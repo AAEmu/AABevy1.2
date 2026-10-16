@@ -4,14 +4,19 @@
 
 pub mod coords;
 pub mod cover;
+pub mod env;
 pub mod heightmap;
+pub mod objects;
 pub mod placement;
 pub mod reader;
+pub mod sky;
 pub mod stream;
 pub mod terrain;
+pub mod vegetation;
 pub mod world;
 
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
+pub use sky::WorldClock;
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus};
 pub use world::World;
 

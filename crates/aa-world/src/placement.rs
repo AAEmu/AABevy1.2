@@ -212,6 +212,16 @@ pub fn parse_vegetation_dat(data: &[u8]) -> Result<Vec<Vegetation>, PlacementErr
     Ok(out)
 }
 
+/// `vegetation/SX_SY.dat` (cells with dense forests): `u32 version(1)` then 64 B records of the 256 m
+/// sector `(sx, sy)` (file name = `{sx:02}_{sy:02}`), positions sector-local.
+pub fn parse_vegetation_sector(data: &[u8], sx: usize, sy: usize) -> Vec<Vegetation> {
+    if data.len() < 4 || u32_at(data, 0) != 1 {
+        return Vec::new();
+    }
+    let origin = Vec3::new(sx as f32 * 256.0, sy as f32 * 256.0, 0.0);
+    data[4..].chunks_exact(64).map(|rec| read_vegetation(rec, origin)).collect()
+}
+
 /// `object.dat`: models, materials and the octree objects (cell-local already).
 pub fn parse_object_dat(data: &[u8]) -> Result<CellObjects, PlacementError> {
     let bad = PlacementError::Malformed("object.dat");
@@ -266,7 +276,8 @@ fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
     Some(())
 }
 
-/// Everything placed in a cell. `brush.dat` / `vegetation.dat` when present, else `object.dat`.
+/// Everything placed in a cell: brushes from `brush.dat` (else the `object.dat` octree), vegetation from
+/// `vegetation.dat`, the per-sector `vegetation/` files and the octree.
 pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
     let dir = crate::world::cell_dir(world, x, y);
     let pak = aa_pak::Pak::global();
@@ -287,11 +298,18 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
             }
         }
     }
-    match read("vegetation.dat").and_then(|d| parse_vegetation_dat(&d).ok()) {
-        Some(v) => objects.vegetation = v,
-        None => {
-            if let Some(o) = &from_octree {
-                objects.vegetation = o.vegetation.clone();
+    // vegetation: vegetation.dat and the octree's own vegetation are different instances (no overlap)
+    if let Some(v) = read("vegetation.dat").and_then(|d| parse_vegetation_dat(&d).ok()) {
+        objects.vegetation = v;
+    }
+    if let Some(o) = &from_octree {
+        objects.vegetation.extend(o.vegetation.iter().cloned());
+    }
+    // dense forests: one file per 256 m sector
+    for sx in 0..4 {
+        for sy in 0..4 {
+            if let Some(d) = read(&format!("vegetation/{sx:02}_{sy:02}.dat")) {
+                objects.vegetation.extend(parse_vegetation_sector(&d, sx, sy));
             }
         }
     }
