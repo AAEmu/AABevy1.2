@@ -26,8 +26,10 @@ dependencies = [
  "aa-dev",
  "aa-net",
  "aa-pak",
+ "aa-ui",
  "aa-world",
  "bevy",
+ "mlua",
  "rusqlite",
 ]
 

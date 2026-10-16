@@ -12,5 +12,7 @@ aa-pak.workspace = true
 aa-cry.workspace = true
 aa-anim.workspace = true
 aa-world.workspace = true
+aa-ui.workspace = true
 aa-net = { workspace = true, features = ["bevy"] }
+mlua.workspace = true
 rusqlite.workspace = true
