@@ -5,12 +5,18 @@
 //! ```text
 //! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:27237] [--user bevytest]
 //!     [--password-file PATH] [--world ID] [--character NAME] [--watch-secs 10] [--roundtrip] [--delete-test]
+//!     [--move-secs N] [--move-hz 10] [--scenario circle|far|underground|jump|fall] [--no-ping] [--ping-interval-ms 3000] [--first-ping-delay-ms N]
 //! ```
 //!
 //! `--roundtrip` additionally goes back to the character list, then to the world list, and enters
 //! the game a second time before logging out.
 //!
 //! `--delete-test` creates a second character, deletes it and shows what the server answers.
+//!
+//! `--move-secs N` walks a circle for N seconds, sending `--move-hz` movement packets per second
+//! (default 10), and reports when the server drops the connection (soak test for the keep-alive).
+//! `--no-ping` and `--first-ping-delay-ms` change the keep-alive to show what the server does to a
+//! client that pings late or never (it drops the connection at its next 30 s sweep).
 //!
 //! The password comes from `--password-file`, else `$AA_PASSWORD_FILE`, else the lane's shared test
 //! password file when it exists, else the user name. It is never printed. With the server's
@@ -21,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use aa_net::login::congestion;
 use aa_net::model::{gender, race, slot, UnitKind};
-use aa_net::{Client, Command, CreateCharacter, Event, LeaveTarget, MoveCommand, Pos, WorldState};
+use aa_net::{Client, ClientOptions, Command, CreateCharacter, Event, LeaveTarget, MoveCommand, MoveState, Pos, WorldState};
 use anyhow::{anyhow, bail, Context, Result};
 
 struct Args {
@@ -33,6 +39,12 @@ struct Args {
     watch_secs: u64,
     roundtrip: bool,
     delete_test: bool,
+    move_secs: u64,
+    move_hz: u32,
+    scenario: String,
+    ping: bool,
+    ping_interval_ms: u64,
+    first_ping_delay_ms: u64,
 }
 
 fn parse_args() -> Result<Args> {
@@ -45,6 +57,12 @@ fn parse_args() -> Result<Args> {
         watch_secs: 10,
         roundtrip: false,
         delete_test: false,
+        move_secs: 0,
+        move_hz: 10,
+        scenario: "circle".into(),
+        ping: true,
+        ping_interval_ms: 3000,
+        first_ping_delay_ms: 0,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -58,6 +76,12 @@ fn parse_args() -> Result<Args> {
             "--watch-secs" => a.watch_secs = value()?.parse()?,
             "--roundtrip" => a.roundtrip = true,
             "--delete-test" => a.delete_test = true,
+            "--move-secs" => a.move_secs = value()?.parse()?,
+            "--move-hz" => a.move_hz = value()?.parse()?,
+            "--scenario" => a.scenario = value()?,
+            "--no-ping" => a.ping = false,
+            "--ping-interval-ms" => a.ping_interval_ms = value()?.parse()?,
+            "--first-ping-delay-ms" => a.first_ping_delay_ms = value()?.parse()?,
             other => bail!("unknown argument {other}"),
         }
     }
@@ -96,7 +120,7 @@ async fn until<T>(
             Event::LoginFailed { message } | Event::ConnectFailed { message } => {
                 bail!("{what}: {message}")
             }
-            Event::Disconnected { message } => bail!("{what}: disconnected ({message})"),
+            Event::Disconnected { message } => bail!("{} {what}: disconnected ({message})", stamp()),
             Event::RequestTimedOut { what: w } => bail!("{what}: timed out waiting for {w}"),
             Event::EnterWorldDenied { reason } => bail!("{what}: enter world denied ({reason})"),
             Event::CharacterCreateFailed { reason } => bail!("{what}: character creation failed ({reason})"),
@@ -108,6 +132,13 @@ async fn until<T>(
             return Ok(v);
         }
     }
+}
+
+/// UTC wall clock, `HH:MM:SS.mmm`, to line events up with the server log.
+fn stamp() -> String {
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let day = ms % 86_400_000;
+    format!("{:02}:{:02}:{:02}.{:03}Z", day / 3_600_000, day / 60_000 % 60, day / 1000 % 60, day % 1000)
 }
 
 fn congestion_name(c: u8) -> &'static str {
@@ -131,7 +162,11 @@ async fn main() -> Result<()> {
         )
         .init();
     let args = parse_args()?;
-    let mut client = Client::spawn_on(&tokio::runtime::Handle::current());
+    let options = ClientOptions {
+        ping_interval: args.ping.then_some(Duration::from_millis(args.ping_interval_ms)),
+        first_ping_delay: Duration::from_millis(args.first_ping_delay_ms),
+    };
+    let mut client = Client::spawn_on_with(&tokio::runtime::Handle::current(), options);
     let mut state = WorldState::default();
     let step = Duration::from_secs(20);
 
@@ -188,6 +223,7 @@ async fn main() -> Result<()> {
     })
     .await?;
     println!("  game server {} (cookie {})", cookie.addr, cookie.cookie);
+    println!("  {} connecting to the game server", stamp());
     client.send(Command::ConnectToWorld);
     let mut characters = until(&mut client, &mut state, "the character list", step, |e| match e {
         Event::CharacterList(l) => Some(l.clone()),
@@ -283,6 +319,7 @@ async fn main() -> Result<()> {
         u.equipment.template_ids()
     );
     until(&mut client, &mut state, "entered world", step, |e| matches!(e, Event::EnteredWorld).then_some(())).await?;
+    println!("  {} in the world", stamp());
 
     // 5. Watch what appears around us.
     println!("== watching {} s", args.watch_secs);
@@ -295,7 +332,7 @@ async fn main() -> Result<()> {
             Event::UnitMoved { .. } => moved += 1,
             Event::UnitsRemoved(ids) => removed += ids.len(),
             Event::Chat(c) => println!("  chat [{}] {}: {}", c.chat_type, c.sender, c.message),
-            Event::Disconnected { message } => bail!("disconnected while watching: {message}"),
+            Event::Disconnected { message } => bail!("{} disconnected while watching: {message}", stamp()),
             _ => {}
         }
     }
@@ -359,6 +396,10 @@ async fn main() -> Result<()> {
     .await?;
     println!("  echoed: {}: {}", echo.sender, echo.message);
 
+    if args.move_secs > 0 {
+        walk_circle(&mut client, &mut state, here, args.move_secs, args.move_hz, &args.scenario).await?;
+    }
+
     if args.roundtrip {
         roundtrip(&mut client, &mut state, world.id, chosen.id).await?;
     }
@@ -377,6 +418,79 @@ async fn main() -> Result<()> {
     })
     .await?;
     println!("  left the world; done");
+    Ok(())
+}
+
+/// Walks a circle around `centre` at about 4 m/s for `secs` seconds, one movement packet every
+/// `1 / hz` seconds, while the session keeps delivering events. Fails when the connection is lost.
+async fn walk_circle(client: &mut Client, state: &mut WorldState, centre: Pos, secs: u64, hz: u32, scenario: &str) -> Result<()> {
+    const RADIUS: f32 = 4.0;
+    const SPEED: f32 = 4.0;
+    println!("== walking a circle for {secs} s at {hz} Hz (scenario {scenario})");
+    let centre = match scenario {
+        "far" => Pos::new(centre.x + 300.0, centre.y, centre.z),
+        "underground" => Pos::new(centre.x, centre.y, centre.z - 150.0),
+        "circle" | "jump" | "fall" => centre,
+        other => bail!("unknown scenario {other}"),
+    };
+    let started = Instant::now();
+    let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / f64::from(hz.max(1))));
+    let (mut sent, mut events) = (0u32, 0u32);
+    let mut last_report = 0;
+    while started.elapsed() < Duration::from_secs(secs) {
+        tokio::select! {
+            _ = tick.tick() => {
+                let t = started.elapsed().as_secs_f32();
+                let angle = t * SPEED / RADIUS;
+                let pos = Pos::new(centre.x + RADIUS * angle.cos() - RADIUS, centre.y + RADIUS * angle.sin(), centre.z);
+                // tangent of the circle: the walking direction, as a yaw (0 faces +y, positive turns left)
+                let (vx, vy) = (-SPEED * angle.sin(), SPEED * angle.cos());
+                let yaw = (-vx).atan2(vy);
+                let mut m = MoveCommand::running(pos, yaw, SPEED);
+                // jump: 0.6 s up and down every 2 s; fall: every 3 s drop 3 m and land at 25 m/s
+                let phase = t % 2.0;
+                match scenario {
+                    "jump" if phase < 0.6 => {
+                        let h = 1.2 * (1.0 - ((phase - 0.3) / 0.3).powi(2));
+                        m.pos.z += h;
+                        m.state = if phase < 0.3 { MoveState::Jump } else { MoveState::Fall };
+                        m.velocity[2] = ((0.3 - phase) * 13.0 * 1024.0) as i16;
+                    }
+                    "jump" if phase < 0.7 => m = m.landing(5.0),
+                    "fall" if t % 3.0 < 0.5 => {
+                        m.pos.z += 3.0 * (1.0 - (t % 3.0) / 0.5);
+                        m.state = MoveState::Fall;
+                        m.velocity[2] = -(6.0 * 1024.0) as i16;
+                    }
+                    "fall" if t % 3.0 < 0.6 => m = m.landing(25.0),
+                    _ => {}
+                }
+                client.send(Command::Move(m));
+                sent += 1;
+            }
+            e = client.recv() => {
+                let Some(e) = e else { bail!("the session ended after {:.1} s ({sent} moves sent)", started.elapsed().as_secs_f32()) };
+                state.apply(&e);
+                events += 1;
+                match e {
+                    Event::Disconnected { message } => bail!(
+                        "{} disconnected after {:.1} s of walking, {sent} moves sent: {message}",
+                        stamp(),
+                        started.elapsed().as_secs_f32()
+                    ),
+                    Event::Kicked { reason, message } => bail!("kicked after {:.1} s: ({reason}) {message}", started.elapsed().as_secs_f32()),
+                    Event::Teleported { pos } => println!("  teleported to ({:.1}, {:.1}, {:.1}) after {:.1} s", pos.x, pos.y, pos.z, started.elapsed().as_secs_f32()),
+                    _ => {}
+                }
+            }
+        }
+        let s = started.elapsed().as_secs();
+        if s >= last_report + 10 {
+            last_report = s;
+            println!("  {s:>4} s: {sent} moves sent, {events} events received");
+        }
+    }
+    println!("  walked {secs} s: {sent} moves sent, {events} events received, connection still up");
     Ok(())
 }
 

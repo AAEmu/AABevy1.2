@@ -18,13 +18,19 @@ The lane `bevy` stack must be up (`cd D:/aaemu-wt/bevy && Scripts/live-stack.sh 
 cargo run -p aa-net --example walkthrough                       # full flow, ~25 s
 cargo run -p aa-net --example walkthrough -- --roundtrip        # + back to character select / world select / in again
 cargo run -p aa-net --example walkthrough -- --delete-test      # + create, delete and list a throw-away character
+cargo run -p aa-net --example walkthrough -- --move-secs 120    # + walk a circle for 2 minutes at 10 Hz (keep-alive soak test)
 cargo run -p aa-net --features bevy --example bevy_walkthrough  # same through NetPlugin in a headless Bevy app
-cargo test -p aa-net                                            # 34 unit tests + 2 scripted-server tests
+cargo test -p aa-net                                            # 41 unit tests + 2 scripted-server tests
 RUST_LOG=aa_net=debug cargo run -p aa-net --example walkthrough # protocol trace (trace = every game packet)
 ```
 
 Options of `walkthrough`: `--login HOST:PORT`, `--user NAME` (default `bevytest`), `--password-file
-PATH`, `--world ID`, `--character NAME`, `--watch-secs N`, `--roundtrip`, `--delete-test`.
+PATH`, `--world ID`, `--character NAME`, `--watch-secs N`, `--roundtrip`, `--delete-test`,
+`--move-secs N` / `--move-hz 10` / `--scenario circle|far|underground|jump|fall` (movement soak test),
+`--no-ping`, `--ping-interval-ms N`, `--first-ping-delay-ms N` (keep-alive experiments, see
+"Keep-alive and the server's dead connection sweep"). Use a throw-away account (`--user NAME
+--character NAME`, created on first use) when another client is signed in as `bevytest`: the server
+refuses a second game connection for an account that is already online ("enter world denied (1)").
 
 **Accounts.** The login server runs with `AutoAccount`, so an unknown account is created on its first
 login with whatever password is sent. The example uses the account `bevytest` (never `clienttest`,
@@ -114,7 +120,28 @@ while let Some(event) = client.recv().await { /* or client.try_recv() from a gam
 ```
 
 `Client::spawn_thread()` runs the session on its own thread (what the Bevy plugin uses), so the app
-never blocks. `Client` is the only handle; dropping it closes the connections.
+never blocks. `Client` is the only handle; dropping it closes the connections. `spawn_on_with` /
+`spawn_thread_with(ClientOptions)` take the keep-alive tunables (defaults are right for apps).
+
+`Move(MoveCommand)` sends `CSMoveUnit` for the local player (ignored until `InWorld`). `MoveCommand`
+is a plain struct of public fields with a `Default`; build it with `MoveCommand::new(pos, yaw)`,
+`MoveCommand::running(pos, yaw, speed_mps)` (velocity along the facing + full forward input),
+`MoveCommand::stopped(pos, yaw)`, `.with_state(..)`, `.landing(fall_speed_mps)` or struct update
+syntax:
+
+| field | wire | notes |
+|---|---|---|
+| `pos`, `yaw` | packed position, direction byte | yaw 0 faces +y, positive turns left |
+| `velocity: [i16; 3]` | velocity, 1/1024 m/s, world axes | |
+| `delta_movement: [i8; 3]` | delta movement | pressed direction `[right, forward, up]`, -127..=127; forward is `[0, 127, 0]` as the server's own movers send it |
+| `moving` | move flag `0x02` moving, else `0x04` stopping | send one `moving: false` packet when the movement ends |
+| `state: MoveState` | actor flags | `Ground` = `0x04` standing on solid, `Jump` = `0x10` jumping (move flags `0x06`), `Fall` = no ground flag |
+| `fall_vel: u16` | actor flag `0x80` + `u16` | set once, in the packet of the landing; `FALL_VELOCITY_PER_MPS` = 506 per m/s; the server applies fall damage from it (nothing below 20 m/s) |
+| `stance`, `alertness`, `in_combat` | stance byte, alertness byte, move flag `0x08` | `model::stance`, `model::alertness` |
+
+Walking vs running is not a flag: it is the velocity (and the animation the other clients pick from
+it). The `0x20` (standing on an object) and `0x40` (hanging) actor blocks are not written. The server
+needs no sequence number: `time` is milliseconds since the session started and only has to grow.
 
 Commands (`session::Command`):
 `Login`, `RefreshWorldList`, `EnterWorld { world_id }`, `CancelEnterWorld`, `ConnectToWorld`,
@@ -206,6 +233,39 @@ game:   name - AddCharacterName, Registered character name Bevytest (1)
 No `ERROR` lines caused by the client; the only warnings are the server's own tick timings. The saved
 position after the move survives the next login (`--roundtrip` spawns at the moved position).
 
+## Keep-alive and the server's dead connection sweep
+
+The game server closes a game connection **silently** (trace level log only, no error) when its
+`remove_dead_connections` sweep, which runs every 30 s, decides the client does not ping. The client
+sends `PingPacket` every 3 s; what matters is the start: **the first ping has to go out as soon as the
+game connection opens**. The measured rule on the lane server (`walkthrough --first-ping-delay-ms`,
+`--no-ping`, sweep phase measured from the kill times, `:02.6` / `:32.6` UTC and creeping 12 ms per
+sweep):
+
+| client | sweep lands this long after the connect | result |
+|---|---|---|
+| never pings | 1.0 .. 4.98 s | survives |
+| never pings | 5.07 s and later (6.4, 8.2, 19.3, 31.4 s) | **closed** |
+| first ping 1.0 .. 3.5 s after connect (the old client) | 5.2, 5.6, 5.6, 5.7, 6.1, 7.35 s | **closed** (6 of 6) |
+| first ping 1.5 .. 3.5 s after connect | 8.7, 12, 20 s | survives |
+| ping at connect (now; then every 3 s, or no more pings) | 5.4, 5.6, 5.9, 6.8, 7.1, 11.5, 19.7, 27.5 s and a 120 s soak | survives (every run) |
+
+So a connection is spared while it is younger than 5 s, and after that only if it has been pinging for
+5 s or more; a client that starts pinging a few seconds late is closed when a sweep falls in the
+window between 5 s and (first ping + 5 s) after its connect. That is a 5 to 8 s window per 30 s
+cycle, about one run in ten; the old session also started the 3 s timer when the *session*
+began and not when the game connection opened. The lane log of the in-game client runs shows it: two
+runs started exactly 60 s apart (17:08:56 and 17:09:56) both ended about 5 s after connecting, the two
+`Client ... disconnected` lines logged at the sweep time and no error.
+
+The fix (`session.rs`): the ping timer starts when the game connection opens, and the first ping is
+sent before the enter world request. `ClientOptions { ping_interval, first_ping_delay }` exist only to
+reproduce the old behaviour in tests.
+
+Not causes (checked): the movement rate (10 Hz for 2 minutes, 1200 packets, no disconnect), the
+`time` field, flags and actor flags, packets far from the spawn, below the terrain, jump / fall
+sequences with a 25 m/s landing; the server's move verifier is off by default and only logs.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
@@ -217,7 +277,7 @@ position after the move survives the next login (`--roundtrip` spawns at the mov
 * Client → server: no skills, interaction, inventory or party packets yet.
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
   template id. Slaves / transfers / shipyards only decode their core fields.
-* Movement: a plain unit movement; vehicles, ships and climbing / falling blocks are not written. The
-  server does not echo our own movement back.
+* Movement: a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships, standing
+  on / hanging from objects are not written. The server does not echo our own movement back.
 * Reconnect after a dropped game connection is not attempted (the session reports `Disconnected` and
   returns to idle).

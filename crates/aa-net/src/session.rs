@@ -18,7 +18,7 @@ use crate::game::{self, LeaveTarget, VisualOptions};
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Movement, Unit, UnitKind,
-    stance,
+    actor_flags, move_flags, stance,
 };
 use crate::net::{self, GameConn, LoginConn, NetError, StreamConn};
 use crate::stream;
@@ -26,31 +26,141 @@ use crate::wire::Pos;
 
 /// How long a request may stay unanswered before the session reports a failure.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// Interval of the keep-alive ping; the server drops game connections silent for 30 s.
+/// Default interval of the keep-alive ping.
 const PING_INTERVAL: Duration = Duration::from_secs(3);
 
-/// A movement the app wants to send for the local player.
+/// Tunables of a session. The defaults are what an app wants; the fields exist for tests.
+#[derive(Clone, Debug)]
+pub struct ClientOptions {
+    /// Interval of the keep-alive `PingPacket`, `None` for no pings at all.
+    ///
+    /// The server drops a game connection whose last ping is older than 30 s. It checks every 30 s
+    /// and treats a connection that never pinged as dead, so a client must ping soon after it
+    /// connects and then at least every few seconds.
+    pub ping_interval: Option<Duration>,
+    /// How long after the game connection opens the first ping goes out (default: at once).
+    pub first_ping_delay: Duration,
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self { ping_interval: Some(PING_INTERVAL), first_ping_delay: Duration::ZERO }
+    }
+}
+
+/// Where the character's feet are, as the movement packet reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MoveState {
+    /// Standing, walking or running on the ground (actor flag "standing on solid").
+    #[default]
+    Ground,
+    /// Rising after a jump (actor flag "jumping", move flags moving + stopping).
+    Jump,
+    /// In the air without a jump, or on the way down: no ground under the feet.
+    Fall,
+}
+
+/// A movement the app wants to send for the local player. All fields are public; build one with
+/// [`MoveCommand::new`] (or [`MoveCommand::running`]) and struct update syntax:
+/// `MoveCommand { stance: stance::COMBAT, ..MoveCommand::new(pos, yaw) }`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MoveCommand {
     pub pos: Pos,
     /// Facing in radians (0 faces +y, positive turns left).
     pub yaw: f32,
+    /// False for the packet that ends a movement (the "stopping" flag is sent instead of "moving").
     pub moving: bool,
     /// [`stance`] byte.
     pub stance: u8,
-    /// Velocity in 1/1024 m/s per axis.
+    /// Velocity in 1/1024 m/s per axis, in world axes.
     pub velocity: [i16; 3],
+    /// What the player is pressing, relative to the facing: `[right, forward, up]`, each in
+    /// -127..=127. Walking straight ahead is `[0, 127, 0]`, as the server's own movers send it.
+    pub delta_movement: [i8; 3],
+    /// Ground, jump or fall.
+    pub state: MoveState,
+    /// [`alertness`](crate::model::alertness) byte.
+    pub alertness: u8,
+    /// Sets the "in combat" movement flag.
+    pub in_combat: bool,
+    /// Fall velocity in wire units ([`FALL_VELOCITY_PER_MPS`](crate::model::FALL_VELOCITY_PER_MPS)
+    /// per m/s). Non-zero only in the packet of the landing; the server applies fall damage from
+    /// it (nothing below 20 m/s).
+    pub fall_vel: u16,
+}
+
+impl Default for MoveCommand {
+    fn default() -> Self {
+        Self {
+            pos: Pos::default(),
+            yaw: 0.0,
+            moving: true,
+            stance: stance::RELAXED,
+            velocity: [0; 3],
+            delta_movement: [0; 3],
+            state: MoveState::Ground,
+            alertness: 0,
+            in_combat: false,
+            fall_vel: 0,
+        }
+    }
 }
 
 impl MoveCommand {
     pub fn new(pos: Pos, yaw: f32) -> Self {
+        Self { pos, yaw, ..Self::default() }
+    }
+
+    /// Moving straight ahead at `speed` m/s: the velocity along the facing and full forward input.
+    pub fn running(pos: Pos, yaw: f32, speed: f32) -> Self {
+        let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
         Self {
-            pos,
-            yaw,
-            moving: true,
-            stance: stance::RELAXED,
-            velocity: [0; 3],
+            velocity: [to_wire(-yaw.sin() * speed), to_wire(yaw.cos() * speed), 0],
+            delta_movement: [0, 127, 0],
+            ..Self::new(pos, yaw)
         }
+    }
+
+    /// The packet that ends a movement: standing still, "stopping" flag.
+    pub fn stopped(pos: Pos, yaw: f32) -> Self {
+        Self { moving: false, ..Self::new(pos, yaw) }
+    }
+
+    /// The same movement in the given state.
+    pub fn with_state(self, state: MoveState) -> Self {
+        Self { state, ..self }
+    }
+
+    /// The same movement, landing at `fall_speed` m/s (ground state, fall velocity set).
+    pub fn landing(self, fall_speed: f32) -> Self {
+        let vel = (fall_speed.max(0.0) * crate::model::FALL_VELOCITY_PER_MPS).min(f32::from(u16::MAX));
+        Self { state: MoveState::Ground, fall_vel: vel as u16, ..self }
+    }
+
+    /// The wire movement for this command at `time_ms` of the session clock.
+    pub fn to_movement(&self, time_ms: u32) -> Movement {
+        let mut m = Movement::unit(self.pos, self.yaw, time_ms);
+        m.velocity = self.velocity;
+        m.delta_movement = self.delta_movement;
+        m.stance = self.stance;
+        m.alertness = self.alertness;
+        m.flags = if self.moving { move_flags::MOVING } else { move_flags::STOPPING };
+        m.actor_flags = match self.state {
+            MoveState::Ground => actor_flags::STANDING_ON_SOLID,
+            MoveState::Jump => actor_flags::JUMPING,
+            MoveState::Fall => 0,
+        };
+        if self.state == MoveState::Jump {
+            m.flags = move_flags::JUMPING;
+        }
+        if self.in_combat {
+            m.flags |= move_flags::IN_COMBAT;
+        }
+        if self.fall_vel != 0 {
+            m.actor_flags |= actor_flags::FALL_VELOCITY;
+            m.fall_vel = self.fall_vel;
+        }
+        m
     }
 }
 
@@ -207,15 +317,25 @@ pub struct Client {
 impl Client {
     /// Starts the session task on an existing tokio runtime.
     pub fn spawn_on(handle: &tokio::runtime::Handle) -> Self {
+        Self::spawn_on_with(handle, ClientOptions::default())
+    }
+
+    /// [`Client::spawn_on`] with explicit [`ClientOptions`].
+    pub fn spawn_on_with(handle: &tokio::runtime::Handle, options: ClientOptions) -> Self {
         let (commands, cmd_rx) = unbounded_channel();
         let (evt_tx, events) = unbounded_channel();
-        handle.spawn(Session::new(evt_tx).run(cmd_rx));
+        handle.spawn(Session::new(evt_tx, options).run(cmd_rx));
         Self { commands, events }
     }
 
     /// Starts the session task on its own thread with a private single-threaded runtime. This is
     /// what apps without tokio (Bevy) use.
     pub fn spawn_thread() -> std::io::Result<Self> {
+        Self::spawn_thread_with(ClientOptions::default())
+    }
+
+    /// [`Client::spawn_thread`] with explicit [`ClientOptions`].
+    pub fn spawn_thread_with(options: ClientOptions) -> std::io::Result<Self> {
         let (commands, cmd_rx) = unbounded_channel();
         let (evt_tx, events) = unbounded_channel();
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -223,7 +343,7 @@ impl Client {
             .build()?;
         std::thread::Builder::new()
             .name("aa-net".into())
-            .spawn(move || rt.block_on(Session::new(evt_tx).run(cmd_rx)))?;
+            .spawn(move || rt.block_on(Session::new(evt_tx, options).run(cmd_rx)))?;
         Ok(Self { commands, events })
     }
 
@@ -250,6 +370,9 @@ impl Client {
 
 struct Session {
     evt: UnboundedSender<Event>,
+    options: ClientOptions,
+    /// When the next keep-alive ping is due (set when the game connection opens).
+    next_ping: Option<Instant>,
     started: Instant,
     phase: Phase,
     login: Option<LoginConn>,
@@ -293,9 +416,11 @@ async fn recv_stream(c: &mut Option<StreamConn>) -> net::Result<stream::ServerMs
 }
 
 impl Session {
-    fn new(evt: UnboundedSender<Event>) -> Self {
+    fn new(evt: UnboundedSender<Event>, options: ClientOptions) -> Self {
         Self {
             evt,
+            options,
+            next_ping: None,
             started: Instant::now(),
             phase: Phase::Idle,
             login: None,
@@ -319,7 +444,6 @@ impl Session {
     async fn run(mut self, mut cmd_rx: UnboundedReceiver<Command>) {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut last_ping = Instant::now();
         loop {
             tokio::select! {
                 cmd = cmd_rx.recv() => {
@@ -331,11 +455,7 @@ impl Session {
                 r = recv_stream(&mut self.stream) => self.stream_msg(r),
                 _ = tick.tick() => {
                     self.check_timeout();
-                    if self.game.is_some() && last_ping.elapsed() >= PING_INTERVAL {
-                        last_ping = Instant::now();
-                        let time_ms = self.started.elapsed().as_millis() as i64;
-                        self.send_game(game::ClientMsg::Ping { time_ms }).await;
-                    }
+                    self.keep_alive().await;
                 }
             }
         }
@@ -343,6 +463,19 @@ impl Session {
     }
 
     // ---- helpers ------------------------------------------------------------------------------
+
+    /// Sends the keep-alive ping when it is due. The server closes a game connection without a
+    /// ping in the last 30 s, and a connection that never pinged at its next sweep (every 30 s), so
+    /// the first ping goes out as soon as the game connection opens.
+    async fn keep_alive(&mut self) {
+        let (Some(due), Some(every)) = (self.next_ping, self.options.ping_interval) else { return };
+        if self.game.is_none() || Instant::now() < due {
+            return;
+        }
+        self.next_ping = Some(Instant::now() + every);
+        let time_ms = self.started.elapsed().as_millis() as i64;
+        self.send_game(game::ClientMsg::Ping { time_ms }).await;
+    }
 
     fn emit(&self, e: Event) {
         let _ = self.evt.send(e);
@@ -552,7 +685,11 @@ impl Session {
         self.wait_for("the game server");
         let addr = cookie.addr.to_string();
         match GameConn::connect(&addr).await {
-            Ok(c) => self.game = Some(c),
+            Ok(c) => {
+                self.game = Some(c);
+                self.next_ping = Some(Instant::now() + self.options.first_ping_delay);
+                self.keep_alive().await;
+            }
             Err(e) => {
                 self.waiting = None;
                 self.set_phase(Phase::ReadyToConnect);
@@ -574,12 +711,7 @@ impl Session {
             tracing::debug!("ignoring Move: the player is not in the world");
             return;
         }
-        let mut movement = Movement::unit(m.pos, m.yaw, self.started.elapsed().as_millis() as u32);
-        movement.stance = m.stance;
-        movement.velocity = m.velocity;
-        if !m.moving {
-            movement.flags = 0;
-        }
+        let movement = m.to_movement(self.started.elapsed().as_millis() as u32);
         let obj_id = self.self_obj;
         self.send_game(game::ClientMsg::Move { obj_id, movement }).await;
     }
@@ -883,5 +1015,137 @@ impl Session {
             token,
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+    use crate::opcodes::pp;
+    use std::net::SocketAddrV4;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+
+    fn at(x: f32, y: f32, z: f32) -> Pos {
+        Pos::new(x, y, z)
+    }
+
+    #[test]
+    fn move_command_defaults_are_a_grounded_run() {
+        let m = MoveCommand::new(at(1.0, 2.0, 3.0), 0.0).to_movement(42);
+        assert_eq!((m.move_type, m.time, m.flags), (1, 42, move_flags::MOVING));
+        assert_eq!(m.actor_flags, actor_flags::STANDING_ON_SOLID);
+        assert_eq!((m.stance, m.alertness, m.fall_vel), (stance::RELAXED, 0, 0));
+        assert_eq!(m.delta_movement, [0; 3]);
+    }
+
+    #[test]
+    fn move_command_states_map_to_flags() {
+        let base = MoveCommand::new(at(0.0, 0.0, 0.0), 0.0);
+        // Stopping: the "stopping" flag replaces "moving" (the server's own stop packets do this).
+        assert_eq!(MoveCommand::stopped(base.pos, 0.0).to_movement(0).flags, move_flags::STOPPING);
+        // Jump: moving + stopping, actor flag "jumping", no ground.
+        let jump = base.with_state(MoveState::Jump).to_movement(0);
+        assert_eq!((jump.flags, jump.actor_flags), (move_flags::JUMPING, actor_flags::JUMPING));
+        // Fall: no ground flag at all.
+        let fall = base.with_state(MoveState::Fall).to_movement(0);
+        assert_eq!((fall.flags, fall.actor_flags), (move_flags::MOVING, 0));
+        // Landing at 25 m/s: grounded again, with the fall velocity block.
+        let land = base.with_state(MoveState::Fall).landing(25.0).to_movement(0);
+        assert_eq!(land.actor_flags, actor_flags::STANDING_ON_SOLID | actor_flags::FALL_VELOCITY);
+        assert_eq!(land.fall_vel, (25.0 * FALL_VELOCITY_PER_MPS) as u16);
+        // Combat.
+        let fight = MoveCommand { in_combat: true, alertness: alertness::COMBAT, stance: stance::COMBAT, ..base };
+        let m = fight.to_movement(0);
+        assert_eq!(m.flags, move_flags::MOVING | move_flags::IN_COMBAT);
+        assert_eq!((m.alertness, m.stance), (alertness::COMBAT, stance::COMBAT));
+    }
+
+    #[test]
+    fn running_moves_along_the_facing() {
+        // yaw 0 faces +y; a positive yaw turns left, towards -x.
+        let north = MoveCommand::running(at(0.0, 0.0, 0.0), 0.0, 5.0);
+        assert_eq!(north.velocity, [0, 5 * 1024, 0]);
+        assert_eq!(north.delta_movement, [0, 127, 0]);
+        let west = MoveCommand::running(at(0.0, 0.0, 0.0), std::f32::consts::FRAC_PI_2, 5.0);
+        assert_eq!(west.velocity[0], -5 * 1024);
+        assert!(west.velocity[1].abs() <= 1);
+    }
+
+    /// A scripted game server: accepts one connection and reports (level, opcode) of the first
+    /// frames, giving up when nothing arrives for a while.
+    async fn game_stub(frames: usize) -> (SocketAddrV4, tokio::task::JoinHandle<Vec<(u8, u16)>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let std::net::SocketAddr::V4(addr) = listener.local_addr().unwrap() else { unreachable!() };
+        let task = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            for _ in 0..frames {
+                let mut len = [0u8; 2];
+                match tokio::time::timeout(Duration::from_millis(300), sock.read_exact(&mut len)).await {
+                    Ok(Ok(_)) => {}
+                    _ => break,
+                }
+                let mut payload = vec![0u8; usize::from(u16::from_le_bytes(len))];
+                sock.read_exact(&mut payload).await.unwrap();
+                // [0xDD][level], then the proxy opcode directly or hash / count / opcode.
+                let opcode = match payload[1] {
+                    game::LEVEL_PROXY => u16::from_le_bytes([payload[2], payload[3]]),
+                    _ => u16::from_le_bytes([payload[4], payload[5]]),
+                };
+                seen.push((payload[1], opcode));
+            }
+            seen
+        });
+        (addr, task)
+    }
+
+    fn session_for(addr: SocketAddrV4, options: ClientOptions) -> Session {
+        let (evt, _events) = unbounded_channel();
+        let mut s = Session::new(evt, options);
+        s.account = Some(AccountInfo { account_id: 7, ..AccountInfo::default() });
+        s.cookie = Some((1, WorldCookie { cookie: 9, addr }));
+        s
+    }
+
+    async fn connect_with(options: ClientOptions) -> Vec<(u8, u16)> {
+        let (addr, stub) = game_stub(3).await;
+        session_for(addr, options).connect_world().await;
+        stub.await.unwrap()
+    }
+
+    /// The server's dead connection sweep closes game connections that have not pinged from the
+    /// start, so the first packet of a session is the ping, ahead of the enter world request.
+    #[tokio::test]
+    async fn the_first_ping_goes_out_as_soon_as_the_game_connection_opens() {
+        let seen = connect_with(ClientOptions::default()).await;
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0], (game::LEVEL_PROXY, pp::PingPacket));
+        assert_eq!(seen[1].0, game::LEVEL_GAME);
+    }
+
+    #[tokio::test]
+    async fn the_ping_can_be_delayed_or_switched_off_for_tests() {
+        let delayed = ClientOptions { first_ping_delay: Duration::from_secs(60), ..ClientOptions::default() };
+        let seen = connect_with(delayed).await;
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(seen[0].0, game::LEVEL_GAME);
+        let off = ClientOptions { ping_interval: None, ..ClientOptions::default() };
+        assert_eq!(connect_with(off).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pings_repeat_at_the_interval() {
+        let (addr, stub) = game_stub(5).await;
+        let options = ClientOptions { ping_interval: Some(Duration::from_millis(20)), ..ClientOptions::default() };
+        let mut s = session_for(addr, options);
+        s.connect_world().await;
+        for _ in 0..3 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            s.keep_alive().await;
+        }
+        let pings = stub.await.unwrap().iter().filter(|f| **f == (game::LEVEL_PROXY, pp::PingPacket)).count();
+        assert!(pings >= 4, "{pings} pings");
     }
 }
