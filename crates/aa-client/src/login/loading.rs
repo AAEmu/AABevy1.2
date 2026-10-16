@@ -64,6 +64,8 @@ struct Loading {
     stable: f32,
     /// Seconds the gauge has been at 100.
     done: f32,
+    /// Terrain cells loaded / needed around the spawn (for the log).
+    cells: (usize, usize),
 }
 
 fn reset(mut loading: ResMut<Loading>) {
@@ -128,6 +130,7 @@ fn progress(
                 let have: Vec<(i32, i32)> = s.loaded_cells().collect();
                 needed.iter().filter(|c| have.contains(c)).count()
             });
+            loading.cells = (loaded, needed.len());
             let terrain_done = needed.is_empty() || loaded == needed.len();
             let terrain_part = if needed.is_empty() { 1.0 } else { loaded as f32 / needed.len() as f32 };
             let entities = objects.as_ref().map_or(0, |o| o.stats.entities);
@@ -157,7 +160,10 @@ fn progress(
         loading.done += dt;
         if loading.done > 0.4 {
             rt.fire_event("LEFT_LOADING", ());
-            info!("loading: done after {:.1} s, entering the game", loading.t);
+            info!(
+                "loading: done after {:.1} s ({}/{} terrain cells within {NEAR} m, {} objects), entering the game",
+                loading.t, loading.cells.0, loading.cells.1, loading.entities
+            );
             next.set(Screen::InGame);
         }
     }
