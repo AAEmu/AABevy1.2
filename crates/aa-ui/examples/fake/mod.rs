@@ -29,6 +29,38 @@ pub const GAME_OBJECTS: &[&str] = &[
     "X2Unit", "X2UserMusic", "X2Util", "X2Warp", "X2World", "Console", "Movie", "DockingManager",
 ];
 
+pub struct FakeCharacter {
+    pub name: &'static str,
+    /// `X2Unit:GetRaceStr` names: `nuian`, `elf`, `ferre`, `hariharan`, ...
+    pub race: &'static str,
+    /// `male` / `female`.
+    pub gender: &'static str,
+    pub level: i64,
+    /// `ABILITY_*` value (1 = fight / Battlerage).
+    pub ability: i64,
+    pub zone: &'static str,
+    pub faction: &'static str,
+}
+
+#[allow(dead_code)]
+/// `--characters 0|1`: none, or the reference's `Refone` (Nuian male, level 1, Battlerage).
+pub fn characters_from_args() -> Vec<FakeCharacter> {
+    let args: Vec<String> = std::env::args().collect();
+    let v = args.iter().position(|a| a == "--characters").and_then(|i| args.get(i + 1)).map(String::as_str);
+    match v {
+        Some("0") => vec![],
+        _ => vec![FakeCharacter {
+            name: "Refone",
+            race: "nuian",
+            gender: "male",
+            level: 1,
+            ability: 1,
+            zone: "Solzreed Peninsula",
+            faction: "Crescent Throne",
+        }],
+    }
+}
+
 pub struct FakeWorld {
     pub id: i64,
     pub name: &'static str,
@@ -88,7 +120,12 @@ fn load_ui_texts(locale: &str) -> HashMap<(i64, String), String> {
 }
 
 /// Install the fake game layer into a fresh runtime (before any script runs).
+#[allow(dead_code)]
 pub fn install(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld]) {
+    install_with(rt, locale, worlds, &[]);
+}
+
+pub fn install_with(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld], characters: &[FakeCharacter]) {
     let lua = &rt.lua;
     for name in GAME_OBJECTS {
         aa_ui::lua::install_game_stub(lua, name).unwrap();
@@ -126,6 +163,27 @@ pub fn install(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld]) {
         list.raw_set(i + 1, t).unwrap();
     }
     fake.raw_set("worlds", list).unwrap();
+    let chars = lua.create_table().unwrap();
+    for (i, c) in characters.iter().enumerate() {
+        let t = lua.create_table().unwrap();
+        t.raw_set("name", c.name).unwrap();
+        t.raw_set("race", c.race).unwrap();
+        t.raw_set("gender", c.gender).unwrap();
+        t.raw_set("level", c.level).unwrap();
+        t.raw_set("ability", c.ability).unwrap();
+        t.raw_set("zone", c.zone).unwrap();
+        t.raw_set("faction", c.faction).unwrap();
+        chars.raw_set(i + 1, t).unwrap();
+    }
+    fake.raw_set("characters", chars).unwrap();
+    // FAKE.fire_later(name, ...): a UI event at the next frame (a server answer).
+    let fire = lua
+        .create_function(|lua, (name, rest): (String, mlua::MultiValue)| {
+            aa_ui::lua::queue_ui_event(lua, &name, rest.into_iter().collect());
+            Ok(())
+        })
+        .unwrap();
+    fake.raw_set("fire_later", fire).unwrap();
     g.raw_set("FAKE", fake).unwrap();
     if let Err(e) = rt.exec("@fake_game.lua", include_str!("fake_game.lua")) {
         eprintln!("fake: fake_game.lua: {e}");
@@ -150,5 +208,64 @@ pub fn dump_tree(rt: Option<NonSend<UiRuntime>>, time: Res<Time>, mut done: Loca
     match std::fs::write(&path, rt.dump_json()) {
         Ok(()) => info!("fake: UI tree -> {path}"),
         Err(e) => warn!("fake: cannot write {path}: {e}"),
+    }
+}
+
+/// Scripted input for screenshots: `--hover X Y T` moves the virtual pointer at T seconds,
+/// `--click X Y T` clicks there (press at T, release one frame later), `--lua CODE T` runs Lua.
+/// Flags may repeat; coordinates are physical pixels.
+pub fn scripted_input(
+    rt: Option<NonSend<UiRuntime>>,
+    time: Res<Time>,
+    mut ptr: ResMut<aa_ui::UiVirtualPointer>,
+    mut done: Local<Vec<usize>>,
+    mut release_next: Local<bool>,
+) {
+    let Some(rt) = rt else { return };
+    if std::mem::take(&mut *release_next) {
+        ptr.release = true;
+    }
+    let args: Vec<String> = std::env::args().collect();
+    let t = time.elapsed_secs();
+    for (i, a) in args.iter().enumerate() {
+        if done.contains(&i) {
+            continue;
+        }
+        let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
+        match a.as_str() {
+            "--hover" | "--click" => {
+                let (Some(x), Some(y), Some(at)) = (num(1), num(2), num(3)) else { continue };
+                if t < at {
+                    continue;
+                }
+                done.push(i);
+                ptr.pos = Some(Vec2::new(x, y));
+                if a == "--click" {
+                    ptr.press = true;
+                    *release_next = true;
+                }
+                info!("fake: {a} {x} {y}");
+            }
+            "--lua" => {
+                let (Some(code), Some(at)) = (args.get(i + 1), num(2)) else { continue };
+                if t < at {
+                    continue;
+                }
+                done.push(i);
+                if let Err(e) = rt.exec("@--lua", code) {
+                    warn!("fake: --lua: {e}");
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Log script errors and the stubbed natives the screen called.
+pub fn report(ui: &UiRuntime, screen: &str) {
+    let stubs = ui.stub_calls();
+    info!("{screen}: {} script errors, {} stubbed natives called", ui.errors.len(), stubs.len());
+    for (name, n) in stubs.iter().take(80) {
+        info!("  stub {name} x{n}");
     }
 }

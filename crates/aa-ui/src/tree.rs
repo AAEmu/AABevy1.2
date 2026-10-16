@@ -339,6 +339,8 @@ pub struct TextBlock {
     pub wrap: bool,
     /// Gametooltip `AddLine` content (one entry per line).
     pub lines: Vec<String>,
+    /// `SetAutoResize(true)`: the widget width follows the text width.
+    pub auto_resize: bool,
 }
 
 /// Button visual state.
@@ -406,6 +408,7 @@ pub struct Widget {
     pub button: Option<ButtonData>,
     pub list: Option<ListCtrlData>,
     pub slider: Option<SliderData>,
+    pub folder: Option<crate::lua::folder::FolderData>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -848,6 +851,7 @@ impl Widget {
             button,
             list,
             slider,
+            folder: None,
             modal: false,
             raise: 0,
         }

@@ -134,6 +134,12 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         let s = ui(lua).tree.get(id).text().map(|t| t.text.clone()).unwrap_or_default();
         ret(lua, s)
     })?)?;
+    def("Animation", method(lua, |lua, id, a| {
+        // (play, visible): frame animation; we show the first frame while it plays.
+        let on = if a.len() >= 3 { a.b(2, true) } else { a.b(1, true) };
+        ui(lua).tree.get_mut(id).shown = on;
+        none()
+    })?)?;
     for name in ["SetSnap", "SetRotation", "SetBlendMode", "SetMask", "SetMaskCoords", "SetMaskVisible", "SetTextureColor"] {
         def(name, method(lua, |_, _, _| none())?)?;
     }

@@ -71,6 +71,7 @@ impl UiRuntime {
             hover: None,
             focus: None,
             cursor: (0.0, 0.0),
+            queued_events: Vec::new(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(UiRuntime { lua, mouse: Default::default(), errors: Vec::new(), init_done: false })
@@ -137,6 +138,12 @@ impl UiRuntime {
         lua::fire_ui_event(&self.lua, name, args);
     }
 
+    /// Raise a UI event at the next frame; for game API callbacks that answer later.
+    pub fn queue_event(&self, name: &str, args: impl mlua::IntoLuaMulti) {
+        let args = args.into_lua_multi(&self.lua).map(|m| m.into_iter().collect()).unwrap_or_default();
+        lua::queue_ui_event(&self.lua, name, args);
+    }
+
     /// Run a Lua chunk (source text), e.g. to define fake game API objects.
     pub fn exec(&self, name: &str, code: &str) -> mlua::Result<()> {
         self.lua.load(code).set_name(name).exec()
@@ -201,6 +208,16 @@ pub struct UiStats {
     pub rebuilds: u64,
 }
 
+/// Scripted pointer for tests and automation: while `pos` is set it replaces the OS cursor
+/// (physical pixels); `press` / `release` act like a left button edge this frame and are
+/// cleared after use.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct UiVirtualPointer {
+    pub pos: Option<Vec2>,
+    pub press: bool,
+    pub release: bool,
+}
+
 #[derive(Default)]
 pub struct UiPlugin {
     pub config: Option<UiConfig>,
@@ -211,6 +228,7 @@ impl Plugin for UiPlugin {
         app.insert_resource(self.config.clone().unwrap_or_default())
             .init_resource::<UiRenderState>()
             .init_resource::<UiStats>()
+            .init_resource::<UiVirtualPointer>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Update, (init_runtime, ui_frame).chain());
     }
@@ -278,6 +296,7 @@ fn ui_frame(
     formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
     batches: Query<Entity, With<UiBatch>>,
     mut camera: Query<(&mut Transform, &mut Projection), With<UiCamera>>,
+    mut virt: ResMut<UiVirtualPointer>,
 ) {
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
@@ -304,14 +323,18 @@ fn ui_frame(
     }
     // Input.
     let sf = window.resolution.scale_factor();
-    let cursor = window.cursor_position().map(|p| (p.x * sf / scale, p.y * sf / scale));
+    let cursor = match virt.pos {
+        Some(p) => Some((p.x / scale, p.y / scale)),
+        None => window.cursor_position().map(|p| (p.x * sf / scale, p.y * sf / scale)),
+    };
     let wheel = scroll.delta.y;
+    let (vpress, vrelease) = (std::mem::take(&mut virt.press), std::mem::take(&mut virt.release));
     input::update(
         lua,
         &mut rt.mouse,
         cursor,
-        buttons.just_pressed(MouseButton::Left),
-        buttons.just_released(MouseButton::Left),
+        buttons.just_pressed(MouseButton::Left) || vpress,
+        buttons.just_released(MouseButton::Left) || vrelease,
         buttons.just_released(MouseButton::Right),
         wheel,
     );

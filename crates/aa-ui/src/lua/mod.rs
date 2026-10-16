@@ -13,6 +13,7 @@
 pub mod classes;
 pub mod constants;
 mod drawable;
+pub mod folder;
 mod globals;
 mod stubs;
 mod widget;
@@ -48,6 +49,9 @@ pub struct Ui {
     pub hover: Option<Id>,
     pub focus: Option<Id>,
     pub cursor: (f32, f32),
+    /// UI events raised from inside Lua (game API callbacks), delivered at the next tick like a
+    /// server answer would be.
+    pub queued_events: Vec<(String, Vec<Value>)>,
 }
 
 /// `Show(visible, ms)` fade.
@@ -264,7 +268,16 @@ pub fn widget_place_on_row(u: &mut Ui, img: Id, row: Option<Id>) {
 }
 
 /// Per-frame update: fades and `OnUpdate(self, dt_ms)` for visible widgets.
+/// Queue a UI event for the next [`tick`] (safe to call from inside a native or a Lua callback).
+pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
+    ui(lua).queued_events.push((name.to_string(), args));
+}
+
 pub fn tick(lua: &Lua, dt_ms: f32) {
+    let queued = std::mem::take(&mut ui(lua).queued_events);
+    for (name, args) in queued {
+        fire_ui_event(lua, &name, args);
+    }
     let (updates, ended) = {
         let mut u = ui(lua);
         u.time_ms += dt_ms as f64;
