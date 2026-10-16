@@ -95,6 +95,9 @@ pub struct Dds<'a> {
     pub attached: Option<Box<Dds<'a>>>,
     /// CryEngine `AvgC` average colour, as stored (u32).
     pub average_color: Option<u32>,
+    /// ATI2 (3Dc): the first BC4 block holds Y, the second X (BC5 is X then Y). The loaders
+    /// swap them so the GPU / decoded image has X in red and Y in green.
+    pub swapped_rg: bool,
 }
 
 impl<'a> Dds<'a> {
@@ -117,6 +120,7 @@ impl<'a> Dds<'a> {
             return Err(Error::invalid(format!("DDS size {width}x{height}")));
         }
 
+        let swapped_rg = pf_flags & 0x4 != 0 && fourcc == b"ATI2";
         let format = if pf_flags & 0x4 != 0 {
             match fourcc {
                 b"DXT1" => DdsFormat::Bc1,
@@ -209,7 +213,7 @@ impl<'a> Dds<'a> {
                 tail = &tail[(8 + len).min(tail.len())..];
             }
         }
-        Ok(Dds { width, height, depth, mips, faces, format, data, attached, average_color })
+        Ok(Dds { width, height, depth, mips, faces, format, data, attached, average_color, swapped_rg })
     }
 
     pub fn is_cubemap(&self) -> bool {
@@ -236,7 +240,12 @@ impl<'a> Dds<'a> {
         let mut out = vec![0u8; w * h * 4];
         match self.format {
             DdsFormat::Bc1 | DdsFormat::Bc2 | DdsFormat::Bc3 | DdsFormat::Bc4 | DdsFormat::Bc5 => {
-                decode_blocks(self.format, src, w, h, &mut out)
+                decode_blocks(self.format, src, w, h, &mut out);
+                if self.swapped_rg {
+                    for p in out.chunks_exact_mut(4) {
+                        p.swap(0, 1);
+                    }
+                }
             }
             DdsFormat::Bgra8 | DdsFormat::Bgrx8 => {
                 for (o, p) in out.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
@@ -335,7 +344,14 @@ pub fn dds_to_image(dds: &Dds<'_>, options: DdsOptions) -> Result<Image> {
                 (DdsFormat::Bc4, _) => TextureFormat::Bc4RUnorm,
                 _ => TextureFormat::Bc5RgUnorm,
             };
-            (f, dds.data.to_vec())
+            let mut data = dds.data.to_vec();
+            if dds.swapped_rg {
+                for block in data.chunks_exact_mut(16) {
+                    let (a, b) = block.split_at_mut(8);
+                    a.swap_with_slice(b);
+                }
+            }
+            (f, data)
         }
         DdsFormat::Bgra8 => {
             (if srgb { TextureFormat::Bgra8UnormSrgb } else { TextureFormat::Bgra8Unorm }, dds.data.to_vec())

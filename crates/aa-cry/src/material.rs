@@ -222,7 +222,9 @@ impl Material {
 /// names a directory (trailing `/`), i.e. "no texture".
 ///
 /// Pure string function: it does not look in the pak, so the result may still not exist (some
-/// textures are simply missing from the pak).
+/// textures are simply missing from the pak). The mapping is net positive but not perfect: 8
+/// refs to `.../presets/materialtypes/.../rocky_diff.tga` (editor presets) exist as `.tga` and
+/// have no `.dds`, while 2 `.tga` refs of real item / env materials exist only as `.dds`.
 pub fn texture_pak_path(file: &str) -> String {
     let mut path = clean_path(file);
     if path.is_empty() || path.ends_with('/') {
@@ -649,7 +651,10 @@ fn start_tag(text: &str, at: usize) -> Option<(String, Vec<(String, String)>, bo
                     }
                     _ => {
                         let v_at = j;
-                        while j < b.len() && !b[j].is_ascii_whitespace() && b[j] != b'>' && !(b[j] == b'/' && b.get(j + 1) == Some(&b'>')) {
+                        let ends_value = |j: usize| {
+                            b[j].is_ascii_whitespace() || b[j] == b'>' || (b[j] == b'/' && b.get(j + 1) == Some(&b'>'))
+                        };
+                        while j < b.len() && !ends_value(j) {
                             j += 1;
                         }
                         &text[v_at..j]
@@ -722,7 +727,8 @@ fn parse_wavefront(text: &str) -> Option<Material> {
             "d" if !nums.is_empty() => m.opacity = nums[0],
             "map_Kd" => {
                 if let Some(file) = words.last() {
-                    m.textures.push(Texture { map: TextureMap::Diffuse, file: file.to_string(), amount: None, tex_mod: None });
+                    let file = file.to_string();
+                    m.textures.push(Texture { map: TextureMap::Diffuse, file, amount: None, tex_mod: None });
                 }
             }
             _ => {}
@@ -1072,6 +1078,26 @@ mod tests {
         assert_eq!(m.sub(0).unwrap().diffuse, Vec3::new(1.0, 0.0, 0.0));
     }
 
+    /// Whatever the text, parsing returns (no panic on odd UTF-8 boundaries, no endless loop).
+    #[test]
+    fn mangled_text_never_panics() {
+        let text = ELF_CLOTH.replace("Name=\"skin\"", "Name=\"sk\u{e9}\u{4e2d}n\"").replace("</Textures>", "\u{e9}</Textures>");
+        let mut parsed = 0;
+        for (cut, _) in text.char_indices() {
+            parsed += Material::parse(&text[..cut]).is_ok() as usize;
+            // Cut a hole instead of the tail.
+            let hole = text[cut..].chars().next().map_or(cut, |c| cut + c.len_utf8());
+            let holed = format!("{}{}", &text[..cut], &text[hole..]);
+            parsed += Material::parse(&holed).is_ok() as usize;
+        }
+        assert!(parsed > text.len(), "most mangled texts still give a material ({parsed})");
+        for junk in ["<", "<<<", "</", "<M", "<M a", "<M a=", "<M a=\"", "<M a='\u{e9}", "<M a=\u{e9}\u{e9} b", "<M/", "<M/>/", "&", "<!--", "<![CDATA[", "<?"] {
+            let _ = Material::parse(junk);
+            let _ = Material::parse(&format!("<Material>{junk}"));
+            let _ = Material::parse(&format!("<Material Name=\"a\" {junk}"));
+        }
+    }
+
     #[test]
     fn deep_nesting_is_cut_off() {
         let n = 200;
@@ -1175,6 +1201,7 @@ mod tests {
         let (mut raw_ok, mut clean_ok, mut mapped_ok) = (0, 0, 0);
         let mut unresolved: BTreeMap<&str, (usize, Vec<String>)> = BTreeMap::new();
         let mut unresolved_dirs: HashMap<String, usize> = HashMap::new();
+        let mut regressions: Vec<String> = Vec::new(); // resolve as written, but not after the mapping
 
         fn walk<'a>(m: &'a Material, f: &mut impl FnMut(&'a Material)) {
             f(m);
@@ -1212,10 +1239,14 @@ mod tests {
                     }
                     let mapped = t.pak_path();
                     raw_ok += pak.exists(&t.file) as usize;
-                    clean_ok += pak.exists(&clean_path(&t.file)) as usize;
+                    let cleaned = pak.exists(&clean_path(&t.file));
+                    clean_ok += cleaned as usize;
                     if pak.exists(&mapped) {
                         mapped_ok += 1;
                         continue;
+                    }
+                    if cleaned {
+                        regressions.push(format!("{} (in {name})", t.file));
                     }
                     let base = mapped.rsplit('/').next().unwrap_or("");
                     let ext = t.file.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_lowercase();
@@ -1265,6 +1296,8 @@ mod tests {
             eprintln!("  unresolved {count:5}: {cause}  e.g. {}", examples.join("; "));
         }
         eprintln!("  unresolved texture dirs: {}", top(&unresolved_dirs, 12));
+        eprintln!("  resolved before the mapping, lost by it: {}  e.g. {}", regressions.len(), regressions.first().map_or("", |s| s));
+        assert!(mapped_ok > clean_ok + regressions.len(), "the .dds mapping must pay off");
         assert!(failures.is_empty(), "{} .mtl files failed to parse", failures.len());
         assert_eq!(files, names.len());
     }
