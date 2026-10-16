@@ -11,7 +11,8 @@
 //! object.dat         u32 n; n x { u32; char[256] } model table, u32 m; m x { u32; char[256] } materials,
 //!                    then an octree: node { u32 version, f32 box[6], u32 objectsBlockSize, u8 childMask },
 //!                    objects block = repeated { u32 type, payload }, then one child node per mask bit.
-//!                    types: 1 brush (128 B), 2 vegetation (64 B), 9 decal (111 B), 13 road (63 B + 12 n).
+//!                    types: 1 brush (128 B), 2 vegetation (64 B), 9 decal (111 B), 13 road (63 B + 12 n),
+//!                    11 water volume (the rest of the block, see [`Water`]), 6 and 14 (rest of block, ignored).
 //! ```
 //!
 //! Brush record (128 B, the engine's `SBrushChunk`): `f32 bbox[6]` @0, `f32 maxViewDist` @28, `u32 rndFlags` @32,
@@ -101,6 +102,65 @@ pub struct Decal {
     pub raw: Vec<u8>,
 }
 
+/// A water volume (object type 11, the whole objects block): rivers are chains of 4-point quads, lakes and
+/// ponds a ring of 8..30 points. Cell-local, cry space.
+///
+/// ```text
+/// f32 bbox[6] @0 (z range = [surface - depth, surface]), f32 maxViewDist @28, u8 viewDistRatio,lodRatio @36,
+/// u32 @39, u64 editor guid @43, ... header up to @71, then 12-byte records:
+///   (0,0,1) plane normal | (-surface, ?, ?) | (uv scale x, y, 0) | (depth, 0, 0) | polygon points (x, y, z)...
+/// ```
+///
+/// Lakes list their ring twice and some variants append more data after the points; the points are read while
+/// they stay inside the box and stop at the first record that does not (or at a repeat of the first point).
+#[derive(Clone, Debug)]
+pub struct Water {
+    pub bbox: [f32; 6],
+    /// Height of the water surface.
+    pub surface: f32,
+    pub depth: f32,
+    pub uv_scale: [f32; 2],
+    pub points: Vec<Vec3>,
+}
+
+/// Parses the payload of a type 11 item.
+pub fn parse_water(b: &[u8]) -> Option<Water> {
+    if b.len() < 119 {
+        return None;
+    }
+    let mut bbox = [0.0f32; 6];
+    for (i, v) in bbox.iter_mut().enumerate() {
+        *v = f32_at(b, i * 4);
+    }
+    if !bbox.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let normal = Vec3::new(f32_at(b, 71), f32_at(b, 75), f32_at(b, 79));
+    let surface = if normal.z > 0.99 { -f32_at(b, 83) } else { bbox[5] };
+    let surface = if (surface - bbox[5]).abs() < 2.0 { surface } else { bbox[5] };
+    let uv_scale = [f32_at(b, 95), f32_at(b, 99)];
+    let depth = f32_at(b, 107).max(0.0);
+    let ok = |p: Vec3| {
+        p.x > bbox[0] - 12.0
+            && p.x < bbox[3] + 12.0
+            && p.y > bbox[1] - 12.0
+            && p.y < bbox[4] + 12.0
+            && p.z > surface - 16.0
+            && p.z < surface + 16.0
+    };
+    let mut points: Vec<Vec3> = Vec::new();
+    let mut at = 119;
+    while at + 12 <= b.len() {
+        let p = Vec3::new(f32_at(b, at), f32_at(b, at + 4), f32_at(b, at + 8));
+        if !ok(p) || points.first() == Some(&p) {
+            break;
+        }
+        points.push(p);
+        at += 12;
+    }
+    (points.len() >= 3).then_some(Water { bbox, surface, depth, uv_scale, points })
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CellObjects {
     pub models: Vec<String>,
@@ -108,6 +168,7 @@ pub struct CellObjects {
     pub brushes: Vec<Brush>,
     pub vegetation: Vec<Vegetation>,
     pub decals: Vec<Decal>,
+    pub water: Vec<Water>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -263,6 +324,10 @@ fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
                 let points = u32_at(head, 39) as usize;
                 r.skip(points.checked_mul(12)?).ok()?;
             }
+            11 => {
+                let rest = end.checked_sub(r.pos())?;
+                out.water.extend(parse_water(r.bytes(rest).ok()?));
+            }
             // unknown payload size: the rest of this block is unreadable, the tree continues
             _ => r.seek(end).ok()?,
         }
@@ -315,6 +380,7 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
     }
     if let Some(o) = from_octree {
         objects.decals = o.decals;
+        objects.water = o.water;
     }
     objects
 }
@@ -355,5 +421,21 @@ mod tests {
         assert!(o.brushes.len() > 100 && o.vegetation.len() > 1000);
         assert!(o.brushes.iter().all(|b| (b.model as usize) < o.models.len()));
         assert!(o.vegetation.iter().all(|v| v.pos.x >= 0.0 && v.pos.x <= 1024.0 && v.pos.y >= 0.0 && v.pos.y <= 1024.0));
+    }
+
+    #[test]
+    fn spawn_pond_water_volume() {
+        if !crate::pak_available() {
+            return;
+        }
+        let pak = aa_pak::Pak::global();
+        let data = pak.read("worlds/main_world/cells/015_015/client/object.dat").unwrap();
+        let o = parse_object_dat(&data).unwrap();
+        assert_eq!(o.water.len(), 1);
+        let w = &o.water[0];
+        // the pond next to the Nuian spawn (218, 22): surface 127, ring of 8 points inside its box
+        assert!((w.surface - 127.0).abs() < 0.01, "{}", w.surface);
+        assert_eq!(w.points.len(), 8);
+        assert!(w.points.iter().all(|p| p.x > 170.0 && p.x < 260.0));
     }
 }

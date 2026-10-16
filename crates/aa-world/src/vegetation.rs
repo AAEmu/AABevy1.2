@@ -77,7 +77,9 @@ mod tests {
             return;
         }
         let g = VegGroups::load("main_world").unwrap();
-        assert!(g.groups.len() > 4000);
+        assert!(g.groups.len() > 2500, "{}", g.groups.len());
+        // ids are sparse: the spawn area uses group 3799
+        assert!(g.groups.contains_key(&3799));
         assert!(g.groups.values().all(|v| !v.model.is_empty()));
     }
 }
