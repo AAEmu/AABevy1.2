@@ -107,7 +107,7 @@ Water volume (type 11), cell-local, cry space: `f32 bbox[6]` @0 (z range = `[sur
 lodRatio` @36, an editor guid @43, header to @71, then 12 byte records: plane normal `(0, 0, 1)`, `(-surface, ?, ?)`, `(uv scale x, y, 0)`,
 `(depth, 0, 0)`, then the polygon points `(x, y, z)`. Rivers are chains of 4 point quads written as a strip (`0 1 2 3` zig-zags
 between the banks); ponds and lakes are rings of 8 to 30 points, often listed twice. Some variants append more data after the points, so
-points are read while they stay inside the box (+12 m) and within 16 m of the surface. The Nuian spawn pond (`015_015`, surface 127.0, 8
+points are read while they stay inside the box (+12 m in x and y, +16 m in z). The Nuian spawn pond (`015_015`, surface 127.0, 8
 points) is a unit test. 3182 type 11 items exist in main_world.
 
 ### zone/<id>/time_of_day.xml, lighting.xml
