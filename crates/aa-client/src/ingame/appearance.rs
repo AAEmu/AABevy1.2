@@ -118,33 +118,3 @@ fn worn_items(db: &GameDb, model: u32, equipment: &Equipment) -> Vec<u32> {
     }
     items
 }
-
-/// How far (depth buffer steps) the nude body is pushed behind worn armour.
-const BODY_DEPTH_BIAS: f32 = -30_000.0;
-
-/// The nude body pokes through the armour in places (the engine hides it behind the armour's
-/// `Cut` hull, which aa-cry does not draw): push it back in the depth buffer so the armour wins.
-/// Applies to the per character material copies aa-anim makes, not to shared ones.
-pub fn layer_body_under_armour(
-    characters: Query<&aa_anim::Character, Added<aa_anim::Character>>,
-    children: Query<&Children>,
-    materials_of: Query<&MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    use aa_anim::PartKind;
-    for c in &characters {
-        if c.parts.len() != c.assets.parts.len() || !c.assets.parts.iter().any(|p| p.kind == PartKind::Costume) {
-            continue;
-        }
-        for (&entity, part) in c.parts.iter().zip(&c.assets.parts) {
-            if part.kind != PartKind::Body {
-                continue;
-            }
-            for e in children.iter_descendants(entity) {
-                if let Some(mut m) = materials_of.get(e).ok().and_then(|m| materials.get_mut(&m.0)) {
-                    m.depth_bias = BODY_DEPTH_BIAS;
-                }
-            }
-        }
-    }
-}

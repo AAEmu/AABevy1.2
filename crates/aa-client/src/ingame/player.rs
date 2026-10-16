@@ -12,7 +12,7 @@ use aa_cry::scene::CryAssets;
 use aa_net::model::stance;
 use aa_net::state::Player;
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
-use aa_world::cry_to_bevy;
+use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::prelude::*;
 
 use super::anim::{ClipSet, Locomotion, Motion, RUN_SPEED, WALK_SPEED};
@@ -20,7 +20,6 @@ use super::appearance;
 use super::camera::OrbitCamera;
 use super::data::Db;
 use super::dev::DevOptions;
-use super::terrain::Terrain;
 use super::weapons::{self, CarriedItem};
 
 /// Marks the local player's character entity.
@@ -61,6 +60,14 @@ pub fn right(yaw: f32) -> Vec2 {
     Vec2::new(yaw.cos(), yaw.sin())
 }
 
+/// Heightmap cells within this many metres of the player are loaded ahead of use.
+const PREFETCH_RADIUS: f32 = 600.0;
+
+/// Terrain height under a game position, or `fallback` outside the map.
+pub fn height_or(terrain: &TerrainQuery, x: f32, y: f32, fallback: f32) -> f32 {
+    terrain.height_at(x, y).unwrap_or(fallback)
+}
+
 pub fn placement(pos: Vec3, yaw: f32, scale: f32) -> Transform {
     Transform { translation: cry_to_bevy(pos), rotation: Quat::from_rotation_y(yaw), scale: Vec3::splat(scale) }
 }
@@ -72,7 +79,7 @@ pub fn spawn_player(
     db: Option<Res<Db>>,
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
-    mut terrain: ResMut<Terrain>,
+    terrain: Res<TerrainQuery>,
     dev: Res<DevOptions>,
 ) {
     let (Some(spawn), Some(db)) = (&player.spawn, db) else {
@@ -82,7 +89,8 @@ pub fn spawn_player(
     let character = spawn.character();
     let p = spawn.position();
     let (px, py) = dev.pos.map_or((p.x, p.y), |d| (d.x, d.y));
-    let ground = terrain.height_or(px, py, p.z);
+    terrain.prefetch(px, py, PREFETCH_RADIUS);
+    let ground = height_or(&terrain, px, py, p.z);
     let pos = Vec3::new(px, py, ground);
     let facing = dev.yaw.unwrap_or_else(|| spawn.yaw());
     info!(
@@ -99,7 +107,21 @@ pub fn spawn_player(
         ground,
         facing.to_degrees()
     );
-    let params = if spawn.unit.model_params.kind > 0 { &spawn.unit.model_params } else { &character.model_params };
+    debug!(
+        "model params: unit kind {} hair {} skin {} | character kind {} hair {} skin {}",
+        spawn.unit.model_params.kind,
+        spawn.unit.model_params.hair_color,
+        spawn.unit.model_params.skin_color,
+        character.model_params.kind,
+        character.model_params.hair_color,
+        character.model_params.skin_color
+    );
+    let mut params = if spawn.unit.model_params.kind > 0 { spawn.unit.model_params.clone() } else { character.model_params.clone() };
+    if let Some(color) = dev.hair_color {
+        params.hair_color = color;
+        params.kind = params.kind.max(aa_net::model::ModelParams::HAIR);
+    }
+    let params = &params;
     let equipment = if spawn.unit.equipment.template_ids().iter().any(|&t| t != 0) { &spawn.unit.equipment } else { &character.equipment };
     for (i, item) in equipment.slots.iter().enumerate() {
         let Some(item) = item else { continue };
@@ -182,7 +204,7 @@ pub fn control_player(
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
     mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion)>,
-    mut terrain: ResMut<Terrain>,
+    terrain: Res<TerrainQuery>,
     mut out: MessageWriter<NetCommand>,
     mut state: Local<SendState>,
     dev: Res<DevOptions>,
@@ -223,13 +245,19 @@ pub fn control_player(
     let mut candidate = pos;
     candidate.x += step.x * dt;
     candidate.y += step.y * dt;
+    // load the neighbouring heightmap cells in the background when a cell border is crossed
+    let cell = ((pos.x / aa_world::CELL_SIZE).floor() as i32, (pos.y / aa_world::CELL_SIZE).floor() as i32);
+    if state.cell != cell {
+        state.cell = cell;
+        terrain.prefetch(pos.x, pos.y, PREFETCH_RADIUS);
+    }
     // stay on the map
-    if terrain.height(candidate.x, candidate.y).is_some() {
+    if terrain.height_at(candidate.x, candidate.y).is_some() {
         pos = candidate;
     }
 
     // vertical: terrain following and jumping
-    let ground = terrain.height_or(pos.x, pos.y, mover.pos.z);
+    let ground = height_or(&terrain, pos.x, pos.y, mover.pos.z);
     if mover.grounded && (keys.just_pressed(KeyCode::Space) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) {
         mover.vz = JUMP_SPEED;
         mover.grounded = false;
@@ -273,6 +301,7 @@ pub fn control_player(
             moving: active,
             stance: stance::RELAXED,
             velocity: if active { [to_wire(velocity.x), to_wire(velocity.y), to_wire(velocity.z)] } else { [0; 3] },
+            ..MoveCommand::default()
         })));
         state.since_sent = 0.0;
         state.sent_first = true;
@@ -292,6 +321,7 @@ pub struct SendState {
     sent_first: bool,
     was_active: bool,
     moves_sent: u32,
+    cell: (i32, i32),
 }
 
 /// Rotates `from` towards `to` (radians) by at most `max`, the short way round.

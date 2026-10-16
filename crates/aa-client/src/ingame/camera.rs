@@ -8,14 +8,13 @@
 //! behind the character, level with the pivot `PIVOT_HEIGHT` above its feet, vertical field of
 //! view 42.75 degrees.
 
-use aa_world::cry_to_bevy;
+use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::dev::DevOptions;
-use super::player::{LocalPlayer, Mover};
-use super::terrain::Terrain;
+use super::player::{LocalPlayer, Mover, height_or};
 
 /// Height of the camera pivot above the character's feet (m): the real client's camera sits 1.754 m
 /// above the ground at pitch 0.
@@ -107,12 +106,12 @@ pub fn orbit_input(
 pub fn follow_player(
     player: Query<&Mover, With<LocalPlayer>>,
     mut camera: Query<(&OrbitCamera, &mut Transform)>,
-    mut terrain: ResMut<Terrain>,
+    terrain: Res<TerrainQuery>,
 ) {
     let (Ok(mover), Ok((orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
     let mut t = camera_transform(orbit, mover.pos);
     // not below the terrain (bevy y = game z)
-    let ground = terrain.height_or(t.translation.x, -t.translation.z, mover.pos.z) + 0.35;
+    let ground = height_or(&terrain, t.translation.x, -t.translation.z, mover.pos.z) + 0.35;
     if t.translation.y < ground {
         t.translation.y = ground;
         // look at the pivot from the corrected position
