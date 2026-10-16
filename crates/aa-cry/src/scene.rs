@@ -320,12 +320,14 @@ impl CryAssets<'_> {
             let Some(mi) = model.nodes[ni].mesh else { continue };
             let mesh = &model.meshes[mi];
             let skinned = mesh.skin.is_some() && skeleton.is_some();
+            // mirrored nodes (rare: ~1 in 3,000 files); meshes are not shared between nodes
+            let flip = !skinned && render_transform(&model, ni).matrix3.determinant() < 0.0;
             let mut node_parts = Vec::new();
             for subset in &mesh.subsets {
                 let Some(material) = self.material(material_path.as_deref(), subset.material_id as usize) else {
                     continue;
                 };
-                let Some((bevy_mesh, aabb)) = subset_mesh(mesh, subset, skinned, usage) else { continue };
+                let Some((bevy_mesh, aabb)) = subset_mesh_with(mesh, subset, skinned, usage, flip) else { continue };
                 node_parts.push(Part { mesh: self.meshes.add(bevy_mesh), material, aabb, skinned });
             }
             if !node_parts.is_empty() {
@@ -471,6 +473,27 @@ pub fn spawn_loaded_full(commands: &mut Commands, path: &str, loaded: &LoadedMod
     SpawnedModel { root, joints }
 }
 
+/// Model-space transform a static node's mesh is drawn with by [`spawn_loaded`]: the node chain,
+/// where LOD nodes contribute identity (they are drawn in their parent's frame). Skinned
+/// meshes ignore node transforms.
+pub fn render_transform(model: &Model, node: usize) -> glam::Affine3A {
+    let mut m = glam::Affine3A::IDENTITY;
+    let mut i = Some(node);
+    let mut guard = 0;
+    while let Some(n) = i {
+        let n = &model.nodes[n];
+        if !matches!(n.kind, NodeKind::Lod(_)) {
+            m = n.local * m;
+        }
+        i = n.parent;
+        guard += 1;
+        if guard > model.nodes.len() {
+            break;
+        }
+    }
+    m
+}
+
 /// Picks the file for a LOD: `*_lodN` if it exists (falling back to lower N), else the file.
 fn load_lod(path: &str, lod: u32) -> Result<(String, Model)> {
     let pak = aa_pak::Pak::global();
@@ -515,11 +538,25 @@ pub fn find_mtl(path: &str, model: &Model) -> Option<String> {
 
 /// One subset as a Bevy mesh with its own compacted vertices (+ local bounds).
 pub fn subset_mesh(m: &MeshData, s: &Subset, skinned: bool, usage: RenderAssetUsages) -> Option<(Mesh, Aabb)> {
+    subset_mesh_with(m, s, skinned, usage, false)
+}
+
+/// [`subset_mesh`]; `flip_winding` reverses every triangle. Bevy culls by winding only and does
+/// not account for mirrored transforms, so meshes drawn under a transform with a negative
+/// determinant (see [`render_transform`]) need it.
+pub fn subset_mesh_with(m: &MeshData, s: &Subset, skinned: bool, usage: RenderAssetUsages, flip_winding: bool) -> Option<(Mesh, Aabb)> {
     let range = s.first_index as usize..(s.first_index + s.index_count) as usize;
     let idx = m.indices.get(range)?;
     if idx.is_empty() {
         return None;
     }
+    let flipped: Vec<u32>;
+    let idx = if flip_winding {
+        flipped = idx.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
+        &flipped[..]
+    } else {
+        idx
+    };
     let mut remap = vec![u32::MAX; m.positions.len()];
     let mut order: Vec<u32> = Vec::new();
     let indices: Vec<u32> = idx
