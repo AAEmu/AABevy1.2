@@ -6,21 +6,29 @@
 //! * Bevy: textures, materials, meshes and model spawning.
 //!
 //! All plain data is in CryEngine model space: right handed, **Z up**, metres, characters face
-//! -Y. Bevy is Y up; [`CRY_TO_BEVY`] rotates one into the other.
+//! **+Y** (their left is -X). Bevy is Y up; [`CRY_TO_BEVY`] rotates one into the other, which
+//! leaves characters facing Bevy **-Z** (turn them by PI about Y to face a camera on +Z).
 
 pub mod chunk;
+pub mod loader;
 pub mod material;
 pub mod mesh;
 pub mod scene;
+pub mod shade;
 pub mod skeleton;
 pub mod texture;
 
 pub use chunk::ChunkFile;
 pub use mesh::{MeshData, Model};
-pub use scene::{CryAssets, CryPlugin, ModelOptions};
+pub use loader::{CryLoader, PreparedModel};
+pub use scene::{CryAssets, CryPlugin, MaterialHook, ModelOptions, VertexHook};
 pub use skeleton::{Bone, Skeleton};
 
 /// Rotation from CryEngine (Z up) to Bevy (Y up) space: `(x, y, z)` -> `(x, z, -y)`.
+///
+/// CryEngine characters face **+Y** (their left is -X), which this turns into Bevy **-Z**; props
+/// authored facing -Y are the exception. To show a character to a camera on +Z, rotate its root
+/// by PI about Y.
 pub const CRY_TO_BEVY: glam::Quat = glam::Quat::from_xyzw(-std::f32::consts::FRAC_1_SQRT_2, 0.0, 0.0, std::f32::consts::FRAC_1_SQRT_2);
 
 /// Errors of every loader in this crate.

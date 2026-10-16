@@ -16,3 +16,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 aa-dev.workspace = true
+# the compare example samples the background colour of the real captures
+image = { version = "0.25", default-features = false, features = ["png"] }
