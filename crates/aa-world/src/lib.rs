@@ -12,6 +12,7 @@ pub mod placement;
 pub mod post;
 pub mod reader;
 pub mod sky;
+pub mod sky_clouds;
 pub mod sky_material;
 pub mod stream;
 pub mod terrain;

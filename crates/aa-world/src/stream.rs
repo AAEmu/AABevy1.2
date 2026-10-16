@@ -102,7 +102,7 @@ impl WorldConfig {
             sky_radius: 9000.0,
             shadows: true,
             shadow_distance: 300.0,
-            sun_lux_scale: 1700.0,
+            sun_lux_scale: 1000.0,
             ambient_scale: 1700.0,
             fog_visibility: 2500.0,
             terrain_tint: Vec3::new(1.2, 1.2, 1.3),

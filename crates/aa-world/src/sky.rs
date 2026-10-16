@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 use bevy::camera::Exposure;
-use bevy::light::{CascadeShadowConfigBuilder, NotShadowCaster, NotShadowReceiver};
+use bevy::light::{CascadeShadowConfigBuilder, EnvironmentMapLight, NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
 
 use crate::coords::{bevy_to_cry, cry_to_bevy};
@@ -78,6 +78,20 @@ pub struct AtmosphereTuning {
     pub saturation: f32,
     /// Colour grading: exposure multiplier before the film curve.
     pub exposure: f32,
+    /// Screen space ambient occlusion on the post camera (1) or not (0, keeps MSAA 4x); read when the camera is set up.
+    pub ssao: f32,
+    /// Cloud sprites: brightness multiplier on top of `sky_gain` (0 = no clouds visible).
+    pub cloud_gain: f32,
+    /// Ambient light: 1 = hemisphere environment light (sky above, ground below), 0 = Bevy's flat `GlobalAmbientLight`.
+    pub ambient_env: f32,
+    /// Ambient light: brightness multiplier on `ambient_scale x luminance`.
+    pub ambient_gain: f32,
+    /// Ambient light: saturation of the sky / ground colours (1 = the data's colours).
+    pub ambient_sat: f32,
+    /// Ambient light: brightness of the environment light's specular reflections relative to its diffuse light.
+    pub ambient_spec: f32,
+    /// Ambient light: how much of the sky dome's colour (horizon / zenith, blue grey) replaces `Sky color` (green yellow in the data).
+    pub ambient_dome: f32,
     /// Water: multiplier of the volume's fog colour (the lit colour of the water body).
     pub water_body: f32,
     /// Water: absorption per metre = volume fog density x this.
@@ -112,6 +126,13 @@ impl Default for AtmosphereTuning {
             fog_sky_mix: 0.6,
             saturation: 0.85,
             exposure: 1.15,
+            ssao: 0.0,
+            cloud_gain: 1.0,
+            ambient_env: 1.0,
+            ambient_gain: 0.9,
+            ambient_sat: 0.3,
+            ambient_dome: 1.0,
+            ambient_spec: 0.2,
             water_body: 20.0,
             water_absorb: 6.0,
             water_refl: 0.5,
@@ -144,6 +165,13 @@ impl AtmosphereTuning {
                 "fog_sky_mix" => t.fog_sky_mix = v,
                 "saturation" => t.saturation = v,
                 "exposure" => t.exposure = v,
+                "ssao" => t.ssao = v,
+                "cloud_gain" => t.cloud_gain = v,
+                "ambient_env" => t.ambient_env = v,
+                "ambient_gain" => t.ambient_gain = v,
+                "ambient_sat" => t.ambient_sat = v,
+                "ambient_dome" => t.ambient_dome = v,
+                "ambient_spec" => t.ambient_spec = v,
                 "water_body" => t.water_body = v,
                 "water_absorb" => t.water_absorb = v,
                 "water_refl" => t.water_refl = v,
@@ -198,12 +226,13 @@ pub fn build(app: &mut App) {
     crate::post::build(app);
     crate::sky_material::build(app);
     crate::water_material::build(app);
+    crate::sky_clouds::build(app);
     app.init_resource::<WorldClock>()
         .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3) })
         .init_resource::<TodCache>()
         .insert_resource(AtmosphereTuning::from_env())
         .add_systems(Startup, setup_sky)
-        .add_systems(Update, (receive_zones, update_clock, update_environment, update_sky, update_post, crate::water_material::update_water).chain())
+        .add_systems(Update, (receive_zones, update_clock, update_environment, update_ambient, update_sky, crate::sky_clouds::update_clouds, update_post, crate::water_material::update_water).chain())
         .add_systems(PostUpdate, follow_camera.before(bevy::transform::TransformSystems::Propagate));
 }
 
@@ -389,11 +418,15 @@ pub fn update_environment(
         light.illuminance = cfg.sun_lux_scale * sun_lum * horizon_fade * (0.3 + 0.7 * cur.day);
         *tf = Transform::IDENTITY.looking_to(-to_light, Vec3::Y);
     }
-    // --- ambient ---
-    let hemi = (cur.sky + cur.ambient_ground) * 0.5;
-    let hemi_lum = luminance(hemi).max(1e-4);
-    ambient.color = Color::linear_rgb((hemi.x / hemi_lum).min(2.0), (hemi.y / hemi_lum).min(2.0), (hemi.z / hemi_lum).min(2.0));
-    ambient.brightness = cfg.ambient_scale * hemi_lum;
+    // --- ambient: a flat light, or (default) the hemisphere environment light of `update_ambient` ---
+    if tuning.ambient_env > 0.5 {
+        ambient.brightness = 0.0;
+    } else {
+        let hemi = (cur.sky + cur.ambient_ground) * 0.5;
+        let hemi_lum = luminance(hemi).max(1e-4);
+        ambient.color = Color::linear_rgb((hemi.x / hemi_lum).min(2.0), (hemi.y / hemi_lum).min(2.0), (hemi.z / hemi_lum).min(2.0));
+        ambient.brightness = cfg.ambient_scale * hemi_lum;
+    }
 
     // --- clear colour (what no geometry covers) and, without the post pass, the camera's distance fog ---
     let expo = view_exposure(&exposure);
@@ -416,6 +449,64 @@ pub fn update_environment(
         clear.0 = Color::srgb(c.x, c.y, c.z);
     }
     env.sample = Some(cur);
+}
+
+fn desaturate(c: Vec3, s: f32) -> Vec3 {
+    let l = luminance(c);
+    Vec3::splat(l) + (c - Vec3::splat(l)) * s
+}
+
+fn unit_luminance(c: Vec3) -> Vec3 {
+    c / luminance(c).max(1e-4)
+}
+
+/// The ambient light: an environment light on the camera with a hemisphere gradient, sky colour above, ground colour below.
+///
+/// The data's `Sky color` is a yellow green and its ambient flat, the real picture has blue grey shade (sky brightening): the
+/// colour is mixed towards the dome's horizon / zenith colour and desaturated, the brightness keeps the old
+/// `ambient_scale x luminance`. The cube maps are 1 x 1 pixels per face and rebuilt only when a colour changes by 1.5 %.
+#[allow(clippy::too_many_arguments)]
+fn update_ambient(
+    mut commands: Commands,
+    env: Res<Environment>,
+    cfg: Res<WorldConfig>,
+    tuning: Res<AtmosphereTuning>,
+    mut images: ResMut<Assets<Image>>,
+    mut last: Local<[f32; 9]>,
+    focus: Query<Entity, With<WorldFocus>>,
+    cameras: Query<Entity, With<Camera3d>>,
+) {
+    if !cfg.environment || tuning.ambient_env < 0.5 {
+        return;
+    }
+    let Some(cur) = &env.sample else { return };
+    let focus = focus.iter().next();
+    let Some(camera) = cameras.iter().find(|e| Some(*e) == focus).or_else(|| cameras.iter().next()) else { return };
+
+    let dome = unit_luminance(cur.horizon * 0.6 + cur.zenith * 0.4);
+    let sky_dir = lerp3(unit_luminance(cur.sky), dome, tuning.ambient_dome);
+    let ground_dir = lerp3(unit_luminance(cur.ambient_ground), dome, tuning.ambient_dome * 0.5);
+    let scale = cfg.ambient_scale * tuning.ambient_gain;
+    let top = desaturate(sky_dir, tuning.ambient_sat) * luminance(cur.sky) * scale;
+    let bottom = desaturate(ground_dir, tuning.ambient_sat) * luminance(cur.ambient_ground) * scale;
+    let mid = (top + bottom) * 0.5;
+    let now = [top.x, top.y, top.z, mid.x, mid.y, mid.z, bottom.x, bottom.y, bottom.z];
+    let peak = now.iter().cloned().fold(1e-3, f32::max);
+    let change = now.iter().zip(last.iter()).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+    if change < 0.015 * peak {
+        return;
+    }
+    *last = now;
+    let color = |c: Vec3| Color::linear_rgb(c.x, c.y, c.z);
+    // the specular half is much dimmer: shiny things (hair, metal, wet rock) would blow out under the full sky radiance
+    let diffuse = EnvironmentMapLight::hemispherical_gradient(&mut images, color(top), color(mid), color(bottom));
+    let k = tuning.ambient_spec;
+    let specular = EnvironmentMapLight::hemispherical_gradient(&mut images, color(top * k), color(mid * k), color(bottom * k));
+    commands.entity(camera).insert(EnvironmentMapLight {
+        diffuse_map: diffuse.diffuse_map,
+        specular_map: specular.specular_map,
+        ..diffuse
+    });
 }
 
 /// The zone's `env.xml` (sky box, angle, ocean colour), read once.
