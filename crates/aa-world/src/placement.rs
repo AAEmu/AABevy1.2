@@ -1,0 +1,341 @@
+//! Object placement files of a cell (`cells/XXX_YYY/client/`): `statobjs.dat`, `material_list.dat`,
+//! `brush.dat`, `vegetation.dat` and the octree `object.dat`.
+//!
+//! All positions returned are **cell-local, cry space** (metres, 0..1024, Z up).
+//!
+//! ```text
+//! statobjs.dat       u32 n; n x char[256]            model (.cgf) paths, the brush "type" table
+//! material_list.dat  u32 n; n x { u32; char[256] }   material (.mtl, no extension) names
+//! brush.dat          u32 version(1); u32 offset[256]; u32 size[256]; 128 B records; sector = sx*16+sy (64 m)
+//! vegetation.dat     u32 version(1); u32 offset[16];  u32 size[16];  64 B records;  sector = sx*4+sy (256 m)
+//! object.dat         u32 n; n x { u32; char[256] } model table, u32 m; m x { u32; char[256] } materials,
+//!                    then an octree: node { u32 version, f32 box[6], u32 objectsBlockSize, u8 childMask },
+//!                    objects block = repeated { u32 type, payload }, then one child node per mask bit.
+//!                    types: 1 brush (128 B), 2 vegetation (64 B), 9 decal (111 B), 13 road (63 B + 12 n).
+//! ```
+//!
+//! Brush record (128 B, the engine's `SBrushChunk`): `f32 bbox[6]` @0, `f32 maxViewDist` @28, `u32 rndFlags` @32,
+//! `u8 viewDistRatio, lodRatio, internalFlags` @36, **`f32 m[12]` @67 row-major 3 x 4 (rotation*scale | translation)**,
+//! `i32 materialId` @115, `i32 editorId` @119, `i32 statObjId` @123, `u8 materialLayers` @127. In
+//! brush.dat the matrix and box are sector-local; in object.dat they are cell-local.
+//!
+//! Vegetation record (64 B, `SVegetationChunk`): same node header (bbox @0, maxViewDist @28, rndFlags @32,
+//! ratios @36), `f32 pos[3]` @39, `f32 scale` @51, `u16 group` @55 (a `vegetation.xml` `<group id>`),
+//! `u8 angleX, angleY` @57, 58, `u8 bright` @59, `u8 angleZ` @60 (256 steps per turn), 61..63 colour/pad.
+//! brush.dat and object.dat carry the same brushes; object.dat additionally holds decals and roads
+//! and (in worlds without the dedicated files, e.g. login2) everything.
+
+use bevy::math::{Mat4, Quat, Vec3};
+
+use crate::coords::SECTOR_SIZE;
+use crate::reader::{Reader, cstr, f32_at, i32_at, u16_at, u32_at};
+
+#[derive(Clone, Debug)]
+pub struct Brush {
+    /// Row-major 3 x 4: `[r00 r01 r02 tx, r10 r11 r12 ty, r20 r21 r22 tz]`, cell-local cry space.
+    pub matrix: [f32; 12],
+    /// Index into [`CellObjects::models`].
+    pub model: u32,
+    /// Index into [`CellObjects::materials`], or -1.
+    pub material: i32,
+    pub flags: u32,
+    pub max_view_dist: f32,
+    /// Cell-local bounding box `[min xyz, max xyz]`.
+    pub bbox: [f32; 6],
+}
+
+impl Brush {
+    pub fn translation(&self) -> Vec3 {
+        Vec3::new(self.matrix[3], self.matrix[7], self.matrix[11])
+    }
+
+    /// Cry-space object -> cell matrix.
+    pub fn mat4(&self) -> Mat4 {
+        let m = &self.matrix;
+        Mat4::from_cols_array(&[
+            m[0], m[4], m[8], 0.0, //
+            m[1], m[5], m[9], 0.0, //
+            m[2], m[6], m[10], 0.0, //
+            m[3], m[7], m[11], 1.0,
+        ])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Vegetation {
+    /// Cell-local cry position.
+    pub pos: Vec3,
+    pub scale: f32,
+    /// `vegetation.xml` group id.
+    pub group: u16,
+    pub angle_x: u8,
+    pub angle_y: u8,
+    pub bright: u8,
+    pub angle_z: u8,
+    pub flags: u32,
+    pub max_view_dist: f32,
+}
+
+impl Vegetation {
+    /// Rotation about Z (up), radians.
+    pub fn yaw(&self) -> f32 {
+        self.angle_z as f32 * std::f32::consts::TAU / 256.0
+    }
+
+    /// Cry-space transform (cell-local): scale, tilt, yaw, translation.
+    pub fn mat4(&self) -> Mat4 {
+        let tau = std::f32::consts::TAU / 256.0;
+        let rot = Quat::from_euler(
+            bevy::math::EulerRot::ZYX,
+            self.angle_z as f32 * tau,
+            self.angle_y as f32 * tau,
+            self.angle_x as f32 * tau,
+        );
+        Mat4::from_scale_rotation_translation(Vec3::splat(self.scale.clamp(0.1, 5.0)), rot, self.pos)
+    }
+}
+
+/// A terrain decal (`SDecalChunk`, 111 B). Kept raw: position, size and material id.
+#[derive(Clone, Debug)]
+pub struct Decal {
+    pub raw: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CellObjects {
+    pub models: Vec<String>,
+    pub materials: Vec<String>,
+    pub brushes: Vec<Brush>,
+    pub vegetation: Vec<Vegetation>,
+    pub decals: Vec<Decal>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PlacementError {
+    #[error("truncated or malformed {0}")]
+    Malformed(&'static str),
+}
+
+/// `statobjs.dat`: `u32 n` then `n` x 256 byte names.
+pub fn parse_statobjs(data: &[u8]) -> Vec<String> {
+    let n = u32_at(data, 0) as usize;
+    (0..n)
+        .filter_map(|i| data.get(4 + i * 256..4 + (i + 1) * 256))
+        .map(|s| cstr(s).trim().to_string())
+        .collect()
+}
+
+/// `material_list.dat` (and the tables inside `object.dat`): `u32 n`, then `n` x { u32, char[256] }.
+pub fn parse_material_list(data: &[u8]) -> Vec<String> {
+    let n = u32_at(data, 0) as usize;
+    (0..n)
+        .filter_map(|i| data.get(4 + i * 260 + 4..4 + (i + 1) * 260))
+        .map(|s| cstr(s).trim().to_string())
+        .collect()
+}
+
+fn read_brush(rec: &[u8], origin: Vec3) -> Brush {
+    let mut matrix = [0.0f32; 12];
+    for (i, m) in matrix.iter_mut().enumerate() {
+        *m = f32_at(rec, 67 + i * 4);
+    }
+    matrix[3] += origin.x;
+    matrix[7] += origin.y;
+    matrix[11] += origin.z;
+    let mut bbox = [0.0f32; 6];
+    for (i, b) in bbox.iter_mut().enumerate() {
+        *b = f32_at(rec, i * 4);
+    }
+    for k in 0..3 {
+        bbox[k] += origin[k];
+        bbox[k + 3] += origin[k];
+    }
+    Brush {
+        matrix,
+        model: u32_at(rec, 123),
+        material: i32_at(rec, 115),
+        flags: u32_at(rec, 32),
+        max_view_dist: f32_at(rec, 28),
+        bbox,
+    }
+}
+
+fn read_vegetation(rec: &[u8], origin: Vec3) -> Vegetation {
+    Vegetation {
+        pos: Vec3::new(f32_at(rec, 39), f32_at(rec, 43), f32_at(rec, 47)) + origin,
+        scale: f32_at(rec, 51),
+        group: u16_at(rec, 55),
+        angle_x: rec[57],
+        angle_y: rec[58],
+        bright: rec[59],
+        angle_z: rec[60],
+        flags: u32_at(rec, 32),
+        max_view_dist: f32_at(rec, 28),
+    }
+}
+
+/// `brush.dat`.
+pub fn parse_brush_dat(data: &[u8]) -> Result<Vec<Brush>, PlacementError> {
+    if data.len() < 2052 || u32_at(data, 0) != 1 {
+        return Err(PlacementError::Malformed("brush.dat"));
+    }
+    let mut out = Vec::new();
+    for i in 0..256 {
+        let off = u32_at(data, 4 + i * 4) as usize;
+        let size = u32_at(data, 4 + 1024 + i * 4) as usize;
+        if size == 0 {
+            continue;
+        }
+        let block = data.get(off..off + size).ok_or(PlacementError::Malformed("brush.dat"))?;
+        let origin = Vec3::new((i / 16) as f32 * SECTOR_SIZE, (i % 16) as f32 * SECTOR_SIZE, 0.0);
+        out.extend(block.chunks_exact(128).map(|rec| read_brush(rec, origin)));
+    }
+    Ok(out)
+}
+
+/// `vegetation.dat`.
+pub fn parse_vegetation_dat(data: &[u8]) -> Result<Vec<Vegetation>, PlacementError> {
+    if data.len() < 132 || u32_at(data, 0) != 1 {
+        return Err(PlacementError::Malformed("vegetation.dat"));
+    }
+    let mut out = Vec::new();
+    for i in 0..16 {
+        let off = u32_at(data, 4 + i * 4) as usize;
+        let size = u32_at(data, 4 + 64 + i * 4) as usize;
+        if size == 0 {
+            continue;
+        }
+        let block = data.get(off..off + size).ok_or(PlacementError::Malformed("vegetation.dat"))?;
+        let origin = Vec3::new((i / 4) as f32 * 256.0, (i % 4) as f32 * 256.0, 0.0);
+        out.extend(block.chunks_exact(64).map(|rec| read_vegetation(rec, origin)));
+    }
+    Ok(out)
+}
+
+/// `object.dat`: models, materials and the octree objects (cell-local already).
+pub fn parse_object_dat(data: &[u8]) -> Result<CellObjects, PlacementError> {
+    let bad = PlacementError::Malformed("object.dat");
+    let mut objects = CellObjects::default();
+    let n = u32_at(data, 0) as usize;
+    let mut pos = 4;
+    for _ in 0..n {
+        let rec = data.get(pos..pos + 260).ok_or(PlacementError::Malformed("object.dat"))?;
+        objects.models.push(cstr(&rec[4..]).trim().to_string());
+        pos += 260;
+    }
+    let m = u32_at(data, pos) as usize;
+    pos += 4;
+    for _ in 0..m {
+        let rec = data.get(pos..pos + 260).ok_or(PlacementError::Malformed("object.dat"))?;
+        objects.materials.push(cstr(&rec[4..]).trim().to_string());
+        pos += 260;
+    }
+    let mut r = Reader::new(data);
+    r.seek(pos).map_err(|_| PlacementError::Malformed("object.dat"))?;
+    walk_node(&mut r, &mut objects).ok_or(bad)?;
+    Ok(objects)
+}
+
+fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
+    let _version = r.u32().ok()?;
+    r.skip(24).ok()?;
+    let block = r.u32().ok()? as usize;
+    let mask = r.u8().ok()?;
+    let end = r.pos().checked_add(block)?;
+    while r.pos() < end {
+        let t = r.u32().ok()?;
+        match t {
+            1 => out.brushes.push(read_brush(r.bytes(128).ok()?, Vec3::ZERO)),
+            2 => out.vegetation.push(read_vegetation(r.bytes(64).ok()?, Vec3::ZERO)),
+            9 => out.decals.push(Decal { raw: r.bytes(111).ok()?.to_vec() }),
+            13 => {
+                let head = r.bytes(63).ok()?;
+                let points = u32_at(head, 39) as usize;
+                r.skip(points.checked_mul(12)?).ok()?;
+            }
+            // unknown payload size: the rest of this block is unreadable, the tree continues
+            _ => r.seek(end).ok()?,
+        }
+    }
+    r.seek(end).ok()?;
+    for bit in 0..8 {
+        if mask >> bit & 1 != 0 {
+            walk_node(r, out)?;
+        }
+    }
+    Some(())
+}
+
+/// Everything placed in a cell. `brush.dat` / `vegetation.dat` when present, else `object.dat`.
+pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
+    let dir = crate::world::cell_dir(world, x, y);
+    let pak = aa_pak::Pak::global();
+    let read = |f: &str| pak.read(&format!("{dir}/client/{f}")).ok();
+    let mut objects = CellObjects::default();
+    let from_octree = read("object.dat").and_then(|d| parse_object_dat(&d).ok());
+    match (read("brush.dat").and_then(|d| parse_brush_dat(&d).ok()), read("statobjs.dat")) {
+        (Some(brushes), Some(statobjs)) => {
+            objects.brushes = brushes;
+            objects.models = parse_statobjs(&statobjs);
+            objects.materials = read("material_list.dat").map(|d| parse_material_list(&d)).unwrap_or_default();
+        }
+        _ => {
+            if let Some(o) = &from_octree {
+                objects.brushes = o.brushes.clone();
+                objects.models = o.models.clone();
+                objects.materials = o.materials.clone();
+            }
+        }
+    }
+    match read("vegetation.dat").and_then(|d| parse_vegetation_dat(&d).ok()) {
+        Some(v) => objects.vegetation = v,
+        None => {
+            if let Some(o) = &from_octree {
+                objects.vegetation = o.vegetation.clone();
+            }
+        }
+    }
+    if let Some(o) = from_octree {
+        objects.decals = o.decals;
+    }
+    objects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_cell_brushes_match_object_dat() {
+        if !crate::pak_available() {
+            return;
+        }
+        let pak = aa_pak::Pak::global();
+        let dir = "worlds/login2/cells/000_001/client";
+        let brush = parse_brush_dat(&pak.read(&format!("{dir}/brush.dat")).unwrap()).unwrap();
+        let object = parse_object_dat(&pak.read(&format!("{dir}/object.dat")).unwrap()).unwrap();
+        assert_eq!(brush.len(), 33);
+        assert_eq!(object.brushes.len(), 33);
+        let key = |b: &Brush| ((b.matrix[3] * 100.0) as i64, (b.matrix[7] * 100.0) as i64, b.model);
+        let mut a: Vec<_> = brush.iter().map(key).collect();
+        let mut b: Vec<_> = object.brushes.iter().map(key).collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
+        let models = parse_statobjs(&pak.read(&format!("{dir}/statobjs.dat")).unwrap());
+        assert_eq!(models.len(), 11);
+        assert!(models.iter().all(|m| m.ends_with(".cgf")), "{models:?}");
+        assert!(brush.iter().all(|b| (b.model as usize) < models.len()));
+    }
+
+    #[test]
+    fn main_world_cell() {
+        if !crate::pak_available() {
+            return;
+        }
+        let o = load_cell_objects("main_world", 9, 14);
+        assert!(o.brushes.len() > 100 && o.vegetation.len() > 1000);
+        assert!(o.brushes.iter().all(|b| (b.model as usize) < o.models.len()));
+        assert!(o.vegetation.iter().all(|v| v.pos.x >= 0.0 && v.pos.x <= 1024.0 && v.pos.y >= 0.0 && v.pos.y <= 1024.0));
+    }
+}
