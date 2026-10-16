@@ -38,6 +38,8 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ClearColorConfig, CompositingSpace};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal};
+use aa_ui::UiBackgroundCamera;
 
 /// Render layer of everything in the login stage.
 pub const STAGE_LAYER: usize = 1;
@@ -350,11 +352,86 @@ fn sync_ui_compositing(stage: Query<(), With<StageCamera>>, mut cameras: Query<&
     }
 }
 
+/// The look of the painted background. The client puts the login backgrounds through its HDR
+/// post processing (the UI texts and panels on top are not touched); the closest thing here is a
+/// tone curve and exposure on the background camera, picked per screen against the reference
+/// captures (`reference/world_select`, `reference/character_select`; sweep with `AA_BG_GRADE=aces,0.5,1.2`
+/// and `--shot`, score on the plain background areas).
+///
+/// Bevy applies the tone curve of an LDR 2D camera inside the sprite shader, where only the curve,
+/// the exposure and the post-tonemapping saturation exist (no contrast / gamma / lift sections).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grade {
+    pub tonemapping: Tonemapping,
+    pub exposure: f32,
+    pub saturation: f32,
+}
+
+impl Grade {
+    /// Server list: ACES, +0.5 EV (RMSE to the capture on the background 11.2 -> 3.9 of 255).
+    pub const WORLD_SELECT: Grade = Grade { tonemapping: Tonemapping::AcesFitted, exposure: 0.5, saturation: 1.2 };
+    /// Character select: ACES, +0.65 EV (RMSE 11.4 -> 4.7).
+    pub const CHARACTER_SELECT: Grade = Grade { tonemapping: Tonemapping::AcesFitted, exposure: 0.65, saturation: 1.2 };
+
+    fn color_grading(&self) -> ColorGrading {
+        ColorGrading {
+            global: ColorGradingGlobal { exposure: self.exposure, post_saturation: self.saturation, ..default() },
+            ..default()
+        }
+    }
+
+    /// `AA_BG_GRADE=tonemapping,exposure,saturation` (fitting against captures).
+    fn from_env() -> Option<Grade> {
+        let v = std::env::var("AA_BG_GRADE").ok()?;
+        let p: Vec<&str> = v.split(',').map(str::trim).collect();
+        let tonemapping = match *p.first()? {
+            "none" => Tonemapping::None,
+            "linear" => Tonemapping::Linear,
+            "reinhard" => Tonemapping::Reinhard,
+            "reinhard-luminance" => Tonemapping::ReinhardLuminance,
+            "aces" => Tonemapping::AcesFitted,
+            "agx" => Tonemapping::AgX,
+            "sbdt" => Tonemapping::SomewhatBoringDisplayTransform,
+            "tony" => Tonemapping::TonyMcMapface,
+            "blender" => Tonemapping::BlenderFilmic,
+            "pbr-neutral" => Tonemapping::KhronosPbrNeutral,
+            _ => return None,
+        };
+        Some(Grade {
+            tonemapping,
+            exposure: p.get(1).and_then(|x| x.parse().ok()).unwrap_or(0.0),
+            saturation: p.get(2).and_then(|x| x.parse().ok()).unwrap_or(1.0),
+        })
+    }
+}
+
+/// The grading of the background camera (`None`: as painted). Set by the screens.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
+pub struct BackgroundGrade(pub Option<Grade>);
+
+fn grade_background(
+    grade: Res<BackgroundGrade>,
+    cameras: Query<Entity, With<UiBackgroundCamera>>,
+    added: Query<(), Added<UiBackgroundCamera>>,
+    mut commands: Commands,
+) {
+    if !grade.is_changed() && added.is_empty() {
+        return;
+    }
+    for e in &cameras {
+        match Grade::from_env().or(grade.0) {
+            Some(g) => commands.entity(e).insert((g.tonemapping, g.color_grading())),
+            None => commands.entity(e).insert((Tonemapping::None, ColorGrading::default())),
+        };
+    }
+}
+
 pub struct Stage3dPlugin;
 
 impl Plugin for Stage3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (apply_stage_layers, sync_ui_compositing));
+        app.init_resource::<BackgroundGrade>()
+            .add_systems(Update, (apply_stage_layers, sync_ui_compositing, grade_background));
     }
 }
 
