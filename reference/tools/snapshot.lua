@@ -3,6 +3,8 @@
 -- values the API can read (rect, text, alpha, ...) plus, when install_hooks() was active while the
 -- screen was built, the recorded construction calls (texture, coords, colour, font, anchors, ...).
 local R = __ref
+-- name the widget/drawable classes once per Lua state (the state is rebuilt on every stage change)
+if not R.classes_probed then R.classes_probed = true R.probe_classes() end
 local order, byaddr = R.enumerate(nil, 10)
 
 -- owner of drawables: the nearest widget on the path (computed from creation log, else path prefix)
@@ -85,6 +87,11 @@ for _, rec in ipairs(R.log) do
   end
 end
 
+local SKIP_ROOT = { tooltip = true, textTooltip = true, imageTooltip = true, unitFrameTooltip = true,
+  summaryTooltip = true, fixedTooltip = true, mapTooltip = true, hotKeyOverrideTooltip = true,
+  premiumServiceToolTip = true, candidateListWnd = true, systemConfigFrame = true, commonDropdown = true,
+  gameExitFrame = true, staffWindow = true, section = true, loginStageBlackWnd = true,
+  actionBar_dockingWindow = true, __ref = true }
 local out, hidden = {}, {}
 local nshown = 0
 for _, rec in ipairs(order) do
@@ -105,12 +112,19 @@ for _, rec in ipairs(order) do
     local cr = creator_of[a]
     if cr then st.created_by = { s = cr.s, m = cr.m, parent = cr.a, args = cr.args } end
     out[#out + 1] = st
-  elseif #rec.paths > 0 then
-    hidden[#hidden + 1] = { addr = a, paths = rec.paths, class = st.class, kind = st.kind, id = st.id,
-                            visible = st.visible, extent = st.extent }
+  elseif #rec.paths > 0 and st.kind == 'widget' then
+    local root = string.match(rec.paths[1], '^[%w_]+')
+    if not SKIP_ROOT[root] then
+      local e = st.extent
+      hidden[#hidden + 1] = rec.paths[1] .. '|' .. tostring(st.class) .. '|' .. tostring(e and e[1]) .. 'x' .. tostring(e and e[2])
+        .. (st.visible and '|selfvisible' or '')
+    end
   end
 end
 table.sort(out, function(x, y) return (x.order or 0) < (y.order or 0) end)
+table.sort(hidden)
+local hidden_total = #hidden
+while #hidden > 300 do hidden[#hidden] = nil end
 
 local meta = {
   screen_width = UIParent:GetScreenWidth(), screen_height = UIParent:GetScreenHeight(),
@@ -120,4 +134,4 @@ local meta = {
   log_entries = #R.log,
   fps = UIParent:GetFrameRate(),
 }
-return R.json({ meta = meta, widgets = out, hidden_named = hidden })
+return R.json({ meta = meta, widgets = out, hidden_named_widgets = hidden, hidden_named_total = hidden_total })
