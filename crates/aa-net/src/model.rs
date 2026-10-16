@@ -1159,9 +1159,11 @@ mod tests {
 
     #[test]
     fn model_params_roundtrip_all_kinds() {
-        let mut face = FaceModel::default();
-        face.lip_color = 0x1122_3344;
-        face.movable_decal_move_x = -3;
+        let mut face = FaceModel {
+            lip_color: 0x1122_3344,
+            movable_decal_move_x: -3,
+            ..FaceModel::default()
+        };
         face.fixed_decals[2] = (9, 0.5);
         face.modifier[5] = 77;
         for params in [
@@ -1362,9 +1364,7 @@ mod tests {
         for _ in 0..slot::COUNT {
             w.u32(0);
         }
-        let mut model = ModelParams::default();
-        model.kind = 2;
-        model.write(&mut w);
+        ModelParams { kind: 2, ..ModelParams::default() }.write(&mut w);
         let head = w.clone().finish();
 
         // Truncated right after the model: core fields only.
