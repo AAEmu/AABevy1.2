@@ -1,0 +1,9 @@
+[package]
+name = "aa-pak"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Read-only access to the ArcheAge 1.2 game_pak archive"
+
+[dependencies]
+aes.workspace = true

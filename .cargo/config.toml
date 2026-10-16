@@ -1,0 +1,8 @@
+# One shared target dir for every crate and agent: Bevy is compiled once, and cargo's build lock
+# serialises builds so parallel agents cannot exhaust the machine's RAM (other sessions share it).
+[build]
+target-dir = "D:/AABevy1.2/target"
+jobs = 4
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

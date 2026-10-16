@@ -1,0 +1,8 @@
+[package]
+name = "aa-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Login and game protocol client for the AAEmu server"
+
+[dependencies]

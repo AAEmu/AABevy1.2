@@ -1,0 +1,8 @@
+[package]
+name = "aa-cry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CryEngine asset formats (DDS, MTL, CGF/CHR/SKIN) to Bevy"
+
+[dependencies]

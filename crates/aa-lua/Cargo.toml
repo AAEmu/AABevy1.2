@@ -1,0 +1,8 @@
+[package]
+name = "aa-lua"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Lua 5.1 runtime for the original .alb UI bytecode and toc.g script loading"
+
+[dependencies]

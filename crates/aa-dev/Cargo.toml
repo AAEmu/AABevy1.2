@@ -1,0 +1,9 @@
+[package]
+name = "aa-dev"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared dev harness: standard window, FPS logging, screenshot-and-exit for automated checks"
+
+[dependencies]
+bevy.workspace = true

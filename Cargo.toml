@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+aa-pak = { path = "crates/aa-pak" }
+aa-dev = { path = "crates/aa-dev" }
+aa-lua = { path = "crates/aa-lua" }
+aa-ui = { path = "crates/aa-ui" }
+aa-cry = { path = "crates/aa-cry" }
+aa-anim = { path = "crates/aa-anim" }
+aa-world = { path = "crates/aa-world" }
+aa-net = { path = "crates/aa-net" }
+
+bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "dds", "tga", "jpeg"] }
+mlua = { version = "0.12", features = ["lua51", "vendored"] }
+aes = "0.8"
+anyhow = "1"
+thiserror = "2"
+bytemuck = { version = "1", features = ["derive"] }
+
+roxmltree = "0.21"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+tracing = "0.1"
+
+# Bevy's recommended dev setup: our code lightly optimised, dependencies fully optimised.
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
+[profile.release]
+debug = "line-tables-only"

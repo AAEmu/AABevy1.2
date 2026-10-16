@@ -1,0 +1,8 @@
+[package]
+name = "aa-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "X2 UI widget toolkit rendered in Bevy and bound to the original Lua UI"
+
+[dependencies]

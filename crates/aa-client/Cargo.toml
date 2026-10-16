@@ -1,0 +1,11 @@
+[package]
+name = "aa-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The ArcheAge 1.2 client remake: screen flow from world select to in-game"
+
+[dependencies]
+bevy.workspace = true
+aa-dev.workspace = true
+aa-pak.workspace = true

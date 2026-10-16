@@ -1,0 +1,8 @@
+[package]
+name = "aa-anim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Animations, CDF characters, character assembly and customizing"
+
+[dependencies]

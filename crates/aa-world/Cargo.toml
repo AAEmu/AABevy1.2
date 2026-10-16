@@ -1,0 +1,8 @@
+[package]
+name = "aa-world"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "World rendering: terrain, cell objects, vegetation, water, sky"
+
+[dependencies]
