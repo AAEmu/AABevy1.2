@@ -416,6 +416,17 @@ pub fn dds_to_image(dds: &Dds<'_>, options: DdsOptions) -> Result<Image> {
     Ok(image)
 }
 
+/// An RGBA8 image from decoded mips (mip 0 first), sampled like the material textures.
+pub fn rgba8_image(width: u32, height: u32, mips: &[Vec<u8>], srgb: bool) -> Image {
+    let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+    let size = Extent3d { width, height, depth_or_array_layers: 1 };
+    let mut image = Image::new_uninit(size, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
+    image.texture_descriptor.mip_level_count = mips.len().max(1) as u32;
+    image.data = Some(mips.concat());
+    image.sampler = ImageSampler::Descriptor(repeat_sampler());
+    image
+}
+
 /// Wrap addressing, trilinear, 4x anisotropic: how CryEngine samples material textures.
 pub fn repeat_sampler() -> ImageSamplerDescriptor {
     ImageSamplerDescriptor {

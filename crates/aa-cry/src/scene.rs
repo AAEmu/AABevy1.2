@@ -126,6 +126,18 @@ impl std::fmt::Debug for VertexHook {
     }
 }
 
+/// How much work the material conversion may spend on one material.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Shading {
+    /// Uniform factors per material: cheap, what the thousands of world props use.
+    #[default]
+    Basic,
+    /// Per-pixel specular: the specular (gloss) map of `Illum` materials is baked into a
+    /// metallic / roughness texture, so leather stays matte and trims shine. Costs one DDS decode
+    /// per material (cached): for characters and close-up objects.
+    Full,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModelOptions {
     /// `.mtl` to use instead of the model's own (CDF `Material=`).
@@ -146,6 +158,8 @@ pub struct ModelOptions {
     /// Edit the vertices (morphs) before the meshes are built; same sharing rule as
     /// `material_hook`.
     pub vertex_hook: Option<VertexHook>,
+    /// Material conversion quality, see [`Shading`].
+    pub shading: Shading,
 }
 
 /// One drawn piece of a node: a subset with its material.

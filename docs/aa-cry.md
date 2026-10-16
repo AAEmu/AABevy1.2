@@ -13,7 +13,10 @@ Layers:
 | `mesh` | no | `Model` (nodes, meshes, subsets, skin weights, LODs) |
 | `material` | no | `Material` (`.mtl` tree, textures, flags, public params) |
 | `texture` | Image | `Dds` parser, `load_dds(bytes, DdsOptions) -> Image`, CPU BC decoder |
-| `scene` | yes | `CryPlugin`, `CryAssets` (cached conversion), `spawn_model*`, material mapping |
+| `scene` | yes | `CryPlugin`, `CryAssets` (cached conversion), `spawn_model*`, `ModelOptions`, hooks |
+| `loader` | yes | `CryLoader` (Send + Sync): the whole conversion on any thread, `prepare_model` -> `PreparedModel` |
+| `shade` | yes | CryEngine shader parameters -> `StandardMaterial` (`to_standard_material`, skin colour helpers) |
+| `stage` | yes | lighting for showing characters: `StageLighting::login()`, environment maps, colour grading |
 
 All plain data uses glam types (the same types as `bevy::math`) and stays in **CryEngine model
 space: right handed, Z up, metres; characters face +Y, their left is -X**. `aa_cry::CRY_TO_BEVY`
@@ -38,7 +41,8 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
 }
 ```
 
-* `ModelOptions { material, lod, skeleton: Option<SkeletonBinding>, cry_space, keep_cpu_mesh }`.
+* `ModelOptions { material, lod, skeleton: Option<SkeletonBinding>, cry_space, keep_cpu_mesh,
+  material_hook, vertex_hook, shading }`.
   `skeleton` binds a skin (`.chr` body part) to existing joint entities of a base skeleton
   (bones matched by controller id, then name); `cry_space` keeps the root at identity (for
   parents that are already in CryEngine space); `lod` picks `*_lodN` files / `$lodN` nodes.
@@ -48,7 +52,36 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
   the root with `SkinnedMesh`; the root has `CrySkeleton { skeleton, joints }`.
   `spawn_model_full` / `spawn_loaded_full` also return the joint entities.
 * `CryAssets::texture(path, srgb)`, `::mtl(path)`, `::material(mtl_path, sub)` give cached
-  handles. Textures whose path moved are found by file name (about 1% of material references).
+  handles. Textures whose path moved are found by file name (about 1% of material references),
+  and ` copy` is stripped from names like `el_f_face01_df copy.dds` (which exist only without it).
+  **Cube and volume maps are never bound to 2D slots** (that is a wgpu validation error): a
+  material whose base colour names a cube map (e.g. `hdeco_table_h.cgf`) gets no texture there;
+  `CryAssets::texture` returns `None` for them, `cube_texture(path)` returns the cube map.
+* **Threads.** `CryAssets::loader()` returns the `CryLoader` (cheap clone, `Send + Sync`, shared
+  caches). `loader.prepare_model(path, &options) -> PreparedModel` parses, builds meshes and
+  decodes DDS on any thread (`PreparedModel::loaded()` already has final handles);
+  `CryAssets::finish_model(prepared) -> Arc<LoadedModel>` inserts the assets on the main thread.
+  `load_model` is `prepare` + `finish`, so both share one cache.
+* **Hooks.** `ModelOptions::material_hook` (`MaterialHook::new(|cry_sub_material, &mut
+  StandardMaterial| ..)`) restyles every converted sub-material, `vertex_hook`
+  (`VertexHook::new(|&mut MeshData| ..)`, CryEngine space) edits vertices (morphs) or collapses
+  triangles (index ranges of the subsets stay valid: set a triangle's three indices equal).
+  A hooked load builds its own meshes and materials (the parsed file is still shared); both must
+  be `Send + Sync`.
+* **Shading level.** `ModelOptions::shading`: `Shading::Basic` (default) converts with uniform
+  factors; `Shading::Full` additionally bakes the specular (gloss) map of `Illum` materials into
+  a metallic / roughness texture (one cached DDS decode per material): for characters and
+  close-up objects. Costumes and weapons look wrong without it (see below).
+* **Stage lighting** (`aa_cry::stage`): `StageLighting::login().spawn(&mut commands, &mut cry,
+  camera, frame)` spawns the three directional lights (key with shadows, fill, rim), the
+  environment map (`GeneratedEnvironmentMapLight` from the `beach_blur2.dds` cube the costumes
+  name) and the ambient light on the camera; `aa_cry::stage::login_color_grading()` is the
+  matching `ColorGrading` component. Lights are in engine light units (`LIGHT_UNIT_LUX`,
+  `LOGIN_EXPOSURE`); `environment_light(cry, cubemap, intensity)` and
+  `material_environment(&Material)` are the generic helpers. Directions are in the stage frame
+  (+Z towards the camera, +Y up, +X to the viewer's right).
+* **Facing.** CryEngine characters face **+Y** (their left is -X); `CRY_TO_BEVY` leaves them
+  facing Bevy **-Z**, so rotate the root by PI about Y to face a camera on +Z.
 * `LoadedModel { model, skeleton, inverse_bindposes, material_path, parts: Vec<(node, Vec<Part>)> }`
   with `Part { mesh, material, aabb, skinned }`: shared handles for instancing; static parts are
   in the node's frame (`scene::render_transform(&model, node)`), skinned parts in model space.
@@ -173,29 +206,74 @@ A8R8G8B8 2,353 (1 cube, 1 volume), ATI2 1,125, DXT3 59, R8G8B8 38, X8R8G8B8 22 (
   support use the CPU decoder (`Dds::decode_rgba8`). Truncated mip chains are cut to what fits.
 * Images use a repeat sampler with trilinear + 4x anisotropic filtering.
 
-## Shader -> StandardMaterial mapping (`scene::to_standard_material`)
+## Shader -> StandardMaterial mapping (`shade::to_standard_material`)
 
-Common: `base_color` = `Diffuse` (linear) x diffuse texture (sRGB); `normal_map_texture` =
-`Normalmap` (or a `_ddn` `Bumpmap`), linear, no Y flip; `perceptual_roughness` from
-`Shininess` (`(2/(n+2))^0.25`); `reflectance` = luma(`Specular`) x `SpecularLevel` / 2;
-`emissive` = `Emissive`; `MtlFlags & 2` -> double sided, no culling; `Opacity < 1` -> blend;
-`AlphaTest > 0` -> mask; additive flag -> add; `TexMod` of the diffuse slot -> `uv_transform`.
+Derived from the shader sources in the pak (`shaders/hwscripts/cryfx/{illum,humanskin,hair,eye,
+fraglib,shadelib}.cfx`) and calibrated against the captures in `reference/`
+(`cargo run -p aa-anim --example compare`, see `docs/aa-anim.md`).
+
+What the numbers mean:
+
+* `Diffuse` (`MatDifColor`) multiplies `texture * (ambient + Emissive + sum N.L * light)`. It is a
+  **lighting scale in engine light units** (costumes 0.216, hair 0.067), not a dark albedo. The
+  base colour stays `Diffuse * DiffuseModifierInHDR * texture`; `stage` gives lights in the same
+  units (one unit shows a white Lambert surface as 1.0 before tone mapping).
+* `Emissive` is not a glow: it is added to the *ambient accumulation* that the texture then
+  multiplies. Converted as `emissive = Emissive * base` with the diffuse texture as emissive
+  texture. (Bevy multiplies the emissive colour by the *sharpened alpha* of alpha-to-coverage
+  materials, thousands in flat areas, so hair clears it.)
+* `Specular` is the final specular colour, **already multiplied by `SpecularLevel`** (the face's
+  `3.0, 2.82, 1.94` is `17,16,11 / 255 * 45`, bows `7.6` = grey 0.87 x level 8.8); it multiplies
+  the specular (gloss) map, which is black for wood and leather and bright (often tinted: gold)
+  for metal. `Shininess` is the Phong exponent of the sun highlight.
+  `reflection = cube * ReflectAmount * fresnel(FresnelBias, FresnelScale) * (ambient + diffuse) *
+  gloss`; the result is `max(spec, reflection)`. `ReflectAmount` is 15 on 12,000 costume
+  materials and 0.25 on 9,000 props. `DiffuseModifierInHDR` / `SpecularModifierInHDR` scale the
+  terms.
+* `BSkinColor` / `MSkinColor` (HumanSkin) are stored **blue first** (`BSkinColor="0.52,0.61,0.71"`
+  is the warm `0.71,0.61,0.52`; the `skin_colors` table too); `HairColor` is plain RGB
+  (colour-picker values: linearised with exponent 1.5).
+* `Cut` sub-materials are a coarse closed hull in costume models: the engine does not draw the
+  nude body triangles inside it (implemented in aa-anim, `aa_anim::cut`).
+
+Common: `base_color` as above; `normal_map_texture` = `Normalmap` (or a `_ddn` `Bumpmap`), linear,
+no Y flip; `perceptual_roughness` from `Shininess` (`(2/(n+2))^0.25`); `reflectance` =
+`min(luma(Specular) * SpecularModifierInHDR / 2, 0.5)` (0.35 above a gain of 3); `MtlFlags & 2`
+-> double sided; `Opacity < 1` -> blend; `AlphaTest > 0` -> mask, except when the diffuse map has
+no alpha (mean alpha of the smallest mip >= 0.98: costume materials all carry `AlphaTest 0.5` on
+BC1 maps); additive flag -> add; `TexMod` of the diffuse slot -> `uv_transform`.
 
 | shader | mapping |
 |---|---|
-| `Illum`, `Cloth`, `Eye`, `Frozenlayerwip`, `Cloaklayer`, `Terrain.Layer`, ... | lit opaque (+ the common rules) |
+| `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`); with `Shading::Full` and a `Specular` map: metallic / roughness texture baked from the map (`metal = smoothstep(0.2, 0.75, luma(map) * min(Specular * modifier, 1.5)) * f(ReflectAmount)`, matte roughness from `Shininess`, shiny 0.6 x that) |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5) |
-| `Hair` | double sided, alpha mask; colour = `HairColor` public param (textures are greyscale) |
-| `HumanSkin` / `Humanskin` | neutral albedo `SKIN_ALBEDO` (0.22) x texture; per-file tints differ between face and body and are replaced by customisation |
+| `Hair` | double sided, alpha-to-coverage (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness 0.7, reflectance 0.2, no emissive |
+| `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
+| `Eye` | roughness 0.12, reflectance 0.5 (aa-anim composes the iris colour into the texture) |
 | `Metal` | metallic 0.6 |
 | `Glass`, `Liquid`, `Ice` | blend, alpha min(opacity, 0.6), roughness 0.1 |
 | `Water*`, `Ocean*` | blend, dark blue-green, roughness 0.05 |
 | particles, `FX_*`, `Light*`, beams, `Sky*`, clouds, `SpecialEffects`, `Hologram` | unlit, additive, double sided |
-| `NoDraw`/`Nodraw` (or flag 0x400), `Cut` | not drawn (`Cut` is a coarse hull in costumes) |
+| `NoDraw`/`Nodraw` (or flag 0x400), `Cut` | not drawn |
 
-Not mapped (no StandardMaterial equivalent without extra Bevy features): specular maps
-(`pbr_specular_textures` is not enabled), environment cubemaps (scene-level), sub-surface,
-detail maps, vertex bending.
+Calibration constants (in `shade.rs` / `stage.rs`, with the reason next to them): `SKIN_PINK`,
+`SKIN_PINK_WEIGHT`, `SKIN_GAIN` (pale skins show pink in the captures whatever their
+`BSkinColor`), `HAIR_GAMMA`, `stage::LOGIN_EXPOSURE` (3: the client's HDR exposure; the nominal
+light values make costumes three times too dark) and `login_color_grading` (saturation 1.6,
+contrast 1.2: the client's colour grading).
+
+Effects on callers (aa-world, aa-client): `Emissive` is now tinted by the albedo and small (it
+used to be an additive grey glow); `HumanSkin` is no longer a flat 0.22 grey but the skin colour;
+hair is alpha-to-coverage (soft strand ends) instead of a hard mask; `Illum` materials with
+`AlphaTest` on opaque (BC1) maps are no longer alpha tested; `Specular > 1` no longer makes
+metal. Costume `Diffuse` stays 0.2: show characters with `StageLighting` (engine units) or about
+3x the nominal sun, not with a plain 10,000 lux light.
+
+Not mapped (no `StandardMaterial` equivalent without extra Bevy features): the specular map's
+*tint* and strength per pixel (needs Bevy's `pbr_specular_textures`, not enabled: requested),
+anisotropic hair highlights (`pbr_anisotropy_texture`), the SSS map, `Environment` cube maps per
+material (scene-level: use `stage::environment_light`), detail maps and blend layers (surveyed:
+they occur on terrain and a few props only; no character material uses them), vertex bending.
 
 ## Tests
 
@@ -223,6 +301,8 @@ later models take 2-10 ms plus GPU upload. Texture references: 97.3% resolve.
 cargo run -p aa-cry --example viewer -- --model objects/<...>.cgf [--model ...] [--attach part.chr [--material x.mtl]]
     [--lod n] [--yaw deg] [--pitch deg] [--dist m] [--focus x,y,z] [--bones] [--shot shots/aa-cry/x.png]
 cargo run -p aa-cry --example dds_dump -- <pak path.dds> <out.tga> [mip] [face]
+cargo run -p aa-cry --example mtl_dump -- <out.tsv> [pak prefix]   # every sub-material as a TSV row
+cargo run -p aa-cry --example cut_info -- <costume.chr> [x.mtl]    # the `Cut` hull of a costume model
 ```
 
 `--attach` binds a part to the previous `--model`'s skeleton (a character = base `.chr` +
@@ -232,12 +312,17 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
 
 ## Known gaps
 
-* Specular maps, environment cubemaps, sub-surface, detail and blend layers are not mapped
-  (see above); vegetation bending and wind are not applied.
-* Character assembly (which parts hide which body pieces, CDF/DB customisation colours for
-  `HumanSkin` / `Hair`) belongs to aa-anim. Costume parts replace body regions, so drawing the
-  nude body under a costume shows through; some costume "skin" subsets use UVs that do not
-  match `el_f_nude_df`, and use the costume's own skin texture in the game.
+* Per-pixel specular tint / strength, anisotropic hair, the SSS map, per-material environment
+  maps, detail and blend layers are not mapped (see above); vegetation bending and wind are not
+  applied. Eye iris colours are composed by aa-anim; a generic `IrisColor` bake is missing.
+* `Shading::Basic` cannot tell a wooden bow (`Specular 7.6` on a dark map) from a steel one: it
+  stays a dielectric; use `Shading::Full` for characters, weapons and close-ups.
+* Skin colour is calibrated on the elf, nuian and ferre captures with one pink pull; nuian male
+  skin is a little too red and the hue differs per face texture (a per-texel bake of the SSS map
+  would remove the remaining differences).
+* Character assembly (the `Cut` hulls, CDF/DB customisation colours for `HumanSkin` / `Hair`)
+  belongs to aa-anim; some costume "skin" subsets use UVs that do not match `el_f_nude_df`, and
+  use the costume's own skin texture in the game.
 * Legacy helmets have no `.mtl` and draw with the default material; the v orientation of
   legacy UVs is unverified for lack of a textured sample.
 * Some buildings are open shells (e.g. the inner sides of `castle_nuia_001`'s towers): the
