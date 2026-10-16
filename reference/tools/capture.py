@@ -313,6 +313,7 @@ def main():
     p = sub.add_parser('launch')
     p = sub.add_parser('to-create')
     p = sub.add_parser('click'); p.add_argument('x', type=int); p.add_argument('y', type=int); p.add_argument('--right', action='store_true')
+    p = sub.add_parser('frames'); p.add_argument('outdir'); p.add_argument('--seconds', type=float, default=50)
     p = sub.add_parser('settle'); p.add_argument('--max', type=float, default=20)
     p = sub.add_parser('lua'); p.add_argument('code')
     p = sub.add_parser('luas'); p.add_argument('code')
@@ -329,6 +330,7 @@ def main():
     elif a.cmd == 'create-sweep': sweep_create(a.pid, [int(x) for x in a.races.split(',')], [int(x) for x in a.genders.split(',')], [int(x) for x in a.steps.split(',')])
     elif a.cmd == 'to-create': to_create(a.pid)
     elif a.cmd == 'click': print(click(a.pid, a.x, a.y, 'right_click' if a.right else 'click'))
+    elif a.cmd == 'frames': grab_frames(a.pid, a.outdir, a.seconds)
     elif a.cmd == 'settle': print(wait_settled(a.pid, a.max))
     elif a.cmd == 'lua': print(lua(a.pid, a.code))
     elif a.cmd == 'luas': print(lua(a.pid, a.code, 'system'))
@@ -415,6 +417,19 @@ def to_create(pid):
 # ---------------------------------------------------------------------------------------------
 # Flow helpers (character create sweep)
 # ---------------------------------------------------------------------------------------------
+def grab_frames(pid, outdir, seconds=50.0, quiet=True):
+    """Screenshots only (no Lua: Lua calls during a stage switch can crash the client), as fast as the hook allows."""
+    os.makedirs(outdir, exist_ok=True)
+    t0 = time.time(); n = 0
+    while time.time() - t0 < seconds:
+        try:
+            drv(pid, ['screenshot', '--pid', str(pid), os.path.join(outdir, 'f%03d.png' % n)])
+            n += 1
+        except Exception:
+            time.sleep(1)
+    print('frames:', n, 'in', outdir)
+
+
 def create_state(pid):
     r = lua(pid, 'return characterCreate.race, characterCreate.gender, characterCreate.state, X2LoginCharacter:GetCurrentStage()').strip().split('\t')
     return r

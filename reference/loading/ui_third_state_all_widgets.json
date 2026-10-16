@@ -1,0 +1,391 @@
+{
+ "hidden_named_total": 0,
+ "hidden_named_widgets": [],
+ "meta": {
+  "fps": 18,
+  "hooks_active": false,
+  "log_entries": 0,
+  "note": "third Lua state (lua_handle 2) = loading screen UI, dumped AFTER loading finished: all named widgets listed regardless of visibility (shown flag = effective visibility at dump time)",
+  "objects_shown": 12,
+  "objects_total": 12,
+  "screen_height": 1080,
+  "screen_width": 1920,
+  "ui_scale": 1
+ },
+ "widgets": [
+  {
+   "addr": "35F5EA2C",
+   "class": "drawable:image",
+   "content_extent": [
+    1920,
+    1200
+   ],
+   "eextent": [
+    1920,
+    1200
+   ],
+   "eoffset": [
+    0,
+    -60
+   ],
+   "extent": [
+    1920,
+    1200
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    -60
+   ],
+   "paths": [
+    "loading.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "3703E594",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "370E65FC",
+   "paths": [
+    "loading.mainWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3703C64C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "370BBE34",
+   "paths": [
+    "loading.mainWindow.tip.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3703D98C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "370D4D7C",
+   "paths": [
+    "loading.mainWindow.title.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3703C17C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "370D638C",
+   "paths": [
+    "loading.mainWindow.percent.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370E65FC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "8fa",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2298,
+   "parent": "?",
+   "paths": [
+    "loading.mainWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": false
+  },
+  {
+   "addr": "3DB34E8C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "8fb",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2299,
+   "parent": "370E65FC",
+   "paths": [
+    "loading.mainWindow.modalBackgroundWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": false
+  },
+  {
+   "addr": "370D4D7C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    322,
+    18
+   ],
+   "eextent": [
+    322,
+    18
+   ],
+   "enabled": true,
+   "eoffset": [
+    799,
+    972
+   ],
+   "extent": [
+    322,
+    18
+   ],
+   "id": "8fc",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    799,
+    972
+   ],
+   "order": 2300,
+   "parent": "370E65FC",
+   "paths": [
+    "loading.mainWindow.title"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "ArcheAge: Craft. Claim. Conquer.",
+   "visible": true
+  },
+  {
+   "addr": "3DB319B4",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    798,
+    22
+   ],
+   "eextent": [
+    798,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    561,
+    995
+   ],
+   "extent": [
+    798,
+    22
+   ],
+   "id": "8fd",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    561,
+    995
+   ],
+   "order": 2301,
+   "parent": "370E65FC",
+   "paths": [
+    "loading.mainWindow.gaugeWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "370AC804",
+   "alpha": 1,
+   "class": "statusbar",
+   "content_extent": [
+    786,
+    6
+   ],
+   "eextent": [
+    786,
+    6
+   ],
+   "enabled": true,
+   "eoffset": [
+    567,
+    1003
+   ],
+   "extent": [
+    786,
+    6
+   ],
+   "id": "8fe",
+   "kind": "widget",
+   "method_count": 103,
+   "mouse_over": false,
+   "offset": [
+    567,
+    1003
+   ],
+   "order": 2302,
+   "parent": "3DB319B4",
+   "paths": [
+    "loading.mainWindow.gaugeWindow.loadingGauge"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "370D638C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    45,
+    18
+   ],
+   "eextent": [
+    45,
+    18
+   ],
+   "enabled": true,
+   "eoffset": [
+    1362,
+    996
+   ],
+   "extent": [
+    45,
+    18
+   ],
+   "id": "8ff",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1362,
+    996
+   ],
+   "order": 2303,
+   "parent": "370E65FC",
+   "paths": [
+    "loading.mainWindow.percent"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "0%%",
+   "visible": true
+  },
+  {
+   "addr": "370BBE34",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    1920,
+    16
+   ],
+   "eextent": [
+    1920,
+    16
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1019
+   ],
+   "extent": [
+    1920,
+    16
+   ],
+   "id": "900",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 496,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    0,
+    1019
+   ],
+   "order": 2304,
+   "parent": "370E65FC",
+   "paths": [
+    "loading.mainWindow.tip"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 16,
+   "text_length": 0,
+   "visible": true
+  }
+ ]
+}
