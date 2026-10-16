@@ -365,7 +365,8 @@ pub fn dev_hide_part(
             for e in children.iter_descendants(part) {
                 if let Ok(m) = meshes.get(e) {
                     n += 1;
-                    verts.push(assets.get(&m.0).map_or(0, |m| m.count_vertices()));
+                    // meshes shared with the character select stage may already be in the render world
+                    verts.push(assets.get(&m.0).map_or(0, |m| m.try_attribute(Mesh::ATTRIBUTE_POSITION).map_or(0, |a| a.len())));
                 }
             }
             debug!("part {i} {:?} {}: {n} meshes {verts:?}", c.assets.parts[i].kind, c.assets.parts[i].path);
