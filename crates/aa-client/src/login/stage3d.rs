@@ -3,8 +3,8 @@
 //!
 //! The real client draws the painted background (UI layer `background`), then the 3D scene of the
 //! login level, then the other UI. Here that is three cameras on the one window: the UI's
-//! background camera (order 0), this module's [`StageCamera`] (order [`STAGE_CAMERA_ORDER`]) and the
-//! UI camera (order 10); see [`crate::login::ui_config`].
+//! background camera (order [`BACKGROUND_CAMERA_ORDER`]), this module's [`StageCamera`] (order
+//! [`STAGE_CAMERA_ORDER`]) and the UI camera (order 10); see [`crate::login::ui_config`].
 //!
 //! ## Isolation from the world
 //!
@@ -41,8 +41,11 @@ use bevy::prelude::*;
 
 /// Render layer of everything in the login stage.
 pub const STAGE_LAYER: usize = 1;
-/// Camera order of the stage camera: above the UI's background camera (0), below the UI camera (10).
-pub const STAGE_CAMERA_ORDER: isize = 5;
+/// Camera order of the stage camera: above the UI's background camera ([`BACKGROUND_CAMERA_ORDER`]),
+/// below the UI camera (10).
+pub const STAGE_CAMERA_ORDER: isize = 0;
+/// Camera order of the UI's background camera (the painted login backgrounds).
+pub const BACKGROUND_CAMERA_ORDER: isize = -10;
 
 /// CryEngine position of the character select slot (feet of the character), the origin of stage space.
 /// Solved from `reference/character_select/1_character` (feet pixel 400,1015, head row 187, 1.9 m).
@@ -158,6 +161,7 @@ impl StagePose {
     }
 
     /// Move a stage camera to this pose.
+    #[allow(dead_code)]
     pub fn apply(&self, transform: &mut Transform, projection: &mut Projection) {
         *transform = self.transform();
         *projection = self.projection();
@@ -231,10 +235,20 @@ pub struct StageSubject;
 
 /// Handles of a spawned stage.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Stage {
     pub root: Entity,
     pub camera: Entity,
     pub lights: Vec<Entity>,
+}
+
+/// `--stage-clear R,G,B` (0..255): the stage camera clears to this colour instead of showing the
+/// background below (to see what the 3D camera draws on its own).
+fn debug_clear() -> Option<ClearColorConfig> {
+    let args: Vec<String> = std::env::args().collect();
+    let v = args.iter().position(|a| a == "--stage-clear").and_then(|i| args.get(i + 1))?;
+    let c: Vec<f32> = v.split(',').filter_map(|c| c.trim().parse().ok()).collect();
+    (c.len() == 3).then(|| ClearColorConfig::Custom(Color::srgb_u8(c[0] as u8, c[1] as u8, c[2] as u8)))
 }
 
 /// Spawn the stage: root, camera at `pose` and the lighting rig. Everything is a child of the root.
@@ -249,11 +263,11 @@ pub fn spawn_stage(commands: &mut Commands, cry: &mut CryAssets, pose: &StagePos
             Camera {
                 order: STAGE_CAMERA_ORDER,
                 // the painted background of the UI's background camera is below
-                clear_color: ClearColorConfig::None,
+                clear_color: debug_clear().unwrap_or(ClearColorConfig::None),
                 ..default()
             },
             // same blending space as the UI cameras, or Bevy falls back to linear for all of them
-            CompositingSpace::Srgb,
+            // (no CompositingSpace: 3D views cannot encode into one)
             Tonemapping::TonyMcMapface,
             login_color_grading(),
             pose.projection(),
@@ -324,11 +338,23 @@ pub fn apply_stage_layers(
     }
 }
 
+/// Blending space of the UI cameras: gamma space like the client's renderer while no 3D camera is
+/// stacked with them (world select, loading), linear while the stage camera is up (Bevy's 3D path
+/// writes linear values, and a stack must agree on one space). aa-ui's split mode starts linear.
+fn sync_ui_compositing(stage: Query<(), With<StageCamera>>, mut cameras: Query<&mut CompositingSpace, With<aa_ui::render::UiCamera>>) {
+    let want = if stage.is_empty() { CompositingSpace::Srgb } else { CompositingSpace::Linear };
+    for mut c in &mut cameras {
+        if *c != want {
+            *c = want;
+        }
+    }
+}
+
 pub struct Stage3dPlugin;
 
 impl Plugin for Stage3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, apply_stage_layers);
+        app.add_systems(Update, (apply_stage_layers, sync_ui_compositing));
     }
 }
 

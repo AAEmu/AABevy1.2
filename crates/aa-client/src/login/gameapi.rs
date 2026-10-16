@@ -105,26 +105,25 @@ impl Names {
         self.conn.as_ref()
     }
 
-    /// Display name of a zone group (`zone_groups.display_text`, English).
-    fn zone(&mut self, id: u32) -> String {
-        if let Some(n) = self.zones.get(&id) {
+    /// Display name of the zone group of a zone (`zones.zone_key` is what the character list sends,
+    /// the name is `zone_groups.display_text`, English).
+    fn zone(&mut self, key: u32) -> String {
+        if let Some(n) = self.zones.get(&key) {
             return n.clone();
         }
         let name = self
             .conn()
             .and_then(|c| {
                 c.query_row(
-                    "SELECT COALESCE(l.en_us, g.display_text) FROM zone_groups g \
-                     LEFT JOIN localized_texts l ON l.tbl_name = 'zone_groups' AND l.tbl_column_name = 'display_text' AND l.idx = g.id \
-                     WHERE g.id = ?1",
-                    [id],
+                    "SELECT COALESCE(l.en_us, g.display_text) FROM zones z JOIN zone_groups g ON g.id = z.group_id                      LEFT JOIN localized_texts l ON l.tbl_name = 'zone_groups' AND l.tbl_column_name = 'display_text' AND l.idx = g.id                      WHERE z.zone_key = ?1",
+                    [key],
                     |r| r.get::<_, Option<String>>(0),
                 )
                 .ok()
                 .flatten()
             })
             .unwrap_or_default();
-        self.zones.insert(id, name.clone());
+        self.zones.insert(key, name.clone());
         name
     }
 
