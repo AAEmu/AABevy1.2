@@ -13,7 +13,7 @@
 //!   `--password-file`, see `ingame::enter::Credentials`; the runs of this screen use `bevycreate`).
 //! * `--race nuian|elf|ferre|hariharan`, `--gender male|female`, `--step 1|2|3`: replay what the
 //!   reference captures did (the race and gender buttons, then the next-step button).
-//! * `--lua CODE T`, `--hover X Y T`, `--click X Y T`, `--drag X1 Y1 X2 Y2 T` (physical pixels), `--wheel D T` (+1 = one notch
+//! * `--clua CODE T`, `--hover X Y T`, `--click X Y T`, `--drag X1 Y1 X2 Y2 T` (physical pixels), `--wheel D T`, `--type TEXT T` (+1 = one notch
 //!   up), `--cshot FILE T`: scripted input and screenshots `T` seconds after the screen is up
 //!   (repeatable; one run can take several shots, e.g. one per tab).
 //! * `--exit-after-create`: quit once the server answered the create request.
@@ -42,7 +42,8 @@ mod poses;
 mod preview;
 mod saved;
 
-use aa_anim::{ClipLibrary, Gender, Race};
+use aa_anim::cal::Cal;
+use aa_anim::{Animator, ClipLibrary, Gender, Race, SampleOptions};
 use aa_cry::scene::CryAssets;
 use aa_cry::stage::StageLighting;
 use aa_net::state::{Characters, Worlds};
@@ -75,6 +76,7 @@ pub fn plugin(app: &mut App) {
                 sync_net,
                 handle_requests,
                 update_preview,
+                set_animation,
                 drive_camera,
                 run_script,
                 net_events,
@@ -100,7 +102,7 @@ pub struct Options {
     pub gender: Gender,
     /// The step the scripted replay ends on.
     pub step: u8,
-    /// `--lua CODE T` pairs.
+    /// `--clua CODE T` pairs.
     pub lua: Vec<(String, f32)>,
     /// `--hover X Y T` / `--click X Y T`: (x, y, seconds, click).
     pub pointer: Vec<(f32, f32, f32, bool)>,
@@ -108,6 +110,8 @@ pub struct Options {
     pub drags: Vec<(Vec2, Vec2, f32)>,
     /// `--wheel D T`
     pub wheel: Vec<(f32, f32)>,
+    /// `--type TEXT T`: typed into the focused edit box.
+    pub typed: Vec<(String, f32)>,
     /// `--cshot FILE T`
     pub shots: Vec<(String, f32)>,
     pub exit_after_create: bool,
@@ -116,11 +120,11 @@ pub struct Options {
 impl Options {
     fn from_args() -> Options {
         let args: Vec<String> = std::env::args().collect();
-        let (mut lua, mut pointer, mut wheel, mut shots, mut drags) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut lua, mut pointer, mut wheel, mut shots, mut drags, mut typed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for (i, a) in args.iter().enumerate() {
             let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
             match a.as_str() {
-                "--lua" => {
+                "--clua" => {
                     if let (Some(code), Some(t)) = (args.get(i + 1), num(2)) {
                         lua.push((code.clone(), t));
                     }
@@ -133,6 +137,11 @@ impl Options {
                 "--drag" => {
                     if let (Some(x1), Some(y1), Some(x2), Some(y2), Some(t)) = (num(1), num(2), num(3), num(4), num(5)) {
                         drags.push((Vec2::new(x1, y1), Vec2::new(x2, y2), t));
+                    }
+                }
+                "--type" => {
+                    if let (Some(text), Some(t)) = (args.get(i + 1), num(2)) {
+                        typed.push((text.clone(), t));
                     }
                 }
                 "--wheel" => {
@@ -157,6 +166,7 @@ impl Options {
             pointer,
             drags,
             wheel,
+            typed,
             shots,
             exit_after_create: args.iter().any(|a| a == "--exit-after-create"),
         }
@@ -226,6 +236,8 @@ struct CreateScreen {
     /// Where the subject stands: (step, race, gender).
     placed: Option<(u8, Race, Gender)>,
     cache: preview::PreviewCache,
+    /// The subject and whether it plays the step 3 stance already.
+    anim_for: Option<(Entity, bool)>,
 }
 
 struct Tween {
@@ -270,9 +282,10 @@ fn enter(mut commands: Commands, mut cry: CryAssets, opts: Res<Options>) {
         tween: None,
         ui_built: false,
         ui_time: 0.0,
-        script_done: vec![false; opts.lua.len() + opts.pointer.len() + opts.drags.len() + opts.wheel.len() + opts.shots.len() + 8],
+        script_done: vec![false; opts.lua.len() + opts.pointer.len() + opts.drags.len() + opts.wheel.len() + opts.typed.len() + opts.shots.len() + 8],
         placed: None,
         cache: Default::default(),
+        anim_for: None,
     });
 }
 
@@ -454,6 +467,44 @@ fn update_preview(
     }
 }
 
+/// Steps 1 and 2 play the login idle (aa-anim's default); step 3 stands in the combat stance of
+/// the captures (`fist_ba_combat_idle`, with its idle variants).
+fn set_animation(
+    screen: Option<ResMut<CreateScreen>>,
+    clips: Option<Res<ClipLibrary>>,
+    mut subjects: Query<(&mut Animator, &aa_anim::Character), With<StageSubject>>,
+) {
+    let (Some(mut screen), Some(clips)) = (screen, clips) else { return };
+    let Some(subject) = screen.subject else { return };
+    let combat = screen.step == 3;
+    // a fresh subject already plays the login idle
+    if screen.anim_for.is_none_or(|(e, _)| e != subject) {
+        screen.anim_for = Some((subject, false));
+    }
+    if screen.anim_for == Some((subject, combat)) {
+        return;
+    }
+    let Ok((mut animator, character)) = subjects.get_mut(subject) else { return };
+    let Ok(cal) = Cal::load(&character.assets.cal) else { return };
+    let bind = |name: &str| {
+        let entry = cal.animation(name)?;
+        let opts = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: true };
+        clips.bound(&animator.rig, &entry.path, opts).ok()
+    };
+    let (idle, variants): (_, Vec<&str>) = if combat {
+        (bind("fist_ba_combat_idle"), vec!["fist_ba_combat_idle_rand_1", "fist_ba_combat_idle_rand_2", "fist_ba_combat_idle_rand_3"])
+    } else {
+        (bind(aa_anim::character::STAGE_IDLE), vec![aa_anim::character::STAGE_VARIANT])
+    };
+    let variants: Vec<_> = variants.into_iter().filter_map(bind).collect();
+    if let Some(idle) = idle {
+        let fade = if animator.speed == 0.0 { 0.0 } else { 0.4 };
+        animator.play(idle, true, fade);
+        animator.random_idle = (!variants.is_empty()).then(|| aa_anim::RandomIdle::new(variants, 2, 7));
+        screen.anim_for = Some((subject, combat));
+    }
+}
+
 /// Moves the stage camera towards the pose of the step (and applies the mouse-wheel zoom).
 fn drive_camera(
     screen: Option<ResMut<CreateScreen>>,
@@ -547,8 +598,8 @@ fn run_script(
     base += 8;
     for (i, (code, at)) in opts.lua.iter().enumerate() {
         if once(base + i, *at) {
-            if let Err(e) = ui.exec("@--lua", code) {
-                warn!("character create: --lua: {e}");
+            if let Err(e) = ui.exec("@--clua", code) {
+                warn!("character create: --clua: {e}");
             }
         }
     }
@@ -595,6 +646,13 @@ fn run_script(
             warn!("character create: --wheel: {e}");
         }
     }
+    for (i, (text, at)) in opts.typed.iter().enumerate() {
+        if once(base + i, *at) {
+            ui.type_text(text);
+            info!("character create: typed {} character(s)", text.chars().count());
+        }
+    }
+    base += opts.typed.len();
     for (i, (path, at)) in opts.shots.iter().enumerate() {
         if once(base + i, *at) {
             if let Some(dir) = std::path::Path::new(path).parent() {
