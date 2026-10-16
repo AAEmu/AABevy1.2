@@ -931,6 +931,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     def("IsNowAnimation", method(lua, |lua, _, _| ret(lua, false))?)?;
     super::edit::focus_methods(lua, &m)?;
+    // `titleBar:SetTitleText(text)` (baselib windows) is the title setter under another name.
+    let set_title: mlua::Function = m.raw_get("SetTitle")?;
+    def("SetTitleText", set_title)?;
     if matches!(ty, "editbox" | "editboxmultiline") {
         super::edit::methods(lua, &m)?;
     }
@@ -1109,6 +1112,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     if ty == "tab" {
         super::tab::methods(lua, &m)?;
+    }
+    if ty == "circlediagram" {
+        super::diagram::methods(lua, &m)?;
     }
     if ty == "paintcolorpicker" {
         // Colour picker: a spectrum and a luminance child the scripts decorate.

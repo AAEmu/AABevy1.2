@@ -36,6 +36,9 @@ pub struct Quad {
     pub uv: [f32; 4],
     /// sRGB colour.
     pub color: [f32; 4],
+    /// Free vertex positions (top-left, top-right, bottom-right, bottom-left order) instead of
+    /// the `pos` rectangle: triangles of the circle diagram.
+    pub corners: Option<[[f32; 2]; 4]>,
 }
 
 /// Collect the quads of the whole tree in paint order.
@@ -79,6 +82,9 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         });
         for d in below {
             drawable_quads(u, d, alpha, state, scale, &mut out);
+        }
+        if let Some(dg) = w.diagram.as_ref() {
+            diagram_quads(u, id, dg, alpha, scale, &mut out);
         }
         // Widget text above background/artwork, below overlay.
         if let Some(t) = w.text.as_ref() {
@@ -224,6 +230,7 @@ fn drawable_quads(
             pos: px(rect, scale),
             uv: white_uv(),
             color,
+            corners: None,
         }),
         DrawKind::Text => {
             if let Some(t) = dr.text.as_ref() {
@@ -276,16 +283,32 @@ fn drawable_quads(
                                 pos: px(r, scale),
                                 uv: [sx[i] / tw, sy[j] / th, sx[i + 1] / tw, sy[j + 1] / th],
                                 color,
+                                corners: None,
                             });
                         }
                     }
                 }
-                _ => out.push(Quad {
-                    tex,
-                    pos: px(rect, scale),
-                    uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
-                    color,
-                }),
+                _ => {
+                    out.push(Quad {
+                        tex,
+                        pos: px(rect, scale),
+                        uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
+                        color,
+                        corners: None,
+                    });
+                    // Icon image overlays (`AddTexture`), whole texture over the same rect.
+                    for extra in &dr.extra_textures {
+                        if let Some(r) = u.textures.resolve(extra) {
+                            out.push(Quad {
+                                tex: Tex::Image(r),
+                                pos: px(rect, scale),
+                                uv: [0.0, 0.0, 1.0, 1.0],
+                                color,
+                                corners: None,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -364,6 +387,7 @@ fn text_quads(
                 (g.glyph.ay + g.glyph.h) as f32 / atlas,
             ],
             color: c,
+            corners: None,
         });
     };
     // Per-line horizontal alignment.
@@ -421,9 +445,48 @@ fn text_quads(
                         (cy + ch) / th as f32,
                     ],
                     color: [1.0, 1.0, 1.0, a],
+                    corners: None,
                 });
             }
         }
+    }
+}
+
+/// A circle diagram: a triangle fan from the widget centre through the current vertices.
+fn diagram_quads(
+    u: &Ui,
+    id: Id,
+    dg: &crate::lua::diagram::DiagramData,
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    let n = dg.points.len();
+    if n < 3 {
+        return;
+    }
+    let r = u.tree.rect(id);
+    let at = |(x, y): (f32, f32)| [(r.x + x) * scale, (r.y + y) * scale];
+    let c = at((r.w / 2.0, r.h / 2.0));
+    let color = [dg.color[0], dg.color[1], dg.color[2], dg.color[3] * alpha];
+    for i in 0..n {
+        let mut a = at(dg.vertex(i, r.w, r.h));
+        let mut b = at(dg.vertex((i + 1) % n, r.w, r.h));
+        // Same winding as the rectangles (clockwise on screen).
+        let cross = (a[0] - c[0]) * (b[1] - c[1]) - (a[1] - c[1]) * (b[0] - c[0]);
+        if cross == 0.0 {
+            continue;
+        }
+        if cross < 0.0 {
+            std::mem::swap(&mut a, &mut b);
+        }
+        out.push(Quad {
+            tex: Tex::Atlas,
+            pos: [0.0; 4],
+            uv: white_uv(),
+            color,
+            corners: Some([c, a, b, b]),
+        });
     }
 }
 
@@ -473,6 +536,7 @@ fn caret_quad(
         pos: [x, y, x + scale.max(1.0), y + h],
         uv: white_uv(),
         color: [c[0], c[1], c[2], c[3] * alpha],
+        corners: None,
     });
 }
 
@@ -573,12 +637,15 @@ pub fn sync_batches(
             let base = pos.len() as u32;
             let [x0, y0, x1, y1] = q.pos;
             let [u0, v0, u1, v1] = q.uv;
-            pos.extend([
-                [x0, -y0, 0.0],
-                [x1, -y0, 0.0],
-                [x1, -y1, 0.0],
-                [x0, -y1, 0.0],
-            ]);
+            match q.corners {
+                Some(c) => pos.extend(c.map(|[x, y]| [x, -y, 0.0])),
+                None => pos.extend([
+                    [x0, -y0, 0.0],
+                    [x1, -y0, 0.0],
+                    [x1, -y1, 0.0],
+                    [x0, -y1, 0.0],
+                ]),
+            }
             uv.extend([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
             let c = Color::srgba(
                 q.color[0],
