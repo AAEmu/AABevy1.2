@@ -228,6 +228,20 @@ pub(crate) fn text_height(lua: &Lua, id: Id) -> f32 {
     lo.height
 }
 
+/// Line count of a widget's text (wrapped at its width) and its line spacing.
+fn text_lines(lua: &Lua, id: Id) -> (usize, f32) {
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let w = u.tree.rect(id).w;
+    let Some(t) = u.tree.get(id).text().cloned() else {
+        return (0, 0.0);
+    };
+    let maxw = (t.wrap && w > 0.0).then_some((w - t.inset[0] - t.inset[2]).max(1.0));
+    let lo = u.fonts.layout(&t.style.font, t.style.size, &t.text, maxw, t.line_space, false);
+    let n = if t.text.is_empty() { 0 } else { lo.line_widths.len() };
+    (n, t.line_space)
+}
+
 /// `SetAutoResize(true)` widgets: labels and buttons take the text width (+ horizontal
 /// insets); textboxes keep their width and take the height of the wrapped text (+ vertical
 /// insets), as the step 3 name guide in `reference/character_create/step3_*` shows.
@@ -894,7 +908,12 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     )?;
     def(
         "GetHeightToLastLine",
-        method(lua, |lua, id, _| ret(lua, text_height(lua, id)))?,
+        // (lines only, including line spacing): tooltip.lua reads `_, includeSpace = ...`.
+        method(lua, |lua, id, _| {
+            let h = text_height(lua, id);
+            let (n, ls) = text_lines(lua, id);
+            ret(lua, (h - n.saturating_sub(1) as f32 * ls, h))
+        })?,
     )?;
 
     // --- misc no-ops that scripts call during setup -------------------------------------
