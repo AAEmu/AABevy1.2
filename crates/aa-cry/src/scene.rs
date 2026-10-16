@@ -120,14 +120,21 @@ pub struct LoadedModel {
     pub parts: Vec<(usize, Vec<Part>)>,
 }
 
+/// (path, material override, lod, keep CPU mesh)
+type ModelKey = (String, Option<String>, u32, bool);
+
 /// Caches of converted assets, keyed by normalised pak path.
 #[derive(Resource, Default)]
 pub struct CryCache {
     images: HashMap<(String, bool), Option<Handle<Image>>>,
     mtls: HashMap<String, Option<Arc<CryMaterial>>>,
     materials: HashMap<(String, usize), Option<Handle<StandardMaterial>>>,
-    models: HashMap<(String, Option<String>, u32, bool), Arc<LoadedModel>>,
+    models: HashMap<ModelKey, Arc<LoadedModel>>,
+    /// Bound to a base skeleton (keyed by the base skeleton's `Arc` address).
+    bound_models: HashMap<(ModelKey, usize), Arc<LoadedModel>>,
     default_material: Option<Handle<StandardMaterial>>,
+    /// `.dds` file name -> pak path, built on the first missing texture.
+    by_basename: Option<HashMap<String, String>>,
     /// Texture paths that failed to load (for diagnostics).
     pub missing_textures: Vec<String>,
 }
@@ -158,7 +165,26 @@ impl CryAssets<'_> {
             return h.clone();
         }
         let options = DdsOptions { srgb, bc_supported: self.bc_supported(), repeat: true };
-        let handle = match crate::texture::load_dds_from_pak(&key.0, options) {
+        let pak = aa_pak::Pak::global();
+        let mut file = key.0.clone();
+        if !pak.exists(&file) {
+            // ~1% of material texture paths point at files that moved: find them by name.
+            let index = self.cache.by_basename.get_or_insert_with(|| {
+                let mut m = HashMap::new();
+                for n in pak.names() {
+                    let n = aa_pak::normalize(n);
+                    if n.ends_with(".dds") {
+                        let base = n.rsplit('/').next().unwrap_or(&n).to_string();
+                        m.entry(base).or_insert(n);
+                    }
+                }
+                m
+            });
+            if let Some(found) = index.get(file.rsplit('/').next().unwrap_or(&file)) {
+                file = found.clone();
+            }
+        }
+        let handle = match crate::texture::load_dds_from_pak(&file, options) {
             Ok(img) => Some(self.images.add(img)),
             Err(e) => {
                 debug!("aa-cry: texture {}: {e}", key.0);
@@ -223,12 +249,46 @@ impl CryAssets<'_> {
         h
     }
 
-    /// Loads (or reuses) a model's Bevy assets without spawning anything.
+    /// Loads (or reuses) a model's Bevy assets without spawning anything. With
+    /// `options.skeleton` the inverse bind poses are the base skeleton's (see
+    /// [`SkeletonBinding`]).
     pub fn load_model(&mut self, path: &str, options: &ModelOptions) -> Result<Arc<LoadedModel>> {
         let key = (aa_pak::normalize(path), options.material.as_deref().map(aa_pak::normalize), options.lod, options.keep_cpu_mesh);
-        if let Some(m) = self.cache.models.get(&key) {
+        let loaded = match self.cache.models.get(&key) {
+            Some(m) => m.clone(),
+            None => {
+                let m = self.load_model_uncached(&key.0, options)?;
+                self.cache.models.insert(key.clone(), m.clone());
+                m
+            }
+        };
+        let (Some(binding), Some(own)) = (&options.skeleton, &loaded.skeleton) else {
+            return Ok(loaded);
+        };
+        let bound_key = (key, Arc::as_ptr(&binding.skeleton) as usize);
+        if let Some(m) = self.cache.bound_models.get(&bound_key) {
             return Ok(m.clone());
         }
+        // CryEngine skins attachments with the base skeleton's default pose: the part's own
+        // bind poses (which differ, e.g. by 0.5 at a costume's neck) are only used for bones
+        // the base does not have.
+        let map = own.map_to(&binding.skeleton);
+        let ibp: Vec<Mat4> = own
+            .bones
+            .iter()
+            .zip(&map)
+            .map(|(b, m)| m.map(|j| binding.skeleton.bones[j].inverse_bind()).unwrap_or_else(|| b.inverse_bind()))
+            .collect();
+        let bound = Arc::new(LoadedModel {
+            inverse_bindposes: Some(self.bindposes.add(SkinnedMeshInverseBindposes::from(ibp))),
+            ..(*loaded).clone()
+        });
+        self.cache.bound_models.insert(bound_key, bound.clone());
+        Ok(bound)
+    }
+
+    fn load_model_uncached(&mut self, path: &str, options: &ModelOptions) -> Result<Arc<LoadedModel>> {
+        let key = (path.to_string(), ());
         let (file_path, model) = load_lod(&key.0, options.lod)?;
         let model = Arc::new(model);
         // embedded LOD level to draw: the requested one if this file has it (and we did not
@@ -238,13 +298,12 @@ impl CryAssets<'_> {
         } else {
             0
         };
-        let skeleton = if model.is_skinned() {
-            match &model.skeleton {
-                Some(s) => Some(Arc::new(s.clone())),
-                None => Skeleton::load(&file_path).ok().map(Arc::new),
-            }
-        } else {
-            None
+        // The file's own bones (also for skeleton-only .chr); LOD files without bones use their
+        // LOD0 skeleton.
+        let skeleton = match &model.skeleton {
+            Some(s) => Some(Arc::new(s.clone())),
+            None if model.is_skinned() => Skeleton::load(&file_path).ok().map(Arc::new),
+            None => None,
         };
         let material_path = options.material.clone().or_else(|| find_mtl(&file_path, &model));
         let usage = if options.keep_cpu_mesh {
@@ -278,9 +337,7 @@ impl CryAssets<'_> {
                 s.bones.iter().map(|b| b.inverse_bind()).collect::<Vec<_>>(),
             ))
         });
-        let loaded = Arc::new(LoadedModel { model, skeleton, inverse_bindposes, material_path, parts });
-        self.cache.models.insert(key, loaded.clone());
-        Ok(loaded)
+        Ok(Arc::new(LoadedModel { model, skeleton, inverse_bindposes, material_path, parts }))
     }
 
     /// Spawns a model with default options; returns the root entity.
@@ -289,13 +346,32 @@ impl CryAssets<'_> {
     }
 
     pub fn spawn_model_with(&mut self, commands: &mut Commands, path: &str, options: &ModelOptions) -> Result<Entity> {
+        Ok(self.spawn_model_full(commands, path, options)?.root)
+    }
+
+    /// Like [`CryAssets::spawn_model_with`], also returning the joint entities.
+    pub fn spawn_model_full(&mut self, commands: &mut Commands, path: &str, options: &ModelOptions) -> Result<SpawnedModel> {
         let loaded = self.load_model(path, options)?;
-        Ok(spawn_loaded(commands, path, &loaded, options))
+        Ok(spawn_loaded_full(commands, path, &loaded, options))
     }
 }
 
-/// Spawns an already loaded model (cheap; usable for many instances).
+/// Entities of a spawned model.
+#[derive(Clone, Debug)]
+pub struct SpawnedModel {
+    pub root: Entity,
+    /// One per bone of [`LoadedModel::skeleton`] (bound joints when a [`SkeletonBinding`] was
+    /// given); empty for static models.
+    pub joints: Vec<Entity>,
+}
+
+/// Spawns an already loaded model (cheap; usable for many instances); returns the root.
 pub fn spawn_loaded(commands: &mut Commands, path: &str, loaded: &LoadedModel, options: &ModelOptions) -> Entity {
+    spawn_loaded_full(commands, path, loaded, options).root
+}
+
+/// [`spawn_loaded`], also returning the joint entities.
+pub fn spawn_loaded_full(commands: &mut Commands, path: &str, loaded: &LoadedModel, options: &ModelOptions) -> SpawnedModel {
     let model = &loaded.model;
     let root_tf = if options.cry_space { Transform::IDENTITY } else { Transform::from_rotation(CRY_TO_BEVY) };
     let root = commands
@@ -310,27 +386,30 @@ pub fn spawn_loaded(commands: &mut Commands, path: &str, loaded: &LoadedModel, o
     // joints
     let mut joints: Vec<Entity> = Vec::new();
     if let Some(skel) = &loaded.skeleton {
-        if let Some(binding) = &options.skeleton {
-            let map = skel.map_to(&binding.skeleton);
-            joints = map
-                .iter()
-                .map(|m| m.and_then(|i| binding.joints.get(i).copied()).unwrap_or(binding.joints.first().copied().unwrap_or(root)))
-                .collect();
-        } else {
-            for (i, bone) in skel.bones.iter().enumerate() {
-                let parent = bone.parent.map(|p| joints[p]).unwrap_or(root);
-                let (s, r, t) = bone.bind_local.to_scale_rotation_translation();
-                let e = commands
-                    .spawn((
-                        Name::new(bone.name.clone()),
-                        CryJoint { index: i },
-                        Transform { translation: t, rotation: r, scale: s },
-                        Visibility::default(),
-                        ChildOf(parent),
-                    ))
-                    .id();
-                joints.push(e);
+        // Bound skins reuse the base skeleton's joints; bones the base does not have (extra
+        // hair / cloth bones) get their own joint under their parent.
+        let map = options.skeleton.as_ref().map(|b| skel.map_to(&b.skeleton));
+        for (i, bone) in skel.bones.iter().enumerate() {
+            if let (Some(binding), Some(map)) = (&options.skeleton, &map) {
+                if let Some(e) = map[i].and_then(|j| binding.joints.get(j).copied()) {
+                    joints.push(e);
+                    continue;
+                }
             }
+            let parent = bone.parent.map(|p| joints[p]).unwrap_or(root);
+            let (s, r, t) = bone.bind_local.to_scale_rotation_translation();
+            let e = commands
+                .spawn((
+                    Name::new(bone.name.clone()),
+                    CryJoint { index: i },
+                    Transform { translation: t, rotation: r, scale: s },
+                    Visibility::default(),
+                    ChildOf(parent),
+                ))
+                .id();
+            joints.push(e);
+        }
+        if options.skeleton.is_none() {
             commands.entity(root).insert(CrySkeleton { skeleton: skel.clone(), joints: joints.clone() });
         }
     }
@@ -389,7 +468,7 @@ pub fn spawn_loaded(commands: &mut Commands, path: &str, loaded: &LoadedModel, o
             }
         }
     }
-    root
+    SpawnedModel { root, joints }
 }
 
 /// Picks the file for a LOD: `*_lodN` if it exists (falling back to lower N), else the file.
@@ -534,6 +613,18 @@ pub fn to_standard_material(
         "hair" => {
             two_sided(&mut out);
             out.alpha_mode = AlphaMode::Mask(if m.alpha_test > 0.0 { m.alpha_test } else { 0.5 });
+            // Hair textures are greyscale; the colour is the (customisable) HairColor param.
+            if let Some(c) = m.public_param("HairColor").and_then(parse_rgb) {
+                out.base_color = Color::linear_rgb(c.x, c.y, c.z);
+            }
+        }
+        "humanskin" => {
+            // The skin tone comes from the texture and the character's customisation; the
+            // per-file Diffuse tints differ between face and body, so use one neutral value.
+            out.base_color = Color::linear_rgb(SKIN_ALBEDO, SKIN_ALBEDO, SKIN_ALBEDO);
+            // skin F0 ~0.028; the files' strong specular is for CryEngine's skin shader
+            out.reflectance = 0.42;
+            out.perceptual_roughness = out.perceptual_roughness.max(0.55);
         }
         "glass" | "liquid" | "ice" => {
             out.alpha_mode = AlphaMode::Blend;
@@ -568,6 +659,15 @@ pub fn to_standard_material(
         }
     }
     Some(out)
+}
+
+/// Diffuse multiplier used for every `HumanSkin` material.
+pub const SKIN_ALBEDO: f32 = 0.22;
+
+/// `"r,g,b"` -> Vec3.
+fn parse_rgb(s: &str) -> Option<Vec3> {
+    let mut it = s.split(',').map(|v| v.trim().parse::<f32>());
+    Some(Vec3::new(it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?))
 }
 
 /// Blinn-Phong exponent -> perceptual roughness (`alpha = sqrt(2 / (n + 2))`, `r = sqrt(alpha)`).
