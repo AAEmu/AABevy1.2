@@ -13,9 +13,18 @@
 //!
 //! Spawned hierarchy: `root (CryModel, Transform = CRY_TO_BEVY unless cry_space)` ->
 //! one child per file node (`CryNode`, node transform) -> one child per drawn subset
-//! (`Mesh3d` + `MeshMaterial3d<StandardMaterial>`). Skinned models (`.chr`) instead get joint
+//! (`Mesh3d` + `MeshMaterial3d`). Skinned models (`.chr`) instead get joint
 //! entities (`CryJoint`, local bind pose) under the root and their meshes carry a
 //! `SkinnedMesh`; the root gets a [`CrySkeleton`] listing the joint entities.
+//!
+//! The heavy work (parsing, texture decoding, mesh building) lives in [`crate::loader`] and can
+//! run on worker threads: [`CryAssets::loader`] + [`CryLoader::prepare_model`] +
+//! [`CryAssets::finish_model`]. [`CryAssets::load_model`] does both on the calling thread.
+//!
+//! **Orientation.** CryEngine space is Z up with characters facing **+Y** (their left is -X).
+//! [`CRY_TO_BEVY`] maps `(x, y, z)` to `(x, z, -y)`, so after it a character faces Bevy **-Z**
+//! (props authored facing -Y are the exception). To show a character to a camera on +Z, turn the
+//! root by PI about Y.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,17 +34,17 @@ use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::system::SystemParam;
 use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats};
-use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::Face;
 
-use crate::material::{Material as CryMaterial, TextureMap};
+use crate::loader::{CryLoader, Pending, Prep, PreparedModel, Shared, lock};
+use crate::material::Material as CryMaterial;
 use crate::mesh::{MeshData, Model, NodeKind, Subset};
 use crate::skeleton::Skeleton;
-use crate::texture::DdsOptions;
 use crate::{CRY_TO_BEVY, Result};
+
+pub use crate::shade::{SKIN_ALBEDO, shininess_to_roughness, to_standard_material};
 
 /// Registers the asset cache used by [`CryAssets`].
 pub struct CryPlugin;
@@ -82,6 +91,41 @@ pub struct SkeletonBinding {
     pub joints: Vec<Entity>,
 }
 
+/// Edits each sub-material's `StandardMaterial` right after the conversion from the `.mtl`
+/// (given the CryEngine sub-material it came from), e.g. to tint skin or swap a texture.
+/// Runs on the thread that prepares the model, so it must be `Send + Sync`.
+#[derive(Clone)]
+pub struct MaterialHook(pub Arc<dyn Fn(&CryMaterial, &mut StandardMaterial) + Send + Sync>);
+
+impl MaterialHook {
+    pub fn new(f: impl Fn(&CryMaterial, &mut StandardMaterial) + Send + Sync + 'static) -> Self {
+        MaterialHook(Arc::new(f))
+    }
+}
+
+impl std::fmt::Debug for MaterialHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MaterialHook")
+    }
+}
+
+/// Edits the vertex data of every mesh of a model before the Bevy meshes are built (positions,
+/// normals, UVs... in CryEngine model space), e.g. for morph targets.
+#[derive(Clone)]
+pub struct VertexHook(pub Arc<dyn Fn(&mut MeshData) + Send + Sync>);
+
+impl VertexHook {
+    pub fn new(f: impl Fn(&mut MeshData) + Send + Sync + 'static) -> Self {
+        VertexHook(Arc::new(f))
+    }
+}
+
+impl std::fmt::Debug for VertexHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VertexHook")
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModelOptions {
     /// `.mtl` to use instead of the model's own (CDF `Material=`).
@@ -96,6 +140,12 @@ pub struct ModelOptions {
     pub cry_space: bool,
     /// Keep mesh data in the main world too (CPU access, e.g. for picking/raycasts).
     pub keep_cpu_mesh: bool,
+    /// Restyle every sub-material after the conversion. With a hook the model is not shared:
+    /// each load builds its own materials and meshes.
+    pub material_hook: Option<MaterialHook>,
+    /// Edit the vertices (morphs) before the meshes are built; same sharing rule as
+    /// `material_hook`.
+    pub vertex_hook: Option<VertexHook>,
 }
 
 /// One drawn piece of a node: a subset with its material.
@@ -120,21 +170,11 @@ pub struct LoadedModel {
     pub parts: Vec<(usize, Vec<Part>)>,
 }
 
-/// (path, material override, lod, keep CPU mesh)
-type ModelKey = (String, Option<String>, u32, bool);
-
-/// Caches of converted assets, keyed by normalised pak path.
+/// Caches of converted assets, keyed by normalised pak path (the shared state lives in the
+/// [`CryLoader`]).
 #[derive(Resource, Default)]
 pub struct CryCache {
-    images: HashMap<(String, bool), Option<Handle<Image>>>,
-    mtls: HashMap<String, Option<Arc<CryMaterial>>>,
-    materials: HashMap<(String, usize), Option<Handle<StandardMaterial>>>,
-    models: HashMap<ModelKey, Arc<LoadedModel>>,
-    /// Bound to a base skeleton (keyed by the base skeleton's `Arc` address).
-    bound_models: HashMap<(ModelKey, usize), Arc<LoadedModel>>,
-    default_material: Option<Handle<StandardMaterial>>,
-    /// `.dds` file name -> pak path, built on the first missing texture.
-    by_basename: Option<HashMap<String, String>>,
+    loader: Option<CryLoader>,
     /// Texture paths that failed to load (for diagnostics).
     pub missing_textures: Vec<String>,
 }
@@ -155,196 +195,105 @@ impl CryAssets<'_> {
         self.formats.as_ref().is_none_or(|f| f.0.contains(CompressedImageFormats::BC))
     }
 
-    /// A pak texture as an image handle (cached). `srgb` for colour maps.
-    pub fn texture(&mut self, path: &str, srgb: bool) -> Option<Handle<Image>> {
-        let key = (crate::material::texture_pak_path(path), srgb);
-        if key.0.is_empty() {
-            return None;
+    /// The thread-safe loader (cheap to clone, `Send + Sync`): use it on worker threads to
+    /// [`CryLoader::prepare_model`], then call [`CryAssets::finish_model`] here.
+    pub fn loader(&mut self) -> CryLoader {
+        if let Some(l) = &self.cache.loader {
+            return l.clone();
         }
-        if let Some(h) = self.cache.images.get(&key) {
-            return h.clone();
-        }
-        let options = DdsOptions { srgb, bc_supported: self.bc_supported(), repeat: true };
-        let pak = aa_pak::Pak::global();
-        let mut file = key.0.clone();
-        if !pak.exists(&file) {
-            // ~1% of material texture paths point at files that moved: find them by name.
-            let index = self.cache.by_basename.get_or_insert_with(|| {
-                let mut m = HashMap::new();
-                for n in pak.names() {
-                    let n = aa_pak::normalize(n);
-                    if n.ends_with(".dds") {
-                        let base = n.rsplit('/').next().unwrap_or(&n).to_string();
-                        m.entry(base).or_insert(n);
+        let l = CryLoader::new(
+            self.images.get_handle_provider(),
+            self.meshes.get_handle_provider(),
+            self.materials.get_handle_provider(),
+            self.bindposes.get_handle_provider(),
+            self.bc_supported(),
+        );
+        self.cache.loader = Some(l.clone());
+        l
+    }
+
+    /// Moves prepared asset values into the `Assets` collections.
+    fn insert_pending(&mut self, pending: Vec<Pending>) {
+        for p in pending {
+            match p {
+                Pending::Shared(Shared::Image(h, s)) => {
+                    if let Some(v) = lock(&s).take() {
+                        let _ = self.images.insert(h.id(), v);
                     }
                 }
-                m
-            });
-            if let Some(found) = index.get(file.rsplit('/').next().unwrap_or(&file)) {
-                file = found.clone();
+                Pending::Shared(Shared::Material(h, s)) => {
+                    if let Some(v) = lock(&s).take() {
+                        let _ = self.materials.insert(h.id(), v);
+                    }
+                }
+                Pending::Mesh(h, v) => {
+                    let _ = self.meshes.insert(h.id(), v);
+                }
+                Pending::Bindposes(h, v) => {
+                    let _ = self.bindposes.insert(h.id(), v);
+                }
             }
         }
-        let handle = match crate::texture::load_dds_from_pak(&file, options) {
-            Ok(img) => Some(self.images.add(img)),
-            Err(e) => {
-                debug!("aa-cry: texture {}: {e}", key.0);
-                self.cache.missing_textures.push(key.0.clone());
-                None
-            }
-        };
-        self.cache.images.insert(key, handle.clone());
-        handle
+    }
+
+    fn sync_missing(&mut self, loader: &CryLoader) {
+        let missing = loader.take_missing();
+        self.cache.missing_textures.extend(missing);
+    }
+
+    /// Runs a preparation step on this thread and inserts what it produced.
+    fn with_prep<R>(&mut self, f: impl FnOnce(&mut Prep<'_>) -> R) -> R {
+        let loader = self.loader();
+        let mut prep = Prep::new(&loader);
+        let r = f(&mut prep);
+        let pending = prep.into_pending();
+        self.insert_pending(pending);
+        self.sync_missing(&loader);
+        r
+    }
+
+    /// A pak texture as an image handle (cached). `srgb` for colour maps. Textures whose path
+    /// moved are found by file name (about 1% of material references), ` copy` is stripped from
+    /// names like `x_df copy.dds`. Cube / volume maps are not 2D textures: `None` (see
+    /// [`CryAssets::cube_texture`]).
+    pub fn texture(&mut self, path: &str, srgb: bool) -> Option<Handle<Image>> {
+        self.with_prep(|p| p.texture(path, srgb))
+    }
+
+    /// A cube map of the pak (e.g. `textures/cubemaps/beach_blur2.dds`), for environment lighting.
+    pub fn cube_texture(&mut self, path: &str) -> Option<Handle<Image>> {
+        self.with_prep(|p| p.cube_texture(path))
     }
 
     /// A parsed `.mtl` (cached); `None` if missing or unreadable.
     pub fn mtl(&mut self, path: &str) -> Option<Arc<CryMaterial>> {
-        let key = aa_pak::normalize(path);
-        if let Some(m) = self.cache.mtls.get(&key) {
-            return m.clone();
-        }
-        let m = if aa_pak::Pak::global().exists(&key) {
-            match CryMaterial::load(&key) {
-                Ok(m) => Some(Arc::new(m)),
-                Err(e) => {
-                    warn!("aa-cry: material {key}: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        self.cache.mtls.insert(key, m.clone());
-        m
+        self.loader().mtl(path)
     }
 
     /// The Bevy material for sub-material `sub` of a `.mtl` (cached). `None` when the
     /// sub-material is not drawn (NoDraw, Cut, proxies).
     pub fn material(&mut self, mtl_path: Option<&str>, sub: usize) -> Option<Handle<StandardMaterial>> {
-        let key = (mtl_path.map(aa_pak::normalize).unwrap_or_default(), sub);
-        if let Some(h) = self.cache.materials.get(&key) {
-            return h.clone();
-        }
-        let mtl = mtl_path.and_then(|p| self.mtl(p));
-        let handle = match mtl.as_deref().and_then(|m| m.sub(sub).or(Some(m))) {
-            Some(m) => {
-                let m = m.clone();
-                to_standard_material(&m, |path, srgb| self.texture(path, srgb)).map(|sm| self.materials.add(sm))
-            }
-            None => Some(self.default_material()),
-        };
-        self.cache.materials.insert(key, handle.clone());
-        handle
-    }
-
-    fn default_material(&mut self) -> Handle<StandardMaterial> {
-        if let Some(h) = &self.cache.default_material {
-            return h.clone();
-        }
-        let h = self.materials.add(StandardMaterial {
-            base_color: Color::srgb(0.6, 0.6, 0.6),
-            perceptual_roughness: 0.8,
-            ..default()
-        });
-        self.cache.default_material = Some(h.clone());
-        h
+        self.with_prep(|p| p.material(mtl_path, sub))
     }
 
     /// Loads (or reuses) a model's Bevy assets without spawning anything. With
     /// `options.skeleton` the inverse bind poses are the base skeleton's (see
-    /// [`SkeletonBinding`]).
+    /// [`SkeletonBinding`]). Equivalent to `loader().prepare_model(..)` + `finish_model(..)`.
     pub fn load_model(&mut self, path: &str, options: &ModelOptions) -> Result<Arc<LoadedModel>> {
-        let key = (aa_pak::normalize(path), options.material.as_deref().map(aa_pak::normalize), options.lod, options.keep_cpu_mesh);
-        let loaded = match self.cache.models.get(&key) {
-            Some(m) => m.clone(),
-            None => {
-                let m = self.load_model_uncached(&key.0, options)?;
-                self.cache.models.insert(key.clone(), m.clone());
-                m
-            }
-        };
-        let (Some(binding), Some(own)) = (&options.skeleton, &loaded.skeleton) else {
-            return Ok(loaded);
-        };
-        let bound_key = (key, Arc::as_ptr(&binding.skeleton) as usize);
-        if let Some(m) = self.cache.bound_models.get(&bound_key) {
-            return Ok(m.clone());
-        }
-        // CryEngine skins attachments with the base skeleton's default pose: the part's own
-        // bind poses (which differ, e.g. by 0.5 at a costume's neck) are only used for bones
-        // the base does not have.
-        let map = own.map_to(&binding.skeleton);
-        let ibp: Vec<Mat4> = own
-            .bones
-            .iter()
-            .zip(&map)
-            .map(|(b, m)| m.map(|j| binding.skeleton.bones[j].inverse_bind()).unwrap_or_else(|| b.inverse_bind()))
-            .collect();
-        let bound = Arc::new(LoadedModel {
-            inverse_bindposes: Some(self.bindposes.add(SkinnedMeshInverseBindposes::from(ibp))),
-            ..(*loaded).clone()
-        });
-        self.cache.bound_models.insert(bound_key, bound.clone());
-        Ok(bound)
+        let prepared = self.loader().prepare_model(path, options)?;
+        Ok(self.finish_model(prepared))
     }
 
-    fn load_model_uncached(&mut self, path: &str, options: &ModelOptions) -> Result<Arc<LoadedModel>> {
-        let key = (path.to_string(), ());
-        let (file_path, model) = load_lod(&key.0, options.lod)?;
-        let model = Arc::new(model);
-        // embedded LOD level to draw: the requested one if this file has it (and we did not
-        // switch to a separate _lodN file), else 0
-        let embedded = if file_path == key.0 && options.lod > 0 {
-            (options.lod.min(model.max_embedded_lod() as u32)) as u8
-        } else {
-            0
-        };
-        // The file's own bones (also for skeleton-only .chr); LOD files without bones use their
-        // LOD0 skeleton.
-        let skeleton = match &model.skeleton {
-            Some(s) => Some(Arc::new(s.clone())),
-            None if model.is_skinned() => Skeleton::load(&file_path).ok().map(Arc::new),
-            None => None,
-        };
-        let material_path = options.material.clone().or_else(|| find_mtl(&file_path, &model));
-        let usage = if options.keep_cpu_mesh {
-            RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD
-        } else {
-            RenderAssetUsages::RENDER_WORLD
-        };
-        let mut nodes = model.lod_nodes(embedded);
-        if nodes.is_empty() && embedded > 0 {
-            nodes = model.lod_nodes(0);
-        }
-        let mut parts = Vec::new();
-        for ni in nodes {
-            let Some(mi) = model.nodes[ni].mesh else { continue };
-            let mesh = &model.meshes[mi];
-            // Skeleton files (all 17 `*_base.chr`) carry a placeholder: one 10 cm triangle at
-            // the origin without a material. Not drawn.
-            if model.skeleton.is_some() && mesh.indices.len() <= 3 {
-                continue;
-            }
-            let skinned = mesh.skin.is_some() && skeleton.is_some();
-            // mirrored nodes (rare: ~1 in 3,000 files); meshes are not shared between nodes
-            let flip = !skinned && render_transform(&model, ni).matrix3.determinant() < 0.0;
-            let mut node_parts = Vec::new();
-            for subset in &mesh.subsets {
-                let Some(material) = self.material(material_path.as_deref(), subset.material_id as usize) else {
-                    continue;
-                };
-                let Some((bevy_mesh, aabb)) = subset_mesh_with(mesh, subset, skinned, usage, flip) else { continue };
-                node_parts.push(Part { mesh: self.meshes.add(bevy_mesh), material, aabb, skinned });
-            }
-            if !node_parts.is_empty() {
-                parts.push((ni, node_parts));
-            }
-        }
-        let inverse_bindposes = skeleton.as_ref().map(|s| {
-            self.bindposes.add(SkinnedMeshInverseBindposes::from(
-                s.bones.iter().map(|b| b.inverse_bind()).collect::<Vec<_>>(),
-            ))
-        });
-        Ok(Arc::new(LoadedModel { model, skeleton, inverse_bindposes, material_path, parts }))
+    /// Inserts the assets of a model prepared with [`CryLoader::prepare_model`] (main thread,
+    /// cheap: moves values) and returns the model. The model's handles were valid since the
+    /// preparation; the assets behind them exist from now on.
+    pub fn finish_model(&mut self, prepared: PreparedModel) -> Arc<LoadedModel> {
+        let loader = self.loader();
+        loader.register(&prepared);
+        let loaded = prepared.loaded.clone();
+        self.insert_pending(prepared.pending);
+        self.sync_missing(&loader);
+        loaded
     }
 
     /// Spawns a model with default options; returns the root entity.
@@ -499,20 +448,6 @@ pub fn render_transform(model: &Model, node: usize) -> glam::Affine3A {
     m
 }
 
-/// Picks the file for a LOD: `*_lodN` if it exists (falling back to lower N), else the file.
-fn load_lod(path: &str, lod: u32) -> Result<(String, Model)> {
-    let pak = aa_pak::Pak::global();
-    for l in (1..=lod).rev() {
-        let p = crate::lod_path(path, l);
-        if p != path && pak.exists(&p) {
-            if let Ok(m) = Model::load(&p) {
-                return Ok((p, m));
-            }
-        }
-    }
-    Ok((path.to_string(), Model::load(path)?))
-}
-
 /// Material lookup as the engine does it: `.chr` -> `<name>.mtl` first; `.cgf` -> the
 /// material name stored in the file, relative to the file's folder, then `<name>.mtl`.
 pub fn find_mtl(path: &str, model: &Model) -> Option<String> {
@@ -609,110 +544,3 @@ pub fn subset_mesh_with(m: &MeshData, s: &Subset, skinned: bool, usage: RenderAs
     Some((mesh, Aabb::from_min_max(lo, hi)))
 }
 
-/// CryEngine material -> `StandardMaterial`; `None` for materials that are not drawn.
-/// `texture(path, srgb)` resolves texture files. The mapping is documented in `docs/aa-cry.md`.
-pub fn to_standard_material(
-    m: &CryMaterial,
-    mut texture: impl FnMut(&str, bool) -> Option<Handle<Image>>,
-) -> Option<StandardMaterial> {
-    let shader = m.shader.to_ascii_lowercase();
-    if m.no_draw() || shader == "cut" {
-        return None;
-    }
-    let diffuse_tex = m.texture(&TextureMap::Diffuse).map(|t| (t.file.clone(), t.tex_mod.clone()));
-    let normal_tex = m
-        .texture(&TextureMap::Normal)
-        .or_else(|| m.texture(&TextureMap::Bump).filter(|t| t.file.to_ascii_lowercase().contains("_ddn")))
-        .map(|t| t.file.clone());
-    let mut out = StandardMaterial {
-        base_color: Color::linear_rgb(m.diffuse.x, m.diffuse.y, m.diffuse.z),
-        base_color_texture: diffuse_tex.as_ref().and_then(|(f, _)| texture(f, true)),
-        normal_map_texture: normal_tex.as_deref().and_then(|f| texture(f, false)),
-        perceptual_roughness: shininess_to_roughness(m.shininess),
-        metallic: 0.0,
-        reflectance: ((m.specular.x * 0.2126 + m.specular.y * 0.7152 + m.specular.z * 0.0722) * m.specular_level * 0.5).clamp(0.0, 1.0),
-        emissive: LinearRgba::rgb(m.emissive.x, m.emissive.y, m.emissive.z),
-        double_sided: m.two_sided(),
-        cull_mode: if m.two_sided() { None } else { Some(Face::Back) },
-        ..default()
-    };
-    if let Some((_, Some(tm))) = &diffuse_tex {
-        out.uv_transform = Affine2::from_scale_angle_translation(
-            Vec2::new(tm.tile_u, tm.tile_v),
-            tm.rotate_w.to_radians(),
-            Vec2::new(tm.offset_u, tm.offset_v),
-        );
-    }
-    let two_sided = |o: &mut StandardMaterial| {
-        o.double_sided = true;
-        o.cull_mode = None;
-    };
-    match shader.as_str() {
-        "vegetation" | "vegetationleaves" | "grass" => {
-            two_sided(&mut out);
-            out.alpha_mode = AlphaMode::Mask(if m.alpha_test > 0.0 { m.alpha_test } else { 0.5 });
-        }
-        "hair" => {
-            two_sided(&mut out);
-            out.alpha_mode = AlphaMode::Mask(if m.alpha_test > 0.0 { m.alpha_test } else { 0.5 });
-            // Hair textures are greyscale; the colour is the (customisable) HairColor param.
-            if let Some(c) = m.public_param("HairColor").and_then(parse_rgb) {
-                out.base_color = Color::linear_rgb(c.x, c.y, c.z);
-            }
-        }
-        "humanskin" => {
-            // The skin tone comes from the texture and the character's customisation; the
-            // per-file Diffuse tints differ between face and body, so use one neutral value.
-            out.base_color = Color::linear_rgb(SKIN_ALBEDO, SKIN_ALBEDO, SKIN_ALBEDO);
-            // skin F0 ~0.028; the files' strong specular is for CryEngine's skin shader
-            out.reflectance = 0.42;
-            out.perceptual_roughness = out.perceptual_roughness.max(0.55);
-        }
-        "glass" | "liquid" | "ice" => {
-            out.alpha_mode = AlphaMode::Blend;
-            out.base_color.set_alpha(m.opacity.min(0.6));
-            out.perceptual_roughness = 0.1;
-        }
-        "metal" => {
-            out.metallic = 0.6;
-        }
-        s if s.starts_with("water") || s.starts_with("ocean") => {
-            out.alpha_mode = AlphaMode::Blend;
-            out.base_color = Color::linear_rgba(0.05, 0.12, 0.15, 0.7);
-            out.perceptual_roughness = 0.05;
-        }
-        s if s.contains("particle") || s.starts_with("fx_") || s.starts_with("light") || s.contains("beam")
-            || s.starts_with("sky") || s.contains("cloud") || s == "specialeffects" || s == "hologram" =>
-        {
-            out.unlit = true;
-            out.alpha_mode = AlphaMode::Add;
-            two_sided(&mut out);
-        }
-        _ => {}
-    }
-    if matches!(out.alpha_mode, AlphaMode::Opaque) {
-        if m.flags & crate::material::flags::ADDITIVE != 0 {
-            out.alpha_mode = AlphaMode::Add;
-        } else if m.opacity < 0.999 {
-            out.alpha_mode = AlphaMode::Blend;
-            out.base_color.set_alpha(m.opacity);
-        } else if m.alpha_test > 0.0 {
-            out.alpha_mode = AlphaMode::Mask(m.alpha_test);
-        }
-    }
-    Some(out)
-}
-
-/// Diffuse multiplier used for every `HumanSkin` material.
-pub const SKIN_ALBEDO: f32 = 0.22;
-
-/// `"r,g,b"` -> Vec3.
-fn parse_rgb(s: &str) -> Option<Vec3> {
-    let mut it = s.split(',').map(|v| v.trim().parse::<f32>());
-    Some(Vec3::new(it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?))
-}
-
-/// Blinn-Phong exponent -> perceptual roughness (`alpha = sqrt(2 / (n + 2))`, `r = sqrt(alpha)`).
-pub fn shininess_to_roughness(n: f32) -> f32 {
-    (2.0 / (n.max(0.0) + 2.0)).powf(0.25).clamp(0.05, 1.0)
-}
