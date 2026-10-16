@@ -20,13 +20,13 @@
 //! * `--shift x,y,z`       added to that position; the in-game captures are client-local, the client
 //!                         renders main_world 11 cells (11264 m) closer to the origin: `--shift 11264,11264,0`
 //! * `--radius <m>`        cell load radius
-//! * `--hour <h>`          time of day (0..24, default 13), `--speed <h/s>` lets it run
-//! * `--zone <id>`         force a zone's time of day
+//! * `--hour <h>`          time of day (0..24, default 10), `--speed <h/s>` lets it run
+//! * `--zone <id>`         force a zone's time of day, `--layer <0|1>` the `relic_layer` block of its files
 //! * `--sun-scale <lux>`, `--ambient-scale <x>`   lighting calibration (see `WorldConfig`)
 //! * `--terrain-tint r,g,b`, `--fog-visibility <m>`, `--tree-distance <m>`
 //! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
 //!                         time statistics (average, 1 % low, worst frame, frames over 20 ms), then exit
-//! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-terrain-detail` (cover colour only)
+//! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-post` (no HDR / fog / film curve camera setup), `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
 
@@ -228,6 +228,7 @@ fn main() {
     plugin.config.vegetation = !flag("--no-objects");
     plugin.config.shadows = !flag("--no-shadows");
     plugin.config.environment = !flag("--no-env");
+    plugin.config.post = !flag("--no-post");
     plugin.config.terrain_detail = !flag("--no-terrain-detail");
     let size = aa_dev::DevArgs::from_env().size;
     let window = WindowPlugin {
@@ -248,6 +249,9 @@ fn main() {
         clock.speed = s;
     }
     clock.zone = arg("--zone").and_then(|v| v.parse().ok());
+    if let Some(l) = arg("--layer").and_then(|v| v.parse().ok()) {
+        clock.layer = l;
+    }
     let mut app = App::new();
     app.add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window))
         .insert_resource(clock)

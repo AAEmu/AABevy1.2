@@ -9,14 +9,17 @@ pub mod env;
 pub mod heightmap;
 pub mod objects;
 pub mod placement;
+pub mod post;
 pub mod reader;
 pub mod sky;
+pub mod sky_material;
 pub mod stream;
 pub mod terrain;
 pub mod terrain_layers;
 pub mod terrain_query;
 pub mod vegetation;
 pub mod water;
+pub mod water_material;
 pub mod world;
 
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};

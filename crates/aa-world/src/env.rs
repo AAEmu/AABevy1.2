@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use bevy::math::Vec3;
+use bevy::math::{Vec3, Vec4};
 
 /// A time of day spline (scalar or colour).
 #[derive(Clone, Debug, Default)]
@@ -62,7 +62,7 @@ pub struct TimeOfDay {
 }
 
 fn parse_floats(s: &str) -> Vec<f32> {
-    s.split(|c: char| c == ',' || c == ':' || c == '(' || c == ')')
+    s.split([',', ':', '(', ')'])
         .filter(|p| !p.trim().is_empty())
         .filter_map(|p| p.trim().parse().ok())
         .collect()
@@ -84,12 +84,20 @@ fn parse_spline(keys: &str, color: bool) -> Vec<(f32, [f32; 3])> {
 }
 
 impl TimeOfDay {
+    /// Layer 0 (the default `relic_layer` / `weather_layer`).
     pub fn parse(xml: &str) -> Option<TimeOfDay> {
+        Self::parse_layer(xml, 0)
+    }
+
+    /// A zone file carries several `<TimeOfDay>` blocks (`relic_layer` 0 and 1); `layer` picks one, falling back to
+    /// the first block.
+    pub fn parse_layer(xml: &str, layer: u32) -> Option<TimeOfDay> {
         let doc = roxmltree::Document::parse(xml).ok()?;
+        let want = layer.to_string();
         let block = doc
             .descendants()
             .filter(|n| n.has_tag_name("TimeOfDay"))
-            .find(|n| n.attribute("relic_layer").unwrap_or("0") == "0" && n.attribute("weather_layer").unwrap_or("0") == "0")
+            .find(|n| n.attribute("relic_layer").unwrap_or("0") == want && n.attribute("weather_layer").unwrap_or("0") == "0")
             .or_else(|| doc.descendants().find(|n| n.has_tag_name("TimeOfDay")))?;
         let default_hour = block.attribute("Time").and_then(|v| v.parse().ok()).unwrap_or(12.0);
         let mut variables = HashMap::new();
@@ -165,9 +173,78 @@ pub struct EnvSample {
     pub night_zenith: Vec3,
     /// 0 at night .. 1 at day: how much the sun contributes.
     pub day: f32,
+    /// `Fog color (top) * multiplier`, linear: the colour of the thin fog high up.
+    pub fog_top: Vec3,
+    /// `(bottom height, top height, bottom density, top density)` of the fog layer.
+    pub fog_layer: Vec4,
+    /// `(ramp start, ramp end, ramp influence)` of the volumetric fog (metres).
+    pub fog_ramp: Vec3,
+    /// Sky gradient, linear: `Night sky: Horizon color * multiplier` (it is the sky's horizon colour all day long).
+    pub horizon: Vec3,
+    /// `Night sky: Zenith color * multiplier`, linear.
+    pub zenith: Vec3,
+    pub zenith_shift: f32,
+    /// Shading colours of clouds: `Sun color * Cloud shading: Sun light multiplier` / `Sky color * ... Sky ...`, linear.
+    pub cloud_sun: Vec3,
+    pub cloud_sky: Vec3,
+    /// How much of the sky box textures shows through.
+    pub skybox_mul: f32,
+    /// Film curve `(shoulder scale, midtones scale, toe scale, whitepoint)`.
+    pub film: Vec4,
+    pub saturation: f32,
+    pub contrast: f32,
+    pub color_balance: Vec3,
+    /// `Levels: min input` (0..1 of the sRGB range).
+    pub levels_min: f32,
+    /// `Filters: photofilter` colour (sRGB) and density.
+    pub photofilter: Vec4,
+    /// HDR eye adaptation strength (`HDR dynamic power factor`).
+    pub hdr_dynamic: f32,
+    /// `Sun shafts visibility`.
+    pub sun_shafts: f32,
+    pub sun_specular: f32,
 }
 
-fn srgb_to_linear(c: Vec3) -> Vec3 {
+/// Linear interpolation of the sample's field types.
+trait Mix: Copy {
+    fn mix(self, other: Self, t: f32) -> Self;
+}
+
+impl Mix for f32 {
+    fn mix(self, o: f32, t: f32) -> f32 {
+        self + (o - self) * t
+    }
+}
+
+impl Mix for Vec3 {
+    fn mix(self, o: Vec3, t: f32) -> Vec3 {
+        self + (o - self) * t
+    }
+}
+
+impl Mix for Vec4 {
+    fn mix(self, o: Vec4, t: f32) -> Vec4 {
+        self + (o - self) * t
+    }
+}
+
+impl EnvSample {
+    /// Component-wise interpolation between two samples (zone changes, time steps).
+    pub fn lerp(&self, other: &EnvSample, t: f32) -> EnvSample {
+        macro_rules! mix {
+            ($($f:ident),*) => {
+                EnvSample { sun_dir: self.sun_dir.mix(other.sun_dir, t).normalize_or(other.sun_dir), $($f: self.$f.mix(other.$f, t)),* }
+            };
+        }
+        mix!(
+            sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, day, fog_top,
+            fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
+            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular
+        )
+    }
+}
+
+pub(crate) fn srgb_to_linear(c: Vec3) -> Vec3 {
     let f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
     Vec3::new(f(c.x), f(c.y), f(c.z))
 }
@@ -186,12 +263,17 @@ impl TimeOfDay {
         let (_, ambient_ground) = col("Ambient ground color", "Ambient ground color multiplier");
         let (fog_srgb, fog) = col("Fog color", "Fog color multiplier");
         let (_, ocean_fog) = col("Ocean fog color", "Ocean fog color multiplier");
-        let (nh, _) = col("Night sky: Horizon color", "");
-        let (nz, _) = col("Night sky: Zenith color", "");
+        let (nh, horizon) = col("Night sky: Horizon color", "Night sky: Horizon color multiplier");
+        let (nz, zenith) = col("Night sky: Zenith color", "Night sky: Zenith color multiplier");
+        let (_, fog_top) = col("Fog color (top)", "Fog color (top) multiplier");
+        let cloud_sun = srgb_to_linear(self.color("Sun color", t)) * self.scalar("Cloud shading: Sun light multiplier", t);
+        let cloud_sky = srgb_to_linear(self.color("Sky color", t)) * self.scalar("Cloud shading: Sky light multiplier", t);
         // The sun is up between the dawn and dusk colour keys: brightness of the sun colour decides.
         let lum = |c: Vec3| c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
         let sun_srgb = self.color("Sun color", t);
         let day = ((lum(sun_srgb) - 0.25) / 0.5).clamp(0.0, 1.0);
+        let balance = self.color("Color balance", t);
+        let photo = self.color("Filters: photofilter color", t);
         EnvSample {
             sun_dir: sun_direction(hour, lighting),
             sun,
@@ -205,6 +287,38 @@ impl TimeOfDay {
             night_horizon: nh,
             night_zenith: nz,
             day,
+            fog_top,
+            fog_layer: Vec4::new(
+                self.scalar("Fog height (bottom)", t),
+                self.scalar("Fog height (top)", t),
+                self.scalar("Fog layer density (bottom)", t),
+                self.scalar("Fog layer density (top)", t),
+            ),
+            fog_ramp: Vec3::new(
+                self.scalar("Volumetric fog: Ramp start", t),
+                self.scalar("Volumetric fog: Ramp end", t),
+                self.scalar("Volumetric fog: Ramp influence", t),
+            ),
+            horizon,
+            zenith,
+            zenith_shift: self.scalar("Night sky: Zenith shift", t),
+            cloud_sun,
+            cloud_sky,
+            skybox_mul: self.scalar("Skybox multiplier", t),
+            film: Vec4::new(
+                self.scalar("Film curve shoulder scale", t),
+                self.scalar("Film curve midtones scale", t),
+                self.scalar("Film curve toe scale", t),
+                self.scalar("Film curve whitepoint", t),
+            ),
+            saturation: self.scalar("Saturation", t),
+            contrast: self.scalar("Contrast", t),
+            color_balance: if balance == Vec3::ZERO { Vec3::ONE } else { balance },
+            levels_min: self.scalar("Levels: min input", t),
+            photofilter: Vec4::new(photo.x, photo.y, photo.z, self.scalar("Filters: photofilter density", t)),
+            hdr_dynamic: self.scalar("HDR dynamic power factor", t),
+            sun_shafts: self.scalar("Sun shafts visibility", t),
+            sun_specular: self.scalar("Sun specular multiplier", t),
         }
     }
 }
@@ -255,6 +369,29 @@ mod tests {
         assert!((t.scalar("Sun color multiplier", 0.5) - 4.0).abs() < 1e-5);
         let c = t.color("Sun color", 0.3);
         assert!((c.y - 0.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn layers_are_separate() {
+        let xml = r#"<TimeOfDayList>
+            <TimeOfDay relic_layer="0"><Variable Name="Saturation" Value="1"><Spline Keys="0:1:0,1:1:0,"/></Variable></TimeOfDay>
+            <TimeOfDay relic_layer="1"><Variable Name="Saturation" Value="1"><Spline Keys="0:0.5:0,1:0.5:0,"/></Variable></TimeOfDay>
+            </TimeOfDayList>"#;
+        assert!((TimeOfDay::parse(xml).unwrap().scalar("Saturation", 0.5) - 1.0).abs() < 1e-5);
+        assert!((TimeOfDay::parse_layer(xml, 0).unwrap().scalar("Saturation", 0.5) - 1.0).abs() < 1e-5);
+        assert!((TimeOfDay::parse_layer(xml, 1).unwrap().scalar("Saturation", 0.5) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn samples_blend() {
+        let xml = r#"<TimeOfDayList><TimeOfDay>
+            <Variable Name="Volumetric fog: Global density" Value="1"><Spline Keys="0:0.2:0,1:0.2:0,"/></Variable>
+            </TimeOfDay></TimeOfDayList>"#;
+        let t = TimeOfDay::parse(xml).unwrap();
+        let a = t.sample(10.0, Lighting::default());
+        let mut b = a.clone();
+        b.fog_density = 0.6;
+        assert!((a.lerp(&b, 0.5).fog_density - 0.4).abs() < 1e-5);
     }
 
     #[test]

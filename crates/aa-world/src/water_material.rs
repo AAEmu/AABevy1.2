@@ -1,0 +1,291 @@
+//! The water material (`water.wesl`): ponds, lakes, rivers and the sea.
+//!
+//! Every distinct [`WaterStyle`] (material path + the volume's own fog) gets one [`WaterMaterial`], built from the `.mtl`
+//! of the volume (`Watersurface` shader: `BumpScale`, `BigWavesScale`, `SmallWavesScale`, `WavesSpeed`, `FresnelBias`,
+//! `SunMultiplier`, `SunShinePow`, `SoftIntersectionFactor`, bump map `oceanwaves_ddn`) and the fog of the volume (colour and
+//! density, `object.dat` type 11 header). The environment part of the uniform (sky colours for the reflection, sun, body
+//! colour) is refreshed by [`update_water`] from the sampled time of day.
+//!
+//! The material reads the frame's opaque colour (`reads_view_transmission_texture`) and the depth prepass of the camera
+//! (`post::setup_post_cameras` adds it): without the prepass the water has a constant thickness and no screen space
+//! reflections.
+
+use std::collections::HashMap;
+
+use bevy::asset::embedded_asset;
+use bevy::camera::Exposure;
+use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
+use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
+use bevy::shader::ShaderRef;
+
+use crate::coords::cry_to_bevy;
+use crate::post::PostUniform;
+use crate::sky::{AtmosphereTuning, Environment, view_exposure};
+use crate::water::WaterStyle;
+
+/// Uniform of `water.wesl` (see the shader for the meaning of the fields).
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
+pub struct WaterParams {
+    pub body: Vec4,
+    pub refl: Vec4,
+    pub waves: Vec4,
+    pub sun: Vec4,
+    pub sun_dir: Vec4,
+    pub sky_h: Vec4,
+    pub sky_z: Vec4,
+    pub misc: Vec4,
+}
+
+impl Default for WaterParams {
+    fn default() -> Self {
+        WaterParams {
+            body: Vec4::new(0.02, 0.04, 0.05, 0.6),
+            refl: Vec4::new(0.05, 1.0, 0.35, 100.0),
+            waves: Vec4::new(1.875, 0.85, -1.5, 0.2),
+            sun: Vec4::new(0.0, 0.0, 0.0, 0.5),
+            sun_dir: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            sky_h: Vec4::new(0.3, 0.35, 0.4, 1.0),
+            sky_z: Vec4::new(0.1, 0.15, 0.3, 0.0),
+            misc: Vec4::new(1.0, 0.012, 0.05, 0.0),
+        }
+    }
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub struct WaterMaterial {
+    #[uniform(0)]
+    pub params: WaterParams,
+    #[texture(1)]
+    #[sampler(2)]
+    pub normal_map: Option<Handle<Image>>,
+}
+
+impl Material for WaterMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://aa_world/water.wesl".into()
+    }
+
+    fn reads_view_transmission_texture(&self) -> bool {
+        true
+    }
+
+    fn enable_prepass() -> bool {
+        false
+    }
+
+    fn enable_shadows() -> bool {
+        false
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}
+
+/// The constants of a style (from its `.mtl` and the volume's fog); the environment part is added each frame.
+#[derive(Clone, Debug)]
+struct StyleBase {
+    fog: Vec3,
+    density: f32,
+    sun_multiplier: f32,
+    shine: f32,
+    bump: f32,
+    big: f32,
+    small: f32,
+    speed: f32,
+    fresnel_bias: f32,
+    soft: f32,
+    repeat: f32,
+    /// The sea plane: its colour comes from the zone's ocean fog.
+    sea: bool,
+}
+
+impl StyleBase {
+    fn of(style: &WaterStyle) -> (StyleBase, String) {
+        let mut base = StyleBase {
+            fog: Vec3::from(style.fog_color()),
+            density: style.fog_density(),
+            sun_multiplier: 0.1,
+            shine: 100.0,
+            bump: 0.35,
+            big: 1.875,
+            small: 0.85,
+            speed: -1.5,
+            fresnel_bias: 0.2,
+            soft: 0.5,
+            repeat: 0.2,
+            sea: false,
+        };
+        let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
+        if style.material == SEA {
+            base.sea = true;
+            base.repeat = 0.05;
+            base.bump = 0.5;
+            base.big = 2.0;
+            base.small = 1.0;
+            base.speed = -4.0;
+            base.fresnel_bias = 0.1;
+            base.soft = 0.25;
+            base.sun_multiplier = 0.3;
+            base.shine = 200.0;
+            return (base, normal_map);
+        }
+        if style.material.is_empty() {
+            return (base, normal_map);
+        }
+        let Ok(mtl) = aa_cry::material::Material::load(&format!("{}.mtl", style.material.trim_end_matches(".mtl"))) else {
+            return (base, normal_map);
+        };
+        let param = |name: &str, default: f32| mtl.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
+        base.sun_multiplier = param("SunMultiplier", base.sun_multiplier);
+        base.shine = param("SunShinePow", base.shine).max(1.0);
+        base.bump = param("BumpScale", base.bump);
+        base.big = param("BigWavesScale", base.big);
+        base.small = param("SmallWavesScale", base.small);
+        base.speed = param("WavesSpeed", base.speed);
+        base.fresnel_bias = param("FresnelBias", base.fresnel_bias);
+        base.soft = param("SoftIntersectionFactor", base.soft);
+        if let Some(t) = mtl.texture(&aa_cry::material::TextureMap::Bump) {
+            let path = t.pak_path();
+            if !path.is_empty() {
+                normal_map = path;
+            }
+        }
+        (base, normal_map)
+    }
+}
+
+const DEFAULT_NORMAL_MAP: &str = "textures/defaults/oceanwaves_ddn.dds";
+/// Material name of the sea plane's style.
+pub const SEA: &str = "<sea>";
+
+/// All water materials of the world, by style.
+#[derive(Resource, Default)]
+pub struct WaterStyles {
+    materials: HashMap<WaterStyle, Handle<WaterMaterial>>,
+    bases: Vec<(Handle<WaterMaterial>, StyleBase)>,
+    normal_maps: HashMap<String, Option<Handle<Image>>>,
+}
+
+impl WaterStyles {
+    /// The material of a style, created on first use.
+    pub fn material(
+        &mut self,
+        style: &WaterStyle,
+        assets: &mut Assets<WaterMaterial>,
+        images: &mut Assets<Image>,
+    ) -> Handle<WaterMaterial> {
+        if let Some(h) = self.materials.get(style) {
+            return h.clone();
+        }
+        let (base, normal_path) = StyleBase::of(style);
+        let normal_map = self
+            .normal_maps
+            .entry(normal_path.clone())
+            .or_insert_with(|| {
+                let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat: true };
+                match aa_cry::texture::load_dds_from_pak(&normal_path, opts) {
+                    Ok(image) => Some(images.add(image)),
+                    Err(e) => {
+                        warn!("aa-world: water normal map {normal_path}: {e}");
+                        None
+                    }
+                }
+            })
+            .clone();
+        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), ..default() };
+        let handle = assets.add(WaterMaterial { params, normal_map });
+        self.materials.insert(style.clone(), handle.clone());
+        self.bases.push((handle.clone(), base));
+        handle
+    }
+
+    pub fn len(&self) -> usize {
+        self.bases.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bases.is_empty()
+    }
+}
+
+pub(crate) fn build(app: &mut App) {
+    embedded_asset!(app, "water.wesl");
+    app.add_plugins(MaterialPlugin::<WaterMaterial>::default()).init_resource::<WaterStyles>();
+}
+
+fn luminance(c: Vec3) -> f32 {
+    c.dot(Vec3::new(0.2126, 0.7152, 0.0722))
+}
+
+/// Refreshes the environment dependent part of every water material: sky for the reflections, the sun, the body colour.
+pub fn update_water(
+    env: Res<Environment>,
+    tuning: Res<AtmosphereTuning>,
+    styles: Res<WaterStyles>,
+    mut materials: ResMut<Assets<WaterMaterial>>,
+    exposure: Query<Option<&Exposure>, With<PostUniform>>,
+) {
+    let Some(cur) = &env.sample else { return };
+    let rs = tuning.radiance * view_exposure(&exposure);
+    let sun_bevy = cry_to_bevy(cur.sun_dir).normalize();
+    let sun_up = ((cur.sun_dir.z + 0.04) / 0.1).clamp(0.0, 1.0);
+    let sky_h = (cur.horizon * rs * tuning.sky_gain).extend(tuning.sky_exp);
+    let sky_z = (cur.zenith * rs * tuning.sky_gain).extend(0.0);
+    // the water's own lighting: the fog colour of the volume is the colour of the lit water body
+    let light = (luminance(cur.sky) + 0.25 * luminance(cur.sun)) * 0.35;
+    for (handle, base) in &styles.bases {
+        let density = if base.density > 0.0 { base.density } else { 0.2 };
+        let body = if base.sea {
+            (env.ocean_fog * tuning.sea_body * light * rs).extend(density * tuning.water_absorb)
+        } else {
+            (base.fog.max(Vec3::splat(0.0015)) * tuning.water_body * light * rs).extend(density * tuning.water_absorb)
+        };
+        let f0 = (base.fresnel_bias * 0.25).clamp(0.02, 0.08);
+        let params = WaterParams {
+            body,
+            refl: Vec4::new(f0, tuning.water_refl, base.bump, base.shine),
+            waves: Vec4::new(base.big, base.small, base.speed, base.repeat),
+            sun: (cur.sun * rs * base.sun_multiplier * tuning.water_sun).extend(base.soft),
+            sun_dir: sun_bevy.extend(sun_up * cur.day.max(0.05)),
+            sky_h,
+            sky_z,
+            misc: Vec4::new(tuning.ssr, tuning.refraction, tuning.water_rough, 0.0),
+        };
+        let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
+        if !unchanged && let Some(mut m) = materials.get_mut(handle) {
+            m.params = params;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn style_reads_the_material() {
+        if !crate::pak_available() {
+            return;
+        }
+        let style = WaterStyle::new("game/materials/ocean/lilyut_lake01", 3, [0.003, 0.0047, 0.0063], 0.1);
+        let (base, normal_map) = StyleBase::of(&style);
+        assert!((base.bump - 0.35).abs() < 1e-4 && (base.big - 1.875).abs() < 1e-4 && (base.shine - 100.0).abs() < 1e-3);
+        assert_eq!(normal_map, "textures/defaults/oceanwaves_ddn.dds");
+        assert!((base.density - 0.1).abs() < 1e-6);
+        // an unknown material keeps the defaults
+        let (base, _) = StyleBase::of(&WaterStyle::new("game/materials/ocean/does_not_exist", 2, [0.0; 3], 0.0));
+        assert!((base.big - 1.875).abs() < 1e-4);
+        // the normal map loads
+        let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat: true };
+        assert!(aa_cry::texture::load_dds_from_pak(&normal_map, opts).is_ok());
+    }
+}

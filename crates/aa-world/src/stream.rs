@@ -59,6 +59,8 @@ pub struct WorldConfig {
     pub object_budget_ms: f32,
     /// Drive sun, ambient light, fog, sky dome and ocean from the time of day data.
     pub environment: bool,
+    /// HDR camera with the atmosphere post pass (height fog, film curve, bloom) on the world's camera, see `post.rs`.
+    pub post: bool,
     /// Radius of the sky dome (m); the camera far plane must exceed it.
     pub sky_radius: f32,
     /// Sun shadows (cascaded).
@@ -96,6 +98,7 @@ impl WorldConfig {
             water_distance: 1400.0,
             object_budget_ms: 3.0,
             environment: true,
+            post: true,
             sky_radius: 9000.0,
             shadows: true,
             shadow_distance: 300.0,
