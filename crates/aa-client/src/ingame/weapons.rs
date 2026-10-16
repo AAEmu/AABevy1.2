@@ -2,7 +2,7 @@
 //! base skeleton, like the bow slung across the back in the real client's spawn view.
 
 use aa_anim::Animator;
-use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
+use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_net::model::{Equipment, slot};
 use bevy::prelude::*;
 
@@ -57,7 +57,8 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
         for item in &carried.0 {
             let Some(index) = animator.rig.skeleton.bones.iter().position(|b| b.name == item.bone) else { continue };
             let Some(&bone) = animator.bones.get(index) else { continue };
-            let options = ModelOptions { cry_space: true, ..default() };
+            // Full shading bakes the Illum specular map into metal / roughness: wood stays wood, blades shine
+            let options = ModelOptions { cry_space: true, shading: Shading::Full, ..default() };
             let Ok(loaded) = cry.load_model(&item.path, &options) else { continue };
             let model = spawn_loaded(&mut commands, &item.path, &loaded, &options);
             commands.entity(model).insert((item.transform, ChildOf(bone)));

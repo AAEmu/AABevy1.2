@@ -5,7 +5,7 @@
 //! * [`camera`]: ArcheAge's third person orbit camera
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
-//! * [`terrain`], [`data`]: ground height queries and game database lookups
+//! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 
 mod anim;
 mod appearance;
@@ -15,7 +15,6 @@ mod data;
 mod dev;
 mod enter;
 mod player;
-mod terrain;
 mod units;
 mod weapons;
 
@@ -25,6 +24,9 @@ use aa_world::AaWorldPlugin;
 use bevy::prelude::*;
 
 use crate::Screen;
+
+/// The world the in-game screen plays in.
+pub const WORLD: &str = "main_world";
 
 pub struct InGamePlugin;
 
@@ -40,7 +42,7 @@ impl Plugin for InGamePlugin {
             app.add_plugins(AnimPlugin);
         }
         if !app.is_plugin_added::<AaWorldPlugin>() {
-            app.add_plugins(AaWorldPlugin::new(terrain::WORLD));
+            app.add_plugins(AaWorldPlugin::new(WORLD));
         }
         if let Some(db) = data::Db::open() {
             app.insert_resource(db);
@@ -58,7 +60,6 @@ impl Plugin for InGamePlugin {
             }
         }
         app.insert_resource(dev)
-            .init_resource::<terrain::Terrain>()
             .init_resource::<units::Views>()
             .add_plugins(enter::plugin)
             .add_systems(Startup, fix_window)
@@ -71,7 +72,6 @@ impl Plugin for InGamePlugin {
                     (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
                     player::dev_hide_part,
-                    appearance::layer_body_under_armour,
                     weapons::attach_carried,
                     log_chat,
                     report,

@@ -6,6 +6,7 @@
 //! * `--walk START:END[:KEYS]`  press KEYS (default `W`, any of `WASDQE` and `J` for jump, `S`hift is
 //!   `H`) from START to END seconds after the player appeared. Repeatable.
 //! * `--hour H`, `--zone ID`  time of day (aa-world's `WorldClock`).
+//! * `--hair-color ID`  `hair_colors.id` to use instead of the one the server saved.
 //! * `--hide-part N`  hide the N-th part of the player character (0 = body, 1 = face, ...)
 //! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit.
 
@@ -22,6 +23,7 @@ pub struct DevOptions {
     pub cam_pitch: Option<f32>,
     pub cam_dist: Option<f32>,
     pub hide_part: Option<usize>,
+    pub hair_color: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,7 @@ impl DevOptions {
             cam_pitch: num("--cam-pitch").map(f32::to_radians),
             cam_dist: num("--cam-dist"),
             hide_part: num("--hide-part").map(|n| n as usize),
+            hair_color: one("--hair-color").and_then(|v| v.parse().ok()),
         }
     }
 
