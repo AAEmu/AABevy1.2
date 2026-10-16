@@ -18,11 +18,16 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::{Error, Result};
 
 /// Grey level of the undyed diffuse that maps to the pure dye colour.
-const GREY_REFERENCE: f32 = 0.38;
+const GREY_REFERENCE: f32 = 0.3;
 
 /// `0x00BBGGRR` (the `dyeing_colors.color_rgb` encoding) to sRGB bytes.
 pub fn dye_rgb(color: u32) -> [u8; 3] {
     [(color & 0xFF) as u8, ((color >> 8) & 0xFF) as u8, ((color >> 16) & 0xFF) as u8]
+}
+
+/// Linear intensity -> sRGB-encoded value (both 0..1).
+fn linear_to_srgb(v: f32) -> f32 {
+    if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
 /// Which mask channel (0..4 = r, g, b, a) a `DyeingChannelMask` value (`"0,1,0,0"`) selects.
@@ -40,7 +45,9 @@ pub fn bake_dyed_diffuse(diffuse: &str, mask: &str, channel: usize, dye: [u8; 3]
     if dds.faces != 1 || dds.depth > 1 {
         return Err(Error::Format(format!("{diffuse}: not a plain 2D texture")));
     }
-    let dye = dye.map(|c| c as f32 / 255.0);
+    // the dye colours (`0x00BBGGRR` of `dyeing_colors`) are linear intensities: the vivid orange
+    // (244, 37, 0) renders as (250, 105, 0) in the client
+    let dye = dye.map(|c| linear_to_srgb(c as f32 / 255.0));
     let (mw, mh) = (mask_dds.width, mask_dds.height);
 
     let mut data = Vec::new();
@@ -65,7 +72,7 @@ pub fn bake_dyed_diffuse(diffuse: &str, mask: &str, channel: usize, dye: [u8; 3]
                 let p = &mut px[(y * w as usize + x) * 4..][..4];
                 let c = [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0];
                 let grey = (c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11) / GREY_REFERENCE;
-                let shade = grey.clamp(0.0, 1.3);
+                let shade = grey.clamp(0.0, 1.5);
                 for i in 0..3 {
                     let dyed = (dye[i] * shade).min(1.0);
                     let out = c[i] + (dyed - c[i]) * weight;
@@ -95,6 +102,14 @@ mod tests {
         assert_eq!(dye_rgb(181), [181, 0, 0]);
         assert_eq!(dye_rgb(9716), [0xF4, 0x25, 0]);
         assert_eq!(dye_rgb(0x00CA_DEFB), [0xFB, 0xDE, 0xCA]);
+    }
+
+    #[test]
+    fn dye_is_linear() {
+        assert!((linear_to_srgb(0.0)).abs() < 1e-6);
+        assert!((linear_to_srgb(1.0) - 1.0).abs() < 1e-4);
+        // 37/255 linear is about 105/255 encoded
+        assert!((linear_to_srgb(37.0 / 255.0) * 255.0 - 105.0).abs() < 3.0);
     }
 
     #[test]

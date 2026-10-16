@@ -1,5 +1,22 @@
 //! Character customisation data: what the character-create screen changes (and what the server
 //! stores in `UnitCustomModelParams`): face morph weights, face texture set, colours, decals.
+//!
+//! The screen drives the native `X2Customizer` API (`x2ui/customizing/*.lua`); how each call maps
+//! onto [`CharacterDesc`](crate::CharacterDesc) / [`Customization`]:
+//!
+//! | client call | field |
+//! |---|---|
+//! | `SetCustomizingHair(index)` | `CharacterDesc::hair` (`item_body_parts.item_id`) |
+//! | `SetCustomizingHairColor(index)` | `CharacterDesc::hair_color` (`hair_colors.id` of that style) |
+//! | `SetCustomizingSkinColor(index)` | `CharacterDesc::skin` (`skin_colors.id`) |
+//! | `SetCustomizingFaceNormal(index, weight)` | `normal_map`, `normal_map_weight` (`face_normal_maps.id`) |
+//! | `SetCustomizingFaceDiffuse(index)` | `face_diffuse_map_id` (the table is empty in 1.2; unused) |
+//! | `SetCustomizingTattoo(index)` / `SetCustomizingMakeUp(index, weight)` | decal, category 2 / 3 |
+//! | `SetCustomizingEyebrow(index)`, `...EyebrowColor(r,g,b)` | decal category 4, `eyebrow_color` |
+//! | `SetCustomizingDeco(index, weight)`, `...DecoColor(r,g,b)` | decal category 5, `deco_color` |
+//! | `SetCustomizingScar(index, x, y, scale, rotate)` | the movable decal (category 1) |
+//! | `SetCustomizingPupilColor` / `SetCustomizingLipColor` | `left/right_pupil_color`, `lip_color` |
+//! | `ModifyFaceParamValue(index, value)` | `modifier[index]` (signed byte, range from `<race>_targets.xml`) |
 
 use crate::db::{Decal, Preset};
 
@@ -58,8 +75,35 @@ impl Customization {
         }
     }
 
+    /// Sets face slider `idx` (`Idx` of `<race>_targets.xml`; -100..100 style values, see the
+    /// slider's `Min`/`Max`); grows the modifier to its 128 bytes.
+    pub fn set_slider(&mut self, idx: usize, value: i8) {
+        if self.modifier.len() < 128 {
+            self.modifier.resize(128, 0);
+        }
+        if let Some(m) = self.modifier.get_mut(idx) {
+            *m = value as u8;
+        }
+    }
+
     /// The signed value (-128..127) of morph target `idx` (0 when absent).
     pub fn value(&self, idx: usize) -> i8 {
         self.modifier.get(idx).map(|&b| b as i8).unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sliders_are_signed_bytes() {
+        let mut c = Customization::default();
+        c.set_slider(25, -80);
+        c.set_slider(4, 35);
+        assert_eq!(c.modifier.len(), 128);
+        assert_eq!(c.value(25), -80);
+        assert_eq!(c.value(4), 35);
+        assert_eq!(c.value(500), 0);
     }
 }
