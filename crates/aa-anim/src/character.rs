@@ -27,7 +27,7 @@ use crate::cal::Cal;
 use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
-use crate::face::{FaceLayer, abgr, compose_face};
+use crate::face::{EyeTint, FaceLayer, abgr, compose_face};
 use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, Rig, SampleOptions};
 use crate::{Error, Result};
@@ -178,6 +178,8 @@ pub struct CharacterAssets {
     pub face_lips: Option<(String, [u8; 3])>,
     /// `face_normal_maps` normal texture and weight.
     pub face_normal: Option<(String, f32)>,
+    /// Iris colour (`left_pupil_color`).
+    pub pupil_color: Option<[u8; 3]>,
 }
 
 impl CharacterDesc {
@@ -261,7 +263,8 @@ impl CharacterDesc {
 
         let skin_albedo = skin_albedo(&skin, &db.skin_colors(model).unwrap_or_default());
         let (face_layers, face_lips, face_normal) = self.face_customization(db, &dir, &prefix);
-        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, skin_albedo, hair_color, face_layers, face_lips, face_normal })
+        let pupil_color = (self.customization.left_pupil_color != 0).then(|| abgr(self.customization.left_pupil_color));
+        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, skin_albedo, hair_color, face_layers, face_lips, face_normal, pupil_color })
     }
 }
 
@@ -392,7 +395,7 @@ fn load_part(
     let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
     let mtl_path = loaded.material_path.clone();
     let mtl = mtl_path.as_deref().and_then(|p| cry.mtl(p));
-    let face_look = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref()) } else { FaceLook::default() };
+    let face_look = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &loaded) } else { FaceLook::default() };
 
     let mut out = (*loaded).clone();
     out.parts.clear();
@@ -447,6 +450,27 @@ struct FaceLook {
     normal: Option<Handle<Image>>,
 }
 
+/// UV bounding box `[u0, v0, u1, v1]` of the geometry drawn with the `Eye` shader.
+fn eye_uv_box(loaded: &LoadedModel, mtl: &CryMaterial) -> Option<[f32; 4]> {
+    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    let mut found = false;
+    for mesh in &loaded.model.meshes {
+        for subset in &mesh.subsets {
+            if !mtl.sub(subset.material_id as usize).is_some_and(|s| s.shader.eq_ignore_ascii_case("eye")) {
+                continue;
+            }
+            let first = subset.first_index as usize;
+            for &i in mesh.indices.get(first..first + subset.index_count as usize)? {
+                if let Some(uv) = mesh.uvs.get(i as usize) {
+                    bounds = [bounds[0].min(uv.x), bounds[1].min(uv.y), bounds[2].max(uv.x), bounds[3].max(uv.y)];
+                    found = true;
+                }
+            }
+        }
+    }
+    found.then_some(bounds)
+}
+
 /// Does the sub-material's diffuse texture match `path` (lower-case pak path)?
 fn uses_texture(sub: &CryMaterial, path: &str) -> bool {
     use aa_cry::material::{TextureMap, texture_pak_path};
@@ -454,7 +478,7 @@ fn uses_texture(sub: &CryMaterial, path: &str) -> bool {
 }
 
 /// Builds the face texture and normal map of the character for a face material.
-fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>) -> FaceLook {
+fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>, loaded: &LoadedModel) -> FaceLook {
     use aa_cry::material::{TextureMap, texture_pak_path};
     let mut look = FaceLook::default();
     let Some(skin) = mtl.and_then(|m| m.sub_materials.iter().find(|s| s.shader.eq_ignore_ascii_case("humanskin"))) else { return look };
@@ -469,11 +493,12 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
     if let Some((path, _)) = &assets.face_normal {
         look.normal = cry.texture(path, false);
     }
-    if assets.face_layers.is_empty() && assets.face_lips.is_none() && base == named {
+    let eye = assets.pupil_color.and_then(|color| eye_uv_box(loaded, mtl?).map(|uv| EyeTint { uv, color }));
+    if assets.face_layers.is_empty() && assets.face_lips.is_none() && eye.is_none() && base == named {
         return look;
     }
     let lips = assets.face_lips.as_ref().map(|(p, c)| (p.as_str(), *c));
-    match compose_face(&base, &assets.face_layers, lips) {
+    match compose_face(&base, &assets.face_layers, lips, eye) {
         Ok(img) => look.texture = Some(cry.images.add(img)),
         Err(e) => warn!("aa-anim: face texture {base}: {e}"),
     }
