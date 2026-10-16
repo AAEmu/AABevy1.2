@@ -2,11 +2,12 @@
 //! world select -> character select -> character create -> loading -> in game.
 //!
 //! Each screen is one module with its own plugin, active while `Screen` is in its state:
-//! * `ingame`: world, player, units, camera, movement (entered via `--enter-world` until the
-//!   login-stage screens are wired up)
-//! * login stage screens (world select, character select/create) and loading: to come
+//! * [`login`]: world select, character select, character create and loading, on the original
+//!   Lua UI
+//! * [`ingame`]: world, player, units, camera, movement (`--enter-world` skips the login stage)
 
 mod ingame;
+mod login;
 
 use bevy::prelude::*;
 
@@ -24,6 +25,6 @@ fn main() {
     App::new()
         .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
         .init_state::<Screen>()
-        .add_plugins(ingame::InGamePlugin)
+        .add_plugins((login::LoginPlugin, ingame::InGamePlugin))
         .run();
 }
