@@ -122,6 +122,8 @@ metres). Parents precede children. The elf female base skeleton has 157 bones.
 
 * 15,812 of 19,684 `.chr` have bones. 3,795 `_lodN.chr` have none: they use their LOD0's
   bone list (`Skeleton::load` does that).
+* Skeleton files (`*_base.chr`, 17) hold a placeholder mesh: one 10 cm triangle at the origin,
+  no `.mtl`. `load_model` does not draw single-triangle meshes of files with bones.
 * Body parts (skin attachments) carry a subset of the base skeleton's bones in their own order
   (matched by controller id, then name: `Skeleton::map_to`), plus extra bones (hair, cloth).
   Their own bind poses can differ from the base (hair / face parts), and skinning them with

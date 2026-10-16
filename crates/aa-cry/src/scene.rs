@@ -319,6 +319,11 @@ impl CryAssets<'_> {
         for ni in nodes {
             let Some(mi) = model.nodes[ni].mesh else { continue };
             let mesh = &model.meshes[mi];
+            // Skeleton files (all 17 `*_base.chr`) carry a placeholder: one 10 cm triangle at
+            // the origin without a material. Not drawn.
+            if model.skeleton.is_some() && mesh.indices.len() <= 3 {
+                continue;
+            }
             let skinned = mesh.skin.is_some() && skeleton.is_some();
             // mirrored nodes (rare: ~1 in 3,000 files); meshes are not shared between nodes
             let flip = !skinned && render_transform(&model, ni).matrix3.determinant() < 0.0;
