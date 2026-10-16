@@ -16,6 +16,7 @@ pub mod diagram;
 mod drawable;
 pub mod edit;
 pub mod folder;
+pub mod picker;
 mod globals;
 mod stubs;
 pub mod tab;

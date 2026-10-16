@@ -31,7 +31,11 @@ pub struct EditData {
     /// `EnableFocus(false)`: clicks do not focus it.
     pub no_focus: bool,
     pub cursor_color: Option<[f32; 4]>,
+    /// `SetCursorHeight(n)` / `SetCursorOffset(n)`: the baselib edits use (2, -2). Read as
+    /// extra caret height over the line height and a horizontal offset (no capture shows a
+    /// focused edit box, so this is a guess).
     pub cursor_height: Option<f32>,
+    pub cursor_offset: f32,
 }
 
 /// A key for the focused widget (see [`crate::UiRuntime::key`]).
@@ -410,7 +414,15 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?,
     )?;
     def("IsComposingText", method(lua, |lua, _, _| ret(lua, false))?)?;
-    for name in ["SetEnglish", "UseSelectAllWhenFocused", "UseClipboard", "SetCursorOffset"] {
+    def(
+        "SetCursorOffset",
+        method(lua, |lua, id, a| {
+            let o = a.f(1);
+            with(lua, id, |e| e.cursor_offset = o);
+            none()
+        })?,
+    )?;
+    for name in ["SetEnglish", "UseSelectAllWhenFocused", "UseClipboard"] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     Ok(())
