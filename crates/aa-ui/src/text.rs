@@ -339,7 +339,16 @@ impl FontLib {
             color: Option<[f32; 4]>,
         }
         let mut items: Vec<Item> = Vec::new();
-        let chars: Vec<char> = expand_codes(text).chars().collect();
+        // A trailing line break does not start another (empty) line: the client counts
+        // `"We fear no death."\r\n\n` as 2 lines.
+        let mut expanded = expand_codes(text);
+        if expanded.ends_with('\n') {
+            expanded.pop();
+            if expanded.ends_with('\r') {
+                expanded.pop();
+            }
+        }
+        let chars: Vec<char> = expanded.chars().collect();
         let mut color: Option<[f32; 4]> = None;
         let mut i = 0;
         while i < chars.len() {

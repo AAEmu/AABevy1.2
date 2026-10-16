@@ -16,6 +16,7 @@ mod drawable;
 pub mod folder;
 mod globals;
 mod stubs;
+pub mod tab;
 mod widget;
 
 use std::collections::{BTreeMap, HashMap};
@@ -90,6 +91,9 @@ pub fn reg(lua: &Lua) -> Reg {
         .clone()
 }
 
+/// Widget classes the scripts create that `reference/api/widget_methods.json` does not list.
+const EXTRA_CLASSES: &[&str] = &["paintcolorpicker"];
+
 /// Install the toolkit into a Lua state: `UIParent`, widget/drawable classes, constants,
 /// `Script.ReloadScript`, and stubs for the not yet implemented natives.
 pub fn install(lua: &Lua, ui_state: Ui) -> mlua::Result<()> {
@@ -114,6 +118,12 @@ pub fn install(lua: &Lua, ui_state: Ui) -> mlua::Result<()> {
         };
         let m = lua.create_table()?;
         m.raw_set("__index", methods)?;
+        mt.insert(class.to_string(), m);
+    }
+    // Classes the reference capture could not name: our natives plus stubs for every name.
+    for class in EXTRA_CLASSES {
+        let m = lua.create_table()?;
+        m.raw_set("__index", widget::methods(lua, class)?)?;
         mt.insert(class.to_string(), m);
     }
     let r = Reg {
@@ -320,6 +330,7 @@ pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
 }
 
 pub fn tick(lua: &Lua, dt_ms: f32) {
+    tab::relayout_all(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
     for (name, args) in queued {
         fire_ui_event(lua, &name, args);

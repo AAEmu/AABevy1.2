@@ -191,6 +191,11 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         }
         t = ui(lua).tree.get(id).parent;
     }
+    // Native tab buttons.
+    if button == "LeftButton" && lua::tab::button_clicked(lua, target) {
+        lua::flush(lua);
+        return;
+    }
     // Native list selection.
     if button == "LeftButton" {
         if let Some((list, row)) = list_row(lua, target) {
