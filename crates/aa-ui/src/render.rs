@@ -14,9 +14,9 @@ use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats, ImageSam
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
+use crate::lua::Ui;
 use crate::text::ATLAS_SIZE;
 use crate::tree::{ButtonState, DrawKind, Id, Kind, Rect, TextBlock, Tree, WidgetType};
-use crate::lua::Ui;
 
 /// Texture of a quad.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -48,7 +48,9 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         if alpha <= 0.0 {
             continue;
         }
-        let Some(w) = u.tree.widget(id).cloned() else { continue };
+        let Some(w) = u.tree.widget(id).cloned() else {
+            continue;
+        };
         if w.ty == WidgetType::Root {
             continue;
         }
@@ -62,9 +64,19 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
                 o.alive && o.shown
             })
             .collect();
-        ds.sort_by_key(|&d| u.tree.get(d).drawable().map(|x| x.layer).unwrap_or_default());
-        let (below, above): (Vec<Id>, Vec<Id>) =
-            ds.iter().partition(|&&d| u.tree.get(d).drawable().is_some_and(|x| x.layer != crate::tree::DrawLayer::Overlay));
+        ds.sort_by_key(|&d| {
+            u.tree
+                .get(d)
+                .drawable()
+                .map(|x| x.layer)
+                .unwrap_or_default()
+        });
+        let (below, above): (Vec<Id>, Vec<Id>) = ds.iter().partition(|&&d| {
+            u.tree
+                .get(d)
+                .drawable()
+                .is_some_and(|x| x.layer != crate::tree::DrawLayer::Overlay)
+        });
         for d in below {
             drawable_quads(u, d, alpha, state, scale, &mut out);
         }
@@ -83,7 +95,12 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         if let Some(t) = w.title.as_ref() {
             if !t.text.is_empty() {
                 let r = u.tree.rect(id);
-                let rect = Rect { x: r.x, y: r.y + 10.0, w: r.w, h: 30.0 };
+                let rect = Rect {
+                    x: r.x,
+                    y: r.y + 10.0,
+                    w: r.w,
+                    h: 30.0,
+                };
                 let mut t = t.clone();
                 t.style.align = crate::tree::Align::Center;
                 text_quads(u, &t, rect, t.style.color, alpha, scale, &mut out);
@@ -107,7 +124,9 @@ fn state_index(s: ButtonState) -> usize {
 
 /// Current visual state of a button.
 pub fn button_state(u: &Ui, id: Id, pressed: Option<Id>) -> ButtonState {
-    let Some(w) = u.tree.widget(id) else { return ButtonState::Normal };
+    let Some(w) = u.tree.widget(id) else {
+        return ButtonState::Normal;
+    };
     if w.button.is_none() {
         return ButtonState::Normal;
     }
@@ -138,9 +157,13 @@ fn effective_alpha(tree: &Tree, mut id: Id) -> f32 {
 /// current state (missing states fall back to normal), and `Create<State>Drawable` extras of
 /// that state. Other drawables always pass.
 pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
-    let Some(dr) = u.tree.get(d).drawable() else { return true };
+    let Some(dr) = u.tree.get(d).drawable() else {
+        return true;
+    };
     if let Some((owner, _)) = dr.state_of {
-        let Some(b) = u.tree.widget(owner).and_then(|w| w.button.as_ref()) else { return true };
+        let Some(b) = u.tree.widget(owner).and_then(|w| w.button.as_ref()) else {
+            return true;
+        };
         if b.bg[state_index(state)].or(b.bg[0]) != Some(d) {
             return false;
         }
@@ -148,7 +171,14 @@ pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
     dr.state_only.is_none_or(|st| st == state)
 }
 
-fn drawable_quads(u: &mut Ui, d: Id, alpha: f32, state: ButtonState, scale: f32, out: &mut Vec<Quad>) {
+fn drawable_quads(
+    u: &mut Ui,
+    d: Id,
+    alpha: f32,
+    state: ButtonState,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
     if !state_visible(u, d, state) {
         return;
     }
@@ -163,23 +193,38 @@ fn drawable_quads(u: &mut Ui, d: Id, alpha: f32, state: ButtonState, scale: f32,
         }
     }
     match dr.kind {
-        DrawKind::Color => out.push(Quad { tex: Tex::Atlas, pos: px(rect, scale), uv: white_uv(), color }),
+        DrawKind::Color => out.push(Quad {
+            tex: Tex::Atlas,
+            pos: px(rect, scale),
+            uv: white_uv(),
+            color,
+        }),
         DrawKind::Text => {
             if let Some(t) = dr.text.as_ref() {
                 text_quads(u, t, rect, t.style.color, a, scale, out);
             }
         }
         DrawKind::Image | DrawKind::Icon | DrawKind::NinePart | DrawKind::ThreePart => {
-            let Some(path) = dr.texture.as_ref() else { return };
-            let Some(resolved) = u.textures.resolve(path) else { return };
-            let Some((tw, th)) = u.textures.size(path) else { return };
+            let Some(path) = dr.texture.as_ref() else {
+                return;
+            };
+            let Some(resolved) = u.textures.resolve(path) else {
+                return;
+            };
+            let Some((tw, th)) = u.textures.size(path) else {
+                return;
+            };
             let (tw, th) = (tw as f32, th as f32);
             let c = dr.coords.unwrap_or([0.0, 0.0, tw, th]);
             let tex = Tex::Image(resolved);
             match dr.kind {
                 DrawKind::NinePart | DrawKind::ThreePart => {
                     let [l, t, r, b] = dr.inset;
-                    let (t, b) = if dr.kind == DrawKind::ThreePart { (0.0, 0.0) } else { (t, b) };
+                    let (t, b) = if dr.kind == DrawKind::ThreePart {
+                        (0.0, 0.0)
+                    } else {
+                        (t, b)
+                    };
                     // Source edges (texels) and destination edges (UI units).
                     let sx = [c[0], c[0] + l, c[0] + c[2] - r, c[0] + c[2]];
                     let sy = [c[1], c[1] + t, c[1] + c[3] - b, c[1] + c[3]];
@@ -194,7 +239,12 @@ fn drawable_quads(u: &mut Ui, d: Id, alpha: f32, state: ButtonState, scale: f32,
                             if dx[i + 1] <= dx[i] || dy[j + 1] <= dy[j] {
                                 continue;
                             }
-                            let r = Rect { x: dx[i], y: dy[j], w: dx[i + 1] - dx[i], h: dy[j + 1] - dy[j] };
+                            let r = Rect {
+                                x: dx[i],
+                                y: dy[j],
+                                w: dx[i + 1] - dx[i],
+                                h: dy[j + 1] - dy[j],
+                            };
                             out.push(Quad {
                                 tex: tex.clone(),
                                 pos: px(r, scale),
@@ -222,10 +272,23 @@ fn white_uv() -> [f32; 4] {
 
 /// UI rect -> pixel rect, snapped to whole pixels.
 fn px(r: Rect, s: f32) -> [f32; 4] {
-    [(r.x * s).round(), (r.y * s).round(), (r.right() * s).round(), (r.bottom() * s).round()]
+    [
+        (r.x * s).round(),
+        (r.y * s).round(),
+        (r.right() * s).round(),
+        (r.bottom() * s).round(),
+    ]
 }
 
-fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32, scale: f32, out: &mut Vec<Quad>) {
+fn text_quads(
+    u: &mut Ui,
+    t: &TextBlock,
+    rect: Rect,
+    color: [f32; 4],
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
     let inner = Rect {
         x: rect.x + t.inset[0],
         y: rect.y + t.inset[1],
@@ -235,7 +298,14 @@ fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32
     let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w);
     let size = t.style.size * scale;
     let mut text = t.text.clone();
-    let mut lo = u.fonts.layout(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale, false);
+    let mut lo = u.fonts.layout(
+        &t.style.font,
+        size,
+        &text,
+        maxw.map(|w| w * scale),
+        t.line_space * scale,
+        false,
+    );
     if t.style.ellipsis && !t.wrap && inner.w > 0.0 && lo.width > inner.w * scale {
         // Trim characters until "text..." fits.
         let mut chars: Vec<char> = text.chars().collect();
@@ -271,9 +341,20 @@ fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32
         });
     };
     // Per-line horizontal alignment.
-    let line_offsets: Vec<f32> = lo.line_widths.iter().map(|w| ((lo.width - w) * fx).round()).collect();
+    let line_offsets: Vec<f32> = lo
+        .line_widths
+        .iter()
+        .map(|w| ((lo.width - w) * fx).round())
+        .collect();
     if t.style.outline {
-        let olo = u.fonts.layout(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale, true);
+        let olo = u.fonts.layout(
+            &t.style.font,
+            size,
+            &text,
+            maxw.map(|w| w * scale),
+            t.line_space * scale,
+            true,
+        );
         for g in &olo.glyphs {
             let lx = line_offsets.get(g.line as usize).copied().unwrap_or(0.0);
             emit(g, 0.0, 0.0, [0.0, 0.0, 0.0, a * 0.85], lx);
@@ -287,13 +368,17 @@ fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32
     }
     for g in &lo.glyphs {
         let lx = line_offsets.get(g.line as usize).copied().unwrap_or(0.0);
-        let c = g.color.map(|gc| [gc[0], gc[1], gc[2], gc[3] * a]).unwrap_or([color[0], color[1], color[2], a]);
+        let c = g
+            .color
+            .map(|gc| [gc[0], gc[1], gc[2], gc[3] * a])
+            .unwrap_or([color[0], color[1], color[2], a]);
         emit(g, 0.0, 0.0, c, lx);
     }
     // Inline icons (coins, loyalty token).
     if !lo.icons.is_empty() {
         let path = crate::text::INLINE_ICON_TEXTURE;
-        if let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path)) {
+        if let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path))
+        {
             for ic in &lo.icons {
                 let lx = line_offsets.get(ic.line as usize).copied().unwrap_or(0.0);
                 let [cx, cy, cw, ch] = crate::text::INLINE_ICONS[ic.icon];
@@ -303,7 +388,12 @@ fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32
                 out.push(Quad {
                     tex: Tex::Image(resolved.clone()),
                     pos: [x, y, x + sz, y + sz * ch / cw],
-                    uv: [cx / tw as f32, cy / th as f32, (cx + cw) / tw as f32, (cy + ch) / th as f32],
+                    uv: [
+                        cx / tw as f32,
+                        cy / th as f32,
+                        (cx + cw) / tw as f32,
+                        (cy + ch) / th as f32,
+                    ],
                     color: [1.0, 1.0, 1.0, a],
                 });
             }
@@ -336,7 +426,14 @@ pub struct UiBatch;
 pub(crate) fn load_image(path: &str, formats: CompressedImageFormats) -> Option<Image> {
     let bytes = aa_pak::Pak::global().read(path).ok()?;
     let ext = path.rsplit('.').next().unwrap_or("dds");
-    match Image::from_buffer(&bytes, ImageType::Extension(ext), formats, true, ImageSampler::linear(), RenderAssetUsages::RENDER_WORLD) {
+    match Image::from_buffer(
+        &bytes,
+        ImageType::Extension(ext),
+        formats,
+        true,
+        ImageSampler::linear(),
+        RenderAssetUsages::RENDER_WORLD,
+    ) {
         Ok(img) => Some(img),
         Err(e) => {
             warn!("aa-ui: cannot decode {path}: {e}");
@@ -375,7 +472,9 @@ pub fn sync_batches(
             Tex::Atlas => state.atlas.clone(),
             Tex::Image(p) => {
                 if !state.images.contains_key(p) {
-                    let h = load_image(p, formats).map(|img| images.add(img)).unwrap_or_default();
+                    let h = load_image(p, formats)
+                        .map(|img| images.add(img))
+                        .unwrap_or_default();
                     state.images.insert(p.clone(), h);
                 }
                 state.images.get(p).cloned()
@@ -384,7 +483,12 @@ pub fn sync_batches(
         let mat = state
             .materials
             .entry(tex.clone())
-            .or_insert_with(|| materials.add(ColorMaterial { texture: image.clone(), ..default() }))
+            .or_insert_with(|| {
+                materials.add(ColorMaterial {
+                    texture: image.clone(),
+                    ..default()
+                })
+            })
             .clone();
         let mut pos = Vec::with_capacity(qs.len() * 4);
         let mut uv = Vec::with_capacity(qs.len() * 4);
@@ -394,17 +498,32 @@ pub fn sync_batches(
             let base = pos.len() as u32;
             let [x0, y0, x1, y1] = q.pos;
             let [u0, v0, u1, v1] = q.uv;
-            pos.extend([[x0, -y0, 0.0], [x1, -y0, 0.0], [x1, -y1, 0.0], [x0, -y1, 0.0]]);
+            pos.extend([
+                [x0, -y0, 0.0],
+                [x1, -y0, 0.0],
+                [x1, -y1, 0.0],
+                [x0, -y1, 0.0],
+            ]);
             uv.extend([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
-            let c = Color::srgba(q.color[0], q.color[1], q.color[2], q.color[3].clamp(0.0, 1.0)).to_linear().to_f32_array();
+            let c = Color::srgba(
+                q.color[0],
+                q.color[1],
+                q.color[2],
+                q.color[3].clamp(0.0, 1.0),
+            )
+            .to_linear()
+            .to_f32_array();
             col.extend([c; 4]);
             idx.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
         }
-        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
-            .with_inserted_indices(Indices::U32(idx));
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+        .with_inserted_indices(Indices::U32(idx));
         let e = commands
             .spawn((
                 UiBatch,
@@ -426,7 +545,11 @@ pub fn sync_atlas(u: &mut Ui, state: &mut UiRenderState, images: &mut Assets<Ima
         return;
     }
     let img = Image::new(
-        bevy::render::render_resource::Extent3d { width: ATLAS_SIZE, height: ATLAS_SIZE, depth_or_array_layers: 1 },
+        bevy::render::render_resource::Extent3d {
+            width: ATLAS_SIZE,
+            height: ATLAS_SIZE,
+            depth_or_array_layers: 1,
+        },
         bevy::render::render_resource::TextureDimension::D2,
         u.fonts.atlas.clone(),
         bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,

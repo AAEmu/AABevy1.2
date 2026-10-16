@@ -80,11 +80,14 @@ pub struct Reg {
 }
 
 pub fn ui(lua: &Lua) -> mlua::AppDataRefMut<'_, Ui> {
-    lua.app_data_mut::<Ui>().expect("aa-ui: Ui app data missing")
+    lua.app_data_mut::<Ui>()
+        .expect("aa-ui: Ui app data missing")
 }
 
 pub fn reg(lua: &Lua) -> Reg {
-    lua.app_data_ref::<Reg>().expect("aa-ui: Reg app data missing").clone()
+    lua.app_data_ref::<Reg>()
+        .expect("aa-ui: Reg app data missing")
+        .clone()
 }
 
 /// Install the toolkit into a Lua state: `UIParent`, widget/drawable classes, constants,
@@ -152,15 +155,37 @@ pub fn new_object_table(lua: &Lua, id: Id) -> mlua::Result<Table> {
         let u = ui(lua);
         let o = u.tree.get(id);
         match (o.widget(), o.drawable()) {
-            (Some(w), _) => (if id == 0 { "uiparent".to_string() } else { w.class.clone() }, w.ty.clone(), w.text.is_some(), w.title.is_some()),
-            (None, Some(d)) => (d.class.to_string(), WidgetType::Root, d.text.is_some(), false),
+            (Some(w), _) => (
+                if id == 0 {
+                    "uiparent".to_string()
+                } else {
+                    w.class.clone()
+                },
+                w.ty.clone(),
+                w.text.is_some(),
+                w.title.is_some(),
+            ),
+            (None, Some(d)) => (
+                d.class.to_string(),
+                WidgetType::Root,
+                d.text.is_some(),
+                false,
+            ),
             _ => ("emptywidget".to_string(), WidgetType::Root, false, false),
         }
     };
-    let meta = r.mt.get(&class).or_else(|| r.mt.get(fallback_class(&ty))).or_else(|| r.mt.get("emptywidget")).cloned();
+    let meta =
+        r.mt.get(&class)
+            .or_else(|| r.mt.get(fallback_class(&ty)))
+            .or_else(|| r.mt.get("emptywidget"))
+            .cloned();
     t.set_metatable(meta)?;
     if has_text {
-        let field = if ty == WidgetType::ListBox { "itemStyle" } else { "style" };
+        let field = if ty == WidgetType::ListBox {
+            "itemStyle"
+        } else {
+            "style"
+        };
         t.raw_set(field, style_table(lua, id, 0)?)?;
     }
     if has_title {
@@ -203,22 +228,34 @@ pub fn value_id(lua: &Lua, v: &Value) -> Option<Id> {
 /// Call a script handler (`OnClick`, `OnEvent` ...) on an object now. Errors are logged.
 pub fn call_handler(lua: &Lua, id: Id, name: &str, args: Vec<Value>) {
     let r = reg(lua);
-    let Ok(Some(hs)) = r.handlers.raw_get::<Option<Table>>(id) else { return };
-    let Ok(Some(f)) = hs.raw_get::<Option<Function>>(name) else { return };
-    let Ok(Some(this)) = r.objs.raw_get::<Option<Table>>(id) else { return };
+    let Ok(Some(hs)) = r.handlers.raw_get::<Option<Table>>(id) else {
+        return;
+    };
+    let Ok(Some(f)) = hs.raw_get::<Option<Function>>(name) else {
+        return;
+    };
+    let Ok(Some(this)) = r.objs.raw_get::<Option<Table>>(id) else {
+        return;
+    };
     let mut mv = MultiValue::new();
     mv.push_back(Value::Table(this));
     for a in args {
         mv.push_back(a);
     }
     if let Err(e) = f.call::<()>(mv) {
-        bevy::log::warn!("aa-ui: {name} handler of {}: {e}", ui(lua).tree.get(id).name);
+        bevy::log::warn!(
+            "aa-ui: {name} handler of {}: {e}",
+            ui(lua).tree.get(id).name
+        );
     }
     flush(lua);
 }
 
 pub fn has_handler(lua: &Lua, id: Id, name: &str) -> bool {
-    ui(lua).handlers.get(&id).is_some_and(|v| v.iter().any(|h| h == name))
+    ui(lua)
+        .handlers
+        .get(&id)
+        .is_some_and(|v| v.iter().any(|h| h == name))
 }
 
 /// Run handler calls queued by natives.
@@ -242,7 +279,16 @@ pub fn fire_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
         if id == 0 {
             // UIParent:SetEventHandler(name, fn): fn(...)
             let r = reg(lua);
-            let f = r.handlers.raw_get::<Option<Table>>(0).ok().flatten().and_then(|t| t.raw_get::<Option<Function>>(format!("__ev_{name}")).ok().flatten());
+            let f = r
+                .handlers
+                .raw_get::<Option<Table>>(0)
+                .ok()
+                .flatten()
+                .and_then(|t| {
+                    t.raw_get::<Option<Function>>(format!("__ev_{name}"))
+                        .ok()
+                        .flatten()
+                });
             if let Some(f) = f {
                 if let Err(e) = f.call::<()>(MultiValue::from_iter(args.iter().cloned())) {
                     bevy::log::warn!("aa-ui: event handler {name}: {e}");
@@ -286,7 +332,11 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         let fades: Vec<(Id, Fade)> = u.fades.iter().map(|(k, v)| (*k, *v)).collect();
         for (id, mut f) in fades {
             f.t += dt_ms;
-            let k = if f.duration <= 0.0 { 1.0 } else { (f.t / f.duration).min(1.0) };
+            let k = if f.duration <= 0.0 {
+                1.0
+            } else {
+                (f.t / f.duration).min(1.0)
+            };
             let a = f.from + (f.to - f.from) * k;
             let o = u.tree.get_mut(id);
             o.alpha = a;
@@ -379,7 +429,9 @@ where
             _ => None,
         };
         let Some(id) = id else {
-            return Err(mlua::Error::runtime("aa-ui: method called without a UI object as self"));
+            return Err(mlua::Error::runtime(
+                "aa-ui: method called without a UI object as self",
+            ));
         };
         let r = f(lua, id, &args);
         flush(lua);

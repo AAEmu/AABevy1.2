@@ -34,6 +34,9 @@ fn main() {
 fn log_stats(stats: Res<aa_ui::UiStats>, time: Res<Time>, mut last: Local<f32>) {
     if time.elapsed_secs() - *last > 2.0 {
         *last = time.elapsed_secs();
-        info!("aa-ui: quads={} draw_calls={} rebuilds={}", stats.quads, stats.draw_calls, stats.rebuilds);
+        info!(
+            "aa-ui: quads={} draw_calls={} rebuilds={}",
+            stats.quads, stats.draw_calls, stats.rebuilds
+        );
     }
 }
