@@ -1,0 +1,126 @@
+//! `--enter-world`: log in, pick the world and the first character, enter the game.
+//!
+//! Until the login-stage screens are wired up this drives the whole flow without a UI:
+//! `Login -> EnterWorld -> ConnectToWorld -> EnterGame`, then switches [`Screen`] to `InGame`.
+//!
+//! Flags: `--user NAME` (default `bevytest`), `--login HOST:PORT` (default `127.0.0.1:27237`),
+//! `--password-file PATH` (else `$AA_PASSWORD_FILE`, else `D:\aaemu-live\cfg\client-test-password.txt`,
+//! else the user name; the password is never printed), `--character NAME` (default: the first).
+
+use aa_net::{Command, Event, NetCommand, NetEvent, Secret};
+use bevy::app::AppExit;
+use bevy::prelude::*;
+
+use crate::Screen;
+
+/// Present when `--enter-world` was given.
+#[derive(Resource)]
+pub struct AutoEnter {
+    login: String,
+    user: String,
+    password: Secret,
+    character: Option<String>,
+}
+
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
+}
+
+impl AutoEnter {
+    pub fn from_args() -> Option<AutoEnter> {
+        let args: Vec<String> = std::env::args().collect();
+        if !args.iter().any(|a| a == "--enter-world") {
+            return None;
+        }
+        let user = flag(&args, "--user").unwrap_or_else(|| "bevytest".into());
+        let shared = r"D:\aaemu-live\cfg\client-test-password.txt";
+        let path = flag(&args, "--password-file")
+            .or_else(|| std::env::var("AA_PASSWORD_FILE").ok())
+            .or_else(|| std::path::Path::new(shared).exists().then(|| shared.to_string()));
+        let password = path
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| user.clone());
+        Some(AutoEnter {
+            login: flag(&args, "--login").unwrap_or_else(|| "127.0.0.1:27237".into()),
+            user,
+            password: Secret::new(password),
+            character: flag(&args, "--character"),
+        })
+    }
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(Startup, login.run_if(resource_exists::<AutoEnter>))
+        .add_systems(Update, drive.run_if(resource_exists::<AutoEnter>));
+}
+
+fn login(auto: Res<AutoEnter>, mut out: MessageWriter<NetCommand>) {
+    info!("enter-world: logging in as {} at {}", auto.user, auto.login);
+    out.write(NetCommand(Command::Login {
+        addr: auto.login.clone(),
+        user: auto.user.clone(),
+        password: auto.password.clone(),
+    }));
+}
+
+fn drive(
+    auto: Res<AutoEnter>,
+    mut events: MessageReader<NetEvent>,
+    mut out: MessageWriter<NetCommand>,
+    mut next: ResMut<NextState<Screen>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::WorldList(list) => match list.worlds.iter().find(|w| w.online) {
+                Some(w) => {
+                    info!("enter-world: entering world {} ({})", w.id, w.name);
+                    out.write(NetCommand(Command::EnterWorld { world_id: w.id }));
+                }
+                None => {
+                    error!("enter-world: no online world");
+                    exit.write(AppExit::error());
+                }
+            },
+            Event::ReadyToConnect { .. } => {
+                out.write(NetCommand(Command::ConnectToWorld));
+            }
+            Event::CharacterList(list) => {
+                let chosen = match &auto.character {
+                    Some(name) => list.iter().find(|c| c.name.eq_ignore_ascii_case(name)),
+                    None => list.first(),
+                };
+                match chosen {
+                    Some(c) => {
+                        info!("enter-world: entering the game as {} (id {})", c.name, c.id);
+                        out.write(NetCommand(Command::EnterGame { character_id: c.id }));
+                    }
+                    None => {
+                        error!("enter-world: no matching character among {} on this world", list.len());
+                        exit.write(AppExit::error());
+                    }
+                }
+            }
+            Event::PlayerSpawn(s) => {
+                let p = s.position();
+                info!("enter-world: spawned {} (obj {}) at ({:.1}, {:.1}, {:.1}) facing {:.2}", s.name(), s.obj_id, p.x, p.y, p.z, s.yaw());
+                next.set(Screen::InGame);
+            }
+            Event::LoginFailed { message } | Event::ConnectFailed { message } | Event::Disconnected { message } => {
+                error!("enter-world: {message}");
+                exit.write(AppExit::error());
+            }
+            Event::EnterWorldDenied { reason } => {
+                error!("enter-world: world denied ({reason})");
+                exit.write(AppExit::error());
+            }
+            Event::Kicked { reason, message } => {
+                error!("enter-world: kicked ({reason}): {message}");
+                exit.write(AppExit::error());
+            }
+            _ => {}
+        }
+    }
+}
