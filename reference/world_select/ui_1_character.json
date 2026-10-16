@@ -1,0 +1,2661 @@
+{
+ "hidden_named_total": 97,
+ "hidden_named_widgets": [
+  "backgroundWindow.authMessage|textbox|250x20",
+  "backgroundWindow.bgWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[1].nameLabel|label|0x0|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[1]|window|100x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[2].iconFrame|emptywidget|0x22",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[2]|window|130x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[3].iconFrame|emptywidget|90x21",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[3]|window|210x25",
+  "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].subItems[4]|window|140x25",
+  "backgroundWindow.mainWindow.worldList[1].scroll.downButton|button|19x11|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].scroll.upButton|button|19x12|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].scroll.vs.thumb|button|17x279|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].scroll.vs|slider|18x279|selfvisible",
+  "backgroundWindow.mainWindow.worldList[1].scroll|emptywidget|19x302",
+  "backgroundWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "backgroundWindow.queueWindow.cancel|button|90x33|selfvisible",
+  "backgroundWindow.queueWindow.exitBtn|button|90x33|selfvisible",
+  "backgroundWindow.queueWindow.guideText|label|352x15|selfvisible",
+  "backgroundWindow.queueWindow.modalBackgroundWindow|emptywidget|1920x1080|selfvisible",
+  "backgroundWindow.queueWindow.normalLengthLabel|label|352x15|selfvisible",
+  "backgroundWindow.queueWindow.premiumLengthLabel|label|352x15|selfvisible",
+  "backgroundWindow.queueWindow.timeLabel|label|352x15|selfvisible",
+  "backgroundWindow.queueWindow.titleBar.closeButton|button|44x38",
+  "backgroundWindow.queueWindow.titleBar|window|352x45|selfvisible",
+  "backgroundWindow.queueWindow.waitingLabel|gametooltip|352x15|selfvisible",
+  "backgroundWindow.queueWindow.waitingQueueType|label|352x15|selfvisible",
+  "backgroundWindow.queueWindow|window|352x185"
+ ],
+ "meta": {
+  "captured": "2026-10-16 15:39:57",
+  "fps": 22,
+  "hooks_active": false,
+  "log_entries": 0,
+  "objects_shown": 81,
+  "objects_total": 1329,
+  "screen_height": 1080,
+  "screen_name": "world_select (1_character)",
+  "screen_width": 1920,
+  "screenshot": {
+   "file": "real_1_character.png",
+   "height": 1080,
+   "width": 1920
+  },
+  "stage": 3,
+  "ui_scale": 1
+ },
+ "widgets": [
+  {
+   "addr": "36291C6C",
+   "class": "drawable:image",
+   "content_extent": [
+    87,
+    21
+   ],
+   "eextent": [
+    87,
+    21
+   ],
+   "eoffset": [
+    1136,
+    356
+   ],
+   "extent": [
+    87,
+    21
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1136,
+    356
+   ],
+   "owner": "42D48FC4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[4].stateImage"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E6BBF4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E7BFB4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A274EC",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    578
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    578
+   ],
+   "owner": "42E7AF4C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40A2723C",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    553
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    553
+   ],
+   "owner": "42E7BFB4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E6EE7C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E7A8BC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A270E4",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    528
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    528
+   ],
+   "owner": "42E7A8BC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E7F004",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E7AF4C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E80CE4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E8899C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A27644",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    603
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    603
+   ],
+   "owner": "42E8899C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E7FC0C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E88CE4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A2779C",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    628
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    628
+   ],
+   "owner": "42E88CE4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "429B9844",
+   "class": "drawable:ninepart",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "eoffset": [
+    669.5,
+    354
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "kind": "drawable",
+   "method_count": 29,
+   "offset": [
+    669.5,
+    354
+   ],
+   "owner": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.selectedImage"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E6D66C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E7DD3C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E6AB1C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37004BEC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A26B84",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    403
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    403
+   ],
+   "owner": "37002B1C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E6D8D4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37002B1C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A26CDC",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    428
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    428
+   ],
+   "owner": "37005C54",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40A26F8C",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    503
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    503
+   ],
+   "owner": "42E7DD3C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E72104",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E6F81C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D48FC4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[4].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A26A2C",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    378
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    378
+   ],
+   "owner": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40A26E34",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    478
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    478
+   ],
+   "owner": "37004BEC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E6C7FC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37003B84",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E6B4BC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37005C54",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A278F4",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    653
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    653
+   ],
+   "owner": "42E87C7C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "36291304",
+   "class": "drawable:image",
+   "content_extent": [
+    129,
+    35
+   ],
+   "eextent": [
+    129,
+    35
+   ],
+   "eoffset": [
+    31,
+    1044
+   ],
+   "extent": [
+    129,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    31,
+    1044
+   ],
+   "owner": "36E46D14",
+   "paths": [
+    "backgroundWindow.exitButton.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E7068C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "36E49B54",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E71C34",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "36E4958C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E6FCEC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "36E48FC4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "36293094",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    0,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    1024
+   ],
+   "owner": "36E46D14",
+   "paths": [
+    "backgroundWindow.exitButton.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E71E9C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "42E73A0C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E725D4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D485EC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[2].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E7236C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D482A4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[1].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "42E6F5B4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D48934",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[3].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216D054",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D49CE4",
+   "paths": [
+    "backgroundWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216DC5C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D49654",
+   "paths": [
+    "backgroundWindow.bgWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216D524",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "36E42D7C",
+   "paths": [
+    "backgroundWindow.enterWorldBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40A27394",
+   "class": "drawable:image",
+   "content_extent": [
+    541,
+    3
+   ],
+   "eextent": [
+    541,
+    3
+   ],
+   "eoffset": [
+    689.5,
+    453
+   ],
+   "extent": [
+    541,
+    3
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    689.5,
+    453
+   ],
+   "owner": "37003B84",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4].line"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "42E80F4C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42E87C7C",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3629247C",
+   "class": "drawable:image",
+   "content_extent": [
+    200,
+    65
+   ],
+   "eextent": [
+    200,
+    65
+   ],
+   "eoffset": [
+    860,
+    686
+   ],
+   "extent": [
+    200,
+    65
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    860,
+    686
+   ],
+   "owner": "36E42D7C",
+   "paths": [
+    "backgroundWindow.enterWorldBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "3627A824",
+   "class": "drawable:image",
+   "content_extent": [
+    28,
+    27
+   ],
+   "eextent": [
+    28,
+    27
+   ],
+   "eoffset": [
+    1009.5,
+    271
+   ],
+   "extent": [
+    28,
+    27
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1009.5,
+    271
+   ],
+   "owner": "36E4674C",
+   "paths": [
+    "backgroundWindow.refreshButton.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "362929DC",
+   "class": "drawable:image",
+   "content_extent": [
+    1920,
+    1200
+   ],
+   "eextent": [
+    1920,
+    1200
+   ],
+   "eoffset": [
+    0,
+    -60
+   ],
+   "extent": [
+    1920,
+    1200
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    -60
+   ],
+   "owner": "42D49654",
+   "paths": [
+    "backgroundWindow.bgWindow.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "371668B4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37154384",
+   "paths": [
+    "tooltip.rootWnd.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216E5FC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "36E46D14",
+   "paths": [
+    "backgroundWindow.exitButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216F204",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "42D4999C",
+   "paths": [
+    "backgroundWindow.bottomPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216E864",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "36E4674C",
+   "paths": [
+    "backgroundWindow.refreshButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4216D78C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "42E5B42C",
+   "paths": [
+    "backgroundWindow.warningLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37154384",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    5,
+    5
+   ],
+   "eextent": [
+    5,
+    5
+   ],
+   "enabled": true,
+   "eoffset": [
+    -100,
+    0
+   ],
+   "extent": [
+    5,
+    5
+   ],
+   "id": "42c",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    -100,
+    0
+   ],
+   "order": 1068,
+   "parent": "UIParent",
+   "paths": [
+    "tooltip.rootWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D49CE4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "582",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": true,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1410,
+   "parent": "UIParent",
+   "paths": [
+    "backgroundWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D49654",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "584",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1412,
+   "parent": "UIParent",
+   "paths": [
+    "backgroundWindow.bgWindow",
+    "backgroundWindow.bgWindow.OnScale^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "36FFCF44",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    581,
+    352
+   ],
+   "eextent": [
+    581,
+    352
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    304
+   ],
+   "extent": [
+    581,
+    352
+   ],
+   "id": "586",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    304
+   ],
+   "order": 1414,
+   "parent": "42D49CE4",
+   "paths": [
+    "backgroundWindow.mainWindow",
+    "backgroundWindow.centerWindow",
+    "UpdateQueueWindow^mainWindow",
+    "CreateWorldList^mainWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "36E42D7C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    200,
+    65
+   ],
+   "disabledbackground": "36292884",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    200,
+    65
+   ],
+   "enabled": true,
+   "eoffset": [
+    860,
+    686
+   ],
+   "extent": [
+    200,
+    65
+   ],
+   "highlightbackground": "362925D4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "id": "587",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3629247C",
+   "normalcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "offset": [
+    860,
+    686
+   ],
+   "order": 1415,
+   "parent": "42D49CE4",
+   "paths": [
+    "backgroundWindow.enterWorldBtn",
+    "backgroundWindow.mainWindow.InsertDataInfo^enterWorldBtn",
+    "backgroundWindow.mainWindow.worldList[1].SelChangedProc^enterWorldBtn"
+   ],
+   "pushedbackground": "3629272C",
+   "pushedcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Connect",
+   "visible": true
+  },
+  {
+   "addr": "36E4674C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    28,
+    27
+   ],
+   "disabledbackground": "36292DE4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    28,
+    27
+   ],
+   "enabled": true,
+   "eoffset": [
+    1009.5,
+    271
+   ],
+   "extent": [
+    28,
+    27
+   ],
+   "highlightbackground": "3627A97C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "588",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3627A824",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1009.5,
+    271
+   ],
+   "order": 1416,
+   "parent": "42D49CE4",
+   "paths": [
+    "backgroundWindow.refreshButton"
+   ],
+   "pushedbackground": "36292C8C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D4999C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    21
+   ],
+   "eextent": [
+    1920,
+    21
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1059
+   ],
+   "extent": [
+    1920,
+    21
+   ],
+   "id": "58a",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    1059
+   ],
+   "order": 1418,
+   "parent": "42D49CE4",
+   "paths": [
+    "backgroundWindow.bottomPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "36E46D14",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "362911AC",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "3627B2E4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "58b",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "36293094",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    0,
+    1024
+   ],
+   "order": 1419,
+   "parent": "42D4999C",
+   "paths": [
+    "backgroundWindow.exitButton"
+   ],
+   "pushedbackground": "36290C4C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E5B42C",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    800,
+    18
+   ],
+   "eextent": [
+    800,
+    18
+   ],
+   "enabled": true,
+   "eoffset": [
+    560,
+    1052
+   ],
+   "extent": [
+    800,
+    18
+   ],
+   "id": "58c",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 577,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    560,
+    1052
+   ],
+   "order": 1420,
+   "parent": "42D49CE4",
+   "paths": [
+    "backgroundWindow.warningLabel",
+    "backgroundWindow.warningLabel.UpdateWarningText^warningLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 18,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "36FFADE4",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    603,
+    352
+   ],
+   "eextent": [
+    603,
+    352
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    304
+   ],
+   "extent": [
+    603,
+    352
+   ],
+   "id": "599",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    304
+   ],
+   "order": 1433,
+   "parent": "36FFCF44",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1]",
+    "backgroundWindow.mainWindow.serverList[1]",
+    "backgroundWindow.mainWindow.worldList[1].InsertRows^frame",
+    "backgroundWindow.mainWindow.worldList[1].SetColumnHeight^frame"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42120884",
+   "alpha": 1,
+   "class": "listctrl",
+   "content_extent": [
+    581,
+    352
+   ],
+   "eextent": [
+    581,
+    352
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    304
+   ],
+   "extent": [
+    581,
+    352
+   ],
+   "id": "59a",
+   "kind": "widget",
+   "method_count": 110,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    304
+   ],
+   "order": 1434,
+   "parent": "36FFADE4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "36E48FC4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    50
+   ],
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    100,
+    50
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    304
+   ],
+   "extent": [
+    100,
+    50
+   ],
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "id": "5a0",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    669.5,
+    304
+   ],
+   "order": 1440,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[1]"
+   ],
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Server",
+   "visible": true
+  },
+  {
+   "addr": "36E4958C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    130,
+    50
+   ],
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    130,
+    50
+   ],
+   "enabled": true,
+   "eoffset": [
+    769.5,
+    304
+   ],
+   "extent": [
+    130,
+    50
+   ],
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "id": "5a1",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    769.5,
+    304
+   ],
+   "order": 1441,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[2]"
+   ],
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Characters",
+   "visible": true
+  },
+  {
+   "addr": "36E49B54",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    210,
+    50
+   ],
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    210,
+    50
+   ],
+   "enabled": true,
+   "eoffset": [
+    899.5,
+    304
+   ],
+   "extent": [
+    210,
+    50
+   ],
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "id": "5a2",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    899.5,
+    304
+   ],
+   "order": 1442,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[3]"
+   ],
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Restrictions",
+   "visible": true
+  },
+  {
+   "addr": "42E73A0C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    140,
+    50
+   ],
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    140,
+    50
+   ],
+   "enabled": true,
+   "eoffset": [
+    1109.5,
+    304
+   ],
+   "extent": [
+    140,
+    50
+   ],
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "id": "5a3",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1109.5,
+    304
+   ],
+   "order": 1443,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.column[4]"
+   ],
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Status",
+   "visible": true
+  },
+  {
+   "addr": "42D4A374",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    354
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5a4",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    354
+   ],
+   "order": 1444,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D482A4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    100,
+    25
+   ],
+   "eextent": [
+    100,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    354
+   ],
+   "extent": [
+    100,
+    25
+   ],
+   "id": "5a5",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    354
+   ],
+   "order": 1445,
+   "parent": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[1]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D485EC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    130,
+    25
+   ],
+   "eextent": [
+    130,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    769.5,
+    354
+   ],
+   "extent": [
+    130,
+    25
+   ],
+   "id": "5a6",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    769.5,
+    354
+   ],
+   "order": 1446,
+   "parent": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[2]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D48934",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    210,
+    25
+   ],
+   "eextent": [
+    210,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    899.5,
+    354
+   ],
+   "extent": [
+    210,
+    25
+   ],
+   "id": "5a7",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    899.5,
+    354
+   ],
+   "order": 1447,
+   "parent": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[3]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42D48FC4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    140,
+    25
+   ],
+   "eextent": [
+    140,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    1109.5,
+    354
+   ],
+   "extent": [
+    140,
+    25
+   ],
+   "id": "5a8",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    1109.5,
+    354
+   ],
+   "order": 1448,
+   "parent": "42D4A374",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[4]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37002B1C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    379
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5a9",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    379
+   ],
+   "order": 1449,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[2]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37005C54",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    404
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5ae",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    404
+   ],
+   "order": 1454,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[3]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37003B84",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    429
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5b3",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    429
+   ],
+   "order": 1459,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[4]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37004BEC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    454
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5b8",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    454
+   ],
+   "order": 1464,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[5]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E7DD3C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    479
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5bd",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    479
+   ],
+   "order": 1469,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[6]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E7A8BC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    504
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5c2",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    504
+   ],
+   "order": 1474,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[7]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E7BFB4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    529
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5c7",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    529
+   ],
+   "order": 1479,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[8]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E7AF4C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    554
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5cc",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    554
+   ],
+   "order": 1484,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[9]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E8899C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    579
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5d1",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    579
+   ],
+   "order": 1489,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[10]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E88CE4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    604
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5d6",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    604
+   ],
+   "order": 1494,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[11]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "42E87C7C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    581,
+    25
+   ],
+   "eextent": [
+    581,
+    25
+   ],
+   "enabled": true,
+   "eoffset": [
+    669.5,
+    629
+   ],
+   "extent": [
+    581,
+    25
+   ],
+   "id": "5db",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    669.5,
+    629
+   ],
+   "order": 1499,
+   "parent": "42120884",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[12]"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4210F1B4",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    0,
+    0
+   ],
+   "eextent": [
+    0,
+    0
+   ],
+   "enabled": true,
+   "eoffset": [
+    689.5,
+    366.5
+   ],
+   "extent": [
+    0,
+    0
+   ],
+   "id": "5e0",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    689.5,
+    366.5
+   ],
+   "order": 1504,
+   "parent": "42D482A4",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[1].nameLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Lane-bevy",
+   "visible": true
+  },
+  {
+   "addr": "36FFD79C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    14,
+    22
+   ],
+   "eextent": [
+    14,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    827.5,
+    355.5
+   ],
+   "extent": [
+    14,
+    22
+   ],
+   "id": "5e1",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    827.5,
+    355.5
+   ],
+   "order": 1505,
+   "parent": "42D485EC",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[2].iconFrame"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "36FFDA64",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    0,
+    21
+   ],
+   "eextent": [
+    0,
+    21
+   ],
+   "enabled": true,
+   "eoffset": [
+    1004.5,
+    356
+   ],
+   "extent": [
+    0,
+    21
+   ],
+   "id": "5e2",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1004.5,
+    356
+   ],
+   "order": 1506,
+   "parent": "42D48934",
+   "paths": [
+    "backgroundWindow.mainWindow.worldList[1].listCtrl.items[1].subItems[3].iconFrame"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  }
+ ]
+}

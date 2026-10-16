@@ -1,0 +1,2934 @@
+{
+ "hidden_named_total": 45,
+ "hidden_named_widgets": [
+  "charButtonList[1].deleteWaitingLabel|label|391x0",
+  "charButtonList[1].detailInfo.checkBox.textButton|button|86x16|selfvisible",
+  "charButtonList[1].detailInfo.checkBox|checkbutton|16x16",
+  "charButtonList[1].detailInfo.laborpower_textbox|textbox|100x20",
+  "charButtonList[1].openBtn.infoLabel|label|280x22|selfvisible",
+  "charButtonList[1].openBtn|button|391x70",
+  "charButtonList[1].serverTransferIcon|emptywidget|98x23",
+  "charButtonList[2].closeBtn.infoLabel|label|280x22|selfvisible",
+  "charButtonList[2].closeBtn|button|391x70",
+  "charButtonList[2].deleteWaitingLabel|label|391x0",
+  "charButtonList[2].detailInfo.checkBox.textButton|button|86x16|selfvisible",
+  "charButtonList[2].detailInfo.checkBox|checkbutton|16x16|selfvisible",
+  "charButtonList[2].detailInfo.laborpower_textbox|textbox|100x20|selfvisible",
+  "charButtonList[2].detailInfo.textbox|textbox|388x0|selfvisible",
+  "charButtonList[2].detailInfo|emptywidget|388x0",
+  "charButtonList[2].serverTransferIcon|emptywidget|98x23",
+  "charButtonList[3].closeBtn.infoLabel|label|280x22|selfvisible",
+  "charButtonList[3].closeBtn|button|391x70",
+  "charButtonList[3].deleteWaitingLabel|label|391x0",
+  "charButtonList[3].detailInfo.checkBox.textButton|button|86x16|selfvisible",
+  "charButtonList[3].detailInfo.checkBox|checkbutton|16x16|selfvisible",
+  "charButtonList[3].detailInfo.laborpower_textbox|textbox|100x20|selfvisible",
+  "charButtonList[3].detailInfo.textbox|textbox|388x0|selfvisible",
+  "charButtonList[3].detailInfo|emptywidget|388x0",
+  "charButtonList[3].serverTransferIcon|emptywidget|98x23",
+  "charButtonList[4].closeBtn.infoLabel|label|280x22|selfvisible",
+  "charButtonList[4].closeBtn|button|391x70",
+  "charButtonList[4].deleteWaitingLabel|label|391x0",
+  "charButtonList[4].detailInfo.checkBox.textButton|button|86x16|selfvisible",
+  "charButtonList[4].detailInfo.checkBox|checkbutton|16x16|selfvisible",
+  "charButtonList[4].detailInfo.laborpower_textbox|textbox|100x20|selfvisible",
+  "charButtonList[4].detailInfo.textbox|textbox|388x0|selfvisible",
+  "charButtonList[4].detailInfo|emptywidget|388x0",
+  "charButtonList[4].serverTransferIcon|emptywidget|98x23",
+  "characterSelectWindow.authMessage|textbox|250x7",
+  "characterSelectWindow.bgWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "characterSelectWindow.bottomPanel.deleteWaitingButton|button|171x57",
+  "characterSelectWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "characterSelectWindow.premiumLabel|label|0x22",
+  "characterSelectWindow.queueWindow.normalLengthText|textbox|500x15|selfvisible",
+  "characterSelectWindow.queueWindow.premiumLengthText|textbox|500x15|selfvisible",
+  "characterSelectWindow.queueWindow.userTypeText|textbox|500x22|selfvisible",
+  "characterSelectWindow.queueWindow.waitingRemain|textbox|500x18|selfvisible",
+  "characterSelectWindow.queueWindow.waitingText|textbox|500x22|selfvisible",
+  "characterSelectWindow.queueWindow|emptywidget|1000x100"
+ ],
+ "meta": {
+  "captured": "2026-10-16 15:37:11",
+  "fps": 22,
+  "hooks_active": false,
+  "log_entries": 0,
+  "objects_shown": 86,
+  "objects_total": 1365,
+  "screen_height": 1080,
+  "screen_name": "character_select/1_character",
+  "screen_width": 1920,
+  "screenshot": {
+   "file": "real.png",
+   "height": 1080,
+   "width": 1920
+  },
+  "stage": 4,
+  "ui_scale": 1
+ },
+ "widgets": [
+  {
+   "addr": "4E15D5CC",
+   "class": "drawable:image",
+   "content_extent": [
+    238,
+    96
+   ],
+   "eextent": [
+    238,
+    96
+   ],
+   "eoffset": [
+    1672,
+    985
+   ],
+   "extent": [
+    238,
+    96
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1672,
+    985
+   ],
+   "owner": "432DB39C",
+   "paths": [
+    "characterSelectWindow.bottomPanel.startButton.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E1684EC",
+   "class": "drawable:image",
+   "content_extent": [
+    114,
+    35
+   ],
+   "eextent": [
+    114,
+    35
+   ],
+   "eoffset": [
+    385.5,
+    1047
+   ],
+   "extent": [
+    114,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    385.5,
+    1047
+   ],
+   "owner": "432D9C7C",
+   "paths": [
+    "bottomPanelLeftButtons[2].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E169FCC",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    171,
+    1025
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    171,
+    1025
+   ],
+   "owner": "432D6874",
+   "paths": [
+    "bottomPanelLeftButtons[1].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E168A4C",
+   "class": "drawable:image",
+   "content_extent": [
+    24,
+    27
+   ],
+   "eextent": [
+    24,
+    27
+   ],
+   "eoffset": [
+    191,
+    1051
+   ],
+   "extent": [
+    24,
+    27
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    191,
+    1051
+   ],
+   "owner": "432D6874",
+   "paths": [
+    "bottomPanelLeftButtons[1].add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E168FAC",
+   "class": "drawable:image",
+   "content_extent": [
+    129,
+    35
+   ],
+   "eextent": [
+    129,
+    35
+   ],
+   "eoffset": [
+    207,
+    1047
+   ],
+   "extent": [
+    129,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    207,
+    1047
+   ],
+   "owner": "432D6874",
+   "paths": [
+    "bottomPanelLeftButtons[1].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E169A6C",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    342,
+    1026
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    342,
+    1026
+   ],
+   "owner": "432D9C7C",
+   "paths": [
+    "bottomPanelLeftButtons[2].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E1600CC",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    513,
+    1027
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    513,
+    1027
+   ],
+   "owner": "432DE1DC",
+   "paths": [
+    "bottomPanelLeftButtons[3].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E15FB6C",
+   "class": "drawable:image",
+   "content_extent": [
+    133,
+    35
+   ],
+   "eextent": [
+    133,
+    35
+   ],
+   "eoffset": [
+    552,
+    1049
+   ],
+   "extent": [
+    133,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    552,
+    1049
+   ],
+   "owner": "432DE1DC",
+   "paths": [
+    "bottomPanelLeftButtons[3].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E15E5EC",
+   "class": "drawable:image",
+   "content_extent": [
+    98,
+    35
+   ],
+   "eextent": [
+    98,
+    35
+   ],
+   "eoffset": [
+    735.5,
+    1047
+   ],
+   "extent": [
+    98,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    735.5,
+    1047
+   ],
+   "owner": "432DCABC",
+   "paths": [
+    "bottomPanelLeftButtons[4].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E15F60C",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    684,
+    1028
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    684,
+    1028
+   ],
+   "owner": "432DCABC",
+   "paths": [
+    "bottomPanelLeftButtons[4].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CC89A7C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432DB39C",
+   "paths": [
+    "characterSelectWindow.bottomPanel.startButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CD225AC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "498E280C",
+   "paths": [
+    "charButtonList[3].openBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC8B9C4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432DE1DC",
+   "paths": [
+    "bottomPanelLeftButtons[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E15D06C",
+   "class": "drawable:image",
+   "content_extent": [
+    107,
+    52
+   ],
+   "eextent": [
+    107,
+    52
+   ],
+   "eoffset": [
+    1772.5,
+    1026
+   ],
+   "extent": [
+    107,
+    52
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1772.5,
+    1026
+   ],
+   "owner": "432DB39C",
+   "paths": [
+    "characterSelectWindow.bottomPanel.startButton.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CD20D9C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "432D855C",
+   "paths": [
+    "charButtonList[4].openBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC8ADBC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432DCABC",
+   "paths": [
+    "bottomPanelLeftButtons[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "36C90BFC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "498DFF94",
+   "paths": [
+    "charButtonList[1].closeBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC889A4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432DB964",
+   "paths": [
+    "bottomPanelLeftButtons[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CD2341C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "498E0B24",
+   "paths": [
+    "charButtonList[2].openBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC8B4F4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432D6874",
+   "paths": [
+    "bottomPanelLeftButtons[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E15EB4C",
+   "class": "drawable:image",
+   "content_extent": [
+    107,
+    35
+   ],
+   "eextent": [
+    107,
+    35
+   ],
+   "eoffset": [
+    907,
+    1050
+   ],
+   "extent": [
+    107,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    907,
+    1050
+   ],
+   "owner": "432DB964",
+   "paths": [
+    "bottomPanelLeftButtons[5].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "36C8F8BC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4741F04C",
+   "paths": [
+    "charButtonList[1].closeBtn.infoLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E171E7C",
+   "class": "drawable:image",
+   "content_extent": [
+    347,
+    62
+   ],
+   "eextent": [
+    347,
+    62
+   ],
+   "eoffset": [
+    1558,
+    324
+   ],
+   "extent": [
+    347,
+    62
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1558,
+    324
+   ],
+   "owner": "498E280C",
+   "paths": [
+    "charButtonList[3].openBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E1713BC",
+   "class": "drawable:image",
+   "content_extent": [
+    59,
+    59
+   ],
+   "eextent": [
+    59,
+    59
+   ],
+   "eoffset": [
+    1539,
+    325.5
+   ],
+   "extent": [
+    59,
+    59
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1539,
+    325.5
+   ],
+   "owner": "498E280C",
+   "paths": [
+    "charButtonList[3].openBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E17191C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1514,
+    303.5
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1514,
+    303.5
+   ],
+   "owner": "498E280C",
+   "paths": [
+    "charButtonList[3].openBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CD23B54",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4F4C848C",
+   "paths": [
+    "charButtonList[4].openBtn.infoLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E16BC04",
+   "class": "drawable:image",
+   "content_extent": [
+    59,
+    59
+   ],
+   "eextent": [
+    59,
+    59
+   ],
+   "eoffset": [
+    1539,
+    430.5
+   ],
+   "extent": [
+    59,
+    59
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1539,
+    430.5
+   ],
+   "owner": "432D855C",
+   "paths": [
+    "charButtonList[4].openBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E16BAAC",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1514,
+    408.5
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1514,
+    408.5
+   ],
+   "owner": "432D855C",
+   "paths": [
+    "charButtonList[4].openBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E16C6C4",
+   "class": "drawable:image",
+   "content_extent": [
+    347,
+    62
+   ],
+   "eextent": [
+    347,
+    62
+   ],
+   "eoffset": [
+    1558,
+    429
+   ],
+   "extent": [
+    347,
+    62
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1558,
+    429
+   ],
+   "owner": "432D855C",
+   "paths": [
+    "charButtonList[4].openBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E15DB2C",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    855,
+    1029
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    855,
+    1029
+   ],
+   "owner": "432DB964",
+   "paths": [
+    "bottomPanelLeftButtons[5].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CD23684",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4F4CA5A4",
+   "paths": [
+    "charButtonList[3].openBtn.infoLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E173EBC",
+   "class": "drawable:image",
+   "content_extent": [
+    59,
+    59
+   ],
+   "eextent": [
+    59,
+    59
+   ],
+   "eoffset": [
+    1539,
+    220.5
+   ],
+   "extent": [
+    59,
+    59
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1539,
+    220.5
+   ],
+   "owner": "498E0B24",
+   "paths": [
+    "charButtonList[2].openBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40C28534",
+   "class": "drawable:image",
+   "content_extent": [
+    79,
+    89
+   ],
+   "eextent": [
+    79,
+    89
+   ],
+   "eoffset": [
+    1501,
+    10.5
+   ],
+   "extent": [
+    79,
+    89
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1501,
+    10.5
+   ],
+   "owner": "498DFF94",
+   "paths": [
+    "charButtonList[1].closeBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40C17064",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1484,
+    23.5
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1484,
+    23.5
+   ],
+   "owner": "498DFF94",
+   "paths": [
+    "charButtonList[1].closeBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E175034",
+   "class": "drawable:image",
+   "content_extent": [
+    347,
+    62
+   ],
+   "eextent": [
+    347,
+    62
+   ],
+   "eoffset": [
+    1558,
+    219
+   ],
+   "extent": [
+    347,
+    62
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1558,
+    219
+   ],
+   "owner": "498E0B24",
+   "paths": [
+    "charButtonList[2].openBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40C1A21C",
+   "class": "drawable:image",
+   "content_extent": [
+    347,
+    62
+   ],
+   "eextent": [
+    347,
+    62
+   ],
+   "eoffset": [
+    1528,
+    44
+   ],
+   "extent": [
+    347,
+    62
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1528,
+    44
+   ],
+   "owner": "498DFF94",
+   "paths": [
+    "charButtonList[1].closeBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CD21004",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4F4C6E7C",
+   "paths": [
+    "charButtonList[2].openBtn.infoLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "36C8E0AC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DE22FB4",
+   "paths": [
+    "charButtonList[1].detailInfo.textbox.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E17441C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1514,
+    198.5
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1514,
+    198.5
+   ],
+   "owner": "498E0B24",
+   "paths": [
+    "charButtonList[2].openBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4CCCC354",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3716B694",
+   "paths": [
+    "tooltip.rootWnd.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC87D9C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "432D9C7C",
+   "paths": [
+    "bottomPanelLeftButtons[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40C19CBC",
+   "class": "drawable:image",
+   "content_extent": [
+    1920,
+    1200
+   ],
+   "eextent": [
+    1920,
+    1200
+   ],
+   "eoffset": [
+    0,
+    -60
+   ],
+   "extent": [
+    1920,
+    1200
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    -60
+   ],
+   "owner": "3DDBCB8C",
+   "paths": [
+    "characterSelectWindow.bgWindow.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "36C8F3EC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4308900C",
+   "paths": [
+    "charButtonList[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CD22A7C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4CAC01BC",
+   "paths": [
+    "charButtonList[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CD20B34",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4CC9EA34",
+   "paths": [
+    "charButtonList[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "36C8D23C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3E1C9F44",
+   "paths": [
+    "charButtonList[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37131A94",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4741E544",
+   "paths": [
+    "characterSelectWindow.serverName.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40C1B8F4",
+   "class": "drawable:image",
+   "content_extent": [
+    20,
+    26
+   ],
+   "eextent": [
+    20,
+    26
+   ],
+   "eoffset": [
+    1835,
+    61
+   ],
+   "extent": [
+    20,
+    26
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1835,
+    61
+   ],
+   "owner": "3E1C9F44",
+   "paths": [
+    "charButtonList[1].aniTexture"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "37133EAC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3713269C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DDBC4FC",
+   "paths": [
+    "characterSelectWindow.rightPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4CC8A8EC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D1BDCAC",
+   "paths": [
+    "UpdateList^chInfoWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "371304EC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DE246C4",
+   "paths": [
+    "characterSelectWindow.laborpower_label.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "371339DC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DE2524C",
+   "paths": [
+    "characterSelectWindow.bmMileage.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3713135C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DDBC1B4",
+   "paths": [
+    "characterSelectWindow.bottomPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37134114",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3DDBCB8C",
+   "paths": [
+    "characterSelectWindow.bgWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3716B694",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    5,
+    5
+   ],
+   "eextent": [
+    5,
+    5
+   ],
+   "enabled": true,
+   "eoffset": [
+    -100,
+    0
+   ],
+   "extent": [
+    5,
+    5
+   ],
+   "id": "981",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    -100,
+    0
+   ],
+   "order": 2433,
+   "parent": "UIParent",
+   "paths": [
+    "tooltip.rootWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DDBBE6C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "ad7",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2775,
+   "parent": "UIParent",
+   "paths": [
+    "characterSelectWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DDBC4FC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    455,
+    1080
+   ],
+   "eextent": [
+    455,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    1465,
+    0
+   ],
+   "extent": [
+    455,
+    1080
+   ],
+   "id": "ad9",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    1465,
+    0
+   ],
+   "order": 2777,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.rightPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DDBC1B4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    21
+   ],
+   "eextent": [
+    1920,
+    21
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1059
+   ],
+   "extent": [
+    1920,
+    21
+   ],
+   "id": "ada",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    1059
+   ],
+   "order": 2778,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.bottomPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DDBCB8C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "adb",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2779,
+   "parent": "UIParent",
+   "paths": [
+    "characterSelectWindow.bgWindow",
+    "characterSelectWindow.bgWindow.OnScale^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4741E544",
+   "alpha": 0.699999988,
+   "class": "label",
+   "content_extent": [
+    73,
+    15
+   ],
+   "eextent": [
+    73,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    217,
+    12
+   ],
+   "extent": [
+    73,
+    15
+   ],
+   "id": "ae5",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    217,
+    12
+   ],
+   "order": 2789,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.serverName"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Lane-bevy",
+   "visible": true
+  },
+  {
+   "addr": "4CBE316C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    260,
+    15
+   ],
+   "eextent": [
+    260,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    830,
+    10
+   ],
+   "extent": [
+    260,
+    15
+   ],
+   "id": "ae6",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    830,
+    10
+   ],
+   "order": 2790,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.textFrame",
+    "characterSelectWindow.textFrame.SetValue^textFrame"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DE2524C",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    139,
+    15
+   ],
+   "eextent": [
+    139,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    830,
+    10
+   ],
+   "extent": [
+    139,
+    15
+   ],
+   "id": "ae7",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 132,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    830,
+    10
+   ],
+   "order": 2791,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.bmMileage"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 16,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "3DE246C4",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    111,
+    15
+   ],
+   "eextent": [
+    111,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    979,
+    10
+   ],
+   "extent": [
+    111,
+    15
+   ],
+   "id": "ae8",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 104,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    979,
+    10
+   ],
+   "order": 2792,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "characterSelectWindow.laborpower_label"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 16,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "3E1C9F44",
+   "alpha": 1,
+   "class": "folder",
+   "content_extent": [
+    391,
+    140
+   ],
+   "eextent": [
+    391,
+    140
+   ],
+   "enabled": true,
+   "eoffset": [
+    1484,
+    40
+   ],
+   "extent": [
+    391,
+    140
+   ],
+   "id": "aea",
+   "kind": "widget",
+   "method_count": 115,
+   "mouse_over": false,
+   "offset": [
+    1484,
+    40
+   ],
+   "order": 2794,
+   "parent": "3DDBC4FC",
+   "paths": [
+    "charButtonList[1]",
+    "charButtonList[1].Init^widget",
+    "charButtonList[1].closeBtn.folder",
+    "charButtonList[1].Update^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "498DFF94",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    391,
+    70
+   ],
+   "disabledbackground": "40C16F0C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1484,
+    40
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "highlightbackground": "40C1A374",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.882352948,
+     "g": 0.725490212,
+     "r": 0.490196079
+    }
+   ],
+   "id": "aeb",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40C1A21C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.843137264,
+     "g": 0.741176486,
+     "r": 0.592156887
+    }
+   ],
+   "offset": [
+    1484,
+    40
+   ],
+   "order": 2795,
+   "parent": "3E1C9F44",
+   "paths": [
+    "charButtonList[1].closeBtn"
+   ],
+   "pushedbackground": "40C1A4CC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.764705896,
+     "g": 0.619607866,
+     "r": 0.407843143
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Refone",
+   "visible": true
+  },
+  {
+   "addr": "4741F04C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    280,
+    22
+   ],
+   "eextent": [
+    280,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    1589,
+    50
+   ],
+   "extent": [
+    280,
+    22
+   ],
+   "id": "aec",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1589,
+    50
+   ],
+   "order": 2796,
+   "parent": "498DFF94",
+   "paths": [
+    "charButtonList[1].closeBtn.infoLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Lv1 Battlerage Novice",
+   "visible": true
+  },
+  {
+   "addr": "4CBE4D3C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    388,
+    70
+   ],
+   "eextent": [
+    388,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1487,
+    110
+   ],
+   "extent": [
+    388,
+    70
+   ],
+   "id": "af1",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1487,
+    110
+   ],
+   "order": 2801,
+   "parent": "3E1C9F44",
+   "paths": [
+    "charButtonList[1].detailInfo"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3DE22FB4",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    388,
+    54
+   ],
+   "eextent": [
+    388,
+    54
+   ],
+   "enabled": true,
+   "eoffset": [
+    1487,
+    115
+   ],
+   "extent": [
+    388,
+    54
+   ],
+   "id": "af2",
+   "inset": [
+    100,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 3,
+   "longest_line_width": 157,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    1487,
+    115
+   ],
+   "order": 2802,
+   "parent": "4CBE4D3C",
+   "paths": [
+    "charButtonList[1].detailInfo.textbox"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 54,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "4308900C",
+   "alpha": 1,
+   "class": "folder",
+   "content_extent": [
+    391,
+    70
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    215
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "id": "af7",
+   "kind": "widget",
+   "method_count": 115,
+   "mouse_over": false,
+   "offset": [
+    1514,
+    215
+   ],
+   "order": 2807,
+   "parent": "3DDBC4FC",
+   "paths": [
+    "charButtonList[2]",
+    "charButtonList[2].Init^widget",
+    "charButtonList[2].closeBtn.folder",
+    "charButtonList[2].Update^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "498E0B24",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    391,
+    70
+   ],
+   "disabledbackground": "4E174574",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    215
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "highlightbackground": "4E174EDC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.478431374,
+     "g": 0.65882355,
+     "r": 0.862745106
+    }
+   ],
+   "id": "afa",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E175034",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.564705908,
+     "g": 0.674509823,
+     "r": 0.80392158
+    }
+   ],
+   "offset": [
+    1514,
+    215
+   ],
+   "order": 2810,
+   "parent": "4308900C",
+   "paths": [
+    "charButtonList[2].openBtn"
+   ],
+   "pushedbackground": "4E174C2C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.423529416,
+     "g": 0.576470613,
+     "r": 0.749019623
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Create Character",
+   "visible": true
+  },
+  {
+   "addr": "4F4C6E7C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    280,
+    22
+   ],
+   "eextent": [
+    280,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    1619,
+    225
+   ],
+   "extent": [
+    280,
+    22
+   ],
+   "id": "afb",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1619,
+    225
+   ],
+   "order": 2811,
+   "parent": "498E0B24",
+   "paths": [
+    "charButtonList[2].openBtn.infoLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4CAC01BC",
+   "alpha": 1,
+   "class": "folder",
+   "content_extent": [
+    391,
+    70
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    320
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "id": "b04",
+   "kind": "widget",
+   "method_count": 115,
+   "mouse_over": false,
+   "offset": [
+    1514,
+    320
+   ],
+   "order": 2820,
+   "parent": "3DDBC4FC",
+   "paths": [
+    "charButtonList[3]",
+    "charButtonList[3].Init^widget",
+    "charButtonList[3].closeBtn.folder",
+    "charButtonList[3].Update^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "498E280C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    391,
+    70
+   ],
+   "disabledbackground": "4E171A74",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    320
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "highlightbackground": "4E171D24",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.478431374,
+     "g": 0.65882355,
+     "r": 0.862745106
+    }
+   ],
+   "id": "b07",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E171E7C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.564705908,
+     "g": 0.674509823,
+     "r": 0.80392158
+    }
+   ],
+   "offset": [
+    1514,
+    320
+   ],
+   "order": 2823,
+   "parent": "4CAC01BC",
+   "paths": [
+    "charButtonList[3].openBtn"
+   ],
+   "pushedbackground": "4E171BCC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.423529416,
+     "g": 0.576470613,
+     "r": 0.749019623
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Create Character",
+   "visible": true
+  },
+  {
+   "addr": "4F4CA5A4",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    280,
+    22
+   ],
+   "eextent": [
+    280,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    1619,
+    330
+   ],
+   "extent": [
+    280,
+    22
+   ],
+   "id": "b08",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1619,
+    330
+   ],
+   "order": 2824,
+   "parent": "498E280C",
+   "paths": [
+    "charButtonList[3].openBtn.infoLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4CC9EA34",
+   "alpha": 1,
+   "class": "folder",
+   "content_extent": [
+    391,
+    70
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    425
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "id": "b11",
+   "kind": "widget",
+   "method_count": 115,
+   "mouse_over": false,
+   "offset": [
+    1514,
+    425
+   ],
+   "order": 2833,
+   "parent": "3DDBC4FC",
+   "paths": [
+    "charButtonList[4]",
+    "charButtonList[4].Init^widget",
+    "charButtonList[4].closeBtn.folder",
+    "charButtonList[4].Update^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432D855C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    391,
+    70
+   ],
+   "disabledbackground": "4E16C2BC",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    391,
+    70
+   ],
+   "enabled": true,
+   "eoffset": [
+    1514,
+    425
+   ],
+   "extent": [
+    391,
+    70
+   ],
+   "highlightbackground": "4E16C56C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.478431374,
+     "g": 0.65882355,
+     "r": 0.862745106
+    }
+   ],
+   "id": "b14",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E16C6C4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.564705908,
+     "g": 0.674509823,
+     "r": 0.80392158
+    }
+   ],
+   "offset": [
+    1514,
+    425
+   ],
+   "order": 2836,
+   "parent": "4CC9EA34",
+   "paths": [
+    "charButtonList[4].openBtn"
+   ],
+   "pushedbackground": "4E16C414",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.423529416,
+     "g": 0.576470613,
+     "r": 0.749019623
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Create Character",
+   "visible": true
+  },
+  {
+   "addr": "4F4C848C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    280,
+    22
+   ],
+   "eextent": [
+    280,
+    22
+   ],
+   "enabled": true,
+   "eoffset": [
+    1619,
+    435
+   ],
+   "extent": [
+    280,
+    22
+   ],
+   "id": "b15",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1619,
+    435
+   ],
+   "order": 2837,
+   "parent": "432D855C",
+   "paths": [
+    "charButtonList[4].openBtn.infoLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432D6874",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "4E169104",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    171,
+    1025
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "4E169E74",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b1f",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E169FCC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    171,
+    1025
+   ],
+   "order": 2847,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "bottomPanelLeftButtons[1]",
+    "characterSelectWindow.bottomPanel.serverButton"
+   ],
+   "pushedbackground": "4E16925C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432D9C7C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "4E168644",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    342,
+    1026
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "4E169914",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b20",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E169A6C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    342,
+    1026
+   ],
+   "order": 2848,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "bottomPanelLeftButtons[2]",
+    "characterSelectWindow.bottomPanel.optionButton"
+   ],
+   "pushedbackground": "4E16879C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432DE1DC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "4E15FCC4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    513,
+    1027
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "4E15FF74",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b2e",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E1600CC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    513,
+    1027
+   ],
+   "order": 2862,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "bottomPanelLeftButtons[3]",
+    "characterSelectWindow.bottomPanel.addonButton"
+   ],
+   "pushedbackground": "4E15FE1C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432DCABC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "4E15F204",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    684,
+    1028
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "4E15F4B4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b2f",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E15F60C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    684,
+    1028
+   ],
+   "order": 2863,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "bottomPanelLeftButtons[4]",
+    "characterSelectWindow.bottomPanel.deleteButton",
+    "characterSelectWindow.UpdateUI_PreSelecteCharacterPeriod^deleteButton"
+   ],
+   "pushedbackground": "4E15F35C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432DB964",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "4E15D724",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    855,
+    1029
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "4E15D9D4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b31",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E15DB2C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    855,
+    1029
+   ],
+   "order": 2865,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "bottomPanelLeftButtons[5]",
+    "characterSelectWindow.bottomPanel.staffButton"
+   ],
+   "pushedbackground": "4E15D87C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "432DB39C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    238,
+    96
+   ],
+   "disabledbackground": "4E15D1C4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    238,
+    96
+   ],
+   "enabled": true,
+   "eoffset": [
+    1672,
+    985
+   ],
+   "extent": [
+    238,
+    96
+   ],
+   "highlightbackground": "4E15D474",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "b32",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4E15D5CC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1672,
+    985
+   ],
+   "order": 2866,
+   "parent": "3DDBC1B4",
+   "paths": [
+    "characterSelectWindow.bottomPanel.startButton"
+   ],
+   "pushedbackground": "4E15D31C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D1BDCAC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1,
+    1
+   ],
+   "eextent": [
+    1,
+    1
+   ],
+   "enabled": true,
+   "eoffset": [
+    959.5,
+    539.5
+   ],
+   "extent": [
+    1,
+    1
+   ],
+   "id": "b33",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    959.5,
+    539.5
+   ],
+   "order": 2867,
+   "parent": "3DDBBE6C",
+   "paths": [
+    "UpdateList^chInfoWindow",
+    "characterSelectWindow.infoWindow",
+    "characterSelectWindow.OnScale^chInfoWindow",
+    "UpdateList^chInfoWindow.chWindow.ReAnchor^infoWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4CBE5DEC",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    32,
+    32
+   ],
+   "eextent": [
+    32,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    928.433167,
+    604.575439
+   ],
+   "extent": [
+    32,
+    32
+   ],
+   "id": "b34",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    928.433167,
+    604.575439
+   ],
+   "order": 2868,
+   "parent": "4D1BDCAC",
+   "paths": [
+    "UpdateList^chInfoWindow.chWindow",
+    "UpdateList^chInfoWindow.ReAnchorChildWnd^chWindow",
+    "UpdateList^chInfoWindow.chWindow.ReAnchor^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  }
+ ]
+}
