@@ -100,6 +100,36 @@ impl WorldConfig {
     }
 }
 
+/// Main thread cost of the streaming systems in the last frame (ms), for diagnostics.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct WorldTimings {
+    stamps: [Option<std::time::Instant>; 5],
+    /// Deciding which cells to load / unload.
+    pub cells_ms: f32,
+    /// Turning finished cells into entities (meshes, cover atlas upload).
+    pub receive_ms: f32,
+    /// Terrain level of detail updates.
+    pub lod_ms: f32,
+    /// Object placement, model loading and sector spawning.
+    pub objects_ms: f32,
+}
+
+fn mark<const N: usize>(mut t: ResMut<WorldTimings>) {
+    let now = std::time::Instant::now();
+    t.stamps[N] = Some(now);
+    if N > 0 {
+        if let Some(prev) = t.stamps[N - 1] {
+            let ms = now.duration_since(prev).as_secs_f32() * 1000.0;
+            match N {
+                1 => t.cells_ms = ms,
+                2 => t.receive_ms = ms,
+                3 => t.lod_ms = ms,
+                _ => t.objects_ms = ms,
+            }
+        }
+    }
+}
+
 /// Marks the entity whose position drives streaming (default: the first `Camera3d`).
 #[derive(Component)]
 pub struct WorldFocus;
@@ -129,7 +159,22 @@ impl Plugin for AaWorldPlugin {
             .insert_resource(WorldInfo(Arc::new(world)))
             .init_resource::<crate::objects::ObjectState>()
             .insert_resource(Streamer { cells: HashMap::new(), loading: HashSet::new(), missing: HashSet::new(), tx, rx: Mutex::new(rx) })
-            .add_systems(Update, (stream_cells, receive_cells, update_patch_lod, crate::objects::stream_objects).chain());
+            .init_resource::<WorldTimings>()
+            .add_systems(
+                Update,
+                (
+                    mark::<0>,
+                    stream_cells,
+                    mark::<1>,
+                    receive_cells,
+                    mark::<2>,
+                    update_patch_lod,
+                    mark::<3>,
+                    crate::objects::stream_objects,
+                    mark::<4>,
+                )
+                    .chain(),
+            );
         crate::sky::build(app);
     }
 }

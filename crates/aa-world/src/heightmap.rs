@@ -17,7 +17,7 @@
 //! Only the 256 leaf nodes (64 m sectors) have data, `size` = 33 (sometimes 17 / 5 for flat
 //! sectors: resampled here). `data[x * size + y]` is x major; sector edges are shared with the
 //! neighbours. A sample is `height << 4 | surfaceType`: the low 4 bits select the surface layer
-//! (see [`crate::surface`]), the high 12 bits the height: `offset + (raw & 0xFFF0) * range` for
+//! (an index into the `SurfaceTypes` of the cell's `leveldata.xml`, kept in [`CellHeights::surface`], not rendered yet), the high 12 bits the height: `offset + (raw & 0xFFF0) * range` for
 //! node versions < 7 (all of 1.2's data); newer nodes use 5 cm integer steps.
 //!
 //! The node boxes are in the coordinates of the engine's 8x8-cell window (a cell sits at some

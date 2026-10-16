@@ -24,6 +24,7 @@ use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureViewDimension;
 use bevy::tasks::AsyncComputeTaskPool;
 
 use crate::coords::{CRY_TO_BEVY, CELL_SIZE, SECTOR_SIZE, bevy_to_cry, cell_origin, cry_to_bevy};
@@ -88,6 +89,8 @@ pub struct ObjectState {
     loading: HashSet<(i32, i32)>,
     sectors: HashMap<(i32, i32, u8, Kind), SectorState>,
     failed_models: HashSet<String>,
+    /// Loaded models (by `Arc` address) already checked for unusable textures.
+    checked_models: HashSet<usize>,
     groups: Option<Arc<VegGroups>>,
     groups_rx: Mutex<Receiver<Option<VegGroups>>>,
     groups_requested: bool,
@@ -129,6 +132,7 @@ impl ObjectState {
             loading: HashSet::new(),
             sectors: HashMap::new(),
             failed_models: HashSet::new(),
+            checked_models: HashSet::new(),
             groups: None,
             groups_rx: Mutex::new(groups_rx),
             groups_requested: false,
@@ -235,7 +239,7 @@ pub fn stream_objects(
     }
     if state.water_material.is_none() {
         state.water_material = Some(cry.materials.add(StandardMaterial {
-            base_color: Color::srgba(0.04, 0.17, 0.2, 0.8),
+            base_color: Color::srgba(0.04, 0.17, 0.2, 0.9),
             alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 0.45,
             reflectance: 0.12,
@@ -404,6 +408,15 @@ pub fn stream_objects(
                     continue;
                 }
             };
+            if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
+                // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
+                // that takes the whole app down, so such textures are dropped (aa-cry binds `Map="Environment"`
+                // cube maps as the base colour of some materials)
+                let stripped = strip_cube_textures(&mut cry, &loaded);
+                if stripped > 0 {
+                    debug!("aa-world: {path}: dropped {stripped} cube map texture(s) bound to 2D slots");
+                }
+            }
             let rel = Mat4::from_translation(-sector_origin) * matrix;
             for (ni, parts) in &loaded.parts {
                 let full = Mat4::from_quat(CRY_TO_BEVY) * rel * Mat4::from(node_world(&loaded.model, *ni));
@@ -428,6 +441,37 @@ pub fn stream_objects(
     state.stats.sectors = state.sectors.len();
     state.stats.entities = state.sectors.values().map(|s| s.spawned).sum();
     state.stats.spawn_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// Removes cube map images from the 2D texture slots of the model's materials; returns how many.
+fn strip_cube_textures(cry: &mut CryAssets, loaded: &LoadedModel) -> usize {
+    let is_cube = |images: &Assets<Image>, h: &Option<Handle<Image>>| {
+        h.as_ref()
+            .and_then(|h| images.get(h))
+            .and_then(|i| i.texture_view_descriptor.as_ref())
+            .is_some_and(|d| d.dimension == Some(TextureViewDimension::Cube))
+    };
+    let mut bad = Vec::new();
+    for part in loaded.parts.iter().flat_map(|(_, parts)| parts) {
+        if let Some(m) = cry.materials.get(&part.material) {
+            let slots = [&m.base_color_texture, &m.emissive_texture, &m.metallic_roughness_texture, &m.normal_map_texture, &m.occlusion_texture];
+            if slots.into_iter().any(|h| is_cube(&cry.images, h)) {
+                bad.push(part.material.clone());
+            }
+        }
+    }
+    let mut count = 0;
+    for handle in bad {
+        let Some(mut guard) = cry.materials.get_mut(&handle) else { continue };
+        let m: &mut StandardMaterial = &mut guard;
+        for slot in [&mut m.base_color_texture, &mut m.emissive_texture, &mut m.metallic_roughness_texture, &mut m.normal_map_texture, &mut m.occlusion_texture] {
+            if is_cube(&cry.images, slot) {
+                *slot = None;
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 fn bin_of(data: &CellObjectData, kind: Kind, sector: usize) -> &[u32] {
