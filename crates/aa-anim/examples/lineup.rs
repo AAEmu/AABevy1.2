@@ -23,10 +23,10 @@ fn main() {
         .run();
 }
 
-/// Overall light level of the showroom (`--light K`, default 0.5): the lights are in lux against
+/// Overall light level of the showroom (`--light K`, default 2): the lights are in lux against
 /// Bevy's default exposure, so full values wash the characters out.
 fn light_scale() -> f32 {
-    arg("--light").and_then(|v| v.parse().ok()).unwrap_or(0.5)
+    arg("--light").and_then(|v| v.parse().ok()).unwrap_or(2.0)
 }
 
 fn arg(name: &str) -> Option<String> {
@@ -105,14 +105,15 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     let fov: f32 = arg("--fov").and_then(|v| v.parse().ok()).unwrap_or(28.0);
     let mut camera = commands.spawn((
         Camera3d::default(),
+        aa_cry::stage::login_color_grading(),
         Projection::Perspective(PerspectiveProjection { fov: fov.to_radians(), ..default() }),
         Transform::from_translation(cam).looking_at(look, Vec3::Y),
     ));
     // the costume materials reference the game's own beach cubemap for reflections
     if arg("--no-env").is_none() {
-        if let Some(env) = cry.texture("textures/cubemaps/beach_blur2.dds", true) {
-            let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0) * light_scale();
-            camera.insert(GeneratedEnvironmentMapLight { environment_map: env, intensity, ..default() });
+        let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0) * light_scale();
+        if let Some(env) = aa_cry::stage::environment_light(&mut cry, aa_cry::stage::DEFAULT_ENVIRONMENT, intensity) {
+            camera.insert(env);
         }
     }
 }

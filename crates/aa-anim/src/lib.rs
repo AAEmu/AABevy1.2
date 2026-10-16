@@ -12,6 +12,7 @@ pub mod cal;
 pub mod cdf;
 pub mod character;
 pub mod custom;
+pub mod cut;
 pub mod db;
 pub mod dye;
 pub mod face;
