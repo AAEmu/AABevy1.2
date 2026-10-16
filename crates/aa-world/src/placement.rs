@@ -121,6 +121,13 @@ pub struct Water {
     pub depth: f32,
     pub uv_scale: [f32; 2],
     pub points: Vec<Vec3>,
+    /// `u32 @39`: the volume type (low 2 bits: 2 = area, 3 = river; higher bits are flags).
+    pub kind: u32,
+    /// `u32 @51`: index of the volume's material in the cell's material list (`game/materials/ocean/..`).
+    pub material: u32,
+    /// `f32 @55` and `f32[3] @59`: density and colour (linear) of the water's own fog.
+    pub fog_density: f32,
+    pub fog_color: [f32; 3],
 }
 
 /// Parses the payload of a type 11 item.
@@ -158,7 +165,11 @@ pub fn parse_water(b: &[u8]) -> Option<Water> {
         points.push(p);
         at += 12;
     }
-    (points.len() >= 3).then_some(Water { bbox, surface, depth, uv_scale, points })
+    let kind = u32_at(b, 39);
+    let material = u32_at(b, 51);
+    let fog_density = f32_at(b, 55);
+    let fog_color = [f32_at(b, 59), f32_at(b, 63), f32_at(b, 67)];
+    (points.len() >= 3).then_some(Water { bbox, surface, depth, uv_scale, points, kind, material, fog_density, fog_color })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -437,5 +448,9 @@ mod tests {
         assert!((w.surface - 127.0).abs() < 0.01, "{}", w.surface);
         assert_eq!(w.points.len(), 8);
         assert!(w.points.iter().all(|p| p.x > 170.0 && p.x < 260.0));
+        // its material and fog (header @39 volume type, @51 material index, @55 density, @59 colour)
+        assert_eq!(w.kind & 3, 2);
+        assert_eq!(o.materials[w.material as usize], "game/materials/ocean/lake_tank");
+        assert!((w.fog_density - 0.6).abs() < 1e-4 && w.fog_color.iter().all(|c| *c > 0.0 && *c < 0.01), "{:?}", w);
     }
 }

@@ -75,26 +75,64 @@ pub fn triangulate(p: &[Vec2]) -> Vec<[usize; 3]> {
     out
 }
 
-/// One mesh with all volumes of a cell, in bevy space relative to the cell origin
-/// (`cry (x, y, z) -> bevy (x, z, -y)`).
-pub fn water_mesh(waters: &[Water]) -> Option<Mesh> {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut uvs: Vec<[f32; 2]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    for w in waters {
-        let pts: Vec<Vec2> = w.points.iter().map(|p| Vec2::new(p.x, p.y)).collect();
-        let order = ring_order(&pts);
-        let ring: Vec<Vec2> = order.iter().map(|&i| pts[i]).collect();
-        let base = positions.len() as u32;
-        let scale = if w.uv_scale[0].abs() > 1e-3 { w.uv_scale[0].abs() } else { 0.2 };
-        for q in &ring {
-            positions.push([q.x, w.surface, -q.y]);
-            uvs.push([q.x * scale, q.y * scale]);
-        }
-        for t in triangulate(&ring) {
-            indices.extend(t.iter().map(|&i| base + i as u32));
+/// What makes two volumes look different: the material of the volume and its own fog (colour, density).
+/// Volumes of one cell with the same style share one mesh.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WaterStyle {
+    /// Material path (`game/materials/ocean/lilyut_lake01`), empty when the volume names none.
+    pub material: String,
+    /// `placement::Water::kind` (low 2 bits: 2 = area, 3 = river).
+    pub kind: u32,
+    /// Fog colour and density as bit patterns (so the style can be a map key).
+    fog: [u32; 4],
+}
+
+impl WaterStyle {
+    pub fn new(material: &str, kind: u32, fog_color: [f32; 3], fog_density: f32) -> WaterStyle {
+        let q = |v: f32| if v.is_finite() { v.to_bits() } else { 0 };
+        WaterStyle {
+            material: material.to_string(),
+            kind: kind & 3,
+            fog: [q(fog_color[0]), q(fog_color[1]), q(fog_color[2]), q(fog_density)],
         }
     }
+
+    /// The style of a volume; `materials` is the cell's material list.
+    pub fn of(w: &Water, materials: &[String]) -> WaterStyle {
+        let name = materials.get(w.material as usize).map(String::as_str).unwrap_or("");
+        WaterStyle::new(name, w.kind, w.fog_color, w.fog_density)
+    }
+
+    pub fn fog_color(&self) -> [f32; 3] {
+        [f32::from_bits(self.fog[0]), f32::from_bits(self.fog[1]), f32::from_bits(self.fog[2])]
+    }
+
+    pub fn fog_density(&self) -> f32 {
+        f32::from_bits(self.fog[3])
+    }
+
+    /// Rivers (flowing) rather than ponds and lakes.
+    pub fn is_river(&self) -> bool {
+        self.kind == 3
+    }
+}
+
+fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>, indices: &mut Vec<u32>) {
+    let pts: Vec<Vec2> = w.points.iter().map(|p| Vec2::new(p.x, p.y)).collect();
+    let order = ring_order(&pts);
+    let ring: Vec<Vec2> = order.iter().map(|&i| pts[i]).collect();
+    let base = positions.len() as u32;
+    let scale = if w.uv_scale[0].abs() > 1e-3 { w.uv_scale[0].abs() } else { 0.2 };
+    for q in &ring {
+        positions.push([q.x, w.surface, -q.y]);
+        uvs.push([q.x * scale, q.y * scale]);
+    }
+    for t in triangulate(&ring) {
+        indices.extend(t.iter().map(|&i| base + i as u32));
+    }
+}
+
+fn build_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, indices: Vec<u32>) -> Option<Mesh> {
     if indices.is_empty() {
         return None;
     }
@@ -107,6 +145,38 @@ pub fn water_mesh(waters: &[Water]) -> Option<Mesh> {
     Some(mesh)
 }
 
+/// One mesh with all volumes of a cell, in bevy space relative to the cell origin
+/// (`cry (x, y, z) -> bevy (x, z, -y)`).
+pub fn water_mesh(waters: &[Water]) -> Option<Mesh> {
+    let (mut positions, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new());
+    for w in waters {
+        push_volume(w, &mut positions, &mut uvs, &mut indices);
+    }
+    build_mesh(positions, uvs, indices)
+}
+
+/// The volumes of a cell grouped by [`WaterStyle`]: one mesh per style (same space as [`water_mesh`]).
+pub fn water_meshes(waters: &[Water], materials: &[String]) -> Vec<(WaterStyle, Mesh)> {
+    let mut groups: Vec<(WaterStyle, Vec<&Water>)> = Vec::new();
+    for w in waters {
+        let style = WaterStyle::of(w, materials);
+        match groups.iter_mut().find(|(s, _)| *s == style) {
+            Some((_, list)) => list.push(w),
+            None => groups.push((style, vec![w])),
+        }
+    }
+    groups
+        .into_iter()
+        .filter_map(|(style, list)| {
+            let (mut positions, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new());
+            for w in list {
+                push_volume(w, &mut positions, &mut uvs, &mut indices);
+            }
+            build_mesh(positions, uvs, indices).map(|m| (style, m))
+        })
+        .collect()
+}
+
 /// Axis aligned bounds of a polygon list, bevy space relative to the cell (for tests and culling).
 pub fn bounds(waters: &[Water]) -> Option<(Vec3, Vec3)> {
     let mut it = waters.iter().flat_map(|w| w.points.iter().map(|p| Vec3::new(p.x, w.surface, -p.y)));
@@ -117,6 +187,37 @@ pub fn bounds(waters: &[Water]) -> Option<(Vec3, Vec3)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn volume(x: f32, material: u32, density: f32) -> Water {
+        Water {
+            bbox: [x, 0.0, 9.0, x + 10.0, 10.0, 10.0],
+            surface: 10.0,
+            depth: 1.0,
+            uv_scale: [0.2, 0.2],
+            points: vec![Vec3::new(x, 0.0, 10.0), Vec3::new(x + 10.0, 0.0, 10.0), Vec3::new(x + 10.0, 10.0, 10.0), Vec3::new(x, 10.0, 10.0)],
+            kind: 2,
+            material,
+            fog_density: density,
+            fog_color: [0.01, 0.02, 0.03],
+        }
+    }
+
+    #[test]
+    fn meshes_are_grouped_by_style() {
+        let names = vec!["game/materials/ocean/a".to_string(), "game/materials/ocean/b".to_string()];
+        let waters = [volume(0.0, 0, 0.1), volume(20.0, 1, 0.1), volume(40.0, 0, 0.1), volume(60.0, 0, 0.5)];
+        let groups = water_meshes(&waters, &names);
+        // a / 0.1 (two volumes), b / 0.1, a / 0.5
+        assert_eq!(groups.len(), 3);
+        let first = groups.iter().find(|(s, _)| s.material.ends_with("/a") && s.fog_density() == 0.1).unwrap();
+        assert_eq!(first.1.count_vertices(), 8);
+        assert_eq!(first.0.fog_color(), [0.01, 0.02, 0.03]);
+        // a material index outside the list is "no material"
+        let g = water_meshes(&[volume(0.0, 9, 0.1)], &names);
+        assert_eq!(g[0].0.material, "");
+        // the single mesh variant still has everything
+        assert_eq!(water_mesh(&waters).unwrap().count_vertices(), 16);
+    }
 
     #[test]
     fn bow_tie_quad_is_reordered() {

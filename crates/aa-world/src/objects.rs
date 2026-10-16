@@ -9,7 +9,8 @@
 //!   [`VisibilityRange`] for its own distance, so the renderer drops far instances without our help;
 //! * level of detail: a sector is spawned with the `_lodN` / `$lodN` level for its distance band and respawned
 //!   when the band changes;
-//! * water volumes (rivers, lakes, ponds) of a cell are merged into one flat mesh per cell, built on the task;
+//! * water volumes (rivers, lakes, ponds) of a cell are merged into one flat mesh per water style (material and
+//!   fog), built on the task, drawn with `water_material::WaterMaterial`;
 //! * instancing: all parts of one model share mesh and material handles, which Bevy batches into instanced
 //!   draws. Parts are flattened (the node transform is baked) so an instance costs one entity per drawn part.
 
@@ -31,7 +32,8 @@ use crate::coords::{CRY_TO_BEVY, CELL_SIZE, SECTOR_SIZE, bevy_to_cry, cell_origi
 use crate::placement::{CellObjects, load_cell_objects};
 use crate::stream::{Streamer, WorldConfig, WorldFocus};
 use crate::vegetation::VegGroups;
-use crate::water::water_mesh;
+use crate::water::{WaterStyle, water_meshes};
+use crate::water_material::{WaterMaterial, WaterStyles};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -104,23 +106,15 @@ pub struct ObjectState {
     groups_requested: bool,
     tx: Sender<CellMessage>,
     rx: Mutex<Receiver<CellMessage>>,
-    /// One water mesh entity per cell.
-    water: HashMap<(i32, i32), Entity>,
-    water_material: Option<Handle<StandardMaterial>>,
+    /// The water mesh entities of each cell (one per water style).
+    water: HashMap<(i32, i32), Vec<Entity>>,
     groups_tx: Sender<Option<VegGroups>>,
     /// Counters for diagnostics.
     pub stats: ObjectStats,
 }
 
-/// What a placement task delivers: the binned data and the water mesh of the cell.
-type CellMessage = ((i32, i32), CellObjectData, Option<Mesh>);
-
-impl ObjectState {
-    /// The material shared by all water volumes (tinted by the environment each frame).
-    pub fn water_material(&self) -> Option<&Handle<StandardMaterial>> {
-        self.water_material.as_ref()
-    }
-}
+/// What a placement task delivers: the binned data and the water meshes of the cell.
+type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>);
 
 #[derive(Default, Clone, Debug)]
 pub struct ObjectStats {
@@ -147,7 +141,6 @@ impl ObjectState {
             tx,
             rx: Mutex::new(rx),
             water: HashMap::new(),
-            water_material: None,
             groups_tx,
             stats: ObjectStats::default(),
         }
@@ -208,6 +201,8 @@ pub fn stream_objects(
     streamer: Res<Streamer>,
     mut state: ResMut<ObjectState>,
     mut cry: CryAssets,
+    mut water_styles: ResMut<WaterStyles>,
+    mut water_materials: ResMut<Assets<WaterMaterial>>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
 ) {
@@ -242,19 +237,9 @@ pub fn stream_objects(
     state.cells.retain(|c, _| loaded.contains(c));
     let gone: Vec<_> = state.water.keys().filter(|c| !loaded.contains(c)).copied().collect();
     for c in gone {
-        if let Some(e) = state.water.remove(&c) {
+        for e in state.water.remove(&c).unwrap_or_default() {
             commands.entity(e).despawn();
         }
-    }
-    if state.water_material.is_none() {
-        state.water_material = Some(cry.materials.add(StandardMaterial {
-            base_color: Color::srgba(0.04, 0.17, 0.2, 0.9),
-            alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.45,
-            reflectance: 0.12,
-            cull_mode: None,
-            ..default()
-        }));
     }
     let dead: Vec<_> = state.sectors.keys().filter(|k| !loaded.contains(&(k.0, k.1))).copied().collect();
     for k in dead {
@@ -278,7 +263,7 @@ pub fn stream_objects(
         let threshold = cfg.vegetation_distance;
         pool.spawn(async move {
             let objects = load_cell_objects(&world, c.0, c.1);
-            let water = water_mesh(&objects.water);
+            let water = water_meshes(&objects.water, &objects.materials);
             let data = CellObjectData::new(objects, threshold);
             let _ = tx.send((c, data, water));
         })
@@ -293,16 +278,22 @@ pub fn stream_objects(
         if !loaded.contains(&c) {
             continue;
         }
-        if let (Some(mesh), Some(material)) = (water, state.water_material.clone()) {
-            let entity = commands
-                .spawn((
-                    Mesh3d(cry.meshes.add(mesh)),
-                    MeshMaterial3d(material),
-                    Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
-                    NotShadowCaster,
-                ))
-                .id();
-            state.water.insert(c, entity);
+        let mut entities = Vec::new();
+        for (style, mesh) in water {
+            let material = water_styles.material(&style, &mut water_materials, &mut cry.images);
+            entities.push(
+                commands
+                    .spawn((
+                        Mesh3d(cry.meshes.add(mesh)),
+                        MeshMaterial3d(material),
+                        Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
+                        NotShadowCaster,
+                    ))
+                    .id(),
+            );
+        }
+        if !entities.is_empty() {
+            state.water.insert(c, entities);
         }
         state.cells.insert(c, Arc::new(data));
     }
