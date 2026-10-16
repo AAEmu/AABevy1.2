@@ -148,8 +148,8 @@ fn stage_of(race: Race, gender: Gender) -> Stage {
         (Race::Elf, _) => (1007.0, 147.0, 1.89),
         (Race::Hariharan, Gender::Male) => (947.0, 164.0, 1.80),
         (Race::Hariharan, _) => (960.0, 217.0, 1.68),
-        (Race::Ferre, Gender::Male) => (1020.0, 87.0, 2.06),
-        (Race::Ferre, _) => (1033.0, 217.0, 1.97),
+        (Race::Ferre, Gender::Male) => (1020.0, 87.0, 2.07),
+        (Race::Ferre, _) => (1033.0, 217.0, 1.84),
     };
     Stage { feet: Vec2::new(960.0, feet_v), head_v, height }
 }

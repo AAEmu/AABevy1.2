@@ -520,7 +520,7 @@ fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, V
     let d = &assets.desc;
     let targets = format!("objects/characters/{}/{}/face/{}_{}_targets.xml", d.race.folder(), d.gender.folder(), d.race.prefix(), d.gender.letter());
     let maker = FaceMaker::load(&targets).ok()?;
-    let mut weights = FaceMaker::race_weights(d.race);
+    let mut weights = FaceMaker::race_gender_weights(d.race, d.gender);
     weights.extend(maker.weights(&c.modifier));
     Some((set, weights))
 }
