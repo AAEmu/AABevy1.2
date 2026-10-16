@@ -11,6 +11,7 @@ dependencies = [
  "aa-pak",
  "bevy",
  "glam",
+ "image",
  "roxmltree",
  "rusqlite",
  "thiserror 2.0.21",
@@ -20,9 +21,14 @@ dependencies = [
 name = "aa-client"
 version = "0.1.0"
 dependencies = [
+ "aa-anim",
+ "aa-cry",
  "aa-dev",
+ "aa-net",
  "aa-pak",
+ "aa-world",
  "bevy",
+ "rusqlite",
 ]
 
 [[package]]
