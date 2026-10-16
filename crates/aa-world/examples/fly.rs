@@ -9,6 +9,8 @@
 //!
 //! * `--world <name>`      `main_world` (default) or `login2`
 //! * `--pos x,y,z`         camera position in game world (cry) coordinates
+//! * `--spawn <race>`     the new-character spawn of `nuian`, `elf`, `hariharan` or `ferre`, seen from the default
+//!                         third person camera (4 m behind, 1.7 m above the player)
 //! * `--yaw <deg>`         compass heading, 0 = north (+Y), 90 = east (+X)
 //! * `--pitch <deg>`       up positive
 //! * `--look x,y,z`       look at this cry-space point instead of yaw / pitch
@@ -22,6 +24,8 @@
 //! * `--zone <id>`         force a zone's time of day
 //! * `--sun-scale <lux>`, `--ambient-scale <x>`   lighting calibration (see `WorldConfig`)
 //! * `--terrain-tint r,g,b`, `--fog-visibility <m>`
+//! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
+//!                         time statistics (average, 1 % low, worst frame, frames over 20 ms), then exit
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
@@ -51,6 +55,72 @@ struct Start {
     fov: f32,
     /// cry space `(forward, up)` from a cinema / capture.
     dir: Option<(Vec3, Vec3)>,
+}
+
+#[derive(Resource)]
+struct Bench {
+    seconds: f32,
+    speed: f32,
+    elapsed: f32,
+    frames: Vec<f32>,
+    slow_logged: usize,
+}
+
+fn bench(
+    time: Res<Time>,
+    mut state: ResMut<Bench>,
+    mut cam: Query<&mut Transform, With<Camera3d>>,
+    timings: Res<aa_world::WorldTimings>,
+    objects: Res<aa_world::objects::ObjectState>,
+    streamer: Res<aa_world::stream::Streamer>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let dt = time.delta_secs();
+    if state.elapsed > 8.0 && dt > 0.02 && state.slow_logged < 12 {
+        state.slow_logged += 1;
+        info!(
+            "slow frame {:.1} ms: cells {:.1} receive {:.1} lod {:.1} objects {:.1}",
+            dt * 1000.0,
+            timings.cells_ms,
+            timings.receive_ms,
+            timings.lod_ms,
+            timings.objects_ms
+        );
+    }
+    state.elapsed += dt;
+    if let Ok(mut t) = cam.single_mut() {
+        let fwd = Vec3::new(t.forward().x, 0.0, t.forward().z).normalize_or_zero();
+        t.translation += fwd * state.speed * dt;
+    }
+    // the first seconds are the initial load of the surroundings
+    if state.elapsed > 8.0 {
+        state.frames.push(dt);
+    }
+    if state.elapsed >= state.seconds + 8.0 {
+        let mut f = state.frames.clone();
+        f.sort_by(|a, b| b.total_cmp(a));
+        let n = f.len().max(1);
+        let avg = f.iter().sum::<f32>() / n as f32;
+        let low1: f32 = f.iter().take((n / 100).max(1)).sum::<f32>() / (n / 100).max(1) as f32;
+        let over = f.iter().filter(|d| **d > 0.02).count();
+        info!(
+            "BENCH frames={} avg_fps={:.0} 1%_low_fps={:.0} worst_ms={:.1} over_20ms={}",
+            n,
+            1.0 / avg,
+            1.0 / low1,
+            f.first().copied().unwrap_or(0.0) * 1000.0,
+            over
+        );
+        info!(
+            "BENCH scene: terrain cells {}, object sectors {}, object part entities {}, water cells {}, failed models {}",
+            streamer.loaded_cells().count(),
+            objects.stats.sectors,
+            objects.stats.entities,
+            objects.stats.water_cells,
+            objects.stats.models_failed
+        );
+        exit.write(AppExit::Success);
+    }
 }
 
 #[derive(Resource)]
@@ -93,6 +163,21 @@ fn main() {
         dir: None,
     };
     let flag = |name: &str| std::env::args().any(|a| a == name);
+    // (x, y, z, server yaw in degrees counter-clockwise from north): `docs/research/world-spots.md`
+    let spawns = [
+        ("nuian", (15578.042, 15382.122, 126.484, 160.0)),
+        ("elf", (10388.576, 15982.466, 367.606, 45.0)),
+        ("hariharan", (19304.874, 7646.06, 212.704, 210.0)),
+        ("ferre", (23881.218, 10495.782, 589.784, 200.0)),
+    ];
+    if let Some((_, (x, y, z, yaw))) = arg("--spawn").and_then(|r| spawns.iter().find(|s| s.0 == r)) {
+        let a = f32::to_radians(*yaw);
+        let forward = Vec3::new(-a.sin(), a.cos(), 0.0);
+        start.pos = Vec3::new(*x, *y, *z + 1.73) - forward * 4.0;
+        start.yaw = -yaw;
+        start.pitch = 0.0;
+        start.fov = 42.75; // the real client's in-game field of view
+    }
     let t: f32 = arg("--t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let cinema_name = arg("--cinema").or_else(|| (world == "login2" && vec3_arg("--pos").is_none() && arg("--camera-json").is_none()).then(|| "01_world_select_e1".to_string()));
     let mut play = None;
@@ -167,6 +252,10 @@ fn main() {
         .insert_resource(start);
     if let Some(play) = play {
         app.insert_resource(play).add_systems(Update, play_cinema);
+    }
+    if let Some(seconds) = arg("--bench").and_then(|v| v.parse::<f32>().ok()) {
+        let speed = arg("--bench-speed").and_then(|v| v.parse().ok()).unwrap_or(80.0);
+        app.insert_resource(Bench { seconds, speed, elapsed: 0.0, frames: Vec::new(), slow_logged: 0 }).add_systems(Update, bench);
     }
     app.add_systems(Startup, setup).add_systems(Update, fly).run();
 }

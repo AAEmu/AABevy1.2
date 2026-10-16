@@ -184,10 +184,10 @@ fn setup_sky(
         bevy::camera::visibility::NoFrustumCulling,
     ));
     let ocean_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.06, 0.28, 0.5, 0.88),
+        base_color: Color::srgba(0.09, 0.34, 0.49, 0.94),
         alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.12,
-        reflectance: 0.5,
+        perceptual_roughness: 0.35,
+        reflectance: 0.2,
         cull_mode: None,
         ..default()
     });
@@ -391,8 +391,8 @@ pub fn update_environment(
         *vis = if elev > -0.03 { Visibility::Inherited } else { Visibility::Hidden };
     }
     if let Some(mut m) = materials.get_mut(&assets.ocean_material) {
-        let deep = srgb_to_linear(Vec3::new(32.0, 112.0, 208.0) / 255.0) * (0.25 + 0.75 * day);
-        m.base_color = Color::linear_rgba(deep.x, deep.y, deep.z, 0.9);
+        let deep = srgb_to_linear(Vec3::new(22.0, 86.0, 124.0) / 255.0) * (0.2 + 0.8 * day);
+        m.base_color = Color::linear_rgba(deep.x, deep.y, deep.z, 0.94);
     }
 
     // --- fog + clear colour on the camera ---
@@ -419,7 +419,7 @@ fn tint_water(
     let (Some(sample), Some(handle)) = (&env.sample, objects.water_material()) else { return };
     let Some(mut m) = materials.get_mut(handle) else { return };
     let tint = (srgb_to_linear(Vec3::new(14.0, 52.0, 60.0) / 255.0) * (0.15 + 0.85 * sample.day)).min(Vec3::ONE);
-    m.base_color = Color::linear_rgba(tint.x, tint.y, tint.z, 0.8);
+    m.base_color = Color::linear_rgba(tint.x, tint.y, tint.z, 0.9);
 }
 
 /// Dome, sun disc and ocean follow the camera.
