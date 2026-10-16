@@ -8,12 +8,12 @@
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 
 mod anim;
-mod appearance;
+pub(crate) mod appearance;
 mod camera;
 mod creature;
-mod data;
+pub(crate) mod data;
 mod dev;
-mod enter;
+pub(crate) mod enter;
 mod player;
 mod units;
 mod weapons;

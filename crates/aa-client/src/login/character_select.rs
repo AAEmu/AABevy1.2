@@ -4,3 +4,7 @@
 use bevy::prelude::*;
 
 pub fn plugin(_app: &mut App) {}
+
+pub fn build(_world: &mut World) -> bool {
+    true
+}

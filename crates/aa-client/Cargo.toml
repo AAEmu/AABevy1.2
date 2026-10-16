@@ -16,3 +16,9 @@ aa-ui.workspace = true
 aa-net = { workspace = true, features = ["bevy"] }
 mlua.workspace = true
 rusqlite.workspace = true
+anyhow.workspace = true
+
+[features]
+# Build without the character create screen (`login/create`), e.g. while it is being rewritten:
+# `cargo build -p aa-client --features no-create`.
+no-create = []
