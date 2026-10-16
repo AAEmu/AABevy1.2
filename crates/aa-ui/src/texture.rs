@@ -22,10 +22,15 @@ pub struct GNode {
 
 impl GNode {
     pub fn child(&self, name: &str) -> Option<&GNode> {
-        self.children.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+        self.children
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
     }
     pub fn nums(&self) -> Vec<f32> {
-        self.args.iter().filter_map(|a| a.trim().parse().ok()).collect()
+        self.args
+            .iter()
+            .filter_map(|a| a.trim().parse().ok())
+            .collect()
     }
 }
 
@@ -60,13 +65,28 @@ fn parse_line(s: &str) -> GNode {
     if let Some(open) = s.find('(') {
         let name = s[..open].trim().to_string();
         let inner = s[open + 1..].trim_end().trim_end_matches(')');
-        let args = inner.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
-        GNode { name, args, children: Vec::new() }
+        let args = inner
+            .split(',')
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+        GNode {
+            name,
+            args,
+            children: Vec::new(),
+        }
     } else {
         let mut it = s.splitn(2, char::is_whitespace);
         let name = it.next().unwrap_or("").to_string();
-        let args = it.next().map(|v| vec![v.trim().to_string()]).unwrap_or_default();
-        GNode { name, args, children: Vec::new() }
+        let args = it
+            .next()
+            .map(|v| vec![v.trim().to_string()])
+            .unwrap_or_default();
+        GNode {
+            name,
+            args,
+            children: Vec::new(),
+        }
     }
 }
 
@@ -80,7 +100,12 @@ pub struct TextureDb {
 
 impl TextureDb {
     pub fn new(locale: &str) -> TextureDb {
-        TextureDb { locale: locale.to_string(), resolved: HashMap::new(), sizes: HashMap::new(), g_files: HashMap::new() }
+        TextureDb {
+            locale: locale.to_string(),
+            resolved: HashMap::new(),
+            sizes: HashMap::new(),
+            g_files: HashMap::new(),
+        }
     }
 
     /// The pak path a script texture path loads: locale copy first, `.dds` when no extension.
@@ -95,7 +120,11 @@ impl TextureDb {
         }
         let has_ext = p.rsplit('/').next().is_some_and(|f| f.contains('.'));
         let mut candidates = Vec::new();
-        let with_ext = if has_ext { p.clone() } else { format!("{p}.dds") };
+        let with_ext = if has_ext {
+            p.clone()
+        } else {
+            format!("{p}.dds")
+        };
         if let Some((dir, file)) = with_ext.rsplit_once('/') {
             candidates.push(format!("{dir}/{}/{file}", self.locale));
         }
@@ -135,15 +164,31 @@ impl TextureDb {
     pub fn info(&mut self, path: &str, key: &str) -> Option<GNode> {
         let g = self.g_path(path)?;
         if !self.g_files.contains_key(&g) {
-            let nodes = aa_pak::Pak::global().read_string(&g).map(|t| parse_g(&t)).unwrap_or_default();
+            let nodes = aa_pak::Pak::global()
+                .read_string(&g)
+                .map(|t| parse_g(&t))
+                .unwrap_or_default();
             self.g_files.insert(g.clone(), nodes);
         }
-        self.g_files[&g].iter().find(|n| n.name == key).or_else(|| self.g_files[&g].iter().find(|n| n.name.eq_ignore_ascii_case(key))).cloned()
+        self.g_files[&g]
+            .iter()
+            .find(|n| n.name == key)
+            .or_else(|| {
+                self.g_files[&g]
+                    .iter()
+                    .find(|n| n.name.eq_ignore_ascii_case(key))
+            })
+            .cloned()
     }
 
     fn g_path(&mut self, path: &str) -> Option<String> {
-        let tex = self.resolve(path).unwrap_or_else(|| aa_pak::normalize(path));
-        let stem = tex.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or(tex);
+        let tex = self
+            .resolve(path)
+            .unwrap_or_else(|| aa_pak::normalize(path));
+        let stem = tex
+            .rsplit_once('.')
+            .map(|(s, _)| s.to_string())
+            .unwrap_or(tex);
         let g = format!("{stem}.g");
         if aa_pak::Pak::global().exists(&g) {
             return Some(g);
@@ -160,10 +205,15 @@ mod tests {
 
     #[test]
     fn parses_g() {
-        let n = parse_g("credits_df\n    coords ( 243, 0, 107, 35 )\ncredits_ov\n    coords ( 243, 35, 107, 35 )\n    extent ( 10, 20 )\n");
+        let n = parse_g(
+            "credits_df\n    coords ( 243, 0, 107, 35 )\ncredits_ov\n    coords ( 243, 35, 107, 35 )\n    extent ( 10, 20 )\n",
+        );
         assert_eq!(n.len(), 2);
         assert_eq!(n[0].name, "credits_df");
-        assert_eq!(n[0].child("coords").unwrap().nums(), vec![243.0, 0.0, 107.0, 35.0]);
+        assert_eq!(
+            n[0].child("coords").unwrap().nums(),
+            vec![243.0, 0.0, 107.0, 35.0]
+        );
         assert_eq!(n[1].child("extent").unwrap().nums(), vec![10.0, 20.0]);
     }
 }

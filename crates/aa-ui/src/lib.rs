@@ -74,7 +74,12 @@ impl UiRuntime {
             queued_events: Vec::new(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
-        Ok(UiRuntime { lua, mouse: Default::default(), errors: Vec::new(), init_done: false })
+        Ok(UiRuntime {
+            lua,
+            mouse: Default::default(),
+            errors: Vec::new(),
+            init_done: false,
+        })
     }
 
     /// Run a `toc.g`; failures are logged and kept in [`Self::errors`].
@@ -103,7 +108,8 @@ impl UiRuntime {
             Ok(f) => f,
             Err(e) => {
                 warn!("aa-ui: stage {}: {e:#}", stage.name());
-                self.errors.push((stage.name().to_string(), format!("{e:#}")));
+                self.errors
+                    .push((stage.name().to_string(), format!("{e:#}")));
                 return;
             }
         };
@@ -134,13 +140,19 @@ impl UiRuntime {
 
     /// Raise a UI event for every widget that registered it.
     pub fn fire_event(&self, name: &str, args: impl mlua::IntoLuaMulti) {
-        let args = args.into_lua_multi(&self.lua).map(|m| m.into_iter().collect()).unwrap_or_default();
+        let args = args
+            .into_lua_multi(&self.lua)
+            .map(|m| m.into_iter().collect())
+            .unwrap_or_default();
         lua::fire_ui_event(&self.lua, name, args);
     }
 
     /// Raise a UI event at the next frame; for game API callbacks that answer later.
     pub fn queue_event(&self, name: &str, args: impl mlua::IntoLuaMulti) {
-        let args = args.into_lua_multi(&self.lua).map(|m| m.into_iter().collect()).unwrap_or_default();
+        let args = args
+            .into_lua_multi(&self.lua)
+            .map(|m| m.into_iter().collect())
+            .unwrap_or_default();
         lua::queue_ui_event(&self.lua, name, args);
     }
 
@@ -151,7 +163,11 @@ impl UiRuntime {
 
     /// Calls to unimplemented natives so far (`kind:Method` -> count).
     pub fn stub_calls(&self) -> Vec<(String, u32)> {
-        lua::ui(&self.lua).stub_calls.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        lua::ui(&self.lua)
+            .stub_calls
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
     }
 
     /// The tree as JSON in the format of `reference/<screen>/ui.json` (see [`dump`]).
@@ -196,7 +212,12 @@ pub struct UiConfig {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        UiConfig { locale: "en_us".into(), camera_order: 10, clear: ClearColorConfig::Default, gamma_blending: true }
+        UiConfig {
+            locale: "en_us".into(),
+            camera_order: 10,
+            clear: ClearColorConfig::Default,
+            gamma_blending: true,
+        }
     }
 }
 
@@ -237,7 +258,11 @@ impl Plugin for UiPlugin {
 fn spawn_camera(mut commands: Commands, cfg: Res<UiConfig>) {
     let mut cam = commands.spawn((
         Camera2d,
-        Camera { order: cfg.camera_order, clear_color: cfg.clear.clone(), ..default() },
+        Camera {
+            order: cfg.camera_order,
+            clear_color: cfg.clear.clone(),
+            ..default()
+        },
         UiCamera,
     ));
     if cfg.gamma_blending {
@@ -248,7 +273,10 @@ fn spawn_camera(mut commands: Commands, cfg: Res<UiConfig>) {
 fn window_size(world: &mut World) -> Option<(f32, f32)> {
     let mut q = world.query_filtered::<&Window, With<PrimaryWindow>>();
     let w = q.single(world).ok()?;
-    let (pw, ph) = (w.resolution.physical_width() as f32, w.resolution.physical_height() as f32);
+    let (pw, ph) = (
+        w.resolution.physical_width() as f32,
+        w.resolution.physical_height() as f32,
+    );
     (pw > 0.0 && ph > 0.0).then_some((pw, ph))
 }
 
@@ -256,7 +284,9 @@ fn init_runtime(world: &mut World) {
     if world.get_non_send::<UiRuntime>().is_some() {
         return;
     }
-    let Some((w, h)) = window_size(world) else { return };
+    let Some((w, h)) = window_size(world) else {
+        return;
+    };
     let locale = world.resource::<UiConfig>().locale.clone();
     let mut rt = match UiRuntime::new(&locale, w, h) {
         Ok(rt) => rt,
@@ -300,7 +330,10 @@ fn ui_frame(
 ) {
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
-    let (pw, ph) = (window.resolution.physical_width() as f32, window.resolution.physical_height() as f32);
+    let (pw, ph) = (
+        window.resolution.physical_width() as f32,
+        window.resolution.physical_height() as f32,
+    );
     if pw <= 0.0 || ph <= 0.0 {
         return;
     }
@@ -316,7 +349,12 @@ fn ui_frame(
         changed
     };
     if resized {
-        let ids: Vec<tree::Id> = lua::ui(lua).handlers.iter().filter(|(_, h)| h.iter().any(|n| n == "OnScale")).map(|(i, _)| *i).collect();
+        let ids: Vec<tree::Id> = lua::ui(lua)
+            .handlers
+            .iter()
+            .filter(|(_, h)| h.iter().any(|n| n == "OnScale"))
+            .map(|(i, _)| *i)
+            .collect();
         for id in ids {
             lua::call_handler(lua, id, "OnScale", vec![]);
         }
@@ -325,10 +363,15 @@ fn ui_frame(
     let sf = window.resolution.scale_factor();
     let cursor = match virt.pos {
         Some(p) => Some((p.x / scale, p.y / scale)),
-        None => window.cursor_position().map(|p| (p.x * sf / scale, p.y * sf / scale)),
+        None => window
+            .cursor_position()
+            .map(|p| (p.x * sf / scale, p.y * sf / scale)),
     };
     let wheel = scroll.delta.y;
-    let (vpress, vrelease) = (std::mem::take(&mut virt.press), std::mem::take(&mut virt.release));
+    let (vpress, vrelease) = (
+        std::mem::take(&mut virt.press),
+        std::mem::take(&mut virt.release),
+    );
     input::update(
         lua,
         &mut rt.mouse,
@@ -344,10 +387,22 @@ fn ui_frame(
     let pressed = rt.mouse.pressed;
     let mut g = lua::ui(lua);
     let u = &mut *g;
-    if u.tree.generation != state.generation || u.fonts.atlas_dirty || state.screen != (pw as u32, ph as u32) {
+    if u.tree.generation != state.generation
+        || u.fonts.atlas_dirty
+        || state.screen != (pw as u32, ph as u32)
+    {
         let quads = render::build_quads(u, pressed);
         render::sync_atlas(u, &mut state, &mut images);
-        render::sync_batches(&mut commands, &mut state, &quads, &mut meshes, &mut materials, &mut images, formats.as_deref(), &batches);
+        render::sync_batches(
+            &mut commands,
+            &mut state,
+            &quads,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            formats.as_deref(),
+            &batches,
+        );
         state.generation = u.tree.generation;
         state.screen = (pw as u32, ph as u32);
         stats.quads = state.quads;
@@ -358,7 +413,10 @@ fn ui_frame(
     for (mut tf, mut proj) in camera.iter_mut() {
         *tf = Transform::from_xyz(pw / 2.0, -ph / 2.0, 0.0);
         if let Projection::Orthographic(o) = &mut *proj {
-            o.scaling_mode = ScalingMode::Fixed { width: pw, height: ph };
+            o.scaling_mode = ScalingMode::Fixed {
+                width: pw,
+                height: ph,
+            };
             o.scale = 1.0;
         }
     }

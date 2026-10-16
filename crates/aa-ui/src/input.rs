@@ -8,8 +8,16 @@ use crate::lua::{self, call_handler, has_handler, ui};
 use crate::tree::{Id, ROOT, WidgetType};
 
 const MOUSE_HANDLERS: &[&str] = &[
-    "OnClick", "OnEnter", "OnLeave", "OnMouseDown", "OnMouseUp", "OnWheelUp", "OnWheelDown", "OnDragStart",
-    "OnDragStop", "OnMouseMove",
+    "OnClick",
+    "OnEnter",
+    "OnLeave",
+    "OnMouseDown",
+    "OnMouseUp",
+    "OnWheelUp",
+    "OnWheelDown",
+    "OnDragStart",
+    "OnDragStop",
+    "OnMouseMove",
 ];
 
 /// Mouse state kept between frames.
@@ -24,7 +32,9 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
     let (order, modal) = {
         let u = ui(lua);
         let order = u.tree.paint_order();
-        let modal = order.iter().rev().copied().find(|&id| u.tree.widget(id).is_some_and(|w| w.modal) && u.tree.get(id).parent.is_none());
+        let modal = order.iter().rev().copied().find(|&id| {
+            u.tree.widget(id).is_some_and(|w| w.modal) && u.tree.get(id).parent.is_none()
+        });
         (order, modal)
     };
     for &id in order.iter().rev() {
@@ -46,9 +56,17 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             if !r.contains(x, y) {
                 continue;
             }
-            let in_list = u.tree.get(id).parent.and_then(|p| u.tree.widget(p)).is_some_and(|p| p.ty == WidgetType::ListCtrl);
+            let in_list = u
+                .tree
+                .get(id)
+                .parent
+                .and_then(|p| u.tree.widget(p))
+                .is_some_and(|p| p.ty == WidgetType::ListCtrl);
             let native = w.ty.mouse_native() || in_list;
-            let scripted = u.handlers.get(&id).is_some_and(|hs| hs.iter().any(|h| MOUSE_HANDLERS.contains(&h.as_str())));
+            let scripted = u
+                .handlers
+                .get(&id)
+                .is_some_and(|hs| hs.iter().any(|h| MOUSE_HANDLERS.contains(&h.as_str())));
             (native || scripted, true)
         };
         if takes && inside {
@@ -65,7 +83,12 @@ fn list_row(lua: &Lua, mut id: Id) -> Option<(Id, usize)> {
         let parent = u.tree.get(id).parent?;
         if let Some(l) = u.tree.widget(parent).and_then(|w| w.list.as_ref()) {
             if let Some(i) = l.rows.iter().position(|&r| r == id) {
-                return l.has_data.get(i).copied().unwrap_or(false).then_some((parent, i));
+                return l
+                    .has_data
+                    .get(i)
+                    .copied()
+                    .unwrap_or(false)
+                    .then_some((parent, i));
             }
         }
         id = parent;
@@ -77,7 +100,15 @@ fn arg(lua: &Lua, s: &str) -> Value {
 }
 
 /// Process one frame of mouse input. `cursor` is in UI units (`None` outside the window).
-pub fn update(lua: &Lua, mouse: &mut MouseState, cursor: Option<(f32, f32)>, down: bool, up: bool, right_up: bool, wheel: f32) {
+pub fn update(
+    lua: &Lua,
+    mouse: &mut MouseState,
+    cursor: Option<(f32, f32)>,
+    down: bool,
+    up: bool,
+    right_up: bool,
+    wheel: f32,
+) {
     let hover = cursor.and_then(|(x, y)| pick(lua, x, y));
     if let Some(c) = cursor {
         ui(lua).cursor = c;
@@ -122,7 +153,11 @@ pub fn update(lua: &Lua, mouse: &mut MouseState, cursor: Option<(f32, f32)>, dow
         }
     }
     if wheel != 0.0 {
-        let name = if wheel > 0.0 { "OnWheelUp" } else { "OnWheelDown" };
+        let name = if wheel > 0.0 {
+            "OnWheelUp"
+        } else {
+            "OnWheelDown"
+        };
         let mut t = hover;
         while let Some(id) = t {
             if has_handler(lua, id, name) {
@@ -136,7 +171,9 @@ pub fn update(lua: &Lua, mouse: &mut MouseState, cursor: Option<(f32, f32)>, dow
 
 fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
     let now = ui(lua).time_ms;
-    let double = mouse.last_click.is_some_and(|(id, t)| id == target && now - t < 350.0);
+    let double = mouse
+        .last_click
+        .is_some_and(|(id, t)| id == target && now - t < 350.0);
     mouse.last_click = Some((target, now));
     // Script OnClick on the target or the nearest ancestor that has one (enabled only).
     let mut t = Some(target);
@@ -169,14 +206,25 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
 fn update_list_hover(lua: &Lua, _old: Option<Id>, new: Option<Id>) {
     let lists: Vec<Id> = {
         let u = ui(lua);
-        u.tree.objects.iter().enumerate().filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.list.is_some())).map(|(i, _)| i as Id).collect()
+        u.tree
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.list.is_some()))
+            .map(|(i, _)| i as Id)
+            .collect()
     };
     let hovered_row = new.and_then(|h| list_row(lua, h));
     for l in lists {
         let mut g = ui(lua);
         let u = &mut *g;
-        let row = hovered_row.filter(|(list, _)| *list == l).map(|(_, r)| r as i32).unwrap_or(-1);
-        let Some(ld) = u.tree.widget_mut(l).and_then(|w| w.list.as_mut()) else { continue };
+        let row = hovered_row
+            .filter(|(list, _)| *list == l)
+            .map(|(_, r)| r as i32)
+            .unwrap_or(-1);
+        let Some(ld) = u.tree.widget_mut(l).and_then(|w| w.list.as_mut()) else {
+            continue;
+        };
         if ld.overed == row {
             continue;
         }

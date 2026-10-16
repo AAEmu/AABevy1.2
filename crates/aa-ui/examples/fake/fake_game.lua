@@ -60,7 +60,13 @@ X2World.EnterWorld = function(self, worldId, zoneId)
   UIParent:LogAlways(string.format("fake: EnterWorld(%s, %s)", tostring(worldId), tostring(zoneId)))
 end
 X2World.RequestWorldListRefresh = function(self) UIParent:LogAlways("fake: RequestWorldListRefresh") end
-X2LoginCharacter.GetLastPlayedWorldInfo = function(self) return FAKE.last_world end
+-- The last played world: the first one with characters (its name).
+X2LoginCharacter.GetLastPlayedWorldInfo = function(self)
+  for _, w in ipairs(FAKE.worlds) do
+    if w.characters > 0 then return w.name end
+  end
+  return nil
+end
 X2LoginCharacter.GetWorldQueueExpectedTime = function(self) return 120 end
 X2LoginCharacter.GetWorldQueuePosition = function(self) return 0 end
 X2LoginCharacter.UsePremiumEntrance = function(self) return false end

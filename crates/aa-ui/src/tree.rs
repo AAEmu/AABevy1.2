@@ -103,7 +103,12 @@ impl Rect {
         let y = self.y.max(o.y);
         let r = self.right().min(o.right());
         let b = self.bottom().min(o.bottom());
-        Rect { x, y, w: (r - x).max(0.0), h: (b - y).max(0.0) }
+        Rect {
+            x,
+            y,
+            w: (r - x).max(0.0),
+            h: (b - y).max(0.0),
+        }
     }
 }
 
@@ -566,12 +571,16 @@ impl Tree {
 
     pub fn widget_mut(&mut self, id: Id) -> Option<&mut Widget> {
         self.generation += 1;
-        self.objects.get_mut(id as usize).and_then(Object::widget_mut)
+        self.objects
+            .get_mut(id as usize)
+            .and_then(Object::widget_mut)
     }
 
     pub fn drawable_mut(&mut self, id: Id) -> Option<&mut Drawable> {
         self.generation += 1;
-        self.objects.get_mut(id as usize).and_then(Object::drawable_mut)
+        self.objects
+            .get_mut(id as usize)
+            .and_then(Object::drawable_mut)
     }
 
     /// Create a widget under `parent` (`None` or `ROOT` = top level).
@@ -605,7 +614,13 @@ impl Tree {
         id
     }
 
-    pub fn create_drawable(&mut self, owner: Id, kind: DrawKind, class: &'static str, layer: DrawLayer) -> Id {
+    pub fn create_drawable(
+        &mut self,
+        owner: Id,
+        kind: DrawKind,
+        class: &'static str,
+        layer: DrawLayer,
+    ) -> Id {
         let id = self.objects.len() as Id;
         self.objects.push(Object {
             name: String::new(),
@@ -714,13 +729,23 @@ impl Tree {
         }
         let o = self.get(id);
         if id == ROOT {
-            let r = Rect { x: 0.0, y: 0.0, w: self.screen_w, h: self.screen_h };
+            let r = Rect {
+                x: 0.0,
+                y: 0.0,
+                w: self.screen_w,
+                h: self.screen_h,
+            };
             cache[0] = Some(r);
             return r;
         }
         if visiting.contains(&id) {
             // Anchor cycle: fall back to the extent at the origin.
-            return Rect { x: 0.0, y: 0.0, w: o.width, h: o.height };
+            return Rect {
+                x: 0.0,
+                y: 0.0,
+                w: o.width,
+                h: o.height,
+            };
         }
         visiting.push(id);
         let owner = o.parent.unwrap_or(ROOT);
@@ -728,7 +753,13 @@ impl Tree {
         let mut fill = false;
         if anchors.is_empty() {
             if o.is_widget() || o.width > 0.0 || o.height > 0.0 {
-                anchors.push(Anchor { point: Point::TopLeft, target: owner, rel: Point::TopLeft, x: 0.0, y: 0.0 });
+                anchors.push(Anchor {
+                    point: Point::TopLeft,
+                    target: owner,
+                    rel: Point::TopLeft,
+                    x: 0.0,
+                    y: 0.0,
+                });
             } else {
                 fill = true;
             }
@@ -770,7 +801,12 @@ impl Tree {
 
     /// Widgets in paint order (bottom first), with effective visibility, by layer.
     pub fn paint_order(&self) -> Vec<Id> {
-        let mut tops: Vec<Id> = self.top.iter().copied().filter(|&t| self.get(t).alive).collect();
+        let mut tops: Vec<Id> = self
+            .top
+            .iter()
+            .copied()
+            .filter(|&t| self.get(t).alive)
+            .collect();
         // Stable: layer first, then the existing (creation/raise) order.
         tops.sort_by_key(|&t| self.widget(t).map(|w| w.layer).unwrap_or_default());
         let mut out = Vec::with_capacity(self.objects.len());
@@ -798,7 +834,10 @@ impl Tree {
         if name == "UIParent" {
             return Some(ROOT);
         }
-        self.objects.iter().position(|o| o.alive && o.is_widget() && o.name == name).map(|i| i as Id)
+        self.objects
+            .iter()
+            .position(|o| o.alive && o.is_widget() && o.name == name)
+            .map(|i| i as Id)
     }
 }
 
@@ -815,7 +854,10 @@ fn axis(lo: Option<f32>, hi: Option<f32>, center: Option<f32>, extent: f32) -> (
 impl Widget {
     pub fn new(ty: WidgetType) -> Widget {
         let text = ty.has_text().then(|| TextBlock {
-            wrap: matches!(ty, WidgetType::TextBox | WidgetType::GameTooltip | WidgetType::EditBoxMultiline),
+            wrap: matches!(
+                ty,
+                WidgetType::TextBox | WidgetType::GameTooltip | WidgetType::EditBoxMultiline
+            ),
             style: TextStyle {
                 align: if matches!(ty, WidgetType::Button | WidgetType::CheckButton) {
                     Align::Center
@@ -829,7 +871,8 @@ impl Widget {
             ..Default::default()
         });
         let title = matches!(ty, WidgetType::Window).then(TextBlock::default);
-        let button = matches!(ty, WidgetType::Button | WidgetType::CheckButton).then(ButtonData::default);
+        let button =
+            matches!(ty, WidgetType::Button | WidgetType::CheckButton).then(ButtonData::default);
         let list = matches!(ty, WidgetType::ListCtrl).then(|| ListCtrlData {
             row_height: 25.0,
             column_height: 25.0,
@@ -837,7 +880,12 @@ impl Widget {
             overed: -1,
             ..Default::default()
         });
-        let slider = matches!(ty, WidgetType::Slider).then(|| SliderData { step: 1.0, page_step: 1.0, vertical: true, ..Default::default() });
+        let slider = matches!(ty, WidgetType::Slider).then(|| SliderData {
+            step: 1.0,
+            page_step: 1.0,
+            vertical: true,
+            ..Default::default()
+        });
         Widget {
             clickable: !matches!(ty, WidgetType::Label | WidgetType::TextBox),
             class: ty.name().to_string(),
@@ -868,14 +916,66 @@ mod tests {
         let a = t.create_widget("emptywidget", "a", None);
         t.get_mut(a).width = 200.0;
         t.get_mut(a).height = 100.0;
-        t.add_anchor(a, Anchor { point: Point::Center, target: ROOT, rel: Point::Center, x: 0.0, y: -60.0 });
-        assert_eq!(t.rect(a), Rect { x: 700.0, y: 340.0, w: 200.0, h: 100.0 });
+        t.add_anchor(
+            a,
+            Anchor {
+                point: Point::Center,
+                target: ROOT,
+                rel: Point::Center,
+                x: 0.0,
+                y: -60.0,
+            },
+        );
+        assert_eq!(
+            t.rect(a),
+            Rect {
+                x: 700.0,
+                y: 340.0,
+                w: 200.0,
+                h: 100.0
+            }
+        );
         let b = t.create_widget("button", "b", Some(a));
-        t.add_anchor(b, Anchor { point: Point::TopLeft, target: a, rel: Point::TopLeft, x: 10.0, y: 10.0 });
-        t.add_anchor(b, Anchor { point: Point::BottomRight, target: a, rel: Point::BottomRight, x: -10.0, y: -10.0 });
-        assert_eq!(t.rect(b), Rect { x: 710.0, y: 350.0, w: 180.0, h: 80.0 });
+        t.add_anchor(
+            b,
+            Anchor {
+                point: Point::TopLeft,
+                target: a,
+                rel: Point::TopLeft,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        t.add_anchor(
+            b,
+            Anchor {
+                point: Point::BottomRight,
+                target: a,
+                rel: Point::BottomRight,
+                x: -10.0,
+                y: -10.0,
+            },
+        );
+        assert_eq!(
+            t.rect(b),
+            Rect {
+                x: 710.0,
+                y: 350.0,
+                w: 180.0,
+                h: 80.0
+            }
+        );
         // Same point replaces.
-        t.add_anchor(b, Anchor { point: Point::TopLeft, target: a, rel: Point::TopLeft, x: 0.0, y: 0.0 });
+        t.add_anchor(
+            b,
+            Anchor {
+                point: Point::TopLeft,
+                target: a,
+                rel: Point::TopLeft,
+                x: 0.0,
+                y: 0.0,
+            },
+        );
         assert_eq!(t.rect(b).w, 190.0);
     }
 }

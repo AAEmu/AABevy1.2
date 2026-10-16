@@ -19,14 +19,76 @@ pub fn physical_pixels(mut q: Query<&mut Window, With<PrimaryWindow>>) {
 
 /// Game API objects the UI scripts use (all `X2*` plus a few CryEngine ones).
 pub const GAME_OBJECTS: &[&str] = &[
-    "X2", "X2Ability", "X2Achievement", "X2Action", "X2Auction", "X2Bag", "X2Bank", "X2BattleField", "X2Book", "X2Bot",
-    "X2Camera", "X2Chat", "X2Coffer", "X2Craft", "X2Cursor", "X2Customizer", "X2Debug", "X2Decal", "X2Demo",
-    "X2DialogManager", "X2Dominion", "X2Equipment", "X2Faction", "X2Family", "X2Friend", "X2Gm", "X2GoodsMail",
-    "X2Helper", "X2Hotkey", "X2House", "X2InGameShop", "X2Input", "X2Interaction", "X2Item", "X2ItemEnchant",
-    "X2ItemLookConverter", "X2Locale", "X2LoginCharacter", "X2Loot", "X2Mail", "X2Map", "X2Mate", "X2MiaMail",
-    "X2NameTag", "X2Nation", "X2Option", "X2Player", "X2PremiumService", "X2Priest", "X2Quest", "X2Racing", "X2Rank",
-    "X2Security", "X2SiegeWeapon", "X2Skill", "X2Sound", "X2Store", "X2Team", "X2Time", "X2Trade", "X2Trial", "X2Ucc",
-    "X2Unit", "X2UserMusic", "X2Util", "X2Warp", "X2World", "Console", "Movie", "DockingManager",
+    "X2",
+    "X2Ability",
+    "X2Achievement",
+    "X2Action",
+    "X2Auction",
+    "X2Bag",
+    "X2Bank",
+    "X2BattleField",
+    "X2Book",
+    "X2Bot",
+    "X2Camera",
+    "X2Chat",
+    "X2Coffer",
+    "X2Craft",
+    "X2Cursor",
+    "X2Customizer",
+    "X2Debug",
+    "X2Decal",
+    "X2Demo",
+    "X2DialogManager",
+    "X2Dominion",
+    "X2Equipment",
+    "X2Faction",
+    "X2Family",
+    "X2Friend",
+    "X2Gm",
+    "X2GoodsMail",
+    "X2Helper",
+    "X2Hotkey",
+    "X2House",
+    "X2InGameShop",
+    "X2Input",
+    "X2Interaction",
+    "X2Item",
+    "X2ItemEnchant",
+    "X2ItemLookConverter",
+    "X2Locale",
+    "X2LoginCharacter",
+    "X2Loot",
+    "X2Mail",
+    "X2Map",
+    "X2Mate",
+    "X2MiaMail",
+    "X2NameTag",
+    "X2Nation",
+    "X2Option",
+    "X2Player",
+    "X2PremiumService",
+    "X2Priest",
+    "X2Quest",
+    "X2Racing",
+    "X2Rank",
+    "X2Security",
+    "X2SiegeWeapon",
+    "X2Skill",
+    "X2Sound",
+    "X2Store",
+    "X2Team",
+    "X2Time",
+    "X2Trade",
+    "X2Trial",
+    "X2Ucc",
+    "X2Unit",
+    "X2UserMusic",
+    "X2Util",
+    "X2Warp",
+    "X2World",
+    "Console",
+    "Movie",
+    "DockingManager",
 ];
 
 pub struct FakeCharacter {
@@ -46,7 +108,11 @@ pub struct FakeCharacter {
 /// `--characters 0|1`: none, or the reference's `Refone` (Nuian male, level 1, Battlerage).
 pub fn characters_from_args() -> Vec<FakeCharacter> {
     let args: Vec<String> = std::env::args().collect();
-    let v = args.iter().position(|a| a == "--characters").and_then(|i| args.get(i + 1)).map(String::as_str);
+    let v = args
+        .iter()
+        .position(|a| a == "--characters")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str);
     match v {
         Some("0") => vec![],
         _ => vec![FakeCharacter {
@@ -71,9 +137,27 @@ pub struct FakeWorld {
 
 pub fn default_worlds() -> Vec<FakeWorld> {
     vec![
-        FakeWorld { id: 1, name: "Lane-bevy", available: true, congestion: 0, characters: 2 },
-        FakeWorld { id: 2, name: "Kyprosa", available: true, congestion: 1, characters: 0 },
-        FakeWorld { id: 3, name: "Melisara", available: false, congestion: 2, characters: 1 },
+        FakeWorld {
+            id: 1,
+            name: "Lane-bevy",
+            available: true,
+            congestion: 0,
+            characters: 2,
+        },
+        FakeWorld {
+            id: 2,
+            name: "Kyprosa",
+            available: true,
+            congestion: 1,
+            characters: 0,
+        },
+        FakeWorld {
+            id: 3,
+            name: "Melisara",
+            available: false,
+            congestion: 2,
+            characters: 1,
+        },
     ]
 }
 
@@ -81,10 +165,26 @@ pub fn default_worlds() -> Vec<FakeWorld> {
 /// characters); default: [`default_worlds`].
 pub fn worlds_from_args() -> Vec<FakeWorld> {
     let args: Vec<String> = std::env::args().collect();
-    let v = args.iter().position(|a| a == "--worlds").and_then(|i| args.get(i + 1)).map(String::as_str);
+    let v = args
+        .iter()
+        .position(|a| a == "--worlds")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str);
     match v {
-        Some("ref0") => vec![FakeWorld { id: 1, name: "Lane-bevy", available: true, congestion: 0, characters: 0 }],
-        Some("ref1") => vec![FakeWorld { id: 1, name: "Lane-bevy", available: true, congestion: 0, characters: 1 }],
+        Some("ref0") => vec![FakeWorld {
+            id: 1,
+            name: "Lane-bevy",
+            available: true,
+            congestion: 0,
+            characters: 0,
+        }],
+        Some("ref1") => vec![FakeWorld {
+            id: 1,
+            name: "Lane-bevy",
+            available: true,
+            congestion: 0,
+            characters: 1,
+        }],
         _ => default_worlds(),
     }
 }
@@ -93,7 +193,8 @@ pub fn worlds_from_args() -> Vec<FakeWorld> {
 fn load_ui_texts(locale: &str) -> HashMap<(i64, String), String> {
     let mut out = HashMap::new();
     let path = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
-    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let Ok(db) = rusqlite::Connection::open_with_flags(path, flags) else {
         eprintln!("fake: cannot open {path}; UI texts will show their keys");
         return out;
@@ -107,7 +208,13 @@ fn load_ui_texts(locale: &str) -> HashMap<(i64, String), String> {
          LEFT JOIN localized_texts l ON l.tbl_name = 'ui_texts' AND l.tbl_column_name = 'text' AND l.idx = u.id"
     );
     if let Ok(mut st) = db.prepare(&sql) {
-        let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)));
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        });
         if let Ok(rows) = rows {
             for (cat, key, text) in rows.flatten() {
                 if let Some(t) = text {
@@ -125,7 +232,12 @@ pub fn install(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld]) {
     install_with(rt, locale, worlds, &[]);
 }
 
-pub fn install_with(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld], characters: &[FakeCharacter]) {
+pub fn install_with(
+    rt: &mut UiRuntime,
+    locale: &str,
+    worlds: &[FakeWorld],
+    characters: &[FakeCharacter],
+) {
     let lua = &rt.lua;
     for name in GAME_OBJECTS {
         aa_ui::lua::install_game_stub(lua, name).unwrap();
@@ -137,7 +249,11 @@ pub fn install_with(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld], char
     // aa-ui installs the client's real constants (`SERVER_TEXT`, `TRION`, ...); any other ALL_CAPS
     // global the UI reads but never assigns gets a unique value.
     let mut next = 1000i64;
-    for name in include_str!("native_constants.txt").lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for name in include_str!("native_constants.txt")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
         if g.raw_get::<mlua::Value>(name).unwrap().is_nil() {
             g.raw_set(name, next).unwrap();
             next += 1;
@@ -195,9 +311,16 @@ pub fn install_with(rt: &mut UiRuntime, locale: &str, worlds: &[FakeWorld], char
 pub fn dump_tree(rt: Option<NonSend<UiRuntime>>, time: Res<Time>, mut done: Local<bool>) {
     let Some(rt) = rt else { return };
     let args: Vec<String> = std::env::args().collect();
-    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let Some(path) = value("--dump") else { return };
-    let after: f32 = value("--dump-after").and_then(|s| s.parse().ok()).unwrap_or(3.0);
+    let after: f32 = value("--dump-after")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3.0);
     if *done || time.elapsed_secs() < after {
         return;
     }
@@ -234,7 +357,9 @@ pub fn scripted_input(
         let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
         match a.as_str() {
             "--hover" | "--click" => {
-                let (Some(x), Some(y), Some(at)) = (num(1), num(2), num(3)) else { continue };
+                let (Some(x), Some(y), Some(at)) = (num(1), num(2), num(3)) else {
+                    continue;
+                };
                 if t < at {
                     continue;
                 }
@@ -247,7 +372,9 @@ pub fn scripted_input(
                 info!("fake: {a} {x} {y}");
             }
             "--lua" => {
-                let (Some(code), Some(at)) = (args.get(i + 1), num(2)) else { continue };
+                let (Some(code), Some(at)) = (args.get(i + 1), num(2)) else {
+                    continue;
+                };
                 if t < at {
                     continue;
                 }
@@ -264,7 +391,11 @@ pub fn scripted_input(
 /// Log script errors and the stubbed natives the screen called.
 pub fn report(ui: &UiRuntime, screen: &str) {
     let stubs = ui.stub_calls();
-    info!("{screen}: {} script errors, {} stubbed natives called", ui.errors.len(), stubs.len());
+    info!(
+        "{screen}: {} script errors, {} stubbed natives called",
+        ui.errors.len(),
+        stubs.len()
+    );
     for (name, n) in stubs.iter().take(80) {
         info!("  stub {name} x{n}");
     }

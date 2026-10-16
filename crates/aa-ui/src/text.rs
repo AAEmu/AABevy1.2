@@ -26,7 +26,11 @@ struct Face {
 
 impl Face {
     fn font(&self) -> FontRef<'_> {
-        FontRef { data: &self.data, offset: self.offset, key: self.key }
+        FontRef {
+            data: &self.data,
+            offset: self.offset,
+            key: self.key,
+        }
     }
 }
 
@@ -81,9 +85,9 @@ pub struct PlacedIcon {
 /// Inline icons of the value codes, in `ui/common/money_window.dds`: (x, y, w, h) texels.
 pub const INLINE_ICON_TEXTURE: &str = "ui/common/money_window.dds";
 pub const INLINE_ICONS: [[f32; 4]; 4] = [
-    [0.0, 29.0, 16.0, 16.0],  // gold coin
-    [16.0, 29.0, 16.0, 16.0], // silver coin
-    [32.0, 29.0, 16.0, 16.0], // copper coin
+    [0.0, 29.0, 16.0, 16.0],   // gold coin
+    [16.0, 29.0, 16.0, 16.0],  // silver coin
+    [32.0, 29.0, 16.0, 16.0],  // copper coin
     [206.0, 12.0, 16.0, 16.0], // loyalty token (BM mileage)
 ];
 /// First private-use code point standing for an inline icon in expanded text.
@@ -144,11 +148,12 @@ impl FontLib {
         let mut in_locale = false;
         let mut logical: Option<String> = None;
         let mut chain: Vec<ChainLink> = Vec::new();
-        let flush = |lib: &mut FontLib, logical: &mut Option<String>, chain: &mut Vec<ChainLink>| {
-            if let Some(l) = logical.take() {
-                lib.chains.insert(l, std::mem::take(chain));
-            }
-        };
+        let flush =
+            |lib: &mut FontLib, logical: &mut Option<String>, chain: &mut Vec<ChainLink>| {
+                if let Some(l) = logical.take() {
+                    lib.chains.insert(l, std::mem::take(chain));
+                }
+            };
         for raw in text.lines() {
             let line = raw.trim_end();
             if line.trim().is_empty() {
@@ -172,7 +177,10 @@ impl FontLib {
                     let path = aa_pak::normalize(item);
                     let path = path.strip_prefix("game/").unwrap_or(&path).to_string();
                     if let Some(face) = self.face(&path) {
-                        chain.push(ChainLink { face, ranges: Vec::new() });
+                        chain.push(ChainLink {
+                            face,
+                            ranges: Vec::new(),
+                        });
                     }
                 }
                 _ => {
@@ -218,15 +226,27 @@ impl FontLib {
         let key = aa_pak::normalize(font);
         if !self.chains.contains_key(&key) {
             let chain = match self.face(&key) {
-                Some(face) => vec![ChainLink { face, ranges: Vec::new() }],
+                Some(face) => vec![ChainLink {
+                    face,
+                    ranges: Vec::new(),
+                }],
                 None => match self.chains.get(DEFAULT_FONT) {
-                    Some(c) => c.iter().map(|l| ChainLink { face: l.face, ranges: l.ranges.clone() }).collect(),
+                    Some(c) => c
+                        .iter()
+                        .map(|l| ChainLink {
+                            face: l.face,
+                            ranges: l.ranges.clone(),
+                        })
+                        .collect(),
                     None => Vec::new(),
                 },
             };
             self.chains.insert(key.clone(), chain);
         }
-        self.chains[&key].iter().map(|l| (l.face, l.ranges.clone())).collect()
+        self.chains[&key]
+            .iter()
+            .map(|l| (l.face, l.ranges.clone()))
+            .collect()
     }
 
     /// Face and glyph id for a character.
@@ -263,7 +283,12 @@ impl FontLib {
         if let Some(&a) = self.advances.get(&key) {
             return a;
         }
-        let a = self.faces[face].font().glyph_metrics(&[]).scale(size as f32).advance_width(glyph).round();
+        let a = self.faces[face]
+            .font()
+            .glyph_metrics(&[])
+            .scale(size as f32)
+            .advance_width(glyph)
+            .round();
         self.advances.insert(key, a);
         a
     }
@@ -343,18 +368,38 @@ impl FontLib {
                 continue;
             }
             if ch == '\n' {
-                items.push(Item { ch, face: usize::MAX, gid: 0, adv: 0.0, color });
+                items.push(Item {
+                    ch,
+                    face: usize::MAX,
+                    gid: 0,
+                    adv: 0.0,
+                    color,
+                });
                 continue;
             }
             if (ICON_BASE..ICON_BASE + INLINE_ICONS.len() as u32).contains(&(ch as u32)) {
                 // Icon plus 1 px on each side (matches the loyalty token width at login).
                 let adv = (ICON_ADVANCE * size / 13.0).round().max(ICON_ADVANCE) + 2.0;
-                items.push(Item { ch, face: ICON_FACE, gid: (ch as u32 - ICON_BASE) as u16, adv, color });
+                items.push(Item {
+                    ch,
+                    face: ICON_FACE,
+                    gid: (ch as u32 - ICON_BASE) as u16,
+                    adv,
+                    color,
+                });
                 continue;
             }
-            let Some((face, gid)) = self.lookup(&chain, ch) else { continue };
+            let Some((face, gid)) = self.lookup(&chain, ch) else {
+                continue;
+            };
             let adv = self.advance(face, px, gid);
-            items.push(Item { ch, face, gid, adv, color });
+            items.push(Item {
+                ch,
+                face,
+                gid,
+                adv,
+                color,
+            });
         }
 
         // 2. Greedy line breaking: lines are index ranges into `items`.
@@ -381,7 +426,11 @@ impl FontLib {
                     };
                     lines.push((start, brk));
                     // Skip the space we broke at.
-                    start = if brk < items.len() && items[brk].ch == ' ' { brk + 1 } else { brk };
+                    start = if brk < items.len() && items[brk].ch == ' ' {
+                        brk + 1
+                    } else {
+                        brk
+                    };
                     x = items[start..k].iter().map(|i| i.adv).sum();
                     last_space = None;
                     continue;
@@ -396,7 +445,10 @@ impl FontLib {
         lines.push((start, items.len()));
 
         // 3. Place glyphs.
-        let mut out = LaidOutText { line_height: line_h, ..Default::default() };
+        let mut out = LaidOutText {
+            line_height: line_h,
+            ..Default::default()
+        };
         for (li, &(a, b)) in lines.iter().enumerate() {
             let y = li as f32 * (line_h + line_space) + ascent;
             let mut x = 0.0f32;
@@ -404,12 +456,24 @@ impl FontLib {
             let mut width = 0.0f32;
             for it in &items[a..b] {
                 if it.face == ICON_FACE {
-                    let top = li as f32 * (line_h + line_space) + ((line_h - (it.adv - 2.0)) / 2.0).round();
-                    out.icons.push(PlacedIcon { x: x + 1.0, y: top, line: li as u16, icon: it.gid as usize });
+                    let top = li as f32 * (line_h + line_space)
+                        + ((line_h - (it.adv - 2.0)) / 2.0).round();
+                    out.icons.push(PlacedIcon {
+                        x: x + 1.0,
+                        y: top,
+                        line: li as u16,
+                        icon: it.gid as usize,
+                    });
                     width = x + it.adv;
                 } else if it.ch != ' ' {
                     if let Some(g) = self.glyph(it.face, px, it.gid, outline) {
-                        out.glyphs.push(PlacedGlyph { x, y, line: li as u16, glyph: g, color: it.color });
+                        out.glyphs.push(PlacedGlyph {
+                            x,
+                            y,
+                            line: li as u16,
+                            glyph: g,
+                            color: it.color,
+                        });
                     }
                     width = x + it.adv;
                 }
@@ -425,14 +489,26 @@ impl FontLib {
 
     /// Rasterise (once) and return a glyph.
     fn glyph(&mut self, face: usize, size: u16, glyph: u16, outline: bool) -> Option<Glyph> {
-        let key = GlyphKey { face: face as u16, size, glyph, outline };
+        let key = GlyphKey {
+            face: face as u16,
+            size,
+            glyph,
+            outline,
+        };
         if let Some(g) = self.glyphs.get(&key) {
             return *g;
         }
         let img = {
             let font = self.faces[face].font();
-            let mut scaler = self.scale.builder(font).size(size as f32).hint(true).build();
-            Render::new(&[Source::Outline]).format(Format::Alpha).render(&mut scaler, glyph)
+            let mut scaler = self
+                .scale
+                .builder(font)
+                .size(size as f32)
+                .hint(true)
+                .build();
+            Render::new(&[Source::Outline])
+                .format(Format::Alpha)
+                .render(&mut scaler, glyph)
         };
         let result = img.and_then(|img| {
             let (mut w, mut h) = (img.placement.width, img.placement.height);
@@ -475,7 +551,14 @@ impl FontLib {
                 }
             }
             self.atlas_dirty = true;
-            Some(Glyph { ax, ay, w, h, left, top: -top })
+            Some(Glyph {
+                ax,
+                ay,
+                w,
+                h,
+                left,
+                top: -top,
+            })
         });
         self.glyphs.insert(key, result);
         result
@@ -507,7 +590,9 @@ fn icon_char(i: usize) -> char {
 
 /// `|m<copper>;`: gold / silver / copper parts with coin icons (`0` shows a copper coin).
 fn money_text(body: &str) -> String {
-    let Ok(v) = body.trim().parse::<i64>() else { return body.to_string() };
+    let Ok(v) = body.trim().parse::<i64>() else {
+        return body.to_string();
+    };
     let (g, s, c) = (v / 10000, (v / 100) % 100, v % 100);
     let mut parts = Vec::new();
     if g != 0 {
@@ -537,9 +622,13 @@ pub fn expand_codes(text: &str) -> String {
         let c = chars[i];
         if c == '|' && i + 1 < chars.len() {
             let k = chars[i + 1];
-            let is_value = k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
+            let is_value =
+                k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
             if is_value {
-                let end = chars[i + 2..].iter().take(64).position(|&x| x == ';' || x == '|' || x == '\n');
+                let end = chars[i + 2..]
+                    .iter()
+                    .take(64)
+                    .position(|&x| x == ';' || x == '|' || x == '\n');
                 if let Some(n) = end.filter(|&n| chars[i + 2 + n] == ';') {
                     let body: String = chars[i + 2..i + 2 + n].iter().collect();
                     match k {
@@ -585,7 +674,10 @@ mod tests {
     fn value_codes() {
         assert_eq!(expand_codes("LP |,85;/|,2000;"), "LP 85/2000");
         assert_eq!(expand_codes("|cFFFF0000red|r |p12;"), "|cFFFF0000red|r 12");
-        assert_eq!(expand_codes("|m10203;"), format!("1{} 2{} 3{}", icon_char(0), icon_char(1), icon_char(2)));
+        assert_eq!(
+            expand_codes("|m10203;"),
+            format!("1{} 2{} 3{}", icon_char(0), icon_char(1), icon_char(2))
+        );
         assert_eq!(expand_codes("|m0;"), format!("0{}", icon_char(2)));
         assert_eq!(expand_codes("a|b"), "a|b");
     }
@@ -597,12 +689,18 @@ mod tests {
         let mut lib = FontLib::new("en_us");
         for font in [DEFAULT_FONT, "ui/font/yoon_snail_b.ttf"] {
             let chain = lib.chain_for(font);
-            let Some((face, _)) = chain.first() else { continue };
+            let Some((face, _)) = chain.first() else {
+                continue;
+            };
             for px in [11.0f32, 13.0, 15.0, 18.0, 22.0] {
                 let m = lib.faces[*face].font().metrics(&[]).scale(px);
                 println!(
                     "{font} {px}: ascent {:.2} descent {:.2} leading {:.2} sum {:.2} upem {}",
-                    m.ascent, m.descent, m.leading, m.ascent + m.descent + m.leading, m.units_per_em
+                    m.ascent,
+                    m.descent,
+                    m.leading,
+                    m.ascent + m.descent + m.leading,
+                    m.units_per_em
                 );
             }
         }
