@@ -85,7 +85,7 @@ pub fn build(app: &mut App) {
         .insert_resource(Environment { sample: None, zone: None, hour: 13.0 })
         .init_resource::<TodCache>()
         .add_systems(Startup, setup_sky)
-        .add_systems(Update, (receive_zones, update_clock, update_environment).chain())
+        .add_systems(Update, (receive_zones, update_clock, update_environment, tint_water).chain())
         .add_systems(PostUpdate, follow_camera.before(bevy::transform::TransformSystems::Propagate));
 }
 
@@ -352,8 +352,10 @@ pub fn update_environment(
     // --- sky colours (LDR) ---
     let day = cur.day;
     let night_scale = 0.18;
-    let horizon_day = srgb_to_linear(cur.fog_srgb * 1.1).min(Vec3::splat(1.0));
-    let zenith_day = srgb_to_linear(cur.sky_srgb);
+    // the engine's sky is procedural scattering; these gradients are the data colours lifted towards the
+    // pale haze of the real client (calibrated against `reference/ingame/spawn/real.png`)
+    let horizon_day = srgb_to_linear(lerp3(cur.fog_srgb * 1.1, Vec3::new(0.7, 0.76, 0.82), 0.55 * cur.day).min(Vec3::splat(1.0)));
+    let zenith_day = srgb_to_linear(lerp3(cur.sky_srgb, Vec3::new(0.5, 0.64, 0.82), 0.55 * cur.day));
     let horizon_night = srgb_to_linear(cur.night_horizon) * night_scale;
     let zenith_night = srgb_to_linear(cur.night_zenith) * night_scale * 0.6;
     let horizon = lerp3(horizon_night, horizon_day, day);
@@ -406,6 +408,18 @@ pub fn update_environment(
     commands.entity(cam_entity).insert(new_fog);
     clear.0 = Color::linear_rgb(fog_color.x, fog_color.y, fog_color.z);
     env.sample = Some(cur);
+}
+
+/// Rivers, lakes and ponds share one material; it follows the daylight.
+fn tint_water(
+    env: Res<Environment>,
+    objects: Res<crate::objects::ObjectState>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let (Some(sample), Some(handle)) = (&env.sample, objects.water_material()) else { return };
+    let Some(mut m) = materials.get_mut(handle) else { return };
+    let tint = (srgb_to_linear(Vec3::new(14.0, 52.0, 60.0) / 255.0) * (0.15 + 0.85 * sample.day)).min(Vec3::ONE);
+    m.base_color = Color::linear_rgba(tint.x, tint.y, tint.z, 0.8);
 }
 
 /// Dome, sun disc and ocean follow the camera.

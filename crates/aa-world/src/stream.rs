@@ -50,6 +50,8 @@ pub struct WorldConfig {
     pub brush_distance: f32,
     /// Vegetation is drawn at most this far (m).
     pub vegetation_distance: f32,
+    /// Water volumes (rivers, lakes, ponds) are loaded within this distance (m).
+    pub water_distance: f32,
     /// Main thread time per frame for loading models and spawning object sectors (ms).
     pub object_budget_ms: f32,
     /// Drive sun, ambient light, fog, sky dome and ocean from the time of day data.
@@ -66,6 +68,9 @@ pub struct WorldConfig {
     pub ambient_scale: f32,
     /// Fog visibility distance (m) at the reference fog density.
     pub fog_visibility: f32,
+    /// Linear colour factor on the terrain's cover texture. The engine multiplies the colour map with detail
+    /// layers and a filmic curve we do not reproduce; this brings the result to the real client's brightness.
+    pub terrain_tint: Vec3,
 }
 
 impl WorldConfig {
@@ -81,14 +86,16 @@ impl WorldConfig {
             vegetation: true,
             brush_distance: 1000.0,
             vegetation_distance: 220.0,
+            water_distance: 1400.0,
             object_budget_ms: 3.0,
             environment: true,
             sky_radius: 9000.0,
             shadows: true,
             shadow_distance: 300.0,
             sun_lux_scale: 1700.0,
-            ambient_scale: 1300.0,
-            fog_visibility: 14000.0,
+            ambient_scale: 1700.0,
+            fog_visibility: 2500.0,
+            terrain_tint: Vec3::new(0.3, 0.32, 0.45),
         }
     }
 }
@@ -137,7 +144,6 @@ struct LoadedCell {
 
 /// What a finished background load delivers.
 struct CellLoad {
-    cell: (i32, i32),
     heights: Arc<CellHeights>,
     cover: Option<crate::cover::CoverAtlas>,
     /// `(patch index, lod, mesh)` for the 16 patches.
@@ -295,7 +301,7 @@ fn load_cell(dir: &str, cell: (i32, i32), focus: Vec3) -> Option<CellLoad> {
         let lod = lod_for_distance(distance_to_box(focus, min, max), None);
         meshes.push((index, lod, build_patch_mesh(&heights, index % PATCHES, index / PATCHES, lod)));
     }
-    Some(CellLoad { cell, heights, cover, meshes })
+    Some(CellLoad { heights, cover, meshes })
 }
 
 /// Bevy-space bounding box of patch `index` (`py * 4 + px` order: `index % 4` = patch x).
@@ -342,7 +348,7 @@ fn receive_cells(
         }
         let material = materials.add(StandardMaterial {
             base_color_texture: load.cover.map(|atlas| images.add(cover_image(atlas))),
-            base_color: Color::WHITE,
+            base_color: Color::linear_rgb(cfg.terrain_tint.x, cfg.terrain_tint.y, cfg.terrain_tint.z),
             perceptual_roughness: 1.0,
             reflectance: 0.05,
             ..default()

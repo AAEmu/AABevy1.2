@@ -12,13 +12,21 @@
 //! * `--yaw <deg>`         compass heading, 0 = north (+Y), 90 = east (+X)
 //! * `--pitch <deg>`       up positive
 //! * `--look x,y,z`       look at this cry-space point instead of yaw / pitch
+//! * `--cinema <name>`     camera of `worlds/<world>/cinemas/<name>.xml` (login2 default `01_world_select_e1`),
+//!                         `--t <s>` evaluates it at that time, `--play` runs the move
+//! * `--camera-json <f>`   pos / dir / fov_deg of a `reference/<screen>/camera.json` capture
+//! * `--shift x,y,z`       added to that position; the in-game captures are client-local, the client
+//!                         renders main_world 11 cells (11264 m) closer to the origin: `--shift 11264,11264,0`
 //! * `--radius <m>`        cell load radius
 //! * `--hour <h>`          time of day (0..24, default 13), `--speed <h/s>` lets it run
 //! * `--zone <id>`         force a zone's time of day
+//! * `--sun-scale <lux>`, `--ambient-scale <x>`   lighting calibration (see `WorldConfig`)
+//! * `--terrain-tint r,g,b`, `--fog-visibility <m>`
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
 
+use aa_world::cinema::CinemaCamera;
 use aa_world::{AaWorldPlugin, WorldConfig, bevy_to_cry, cry_to_bevy};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
@@ -40,22 +48,94 @@ struct Start {
     yaw: f32,
     pitch: f32,
     look: Option<Vec3>,
+    fov: f32,
+    /// cry space `(forward, up)` from a cinema / capture.
+    dir: Option<(Vec3, Vec3)>,
+}
+
+#[derive(Resource)]
+struct Play {
+    cinema: CinemaCamera,
+    time: f32,
+}
+
+fn reference_camera(path: &str) -> Option<(Vec3, Vec3, f32)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let num = |obj: &str, key: &str| -> Option<f32> {
+        let i = text.find(&format!("\"{obj}\""))?;
+        let rest = &text[i..];
+        let j = rest.find(&format!("\"{key}\""))?;
+        let rest = &rest[j + key.len() + 2..];
+        let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || "+-.eE".contains(c)))?;
+        rest[..end].parse().ok()
+    };
+    let pos = Vec3::new(num("pos", "x")?, num("pos", "y")?, num("pos", "z")?);
+    let dir = Vec3::new(num("dir", "x")?, num("dir", "y")?, num("dir", "z")?);
+    let fov = {
+        let i = text.find("\"fov_deg\"")?;
+        let rest = text[i + 9..].trim_start().strip_prefix(':')?.trim_start();
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || "+-.eE".contains(c)))?;
+        rest[..end].parse().ok()?
+    };
+    Some((pos, dir, fov))
 }
 
 fn main() {
     let world = arg("--world").unwrap_or_else(|| "main_world".into());
     let default_pos = if world == "login2" { Vec3::new(1652.5, 465.7, 164.8) } else { Vec3::new(9420.0, 14480.0, 330.0) };
-    let start = Start {
+    let mut start = Start {
         pos: vec3_arg("--pos").unwrap_or(default_pos),
         yaw: arg("--yaw").and_then(|v| v.parse().ok()).unwrap_or(if world == "login2" { 270.0 } else { 0.0 }),
         pitch: arg("--pitch").and_then(|v| v.parse().ok()).unwrap_or(-10.0),
         look: vec3_arg("--look"),
+        fov: 60.0,
+        dir: None,
     };
+    let flag = |name: &str| std::env::args().any(|a| a == name);
+    let t: f32 = arg("--t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let cinema_name = arg("--cinema").or_else(|| (world == "login2" && vec3_arg("--pos").is_none() && arg("--camera-json").is_none()).then(|| "01_world_select_e1".to_string()));
+    let mut play = None;
+    if let Some(name) = cinema_name {
+        match CinemaCamera::load(&world, &name) {
+            Some(cinema) => {
+                let pose = cinema.pose(t);
+                start.pos = pose.position;
+                start.fov = pose.fov_deg;
+                start.dir = Some((pose.rotation * Vec3::Y, pose.rotation * Vec3::Z));
+                if flag("--play") {
+                    play = Some(Play { cinema, time: t });
+                }
+            }
+            None => eprintln!("cinema {name} not found"),
+        }
+    }
+    if let Some(path) = arg("--camera-json") {
+        match reference_camera(&path) {
+            Some((pos, dir, fov)) => {
+                start.pos = pos + vec3_arg("--shift").unwrap_or(Vec3::ZERO);
+                start.fov = fov;
+                start.dir = Some((dir, Vec3::Z));
+            }
+            None => eprintln!("cannot read {path}"),
+        }
+    }
     let mut plugin = AaWorldPlugin::new(&world);
     if let Some(r) = arg("--radius").and_then(|v| v.parse().ok()) {
         plugin.config = WorldConfig { load_radius: r, unload_radius: r * 1.2, ..plugin.config };
     }
-    let flag = |name: &str| std::env::args().any(|a| a == name);
+    if let Some(v) = arg("--sun-scale").and_then(|v| v.parse().ok()) {
+        plugin.config.sun_lux_scale = v;
+    }
+    if let Some(v) = arg("--ambient-scale").and_then(|v| v.parse().ok()) {
+        plugin.config.ambient_scale = v;
+    }
+    if let Some(v) = vec3_arg("--terrain-tint") {
+        plugin.config.terrain_tint = v;
+    }
+    if let Some(v) = arg("--fog-visibility").and_then(|v| v.parse().ok()) {
+        plugin.config.fog_visibility = v;
+    }
     plugin.config.objects = !flag("--no-objects");
     plugin.config.vegetation = !flag("--no-objects");
     plugin.config.shadows = !flag("--no-shadows");
@@ -79,21 +159,24 @@ fn main() {
         clock.speed = s;
     }
     clock.zone = arg("--zone").and_then(|v| v.parse().ok());
-    App::new()
-        .add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window))
+    let mut app = App::new();
+    app.add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window))
         .insert_resource(clock)
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(plugin)
-        .insert_resource(start)
-        .add_systems(Startup, setup)
-        .add_systems(Update, fly)
-        .run();
+        .insert_resource(start);
+    if let Some(play) = play {
+        app.insert_resource(play).add_systems(Update, play_cinema);
+    }
+    app.add_systems(Startup, setup).add_systems(Update, fly).run();
 }
 
 fn setup(mut commands: Commands, start: Res<Start>) {
     let pos = cry_to_bevy(start.pos);
     let mut transform = Transform::from_translation(pos);
-    if let Some(look) = start.look {
+    if let Some((forward, up)) = start.dir {
+        transform = Transform::from_translation(pos).looking_to(cry_to_bevy(forward), cry_to_bevy(up));
+    } else if let Some(look) = start.look {
         transform.look_at(cry_to_bevy(look), Vec3::Y);
     } else {
         let (yaw, pitch) = (start.yaw.to_radians(), start.pitch.to_radians());
@@ -102,9 +185,24 @@ fn setup(mut commands: Commands, start: Res<Start>) {
     }
     commands.spawn((
         Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { fov: 60f32.to_radians(), near: 0.3, far: 20000.0, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: start.fov.to_radians(), near: 0.3, far: 20000.0, ..default() }),
         transform,
     ));
+}
+
+fn play_cinema(
+    time: Res<Time>,
+    mut play: ResMut<Play>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+) {
+    let Ok((mut t, mut projection)) = cam.single_mut() else { return };
+    play.time = (play.time + time.delta_secs()).min(play.cinema.duration.max(0.1));
+    let pose = play.cinema.pose(play.time);
+    *t = Transform::from_translation(cry_to_bevy(pose.position))
+        .looking_to(cry_to_bevy(pose.rotation * Vec3::Y), cry_to_bevy(pose.rotation * Vec3::Z));
+    if let Projection::Perspective(p) = &mut *projection {
+        p.fov = pose.fov_deg.to_radians();
+    }
 }
 
 fn fly(

@@ -213,13 +213,17 @@ impl TimeOfDay {
 /// `sun_height` on the midday bearing and sets in the west around 18:00; below the horizon (moon side)
 /// otherwise.
 pub fn sun_direction(hour: f32, l: Lighting) -> Vec3 {
-    let u = (hour - 6.0) / 12.0; // 0 at sunrise .. 1 at sunset
-    let elev = if (0.0..=1.0).contains(&u) {
-        (l.sun_height.min(75.0)) * (std::f32::consts::PI * u).sin()
+    const RISE: f32 = 7.0;
+    const SET: f32 = 18.0;
+    let h = hour.rem_euclid(24.0);
+    let peak = l.sun_height.min(75.0);
+    // u: 0 at sunrise .. 1 at sunset; during the night the sun continues its circle below the horizon
+    let (u, elev) = if (RISE..=SET).contains(&h) {
+        let u = (h - RISE) / (SET - RISE);
+        (u, peak * (std::f32::consts::PI * u).sin())
     } else {
-        // night: continue the arc below the horizon
-        let n = if u > 1.0 { (u - 1.0) / 1.0 } else { (u + 1.0) / 1.0 };
-        -(l.sun_height.min(75.0)) * (std::f32::consts::PI * n.clamp(0.0, 1.0)).sin()
+        let n = (h - SET).rem_euclid(24.0) / (24.0 - (SET - RISE));
+        (1.0 + n, -peak * (std::f32::consts::PI * n).sin())
     };
     // bearing of the sun (clockwise from north): midday = rotation - 180
     let noon = (l.sun_rotation - 180.0).to_radians();
@@ -258,7 +262,7 @@ mod tests {
         let l = Lighting { sun_rotation: 188.0, sun_height: 70.0 };
         let noon = sun_direction(12.0, l);
         assert!(noon.z > 0.9);
-        let rise = sun_direction(6.5, l);
+        let rise = sun_direction(7.5, l);
         assert!(rise.x > 0.5 && rise.z > 0.0, "{rise}");
         let set = sun_direction(17.5, l);
         assert!(set.x < -0.5 && set.z > 0.0, "{set}");

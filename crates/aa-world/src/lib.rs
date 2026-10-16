@@ -2,6 +2,7 @@
 //!
 //! See `docs/aa-world.md` for the formats, coordinates, API and performance numbers.
 
+pub mod cinema;
 pub mod coords;
 pub mod cover;
 pub mod env;
@@ -13,6 +14,7 @@ pub mod sky;
 pub mod stream;
 pub mod terrain;
 pub mod vegetation;
+pub mod water;
 pub mod world;
 
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
