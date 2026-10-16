@@ -14,8 +14,12 @@
 
 use std::sync::Arc;
 
-use aa_cry::scene::{CryAssets, LoadedModel, ModelOptions, SkeletonBinding, spawn_loaded};
+use aa_cry::material::Material as CryMaterial;
+use aa_cry::mesh::MeshData;
+use aa_cry::scene::{CryAssets, LoadedModel, ModelOptions, Part, SkeletonBinding, spawn_loaded, subset_mesh};
 use aa_cry::{CRY_TO_BEVY, Skeleton};
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
 
 use crate::animator::{Animator, ClipLibrary, RandomIdle, spawn_bones};
@@ -23,6 +27,7 @@ use crate::cal::Cal;
 use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
+use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, Rig, SampleOptions};
 use crate::{Error, Result};
 
@@ -261,7 +266,7 @@ pub fn spawn_character(
             cry_space: true,
             ..default()
         };
-        let loaded: Arc<LoadedModel> = match cry.load_model(&part.path, &options) {
+        let loaded = match load_part(cry, &assets, &skeleton, part, &options) {
             Ok(l) => l,
             Err(e) => {
                 warn!("aa-anim: {}: {e}", part.path);
@@ -302,4 +307,117 @@ fn start_idle(animator: &mut Animator, clips: &ClipLibrary, assets: &CharacterAs
         animator.random_idle = Some(RandomIdle::new(vec![v], 2, seed));
     }
     Ok(())
+}
+
+/// Loads a part's Bevy assets with the character's look applied: face morphs on the vertices and
+/// skin / hair / eye / costume material tuning (materials are copied, the shared cache entries
+/// stay untouched).
+fn load_part(
+    cry: &mut CryAssets,
+    assets: &CharacterAssets,
+    base: &Skeleton,
+    part: &PartAsset,
+    options: &ModelOptions,
+) -> Result<Arc<LoadedModel>> {
+    let loaded = cry.load_model(&part.path, options)?;
+    let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
+    let mtl_path = loaded.material_path.clone();
+    let mtl = mtl_path.as_deref().and_then(|p| cry.mtl(p));
+
+    let mut out = (*loaded).clone();
+    out.parts.clear();
+    // Skin vertices are expressed in the *character's* bind pose, not the part's: use the base
+    // skeleton's inverse bind matrices for the joints the part maps to (identical for parts made
+    // for the same race; the Nuian head on Harani bodies relies on it plus `hariharan_Morph`).
+    if let Some(part_skeleton) = &loaded.skeleton {
+        let inverse: Vec<Mat4> = part_skeleton
+            .bones
+            .iter()
+            .zip(part_skeleton.map_to(base))
+            .map(|(b, m)| m.map(|j| base.bones[j].inverse_bind()).unwrap_or_else(|| b.inverse_bind()))
+            .collect();
+        out.inverse_bindposes = Some(cry.bindposes.add(SkinnedMeshInverseBindposes::from(inverse)));
+    }
+    for (ni, parts) in &loaded.parts {
+        let Some(mi) = loaded.model.nodes[*ni].mesh else { continue };
+        let source = &loaded.model.meshes[mi];
+        let morphed: Option<MeshData> = morph.as_ref().map(|(set, weights)| {
+            let mut m = source.clone();
+            set.apply(&mut m.positions, weights);
+            m
+        });
+        let data = morphed.as_ref().unwrap_or(source);
+        let skinned = parts.first().is_some_and(|p| p.skinned);
+        let mut new_parts = Vec::new();
+        for subset in &source.subsets {
+            let Some(base) = cry.material(mtl_path.as_deref(), subset.material_id as usize) else { continue };
+            let sub = mtl.as_deref().and_then(|m| m.sub(subset.material_id as usize));
+            let material = match sub {
+                Some(sub) => restyle(cry, &base, sub, assets, part),
+                None => base,
+            };
+            let Some((mesh, aabb)) = subset_mesh(data, subset, skinned, RenderAssetUsages::RENDER_WORLD) else { continue };
+            new_parts.push(Part { mesh: cry.meshes.add(mesh), material, aabb, skinned });
+        }
+        if !new_parts.is_empty() {
+            out.parts.push((*ni, new_parts));
+        }
+    }
+    Ok(Arc::new(out))
+}
+
+/// Morph targets of the customisable head and the weights of this character, if any.
+fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, Vec<(String, f32)>)> {
+    let c = &assets.desc.customization;
+    let set = MorphSet::load(&part.path).ok().flatten()?;
+    let d = &assets.desc;
+    let targets = format!("objects/characters/{}/{}/face/{}_{}_targets.xml", d.race.folder(), d.gender.folder(), d.race.prefix(), d.gender.letter());
+    let maker = FaceMaker::load(&targets).ok()?;
+    let mut weights = FaceMaker::race_weights(d.race);
+    weights.extend(maker.weights(&c.modifier));
+    Some((set, weights))
+}
+
+/// Per-shader tuning of one sub-material for the character (see the module docs of `aa-anim`).
+fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMaterial, assets: &CharacterAssets, _part: &PartAsset) -> Handle<StandardMaterial> {
+    let shader = sub.shader.to_ascii_lowercase();
+    let Some(src) = cry.materials.get(base) else { return base.clone() };
+    let mut m = src.clone();
+    match shader.as_str() {
+        "humanskin" => {
+            // the textures carry the colour; the engine's `Diffuse` (0.2) and SSS colours are lighting terms
+            m.base_color = Color::WHITE;
+            m.emissive = LinearRgba::BLACK;
+            m.perceptual_roughness = 0.55;
+            m.reflectance = 0.3;
+            let _ = &assets.skin;
+        }
+        "hair" => {
+            let color = sub
+                .public_param("HairColor")
+                .and_then(parse_rgb)
+                .map(|c| Color::srgb(c[0], c[1], c[2]))
+                .unwrap_or(Color::srgb(0.4, 0.3, 0.2));
+            m.base_color = color;
+            m.emissive = LinearRgba::BLACK;
+            m.perceptual_roughness = 0.6;
+            m.reflectance = 0.25;
+        }
+        "eye" => {
+            m.base_color = Color::WHITE;
+            m.emissive = LinearRgba::BLACK;
+            m.perceptual_roughness = 0.12;
+            m.reflectance = 0.5;
+        }
+        "illum" => {
+            m.emissive = LinearRgba::BLACK;
+        }
+        _ => return base.clone(),
+    }
+    cry.materials.add(m)
+}
+
+fn parse_rgb(s: &str) -> Option<[f32; 3]> {
+    let mut it = s.split(',').map(|v| v.trim().parse::<f32>());
+    Some([it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?])
 }
