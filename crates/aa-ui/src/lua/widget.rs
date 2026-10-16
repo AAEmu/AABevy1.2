@@ -163,6 +163,18 @@ pub(crate) fn text_height(lua: &Lua, id: Id) -> f32 {
     lo.height
 }
 
+/// `SetAutoResize(true)` widgets: width = text width + horizontal insets.
+pub(crate) fn auto_size(lua: &Lua, id: Id) {
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let Some(t) = u.tree.get(id).text().cloned() else { return };
+    if !t.auto_resize {
+        return;
+    }
+    let w = u.fonts.layout(&t.style.font, t.style.size, &t.text, None, t.line_space, false).width;
+    u.tree.get_mut(id).width = w + t.inset[0] + t.inset[2];
+}
+
 fn longest_line(lua: &Lua, id: Id) -> f32 {
     let mut g = ui(lua);
     let u = &mut *g;
@@ -436,13 +448,22 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     // --- text -------------------------------------------------------------------------------
     def("SetText", method(lua, |lua, id, a| {
         let s = a.s(1).unwrap_or_default();
-        let mut u = ui(lua);
-        if let Some(w) = u.tree.widget_mut(id) {
-            if let Some(t) = w.text.as_mut().or(w.title.as_mut()) {
-                t.text = s;
-                t.lines.clear();
+        {
+            let mut u = ui(lua);
+            if let Some(w) = u.tree.widget_mut(id) {
+                if let Some(t) = w.text.as_mut().or(w.title.as_mut()) {
+                    t.text = s;
+                    t.lines.clear();
+                }
             }
         }
+        auto_size(lua, id);
+        none()
+    })?)?;
+    def("SetAutoResize", method(lua, |lua, id, a| {
+        let on = a.b(1, true);
+        text_of(lua, id, |t| t.auto_resize = on);
+        auto_size(lua, id);
         none()
     })?)?;
     def("GetText", method(lua, |lua, id, _| {
@@ -508,7 +529,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetSounds", "SetCloseOnEscape", "EnableHidingIsRemove", "RegisterForClicks", "RegisterForDrag",
         "StartMoving", "StopMovingOrSizing", "SetEscEvent", "EnableFocus", "EnableKeyboard", "SetSaveConfig",
         "UseDynamicDrawableState", "UseDynamicContentState", "SetMsgToParent", "ApplyUIScale",
-        "SetTitleInset", "SetAutoResize", "SetMaxTextLength", "SetNumberOnly", "SetLimitWidth",
+        "SetTitleInset", "SetMaxTextLength", "SetNumberOnly", "SetLimitWidth",
         "UseConsistentTextColor", "SetStartAnimation", "SetAlphaAnimation", "SetScaleAnimation",
         "InheritAnimationData", "CheckOutOfScreen", "CorrectOffsetByScreen", "SetScale",
     ] {
@@ -627,6 +648,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     // --- list control --------------------------------------------------------------------------
     if ty == "listctrl" {
         crate::lua::widget::listctrl_methods(lua, &m)?;
+    }
+    if ty == "folder" {
+        super::folder::methods(lua, &m)?;
     }
 
     // --- slider ------------------------------------------------------------------------------
@@ -788,6 +812,10 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         };
         if let Some(tb) = tb {
             f(tb);
+        }
+        drop(u);
+        if which == 0 {
+            auto_size(lua, owner);
         }
         Ok(())
     }

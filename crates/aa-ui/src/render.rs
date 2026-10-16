@@ -290,6 +290,25 @@ fn text_quads(u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4], alpha: f32
         let c = g.color.map(|gc| [gc[0], gc[1], gc[2], gc[3] * a]).unwrap_or([color[0], color[1], color[2], a]);
         emit(g, 0.0, 0.0, c, lx);
     }
+    // Inline icons (coins, loyalty token).
+    if !lo.icons.is_empty() {
+        let path = crate::text::INLINE_ICON_TEXTURE;
+        if let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path)) {
+            for ic in &lo.icons {
+                let lx = line_offsets.get(ic.line as usize).copied().unwrap_or(0.0);
+                let [cx, cy, cw, ch] = crate::text::INLINE_ICONS[ic.icon];
+                let sz = (cw * size / 13.0).round().max(cw);
+                let x = ox + lx + ic.x;
+                let y = oy + ic.y;
+                out.push(Quad {
+                    tex: Tex::Image(resolved.clone()),
+                    pos: [x, y, x + sz, y + sz * ch / cw],
+                    uv: [cx / tw as f32, cy / th as f32, (cx + cw) / tw as f32, (cy + ch) / th as f32],
+                    color: [1.0, 1.0, 1.0, a],
+                });
+            }
+        }
+    }
 }
 
 /// Render-side state: textures, materials and the batch entities.

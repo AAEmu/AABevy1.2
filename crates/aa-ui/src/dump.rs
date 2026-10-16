@@ -16,11 +16,29 @@ fn object_paths(lua: &Lua, max_depth: usize) -> mlua::Result<HashMap<Id, Vec<Str
     let mut out: HashMap<Id, Vec<String>> = HashMap::new();
     let mut seen: HashMap<usize, ()> = HashMap::new();
     let mut queue: Vec<(Table, String)> = vec![(lua.globals(), String::new())];
+    let getupvalue: Option<mlua::Function> =
+        lua.globals().get::<Option<Table>>("debug").ok().flatten().and_then(|d| d.get("getupvalue").ok());
+    let mut upvalue_tables: Vec<(Table, String)> = Vec::new();
     for _depth in 0..max_depth {
         let mut next = Vec::new();
         for (t, path) in queue {
             for pair in t.pairs::<Value, Value>() {
                 let Ok((k, v)) = pair else { continue };
+                // Global functions: tables held in their upvalues (`UpdateList^chInfoWindow`, the
+                // reference capture's notation).
+                if let (true, Value::Function(f), Value::String(name)) = (path.is_empty(), &v, &k) {
+                    if let Some(getup) = getupvalue.as_ref() {
+                        let fname = name.to_string_lossy().to_string();
+                        for i in 1..=255 {
+                            let Ok((uname, uv)) = getup.call::<(Option<String>, Value)>((f.clone(), i)) else { break };
+                            let Some(uname) = uname else { break };
+                            if let Value::Table(ut) = uv {
+                                upvalue_tables.push((ut, format!("{fname}^{uname}")));
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let Value::Table(child) = v else { continue };
                 let key = match &k {
                     Value::String(s) => {
@@ -44,6 +62,17 @@ fn object_paths(lua: &Lua, max_depth: usize) -> mlua::Result<HashMap<Id, Vec<Str
                 if seen.insert(addr, ()).is_none() {
                     next.push((child, key));
                 }
+            }
+        }
+        for (ut, p) in upvalue_tables.drain(..) {
+            if let Some(id) = r.ids.raw_get::<Option<i64>>(&ut)? {
+                let paths = out.entry(id as Id).or_default();
+                if paths.len() < 4 {
+                    paths.push(p.clone());
+                }
+            }
+            if seen.insert(ut.to_pointer() as usize, ()).is_none() {
+                next.push((ut, p));
             }
         }
         queue = next;

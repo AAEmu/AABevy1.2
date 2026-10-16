@@ -20,23 +20,15 @@ fn main() {
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(aa_ui::UiPlugin::default())
         .insert_resource(aa_ui::UiSetup::new(move |ui| {
-            fake::install(ui, locale, &fake::worlds_from_args());
+            fake::install_with(ui, locale, &fake::worlds_from_args(), &[]);
             ui.run_stage(aa_ui::Stage::WorldSelect);
             ui.fire_event("ENTERED_WORLD_SELECT", ());
             ui.fire_event("SHOW_SERVER_SELECT_WINDOW", true);
-            report(ui);
+            fake::report(ui, "world_select");
         }))
         .add_systems(Startup, fake::physical_pixels)
-        .add_systems(Update, (log_stats, fake::dump_tree))
+        .add_systems(Update, (log_stats, fake::dump_tree, fake::scripted_input))
         .run();
-}
-
-fn report(ui: &aa_ui::UiRuntime) {
-    let stubs = ui.stub_calls();
-    info!("world_select: {} script errors, {} stubbed natives called", ui.errors.len(), stubs.len());
-    for (name, n) in stubs.iter().take(60) {
-        info!("  stub {name} x{n}");
-    }
 }
 
 fn log_stats(stats: Res<aa_ui::UiStats>, time: Res<Time>, mut last: Local<f32>) {

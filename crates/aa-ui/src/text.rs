@@ -68,9 +68,32 @@ pub struct PlacedGlyph {
     pub color: Option<[f32; 4]>,
 }
 
+/// An inline icon in laid out text (money coins, loyalty token): `x`, `y` = top left in the
+/// block, `icon` indexes [`INLINE_ICONS`].
+#[derive(Clone, Copy, Debug)]
+pub struct PlacedIcon {
+    pub x: f32,
+    pub y: f32,
+    pub line: u16,
+    pub icon: usize,
+}
+
+/// Inline icons of the value codes, in `ui/common/money_window.dds`: (x, y, w, h) texels.
+pub const INLINE_ICON_TEXTURE: &str = "ui/common/money_window.dds";
+pub const INLINE_ICONS: [[f32; 4]; 4] = [
+    [0.0, 29.0, 16.0, 16.0],  // gold coin
+    [16.0, 29.0, 16.0, 16.0], // silver coin
+    [32.0, 29.0, 16.0, 16.0], // copper coin
+    [206.0, 12.0, 16.0, 16.0], // loyalty token (BM mileage)
+];
+/// First private-use code point standing for an inline icon in expanded text.
+const ICON_BASE: u32 = 0xE000;
+const ICON_ADVANCE: f32 = 16.0;
+
 #[derive(Clone, Debug, Default)]
 pub struct LaidOutText {
     pub glyphs: Vec<PlacedGlyph>,
+    pub icons: Vec<PlacedIcon>,
     pub width: f32,
     pub height: f32,
     pub line_widths: Vec<f32>,
@@ -291,7 +314,7 @@ impl FontLib {
             color: Option<[f32; 4]>,
         }
         let mut items: Vec<Item> = Vec::new();
-        let chars: Vec<char> = text.chars().collect();
+        let chars: Vec<char> = expand_codes(text).chars().collect();
         let mut color: Option<[f32; 4]> = None;
         let mut i = 0;
         while i < chars.len() {
@@ -321,6 +344,12 @@ impl FontLib {
             }
             if ch == '\n' {
                 items.push(Item { ch, face: usize::MAX, gid: 0, adv: 0.0, color });
+                continue;
+            }
+            if (ICON_BASE..ICON_BASE + INLINE_ICONS.len() as u32).contains(&(ch as u32)) {
+                // Icon plus 1 px on each side (matches the loyalty token width at login).
+                let adv = (ICON_ADVANCE * size / 13.0).round().max(ICON_ADVANCE) + 2.0;
+                items.push(Item { ch, face: ICON_FACE, gid: (ch as u32 - ICON_BASE) as u16, adv, color });
                 continue;
             }
             let Some((face, gid)) = self.lookup(&chain, ch) else { continue };
@@ -374,7 +403,11 @@ impl FontLib {
             // Trailing spaces do not count towards the line width.
             let mut width = 0.0f32;
             for it in &items[a..b] {
-                if it.ch != ' ' {
+                if it.face == ICON_FACE {
+                    let top = li as f32 * (line_h + line_space) + ((line_h - (it.adv - 2.0)) / 2.0).round();
+                    out.icons.push(PlacedIcon { x: x + 1.0, y: top, line: li as u16, icon: it.gid as usize });
+                    width = x + it.adv;
+                } else if it.ch != ' ' {
                     if let Some(g) = self.glyph(it.face, px, it.gid, outline) {
                         out.glyphs.push(PlacedGlyph { x, y, line: li as u16, glyph: g, color: it.color });
                     }
@@ -465,9 +498,97 @@ impl FontLib {
     }
 }
 
+/// Item face for inline icons.
+const ICON_FACE: usize = usize::MAX - 1;
+
+fn icon_char(i: usize) -> char {
+    char::from_u32(ICON_BASE + i as u32).unwrap_or(' ')
+}
+
+/// `|m<copper>;`: gold / silver / copper parts with coin icons (`0` shows a copper coin).
+fn money_text(body: &str) -> String {
+    let Ok(v) = body.trim().parse::<i64>() else { return body.to_string() };
+    let (g, s, c) = (v / 10000, (v / 100) % 100, v % 100);
+    let mut parts = Vec::new();
+    if g != 0 {
+        parts.push(format!("{g}{}", icon_char(0)));
+    }
+    if s != 0 {
+        parts.push(format!("{s}{}", icon_char(1)));
+    }
+    if c != 0 || parts.is_empty() {
+        parts.push(format!("{c}{}", icon_char(2)));
+    }
+    parts.join(" ")
+}
+
+/// Expand the client's inline value codes, keeping colour codes (`|cAARRGGBB`, `|r`):
+/// `|,1234;` -> `1234` (the client shows `Labor 85/2000`, no separators at login); other `|x...;` codes (`|b` bold value, `|m`
+/// money with coin icons, `|p`, `|u`, ...) show their content (`|b` adds the loyalty token
+/// icon, `|m` coins).
+pub fn expand_codes(text: &str) -> String {
+    if !text.contains('|') {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '|' && i + 1 < chars.len() {
+            let k = chars[i + 1];
+            let is_value = k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
+            if is_value {
+                let end = chars[i + 2..].iter().take(64).position(|&x| x == ';' || x == '|' || x == '\n');
+                if let Some(n) = end.filter(|&n| chars[i + 2 + n] == ';') {
+                    let body: String = chars[i + 2..i + 2 + n].iter().collect();
+                    match k {
+                        'm' => out.push_str(&money_text(&body)),
+                        'b' => {
+                            out.push_str(&body);
+                            out.push(icon_char(3));
+                        }
+                        _ => out.push_str(&body),
+                    }
+                    i += n + 3;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+#[allow(dead_code)]
+fn group_thousands(s: &str) -> String {
+    let (sign, digits) = s.strip_prefix('-').map_or(("", s), |d| ("-", d));
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    format!("{sign}{out}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn value_codes() {
+        assert_eq!(expand_codes("LP |,85;/|,2000;"), "LP 85/2000");
+        assert_eq!(expand_codes("|cFFFF0000red|r |p12;"), "|cFFFF0000red|r 12");
+        assert_eq!(expand_codes("|m10203;"), format!("1{} 2{} 3{}", icon_char(0), icon_char(1), icon_char(2)));
+        assert_eq!(expand_codes("|m0;"), format!("0{}", icon_char(2)));
+        assert_eq!(expand_codes("a|b"), "a|b");
+    }
 
     /// Prints font metrics of the UI fonts (needs the client pak): `cargo test -p aa-ui font_metrics -- --ignored --nocapture`.
     #[test]
