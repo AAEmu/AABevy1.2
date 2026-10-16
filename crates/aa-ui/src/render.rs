@@ -112,11 +112,13 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         if let Some(t) = w.title.as_ref() {
             if !t.text.is_empty() {
                 let r = u.tree.rect(id);
+                // Centred in the top 45 units (the baselib title bar height), 1 unit lower:
+                // the step 3 confirm dialog in reference/character_create matches to the pixel.
                 let rect = Rect {
                     x: r.x,
-                    y: r.y + 10.0,
+                    y: r.y + 1.0,
                     w: r.w,
-                    h: 30.0,
+                    h: r.h.min(45.0),
                 };
                 let mut t = t.clone();
                 t.style.align = crate::tree::Align::Center;

@@ -201,9 +201,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         g.raw_set("Script", script)?;
     }
 
-    // The toolkit's part of the game API: `X2Locale:GetLocale()` and the `ADDON` content
-    // registry. `ADDON` and `X2` are one native table in the client. The app adds the rest
-    // (`install_game_stub` returns these tables).
+    // The toolkit's part of the game API: `X2Locale:GetLocale()`, the `ADDON` content registry
+    // and the `X2DialogManager` message boxes. `ADDON` and `X2` are one native table in the
+    // client. The app adds the rest (`install_game_stub` returns these tables).
     let locale = ui(lua).textures.locale.clone();
     let x2locale = install_game_stub(lua, "X2Locale")?;
     x2locale.raw_set(
@@ -214,15 +214,22 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     if g.raw_get::<Value>("X2")?.is_nil() {
         g.raw_set("X2", &addon)?;
     }
-    lua.load(ADDON_LUA).set_name("@aa-ui/addon").exec()?;
+    install_game_stub(lua, "X2DialogManager")?;
+    lua.load(TOOLKIT_LUA).set_name("@aa-ui/toolkit").exec()?;
     Ok(())
 }
 
-/// `ADDON` content registry (`UIC_*` categories): `RegisterContentWidget(cat, widget, showFn)`,
-/// `GetContent(cat)` (nil when nothing registered), `RegisterContentTriggerFunc(cat, fn)`,
-/// `ShowContent(cat, show)`, `ToggleContent(cat)`. `X2Locale:LocalizeUiText` defaults to the
-/// key until the app provides the UI text table.
-const ADDON_LUA: &str = r#"
+/// * `ADDON` content registry (`UIC_*` categories): `RegisterContentWidget(cat, widget,
+///   showFn)`, `GetContent(cat)` (nil when nothing registered), `RegisterContentTriggerFunc(cat,
+///   fn)`, `ShowContent(cat, show)`, `ToggleContent(cat)`.
+/// * `X2DialogManager`: `SetHandler(task, fn)` registers the decorator of a dialog kind
+///   (`components/dialog_handler.lua` registers `DLG_TASK_DEFAULT`); `RequestDefaultDialog(fn,
+///   ownerId)` / `RequestNoticeDialog(fn, ownerId)` create a window with `textbox`, `btnOk`,
+///   `btnCancel`, run the decorator with `(wnd, info)` (`info.buttonType` `DBT_OK_CANCEL` /
+///   `DBT_OK`, modal), then `fn(wnd, info)`, and show it; `OnOK` / `OnCancel` / `OnCustom(id)`
+///   close it, `DeleteByOwnerWindow(ownerId)` closes an owner's dialogs.
+/// * `X2Locale:LocalizeUiText` returns the key until the app provides the UI text table.
+const TOOLKIT_LUA: &str = r#"
 local contents, shows, triggers = {}, {}, {}
 function ADDON:RegisterContentWidget(cat, widget, show)
   contents[cat] = widget
@@ -254,6 +261,50 @@ function ADDON:ImportAPI() end
 function ADDON:ImportObject() end
 function X2Locale:LocalizeUiText(cat, key)
   return tostring(key)
+end
+
+local dialogHandlers, dialogs, dialogCount = {}, {}, 0
+function X2DialogManager:SetHandler(task, fn)
+  dialogHandlers[task] = fn
+end
+local function requestDialog(fn, owner, buttonType)
+  dialogCount = dialogCount + 1
+  local wnd = UIParent:CreateWidget("window", "x2Dialog" .. dialogCount, "UIParent")
+  wnd:CreateChildWidget("textbox", "textbox", 0, true)
+  wnd:CreateChildWidget("button", "btnOk", 0, true)
+  wnd:CreateChildWidget("button", "btnCancel", 0, true)
+  if buttonType ~= DBT_OK_CANCEL then
+    wnd.btnCancel:Show(false)
+  end
+  local info = { buttonType = buttonType, isModal = true }
+  local decorate = dialogHandlers[DLG_TASK_DEFAULT]
+  if decorate then decorate(wnd, info) end
+  if fn then fn(wnd, info) end
+  dialogs[wnd:GetId()] = { wnd = wnd, owner = owner }
+  wnd:Show(true)
+  wnd:Raise()
+  return wnd
+end
+function X2DialogManager:RequestDefaultDialog(fn, owner)
+  return requestDialog(fn, owner, DBT_OK_CANCEL)
+end
+function X2DialogManager:RequestNoticeDialog(fn, owner)
+  return requestDialog(fn, owner, DBT_OK)
+end
+local function closeDialog(id)
+  local d = dialogs[id]
+  if d then
+    dialogs[id] = nil
+    d.wnd:Show(false)
+  end
+end
+function X2DialogManager:OnOK(id) closeDialog(id) end
+function X2DialogManager:OnCancel(id) closeDialog(id) end
+function X2DialogManager:OnCustom(id) closeDialog(id) end
+function X2DialogManager:DeleteByOwnerWindow(owner)
+  for id, d in pairs(dialogs) do
+    if d.owner == owner then closeDialog(id) end
+  end
 end
 "#;
 
