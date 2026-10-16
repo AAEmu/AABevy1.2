@@ -723,19 +723,19 @@
     ],
     [
      "GetAchievementInfo",
-     "mId, sId"
+     "aId"
     ],
     [
      "AddTracingAchievement",
-     "mId, sId"
+     "aId"
     ],
     [
      "RemoveTracingAchievement",
-     null
+     "aId"
     ],
     [
      "IsTracingAchievement",
-     null
+     "aId"
     ],
     [
      "GetTracingAchievementCount",
@@ -743,7 +743,7 @@
     ],
     [
      "RemoveNewCompleteAchievement",
-     ""
+     "aId"
     ],
     [
      "GetNewCompleteAchievementCount",
@@ -930,7 +930,7 @@
     ],
     [
      "GetBeautyShopConfigInfo",
-     "fileName"
+     ""
     ],
     [
      "TerminateBeautyShop",
@@ -938,19 +938,19 @@
     ],
     [
      "CanEnterBeautyShop",
-     null
+     ""
     ],
     [
      "HasTemporaryCustomData",
-     null
+     ""
     ],
     [
      "LoadTemporaryCustomData",
-     null
+     ""
     ],
     [
      "DeleteTemporaryCustomData",
-     null
+     ""
     ]
    ]
   },
@@ -963,11 +963,11 @@
     ],
     [
      "OnOK",
-     "taskType, handler"
+     "widgetId"
     ],
     [
      "OnCancel",
-     "taskType, handler"
+     "widgetId"
     ],
     [
      "OnCustom",
@@ -975,11 +975,11 @@
     ],
     [
      "RequestDefaultDialog",
-     "widgetId, btnNum"
+     "handler, ownerWindowId"
     ],
     [
      "RequestNoticeDialog",
-     "widgetId, btnNum"
+     "handler, ownerWindowId"
     ],
     [
      "Delete",
@@ -1008,7 +1008,7 @@
     ],
     [
      "SelectMainTab",
-     ""
+     "index"
     ],
     [
      "SelectSubTab",
@@ -1020,11 +1020,11 @@
     ],
     [
      "GetGood",
-     "page"
+     "page, index"
     ],
     [
      "SelectGood",
-     "page"
+     "page, index"
     ],
     [
      "CheckSelectedGoodDetail",
@@ -1052,7 +1052,7 @@
     ],
     [
      "GetBuyResult",
-     "buyMode, receiverName"
+     ""
     ],
     [
      "GetAdvertisementInfo",
@@ -1060,23 +1060,23 @@
     ],
     [
      "IsInGameShopEnable",
-     null
+     ""
     ],
     [
      "EnterBeautyShop",
-     null
+     ""
     ],
     [
      "GenderTransfer",
-     null
+     ""
     ],
     [
      "CheckWaitingServer",
-     null
+     ""
     ],
     [
      "GetSecondPriceType",
-     null
+     ""
     ]
    ]
   },
@@ -1190,7 +1190,7 @@
     ],
     [
      "SetConvertLookItemSlotFromPick",
-     "itemIndex"
+     ""
     ],
     [
      "GetConvertLookItemInfo",
@@ -1198,19 +1198,19 @@
     ],
     [
      "ClearConvertLookItemSlot",
-     null
+     ""
     ],
     [
      "GetConvertResultItemInfo",
-     null
+     ""
     ],
     [
      "GetItemLookConvertInfo",
-     null
+     ""
     ],
     [
      "ConvertItemLook",
-     null
+     ""
     ]
    ]
   },
@@ -1296,75 +1296,75 @@
     ],
     [
      "StandMode",
-     null
+     ""
     ],
     [
      "ProtectiveMode",
-     null
+     ""
     ],
     [
      "AggressiveMode",
-     null
+     ""
     ],
     [
      "OrderAttackTarget",
-     null
+     ""
     ],
     [
      "IsMyPet",
-     null
+     ""
     ],
     [
      "IsPlayerPetExists",
-     null
+     ""
     ],
     [
      "IsAttackablePet",
-     null
+     ""
     ],
     [
      "IsMountablePet",
-     null
+     ""
     ],
     [
      "IsHavePassengerSeat",
-     null
+     ""
     ],
     [
      "PetState",
-     null
+     ""
     ],
     [
      "MountMate",
-     null
+     ""
     ],
     [
      "UnMountMate",
-     null
+     ""
     ],
     [
      "CanMount",
-     null
+     ""
     ],
     [
      "CanDismiss",
-     null
+     ""
     ],
     [
      "KickPassenger",
-     null
+     ""
     ],
     [
      "HavePassenger",
-     null
+     ""
     ],
     [
      "IsTargetMyMate",
-     null
+     ""
     ],
     [
      "IsPlayerMounting",
-     null
+     ""
     ],
     [
      "SetMateName",
@@ -1372,7 +1372,7 @@
     ],
     [
      "GetNumMountSkills",
-     "name"
+     ""
     ],
     [
      "GetMountSkill",
@@ -1449,11 +1449,11 @@
     ],
     [
      "InviteToFaction",
-     "zoneGroupType, taxRate"
+     "charName"
     ],
     [
      "KickToFaction",
-     "zoneGroupType, taxRate"
+     "charName"
     ],
     [
      "GetNationList",
@@ -1465,7 +1465,7 @@
     ],
     [
      "GetRelationList",
-     "factionId, page"
+     "factionId"
     ],
     [
      "DeclareHostileToFaction",
@@ -1709,11 +1709,11 @@
     ],
     [
      "StartSecondPasswordClear",
-     null
+     ""
     ],
     [
      "StartSecondPasswordWebClear",
-     null
+     ""
     ],
     [
      "CreateSecondPassword",
@@ -1733,7 +1733,7 @@
     ],
     [
      "IsSecondPasswordCreated",
-     "password"
+     ""
     ],
     [
      "IsSecondPasswordPassed",
@@ -1741,27 +1741,27 @@
     ],
     [
      "IsSecondPasswordLocked",
-     null
+     ""
     ],
     [
      "GetSecondPasswordUnlockTime",
-     null
+     ""
     ],
     [
      "GetSecondPasswordUnlockRemainTime",
-     null
+     ""
     ],
     [
      "GetSecondPasswordFailedCount",
-     null
+     ""
     ],
     [
      "CancelVaildation",
-     null
+     ""
     ],
     [
      "RecommendUsingSecondPassword",
-     null
+     ""
     ]
    ]
   },
@@ -1778,15 +1778,15 @@
     ],
     [
      "CancelTrial",
-     "idx"
+     ""
     ],
     [
      "GetCrimeRecords",
-     null
+     ""
     ],
     [
      "GetCrimeData",
-     null
+     ""
     ],
     [
      "ReportCrime",
@@ -1802,7 +1802,7 @@
     ],
     [
      "ReportBotSuspect",
-     ""
+     "msg"
     ],
     [
      "GetTrialType",
@@ -2139,35 +2139,35 @@
     ],
     [
      "SetTextColor",
-     ""
+     "r, g, b, a"
     ],
     [
      "SetNormalColor",
-     ""
+     "r, g, b, a"
     ],
     [
      "SetPushedTextColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetPushedColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetHighlightTextColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetHighlightColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetDisabledTextColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetDisabledColor",
-     null
+     "r, g, b, a"
     ],
     [
      "SetInset",
@@ -3035,11 +3035,11 @@
     ],
     [
      "SetHeaderType",
-     "width"
+     "type"
     ],
     [
      "SetDrawLineType",
-     "width"
+     "type"
     ],
     [
      "SetDrawStartNumber",
@@ -3253,15 +3253,15 @@
     ],
     [
      "SetSelectedItemCoord",
-     "texFile"
+     "x, y, cx, cy"
     ],
     [
      "SetOveredItemCoord",
-     "texFile"
+     "x, y, cx, cy"
     ],
     [
      "SetDefaultItemCoord",
-     null
+     "x, y, cx, cy"
     ],
     [
      "SetSelectedItemColor",
@@ -3293,15 +3293,15 @@
     ],
     [
      "CreateOpenedImageDrawable",
-     "use"
+     "nameTex"
     ],
     [
      "CreateClosedImageDrawable",
-     "use"
+     "nameTex"
     ],
     [
      "CreateSeparatorImageDrawable",
-     null
+     "nameTex"
     ],
     [
      "InitializeSelect",
@@ -3503,11 +3503,11 @@
     ],
     [
      "AddNotifyQuestInfo",
-     ""
+     "qType"
     ],
     [
      "RemoveNotifyQuestInfo",
-     ""
+     "qType"
     ],
     [
      "ClearNotifyQuestInfo",
@@ -3552,11 +3552,11 @@
     ],
     [
      "SetTimeVisible",
-     "space"
+     "seconds"
     ],
     [
      "SetFadeDuration",
-     "space"
+     "seconds"
     ],
     [
      "AddMessage",
@@ -3587,19 +3587,11 @@
      ""
     ],
     [
-     "ScrollUp",
-     ""
-    ],
-    [
      "ScrollToTop",
      ""
     ],
     [
      "ScrollToBottom",
-     ""
-    ],
-    [
-     "ScrollUp",
      ""
     ],
     [
@@ -3781,15 +3773,15 @@
     ],
     [
      "SetCustomizingHair",
-     ""
+     "index"
     ],
     [
      "SetCustomizingHairColor",
-     ""
+     "index"
     ],
     [
      "SetCustomizingSkinColor",
-     null
+     "index"
     ],
     [
      "SetCustomizingScar",
@@ -3797,7 +3789,7 @@
     ],
     [
      "SetCustomizingTattoo",
-     "index, x, y, scale, rotate"
+     "index"
     ],
     [
      "SetCustomizingMakeUp",
@@ -3805,11 +3797,11 @@
     ],
     [
      "SetCustomizingEyebrow",
-     "index, weight"
+     "index"
     ],
     [
      "SetCustomizingEyebrowColor",
-     "index, weight"
+     "r, g, b"
     ],
     [
      "SetCustomizingDeco",
@@ -3817,7 +3809,7 @@
     ],
     [
      "SetCustomizingDecoColor",
-     "index, weight"
+     "r, g, b"
     ],
     [
      "SetCustomizingFaceDiffuse",
@@ -3829,11 +3821,11 @@
     ],
     [
      "SetCustomizingPupilColor",
-     "index, weight"
+     "r, g, b"
     ],
     [
      "SetCustomizingLipColor",
-     "index, weight"
+     "r, g, b"
     ],
     [
      "GetCustomHair",
@@ -4301,7 +4293,7 @@
     ],
     [
      "SetMinTabWidth",
-     ""
+     "width"
     ],
     [
      "SetTabWidth",
@@ -4544,7 +4536,7 @@
     ],
     [
      "Log",
-     "sEntityName"
+     ""
     ],
     [
      "LogAlways",
@@ -4552,11 +4544,11 @@
     ],
     [
      "Warning",
-     null
+     ""
     ],
     [
      "Error",
-     null
+     ""
     ],
     [
      "SetTextureCoordsForFormattedText",
@@ -4568,11 +4560,11 @@
     ],
     [
      "SetEventHandler",
-     "use"
+     "eventName, handler"
     ],
     [
      "ReleaseEventHandler",
-     "use"
+     "eventName, handler"
     ],
     [
      "SetUIStamp",
@@ -4711,7 +4703,7 @@
     ],
     [
      "RequestMessengerByPcName",
-     ""
+     "pcName"
     ],
     [
      "RequestPlayDiary",
@@ -4723,7 +4715,7 @@
     ],
     [
      "RequestPlayDiaryByPcName",
-     ""
+     "pcName"
     ],
     [
      "RequestPlayDiaryInstant",
@@ -4904,11 +4896,11 @@
     ],
     [
      "ReleaseHandler",
-     "action, handler"
+     "actionName"
     ],
     [
      "HasHandler",
-     "action, handler"
+     "actionName"
     ],
     [
      "SetLayerColor",
@@ -4920,11 +4912,11 @@
     ],
     [
      "EnableKeyboard",
-     "anchorPoint"
+     "enable"
     ],
     [
      "EnableFocus",
-     "anchorPoint"
+     "enable"
     ],
     [
      "EnableHidingIsRemove",
@@ -5028,7 +5020,7 @@
     ],
     [
      "GetMinMaxValues",
-     "enable"
+     "typeStr"
     ],
     [
      "ChangeChildAnchorByScrollValue",
@@ -5036,15 +5028,15 @@
     ],
     [
      "FindPrevWidgetOffset",
-     "typeStr, value"
+     "typeStr"
     ],
     [
      "FindNextWidgetOffset",
-     "typeStr, value"
+     "typeStr"
     ],
     [
      "GetValue",
-     null
+     "typeStr"
     ],
     [
      "UpdateRange",
@@ -5166,7 +5158,7 @@
     ],
     [
      "SetPortalDrawable",
-     "zoneId, x, y, z"
+     "drawable"
     ],
     [
      "ShowCommonFarm",
@@ -5174,7 +5166,7 @@
     ],
     [
      "SetCommonFarmDrawable",
-     "farmGroupType, farmType, x, y"
+     "drawable"
     ],
     [
      "SetExpandRatio",
@@ -5247,11 +5239,11 @@
     ],
     [
      "GetTrainerSkillInfo",
-     "ability"
+     "ability, index"
     ],
     [
      "GetBuffInfo",
-     "ability"
+     "ability, index"
     ],
     [
      "LearnSkillAndBuff",
@@ -5259,15 +5251,15 @@
     ],
     [
      "LearnSkill",
-     "ability, index, isSkill"
+     "ability, index"
     ],
     [
      "LearnBuff",
-     "ability, index, isSkill"
+     "ability, index"
     ],
     [
      "UpgradeSkill",
-     null
+     "ability, index"
     ],
     [
      "AskResetSkills",
@@ -5287,7 +5279,7 @@
     ],
     [
      "CanBuyAbilityChange",
-     "oldAbility, newAbility"
+     ""
     ],
     [
      "GetAbilityChangeCost",
@@ -5299,19 +5291,19 @@
     ],
     [
      "NumActiveAbility",
-     "ability"
+     ""
     ],
     [
      "GetActiveAbility",
-     null
+     ""
     ],
     [
      "GetDeactiveAbility",
-     null
+     ""
     ],
     [
      "GetAllAbility",
-     null
+     ""
     ],
     [
      "IsActiveAbility",
@@ -5391,7 +5383,7 @@
     ],
     [
      "GetGradeInfo",
-     "actAbilityGroupType"
+     "grade"
     ],
     [
      "GetMaxGrade",
@@ -5399,7 +5391,7 @@
     ],
     [
      "GetActabilityCountByGrade",
-     ""
+     "grade"
     ],
     [
      "CanExpandExpert",
@@ -5411,7 +5403,7 @@
     ],
     [
      "ExpandExpert",
-     null
+     ""
     ],
     [
      "GetCurrencyForAbilityChange",
@@ -5529,15 +5521,15 @@
     ],
     [
      "RegisterContentWidget",
-     "objectType"
+     "uiCategory"
     ],
     [
      "RegisterContentTriggerFunc",
-     "objectType"
+     "uiCategory"
     ],
     [
      "GetContent",
-     null
+     "uiCategory"
     ],
     [
      "ShowContent",
@@ -5545,7 +5537,7 @@
     ],
     [
      "ToggleContent",
-     "uiCategory, arg"
+     "uiCategory"
     ],
     [
      "GetAddonInfos",
@@ -5638,7 +5630,7 @@
     ],
     [
      "GetDynamicActionSkill",
-     ""
+     "idx"
     ],
     [
      "ExecuteDynamicAction",
@@ -5646,7 +5638,7 @@
     ],
     [
      "IsDynamicActionSkillToggled",
-     null
+     "idx"
     ],
     [
      "GetPetExpToNextLevel",
@@ -5658,7 +5650,7 @@
     ],
     [
      "GetBodyItemCategoryCount",
-     null
+     ""
     ],
     [
      "GetBodyItemCountByCategory",
@@ -5670,35 +5662,35 @@
     ],
     [
      "GetTargetCombatRelationship",
-     "category, index, race, gender"
+     ""
     ],
     [
      "GetTargetFactionRelationship",
-     null
+     ""
     ],
     [
      "IsStablerNpc",
-     null
+     ""
     ],
     [
      "RepairPetItems",
-     null
+     ""
     ],
     [
      "GetTotalRepairsForPetItems",
-     null
+     ""
     ],
     [
      "IsRepairmanNpc",
-     null
+     ""
     ],
     [
      "RepairSlaveItems",
-     null
+     ""
     ],
     [
      "GetTotalRepairsForSlaveItems",
-     null
+     ""
     ],
     [
      "RollDice",
@@ -5706,23 +5698,23 @@
     ],
     [
      "KickPassenger",
-     "maxFaces"
+     ""
     ],
     [
      "HavePassengerPet",
-     null
+     ""
     ],
     [
      "DismissPet",
-     null
+     ""
     ],
     [
      "IsPlayerPetExists",
-     null
+     ""
     ],
     [
      "IsWebEnable",
-     null
+     ""
     ],
     [
      "SendNewsCastByChat",
@@ -5742,7 +5734,7 @@
     ],
     [
      "FastForwardQuestChat",
-     ""
+     "nextBubbleId"
     ],
     [
      "FastBackwardQuestChat",
@@ -5750,7 +5742,7 @@
     ],
     [
      "IsFirstQuestChat",
-     null
+     "nextBubbleId"
     ],
     [
      "GetAccountUiData",
@@ -5794,7 +5786,7 @@
     ],
     [
      "GetWorldmapDefaultExpansionLevel",
-     "table"
+     ""
     ],
     [
      "SetWorldmapDefaultExpansionLevel",
@@ -5802,15 +5794,15 @@
     ],
     [
      "LoadAccountUiData",
-     "level"
+     ""
     ],
     [
      "SaveAccountUiData",
-     null
+     ""
     ],
     [
      "LoadCharacterUiData",
-     null
+     ""
     ]
    ]
   },
@@ -5839,7 +5831,7 @@
     ],
     [
      "SearchAuctionArticleByPage",
-     ""
+     "page"
     ],
     [
      "SearchMyAuctionArticles",
@@ -5847,7 +5839,7 @@
     ],
     [
      "SearchDeclareSiege",
-     null
+     "page"
     ],
     [
      "BidAuctionArticle",
@@ -6028,7 +6020,7 @@
     ],
     [
      "UseItemByType",
-     "mountIndex, slot"
+     "itemType"
     ],
     [
      "GetBagItemSoundType",
@@ -6044,15 +6036,15 @@
     ],
     [
      "CountBagItemByItemType",
-     "bagId, equipSlot"
+     "itemType"
     ],
     [
      "FindFirstBagSlotItemByItemType",
-     "bagId, equipSlot"
+     "itemType"
     ],
     [
      "FindFirstBagItemInfoByItemType",
-     null
+     "itemType"
     ],
     [
      "EquipBagItem",
@@ -6076,7 +6068,7 @@
     ],
     [
      "ItemIdentifier",
-     "bagSlot"
+     "slot"
     ],
     [
      "ItemDurability",
@@ -6088,43 +6080,43 @@
     ],
     [
      "ItemArmor",
-     null
+     "slot"
     ],
     [
      "ItemMagicDamage",
-     null
+     "slot"
     ],
     [
      "ItemMagicResistance",
-     null
+     "slot"
     ],
     [
      "ItemGemStats",
-     null
+     "slot"
     ],
     [
      "IsSoulBoundedItem",
-     null
+     "slot"
     ],
     [
      "ItemStack",
-     null
+     "slot"
     ],
     [
      "IsLocked",
-     null
+     "slot"
     ],
     [
      "ItemRepair",
-     null
+     "slot"
     ],
     [
      "ItemRepairCost",
-     null
+     "slot"
     ],
     [
      "ItemRequireLevel",
-     null
+     "slot"
     ],
     [
      "Slots",
@@ -6200,7 +6192,7 @@
     ],
     [
      "TabInfos",
-     "tabIdx"
+     ""
     ],
     [
      "Expand",
@@ -6208,15 +6200,15 @@
     ],
     [
      "IsExpandable",
-     null
+     ""
     ],
     [
      "CanExpand",
-     null
+     ""
     ],
     [
      "ExpansionCost",
-     null
+     ""
     ],
     [
      "LockSlot",
@@ -6228,15 +6220,15 @@
     ],
     [
      "MoveToEmptyBankSlot",
-     null
+     "slotIdx"
     ],
     [
      "MoveToEmptyCofferSlot",
-     null
+     "slotIdx"
     ],
     [
      "GetLinkText",
-     null
+     "slotIdx"
     ],
     [
      "ExpansionMaxSlotCount",
@@ -6277,55 +6269,55 @@
     ],
     [
      "ItemIdentifier",
-     ""
+     "slot"
     ],
     [
      "ItemDurability",
-     ""
+     "slot"
     ],
     [
      "ItemDameage",
-     null
+     "slot"
     ],
     [
      "ItemArmor",
-     null
+     "slot"
     ],
     [
      "ItemMagicDamage",
-     null
+     "slot"
     ],
     [
      "ItemMagicResistance",
-     null
+     "slot"
     ],
     [
      "ItemGemStats",
-     null
+     "slot"
     ],
     [
      "IsSoulBoundedItem",
-     null
+     "slot"
     ],
     [
      "ItemStack",
-     null
+     "slot"
     ],
     [
      "IsLocked",
-     null
+     "slot"
     ],
     [
      "ItemRepair",
-     null
+     "slot"
     ],
     [
      "ItemRepairCost",
-     null
+     "slot"
     ],
     [
      "ItemRequireLevel",
-     null
+     "slot"
     ],
     [
      "Slots",
@@ -6409,7 +6401,7 @@
     ],
     [
      "TabInfos",
-     "tabIdx"
+     ""
     ],
     [
      "Expand",
@@ -6417,15 +6409,15 @@
     ],
     [
      "IsExpandable",
-     null
+     ""
     ],
     [
      "CanExpand",
-     null
+     ""
     ],
     [
      "ExpansionCost",
-     null
+     ""
     ],
     [
      "LockSlot",
@@ -6437,7 +6429,7 @@
     ],
     [
      "MoveToEmptyBagSlot",
-     null
+     "slotIdx"
     ],
     [
      "Deposit",
@@ -6502,7 +6494,7 @@
     ],
     [
      "GetJoinedInfos",
-     "npcType"
+     ""
     ],
     [
      "GetEndGameTime",
@@ -6510,35 +6502,35 @@
     ],
     [
      "GetProgressEntireInfo",
-     null
+     ""
     ],
     [
      "GetProgressTimeInfo",
-     null
+     ""
     ],
     [
      "GetProgressScoreInfo",
-     null
+     ""
     ],
     [
      "GetProgressVictoryConditionInfo",
-     null
+     ""
     ],
     [
      "GetMembersDetailInfo",
-     null
+     ""
     ],
     [
      "GetInteractedNpcType",
-     null
+     ""
     ],
     [
      "EndKillStreakSound",
-     null
+     ""
     ],
     [
      "AskLeaveInstantGame",
-     null
+     ""
     ]
    ]
   },
@@ -6580,7 +6572,7 @@
     ],
     [
      "GetChatChannelName",
-     "channel, message, target"
+     "channel"
     ],
     [
      "OpenChat",
@@ -6640,7 +6632,7 @@
     ],
     [
      "AddItemLinkToActiveChatInput",
-     ""
+     "linkText"
     ],
     [
      "AddQuestLinkToActiveChatInput",
@@ -6701,47 +6693,47 @@
     ],
     [
      "ItemIdentifier",
-     ""
+     "slot"
     ],
     [
      "ItemDurability",
-     ""
+     "slot"
     ],
     [
      "ItemDameage",
-     null
+     "slot"
     ],
     [
      "ItemArmor",
-     null
+     "slot"
     ],
     [
      "ItemMagicDamage",
-     null
+     "slot"
     ],
     [
      "ItemMagicResistance",
-     null
+     "slot"
     ],
     [
      "ItemGemStats",
-     null
+     "slot"
     ],
     [
      "IsSoulBoundedItem",
-     null
+     "slot"
     ],
     [
      "ItemStack",
-     null
+     "slot"
     ],
     [
      "IsLocked",
-     null
+     "slot"
     ],
     [
      "ItemRequireLevel",
-     null
+     "slot"
     ],
     [
      "Slots",
@@ -6749,7 +6741,7 @@
     ],
     [
      "SlotByIdx",
-     ""
+     "virtualSlot"
     ],
     [
      "Sort",
@@ -6785,19 +6777,19 @@
     ],
     [
      "HandleClick",
-     ""
+     "virtualSlot"
     ],
     [
      "HandleDragStart",
-     ""
+     "virtualSlot"
     ],
     [
      "HandleDragRecv",
-     null
+     "virtualSlot"
     ],
     [
      "HandleUse",
-     null
+     "virtualSlot"
     ],
     [
      "Confirm",
@@ -6805,11 +6797,11 @@
     ],
     [
      "IsConfirmedSlot",
-     ""
+     "virtualSlot"
     ],
     [
      "IsInvalidSlot",
-     ""
+     "virtualSlot"
     ],
     [
      "PickupCofferItemPartial",
@@ -6821,7 +6813,7 @@
     ],
     [
      "TabInfos",
-     "tabIdx"
+     ""
     ],
     [
      "MoveToEmptyBagSlot",
@@ -6833,15 +6825,15 @@
     ],
     [
      "IsMyHouseCoffer",
-     "slotIdx"
+     ""
     ],
     [
      "GetHouseCofferPermission",
-     null
+     ""
     ],
     [
      "GetHouseCofferName",
-     null
+     ""
     ],
     [
      "SetHouseCofferPermission",
@@ -6883,7 +6875,7 @@
     ],
     [
      "GetActabilityGroupNameByGroupType",
-     ""
+     "groupType"
     ],
     [
      "GetActabilityGroupInfoByGroupType",
@@ -6899,7 +6891,7 @@
     ],
     [
      "GetActabilityCategoryCraftTypesByTypes",
-     "categoryType"
+     "groupType, categoryType"
     ],
     [
      "EnumActabilityGroupTypesFromCurrentDoodad",
@@ -6919,7 +6911,7 @@
     ],
     [
      "GetCraftTypesFromCurrentDoodad",
-     "groupType"
+     "groupType, categoryType"
     ],
     [
      "GetAllCraftTypesInGroupByName",
@@ -6931,15 +6923,15 @@
     ],
     [
      "GetCraftName",
-     "categoryType, categoryType, name"
+     "craftType"
     ],
     [
      "GetCraftBaseInfo",
-     "categoryType, categoryType, name"
+     "craftType"
     ],
     [
      "GetCraftMaterialInfo",
-     null
+     "craftType"
     ],
     [
      "GetCraftTypesByMaterialName",
@@ -6951,11 +6943,11 @@
     ],
     [
      "GetCraftProductInfo",
-     "categoryType, name"
+     "craftType"
     ],
     [
      "GetExecutableCraftCount",
-     "categoryType, name"
+     "craftType"
     ],
     [
      "ExecuteBatchCraftByType",
@@ -6963,7 +6955,7 @@
     ],
     [
      "StopBatchCrafting",
-     "craftType, doodadId, count"
+     ""
     ],
     [
      "EndCraftingInteraction",
@@ -6971,7 +6963,7 @@
     ],
     [
      "IsWorkingCraft",
-     null
+     ""
     ],
     [
      "GetCraftTypeByItemType",
@@ -6983,11 +6975,11 @@
     ],
     [
      "GetLeftBatchCount",
-     "craftType, categoryType"
+     ""
     ],
     [
      "GetCategoryType",
-     null
+     ""
     ],
     [
      "GetCategoryName",
@@ -7466,15 +7458,15 @@
     ],
     [
      "UseEquippedItemByType",
-     "equipSlot"
+     "itemType"
     ],
     [
      "IsEquippedItemByType",
-     "equipSlot"
+     "itemType"
     ],
     [
      "FindEquippedItemByType",
-     null
+     "itemType"
     ],
     [
      "ItemIdentifier",
@@ -7591,7 +7583,7 @@
     ],
     [
      "InviteToExpedition",
-     ""
+     "charName"
     ],
     [
      "KickFromExpedition",
@@ -7607,11 +7599,11 @@
     ],
     [
      "ChangeExpeditionOwner",
-     "charName, roleId"
+     "charName"
     ],
     [
      "RenameExpedition",
-     "charName, roleId"
+     "newName"
     ],
     [
      "RenameNation",
@@ -7627,7 +7619,7 @@
     ],
     [
      "GetMyExpeditionName",
-     null
+     ""
     ],
     [
      "IsMyExpeditionMember",
@@ -7635,7 +7627,7 @@
     ],
     [
      "GetAllExpeditionRolePolicies",
-     "charName"
+     ""
     ],
     [
      "GetExpeditionRolePolicy",
@@ -7643,11 +7635,11 @@
     ],
     [
      "GetExpeditionMyRolePolicy",
-     "roleId"
+     ""
     ],
     [
      "GetExpeditionMemberCount",
-     null
+     ""
     ],
     [
      "RequestExpeditionMembers",
@@ -7655,11 +7647,11 @@
     ],
     [
      "GetExpeditionMembersPerPage",
-     "allMember, startIndex"
+     ""
     ],
     [
      "CanInviteExpedition",
-     null
+     ""
     ]
    ]
   },
@@ -7810,11 +7802,11 @@
     ],
     [
      "GetBindingButton",
-     "spellName, index"
+     "buttonName, index"
     ],
     [
      "GetOptionBindingButton",
-     "spellName, index"
+     "buttonName, index"
     ],
     [
      "SetBinding",
@@ -7830,15 +7822,15 @@
     ],
     [
      "SetBindingButton",
-     "spellName, key"
+     "buttonName, key"
     ],
     [
      "SetOptionBindingButton",
-     "spellName, key"
+     "buttonName, key"
     ],
     [
      "SetOptionBindingButtonWithIndex",
-     null
+     "buttonName, key"
     ],
     [
      "SetBindingItem",
@@ -7959,7 +7951,7 @@
     ],
     [
      "GetHouseConstructionStepInfo",
-     "additionalTaxRate"
+     ""
     ],
     [
      "GetTaxItem",
@@ -7967,7 +7959,7 @@
     ],
     [
      "CountTaxItemInBag",
-     null
+     ""
     ],
     [
      "CountTaxItemForTax",
@@ -7975,23 +7967,23 @@
     ],
     [
      "GetShipyardOwnerName",
-     "taxStr"
+     ""
     ],
     [
      "GetShipyardProtectionPeriod",
-     null
+     ""
     ],
     [
      "GetShipyardRemainProgress",
-     null
+     ""
     ],
     [
      "GetShipyardBaseProgress",
-     null
+     ""
     ],
     [
      "GetShipyardConstructionStepInfo",
-     null
+     ""
     ],
     [
      "GetHousingModelName",
@@ -8011,15 +8003,15 @@
     ],
     [
      "GetGuardTowerStepInfo",
-     null
+     ""
     ],
     [
      "GetHouseDecoCount",
-     null
+     ""
     ],
     [
      "GetHouseAllowRecover",
-     null
+     ""
     ],
     [
      "SetHouseAllowRecover",
@@ -8027,7 +8019,7 @@
     ],
     [
      "GetActabilityDecoCount",
-     "isAllow"
+     ""
     ],
     [
      "GetDecoActabilityPoint",
@@ -8051,11 +8043,11 @@
     ],
     [
      "CancelHouseForSale",
-     "gold, silver, cooper, sellToName"
+     ""
     ],
     [
      "BuyHouse",
-     null
+     ""
     ],
     [
      "GetHouseSaleItemInfo",
@@ -8063,11 +8055,11 @@
     ],
     [
      "GetCurrencyForTax",
-     "gold, silver, cooper"
+     ""
     ],
     [
      "GetCurrencyForHouseSale",
-     null
+     ""
     ]
    ]
   },
@@ -8113,7 +8105,7 @@
     ],
     [
      "GetNPCInteractionMsg",
-     ""
+     "interactIndex"
     ],
     [
      "ConfirmNPCInteraction",
@@ -8145,7 +8137,7 @@
     ],
     [
      "GetInteractionSkillId",
-     ""
+     "index"
     ],
     [
      "GetInteractionSkillName",
@@ -8165,7 +8157,7 @@
     ],
     [
      "GetInteractionSkillIconPath",
-     ""
+     "item"
     ],
     [
      "StartDoodadInteraction",
@@ -8173,7 +8165,7 @@
     ],
     [
      "StartNpcInteraction",
-     null
+     "item"
     ],
     [
      "IsValidIconPath",
@@ -8198,99 +8190,99 @@
     ],
     [
      "Cooldown",
-     "type, grade"
+     "type"
     ],
     [
      "Name",
-     "type, grade"
+     "type"
     ],
     [
      "CountInBag",
-     null
+     "type"
     ],
     [
      "CountInEquipment",
-     null
+     "type"
     ],
     [
      "Count",
-     null
+     "type"
     ],
     [
      "Icon",
-     null
+     "type"
     ],
     [
      "Info",
-     null
+     "type"
     ],
     [
      "CombinedSkill",
-     null
+     "type"
     ],
     [
      "CombinedBuff",
-     null
+     "type"
     ],
     [
      "StatDelta",
-     null
+     "type"
     ],
     [
      "Stats",
-     null
+     "type"
     ],
     [
      "IsSoulBoundable",
-     null
+     "type"
     ],
     [
      "IsConsumable",
-     null
+     "type"
     ],
     [
      "IsEquippable",
-     null
+     "type"
     ],
     [
      "IsEquipped",
-     null
+     "type"
     ],
     [
      "IsUsable",
-     null
+     "type"
     ],
     [
      "IsInRange",
-     null
+     "type"
     ],
     [
      "IsStackable",
-     null
+     "type"
     ],
     [
      "IsSellable",
-     null
+     "type"
     ],
     [
      "IsGradeable",
-     null
+     "type"
     ],
     [
      "IsPetArmor",
-     null
+     "type"
     ],
     [
      "EquipType",
-     null
+     "type"
     ],
     [
      "Use",
-     null
+     "type"
     ],
     [
      "Description",
-     null
+     "type"
     ],
     [
      "RepairAll",
@@ -8374,7 +8366,7 @@
     ],
     [
      "GroupName",
-     ""
+     "itemGroupType"
     ],
     [
      "GroupDescription",
@@ -8390,7 +8382,7 @@
     ],
     [
      "GradeColor",
-     ""
+     "grade"
     ],
     [
      "GradeName",
@@ -8398,7 +8390,7 @@
     ],
     [
      "IsLimitGrade",
-     null
+     "grade"
     ],
     [
      "GetLevelRequirement",
@@ -8636,7 +8628,7 @@
     ],
     [
      "UsePremiumEntrance",
-     "duration, r, g, b, param"
+     ""
     ],
     [
      "IsInPremiumQueue",
@@ -8644,35 +8636,35 @@
     ],
     [
      "GetWorldNormalQueueLength",
-     null
+     ""
     ],
     [
      "GetWorldPremiumQueueLength",
-     null
+     ""
     ],
     [
      "GetWorldQueuePosition",
-     null
+     ""
     ],
     [
      "GetWorldQueueExpectedTime",
-     null
+     ""
     ],
     [
      "ConnectToWorld",
-     null
+     ""
     ],
     [
      "CancelWorldQueue",
-     null
+     ""
     ],
     [
      "StartCiPage",
-     null
+     ""
     ],
     [
      "StartLoginPage",
-     null
+     ""
     ],
     [
      "OnEndLoginState",
@@ -8680,15 +8672,15 @@
     ],
     [
      "EndCharacterCreate",
-     "state"
+     "gotoNext"
     ],
     [
      "EndCharacterCustomize",
-     "state"
+     "gotoNext"
     ],
     [
      "EndCharacterAbility",
-     null
+     "gotoNext"
     ],
     [
      "GotoCharacterSelect",
@@ -8720,7 +8712,7 @@
     ],
     [
      "IsRecustomizing",
-     "skillId"
+     ""
     ],
     [
      "GetEditUnitGender",
@@ -8728,15 +8720,15 @@
     ],
     [
      "GetEditUnitRace",
-     null
+     ""
     ],
     [
      "GetEditUnitAbility",
-     null
+     ""
     ],
     [
      "GetEditUnitName",
-     null
+     ""
     ]
    ]
   },
@@ -8749,7 +8741,7 @@
     ],
     [
      "GetLootingBagItemInfo",
-     ""
+     "slot"
     ],
     [
      "GetLootingBagItemTooltipText",
@@ -8757,7 +8749,7 @@
     ],
     [
      "LootItem",
-     null
+     "slot"
     ],
     [
      "CloseLoot",
@@ -8765,7 +8757,7 @@
     ],
     [
      "GetLootItemSoundType",
-     ""
+     "slot"
     ],
     [
      "DoDiceAction",
@@ -8838,7 +8830,7 @@
     ],
     [
      "ReadReceivedMailById",
-     "index"
+     "idStr"
     ],
     [
      "ReadPostedMail",
@@ -8846,7 +8838,7 @@
     ],
     [
      "ReadPostedMailById",
-     "index"
+     "idStr"
     ],
     [
      "IsExistCurrentMailBody",
@@ -8874,7 +8866,7 @@
     ],
     [
      "TakeAttachmentSequentially",
-     "index"
+     "idStr"
     ],
     [
      "GetCurrentMailItemCount",
@@ -8886,43 +8878,43 @@
     ],
     [
      "TakeAllCurrentMailItem",
-     "index"
+     ""
     ],
     [
      "GetCurrentMailMoney",
-     null
+     ""
     ],
     [
      "GetCurrentMailMoneyStr",
-     null
+     ""
     ],
     [
      "TakeCurrentMailMoney",
-     null
+     ""
     ],
     [
      "GetCurrentMailChargeMoney",
-     null
+     ""
     ],
     [
      "GetCurrentMailChargeMoneyStr",
-     null
+     ""
     ],
     [
      "GetCurrentMailAAPoint",
-     null
+     ""
     ],
     [
      "GetCurrentMailAAPointStr",
-     null
+     ""
     ],
     [
      "PayCurrentMailChargeMoney",
-     null
+     ""
     ],
     [
      "GetCountUnreadMail",
-     null
+     ""
     ],
     [
      "GetAttachedItemCountById",
@@ -8938,11 +8930,11 @@
     ],
     [
      "ReturnMailById",
-     "isSent, idStr"
+     "idStr"
     ],
     [
      "IsReturnedMail",
-     "isSent, idStr"
+     "idStr"
     ],
     [
      "IsReturnedCurrentMail",
@@ -8950,35 +8942,35 @@
     ],
     [
      "IsSystemMail",
-     ""
+     "idStr"
     ],
     [
      "IsBillingMail",
-     ""
+     "idStr"
     ],
     [
      "IsBalanceReceiptMail",
-     null
+     "idStr"
     ],
     [
      "IsNationReceiptMail",
-     null
+     "idStr"
     ],
     [
      "IsTaxRateChangedMail",
-     null
+     "idStr"
     ],
     [
      "IsNationTaxRateChangedMail",
-     null
+     "idStr"
     ],
     [
      "IsUserMail",
-     null
+     "idStr"
     ],
     [
      "IsNationRequestFriendMail",
-     null
+     "idStr"
     ],
     [
      "RequestPostList",
@@ -9022,7 +9014,7 @@
     ],
     [
      "RequestNewPostExists",
-     "postBagSlot"
+     ""
     ],
     [
      "GetQuestMailSender",
@@ -9030,15 +9022,15 @@
     ],
     [
      "RequestMailList",
-     "id"
+     ""
     ],
     [
      "GetCurrencyForAttachment",
-     null
+     ""
     ],
     [
      "GetCurrencyForFee",
-     null
+     ""
     ],
     [
      "GetCacheBodyInfo",
@@ -9093,7 +9085,7 @@
     ],
     [
      "CreateOptionItemFloat",
-     ""
+     "name, value"
     ],
     [
      "CreateOptionItemString",
@@ -9109,11 +9101,11 @@
     ],
     [
      "SetItemFloatValue",
-     "name"
+     "optionType, value"
     ],
     [
      "SetItemFloatValueWithoutModify",
-     "name"
+     "optionType, value"
     ],
     [
      "SetItemFloatValueByName",
@@ -9121,7 +9113,7 @@
     ],
     [
      "SetItemStringValue",
-     "name, value"
+     "optionType, value"
     ],
     [
      "SetItemStringValueByName",
@@ -9129,7 +9121,7 @@
     ],
     [
      "SetItemDefaultFloatValue",
-     "name, value"
+     "optionType, value"
     ],
     [
      "SetItemDefaultFloatValueByName",
@@ -9137,7 +9129,7 @@
     ],
     [
      "SetItemDefaultStringValue",
-     "name, value"
+     "optionType, value"
     ],
     [
      "SetItemDefaultStringValueByName",
@@ -9145,7 +9137,7 @@
     ],
     [
      "GetResolutionCount",
-     "name, value"
+     ""
     ],
     [
      "GetResolution",
@@ -9153,19 +9145,19 @@
     ],
     [
      "EnumAAFormats",
-     "index"
+     ""
     ],
     [
      "GetModifiedRestartOption",
-     null
+     ""
     ],
     [
      "RemoveModifiedOption",
-     null
+     ""
     ],
     [
      "GetNextSysSpecFullValue",
-     null
+     ""
     ],
     [
      "IsRestartOption",
@@ -9173,7 +9165,7 @@
     ],
     [
      "GetMinxMaxOfMouseSensitivity",
-     "optionType"
+     ""
     ]
    ]
   },
@@ -9254,7 +9246,7 @@
     ],
     [
      "ShowBackHoldable",
-     ""
+     "show"
     ],
     [
      "ShowCosplay",
@@ -9262,7 +9254,7 @@
     ],
     [
      "ShowBackPackWithCosplay",
-     null
+     "show"
     ],
     [
      "GetJuryPoint",
@@ -9322,11 +9314,11 @@
     ],
     [
      "GetScheduleItemInfo",
-     "activeTake"
+     "scheduleType"
     ],
     [
      "TakeScheduleItem",
-     "activeTake"
+     "scheduleType"
     ],
     [
      "CheckEventScheduleState",
@@ -9334,7 +9326,7 @@
     ],
     [
      "ExchangeCashToAAPoint",
-     ""
+     "cashString"
     ],
     [
      "RequestBuyAAPoint",
@@ -9476,35 +9468,35 @@
     ],
     [
      "GetQuestContextRewardItemIconType",
-     "type"
+     "type, idx"
     ],
     [
      "GetQuestContextRewardItemName",
-     "type"
+     "type, idx"
     ],
     [
      "GetQuestContextRewardItemCount",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextRewardSelectiveItemIconType",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextRewardSelectiveItemName",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextRewardSelectiveItemCount",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextItemTooltip",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextSelectiveItemTooltip",
-     null
+     "type, idx"
     ],
     [
      "GetQuestContextObjectiveCount",
@@ -9512,7 +9504,7 @@
     ],
     [
      "GetQuestObjectiveText",
-     "type"
+     "type, idx"
     ],
     [
      "GetLastQuest",
@@ -9794,7 +9786,7 @@
     ],
     [
      "DiscardSiegeWeapon",
-     "index"
+     ""
     ],
     [
      "SetSiegeWeaponName",
@@ -9802,39 +9794,39 @@
     ],
     [
      "IsTargetMySiegeWeapon",
-     "name"
+     ""
     ],
     [
      "IsMountingShipStucked",
-     null
+     ""
     ],
     [
      "DestroyStuckedShip",
-     null
+     ""
     ],
     [
      "GetSiegeWeaponSpeed",
-     null
+     ""
     ],
     [
      "GetSiegeWeaponTurnSpeed",
-     null
+     ""
     ],
     [
      "IsDriver",
-     null
+     ""
     ],
     [
      "GetMountedSiegeWeaponInfo",
-     null
+     ""
     ],
     [
      "GetVehicleInfo",
-     null
+     ""
     ],
     [
      "GetSlaveCustomizingType",
-     null
+     ""
     ],
     [
      "GetSlaveEquipSlotInfo",
@@ -9846,11 +9838,11 @@
     ],
     [
      "UninstallEquipSlotOfSlave",
-     null
+     "equipSlot"
     ],
     [
      "CanSlaveEquipPickedItem",
-     null
+     "equipSlot"
     ]
    ]
   },
@@ -10034,7 +10026,7 @@
     ],
     [
      "GetTeamPlayerParty",
-     "memberIndex"
+     ""
     ],
     [
      "GetTeamPlayerPartyHeadIndex",
@@ -10042,11 +10034,11 @@
     ],
     [
      "GetTeamPlayerSlot",
-     null
+     ""
     ],
     [
      "GetTeamPlayerIndex",
-     null
+     ""
     ],
     [
      "MoveTeamMember",
@@ -10126,7 +10118,7 @@
     ],
     [
      "SetPartyFrameVisible",
-     ""
+     "visible"
     ],
     [
      "GetPartyFrameVisible",
@@ -10134,7 +10126,7 @@
     ],
     [
      "SetRaidFrameVisible",
-     ""
+     "visible"
     ],
     [
      "GetRaidFrameVisible",
@@ -10228,7 +10220,7 @@
     ],
     [
      "IsTradeLocked",
-     "gold, silver, copper"
+     ""
     ],
     [
      "IsOtherTradeLocked",
@@ -10236,11 +10228,11 @@
     ],
     [
      "GetCurrencyForUserTrade",
-     null
+     ""
     ],
     [
      "GetSellerShareRatio",
-     null
+     ""
     ]
    ]
   },
@@ -10266,7 +10258,7 @@
     ],
     [
      "GetPatternKind",
-     ""
+     "typeNumber"
     ],
     [
      "GetPatternName",
@@ -10274,11 +10266,11 @@
     ],
     [
      "GetPatternPath",
-     null
+     "typeNumber"
     ],
     [
      "GetPatternIconPath",
-     null
+     "typeNumber"
     ],
     [
      "GetUccUserDirectoryPath",
@@ -10752,11 +10744,11 @@
     ],
     [
      "GetFactionName",
-     "unit"
+     "target"
     ],
     [
      "GetUnitTypeString",
-     "unit"
+     "target"
     ],
     [
      "GetTargetTypeString",
@@ -10764,23 +10756,23 @@
     ],
     [
      "GetTargetAbilityTemplates",
-     ""
+     "target"
     ],
     [
      "GetTargetKindType",
-     ""
+     "target"
     ],
     [
      "GetCombatRelationshipStr",
-     null
+     "target"
     ],
     [
      "GetNpcInfo",
-     null
+     "target"
     ],
     [
      "GetNpcTypeIndex",
-     null
+     "target"
     ],
     [
      "GetTargetUnitId",
@@ -10796,7 +10788,7 @@
     ],
     [
      "GetUnitNameById",
-     ""
+     "stringId"
     ],
     [
      "GetUnitFactionById",
@@ -10808,11 +10800,11 @@
     ],
     [
      "GetUnitLevelById",
-     null
+     "stringId"
     ],
     [
      "GetUnitAbilitesById",
-     null
+     "stringId"
     ],
     [
      "GetUnitType",
@@ -10820,23 +10812,23 @@
     ],
     [
      "GetUnitTypeById",
-     "unit"
+     "stringId"
     ],
     [
      "GetUnitKindById",
-     "unit"
+     "stringId"
     ],
     [
      "GetUnitGradeById",
-     null
+     "stringId"
     ],
     [
      "GetUnitNickNameById",
-     null
+     "stringId"
     ],
     [
      "GetUnitInfoById",
-     null
+     "stringId"
     ],
     [
      "GetDoodadInfoById",
@@ -10848,7 +10840,7 @@
     ],
     [
      "MoveUnit",
-     "unit, power"
+     "unit"
     ],
     [
      "Follow",
@@ -10872,7 +10864,7 @@
     ],
     [
      "GetOverHeadMarker",
-     ""
+     "unit"
     ],
     [
      "GetOverHeadMarkerUnitId",
@@ -10917,7 +10909,7 @@
     ],
     [
      "GetMyMoneyString",
-     "money"
+     ""
     ],
     [
      "GetMyBankMoneyString",
@@ -10925,11 +10917,11 @@
     ],
     [
      "GetMyAAPointString",
-     null
+     ""
     ],
     [
      "GetMyBankAAPointString",
-     null
+     ""
     ],
     [
      "StrNumericAdd",
@@ -10957,11 +10949,11 @@
     ],
     [
      "MultiplyNumberString",
-     "goldStr, silverStr, copperStr"
+     "number1, number2"
     ],
     [
      "DivideNumberString",
-     "goldStr, silverStr, copperStr"
+     "number1, number2"
     ],
     [
      "UTF8StringLength",
@@ -10977,11 +10969,11 @@
     ],
     [
      "ParsePipeArgsFromText",
-     "text, ciphers"
+     "text"
     ],
     [
      "ErasePipeArgsFromText",
-     "text, ciphers"
+     "text"
     ],
     [
      "InsertComma",
@@ -11131,7 +11123,7 @@
     ],
     [
      "CancelLeaveWorld",
-     "target"
+     null
     ],
     [
      "LeaveGame",
@@ -11151,11 +11143,11 @@
     ],
     [
      "GetZoneName",
-     ""
+     null
     ],
     [
      "GetZoneInfo",
-     ""
+     null
     ],
     [
      "GetZoneText",

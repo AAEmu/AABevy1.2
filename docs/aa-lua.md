@@ -103,6 +103,87 @@ unluac reads the float-number header directly; no conversion step is needed.
 `scripts/re/x2game_api.py <x2game_unpacked.dll> crates/aa-lua/data/x2game.json` (Python + `pefile`)
 extracts from the client DLL: the 71 native API table names (`ADDON`, `UI`, `X2Console` …
 `X2Achievement`, by API id), the 626 UI event names by event id (`FireUIEvent` ids: 70
-`ENTERED_LOGIN`, 477 `ENTERED_WORLD_SELECT`, 78 `ENTERED_WORLD`), and 2493 natively registered
-script functions with their parameter names (`SelectCharacter(index, skipClientDriven)`), grouped by
-registering bind class.
+`ENTERED_LOGIN`, 477 `ENTERED_WORLD_SELECT`, 78 `ENTERED_WORLD`), and 2491 natively registered
+script functions (`SUserFunctionDesc {name, params}`) with their parameter names
+(`SelectCharacter(index, skipClientDriven)`), in 119 groups by registering bind class. The events
+come from a static initializer (`push name; mov ecx, slot; call`), so their id is their index.
+
+## API recorder (`docs/ui-api.md`, `data/ui-api.json`)
+
+```sh
+cargo run -p aa-lua --bin aa-lua -- record [out.json] [out.md]   # default data/ui-api.json, docs/ui-api.md
+```
+
+The recorder combines three sources:
+
+1. **Static scan** of all 731 UI chunks (`recorder::static_scan`). It tracks registers to find:
+   * global reads and writes;
+   * `Global:Method(...)` and `Global.field` with argument counts;
+   * every `self` method name;
+   * field writes and method definitions;
+   * string constants;
+   * how each native return value is used (number, string, table with fields, boolean, truth
+     test).
+2. **Dynamic run** of each screen in client order (`recorder::record_stage`) in a fresh state.
+   * Every global that the scripts do not define is a recording proxy (a table sharing one
+     metatable).
+   * Widgets are created by `CreateWidget`, `CreateChildWidget` and `CreateChildWidgetByType`; they
+     are typed proxies whose method lists come from the reference capture.
+   * Native constants and data tables get their real values from the reference.
+   * Native returns are neutral values of the statically inferred kind (`0`, `""`, `false`), else
+     a proxy.
+   * After loading, every recorded handler (`SetHandler`, `OnEvent` per `RegisterEvent`) is called
+     with fuzzed arguments, under an instruction budget.
+   * The prelude is `src/recorder.lua`.
+3. **Reference**: `reference/api/` (real-client captures by the `reference` agent) and
+   `data/x2game.json`. Every recorded member is checked against them (`~` means native but unused,
+   `!` means not native).
+
+The output is ranked by call sites and grouped into:
+
+* widget toolkit (28 widget types, 18 drawable/object types, 39 handlers);
+* X2 game API (68 tables);
+* CryEngine (`Script`, `Console`, `Movie`);
+* other native functions and values (with their values);
+* unresolved globals;
+* events (all 626, with id, who registers them, and which login screen);
+* bind groups.
+
+§0 covers the login stage on one page: widget types, objects, the X2 members called on each login
+screen (bold = actually called while running), and the events per screen.
+
+**Results:**
+
+| Screen | Scripts | With load errors | Handler calls |
+|---|---|---|---|
+| login, world select, character select, character create, loading | all | 0 | ~2400 |
+| world | 606 | 10 | 7328 |
+
+The 10 world errors come from native data we return neutral values for, such as a `maxHp` string
+and an `sformat` nil.
+
+**Load-order check:** after world select, the global Lua functions defined are exactly the real
+client's 534 (from `reference/api/x2_globals.json`), with 0 missing and 0 extra.
+
+### Native behaviour the scripts rely on
+
+The scripts depend on the following native behaviour. aa-ui must implement it.
+
+* **`parent:CreateChildWidget(type, name, index, true)`** also stores the child on the parent:
+  `parent[name]` when index is 0, `parent[name][index]` otherwise. Scripts then use
+  `window.titleBar.closeButton` without ever assigning it.
+* **Native style fields on widgets:** `style`, `titleStyle`, `itemStyle`, `extraStyle`,
+  `childStyle`, `prefixStyle`, `cooltime_style`. These are textstyle objects.
+* **`tab:AddSimpleTab` / `AddTab`** create `tab.window[i]`, `tab.selectedButton[i]` and
+  `tab.unselectedButton[i]`.
+* **`listctrl:InsertColumn`** creates `listctrl.column[i]`.
+* **`listctrl:InsertRows(n)`** creates `listctrl.items[i].subItems[col]`.
+* **`ADDON:RegisterContentWidget(id, w)`** and **`ADDON:GetContent(id)`**: `GetContent` returns the
+  stored widget, or nil if none was registered. Returning a dummy at login makes
+  `option/interface_option` fail where the real client does not.
+* **Events:**
+  * `RegistUIEvent(window, table)` is script code; it calls `window:RegisterEvent(name)` per key.
+  * `OnEvent` handlers are called as `(this, event, ...)`.
+  * `UIParent:SetEventHandler("ENTERED_WORLD", fn)` is the other path; it takes the event name.
+* **Number comparisons:** Lua 5.1 raises an error when comparing a number with a table, before it
+  looks at any metamethod. Natives that return numbers must return real numbers.
