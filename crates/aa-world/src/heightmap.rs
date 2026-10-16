@@ -137,6 +137,35 @@ impl CellHeights {
         (a + (b - a) * tx) * (1.0 - ty) + (c + (d - c) * tx) * ty
     }
 
+    /// The triangle of the finest terrain mesh (`terrain.rs`: quads split from their south west to their north
+    /// east corner) under cell-local `(x, y)` metres: its height there and its slopes `d height / d x`, `d y`.
+    fn facet(&self, x: f32, y: f32) -> (f32, f32, f32) {
+        let fx = (x / UNIT_SIZE).clamp(0.0, CELL_UNITS as f32);
+        let fy = (y / UNIT_SIZE).clamp(0.0, CELL_UNITS as f32);
+        let (ix, iy) = ((fx.floor() as usize).min(CELL_UNITS - 1), (fy.floor() as usize).min(CELL_UNITS - 1));
+        let (tx, ty) = (fx - ix as f32, fy - iy as f32);
+        let (a, b, c, d) = (self.at(ix, iy), self.at(ix + 1, iy), self.at(ix + 1, iy + 1), self.at(ix, iy + 1));
+        if tx >= ty {
+            (a + (b - a) * tx + (c - b) * ty, (b - a) / UNIT_SIZE, (c - b) / UNIT_SIZE)
+        } else {
+            (a + (c - d) * tx + (d - a) * ty, (c - d) / UNIT_SIZE, (d - a) / UNIT_SIZE)
+        }
+    }
+
+    /// Height of the rendered terrain surface (the finest mesh, linear over its triangles) at a cell-local
+    /// position in metres (clamped to the cell). Within a few centimetres of [`CellHeights::sample`]'s bilinear
+    /// value; this one is exactly the surface that is drawn.
+    pub fn mesh_height(&self, x: f32, y: f32) -> f32 {
+        self.facet(x, y).0
+    }
+
+    /// Unit face normal (cry space, up = +Z) of the finest mesh's triangle at a cell-local position.
+    pub fn mesh_normal(&self, x: f32, y: f32) -> [f32; 3] {
+        let (_, dx, dy) = self.facet(x, y);
+        let len = (dx * dx + dy * dy + 1.0).sqrt();
+        [-dx / len, -dy / len, 1.0 / len]
+    }
+
     /// Surface normal (cry space, up = +Z) at sample `(ix, iy)`.
     pub fn normal(&self, ix: usize, iy: usize) -> [f32; 3] {
         self.normal_step(ix, iy, 1)

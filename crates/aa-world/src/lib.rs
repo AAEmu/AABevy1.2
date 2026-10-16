@@ -13,6 +13,8 @@ pub mod reader;
 pub mod sky;
 pub mod stream;
 pub mod terrain;
+pub mod terrain_layers;
+pub mod terrain_query;
 pub mod vegetation;
 pub mod water;
 pub mod world;
@@ -20,6 +22,7 @@ pub mod world;
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
 pub use sky::WorldClock;
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
+pub use terrain_query::{Ground, TerrainQuery};
 pub use world::World;
 
 /// Whether the real client pak can be opened (tests that need it skip otherwise).

@@ -110,15 +110,16 @@ pub fn build_patch_mesh(h: &CellHeights, px: usize, py: usize, lod: usize) -> Me
     mesh
 }
 
-/// A BC texture (with its mip chain) from a cover atlas.
+/// A BC texture (with its mip chain) from a cover atlas. The texels are **not** colours (see
+/// [`crate::terrain_layers`]): the format is plain `Unorm`, the terrain shader decodes them after filtering.
 pub fn cover_image(atlas: CoverAtlas) -> Image {
     let mut image = Image::default();
     image.texture_descriptor.size = Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 };
     image.texture_descriptor.dimension = TextureDimension::D2;
     image.texture_descriptor.mip_level_count = atlas.mips;
     image.texture_descriptor.format = match atlas.format {
-        CoverFormat::Bc1 => TextureFormat::Bc1RgbaUnormSrgb,
-        CoverFormat::Bc3 => TextureFormat::Bc3RgbaUnormSrgb,
+        CoverFormat::Bc1 => TextureFormat::Bc1RgbaUnorm,
+        CoverFormat::Bc3 => TextureFormat::Bc3RgbaUnorm,
     };
     image.data = Some(atlas.data);
     image.asset_usage = RenderAssetUsages::RENDER_WORLD;
