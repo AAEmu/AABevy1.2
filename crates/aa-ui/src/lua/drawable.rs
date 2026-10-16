@@ -151,6 +151,30 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
+    if class == "drawable:iconimage" {
+        // Icon images stack textures: the first `AddTexture` is the image, later ones overlay it.
+        def(
+            "AddTexture",
+            method(lua, |lua, id, a| {
+                let Some(p) = a.s(1) else { return none() };
+                with(lua, id, |d| match d.texture {
+                    None => d.texture = Some(p),
+                    Some(_) => d.extra_textures.push(p),
+                });
+                none()
+            })?,
+        )?;
+        def(
+            "ClearAllTextures",
+            method(lua, |lua, id, _| {
+                with(lua, id, |d| {
+                    d.texture = None;
+                    d.extra_textures.clear();
+                });
+                none()
+            })?,
+        )?;
+    }
     def(
         "SetTextureInfo",
         method(lua, |lua, id, a| {

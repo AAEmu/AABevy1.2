@@ -12,6 +12,7 @@
 
 pub mod classes;
 pub mod constants;
+pub mod diagram;
 mod drawable;
 pub mod edit;
 pub mod folder;

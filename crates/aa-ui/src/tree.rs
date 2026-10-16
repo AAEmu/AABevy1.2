@@ -417,6 +417,7 @@ pub struct Widget {
     pub folder: Option<crate::lua::folder::FolderData>,
     pub tab: Option<crate::lua::tab::TabData>,
     pub edit: Option<crate::lua::edit::EditData>,
+    pub diagram: Option<crate::lua::diagram::DiagramData>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -429,6 +430,8 @@ pub struct Drawable {
     pub class: &'static str,
     pub layer: DrawLayer,
     pub texture: Option<String>,
+    /// Icon images: textures stacked over `texture` (`AddTexture`: icon, then frame / overlay).
+    pub extra_textures: Vec<String>,
     /// Texture rectangle `x, y, w, h` in texels; negative `w`/`h` mirror.
     pub coords: Option<[f32; 4]>,
     /// Nine/three part borders in texels (left, top, right, bottom).
@@ -905,6 +908,7 @@ impl Widget {
             folder: None,
             tab: None,
             edit: None,
+            diagram: None,
             modal: false,
             raise: 0,
         }
