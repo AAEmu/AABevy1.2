@@ -13,7 +13,9 @@
 //!   `--password-file`, see `ingame::enter::Credentials`; the runs of this screen use `bevycreate`).
 //! * `--race nuian|elf|ferre|hariharan`, `--gender male|female`, `--step 1|2|3`: replay what the
 //!   reference captures did (the race and gender buttons, then the next-step button).
-//! * `--lua CODE T`: run Lua in the UI `T` seconds after the screen is up (repeatable).
+//! * `--lua CODE T`, `--hover X Y T`, `--click X Y T`, `--drag X1 Y1 X2 Y2 T` (physical pixels), `--wheel D T` (+1 = one notch
+//!   up), `--cshot FILE T`: scripted input and screenshots `T` seconds after the screen is up
+//!   (repeatable; one run can take several shots, e.g. one per tab).
 //! * `--exit-after-create`: quit once the server answered the create request.
 //!
 //! ## Hand-off
@@ -30,12 +32,14 @@
 //! * `api` + `game_create.lua`: the natives (the `CC` table) and the Lua objects built on them
 //!   (`X2LoginCharacter`, `X2Customizer`, the customizing unit);
 //! * `poses`: the cameras of the captures and where the figure stands;
+//! * `preview`: the cache that keeps slider drags cheap;
 //! * `saved`: saved looks on disk.
 
 mod api;
 mod base;
 mod look;
 mod poses;
+mod preview;
 mod saved;
 
 use aa_anim::{ClipLibrary, Gender, Race};
@@ -98,18 +102,50 @@ pub struct Options {
     pub step: u8,
     /// `--lua CODE T` pairs.
     pub lua: Vec<(String, f32)>,
+    /// `--hover X Y T` / `--click X Y T`: (x, y, seconds, click).
+    pub pointer: Vec<(f32, f32, f32, bool)>,
+    /// `--drag X1 Y1 X2 Y2 T`: press at the first point, move to the second over a few frames, release.
+    pub drags: Vec<(Vec2, Vec2, f32)>,
+    /// `--wheel D T`
+    pub wheel: Vec<(f32, f32)>,
+    /// `--cshot FILE T`
+    pub shots: Vec<(String, f32)>,
     pub exit_after_create: bool,
 }
 
 impl Options {
     fn from_args() -> Options {
         let args: Vec<String> = std::env::args().collect();
-        let mut lua = Vec::new();
+        let (mut lua, mut pointer, mut wheel, mut shots, mut drags) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for (i, a) in args.iter().enumerate() {
-            if a == "--lua" {
-                if let (Some(code), Some(t)) = (args.get(i + 1), args.get(i + 2).and_then(|t| t.parse().ok())) {
-                    lua.push((code.clone(), t));
+            let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
+            match a.as_str() {
+                "--lua" => {
+                    if let (Some(code), Some(t)) = (args.get(i + 1), num(2)) {
+                        lua.push((code.clone(), t));
+                    }
                 }
+                "--hover" | "--click" => {
+                    if let (Some(x), Some(y), Some(t)) = (num(1), num(2), num(3)) {
+                        pointer.push((x, y, t, a == "--click"));
+                    }
+                }
+                "--drag" => {
+                    if let (Some(x1), Some(y1), Some(x2), Some(y2), Some(t)) = (num(1), num(2), num(3), num(4), num(5)) {
+                        drags.push((Vec2::new(x1, y1), Vec2::new(x2, y2), t));
+                    }
+                }
+                "--wheel" => {
+                    if let (Some(d), Some(t)) = (num(1), num(2)) {
+                        wheel.push((d, t));
+                    }
+                }
+                "--cshot" => {
+                    if let (Some(path), Some(t)) = (args.get(i + 1), num(2)) {
+                        shots.push((path.clone(), t));
+                    }
+                }
+                _ => {}
             }
         }
         Options {
@@ -118,13 +154,18 @@ impl Options {
             gender: api::gender_from(&flag(&args, "--gender").unwrap_or_default()),
             step: flag(&args, "--step").and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 3),
             lua,
+            pointer,
+            drags,
+            wheel,
+            shots,
             exit_after_create: args.iter().any(|a| a == "--exit-after-create"),
         }
     }
 }
 
-fn freeze_for_shots(args: Option<Res<aa_dev::DevArgs>>) -> bool {
-    args.is_some_and(|a| a.shot.is_some())
+/// Screenshot runs hold the idle pose at its first frame (they compare one moment).
+fn freeze_for_shots(args: Option<Res<aa_dev::DevArgs>>, opts: Res<Options>) -> bool {
+    args.is_some_and(|a| a.shot.is_some()) || !opts.shots.is_empty()
 }
 
 // ---- getting here with `--goto create` ------------------------------------------------------------
@@ -184,6 +225,7 @@ struct CreateScreen {
     script_done: Vec<bool>,
     /// Where the subject stands: (step, race, gender).
     placed: Option<(u8, Race, Gender)>,
+    cache: preview::PreviewCache,
 }
 
 struct Tween {
@@ -228,8 +270,9 @@ fn enter(mut commands: Commands, mut cry: CryAssets, opts: Res<Options>) {
         tween: None,
         ui_built: false,
         ui_time: 0.0,
-        script_done: vec![false; opts.lua.len() + 8],
+        script_done: vec![false; opts.lua.len() + opts.pointer.len() + opts.drags.len() + opts.wheel.len() + opts.shots.len() + 8],
         placed: None,
+        cache: Default::default(),
     });
 }
 
@@ -376,9 +419,11 @@ fn update_preview(
     if look_changed && (model_changed || now - screen.last_build >= REBUILD_SECONDS) {
         let t0 = std::time::Instant::now();
         let assets = {
-            let g = lock(&screen.shared);
-            g.cz.desc().resolve(&g.cz.db)
+            let shared = screen.shared.clone();
+            let g = lock(&shared);
+            screen.cache.assets(&g.cz.desc(), &g.cz.db)
         };
+        let resolved = t0.elapsed();
         match assets {
             Ok(assets) => {
                 let slot = step_slot(step, race, gender);
@@ -394,7 +439,7 @@ fn update_preview(
             }
             Err(e) => error!("character create: cannot resolve the look: {e}"),
         }
-        debug!("character create: preview rebuilt in {:.1} ms, subject {:?}", t0.elapsed().as_secs_f32() * 1000.0, screen.subject.map(|_| step_slot(step, race, gender).transform()));
+        debug!("character create: preview rebuilt in {:.1} ms (resolve {:.1} ms)", t0.elapsed().as_secs_f32() * 1000.0, resolved.as_secs_f32() * 1000.0);
         screen.built = Some((rev, race, gender));
         screen.last_build = now;
     }
@@ -443,21 +488,35 @@ fn drive_camera(
     }
 }
 
-/// The scripted replay of the reference captures (`--race`, `--gender`, `--step`) and `--lua`.
-fn run_script(screen: Option<ResMut<CreateScreen>>, ui: Option<NonSend<UiRuntime>>, opts: Res<Options>, time: Res<Time>) {
+/// The scripted replay of the reference captures (`--race`, `--gender`, `--step`), `--lua`, the
+/// virtual pointer (`--hover`, `--click`, `--wheel`) and `--cshot`.
+fn run_script(
+    mut commands: Commands,
+    screen: Option<ResMut<CreateScreen>>,
+    ui: Option<NonSend<UiRuntime>>,
+    opts: Res<Options>,
+    time: Res<Time>,
+    mut pointer: ResMut<aa_ui::UiVirtualPointer>,
+    mut release_next: Local<bool>,
+    mut wheel_to: Local<Option<f32>>,
+    mut active_drags: Local<Vec<(Vec2, Vec2, u32)>>,
+) {
     let (Some(mut screen), Some(ui)) = (screen, ui) else { return };
     if !screen.ui_built {
         return;
     }
+    if std::mem::take(&mut *release_next) {
+        pointer.release = true;
+    }
     screen.ui_time += time.delta_secs();
     let t = screen.ui_time;
-    let mut run = |idx: usize, at: f32, code: &str| {
-        if t >= at && !screen.script_done[idx] {
+    let mut base = 0;
+    let mut once = |idx: usize, at: f32| {
+        let due = t >= at && !screen.script_done[idx];
+        if due {
             screen.script_done[idx] = true;
-            if let Err(e) = ui.exec("create script", code) {
-                warn!("character create: script: {e}");
-            }
         }
+        due
     };
     if opts.goto {
         let race = match opts.race {
@@ -467,23 +526,85 @@ fn run_script(screen: Option<ResMut<CreateScreen>>, ui: Option<NonSend<UiRuntime
             Race::Hariharan => "RACE_HARIHARAN",
         };
         let gender = if opts.gender == Gender::Female { 2 } else { 1 };
-        run(
-            0,
-            1.0,
-            &format!(
-                "for k = 1, #RACE_TYPE do if RACE_TYPE[k] == {race} then step1.content.raceBtn[k].OnClick() end end\n\
+        let mut exec = |code: &str| {
+            if let Err(e) = ui.exec("create script", code) {
+                warn!("character create: script: {e}");
+            }
+        };
+        if once(0, 1.0) {
+            exec(&format!(
+                "for k = 1, #RACE_TYPE do if RACE_TYPE[k] == {race} then step1.content.raceBtn[k].OnClick() end end
                  step1.content.rightPanel.genderBtn[{gender}].OnClick()"
-            ),
-        );
-        if opts.step >= 2 {
-            run(1, 2.5, "characterCreate.OnNextStep()");
+            ));
         }
-        if opts.step >= 3 {
-            run(2, 5.0, "characterCreate.OnNextStep()");
+        if opts.step >= 2 && once(1, 2.5) {
+            exec("characterCreate.OnNextStep()");
+        }
+        if opts.step >= 3 && once(2, 5.0) {
+            exec("characterCreate.OnNextStep()");
         }
     }
+    base += 8;
     for (i, (code, at)) in opts.lua.iter().enumerate() {
-        run(8 + i, *at, code);
+        if once(base + i, *at) {
+            if let Err(e) = ui.exec("@--lua", code) {
+                warn!("character create: --lua: {e}");
+            }
+        }
+    }
+    base += opts.lua.len();
+    for (i, (x, y, at, click)) in opts.pointer.iter().enumerate() {
+        if once(base + i, *at) {
+            pointer.pos = Some(Vec2::new(*x, *y));
+            if *click {
+                pointer.press = true;
+                *release_next = true;
+            }
+            info!("character create: {} {x} {y}", if *click { "click" } else { "hover" });
+        }
+    }
+    base += opts.pointer.len();
+    for (i, (from, to, at)) in opts.drags.iter().enumerate() {
+        if once(base + i, *at) {
+            active_drags.push((*from, *to, 0));
+            info!("character create: drag {from} -> {to}");
+        }
+    }
+    base += opts.drags.len();
+    // a drag takes one frame to move to its start, one to press, 8 to move, one to release
+    for (from, to, frame) in active_drags.iter_mut() {
+        match *frame {
+            0 => pointer.pos = Some(*from),
+            1 => pointer.press = true,
+            2..=9 => pointer.pos = Some(from.lerp(*to, (*frame - 1) as f32 / 8.0)),
+            _ => pointer.release = true,
+        }
+        *frame += 1;
+    }
+    active_drags.retain(|(_, _, frame)| *frame <= 10);
+    for (i, (d, at)) in opts.wheel.iter().enumerate() {
+        if once(base + i, *at) {
+            *wheel_to = Some(*d);
+        }
+    }
+    base += opts.wheel.len();
+    if let Some(d) = wheel_to.take() {
+        // the wheel goes to the screen's background window like the OS wheel would
+        let code = if d < 0.0 { "characterCreate.bgWindow:OnWheelDown()" } else { "characterCreate.bgWindow:OnWheelUp()" };
+        if let Err(e) = ui.exec("@--wheel", code) {
+            warn!("character create: --wheel: {e}");
+        }
+    }
+    for (i, (path, at)) in opts.shots.iter().enumerate() {
+        if once(base + i, *at) {
+            if let Some(dir) = std::path::Path::new(path).parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            commands
+                .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+                .observe(bevy::render::view::screenshot::save_to_disk(path.clone()));
+            info!("character create: screenshot -> {path}");
+        }
     }
 }
 

@@ -107,6 +107,8 @@ pub struct Catalog {
     pub face_item: u32,
     /// Category of every decal id of the model.
     pub decal_category: HashMap<u32, u32>,
+    /// `hair_colors_for` per hair style asset (a query of 60 rows, asked on every rebuild).
+    hair_color_cache: std::sync::Mutex<HashMap<u32, std::sync::Arc<Vec<aa_anim::db::HairColor>>>>,
 }
 
 fn db_path() -> String {
@@ -180,7 +182,14 @@ impl Catalog {
         ))?;
         let face_item = db.base_face(model)?.item_id;
 
-        Ok(Catalog { race, gender, model, hair, eyebrow, makeup, deco, tattoo, scar, wrinkle, skin, presets, parts, maker, face_item, decal_category })
+        Ok(Catalog { race, gender, model, hair, eyebrow, makeup, deco, tattoo, scar, wrinkle, skin, presets, parts, maker, face_item, decal_category, hair_color_cache: Default::default() })
+    }
+
+    /// The colours of hair style `style` (1-based), in the DB's order.
+    pub fn hair_colors_of(&self, db: &GameDb, style: usize) -> std::sync::Arc<Vec<aa_anim::db::HairColor>> {
+        let Some(h) = self.hair.get(style.wrapping_sub(1)) else { return Default::default() };
+        let mut cache = self.hair_color_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.entry(h.asset).or_insert_with(|| std::sync::Arc::new(db.hair_colors_for(self.model, h.asset).unwrap_or_default())).clone()
     }
 
     /// The sliders of a face part (1 eyes, 2 nose, 3 mouth, 4 head shape), in file order.
@@ -237,12 +246,7 @@ impl Look {
     /// The look of a premade face: everything it sets.
     pub fn from_preset(cat: &Catalog, db: &GameDb, p: &Preset) -> Look {
         let hair = cat.hair.iter().position(|h| h.item == p.hair_item).map_or(0, |i| i + 1);
-        let hair_color = cat
-            .hair
-            .get(hair.wrapping_sub(1))
-            .and_then(|h| db.hair_colors_for(cat.model, h.asset).ok())
-            .and_then(|colors| colors.iter().position(|c| c.id == p.hair_color_id))
-            .map_or(1, |i| i + 1);
+        let hair_color = cat.hair_colors_of(db, hair).iter().position(|c| c.id == p.hair_color_id).map_or(1, |i| i + 1);
         let skin = cat.skin.iter().position(|&s| s == p.skin_color_id).map_or(1, |i| i + 1);
         let pos = |list: &[u32], id: u32| list.iter().position(|&x| x == id).map_or(0, |i| i + 1);
         let mut look = Look {
@@ -286,8 +290,8 @@ impl Look {
     }
 
     /// The hair colour ids of the current hair style (60 of them).
-    pub fn hair_colors(&self, cat: &Catalog, db: &GameDb) -> Vec<aa_anim::db::HairColor> {
-        cat.hair.get(self.hair.wrapping_sub(1)).and_then(|h| db.hair_colors_for(cat.model, h.asset).ok()).unwrap_or_default()
+    pub fn hair_colors(&self, cat: &Catalog, db: &GameDb) -> std::sync::Arc<Vec<aa_anim::db::HairColor>> {
+        cat.hair_colors_of(db, self.hair)
     }
 
     /// The preview character of this look, in the login-stage costume.
@@ -677,5 +681,29 @@ impl Customizer {
         };
         req.abilities = [ability.min(u32::from(NO_ABILITY)) as u8, NO_ABILITY, NO_ABILITY];
         req
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "timing probe, needs the game data"]
+    fn resolve_cost() {
+        let cz = Customizer::open(Race::Nuian, Gender::Male).unwrap();
+        let desc = cz.desc();
+        for i in 0..6 {
+            let t = std::time::Instant::now();
+            let a = desc.resolve(&cz.db).unwrap();
+            println!("resolve {i}: {:.1} ms ({} parts)", t.elapsed().as_secs_f32() * 1000.0, a.parts.len());
+        }
+        let mut plain = desc.clone();
+        plain.customization = Default::default();
+        for i in 0..3 {
+            let t = std::time::Instant::now();
+            plain.resolve(&cz.db).unwrap();
+            println!("resolve (no customization) {i}: {:.1} ms", t.elapsed().as_secs_f32() * 1000.0);
+        }
     }
 }
