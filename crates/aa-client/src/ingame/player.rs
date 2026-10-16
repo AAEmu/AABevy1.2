@@ -21,6 +21,7 @@ use super::camera::OrbitCamera;
 use super::data::Db;
 use super::dev::DevOptions;
 use super::terrain::Terrain;
+use super::weapons::{self, CarriedItem};
 
 /// Marks the local player's character entity.
 #[derive(Component)]
@@ -126,7 +127,8 @@ pub fn spawn_player(
         }
     };
     drop(game);
-    let Some(root) = spawn_with_locomotion(&mut commands, &mut cry, &clips, assets, placement(pos, facing, 1.0)) else { return };
+    let carried = weapons::carried(&db, equipment);
+    let Some(root) = spawn_with_locomotion(&mut commands, &mut cry, &clips, assets, placement(pos, facing, 1.0), carried) else { return };
     commands.entity(root).insert((
         Name::new(format!("player {}", spawn.name())),
         LocalPlayer { obj_id: spawn.obj_id },
@@ -141,6 +143,7 @@ pub fn spawn_with_locomotion(
     clips: &ClipLibrary,
     assets: CharacterAssets,
     transform: Transform,
+    carried: Vec<CarriedItem>,
 ) -> Option<Entity> {
     let skeleton = assets.skeleton.clone();
     let cal = assets.cal.clone();
@@ -162,6 +165,9 @@ pub fn spawn_with_locomotion(
     debug!("spawn_character {t_character:.0} ms, locomotion clips {:.0} ms", t.elapsed().as_secs_f32() * 1000.0 - t_character);
     let mut entity = commands.entity(root);
     entity.insert(Motion::default());
+    if !carried.is_empty() {
+        entity.insert(weapons::Carried(carried));
+    }
     if let Some(set) = set {
         entity.insert(Locomotion::new(set));
     }

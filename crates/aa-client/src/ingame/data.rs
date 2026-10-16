@@ -22,6 +22,20 @@ struct Lookups {
     actor_files: HashMap<u32, Option<String>>,
     doodad_models: HashMap<u32, Option<String>>,
     npc_scale: HashMap<u32, f32>,
+    weapons: HashMap<u32, Option<Weapon>>,
+}
+
+/// How a weapon item is drawn (`item_weapons` + its `item_assets` row).
+#[derive(Clone, Debug)]
+pub struct Weapon {
+    pub path: String,
+    /// `holdables.code`: `bow`, `shield`, `normal_piercing_sod`, ...
+    pub code: String,
+    /// Offset in the attachment bone's frame (m) and rotation (degrees about x, y, z).
+    pub offset: [f32; 3],
+    pub rotation: [f32; 3],
+    /// Scale while it hangs on the body.
+    pub worn_scale: f32,
 }
 
 /// Columns the in-game lookups filter or join on. The server's database has no indexes beyond the
@@ -53,6 +67,8 @@ const INDEXES: &[(&str, &str)] = &[
     ("doodad_almighties", "id"),
     ("characters", "model_id"),
     ("equip_pack_cloths", "id"),
+    ("item_weapons", "item_id"),
+    ("holdables", "id"),
 ];
 
 /// The database path to use: a copy of the server's database with the [`INDEXES`] added, kept under
@@ -111,6 +127,7 @@ impl Db {
                 actor_files: HashMap::new(),
                 doodad_models: HashMap::new(),
                 npc_scale: HashMap::new(),
+                weapons: HashMap::new(),
             }),
         })
     }
@@ -152,6 +169,33 @@ impl Db {
             .unwrap_or(1.0);
         l.npc_scale.insert(template_id, scale);
         scale
+    }
+
+    /// The model and attachment data of a weapon / shield item template.
+    pub fn weapon(&self, item_id: u32) -> Option<Weapon> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(w) = l.weapons.get(&item_id) {
+            return w.clone();
+        }
+        let weapon = l
+            .conn
+            .query_row(
+                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
+                params![item_id],
+                |r| {
+                    let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
+                    Ok(Weapon {
+                        path: norm(&r.get::<_, String>(0)?),
+                        code: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        offset: [f(2)?, f(3)?, f(4)?],
+                        rotation: [f(5)?, f(6)?, f(7)?],
+                        worn_scale: f(8)?,
+                    })
+                },
+            )
+            .ok();
+        l.weapons.insert(item_id, weapon.clone());
+        weapon
     }
 
     /// The `.cgf` a doodad template is drawn with (`doodad_almighties.model` is `cgf://game/<path>`).
