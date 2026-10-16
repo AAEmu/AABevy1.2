@@ -194,13 +194,28 @@ impl FaceMaker {
         out
     }
 
-    /// Race-shape targets that are always on for a race (they are not sliders).
+    /// Race-shape targets that are always on for a race (they are not sliders). The ferre faces
+    /// also need their gender target, see [`FaceMaker::race_gender_weights`].
     pub fn race_weights(race: crate::db::Race) -> Vec<(String, f32)> {
         match race {
             crate::db::Race::Elf => vec![("elf_Morph".to_string(), 1.0)],
             crate::db::Race::Hariharan => vec![("hariharan_Morph".to_string(), 1.0)],
             _ => Vec::new(),
         }
+    }
+
+    /// The always-on targets of a model: [`FaceMaker::race_weights`] plus, for ferre, the `Male` /
+    /// `Female` target. The ferre face files (`fe_m_face01.chr` and `fe_f_face01.chr` hold the
+    /// same neutral head) carry both gender shapes as morph targets: `Male` lifts the head by
+    /// 0.14 m (to the male skeleton's head bone), `Female` lowers it by 0.14 m. Without one the
+    /// head sinks into the male's shoulders and floats above the female's.
+    pub fn race_gender_weights(race: crate::db::Race, gender: crate::db::Gender) -> Vec<(String, f32)> {
+        let mut weights = Self::race_weights(race);
+        if race == crate::db::Race::Ferre {
+            let name = if gender == crate::db::Gender::Male { "Male" } else { "Female" };
+            weights.push((name.to_string(), 1.0));
+        }
+        weights
     }
 }
 
