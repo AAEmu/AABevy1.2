@@ -257,6 +257,8 @@ pub struct UiStats {
     /// A widget (edit box) has the keyboard focus: the app should not treat keys as game
     /// bindings this frame.
     pub keyboard_focus: bool,
+    /// CPU time of the last UI frame (input, Lua tick, rebuild if any), microseconds.
+    pub frame_us: f32,
 }
 
 /// Scripted pointer for tests and automation: while `pos` is set it replaces the OS cursor
@@ -393,6 +395,7 @@ fn ui_frame(
 ) {
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
+    let t0 = std::time::Instant::now();
     let (pw, ph) = (
         window.resolution.physical_width() as f32,
         window.resolution.physical_height() as f32,
@@ -474,6 +477,7 @@ fn ui_frame(
     }
     stats.keyboard_focus = u.focus.is_some();
     drop(g);
+    stats.frame_us = t0.elapsed().as_secs_f32() * 1e6;
     for (mut tf, mut proj) in camera.iter_mut() {
         *tf = Transform::from_xyz(pw / 2.0, -ph / 2.0, 0.0);
         if let Projection::Orthographic(o) = &mut *proj {
