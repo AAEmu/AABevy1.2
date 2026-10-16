@@ -3,9 +3,11 @@
 //! Until the login-stage screens are wired up this drives the whole flow without a UI:
 //! `Login -> EnterWorld -> ConnectToWorld -> EnterGame`, then switches [`Screen`] to `InGame`.
 //!
-//! Flags: `--user NAME` (default `bevytest`), `--login HOST:PORT` (default `127.0.0.1:27237`),
-//! `--password-file PATH` (else `$AA_PASSWORD_FILE`, else `D:\aaemu-live\cfg\client-test-password.txt`,
-//! else the user name; the password is never printed), `--character NAME` (default: the first).
+//! Flags: `--account NAME` (alias `--user`, default `bevytest`; the server lets one connection per
+//! account in), `--login HOST:PORT` (default `127.0.0.1:27237`), `--password-file PATH` (else
+//! `$AA_PASSWORD_FILE`, else `D:\aaemu-live\cfg\client-test-password.txt`, else the account name; the
+//! password is never printed), `--character NAME` (default: the first). The account flags are
+//! shared with the login screens ([`Credentials`]).
 
 use aa_net::{Command, Event, NetCommand, NetEvent, Secret};
 use bevy::app::AppExit;
@@ -13,26 +15,23 @@ use bevy::prelude::*;
 
 use crate::Screen;
 
-/// Present when `--enter-world` was given.
-#[derive(Resource)]
-pub struct AutoEnter {
-    login: String,
-    user: String,
-    password: Secret,
-    character: Option<String>,
+/// Which account logs in where (`--account`, `--login`, `--password-file`); used by the login
+/// screens and by `--enter-world`.
+#[derive(Resource, Clone)]
+pub struct Credentials {
+    pub login: String,
+    pub user: String,
+    pub password: Secret,
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
+pub fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
 
-impl AutoEnter {
-    pub fn from_args() -> Option<AutoEnter> {
+impl Credentials {
+    pub fn from_args() -> Credentials {
         let args: Vec<String> = std::env::args().collect();
-        if !args.iter().any(|a| a == "--enter-world") {
-            return None;
-        }
-        let user = flag(&args, "--user").unwrap_or_else(|| "bevytest".into());
+        let user = flag(&args, "--account").or_else(|| flag(&args, "--user")).unwrap_or_else(|| "bevytest".into());
         let shared = r"D:\aaemu-live\cfg\client-test-password.txt";
         let path = flag(&args, "--password-file")
             .or_else(|| std::env::var("AA_PASSWORD_FILE").ok())
@@ -42,12 +41,29 @@ impl AutoEnter {
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| user.clone());
-        Some(AutoEnter {
-            login: flag(&args, "--login").unwrap_or_else(|| "127.0.0.1:27237".into()),
-            user,
-            password: Secret::new(password),
-            character: flag(&args, "--character"),
-        })
+        Credentials { login: flag(&args, "--login").unwrap_or_else(|| "127.0.0.1:27237".into()), user, password: Secret::new(password) }
+    }
+
+    /// The `Login` command for these credentials.
+    pub fn command(&self) -> Command {
+        Command::Login { addr: self.login.clone(), user: self.user.clone(), password: self.password.clone() }
+    }
+}
+
+/// Present when `--enter-world` was given.
+#[derive(Resource)]
+pub struct AutoEnter {
+    credentials: Credentials,
+    character: Option<String>,
+}
+
+impl AutoEnter {
+    pub fn from_args() -> Option<AutoEnter> {
+        let args: Vec<String> = std::env::args().collect();
+        if !args.iter().any(|a| a == "--enter-world") {
+            return None;
+        }
+        Some(AutoEnter { credentials: Credentials::from_args(), character: flag(&args, "--character") })
     }
 }
 
@@ -57,12 +73,8 @@ pub fn plugin(app: &mut App) {
 }
 
 fn login(auto: Res<AutoEnter>, mut out: MessageWriter<NetCommand>) {
-    info!("enter-world: logging in as {} at {}", auto.user, auto.login);
-    out.write(NetCommand(Command::Login {
-        addr: auto.login.clone(),
-        user: auto.user.clone(),
-        password: auto.password.clone(),
-    }));
+    info!("enter-world: logging in as {} at {}", auto.credentials.user, auto.credentials.login);
+    out.write(NetCommand(auto.credentials.command()));
 }
 
 fn drive(

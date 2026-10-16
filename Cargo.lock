@@ -28,6 +28,7 @@ dependencies = [
  "aa-pak",
  "aa-ui",
  "aa-world",
+ "anyhow",
  "bevy",
  "mlua",
  "rusqlite",
