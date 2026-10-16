@@ -366,11 +366,11 @@ fn i16n(b: &[u8], i: usize) -> f32 {
 
 /// Reads a compiled mesh; `None` when it has nothing to render (no indices or positions).
 fn read_mesh(file: &ChunkFile<'_>, c: &crate::chunk::Chunk<'_>, skinned: bool) -> Result<Option<MeshData>> {
+    if c.version == 0x744 {
+        return read_mesh_744(c.data);
+    }
     if c.version != 0x800 {
-        return Err(Error::Unsupported(format!(
-            "Mesh chunk version {:#x} (uncompiled legacy mesh)",
-            c.version
-        )));
+        return Err(Error::Unsupported(format!("Mesh chunk version {:#x}", c.version)));
     }
     let mut r = c.reader();
     let _flags = r.i32()?;
@@ -563,6 +563,174 @@ fn read_mesh(file: &ChunkFile<'_>, c: &crate::chunk::Chunk<'_>, skinned: bool) -
     Ok(Some(m))
 }
 
+/// Legacy uncompiled mesh (Mesh v0x744; 75 `.chr` helmets/pants and one decal):
+/// `u8 hasBoneInfo, hasVertexColors, pad[2]; i32 nVerts, nTVerts, nFaces, vertAnim;`
+/// `{Vec3 pos (cm), Vec3 normal}[nVerts]; {i32 v0, v1, v2, mat, smoothGroup}[nFaces];`
+/// `{f32 u, v}[nTVerts]; {i32 t0, t1, t2}[nFaces] (if nTVerts);`
+/// `{i32 n; {i32 bone; Vec3 offset; f32 weight}[n]}[nVerts] (if bones); u8 rgb[3][nVerts] (if colours)`.
+/// Vertices are split per (position, uv) pair and faces grouped into subsets by material.
+fn read_mesh_744(data: &[u8]) -> Result<Option<MeshData>> {
+    let mut r = crate::chunk::Reader::new(data);
+    let has_bones = r.u8()? != 0;
+    let has_colors = r.u8()? != 0;
+    r.skip(2)?;
+    let nv = r.i32()?.max(0) as usize;
+    let nt = r.i32()?.max(0) as usize;
+    let nf = r.i32()?.max(0) as usize;
+    let _vert_anim = r.i32()?;
+    if nv.saturating_mul(24) > r.remaining() || nf.saturating_mul(20) > r.remaining() {
+        return Err(Error::invalid(format!("legacy mesh: {nv} verts / {nf} faces")));
+    }
+    let mut pos = Vec::with_capacity(nv);
+    let mut nrm = Vec::with_capacity(nv);
+    for _ in 0..nv {
+        pos.push(r.vec3()? * 0.01);
+        nrm.push(r.vec3()?);
+    }
+    let mut faces = Vec::with_capacity(nf);
+    for _ in 0..nf {
+        let v = [r.i32()?, r.i32()?, r.i32()?];
+        let mat = r.i32()?;
+        let _smooth = r.i32()?;
+        faces.push((v, mat.max(0) as u32));
+    }
+    let mut uvs = Vec::with_capacity(nt);
+    for _ in 0..nt {
+        uvs.push(r.vec2()?);
+    }
+    let mut tfaces = Vec::new();
+    if nt > 0 {
+        for _ in 0..nf {
+            tfaces.push([r.i32()?, r.i32()?, r.i32()?]);
+        }
+    }
+    let mut links: Vec<([u16; 4], [f32; 4])> = Vec::new();
+    if has_bones {
+        for _ in 0..nv {
+            let n = r.i32()?.max(0) as usize;
+            let mut l: Vec<(u16, f32)> = Vec::with_capacity(n);
+            for _ in 0..n {
+                let bone = r.i32()?.max(0) as u16;
+                let _offset = r.vec3()?;
+                l.push((bone, r.f32()?));
+            }
+            l.sort_by(|a, b| b.1.total_cmp(&a.1));
+            l.truncate(4);
+            let sum: f32 = l.iter().map(|x| x.1).sum();
+            let mut j = [0u16; 4];
+            let mut w = [0f32; 4];
+            for (k, (b, wt)) in l.iter().enumerate() {
+                j[k] = *b;
+                w[k] = if sum > 0.0 { wt / sum } else { 0.0 };
+            }
+            if sum <= 0.0 {
+                w[0] = 1.0;
+            }
+            links.push((j, w));
+        }
+    }
+    let mut colors = Vec::new();
+    if has_colors && r.remaining() >= nv * 3 {
+        for _ in 0..nv {
+            let b = r.bytes(3)?;
+            colors.push([b[0], b[1], b[2], 255]);
+        }
+    }
+    if nv == 0 || nf == 0 {
+        return Ok(None);
+    }
+    // split vertices per (position, uv) and group faces by material
+    let mut order: Vec<usize> = (0..nf).collect();
+    order.sort_by_key(|&f| faces[f].1);
+    let mut m = MeshData::default();
+    let mut remap: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    let mut skin = Skin::default();
+    for &f in &order {
+        let (v, mat) = faces[f];
+        if m.subsets.last().is_none_or(|s: &Subset| s.material_id != mat) {
+            m.subsets.push(Subset {
+                first_index: m.indices.len() as u32,
+                index_count: 0,
+                first_vertex: 0,
+                vertex_count: 0,
+                material_id: mat,
+                radius: 0.0,
+                center: Vec3::ZERO,
+            });
+        }
+        for k in 0..3 {
+            let vi = v[k];
+            if vi < 0 || vi as usize >= nv {
+                return Err(Error::invalid(format!("legacy mesh: vertex index {vi}")));
+            }
+            let ti = tfaces.get(f).map(|t| t[k]).unwrap_or(-1);
+            let ti = if ti >= 0 && (ti as usize) < nt { ti as u32 } else { u32::MAX };
+            let next = m.positions.len() as u32;
+            let idx = *remap.entry((vi as u32, ti)).or_insert_with(|| {
+                let vi = vi as usize;
+                m.positions.push(pos[vi]);
+                m.normals.push(nrm[vi].normalize_or(Vec3::Z));
+                m.uvs.push(if ti == u32::MAX { Vec2::ZERO } else { uvs[ti as usize] });
+                if let Some(c) = colors.get(vi) {
+                    m.colors.push(*c);
+                }
+                if let Some((j, w)) = links.get(vi) {
+                    skin.joints.push(*j);
+                    skin.weights.push(*w);
+                }
+                next
+            });
+            m.indices.push(idx);
+        }
+        m.subsets.last_mut().unwrap().index_count += 3;
+    }
+    for s in &mut m.subsets {
+        s.vertex_count = m.positions.len() as u32;
+    }
+    m.tangents = compute_tangents(&m.positions, &m.normals, &m.uvs, &m.indices);
+    if links.len() == nv {
+        m.skin = Some(skin);
+    }
+    let (lo, hi) = m.positions.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), p| (a.min(*p), b.max(*p)));
+    m.bbox_min = lo;
+    m.bbox_max = hi;
+    Ok(Some(m))
+}
+
+/// Per-vertex tangents from UV derivatives (Lengyel), `w` = handedness in Bevy's convention.
+pub fn compute_tangents(positions: &[Vec3], normals: &[Vec3], uvs: &[Vec2], indices: &[u32]) -> Vec<Vec4> {
+    let n = positions.len();
+    if uvs.len() != n || normals.len() != n {
+        return Vec::new();
+    }
+    let mut tan = vec![Vec3::ZERO; n];
+    let mut bit = vec![Vec3::ZERO; n];
+    for t in indices.chunks_exact(3) {
+        let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
+        let (e1, e2) = (positions[b] - positions[a], positions[c] - positions[a]);
+        let (d1, d2) = (uvs[b] - uvs[a], uvs[c] - uvs[a]);
+        let det = d1.x * d2.y - d2.x * d1.y;
+        if det.abs() < 1e-12 {
+            continue;
+        }
+        let r = 1.0 / det;
+        let tu = (e1 * d2.y - e2 * d1.y) * r;
+        let tv = (e2 * d1.x - e1 * d2.x) * r;
+        for &i in &[a, b, c] {
+            tan[i] += tu;
+            bit[i] += tv;
+        }
+    }
+    (0..n)
+        .map(|i| {
+            let nn = normals[i];
+            let t = (tan[i] - nn * nn.dot(tan[i])).normalize_or(nn.any_orthonormal_vector());
+            let w = if nn.cross(t).dot(bit[i]) < 0.0 { -1.0 } else { 1.0 };
+            t.extend(w)
+        })
+        .collect()
+}
+
 fn flat_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut n = vec![Vec3::ZERO; positions.len()];
     for t in indices.chunks_exact(3) {
@@ -616,5 +784,33 @@ mod tests {
         let names: Vec<&str> = skin.joints[0][..3].iter().map(|&j| s.bones[j as usize].name.as_str()).collect();
         assert_eq!(names, ["Bip01 Spine1", "Bip01 Spine2", "Bip01 Pelvis"]);
         assert!(skin.joints.iter().flatten().all(|&j| (j as usize) < s.len()));
+    }
+
+    /// Legacy uncompiled skinned part (Mesh 0x744 + BoneAnim / BoneNameList / BoneInitialPos).
+    #[test]
+    fn real_legacy_mesh() {
+        if !crate::pak_available() {
+            return;
+        }
+        let m = Model::load("objects/characters/ferre/male/parts/hm/obj/fe_m_1hm217.chr").unwrap();
+        let s = m.skeleton.as_ref().expect("legacy skeleton");
+        assert!(m.is_skinned());
+        let lod0 = m.lod_nodes(0);
+        assert!(!lod0.is_empty());
+        for ni in lod0 {
+            let mesh = &m.meshes[m.nodes[ni].mesh.unwrap()];
+            let n = mesh.positions.len();
+            assert!(n > 0 && !mesh.subsets.is_empty());
+            assert_eq!((mesh.normals.len(), mesh.uvs.len(), mesh.tangents.len()), (n, n, n));
+            assert!(mesh.indices.iter().all(|&i| (i as usize) < n));
+            let skin = mesh.skin.as_ref().unwrap();
+            assert_eq!(skin.joints.len(), n);
+            assert!(skin.joints.iter().flatten().all(|&j| (j as usize) < s.len()));
+            assert!(skin.weights.iter().all(|w| (w.iter().sum::<f32>() - 1.0).abs() < 1e-3));
+        }
+        // a helmet: model space (metres), around head height
+        let (lo, hi) = m.bounds().unwrap();
+        println!("legacy helmet: {} bones, bounds {lo} .. {hi}", s.len());
+        assert!(hi.z > 1.2 && hi.z < 3.0 && (hi - lo).max_element() < 1.0, "{lo} .. {hi}");
     }
 }

@@ -6,6 +6,7 @@
 //! * `--material <.mtl>`    material override for the last `--model`
 //! * `--lod <n>`            level of detail
 //! * `--yaw <deg>` `--pitch <deg>` `--dist <m>`  initial camera (distance defaults to fit)
+//! * `--focus <x,y,z>`      camera target (Bevy space, metres; defaults to the bounds centre)
 //! * `--bones`              draw the skeleton
 //!
 //! Mouse: left drag orbits, wheel zooms, right drag pans.
@@ -23,12 +24,13 @@ struct Args {
     yaw: f32,
     pitch: f32,
     dist: Option<f32>,
+    focus: Option<Vec3>,
     bones: bool,
 }
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    let mut a = Args { models: Vec::new(), yaw: 35.0, pitch: 15.0, dist: None, bones: false };
+    let mut a = Args { models: Vec::new(), yaw: 35.0, pitch: 15.0, dist: None, focus: None, bones: false };
     let mut lod = 0;
     let mut i = 1;
     while i < args.len() {
@@ -61,6 +63,13 @@ fn parse_args() -> Args {
             }
             "--dist" => {
                 a.dist = v.parse().ok();
+                i += 1;
+            }
+            "--focus" => {
+                let v: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                if v.len() == 3 {
+                    a.focus = Some(Vec3::new(v[0], v[1], v[2]));
+                }
                 i += 1;
             }
             "--bones" => a.bones = true,
@@ -162,7 +171,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, args: Res<Args>) {
         lo = Vec3::ZERO;
         hi = Vec3::ONE;
     }
-    let center = (lo + hi) * 0.5;
+    let center = args.focus.unwrap_or((lo + hi) * 0.5);
     let radius = ((hi - lo).length() * 0.5).max(0.5);
     let dist = args.dist.unwrap_or(radius * 2.4);
 
