@@ -4,13 +4,18 @@
 //!
 //! ```text
 //! Character (Transform = placement, Animator, Character)
-//! └─ model root (CRY_TO_BEVY: CryEngine Z up -> Bevy Y up)
+//! └─ model root (CRY_TO_BEVY: CryEngine Z up -> Bevy Y up; characters face CryEngine +Y = Bevy -Z)
 //!    ├─ Bip01 ... (one entity per bone of the *_base.chr skeleton, animated)
-//!    ├─ body        (nude .chr, skinned to the bones)
-//!    ├─ face        (face00.cdf: shared head mesh + race material + morphs)
+//!    ├─ body        (nude .chr, skinned to the bones; dropped under a one-piece `cosplay` costume)
+//!    ├─ face        (face00.cdf: shared head mesh + race material + morphs + composited texture)
 //!    ├─ hair        (hair .chr with the .mtl of the chosen colour)
-//!    └─ costume pieces (chest, legs, hands, feet)
+//!    └─ costume pieces (the login-stage cloth pack of the model: cosplay skin, or shirt / pants / gloves / shoes)
 //! ```
+//!
+//! Per-character material work (copies of the cached aa-cry materials, see `restyle`):
+//! skin albedo from the `skin_colors` row, composited face texture + normal map + iris colour,
+//! hair colour, dyed costume diffuse textures. Skinned parts use the base skeleton's inverse bind
+//! matrices so a part made for another race (the Nuian head on Harani bodies) bends correctly.
 
 use std::sync::Arc;
 
@@ -37,7 +42,8 @@ use crate::{Error, Result};
 pub enum Costume {
     /// Nothing but the nude body.
     None,
-    /// The login-stage outfit (chest, legs, hands, feet of `armor_assets` 1111..1114).
+    /// The outfit the login / character-create stage dresses the model in
+    /// (`characters.preview_cloth_pack_id`, see [`GameDb::login_costume`]).
     #[default]
     Login,
     /// Equipment items (`items.id` of armour); resolved through `item_armors`.

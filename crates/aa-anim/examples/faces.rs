@@ -68,14 +68,9 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     let x0 = -spacing * (presets.len() as f32 - 1.0) / 2.0;
     for (i, &p) in presets.iter().enumerate() {
         let mut desc = CharacterDesc::from_preset(&db, race, gender, p).expect("preset");
-        if desc.customization.modifier.len() < 128 {
-            desc.customization.modifier.resize(128, 0);
-        }
         let mine = if extra.len() == 1 { extra.first() } else { extra.get(i) };
         for &(idx, v) in mine.into_iter().flatten() {
-            if let Some(m) = desc.customization.modifier.get_mut(idx) {
-                *m = v as u8;
-            }
+            desc.customization.set_slider(idx, v);
         }
         if let Some(v) = arg("--skin").and_then(|v| v.parse().ok()) {
             desc.skin = v;
