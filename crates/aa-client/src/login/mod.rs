@@ -8,6 +8,7 @@
 pub mod character_select;
 pub mod create;
 pub mod loading;
+pub mod stage3d;
 pub mod world_select;
 
 use bevy::prelude::*;
@@ -21,6 +22,9 @@ impl Plugin for LoginPlugin {
             character_select::plugin,
             create::plugin,
             loading::plugin,
+            |app: &mut App| {
+                app.add_plugins(stage3d::Stage3dPlugin);
+            },
         ));
     }
 }
