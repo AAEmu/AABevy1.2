@@ -20,7 +20,10 @@
 
 use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, Costume, GameDb, Gender, Race, spawn_character};
 use aa_cry::scene::{CryAssets, CryPlugin};
+use aa_cry::stage::StageLighting;
 use bevy::prelude::*;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::render::view::ColorGrading;
 
 const REF: &str = "D:/AABevy1.2/reference";
 
@@ -284,6 +287,8 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>, ta
     let camera = commands
         .spawn((
             Camera3d::default(),
+            tonemapping(),
+            grading(),
             Projection::Perspective(PerspectiveProjection { fov: cam.fov.to_radians(), ..default() }),
             Transform::from_translation(eye).looking_to(to_bevy(fwd), to_bevy(up)),
         ))
@@ -293,31 +298,50 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>, ta
     stage_lights(&mut commands, &mut cry, camera, rotation, k);
 }
 
-/// Temporary showroom lights (replaced by `aa_cry::stage` once calibrated).
+/// The login stage lights of `aa_cry::stage`, turned to face the camera; `--key K --fill K --rim K
+/// --env K --amb K` scale the parts (calibration), `--light K` scales all.
 fn stage_lights(commands: &mut Commands, cry: &mut CryAssets, camera: Entity, rotation: Quat, k: f32) {
-    use bevy::light::GeneratedEnvironmentMapLight;
-    let dir = |from: Vec3| Transform::from_translation(rotation * from).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y);
-    commands.spawn((
-        DirectionalLight { illuminance: 9000.0 * 0.5 * k, shadow_maps_enabled: true, color: Color::srgb(1.0, 0.96, 0.9), ..default() },
-        dir(Vec3::new(-2.0, 5.0, 6.0)),
-    ));
-    commands.spawn((
-        DirectionalLight { illuminance: 2500.0 * 0.5 * k, color: Color::srgb(0.6, 0.7, 1.0), ..default() },
-        dir(Vec3::new(5.0, 2.5, 4.0)),
-    ));
-    commands.spawn((
-        DirectionalLight { illuminance: 4000.0 * 0.5 * k, color: Color::srgb(1.0, 0.9, 0.8), ..default() },
-        dir(Vec3::new(0.0, 3.0, -6.0)),
-    ));
-    if let Some(env) = cry.texture("textures/cubemaps/beach_blur2.dds", true) {
-        commands.entity(camera).insert(GeneratedEnvironmentMapLight { environment_map: env, intensity: 1500.0 * 0.5 * k, ..default() });
+    let f = |name: &str| arg(name).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
+    let mut stage = StageLighting::login().scaled(k);
+    for (l, name) in stage.lights.iter_mut().zip(["--key", "--fill", "--rim"]) {
+        l.intensity *= f(name);
     }
-    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.75, 0.8, 0.9), brightness: 350.0 * 0.5 * k, ..default() });
+    if let Some((_, i)) = &mut stage.environment {
+        *i *= f("--env");
+    }
+    if let Some((_, i)) = &mut stage.ambient {
+        *i *= f("--amb");
+    }
+    stage.spawn(commands, cry, camera, rotation);
 }
 
 /// The capture shows one moment of the idle; hold the first frame so renders are comparable.
 fn hold_pose(mut q: Query<&mut Animator>) {
     for mut a in &mut q {
         a.speed = 0.0;
+    }
+}
+
+fn tonemapping() -> Tonemapping {
+    match arg("--tonemap").as_deref() {
+        Some("none") => Tonemapping::None,
+        Some("reinhard") => Tonemapping::Reinhard,
+        Some("reinhard_lum") => Tonemapping::ReinhardLuminance,
+        Some("aces") => Tonemapping::AcesFitted,
+        Some("agx") => Tonemapping::AgX,
+        Some("blender") => Tonemapping::BlenderFilmic,
+        Some("somewhat") => Tonemapping::SomewhatBoringDisplayTransform,
+        _ => Tonemapping::TonyMcMapface,
+    }
+}
+
+/// The login stage's colour grading; `--sat K` / `--contrast K` override it.
+fn grading() -> ColorGrading {
+    match (arg("--sat"), arg("--contrast")) {
+        (None, None) => aa_cry::stage::login_color_grading(),
+        (s, c) => aa_cry::stage::color_grading(
+            s.and_then(|v| v.parse().ok()).unwrap_or(1.0),
+            c.and_then(|v| v.parse().ok()).unwrap_or(1.0),
+        ),
     }
 }

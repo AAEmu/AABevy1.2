@@ -10,6 +10,7 @@ cargo test -p aa-anim                                   # unit tests + real-data
 cargo test -p aa-anim --lib decodes_the_whole_pak -- --ignored --nocapture   # all 25,202 .caf, ~15 s
 cargo run  -p aa-anim --example lineup -- --shot shots/aa-anim/lineup.png     # 8 playable models, login costume, idle
 cargo run  -p aa-anim --example faces  -- --race nuian --gender f --shot shots/aa-anim/faces_nuian_f.png
+cargo run  -p aa-anim --example compare -- --target step2_elf_female --shot shots/materials/step2_elf_female.png
 ```
 
 ## Status
@@ -29,6 +30,19 @@ Nuian male / female (silver saint armour + cape), Harani (orange / red dyed jack
 (brown leather and feathers) costumes match them, faces are the same people (hair style, brows,
 eyes, skin tone), the metal shine of the client (specular terms of the Illum shader) is
 approximated with the game's own beach cubemap as environment light.
+
+Material / lighting comparison (`compare` example, `shots/materials/`): `after_sheet.png` is the
+contact sheet of the 8 `step1_<race>_<gender>` captures (real left, ours right; `before_sheet.png`
+is the same before the material work), `after_step2_elf_female.png` the face close-up,
+`after_select_refone.png` the Nuian male Refone of the select screen. `compare` places the figure
+by the real camera (`camera.json`: position, angles, roll, FOV 1920x1080) and measured feet / head
+rows of each capture (figure height within 1 cm), lights it with `aa_cry::stage::StageLighting::login()`
+and the login colour grading, and clears to the mean colour of the capture's background. Options:
+`--target stepN_<race>_<gender>|select`, `--preset N`, `--costume none`, `--no-hair`, `--yaw deg`,
+`--light K` (all lights), `--key/--fill/--rim/--env/--amb K`, `--sat K --contrast K`,
+`--tonemap none|reinhard|aces|agx|blender|...`, `--bg r,g,b`. Side-by-side tools:
+`python -I crates/aa-anim/tools/side_by_side.py <reference folder> <shot> <out> [x0 y0 x1 y1]` and
+`sheet.py <shot prefix> <out> [scale]`.
 
 ## Formats
 
@@ -127,20 +141,29 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
    chosen colour), costume pieces. Skinned parts are subsets of the base skeleton, matched by
    controller id. They use the **base skeleton's inverse bind matrices** (engine behaviour; needed for
    the Nuian head on Harani bodies).
-3. **Materials** (aa-cry converts them generically; `restyle` copies and adjusts per shader):
-   * HumanSkin: white base times `skin_albedo` (from `skin_colors.diffuse_color`, relative to the
-     model's lightest skin; albedo 0.79 for Nuian male skin 1, 0.51 for the dark skin 21, 0.24 for skin 8000002).
-     The face gets x1.2, the body x0.9 so the neck matches the face.
+3. **Materials**: aa-cry converts them from the shader parameters (`docs/aa-cry.md`); aa-anim loads
+   every part with `Shading::Full` (per-pixel metal from the specular map) and tunes the converted
+   sub-materials per character through aa-cry's `material_hook` (`restyle`):
+   * HumanSkin: the chosen `skin_colors` row replaces `BSkinColor` (stored b, g, r) / `Diffuse`
+     (`aa_cry::shade::skin_base_color`: the shader's `bright^1.5 * 1.5` lit colour, pulled towards
+     pink and scaled; the calibration constants are in `shade.rs`). Body and face use the same
+     colour. (The old `skin_albedo` scale is still computed and exposed but no longer used.)
    * face: texture composited on the CPU (`face.rs`): `face01/<pfx>_face01_df.dds` (the material's
      `face00_df copy.dds` does not exist in the pak) + decals + lip tint + iris tint, with a full mip
      chain; the face normal map of the preset replaces the material's.
    * Eye: the same composited texture (the eye lives in the face atlas), iris recoloured from
      `left_pupil_color` inside the eye mesh's UV square.
-   * Hair: `HairColor` of the colour `.mtl` times 0.55 (the shader's own diffuse is 0.07; the colour
-     is mostly specular), no emissive.
-   * Illum (cloth, armour): white base (the mtl `Diffuse` ~0.2 is a lighting scale), no emissive,
-     reflectance 0.35; dyeable materials (`DyeingChannelMask`, `[1] Custom` mask) get a baked dyed
-     diffuse (`dye.rs`).
+   * Hair: aa-cry's conversion (`HairColor^1.5 * 2 * Diffuse`, alpha-to-coverage); the colour `.mtl`
+     of the chosen hair colour is the material.
+   * Illum (cloth, armour): aa-cry's conversion; dyeable materials (`DyeingChannelMask`,
+     `[1] Custom` mask) get a baked dyed diffuse (`dye.rs`) that replaces the base (and emissive) texture.
+   Parts without a per-character change (most costumes) are the shared cached models; parts with
+   one are built per character (hooked loads are not shared).
+3b. **Cut hulls** (`cut.rs`): costume models carry a closed coarse hull under a `Cut` sub-material.
+   The nude body triangles whose three vertices lie inside a hull (generalised winding number)
+   are collapsed (degenerate triangles) by a vertex hook on the body part, so the body no longer
+   shows through armour (thighs through pants, chest through a cuirass). The costume's own `skin`
+   sub-mesh covers the exposed skin. Callers need no depth bias any more.
 4. **Morphs**: `FaceMaker::weights(modifier)` -> target weights -> vertex deltas applied to the face
    mesh on the CPU before the Bevy mesh is built (`MorphSet::apply`).
 5. **Animation**: `Animator` samples `fist_ac_stage_idle` (with `fist_ac_stage_rand_1` every few
@@ -184,7 +207,9 @@ picks the outfit; `GameDb::{playable, presets, skin_colors, hair_colors_for, bod
 list the choices. `Clip::load`, `Cal::load`, `Cdf::load`, `Lmg::load`, `MorphSet::load`,
 `FaceMaker::load`, `Pose`, `Rig`, `ClipLibrary` are usable on their own.
 
-The examples are the reference usage: `lineup` (`--preset N`, `--costume none`, `--no-hair 1`,
+`ModelOptions::shading` is set to `Shading::Full` for every character part.
+
+The examples are the reference usage: `compare` (the calibrated login stage, above), `lineup` (`--preset N`, `--costume none`, `--no-hair 1`,
 `--only N`, `--cam x,y,z --look x,y,z --fov deg`, `--light K`, `--env I`) and `faces` (`--race`,
 `--gender`, `--presets 0,1,2`, `--morph "4=35,25=65;..."`, `--skin`, `--hair`, `--hair-color`,
 `--fov`, `--full 1`). Lighting note: Bevy lights are in lux against its default exposure; the
@@ -192,11 +217,11 @@ showroom uses ~0.5 of "nominal" values, higher washes characters out.
 
 ## Gaps
 
-* Skin shading: the engine's HumanSkin shader (SSS, rim, `bright` / `middle` colours) is replaced by
-  a plain albedo scale; the `bright` / `middle` columns are not used (they do not explain the dark
-  skins, `diffuse_color` does). Ferre fur is drawn flat (no fur shells), so ferre faces and bodies
-  look paler than in the client.
-* Hair: colour is an approximation (no Kajiya-Kay highlights, no alpha-blend sorting); hat variants
+* Skin shading: the engine's HumanSkin shader (SSS map, rim, `bright` / `middle` colours per light
+  angle) is replaced by one calibrated colour; the pink of pale skins is a constant pull, so nuian
+  male skin is a little too red. `middle_skin_color` and the specular columns are not used. Ferre
+  fur is drawn flat (no fur shells), so ferre faces and bodies look paler than in the client.
+* Hair: no Kajiya-Kay highlights (strand streaks), no alpha-blend sorting; hat variants
   (`asset_1..3`) and beards are not implemented; preset hair colours come from the colour `.mtl` of
   the chosen style (`hair_colors`).
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
@@ -204,31 +229,22 @@ showroom uses ~0.5 of "nominal" values, higher washes characters out.
 * Only the idle clips play. Locomotion blending (`Lmg`), facial animation (`.fsq`) and lip sync, eye
   blinks, dye choice for armour other than the default dye are not done. The `.dbh` track database
   is not decoded (not needed).
-* Costume specular: the Illum look of the client (SpecularModifierInHDR, env map amounts) is only
-  approximated by the game's beach cubemap; metal armour is a little duller than the capture.
+* Costume specular: metal comes from the baked specular map; per-pixel specular tint (gold trims
+  stay a little duller) needs Bevy's `pbr_specular_textures` feature. Leather lacks the client's
+  sharp highlight streaks.
+* The `Cut` removal tests vertices against the hulls in the rest pose of the costume's own
+  vertex positions; a body triangle that straddles a hull stays.
 * The order of the 9 presets matches the screen by name; the order of hair / hair colour grids of the
   screen (`character_customizing_hair_assets`, `hair_colors` by `comment`) is exposed but the exact
   screen order was not verified.
 
-## Requests to aa-cry
+## Requests to aa-cry (all done)
 
-1. `aa_cry::CRY_TO_BEVY` docs: say that characters face CryEngine **+Y**, i.e. Bevy -Z after the
-   conversion (props authored facing -Y are the exception). Everything in aa-anim rotates by PI.
-2. Material hook: `ModelOptions` could take an `Option<Arc<dyn Fn(&CryMaterial, &mut StandardMaterial)>>`
-   (and a vertex hook `Fn(&mut MeshData)`) so callers can restyle materials and morph vertices inside
-   `load_model` instead of re-running `subset_mesh` / `cry.material` themselves (aa-anim copies every
-   part per character now).
-3. Illum: `Diffuse` (~0.2) multiplied into the texture and `Specular = 1,1,1` with `SpecularLevel 2`
-   (reflectance 1.0) make costumes dark and grey; `Emissive` 0.34 on metal armour washes it out. For
-   textured Illum materials use a white base colour, cap reflectance (~0.35-0.5) and ignore emissive;
-   that is what `restyle` does for characters. HumanSkin: `SKIN_ALBEDO` 0.22 is too dark for faces
-   and body textures (aa-anim uses 0.5-1.0 depending on the skin colour).
-4. `CryAssets::texture` could resolve the `... df copy.dds` style paths (names with spaces) by
-   stripping ` copy`; the customisable faces reference such files.
-5. Environment light helper: build a `GeneratedEnvironmentMapLight` from the material's
-   `Environment` cubemap (`textures/cubemaps/beach_blur2.dds`) and expose it; characters look
-   plasticky without it. aa-anim's examples do it by hand
-   (`cry.texture("textures/cubemaps/beach_blur2.dds", true)` works as is).
-6. Dyeing: `Illum` materials with `DyeingChannelMask` / `DyeingColor` and a `[1] Custom` mask texture
-   (costume dye) need a per-instance baked texture or a shader; aa-anim has `dye::bake_dyed_diffuse`
-   if aa-cry wants to own that.
+1. `CRY_TO_BEVY` docs say characters face CryEngine +Y (Bevy -Z): done.
+2. Material and vertex hooks on `ModelOptions`: done, aa-anim uses them (no more per-character
+   copies of shared parts).
+3. Illum / HumanSkin conversion: done in `aa_cry::shade` (see `docs/aa-cry.md`).
+4. ` copy` texture paths: done (`CryAssets::texture`, `CryLoader::resolve_texture`).
+5. Environment light helper: `aa_cry::stage::environment_light` / `StageLighting`.
+6. Dyeing stays in aa-anim (`dye::bake_dyed_diffuse`, applied by `restyle`); per-item dye colours
+   for equipment attached outside `spawn_character` (weapons, bows) are not done.

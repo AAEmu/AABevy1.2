@@ -20,17 +20,18 @@
 use std::sync::Arc;
 
 use aa_cry::material::Material as CryMaterial;
-use aa_cry::mesh::MeshData;
-use aa_cry::scene::{CryAssets, LoadedModel, ModelOptions, Part, SkeletonBinding, spawn_loaded, subset_mesh};
-use aa_cry::{CRY_TO_BEVY, Skeleton};
-use bevy::asset::RenderAssetUsages;
-use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
+use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, SkeletonBinding, VertexHook, spawn_loaded};
+use aa_cry::shade::skin_base_color;
+use aa_cry::{CRY_TO_BEVY, Shading, Skeleton};
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 
 use crate::animator::{Animator, ClipLibrary, RandomIdle, spawn_bones};
 use crate::cal::Cal;
 use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
+use crate::cut::{Hull, cut_hulls, cut_mesh};
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
 use crate::face::{EyeTint, FaceLayer, abgr, compose_face};
 use crate::morph::{FaceMaker, MorphSet};
@@ -336,15 +337,19 @@ pub fn spawn_character(
         .id();
     let bones = spawn_bones(commands, model_root, &rig);
 
+    // costumes hide the nude body triangles inside their `Cut` hulls
+    let hulls = Arc::new(costume_hulls(cry, &assets));
+
     let mut part_entities = Vec::new();
     for part in &assets.parts {
         let options = ModelOptions {
             material: part.material.clone(),
             skeleton: Some(SkeletonBinding { skeleton: skeleton.clone(), joints: bones.clone() }),
             cry_space: true,
+            shading: Shading::Full,
             ..default()
         };
-        let loaded = match load_part(cry, &assets, &skeleton, part, &options) {
+        let loaded = match load_part(cry, &assets, part, &options, &hulls) {
             Ok(l) => l,
             Err(e) => {
                 warn!("aa-anim: {}: {e}", part.path);
@@ -388,61 +393,58 @@ fn start_idle(animator: &mut Animator, clips: &ClipLibrary, assets: &CharacterAs
 }
 
 /// Loads a part's Bevy assets with the character's look applied: face morphs on the vertices and
-/// skin / hair / eye / costume material tuning (materials are copied, the shared cache entries
-/// stay untouched).
+/// skin / eye / costume material tuning, done by the model hooks of aa-cry (the converted
+/// materials of the `.mtl` stay untouched in the shared cache; parts without a per-character
+/// change are shared between characters).
 fn load_part(
     cry: &mut CryAssets,
     assets: &CharacterAssets,
-    base: &Skeleton,
     part: &PartAsset,
     options: &ModelOptions,
+    hulls: &Arc<Vec<Hull>>,
 ) -> Result<Arc<LoadedModel>> {
-    let loaded = cry.load_model(&part.path, options)?;
+    // the plain model (cached): material path and mesh data for the face texture
+    let plain = cry.load_model(&part.path, options)?;
+    let mtl = plain.material_path.as_deref().and_then(|p| cry.mtl(p));
+    let face = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &plain) } else { FaceLook::default() };
+    let dyes = dyed_diffuses(cry, mtl.as_deref(), part);
     let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
-    let mtl_path = loaded.material_path.clone();
-    let mtl = mtl_path.as_deref().and_then(|p| cry.mtl(p));
-    let face_look = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &loaded) } else { FaceLook::default() };
+    let cut = (part.kind == PartKind::Body && !hulls.is_empty()).then(|| hulls.clone());
 
-    let mut out = (*loaded).clone();
-    out.parts.clear();
-    // Skin vertices are expressed in the *character's* bind pose, not the part's: use the base
-    // skeleton's inverse bind matrices for the joints the part maps to (identical for parts made
-    // for the same race; the Nuian head on Harani bodies relies on it plus `hariharan_Morph`).
-    if let Some(part_skeleton) = &loaded.skeleton {
-        let inverse: Vec<Mat4> = part_skeleton
-            .bones
-            .iter()
-            .zip(part_skeleton.map_to(base))
-            .map(|(b, m)| m.map(|j| base.bones[j].inverse_bind()).unwrap_or_else(|| b.inverse_bind()))
-            .collect();
-        out.inverse_bindposes = Some(cry.bindposes.add(SkinnedMeshInverseBindposes::from(inverse)));
+    let skin = part.kind != PartKind::Costume || mtl.as_deref().is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin")));
+    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), face, dyes });
+    let needs_materials = skin || !look.dyes.is_empty();
+    if !needs_materials && morph.is_none() && cut.is_none() {
+        return Ok(plain);
     }
-    for (ni, parts) in &loaded.parts {
-        let Some(mi) = loaded.model.nodes[*ni].mesh else { continue };
-        let source = &loaded.model.meshes[mi];
-        let morphed: Option<MeshData> = morph.as_ref().map(|(set, weights)| {
-            let mut m = source.clone();
-            set.apply(&mut m.positions, weights);
-            m
-        });
-        let data = morphed.as_ref().unwrap_or(source);
-        let skinned = parts.first().is_some_and(|p| p.skinned);
-        let mut new_parts = Vec::new();
-        for subset in &source.subsets {
-            let Some(base) = cry.material(mtl_path.as_deref(), subset.material_id as usize) else { continue };
-            let sub = mtl.as_deref().and_then(|m| m.sub(subset.material_id as usize));
-            let material = match sub {
-                Some(sub) => restyle(cry, &base, sub, assets, part, &face_look),
-                None => base,
-            };
-            let Some((mesh, aabb)) = subset_mesh(data, subset, skinned, RenderAssetUsages::RENDER_WORLD) else { continue };
-            new_parts.push(Part { mesh: cry.meshes.add(mesh), material, aabb, skinned });
-        }
-        if !new_parts.is_empty() {
-            out.parts.push((*ni, new_parts));
-        }
+    let mut hooked = options.clone();
+    if needs_materials {
+        let look = look.clone();
+        hooked.material_hook = Some(MaterialHook::new(move |sub, m| restyle(sub, m, &look)));
     }
-    Ok(Arc::new(out))
+    if morph.is_some() || cut.is_some() {
+        hooked.vertex_hook = Some(VertexHook::new(move |mesh| {
+            if let Some((set, weights)) = &morph {
+                set.apply(&mut mesh.positions, weights);
+            }
+            if let Some(hulls) = &cut {
+                cut_mesh(mesh, hulls);
+            }
+        }));
+    }
+    Ok(cry.load_model(&part.path, &hooked)?)
+}
+
+/// The `Cut` hulls of the costume parts of a character (see [`crate::cut`]).
+fn costume_hulls(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Hull> {
+    let mut hulls = Vec::new();
+    for part in assets.parts.iter().filter(|p| p.kind == PartKind::Costume) {
+        let Ok(model) = aa_cry::Model::load(&part.path) else { continue };
+        let mtl_path = part.material.clone().or_else(|| aa_cry::scene::find_mtl(&part.path, &model));
+        let Some(mtl) = mtl_path.and_then(|p| cry.mtl(&p)) else { continue };
+        hulls.extend(cut_hulls(&model, &mtl));
+    }
+    hulls
 }
 
 /// The per-character textures of the customisable face.
@@ -523,75 +525,54 @@ fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, V
     Some((set, weights))
 }
 
-/// Per-shader tuning of one sub-material for the character (see the module docs of `aa-anim`).
-fn restyle(
-    cry: &mut CryAssets,
-    base: &Handle<StandardMaterial>,
-    sub: &CryMaterial,
-    assets: &CharacterAssets,
-    part: &PartAsset,
-    face: &FaceLook,
-) -> Handle<StandardMaterial> {
+/// What differs per character in the materials of one part.
+struct Look {
+    kind: PartKind,
+    /// The chosen `skin_colors` row: it feeds the `HumanSkin` shader parameters.
+    skin: SkinColor,
+    face: FaceLook,
+    /// Dyed copies of dyeable diffuse textures, by pak path of the original.
+    dyes: HashMap<String, Handle<Image>>,
+}
+
+/// Per-shader tuning of one converted sub-material for the character: aa-cry's conversion
+/// already follows the shaders (skin tone from `BSkinColor`, hair colour from `HairColor`, eye,
+/// Illum specular); only what the customisation changes is applied here.
+fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
     let shader = sub.shader.to_ascii_lowercase();
-    let Some(src) = cry.materials.get(base) else { return base.clone() };
-    let mut m = src.clone();
     match shader.as_str() {
         "humanskin" => {
-            // the textures carry the colour; the engine's `Diffuse` (0.2) and SSS colours are lighting terms
-            if part.kind == PartKind::Face && uses_texture(sub, &face.replaces) {
-                if let Some(t) = &face.texture {
+            if look.kind == PartKind::Face && uses_texture(sub, &look.face.replaces) {
+                if let Some(t) = &look.face.texture {
                     m.base_color_texture = Some(t.clone());
                 }
-                if let Some(n) = &face.normal {
+                if let Some(n) = &look.face.normal {
                     m.normal_map_texture = Some(n.clone());
                 }
             }
-            // the face textures are ~20% darker than the body textures of the same skin: even the
-            // two out so the neck does not look lighter than the face
-            let k = if part.kind == PartKind::Face { 1.2 } else { 0.9 };
-            let a = assets.skin_albedo.map(|c| (c * k).min(1.0));
-            m.base_color = Color::linear_rgb(a[0], a[1], a[2]);
-            m.emissive = LinearRgba::BLACK;
-            m.perceptual_roughness = 0.55;
-            m.reflectance = 0.3;
-        }
-        "hair" => {
-            let color = sub
-                .public_param("HairColor")
-                .and_then(parse_rgb)
-                .map(|c| Color::srgb(c[0], c[1], c[2]))
-                .unwrap_or(Color::srgb(0.4, 0.3, 0.2));
-            // the Hair shader's own Diffuse is ~0.07 and the colour mostly comes from the specular
-            // terms; a plain multiply of the full colour is too bright against the real screens
-            m.base_color = Color::from(color.to_linear() * 0.55);
-            m.emissive = LinearRgba::BLACK;
-            m.perceptual_roughness = 0.6;
-            m.reflectance = 0.25;
+            // the character's skin colour: the row's bright colour (stored b, g, r like the
+            // material's `BSkinColor`) and diffuse colour replace the file's own (the first skin)
+            let row = &look.skin;
+            let bright = Vec3::new(row.bright[2] as f32, row.bright[1] as f32, row.bright[0] as f32) / 255.0;
+            let diffuse = Vec3::new(row.diffuse[0] as f32, row.diffuse[1] as f32, row.diffuse[2] as f32) / 255.0;
+            m.base_color = skin_base_color(diffuse, bright);
         }
         "eye" => {
-            if let Some(t) = face.texture.as_ref().filter(|_| uses_texture(sub, &face.replaces)) {
+            if let Some(t) = look.face.texture.as_ref().filter(|_| uses_texture(sub, &look.face.replaces)) {
                 // the iris lives in the face texture atlas
                 m.base_color_texture = Some(t.clone());
             }
-            m.base_color = Color::WHITE;
-            m.emissive = LinearRgba::BLACK;
-            m.perceptual_roughness = 0.12;
-            m.reflectance = 0.5;
         }
         "illum" => {
-            // costume cloth / armour: the diffuse texture carries the colour (the mtl `Diffuse` ~0.2 is a
-            // lighting scale that the engine compensates for); the specular term is rebuilt from the
-            // environment map, so a full-strength `Specular` would only paint everything grey
-            m.base_color = Color::WHITE;
-            m.emissive = LinearRgba::BLACK;
-            m.reflectance = 0.35;
-            if let Some(image) = dyed_diffuse(cry, sub, part) {
-                m.base_color_texture = Some(image);
+            if let Some(image) = sub.texture(&aa_cry::material::TextureMap::Diffuse).and_then(|t| look.dyes.get(&t.pak_path())) {
+                m.base_color_texture = Some(image.clone());
+                if m.emissive_texture.is_some() {
+                    m.emissive_texture = Some(image.clone());
+                }
             }
         }
-        _ => return base.clone(),
+        _ => {}
     }
-    cry.materials.add(m)
 }
 
 /// Albedo multiplier of the HumanSkin materials for a `skin_colors` row. The body / face
@@ -609,22 +590,28 @@ pub fn skin_albedo(skin: &SkinColor, all: &[SkinColor]) -> [f32; 3] {
     hue.map(|h| (level * h).clamp(0.0, 1.0))
 }
 
-/// The dyed copy of a dyeable costume material's diffuse texture (see [`crate::dye`]).
-fn dyed_diffuse(cry: &mut CryAssets, sub: &CryMaterial, part: &PartAsset) -> Option<Handle<Image>> {
+/// The dyed copies of the dyeable diffuse textures of a costume part (see [`crate::dye`]), by the
+/// pak path of the original texture.
+fn dyed_diffuses(cry: &mut CryAssets, mtl: Option<&CryMaterial>, part: &PartAsset) -> HashMap<String, Handle<Image>> {
     use aa_cry::material::{TextureMap, texture_pak_path};
-    let channel = crate::dye::mask_channel(sub.public_param("DyeingChannelMask")?);
-    let mask = sub.texture(&TextureMap::Custom1)?;
-    let diffuse = sub.texture(&TextureMap::Diffuse)?;
-    let dye = part.dye.or_else(|| {
-        sub.public_param("DyeingColor").and_then(parse_rgb).map(|c| [c[0], c[1], c[2]].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
-    })?;
-    match crate::dye::bake_dyed_diffuse(&texture_pak_path(&diffuse.file), &texture_pak_path(&mask.file), channel, dye) {
-        Ok(img) => Some(cry.images.add(img)),
-        Err(e) => {
-            warn!("aa-anim: dyeing {}: {e}", diffuse.file);
-            None
+    let mut out = HashMap::new();
+    let Some(mtl) = mtl else { return out };
+    for sub in &mtl.sub_materials {
+        let Some(channel) = sub.public_param("DyeingChannelMask").map(crate::dye::mask_channel) else { continue };
+        let (Some(mask), Some(diffuse)) = (sub.texture(&TextureMap::Custom1), sub.texture(&TextureMap::Diffuse)) else { continue };
+        let Some(dye) = part.dye.or_else(|| {
+            sub.public_param("DyeingColor").and_then(parse_rgb).map(|c| [c[0], c[1], c[2]].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
+        }) else {
+            continue;
+        };
+        match crate::dye::bake_dyed_diffuse(&texture_pak_path(&diffuse.file), &texture_pak_path(&mask.file), channel, dye) {
+            Ok(img) => {
+                out.insert(diffuse.pak_path(), cry.images.add(img));
+            }
+            Err(e) => warn!("aa-anim: dyeing {}: {e}", diffuse.file),
         }
     }
+    out
 }
 
 fn parse_rgb(s: &str) -> Option<[f32; 3]> {
