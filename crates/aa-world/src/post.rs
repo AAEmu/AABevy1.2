@@ -12,12 +12,14 @@
 
 use bevy::asset::{embedded_asset, load_embedded_asset};
 use bevy::camera::{Camera3d, Camera3dDepthTextureUsage, Hdr};
+use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
 use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::core_pipeline::schedule::Core3d;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping, tonemapping};
 use bevy::core_pipeline::{Core3dSystems, FullscreenShader};
 use bevy::math::{Vec3, Vec4};
 use bevy::post_process::bloom::{Bloom, bloom};
+use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::diagnostic::RecordDiagnostics;
@@ -36,6 +38,9 @@ use bevy::render::view::{ExtractedView, Msaa, ViewDepthStencilTexture, ViewTarge
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
 
+/// Sample radius of the ambient occlusion in metres: deeper shade under bushes needs more than Bevy's 0.73.
+const SSAO_RADIUS: f32 = 1.2;
+
 /// Marks a camera for the world's post processing (see the module docs). Adding it sets up the camera.
 #[derive(Component, Clone, Debug)]
 pub struct Post {
@@ -45,11 +50,14 @@ pub struct Post {
     pub fog: bool,
     /// Exposure compensation in stops on top of the time of day's.
     pub exposure_ev: f32,
+    /// Screen space ambient occlusion (Bevy's GTAO: needs the normal prepass and switches MSAA off for SMAA). Off by default:
+    /// the normal prepass without MSAA turns the anisotropic hair material white (`AA_TUNE=ssao=1` also enables it).
+    pub ssao: bool,
 }
 
 impl Default for Post {
     fn default() -> Self {
-        Post { bloom: 0.1, fog: true, exposure_ev: 0.0 }
+        Post { bloom: 0.1, fog: true, exposure_ev: 0.0, ssao: false }
     }
 }
 
@@ -116,6 +124,7 @@ pub(crate) fn build(app: &mut App) {
 fn setup_post_cameras(
     mut commands: Commands,
     cfg: Res<crate::stream::WorldConfig>,
+    tuning: Res<crate::sky::AtmosphereTuning>,
     focus: Query<Entity, With<crate::stream::WorldFocus>>,
     mut cameras: Query<(Entity, &mut Camera3d, Option<&Post>, Option<&PostReady>)>,
 ) {
@@ -141,6 +150,18 @@ fn setup_post_cameras(
             DepthPrepass,
             Bloom { intensity: post.bloom, ..Bloom::NATURAL },
         ));
+        if post.ssao || tuning.ssao > 0.5 {
+            // SSAO cannot run on a multisampled depth buffer: SMAA takes over the edges
+            commands.entity(entity).insert((
+                Msaa::Off,
+                Smaa { preset: SmaaPreset::High },
+                ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Low,
+                    radius: SSAO_RADIUS,
+                    constant_object_thickness: 0.25,
+                },
+            ));
+        }
     }
 }
 

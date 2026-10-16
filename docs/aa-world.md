@@ -202,8 +202,8 @@ control flow): up to about 4 types x 1 to 2 axes x 3 fetches, usually 3. No per-
 cover texture's, one material per cell). `WorldConfig::terrain_detail = false` (`fly --no-terrain-detail`) shades the decoded cover colour only.
 `WorldConfig::terrain_tint` (linear 1.2, 1.2, 1.3, was 0.30 / 0.32 / 0.45 for the wrongly read cover) scales the result: the engine's exposure and
 film curve are not reproduced, this brings the ground to the real client's brightness (sunlit rock and hill grass of
-`reference/ingame/spawn/real.png`; the real picture's cooler grade, shadow depth and SSAO are not reproduced). Re-tune it when the lighting
-calibration (`sun_lux_scale`, `ambient_scale`) changes.
+`reference/ingame/spawn/real.png`; the real picture's cooler grade is not reproduced, SSAO is opt-in). Re-tune it when the lighting
+calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
@@ -228,14 +228,15 @@ are higher, which is the shore line.
 
 `WorldClock { hour, speed, zone, layer }` (default hour 10, layer 0) selects the sample of the zone under the camera (`zone_at`), smoothed over
 about 0.3 s. It drives: a sun / moon `DirectionalLight` (illuminance = `sun_lux_scale x luminance(sun color x multiplier)`, cascaded shadows,
-3 cascades over `shadow_distance`), `GlobalAmbientLight` (`ambient_scale x` the sky / ground colour luminance), the sky dome, the post pass
-(fog, film curve, grading) and the water materials. The sun rises at 7 h and sets at 18 h on the arc of `lighting.xml` (bearing from
+3 cascades over `shadow_distance`), the ambient light (see below), the sky dome, the cloud sprites, the post pass (fog, film curve, grading) and the
+water materials. The sun rises at 7 h and sets at 18 h on the arc of `lighting.xml` (bearing from
 `SunRotation`, elevation `min(SunHeight, 75)`), at night the light comes from the moon side.
 
 All HDR colours are `data value x AtmosphereTuning::radiance (540) x the view's exposure` (the material shaders output pre-exposed colours, the post
 pass does the film curve). `AtmosphereTuning` is the calibration against the capture; every field can be overridden for experiments with
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
-exposure water_body water_absorb water_refl water_sun ssr refraction water_rough sea_body`).
+exposure water_body water_absorb water_refl water_sun ssr refraction water_rough sea_body ssao cloud_gain ambient_env ambient_gain ambient_sat
+ambient_dome ambient_spec`).
 
 **The time of day of the capture is not recoverable**: `e_time_of_day` says 19.17 for the spawn and 6.17 for create step 3, 13 h apart, while both
 pictures show full daylight, and the data is night blue at 19.17. So `hour 10, layer 0` is a calibration choice: sun 57 degrees up, pale blue
@@ -249,12 +250,30 @@ exp2(-Attenuation x 8 r))`, alpha = `tex.a x Opacity x r ^ AlphaSaturation` with
 `box_5.dds` next to the material's diffuse map (`Materials/sky/sky_solzreed_cbt1.mtl`, `Shader=Sky`); layout found by matching the face edges:
 four side faces are the upper halves of cube faces (1024 x 512), clockwise north, east, south, west; `box_12` stacks north (top) and east
 (bottom, flipped vertically), `box_34` south and west, `box_5` is the top face with north at its bottom edge. `Angle` of `env.xml` rotates
-it. The stormy photo is only faintly visible (`box_gain`), as the real picture shows a pale overcast sky with a few bright patches; there are no
-separate cloud sprites (`clouds.xml` lists distant cloud billboards: not drawn).
+it. The stormy photo is only faintly visible (`box_gain`), as the real picture shows a pale overcast sky with a few bright patches.
+
+**Ambient light** (`update_ambient` in `sky.rs`): the data's flat ambient (a constant `GlobalAmbientLight`) left the shade too dark and too
+saturated, so the camera carries a hemispherical `EnvironmentMapLight` instead (`GlobalAmbientLight.brightness` is 0; `AA_TUNE=ambient_env=0`
+brings the old flat ambient back). The top is the zone's `Sky color`, the bottom `Ambient ground color`, the middle their mean; the hue of each is
+pulled towards the sky dome (`ambient_dome`, the mix of the horizon and zenith colours: this is the "sky brightening" of the engine) and
+desaturated (`ambient_sat`, 0.3 keeps 30 % of the saturation), the level is `ambient_scale x ambient_gain (0.9) x luminance`. The cube map has
+1 x 1 faces, so it costs nothing per pixel beyond the normal lighting; it is rebuilt only when the colours move by more than 1.5 % of the peak
+(a time of day change), the diffuse map is the lit one and the specular map is `ambient_spec` (0.2) times it: the full strength made the aa-cry hair
+and the water speckle. `sun_lux_scale` went from 1700 to 1000 with this change (the sun and the ambient share the brightness of the lit
+ground; the terrain tint is unchanged). Shade means of `spawn.png` against the capture: trees 28 / 45 / 24 against 28 / 40 / 30, grass in shadow
+28 / 43 / 11 against 29 / 41 / 18 (it was 19 / 35 / 17 and 19 / 33 / 6), sunlit trees 41 / 60 / 28 against 48 / 61 / 38, rock 84 / 83 / 77 against
+75 / 78 / 67.
+
+**Clouds** (`sky_clouds.rs`, `clouds.wesl`): `clouds.xml` of the zone lists the distant cloud billboards (`bearing`, `distance`, `height`,
+`size`, `speed`, `material`). Each becomes a camera facing quad (4 per zone in the spawn zone) placed at `camera + compass direction x distance +
+height` and shaded as the engine's `DistanceClouds` material (`distanceclouds.cfx`) does: density = the red channel of the sprite texture, the
+colour lerps from the sky shading colour to the sun shading colour by `exp2(-Attenuation x density)` summed over 8 taps towards the sun in the
+sprite plane, alpha = `density ^ AlphaSaturation x Opacity`, faded into the haze at the horizon. `AlphaMode::Blend`, no prepass, no shadows, so
+the cost is 4 draws. The clouds are subtle against the capture's sky (`cloud_gain` scales their brightness, `speed` is not animated yet).
 
 ### Post (`post.rs`, `post.wesl`)
 
-`Post { bloom, fog, exposure_ev }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
+`Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
 `WorldConfig::post`; aa-client's camera needs nothing) makes it an HDR camera (`Hdr`, `Tonemapping::None`, `DepthPrepass` with `TEXTURE_BINDING`
 usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. One fullscreen pass after the bloom replaces the tone mapping:
 
@@ -265,6 +284,12 @@ usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. O
 * **grade**: exposure, contrast around 0.18, colour balance, saturation (data `Saturation` x 0.85),
 * the engine's **film curve** (`postprocess.cfx`: `x (a 6.2 x + b 0.5) / (x (a 6.2 x + 1.7) + c 0.06)` with shoulder / midtones / toe scales from the
   data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input`.
+
+**SSAO** is opt-in: `Post.ssao = true` or `AA_TUNE=ssao=1` adds Bevy's `ScreenSpaceAmbientOcclusion` (low quality, radius 1.2 m, thickness 0.25), which
+needs `Msaa::Off` (SMAA High replaces it) and a normal prepass. It deepens the shade under bushes and trees the way the capture shows, for about
+8 to 10 % of the frame time. It is off by default because the normal prepass with `Msaa::Off` turns the hair of aa-cry's anisotropic hair material
+(`shade.rs`, `anisotropy_strength`) white, and it persists with `AlphaMode::Mask`; once aa-cry's hair material is fixed it can be switched on
+by default.
 
 `aa_world::post::{Post, PostUniform}` is the reusable setup; a second camera only needs the `Post` component. `--no-post` / `post: false`
 leaves the camera alone (Bevy tone mapping, no fog, the water falls back to a constant thickness and no reflections).
@@ -306,7 +331,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 
 * `AaWorldPlugin { config: WorldConfig }`; `WorldConfig` fields: `world`, `load_radius`, `unload_radius`, `max_loads`, `spawns_per_frame`,
   `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `tree_distance`, `water_distance`, `object_budget_ms`,
-  `environment`, `post`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1700), `ambient_scale`
+  `environment`, `post`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1000), `ambient_scale`
   (1700), `fog_visibility`, `terrain_tint`, `terrain_detail`.
 * Resources: `WorldClock` (time of day: `hour`, `speed` in game hours per second, `zone` to force one, `layer` of the zone files), `Environment` (the
   applied sample, `ocean_fog`), `AtmosphereTuning` (`AA_TUNE`), `WaterStyles` (materials by style), `TodCache`,
@@ -317,7 +342,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
 * Parsers (no Bevy world needed, all tested against the pak): `heightmap::CellHeights::parse`, `cover::Cover::parse` (+ `atlas`),
   `placement::{parse_brush_dat, parse_vegetation_dat, parse_vegetation_sector, parse_object_dat, parse_water, load_cell_objects}`,
-  `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay (parse, parse_layer), Lighting, sun_direction, EnvSample::lerp}`, `sky_material::{ZoneSky, load_sky_box}`, `post::{Post, PostUniform}`,
+  `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay (parse, parse_layer), Lighting, sun_direction, EnvSample::lerp}`, `sky_material::{ZoneSky, load_sky_box}`, `sky_clouds::{parse_clouds, CloudDef, CloudMaterial}`, `post::{Post, PostUniform}`,
   `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, water_meshes, WaterStyle, triangulate}`, `water_material::{WaterMaterial, WaterStyles}`,
   `terrain_layers::{LayerLibrary::build, parse_surface_types, TerrainMaterial}`.
 
@@ -424,6 +449,9 @@ rounds (about -12 %); noisy rounds with another session on the GPU gave 67 to 97
 per frame), so the GPU passes (HDR target, depth prepass, bloom, fog / film pass) cost almost nothing by themselves; the water's ray march is the
 visible part (`AA_TUNE=ssr=0`: about +10 %) and shrinks with the screen area of water (it is limited to 160 m and to two 16 step rays).
 
+With the hemisphere ambient, the cloud sprites and (optionally) SSAO added, same view and method (best of alternating runs, the machine was
+shared): 114 fps before the atmosphere work, 101 fps now (-11 %), 93 fps with `AA_TUNE=ssao=1` (-18 %).
+
 The numbers move by a factor of two with the load of the machine: while another session's real client rendered on the same GPU the same scene
 ran at 55 to 65 fps. Main thread cost of the streaming systems in slow frames (`WorldTimings`) is below 6 ms (`objects`); the rest of a slow
 frame is render world work (uploading 3 MB cover atlases, extraction of the part entities). A release build of this crate would cut the CPU
@@ -432,7 +460,7 @@ share further.
 ## 6. Known gaps
 
 * Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
-  cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO); the layers have no specular /
+  cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
   over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
@@ -443,12 +471,11 @@ share further.
   and greener in the middle, the real surface has bigger soft ripples near the camera. Caustics, waterfalls and the underwater view are not done.
   The sea has no foam / white caps or beach gradient; its colour is the zone's `Ocean FogColor` x `sea_body` and it is hazy at distance.
 * Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
-  the login stage's training dummies and grass, `CameraSource` positions), `clouds.xml` cloud billboards (the sky box has clouds, the
-  real picture has more, brighter ones), sun shafts, the photofilter / blueshift of the zone's time of day, SSAO (deeper shadows under bushes in
-  the real picture), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
-* Ambient light is too dark in shade (trees 19 / 35 / 17 against 28 / 40 / 30 in the capture, the grass in shadow 19 / 33 / 6 against 29 / 41 / 18) while
-  the lit surfaces match; raising `ambient_scale` over-saturates the foliage, the engine's ambient is less saturated and has sky brightening
-  from terrain occlusion.
+  the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
+  real picture has more, brighter clouds), sun shafts, the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
+* Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
+  the water shows some reflection speckle where the screen space march hits foliage.
 * The real client's time of day: `e_time_of_day` in the capture says 19.17 (the spawn) and 6.17 (create step 3) while both pictures show
   full daylight, yet zone 179's `Sun color` spline is night blue at 19.17 in both of its layers. The clock here is a free parameter (default
   hour 10, layer 0, see Environment); matching the capture exactly needs the engine's own time mapping.
