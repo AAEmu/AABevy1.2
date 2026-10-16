@@ -45,10 +45,31 @@ pub struct Quad {
 
 /// Collect the quads of the whole tree in paint order.
 pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
+    build_quads_split(u, pressed).0
+}
+
+/// The UI layer of the top-level window `id` belongs to.
+fn top_layer(tree: &Tree, mut id: Id) -> crate::tree::Layer {
+    while let Some(p) = tree.get(id).parent {
+        id = p;
+    }
+    tree.widget(id).map(|w| w.layer).unwrap_or_default()
+}
+
+/// [`build_quads`] plus the number of leading quads that belong to `background`-layer windows
+/// (paint order puts them first): those go to the background camera in split mode.
+pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) {
     let mut out = Vec::new();
     let order = u.tree.paint_order();
     let scale = u.ui_scale;
+    let mut background_end = None;
     for id in order {
+        if background_end.is_none()
+            && id != crate::tree::ROOT
+            && top_layer(&u.tree, id) > crate::tree::Layer::Background
+        {
+            background_end = Some(out.len());
+        }
         let alpha = effective_alpha(&u.tree, id);
         if alpha <= 0.0 {
             continue;
@@ -138,7 +159,8 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
             drawable_quads(u, d, alpha, state, scale, &mut out);
         }
     }
-    out
+    let n = background_end.unwrap_or(out.len());
+    (out, n)
 }
 
 fn state_index(s: ButtonState) -> usize {
@@ -624,6 +646,8 @@ pub struct UiRenderState {
     pub quads: usize,
     pub draw_calls: usize,
     pub force: bool,
+    /// Split mode: render layer of the background camera (`UiConfig::background_camera_order`).
+    pub background_layer: Option<usize>,
 }
 
 /// Marker for the UI camera.
@@ -659,6 +683,7 @@ pub fn sync_batches(
     commands: &mut Commands,
     state: &mut UiRenderState,
     quads: &[Quad],
+    background_quads: usize,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     images: &mut Assets<Image>,
@@ -666,19 +691,21 @@ pub fn sync_batches(
     existing: &Query<Entity, With<UiBatch>>,
 ) {
     let formats = formats.map(|f| f.0).unwrap_or(CompressedImageFormats::BC);
-    // Group consecutive quads by texture.
-    let mut batches: Vec<(Tex, Vec<&Quad>)> = Vec::new();
-    for q in quads {
+    // Group consecutive quads by texture (and, in split mode, by camera).
+    let split = state.background_layer.is_some();
+    let mut batches: Vec<(Tex, bool, Vec<&Quad>)> = Vec::new();
+    for (i, q) in quads.iter().enumerate() {
+        let bg = split && i < background_quads;
         match batches.last_mut() {
-            Some((t, v)) if *t == q.tex => v.push(q),
-            _ => batches.push((q.tex.clone(), vec![q])),
+            Some((t, b, v)) if *t == q.tex && *b == bg => v.push(q),
+            _ => batches.push((q.tex.clone(), bg, vec![q])),
         }
     }
     for e in existing.iter() {
         commands.entity(e).despawn();
     }
     state.batches.clear();
-    for (i, (tex, qs)) in batches.iter().enumerate() {
+    for (i, (tex, bg, qs)) in batches.iter().enumerate() {
         let image = match tex {
             Tex::Atlas => state.atlas.clone(),
             Tex::Image(p) => {
@@ -738,15 +765,17 @@ pub fn sync_batches(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
         .with_inserted_indices(Indices::U32(idx));
-        let e = commands
-            .spawn((
-                UiBatch,
-                Mesh2d(meshes.add(mesh)),
-                MeshMaterial2d(mat),
-                Transform::from_xyz(0.0, 0.0, i as f32 * 0.01),
-                bevy::camera::visibility::NoFrustumCulling,
-            ))
-            .id();
+        let mut e = commands.spawn((
+            UiBatch,
+            Mesh2d(meshes.add(mesh)),
+            MeshMaterial2d(mat),
+            Transform::from_xyz(0.0, 0.0, i as f32 * 0.01),
+            bevy::camera::visibility::NoFrustumCulling,
+        ));
+        if let (true, Some(layer)) = (*bg, state.background_layer) {
+            e.insert(bevy::camera::visibility::RenderLayers::layer(layer));
+        }
+        let e = e.id();
         state.batches.push(e);
     }
     state.quads = quads.len();

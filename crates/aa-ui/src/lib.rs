@@ -33,6 +33,7 @@ pub mod render;
 pub mod text;
 pub mod texture;
 pub mod tree;
+pub mod uitext;
 
 use bevy::camera::ScalingMode;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -201,9 +202,56 @@ impl UiRuntime {
         lua::ui(&self.lua).focus
     }
 
+    /// Load the game database's UI texts (cached per path and locale) and serve
+    /// `X2Locale:LocalizeUiText` from them. Returns the number of texts.
+    pub fn load_ui_texts(&self, db: &std::path::Path) -> anyhow::Result<usize> {
+        let locale = lua::ui(&self.lua).textures.locale.clone();
+        let texts = uitext::load(db, &locale)?;
+        let n = texts.len();
+        self.set_ui_texts(texts).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(n)
+    }
+
+    /// Serve `X2Locale:LocalizeUiText(category, key, ...)` from `texts` (`$1`.. are replaced by
+    /// the extra arguments, a missing text returns the key).
+    pub fn set_ui_texts(&self, texts: std::sync::Arc<uitext::UiTexts>) -> mlua::Result<()> {
+        let x2locale = lua::install_game_stub(&self.lua, "X2Locale")?;
+        let f = self.lua.create_function(move |lua, args: mlua::MultiValue| {
+            let mut it = args.into_iter().skip(1); // self
+            let cat = match it.next() {
+                Some(mlua::Value::Integer(i)) => i,
+                Some(mlua::Value::Number(n)) => n as i64,
+                _ => 0,
+            };
+            let key = match it.next() {
+                Some(mlua::Value::String(s)) => s.to_string_lossy(),
+                Some(v) => lua_tostring(lua, v),
+                None => String::new(),
+            };
+            let rest: Vec<String> = it.map(|v| lua_tostring(lua, v)).collect();
+            Ok(uitext::localize(&texts, cat, &key, &rest))
+        })?;
+        x2locale.raw_set("LocalizeUiText", f)
+    }
+
     /// Give the keyboard focus to a widget (`None` clears it), like `widget:SetFocus()`.
     pub fn set_focus(&self, id: Option<tree::Id>) {
         lua::edit::set_focus(&self.lua, id);
+    }
+}
+
+/// `tostring(v)` as Lua prints it (whole numbers without a fraction).
+fn lua_tostring(lua: &mlua::Lua, v: mlua::Value) -> String {
+    match v {
+        mlua::Value::String(s) => s.to_string_lossy(),
+        mlua::Value::Integer(i) => i.to_string(),
+        mlua::Value::Number(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", n as i64),
+        mlua::Value::Number(n) => n.to_string(),
+        other => lua
+            .globals()
+            .get::<mlua::Function>("tostring")
+            .and_then(|f| f.call::<String>(other))
+            .unwrap_or_default(),
     }
 }
 
@@ -223,6 +271,52 @@ impl UiSetup {
     }
 }
 
+/// Command: throw the current UI away and build a fresh one with `setup`, like the client
+/// does on every stage change (world select -> character select -> loading -> in game: each
+/// stage gets a new Lua state). The old Lua state, its widgets and handlers are dropped; the
+/// new runtime is created by the plugin at the next update, so `setup` runs exactly as an
+/// initial [`UiSetup`] would.
+///
+/// ```no_run
+/// # use bevy::prelude::*;
+/// fn enter_character_select(mut commands: Commands) {
+///     commands.queue(aa_ui::ReloadUi::new(|ui| {
+///         // register X2* objects ...
+///         ui.run_stage(aa_ui::Stage::CharacterSelect);
+///         ui.fire_event("SHOW_CHARACTER_SELECT_WINDOW", true);
+///     }));
+/// }
+/// ```
+pub struct ReloadUi(pub UiSetup);
+
+impl ReloadUi {
+    pub fn new(f: impl Fn(&mut UiRuntime) + Send + Sync + 'static) -> ReloadUi {
+        ReloadUi(UiSetup::new(f))
+    }
+}
+
+impl Command for ReloadUi {
+    type Out = ();
+    fn apply(self, world: &mut World) {
+        reload_ui(world, self.0);
+    }
+}
+
+/// [`ReloadUi`] for exclusive systems: drop the current [`UiRuntime`] and install `setup` for
+/// the next one.
+pub fn reload_ui(world: &mut World, setup: UiSetup) {
+    let had = world.remove_non_send::<UiRuntime>().is_some();
+    world.insert_resource(setup);
+    // The new tree's generation may equal the last one drawn: force a rebuild.
+    if let Some(mut st) = world.get_resource_mut::<UiRenderState>() {
+        st.generation = u64::MAX;
+    }
+    if let Some(mut stats) = world.get_resource_mut::<UiStats>() {
+        stats.keyboard_focus = false;
+    }
+    info!("aa-ui: reloading the UI (previous runtime {})", if had { "dropped" } else { "none" });
+}
+
 /// Toolkit settings.
 #[derive(Resource, Clone)]
 pub struct UiConfig {
@@ -235,6 +329,20 @@ pub struct UiConfig {
     /// (`CompositingSpace::Srgb`); semi-transparent UI looks too light with linear blending.
     /// Cameras stacked on one main texture must agree on the space (Bevy falls back to linear).
     pub gamma_blending: bool,
+    /// Split mode for login stages with a 3D scene: windows on the `background` UI layer (the
+    /// painted login backgrounds, `SetUILayer("background")`) are drawn by a second camera at
+    /// this order, below the app's 3D camera; everything else by the UI camera at
+    /// `camera_order`, above it. The background camera clears with `clear`, the UI camera then
+    /// loads (`ClearColorConfig::None`), so the 3D camera between them must not clear colour
+    /// either. `None` (default): one camera draws the whole UI.
+    pub background_camera_order: Option<isize>,
+    /// Render layer of the background camera and its batches in split mode (the UI camera and
+    /// its batches stay on layer 0, which 2D cameras of the app also see).
+    pub background_render_layer: usize,
+    /// Game database with `ui_texts` / `localized_texts` (e.g. `compact.sqlite3`): when set,
+    /// `X2Locale:LocalizeUiText(category, key, ...)` returns the localized text with `$1`..
+    /// substituted, loaded once per path and locale. Unset: the key.
+    pub ui_texts_db: Option<std::path::PathBuf>,
 }
 
 impl Default for UiConfig {
@@ -244,6 +352,9 @@ impl Default for UiConfig {
             camera_order: 10,
             clear: ClearColorConfig::Default,
             gamma_blending: true,
+            background_camera_order: None,
+            background_render_layer: 31,
+            ui_texts_db: None,
         }
     }
 }
@@ -287,20 +398,50 @@ impl Plugin for UiPlugin {
     }
 }
 
-fn spawn_camera(mut commands: Commands, cfg: Res<UiConfig>) {
-    let mut cam = commands.spawn((
+fn spawn_camera(mut commands: Commands, cfg: Res<UiConfig>, mut state: ResMut<UiRenderState>) {
+    // A stack that holds a Camera3d composites in linear space (Bevy's 3D path writes linear
+    // values), and cameras that disagree get separate main textures, so the later one would
+    // overwrite the 3D layer: in split mode the UI cameras blend in linear space too.
+    let space = if cfg.gamma_blending && cfg.background_camera_order.is_none() {
+        bevy::camera::CompositingSpace::Srgb
+    } else {
+        bevy::camera::CompositingSpace::Linear
+    };
+    // Split mode: the background camera clears, the UI camera draws over whatever is below.
+    let ui_clear = match cfg.background_camera_order {
+        Some(order) => {
+            commands.spawn((
+                Camera2d,
+                Camera {
+                    order,
+                    clear_color: cfg.clear,
+                    ..default()
+                },
+                bevy::camera::visibility::RenderLayers::layer(cfg.background_render_layer),
+                space,
+                UiCamera,
+                UiBackgroundCamera,
+            ));
+            state.background_layer = Some(cfg.background_render_layer);
+            ClearColorConfig::None
+        }
+        None => cfg.clear,
+    };
+    commands.spawn((
         Camera2d,
         Camera {
             order: cfg.camera_order,
-            clear_color: cfg.clear.clone(),
+            clear_color: ui_clear,
             ..default()
         },
+        space,
         UiCamera,
     ));
-    if cfg.gamma_blending {
-        cam.insert(bevy::camera::CompositingSpace::Srgb);
-    }
 }
+
+/// Marker of the background camera in split mode (`UiConfig::background_camera_order`).
+#[derive(Component)]
+pub struct UiBackgroundCamera;
 
 fn window_size(world: &mut World) -> Option<(f32, f32)> {
     let mut q = world.query_filtered::<&Window, With<PrimaryWindow>>();
@@ -328,6 +469,12 @@ fn init_runtime(world: &mut World) {
         }
     };
     let t0 = std::time::Instant::now();
+    if let Some(db) = world.resource::<UiConfig>().ui_texts_db.clone() {
+        match rt.load_ui_texts(&db) {
+            Ok(n) => info!("aa-ui: {n} UI texts from {}", db.display()),
+            Err(e) => warn!("aa-ui: UI texts from {}: {e:#}; LocalizeUiText returns keys", db.display()),
+        }
+    }
     if let Some(setup) = world.remove_resource::<UiSetup>() {
         (setup.0)(&mut rt);
         world.insert_resource(setup);
@@ -457,12 +604,19 @@ fn ui_frame(
         || u.fonts.atlas_dirty
         || state.screen != (pw as u32, ph as u32)
     {
-        let quads = render::build_quads(u, pressed);
+        let (quads, background_quads) = render::build_quads_split(u, pressed);
+        debug!(
+            "aa-ui: rebuild {} quads, {} background (split layer {:?})",
+            quads.len(),
+            background_quads,
+            state.background_layer
+        );
         render::sync_atlas(u, &mut state, &mut images);
         render::sync_batches(
             &mut commands,
             &mut state,
             &quads,
+            background_quads,
             &mut meshes,
             &mut materials,
             &mut images,

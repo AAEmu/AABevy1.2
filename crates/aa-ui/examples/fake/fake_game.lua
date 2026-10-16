@@ -14,16 +14,7 @@ local genderStr = { [GENDER_MALE] = "male", [GENDER_FEMALE] = "female" }
 
 X2Util.GetGameProvider = function(self) return TRION end
 X2Locale.GetLocale = function(self) return FAKE.locale end
-X2Locale.LocalizeUiText = function(self, category, key, ...)
-  local s = FAKE.ui_text(category, key)
-  if s == nil then return key end
-  local args = { ... }
-  if #args > 0 then
-    -- $1, $2 ... placeholders.
-    s = string.gsub(s, "%$(%d)", function(n) return tostring(args[tonumber(n)] or "") end)
-  end
-  return s
-end
+-- X2Locale:LocalizeUiText comes from aa-ui (UiConfig::ui_texts_db).
 X2Unit.GetRaceStr = function(self, race) return raceStr[race] end
 X2Unit.GetGenderStr = function(self, gender) return genderStr[gender] end
 X2Debug.GetDevMode = function(self) return false end
