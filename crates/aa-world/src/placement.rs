@@ -145,8 +145,8 @@ pub fn parse_water(b: &[u8]) -> Option<Water> {
             && p.x < bbox[3] + 12.0
             && p.y > bbox[1] - 12.0
             && p.y < bbox[4] + 12.0
-            && p.z > surface - 16.0
-            && p.z < surface + 16.0
+            && p.z > bbox[2] - 16.0
+            && p.z < bbox[5] + 16.0
     };
     let mut points: Vec<Vec3> = Vec::new();
     let mut at = 119;
