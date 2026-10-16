@@ -149,8 +149,10 @@ Placement files are parsed on the task pool (max 2 cells in flight) and binned p
 under a time budget (`object_budget_ms`, 3 ms per frame) through `aa_cry::CryAssets::load_model`; a sector fills in over a few frames. A
 part is one entity with the node transform baked, sharing the mesh and material handles of every instance of the model, so Bevy batches
 them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` (its own `maxViewDist`, capped by `brush_distance` 1000 m /
-`vegetation_distance` 220 m); a sector is despawned when the camera is farther than that cap. Level of detail: `_lodN` / `$lodN` by
-distance band (brush 140 / 380 m, vegetation 55 / 130 m with hysteresis); a sector is respawned when its band changes. Models that fail to load
+`vegetation_distance` 220 m / `tree_distance` 600 m); a sector is despawned when the camera is farther than that cap. Vegetation is split by its
+own view distance: instances up to 220 m are small plants (`Kind::Vegetation`), larger ones (trees, up to 1 km and more in the data) are
+`Kind::Trees` and are drawn up to 600 m. Level of detail: `_lodN` / `$lodN` by distance band (brush 140 / 380 m, vegetation 55 / 130 m, trees
+150 / 350 m, with hysteresis); a sector is respawned when its band changes. Models that fail to load
 are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environment"` cube maps as the base colour of 2D materials, which is
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
@@ -185,7 +187,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 ```
 
 * `AaWorldPlugin { config: WorldConfig }`; `WorldConfig` fields: `world`, `load_radius`, `unload_radius`, `max_loads`, `spawns_per_frame`,
-  `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `water_distance`, `object_budget_ms`,
+  `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `tree_distance`, `water_distance`, `object_budget_ms`,
   `environment`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1700), `ambient_scale`
   (1700), `fog_visibility`, `terrain_tint`.
 * Resources: `WorldClock` (time of day: `hour`, `speed` in game hours per second, `zone` to force one), `Environment` (the applied sample),
@@ -211,7 +213,7 @@ window is forced to 1 physical pixel per pixel):
 | `--camera-json reference/<screen>/camera.json [--shift 11264,11264,0]` | the real client's camera (in game: client local, hence the shift) |
 | `--cinema <name> [--t s] [--play]` | camera of `cinemas/<name>.xml` (default for login2: `01_world_select_e1`) |
 | `--hour h` `--speed h/s` `--zone id` | time of day |
-| `--sun-scale` `--ambient-scale` `--terrain-tint r,g,b` `--fog-visibility m` | lighting calibration |
+| `--sun-scale` `--ambient-scale` `--terrain-tint r,g,b` `--fog-visibility m` `--tree-distance m` | calibration |
 | `--radius m` `--no-objects` `--no-shadows` `--no-env` | |
 | `--bench s [--bench-speed m/s]` | fly forward and print frame statistics, scene sizes and slow frames, then exit |
 
@@ -229,6 +231,7 @@ cells.
 | everything, standing at the spawn | 120 to 145 | 50 to 83 | 16 to 26 ms |
 | everything, flying 60 m/s | 173 to 179 | 88 to 94 | 16 to 23 ms |
 | everything, flying 150 m/s (540 km/h) | 147 | 41 | 45 ms |
+| elf spawn (dense forest, 12.8k part entities, 475 sectors), standing | 120 | 82 | 18 ms |
 
 The numbers move by a factor of two with the load of the machine: while another session's real client rendered on the same GPU the same scene
 ran at 55 to 65 fps. Main thread cost of the streaming systems in slow frames (`WorldTimings`) is below 6 ms (`objects`); the rest of a slow
@@ -248,7 +251,7 @@ share further.
   full daylight; the clock here is a free parameter (default 13).
 * login2: cinema cameras and the real cameras are supported, but the race training fields of create step 3 are not part of the cell
   brush data (entities / cinemas); the scene shows terrain and the stage props of `object.dat`.
-* Far objects (beyond 1000 m brushes / 220 m vegetation) vanish; there is no HLOD or impostor.
+* Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
 
 ## 7. Requests to other crates
 
