@@ -213,13 +213,18 @@ pub struct PlayableModel {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CostumePiece {
-    /// `chest`, `legs`, `hands`, `feet`
-    pub slot: &'static str,
+    /// Slot column of `equip_pack_cloths`: `shirt`, `pants`, `glove`, `shoes`, `cosplay`, ...
+    pub slot: String,
+    /// `.chr` or `.cdf`, normalised.
     pub path: String,
+    /// Default dye colour of the item (sRGB), if it is dyeable.
+    pub dye: Option<[u8; 3]>,
 }
 
-/// Login-stage costume armor assets (`armor_assets`: 1111 chest, 1112 legs, 1113 hands, 1114 feet).
-pub const LOGIN_ARMOR_ASSETS: [(&str, u32); 4] = [("chest", 1111), ("legs", 1112), ("hands", 1113), ("feet", 1114)];
+/// Item slots of an `equip_pack_cloths` row, in draw order.
+pub const CLOTH_PACK_SLOTS: [&str; 12] = [
+    "underpants", "undershirt", "shirt", "pants", "glove", "shoes", "belt", "bracelet", "necklace", "headgear", "back", "cosplay",
+];
 
 pub struct GameDb {
     conn: Connection,
@@ -269,22 +274,46 @@ impl GameDb {
         Ok(out)
     }
 
-    /// The login-stage costume of a model: chest, legs, hands, feet meshes (`.chr` or `.cdf`).
+    /// The costume the login / character-create stage dresses a model in: the model's
+    /// `characters.preview_cloth_pack_id` -> `equip_pack_cloths` items -> their meshes for the model.
+    /// Nuian and Hariharan wear a one-piece `cosplay` skin (with cape), Elf and Ferre the
+    /// "login stage" shirt / pants / gloves / shoes.
     pub fn login_costume(&self, model_id: u32) -> Result<Vec<CostumePiece>> {
-        let mut st = self
+        let cols = CLOTH_PACK_SLOTS.map(|c| format!("p.{c}_id")).join(", ");
+        let sql = format!(
+            "SELECT {cols} FROM characters ch JOIN equip_pack_cloths p ON p.id = ch.preview_cloth_pack_id              WHERE ch.model_id = ?1 AND ch.creatable = 't' LIMIT 1"
+        );
+        let items: Vec<u32> = self
             .conn
-            .prepare(
-                "SELECT ia.path FROM item_armor_assets iaa JOIN item_assets ia ON ia.id = iaa.asset_id \
-                 WHERE iaa.armor_asset_id = ?1 AND ia.model_id = ?2 ORDER BY ia.id LIMIT 1",
-            )
-            .map_err(db_err)?;
+            .query_row(&sql, params![model_id], |r| {
+                (0..CLOTH_PACK_SLOTS.len()).map(|i| Ok(r.get::<_, Option<u32>>(i)?.unwrap_or(0))).collect()
+            })
+            .map_err(|e| Error::Db(format!("preview cloth pack of model {model_id}: {e}")))?;
         let mut out = Vec::new();
-        for (slot, armor) in LOGIN_ARMOR_ASSETS {
-            if let Ok(path) = st.query_row(params![armor, model_id], |r| r.get::<_, String>(0)) {
-                out.push(CostumePiece { slot, path: norm(&path) });
+        for (slot, item) in CLOTH_PACK_SLOTS.iter().zip(items) {
+            if item == 0 {
+                continue;
+            }
+            let dye = self.default_dye(item);
+            for path in self.item_meshes(item, model_id)? {
+                out.push(CostumePiece { slot: slot.to_string(), path, dye });
             }
         }
         Ok(out)
+    }
+
+    /// The colour a dyeable item is sold / worn with by default:
+    /// `dyeable_items.default_dyeing_item_id` -> `item_dyeings` -> `dyeing_colors.color_rgb` (sRGB bytes).
+    pub fn default_dye(&self, item_id: u32) -> Option<[u8; 3]> {
+        let color: u32 = self
+            .conn
+            .query_row(
+                "SELECT dc.color_rgb FROM dyeable_items di JOIN item_dyeings idy ON idy.item_id = di.default_dyeing_item_id                  JOIN dyeing_colors dc ON dc.id = idy.dyeing_color_id WHERE di.item_id = ?1 LIMIT 1",
+                params![item_id],
+                |r| r.get(0),
+            )
+            .ok()?;
+        Some(crate::dye::dye_rgb(color))
     }
 
     /// Meshes of an equipment item for a model (`item_armors` -> `item_armor_assets` -> `item_assets`).
@@ -562,7 +591,7 @@ mod tests {
         assert!(p[0].cdf.ends_with("nuian/male/nude/nu_m.cdf"), "{}", p[0].cdf);
         for m in &p {
             let c = db.login_costume(m.model_id).unwrap();
-            assert!(c.len() >= 3, "{}: {c:?}", m.model_name);
+            assert!(!c.is_empty(), "{}: {c:?}", m.model_name);
             let face = db.base_face(m.model_id).unwrap();
             assert!(face.path.ends_with("face00.cdf"), "{}", face.path);
             let presets = db.presets(m.model_id, 1).unwrap();

@@ -109,6 +109,8 @@ pub struct PartAsset {
     pub path: String,
     /// `.mtl` overriding the model's own.
     pub material: Option<String>,
+    /// Dye colour (sRGB) for dyeable costume materials.
+    pub dye: Option<[u8; 3]>,
 }
 
 /// A [`CharacterDesc`] resolved to files.
@@ -146,7 +148,7 @@ impl CharacterDesc {
         let mut parts = Vec::new();
 
         // body (+ fur / skin variant materials)
-        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None };
+        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None, dye: None };
         body.material = skin_variant(&body_path, &skin);
         parts.push(body);
 
@@ -181,20 +183,27 @@ impl CharacterDesc {
         }
 
         // costume
-        let costume_paths: Vec<(String, String)> = match &self.costume {
+        let costume_paths: Vec<(String, String, Option<[u8; 3]>)> = match &self.costume {
             Costume::None => Vec::new(),
-            Costume::Login => db.login_costume(model)?.into_iter().map(|p| (p.slot.to_string(), p.path)).collect(),
+            Costume::Login => db.login_costume(model)?.into_iter().map(|p| (p.slot, p.path, p.dye)).collect(),
             Costume::Items(items) => {
                 let mut v = Vec::new();
                 for &i in items {
-                    v.extend(db.item_meshes(i, model)?.into_iter().map(|p| ("item".to_string(), p)));
+                    let dye = db.default_dye(i);
+                    v.extend(db.item_meshes(i, model)?.into_iter().map(|p| ("item".to_string(), p, dye)));
                 }
                 v
             }
-            Costume::Meshes(m) => m.iter().map(|p| ("mesh".to_string(), norm(p))).collect(),
+            Costume::Meshes(m) => m.iter().map(|p| ("mesh".to_string(), norm(p), None)).collect(),
         };
-        for (slot, path) in costume_paths {
-            parts.push(resolve_part(PartKind::Costume, &slot, &path)?);
+        // a one-piece `cosplay` skin carries its own skin geometry; the nude body would poke through it
+        if costume_paths.iter().any(|(slot, _, _)| slot == "cosplay") {
+            parts.retain(|p| p.kind != PartKind::Body);
+        }
+        for (slot, path, dye) in costume_paths {
+            let mut part = resolve_part(PartKind::Costume, &slot, &path)?;
+            part.dye = dye;
+            parts.push(part);
         }
 
         Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, hair_color })
@@ -205,9 +214,9 @@ impl CharacterDesc {
 fn resolve_part(kind: PartKind, slot: &str, path: &str) -> Result<PartAsset> {
     if path.ends_with(".cdf") {
         let cdf = Cdf::load(path)?;
-        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material, dye: None })
     } else {
-        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None, dye: None })
     }
 }
 
@@ -379,7 +388,7 @@ fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, V
 }
 
 /// Per-shader tuning of one sub-material for the character (see the module docs of `aa-anim`).
-fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMaterial, assets: &CharacterAssets, _part: &PartAsset) -> Handle<StandardMaterial> {
+fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMaterial, assets: &CharacterAssets, part: &PartAsset) -> Handle<StandardMaterial> {
     let shader = sub.shader.to_ascii_lowercase();
     let Some(src) = cry.materials.get(base) else { return base.clone() };
     let mut m = src.clone();
@@ -410,11 +419,37 @@ fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMateri
             m.reflectance = 0.5;
         }
         "illum" => {
+            // costume cloth / armour: the diffuse texture carries the colour (the mtl `Diffuse` ~0.2 is a
+            // lighting scale that the engine compensates for); the specular term is rebuilt from the
+            // environment map, so a full-strength `Specular` would only paint everything grey
+            m.base_color = Color::WHITE;
             m.emissive = LinearRgba::BLACK;
+            m.reflectance = 0.35;
+            if let Some(image) = dyed_diffuse(cry, sub, part) {
+                m.base_color_texture = Some(image);
+            }
         }
         _ => return base.clone(),
     }
     cry.materials.add(m)
+}
+
+/// The dyed copy of a dyeable costume material's diffuse texture (see [`crate::dye`]).
+fn dyed_diffuse(cry: &mut CryAssets, sub: &CryMaterial, part: &PartAsset) -> Option<Handle<Image>> {
+    use aa_cry::material::{TextureMap, texture_pak_path};
+    let channel = crate::dye::mask_channel(sub.public_param("DyeingChannelMask")?);
+    let mask = sub.texture(&TextureMap::Custom1)?;
+    let diffuse = sub.texture(&TextureMap::Diffuse)?;
+    let dye = part.dye.or_else(|| {
+        sub.public_param("DyeingColor").and_then(parse_rgb).map(|c| [c[0], c[1], c[2]].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
+    })?;
+    match crate::dye::bake_dyed_diffuse(&texture_pak_path(&diffuse.file), &texture_pak_path(&mask.file), channel, dye) {
+        Ok(img) => Some(cry.images.add(img)),
+        Err(e) => {
+            warn!("aa-anim: dyeing {}: {e}", diffuse.file);
+            None
+        }
+    }
 }
 
 fn parse_rgb(s: &str) -> Option<[f32; 3]> {

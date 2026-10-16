@@ -6,6 +6,7 @@
 //!     [--costume none]   nude instead of the login outfit
 //!     [--no-hair 1]      leave the hair out
 //!     [--only N]         only character N (0..7: nuian m/f, elf m/f, hariharan m/f, ferre m/f), at the origin
+//!     [--env I | --no-env]   reflection cubemap intensity (default 1500)
 //!     [--cam x,y,z --look x,y,z --fov deg]   camera override (close-ups)
 //! ```
 
@@ -67,7 +68,8 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     let floor = cry.meshes.add(Cylinder::new(7.0, 0.04));
     let floor_mat = cry.materials.add(StandardMaterial {
         base_color: Color::srgb(0.045, 0.05, 0.06),
-        perceptual_roughness: 0.9,
+        perceptual_roughness: 1.0,
+        reflectance: 0.0,
         ..default()
     });
     commands.spawn((Mesh3d(floor), MeshMaterial3d(floor_mat), Transform::from_xyz(0.0, -0.02, 0.0)));
@@ -95,9 +97,16 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     let cam = vec3("--cam", Vec3::new(0.0, 1.15, 10.5));
     let look = vec3("--look", Vec3::new(0.0, 0.95, 0.0));
     let fov: f32 = arg("--fov").and_then(|v| v.parse().ok()).unwrap_or(28.0);
-    commands.spawn((
+    let mut camera = commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection { fov: fov.to_radians(), ..default() }),
         Transform::from_translation(cam).looking_at(look, Vec3::Y),
     ));
+    // the costume materials reference the game's own beach cubemap for reflections
+    if arg("--no-env").is_none() {
+        if let Some(env) = cry.texture("textures/cubemaps/beach_blur2.dds", true) {
+            let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0);
+            camera.insert(GeneratedEnvironmentMapLight { environment_map: env, intensity, ..default() });
+        }
+    }
 }
