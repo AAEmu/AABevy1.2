@@ -32,7 +32,8 @@
 //! `--account NAME`, `--login HOST:PORT`, `--password-file PATH` (see `ingame::enter::Credentials`);
 //! `--goto world-select|character-select|loading` drives the screens through the original UI
 //! scripts up to that screen (for `--shot`); `--hold-loading PCT` keeps the loading screen at that
-//! progress instead of entering the game.
+//! progress instead of entering the game; `--lua SCREEN:CODE` (repeatable) runs Lua in the UI of a
+//! screen (`world-select`, `character-select`, `loading`) once it has been up for a moment.
 
 pub mod character_select;
 #[cfg(not(feature = "no-create"))]
@@ -70,6 +71,8 @@ pub struct LoginArgs {
     pub goto: Option<Goto>,
     /// Keep the loading screen at this progress (percent) instead of entering the game.
     pub hold_loading: Option<f32>,
+    /// `--lua SCREEN:CODE`: Lua run in the UI of that screen once it has been up for a moment.
+    pub lua: Vec<(Screen, String)>,
 }
 
 impl LoginArgs {
@@ -88,6 +91,23 @@ impl LoginArgs {
             enter_world: args.iter().any(|a| a == "--enter-world"),
             goto,
             hold_loading: flag(&args, "--hold-loading").and_then(|v| v.parse().ok()),
+            lua: args
+                .windows(2)
+                .filter(|w| w[0] == "--lua")
+                .filter_map(|w| {
+                    let (screen, code) = w[1].split_once(':')?;
+                    let screen = match screen {
+                        "world-select" => Screen::WorldSelect,
+                        "character-select" => Screen::CharacterSelect,
+                        "loading" => Screen::Loading,
+                        other => {
+                            eprintln!("--lua: unknown screen {other:?}");
+                            return None;
+                        }
+                    };
+                    Some((screen, code.to_string()))
+                })
+                .collect(),
         }
     }
 }
@@ -129,9 +149,41 @@ impl Plugin for LoginPlugin {
             .insert_non_send(LoginBridge(gameapi::new_shared()))
             .add_message::<UiRequest>()
             .add_systems(Startup, (start_login, spawn_world_anchor))
-            .add_systems(Update, (sync_bridge, route_events, handle_requests, ensure_ui).chain())
+            .add_systems(Update, (sync_bridge, route_events, handle_requests, ensure_ui, run_lua).chain())
             .add_systems(OnEnter(Screen::InGame), release_world_anchor)
             .add_plugins((stage3d::Stage3dPlugin, world_select::plugin, character_select::plugin, create::plugin, loading::plugin));
+    }
+}
+
+/// `--lua SCREEN:CODE` (repeatable): run Lua in the UI of a screen, one step a second, after the
+/// screen has been up for two seconds (drives the original scripts for unattended checks).
+fn run_lua(
+    rt: Option<NonSend<UiRuntime>>,
+    built: Res<UiBuilt>,
+    args: Res<LoginArgs>,
+    time: Res<Time>,
+    mut state: Local<(usize, f32, Option<Screen>)>,
+) {
+    let (next, wait, seen) = &mut *state;
+    let (Some(rt), Some((screen, code))) = (rt, args.lua.get(*next)) else { return };
+    if built.0 != Some(*screen) {
+        *wait = 0.0;
+        *seen = None;
+        return;
+    }
+    if seen.is_none() {
+        *seen = Some(*screen);
+        *wait = 1.0;
+    }
+    *wait += time.delta_secs();
+    if *wait < 3.0 {
+        return;
+    }
+    *next += 1;
+    *wait = 2.0;
+    info!("login: --lua {code}");
+    if let Err(e) = rt.exec("lua", code) {
+        warn!("login: --lua: {e}");
     }
 }
 
@@ -213,7 +265,6 @@ fn route_events(
 fn handle_requests(
     bridge: NonSend<LoginBridge>,
     rt: Option<NonSend<UiRuntime>>,
-    screen: Res<State<Screen>>,
     mut net: MessageWriter<NetCommand>,
     mut next: ResMut<NextState<Screen>>,
     mut exit: MessageWriter<AppExit>,
@@ -267,10 +318,12 @@ fn handle_requests(
             Request::CancelDelete(index) => {
                 if let Some(c) = character(index) {
                     net.write(NetCommand(Command::CancelDeleteCharacter { id: c.id }));
+                    // aa-net has no event for the answer, the refreshed list is it: the screen tells
+                    // the scripts "delete_canceled" when it arrives
+                    forward.write(UiRequest(Request::CancelDelete(index)));
                 }
             }
             other => {
-                let _ = screen.get();
                 forward.write(UiRequest(other));
             }
         }

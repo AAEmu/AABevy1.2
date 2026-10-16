@@ -121,10 +121,16 @@ fn net_events(
     rt: NonSend<UiRuntime>,
     bridge: NonSend<LoginBridge>,
     mut events: MessageReader<NetEvent>,
+    mut requests: MessageReader<UiRequest>,
     worlds: Res<Worlds>,
     characters: Res<Characters>,
     mut pending: Local<Option<(&'static str, i64)>>,
 ) {
+    for UiRequest(request) in requests.read() {
+        if let Request::CancelDelete(index) = request {
+            *pending = Some(("delete_canceled", *index as i64));
+        }
+    }
     for NetEvent(event) in events.read() {
         match event {
             Event::CharacterList(_) => {
