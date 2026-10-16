@@ -67,7 +67,7 @@ impl Plugin for InGamePlugin {
                 (
                     camera::spawn_camera,
                     (camera::orbit_input, player::follow_server, player::control_player, camera::follow_player).chain(),
-                    (units::sync_views, units::move_units).chain(),
+                    (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
                     player::dev_hide_part,
                     appearance::layer_body_under_armour,

@@ -29,6 +29,13 @@ pub const UNIT_RADIUS: f32 = 140.0;
 pub const DOODAD_RADIUS: f32 = 160.0;
 /// Main thread time per frame for building models (ms); one model is always built.
 const SPAWN_BUDGET_MS: f32 = 10.0;
+/// While the last frame took longer than this (s), builds wait (up to `SPAWN_MAX_WAIT`) so the game
+/// stays playable while a town fills up.
+const SPAWN_SLOW_FRAME: f32 = 0.025;
+const SPAWN_MAX_WAIT: f32 = 0.2;
+/// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
+const DRAW_RADIUS: f32 = 110.0;
+const ANIMATE_RADIUS: f32 = 60.0;
 
 /// A spawned unit, smoothed towards the server's position.
 #[derive(Component)]
@@ -109,10 +116,18 @@ pub fn sync_views(
     clips: Res<ClipLibrary>,
     player: Query<&Mover, With<LocalPlayer>>,
     mut remote: Query<&mut RemoteUnit>,
+    time: Res<Time>,
+    mut last_spawn: Local<f32>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     let (Some(db), Ok(me)) = (db, player.single()) else { return };
     let me = me.pos;
     let started = Instant::now();
+    *last_spawn += time.delta_secs();
+    // build only when the frame rate can take it
+    let may_build = time.delta_secs() < SPAWN_SLOW_FRAME || *last_spawn > SPAWN_MAX_WAIT;
+    // units behind the camera can wait
+    let facing = camera.single().map(|c| flat_dir(c)).unwrap_or(Vec2::ZERO);
 
     // units that are gone
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
@@ -157,17 +172,26 @@ pub fn sync_views(
                     });
                 }
             }
-            None if !view.no_model && d <= UNIT_RADIUS => wanted.push((d, *id)),
+            None if !view.no_model && d <= UNIT_RADIUS => {
+                let ahead = Vec2::new(pos.x - me.x, pos.y - me.y).normalize_or_zero().dot(facing_game(facing));
+                wanted.push((d + if ahead < -0.2 { 50.0 } else { 0.0 }, *id));
+            }
             None => {}
         }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (_, id) in wanted {
-        if started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
+        if !may_build || started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
             break;
         }
+        *last_spawn = 0.0;
         let Some(unit) = units.by_id.get(&id) else { continue };
+        let t0 = Instant::now();
         let entity = spawn_unit(&mut commands, &mut cry, &clips, &db, unit);
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        if ms > 60.0 {
+            debug!("spawning unit {} ({:?}) took {ms:.0} ms", unit.obj_id, unit.kind);
+        }
         let view = views.units.entry(id).or_default();
         match entity {
             Some(e) => {
@@ -198,7 +222,7 @@ pub fn sync_views(
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (_, id) in wanted {
-        if started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
+        if !may_build || started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
             break;
         }
         let Some(doodad) = doodads.by_id.get(&id) else { continue };
@@ -245,7 +269,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
         UnitKind::Character { .. } => appearance::race_gender(unit.model_id, unit.race(), unit.gender()),
         _ => file.as_deref().and_then(humanoid_of_file),
     };
-    info!(
+    debug!(
         "unit {} {:?} {:?} model {} {:?} humanoid {:?} at ({:.1}, {:.1}, {:.1}) scale {:.2}",
         unit.obj_id,
         unit.name,
@@ -259,6 +283,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
         scale
     );
     let entity = if let Some((race, gender)) = humanoid {
+        let t = Instant::now();
         let game = db.game.lock().unwrap();
         let mut desc = appearance::describe(&game, race, gender, &unit.equipment, &unit.model_params)?;
         if matches!(desc.costume, Costume::Items(ref i) if i.is_empty()) && !unit.is_character() {
@@ -267,7 +292,10 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
         }
         let assets = desc.resolve(&game).map_err(|e| debug!("unit {} {}: {e}", unit.obj_id, unit.name)).ok()?;
         drop(game);
-        spawn_with_locomotion(commands, cry, clips, assets, transform)?
+        let t_resolve = t.elapsed().as_secs_f32() * 1000.0;
+        let e = spawn_with_locomotion(commands, cry, clips, assets, transform)?;
+        debug!("unit {} look {t_resolve:.0} ms, spawn {:.0} ms", unit.obj_id, t.elapsed().as_secs_f32() * 1000.0 - t_resolve);
+        e
     } else {
         creature::spawn(commands, cry, clips, file.as_deref()?, transform)?
     };
@@ -338,6 +366,64 @@ pub fn move_units(
         if let Some(mut m) = motion {
             let moving = unit.speed > 0.4;
             *m = Motion { speed: if moving { unit.speed } else { 0.0 }, local_dir: if moving { Vec2::Y } else { Vec2::ZERO }, airborne: false };
+        }
+    }
+}
+
+/// Horizontal facing of a camera as a Bevy-space (x, z) vector.
+fn flat_dir(camera: &GlobalTransform) -> Vec2 {
+    let f = camera.forward();
+    Vec2::new(f.x, f.z).normalize_or_zero()
+}
+
+/// A Bevy-space (x, z) direction as a game (x east, y north) one.
+fn facing_game(v: Vec2) -> Vec2 {
+    Vec2::new(v.x, -v.y)
+}
+
+/// A unit whose animation is switched off while nobody sees it (aa-anim's `animate` runs for every
+/// [`Animator`], so the component is parked here).
+#[derive(Component)]
+pub struct Asleep(Animator);
+
+/// Hides the units outside the view or far away and stops animating the ones nobody looks at.
+/// Skinned meshes are never frustum culled by Bevy (their bounds are unknown), so without this a
+/// town of 130 NPCs is drawn in full, behind the camera too.
+pub fn cull_units(
+    mut commands: Commands,
+    camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
+    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, Has<Animator>, Has<Asleep>), With<RemoteUnit>>,
+) {
+    let Ok((cam, projection)) = camera.single() else { return };
+    let (cam_pos, forward) = (cam.translation(), cam.forward().as_vec3());
+    let (vfov, aspect) = match projection {
+        Projection::Perspective(p) => (p.fov, p.aspect_ratio),
+        _ => (0.75, 16.0 / 9.0),
+    };
+    // half angle of the view cone's diagonal
+    let half_diag = ((vfov * 0.5).tan() * (1.0 + aspect * aspect).sqrt()).atan();
+    for (entity, transform, mut visibility, awake, asleep) in &mut units {
+        let to = transform.translation() + Vec3::Y - cam_pos;
+        let d = to.length();
+        let in_view = d < 3.0 || (to / d).dot(forward).acos() < half_diag + (2.0 / d.max(2.0)).atan() + 0.1;
+        let show = d < DRAW_RADIUS && in_view;
+        let want = if show { Visibility::Inherited } else { Visibility::Hidden };
+        if *visibility != want {
+            *visibility = want;
+        }
+        let animate = show && d < ANIMATE_RADIUS;
+        if animate && asleep {
+            commands.queue(move |world: &mut World| {
+                if let Some(Asleep(a)) = world.entity_mut(entity).take::<Asleep>() {
+                    world.entity_mut(entity).insert(a);
+                }
+            });
+        } else if !animate && awake {
+            commands.queue(move |world: &mut World| {
+                if let Some(a) = world.entity_mut(entity).take::<Animator>() {
+                    world.entity_mut(entity).insert(Asleep(a));
+                }
+            });
         }
     }
 }

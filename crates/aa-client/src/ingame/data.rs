@@ -24,16 +24,79 @@ struct Lookups {
     npc_scale: HashMap<u32, f32>,
 }
 
+/// Columns the in-game lookups filter or join on. The server's database has no indexes beyond the
+/// primary keys, so `item -> armour meshes` (three joined tables) takes about 30 ms a call; a
+/// private indexed copy makes it a lookup.
+const INDEXES: &[(&str, &str)] = &[
+    ("item_armors", "item_id"),
+    ("item_armors", "asset_id"),
+    ("item_armor_assets", "armor_asset_id"),
+    ("item_armor_assets", "asset_id"),
+    ("item_assets", "id"),
+    ("item_assets", "model_id"),
+    ("item_body_parts", "item_id"),
+    ("item_body_parts", "model_id, slot_type_id"),
+    ("hair_colors", "id"),
+    ("hair_colors", "model_id, asset_id"),
+    ("skin_colors", "id"),
+    ("skin_colors", "model_id"),
+    ("dyeable_items", "item_id"),
+    ("item_dyeings", "item_id"),
+    ("dyeing_colors", "id"),
+    ("total_character_customs", "id"),
+    ("total_character_customs", "model_id, owner_type_id"),
+    ("face_decal_assets", "id"),
+    ("face_normal_maps", "id"),
+    ("models", "id"),
+    ("actor_models", "id"),
+    ("npcs", "id"),
+    ("doodad_almighties", "id"),
+    ("characters", "model_id"),
+    ("equip_pack_cloths", "id"),
+];
+
+/// The database path to use: a copy of the server's database with the [`INDEXES`] added, kept under
+/// `data/extract/aa-client/` and rebuilt when the original changes. Falls back to the original.
+fn indexed_database(original: &str) -> String {
+    let build = || -> Option<String> {
+        let meta = std::fs::metadata(original).ok()?;
+        let stamp = format!("{} {:?}", meta.len(), meta.modified().ok()?);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/extract/aa-client");
+        std::fs::create_dir_all(&dir).ok()?;
+        let target = dir.join("compact-indexed.sqlite3");
+        let marker = dir.join("compact-indexed.stamp");
+        if target.exists() && std::fs::read_to_string(&marker).ok().as_deref() == Some(stamp.as_str()) {
+            return Some(target.to_string_lossy().into_owned());
+        }
+        info!("building the indexed game database copy {} (once)", target.display());
+        let tmp = dir.join(format!("compact-indexed.{}.tmp", std::process::id()));
+        std::fs::copy(original, &tmp).ok()?;
+        {
+            let conn = Connection::open(&tmp).ok()?;
+            for (i, (table, columns)) in INDEXES.iter().enumerate() {
+                // tables or columns the database lacks are skipped
+                let _ = conn.execute_batch(&format!("CREATE INDEX IF NOT EXISTS aa_client_idx_{i} ON {table}({columns})"));
+            }
+            let _ = conn.execute_batch("ANALYZE");
+        }
+        std::fs::rename(&tmp, &target).ok()?;
+        std::fs::write(&marker, stamp).ok()?;
+        Some(target.to_string_lossy().into_owned())
+    };
+    build().unwrap_or_else(|| original.to_string())
+}
+
 impl Db {
     pub fn open() -> Option<Db> {
-        let game = match GameDb::open() {
+        let original = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let path = indexed_database(&original);
+        let game = match GameDb::open_path(&path) {
             Ok(g) => g,
             Err(e) => {
                 error!("game database: {e}");
                 return None;
             }
         };
-        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let conn = match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI) {
             Ok(c) => c,
             Err(e) => {

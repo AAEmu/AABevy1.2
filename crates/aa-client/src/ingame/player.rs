@@ -144,6 +144,7 @@ pub fn spawn_with_locomotion(
 ) -> Option<Entity> {
     let skeleton = assets.skeleton.clone();
     let cal = assets.cal.clone();
+    let t = std::time::Instant::now();
     let root = match spawn_character(commands, cry, clips, assets, transform) {
         Ok(r) => r,
         Err(e) => {
@@ -151,12 +152,14 @@ pub fn spawn_with_locomotion(
             return None;
         }
     };
+    let t_character = t.elapsed().as_secs_f32() * 1000.0;
     // the animator's own rig is private to the entity; clip bindings only depend on the skeleton
     let set = Skeleton::load(&skeleton)
         .ok()
         .map(|s| std::sync::Arc::new(Rig::new(s)))
         .zip(Cal::load(&cal).ok())
         .and_then(|(rig, cal)| ClipSet::load(&rig, &cal, clips));
+    debug!("spawn_character {t_character:.0} ms, locomotion clips {:.0} ms", t.elapsed().as_secs_f32() * 1000.0 - t_character);
     let mut entity = commands.entity(root);
     entity.insert(Motion::default());
     if let Some(set) = set {
