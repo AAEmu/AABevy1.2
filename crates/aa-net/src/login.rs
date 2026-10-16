@@ -11,7 +11,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use sha2::{Digest, Sha256};
 
 use crate::opcodes::{ac, ca};
-use crate::wire::{Reader, Result, WireError, Writer};
+use crate::wire::{Reader, Result, Writer};
 
 /// Congestion levels of a world and of a race on a world (`RACE_CONGESTION`).
 pub mod congestion {
@@ -102,9 +102,32 @@ pub struct AccountInfo {
     pub slot_count: u8,
 }
 
-/// A credential that never shows up in logs.
+/// A credential that never shows up in logs: its `Debug` output is redacted.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The plain value.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Secret {
+    fn from(v: String) -> Self {
+        Self(v)
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(v: &str) -> Self {
+        Self(v.to_string())
+    }
+}
 
 impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -352,6 +375,7 @@ pub fn login_denied_text(reason: u8) -> &'static str {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::wire::WireError;
 
     /// A `[u16 len][payload]` frame in hex, as printed by the server's own packet tests, to the
     /// payload.

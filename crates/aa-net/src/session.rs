@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::game::{self, LeaveTarget, VisualOptions};
-use crate::login::{self, AccountInfo, WorldCookie, WorldList, WorldQueue};
+use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Movement, Unit, UnitKind,
     stance,
@@ -59,7 +59,7 @@ impl MoveCommand {
 pub enum Command {
     /// Connect to the login server at `addr` (`host:port`) and authenticate. On success the world
     /// list follows.
-    Login { addr: String, user: String, password: String },
+    Login { addr: String, user: String, password: Secret },
     /// `CAListWorld`.
     RefreshWorldList,
     /// Ask to enter `world_id`; answered by `WorldQueue`s and then `ReadyToConnect`.
@@ -378,6 +378,10 @@ impl Session {
                 self.set_phase(Phase::ReadyToConnect);
                 self.emit(Event::ConnectFailed { message });
             }
+            Phase::EnteringWorld => {
+                self.set_phase(Phase::CharacterSelect);
+                self.emit(Event::RequestTimedOut { what: what.to_string() });
+            }
             _ => self.emit(Event::RequestTimedOut { what: what.to_string() }),
         }
     }
@@ -517,7 +521,7 @@ impl Session {
         }
     }
 
-    async fn start_login(&mut self, addr: String, user: String, password: String) {
+    async fn start_login(&mut self, addr: String, user: String, password: Secret) {
         self.close_all().await;
         self.account = None;
         self.cookie = None;
@@ -536,7 +540,7 @@ impl Session {
                 return;
             }
         }
-        self.send_login(login::ClientMsg::auth(&user, &password)).await;
+        self.send_login(login::ClientMsg::auth(&user, password.expose())).await;
     }
 
     async fn connect_world(&mut self) {
@@ -719,7 +723,7 @@ impl Session {
             }
             M::CharacterDeleted { id, name } => self.emit(Event::CharacterDeleted { id, name }),
             M::CharacterState(state) => {
-                self.waiting = None;
+                self.wait_for("the player spawn");
                 self.selected_state = Some((*state).clone());
                 self.emit(Event::CharacterSelected(state));
                 self.send_game(game::ClientMsg::SpawnCharacter(VisualOptions::default())).await;
@@ -815,6 +819,7 @@ impl Session {
             return;
         }
         let Some(state) = self.selected_state.clone() else { return };
+        self.waiting = None;
         self.self_obj = unit.obj_id;
         self.set_phase(Phase::InWorld);
         self.emit(Event::PlayerSpawn(Box::new(PlayerSpawn {

@@ -27,6 +27,7 @@ pub mod wire;
 pub mod plugin;
 
 pub use game::LeaveTarget;
+pub use login::Secret;
 pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, Command, Event, MoveCommand, Phase, PlayerSpawn};
 pub use state::WorldState;
