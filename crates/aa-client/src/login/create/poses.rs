@@ -71,9 +71,11 @@ pub fn slot_steps_1_2(race: Race, gender: Gender) -> StageSlot {
 /// Step 3's feet pixel and head row, measured on the step 3 captures (provisional values for the
 /// models not measured yet), and the turn towards the training dummies.
 fn feet_pixels_3(race: Race, gender: Gender) -> (Vec2, f32, f32, f32) {
+    // the combat stance of step 3 is lower than the step 1 stand: the rendered height is smaller
     let (_, _, height) = feet_pixels(race, gender);
+    let height = height * 0.906;
     match (race, gender) {
-        (_, _) => (Vec2::new(440.0, 905.0), 365.0, height, -35.0),
+        (_, _) => (Vec2::new(440.0, 910.0), 362.0, height, 52.0),
     }
 }
 
@@ -84,13 +86,31 @@ pub fn slot_step_3(race: Race, gender: Gender) -> StageSlot {
     let (feet_px, head_v, height, yaw) = feet_pixels_3(race, gender);
     let feet = cam.solve_feet(feet_px, head_v, height);
     let mut slot = StageSlot::facing(feet, cam.pos, race, gender);
-    slot.yaw_deg = yaw;
+    slot.yaw_deg = std::env::var("AA_YAW3").ok().and_then(|v| v.parse().ok()).unwrap_or(yaw);
     slot
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "lists animations, needs the game data"]
+    fn list_animations() {
+        let cal = aa_anim::cal::Cal::load("objects/characters/nuian/male/nu_m_base.cal").or_else(|_| aa_anim::cal::Cal::load("objects/characters/nuian/male/nude/nu_m_base.cal")).unwrap();
+        let mut names: Vec<&String> = cal.animations.keys().filter(|n| n.contains("stage") || n.contains("idle") || n.contains("select") || n.contains("create")).collect();
+        names.sort();
+        for n in names { println!("anim {n} -> {}", cal.animations[n].path); }
+    }
+
+    #[test]
+    fn step3_slot_probe() {
+        let cam = pose(3, Race::Nuian, Gender::Male);
+        let slot = slot_step_3(Race::Nuian, Gender::Male);
+        println!("cam {:?}
+feet {:?} dist {:.2} face {:?} px {:?}", cam, slot.feet, (slot.feet - cam.pos).length(), slot.face, cam.project(slot.feet));
+        println!("head px {:?}", cam.project(slot.feet + Vec3::Z * 2.03));
+    }
 
     #[test]
     fn figures_stand_on_their_feet_pixel() {
