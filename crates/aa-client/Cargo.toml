@@ -9,3 +9,8 @@ description = "The ArcheAge 1.2 client remake: screen flow from world select to 
 bevy.workspace = true
 aa-dev.workspace = true
 aa-pak.workspace = true
+aa-cry.workspace = true
+aa-anim.workspace = true
+aa-world.workspace = true
+aa-net = { workspace = true, features = ["bevy"] }
+rusqlite.workspace = true
