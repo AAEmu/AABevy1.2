@@ -16,12 +16,13 @@ pub mod mesh;
 pub mod scene;
 pub mod shade;
 pub mod skeleton;
+pub mod stage;
 pub mod texture;
 
 pub use chunk::ChunkFile;
 pub use mesh::{MeshData, Model};
 pub use loader::{CryLoader, PreparedModel};
-pub use scene::{CryAssets, CryPlugin, MaterialHook, ModelOptions, VertexHook};
+pub use scene::{CryAssets, CryPlugin, MaterialHook, ModelOptions, Shading, VertexHook};
 pub use skeleton::{Bone, Skeleton};
 
 /// Rotation from CryEngine (Z up) to Bevy (Y up) space: `(x, y, z)` -> `(x, z, -y)`.

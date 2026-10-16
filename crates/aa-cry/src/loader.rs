@@ -38,7 +38,7 @@ use bevy::prelude::*;
 
 use crate::material::{Material as CryMaterial, texture_pak_path};
 use crate::mesh::Model;
-use crate::scene::{LoadedModel, MaterialHook, ModelOptions, Part, find_mtl, render_transform, subset_mesh_with};
+use crate::scene::{LoadedModel, MaterialHook, ModelOptions, Part, Shading, find_mtl, render_transform, subset_mesh_with};
 use crate::skeleton::Skeleton;
 use crate::texture::{Dds, DdsOptions, dds_to_image};
 use crate::Result;
@@ -82,7 +82,7 @@ struct MaterialEntry {
 }
 
 /// (path, material override, lod, keep CPU mesh)
-pub(crate) type ModelKey = (String, Option<String>, u32, bool);
+pub(crate) type ModelKey = (String, Option<String>, u32, bool, Shading);
 
 enum CacheKey {
     Plain(ModelKey),
@@ -115,7 +115,7 @@ struct Inner {
     textures: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
     cubes: Mutex<HashMap<String, Option<ImageEntry>>>,
     baked: Mutex<HashMap<String, Option<ImageEntry>>>,
-    materials_cache: Mutex<HashMap<(String, usize), Option<MaterialEntry>>>,
+    materials_cache: Mutex<HashMap<(String, usize, Shading), Option<MaterialEntry>>>,
     default_material: OnceLock<MaterialEntry>,
     raw_models: Mutex<HashMap<String, Arc<Model>>>,
     models: Mutex<HashMap<ModelKey, Arc<LoadedModel>>>,
@@ -284,6 +284,23 @@ impl CryLoader {
         }
     }
 
+    /// Mean alpha (0..1) of a texture, from its smallest mip; `None` when it cannot be read.
+    pub fn mean_alpha(&self, path: &str) -> Option<f32> {
+        let (_, _, rgba) = self.decode_rgba8(path, u32::MAX)?;
+        let n = rgba.len() / 4;
+        (n > 0).then(|| rgba.chunks_exact(4).map(|p| p[3] as f32).sum::<f32>() / (255.0 * n as f32))
+    }
+
+    /// Every mip of a flat texture as RGBA8 (CPU decode), for baking: `(width, height, mips)`.
+    pub fn decode_mips_rgba8(&self, path: &str) -> Option<(u32, u32, Vec<Vec<u8>>)> {
+        let (_, bytes) = self.read_dds(path)?;
+        let dds = Dds::parse(&bytes).ok()?;
+        if dds.faces > 1 || dds.depth > 1 {
+            return None;
+        }
+        Some((dds.width, dds.height, (0..dds.mips.max(1)).map(|m| dds.decode_rgba8(0, m)).collect()))
+    }
+
     /// Raw RGBA8 pixels of mip `mip` of a texture (CPU decode), for baking; `(w, h, rgba)`.
     pub fn decode_rgba8(&self, path: &str, mip: u32) -> Option<(u32, u32, Vec<u8>)> {
         let (_, bytes) = self.read_dds(path)?;
@@ -300,11 +317,12 @@ impl CryLoader {
 pub struct Prep<'a> {
     pub(crate) loader: &'a CryLoader,
     pub(crate) pending: Vec<Pending>,
+    pub(crate) shading: Shading,
 }
 
 impl<'a> Prep<'a> {
     pub(crate) fn new(loader: &'a CryLoader) -> Prep<'a> {
-        Prep { loader, pending: Vec::new() }
+        Prep { loader, pending: Vec::new(), shading: Shading::Basic }
     }
 
     pub(crate) fn into_pending(self) -> Vec<Pending> {
@@ -407,7 +425,7 @@ impl<'a> Prep<'a> {
     /// The Bevy material for sub-material `sub` of a `.mtl` (cached). `None` when the
     /// sub-material is not drawn (NoDraw, Cut, proxies).
     pub fn material(&mut self, mtl_path: Option<&str>, sub: usize) -> Option<Handle<StandardMaterial>> {
-        let key = (mtl_path.map(aa_pak::normalize).unwrap_or_default(), sub);
+        let key = (mtl_path.map(aa_pak::normalize).unwrap_or_default(), sub, self.shading);
         if let Some(entry) = lock(&self.loader.shared.materials_cache).get(&key).cloned() {
             return entry.map(|e| self.use_material(&e));
         }
@@ -472,8 +490,9 @@ impl CryLoader {
     pub fn prepare_model(&self, path: &str, options: &ModelOptions) -> Result<PreparedModel> {
         let path = aa_pak::normalize(path);
         let hooked = options.material_hook.is_some() || options.vertex_hook.is_some();
-        let key: ModelKey = (path.clone(), options.material.as_deref().map(aa_pak::normalize), options.lod, options.keep_cpu_mesh);
+        let key: ModelKey = (path.clone(), options.material.as_deref().map(aa_pak::normalize), options.lod, options.keep_cpu_mesh, options.shading);
         let mut prep = Prep::new(self);
+        prep.shading = options.shading;
         let mut register = Vec::new();
 
         let cached = if hooked { None } else { lock(&self.shared.models).get(&key).cloned() };
