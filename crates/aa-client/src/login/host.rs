@@ -21,20 +21,20 @@ use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use super::stage3d::STAGE_CAMERA_ORDER;
+use super::stage3d::BACKGROUND_CAMERA_ORDER;
 
 /// Where the game database with the UI texts is.
 const DB: &str = aa_anim::db::DEFAULT_DB;
 
 /// The toolkit settings of the login screens: the painted `background` layer is drawn by its own
-/// camera below the 3D stage camera ([`STAGE_CAMERA_ORDER`]), everything else above it.
+/// camera below the 3D stage camera ([`super::stage3d::STAGE_CAMERA_ORDER`]), everything else above it.
 pub fn ui_config() -> UiConfig {
     UiConfig {
         locale: "en_us".into(),
         camera_order: 10,
         clear: ClearColorConfig::Custom(Color::BLACK),
         gamma_blending: true,
-        background_camera_order: Some(STAGE_CAMERA_ORDER - 5),
+        background_camera_order: Some(BACKGROUND_CAMERA_ORDER),
         background_render_layer: 31,
         ui_texts_db: Some(std::env::var("AA_DB").unwrap_or_else(|_| DB.to_string()).into()),
     }
