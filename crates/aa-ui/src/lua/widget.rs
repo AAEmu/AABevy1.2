@@ -111,7 +111,7 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     }
 }
 
-fn create_child(
+pub(crate) fn create_child(
     lua: &Lua,
     parent: Option<Id>,
     ty: &str,
@@ -1078,6 +1078,26 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     if ty == "folder" {
         super::folder::methods(lua, &m)?;
+    }
+    if ty == "tab" {
+        super::tab::methods(lua, &m)?;
+    }
+    if ty == "paintcolorpicker" {
+        // Colour picker: a spectrum and a luminance child the scripts decorate.
+        for (getter, field) in [("GetSpectrumWidget", "__spectrum"), ("GetLuminanceWidget", "__luminance")] {
+            def(getter, method(lua, move |lua, id, _| {
+                let this = super::object_table(lua, id)?.unwrap();
+                if let Some(t) = this.raw_get::<Option<Table>>(field)? {
+                    return ret(lua, t);
+                }
+                let child = create_child(lua, Some(id), "emptywidget", field, 0, false)?;
+                if let Some(cid) = value_id(lua, &Value::Table(child.clone())) {
+                    ui(lua).tree.get_mut(cid).shown = true;
+                }
+                this.raw_set(field, &child)?;
+                ret(lua, child)
+            })?)?;
+        }
     }
 
     // --- slider ------------------------------------------------------------------------------

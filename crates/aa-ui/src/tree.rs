@@ -414,6 +414,7 @@ pub struct Widget {
     pub list: Option<ListCtrlData>,
     pub slider: Option<SliderData>,
     pub folder: Option<crate::lua::folder::FolderData>,
+    pub tab: Option<crate::lua::tab::TabData>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -900,6 +901,7 @@ impl Widget {
             list,
             slider,
             folder: None,
+            tab: None,
             modal: false,
             raise: 0,
         }

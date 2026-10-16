@@ -131,3 +131,37 @@ X2LoginCharacter.SelectCharacter = function(self, i, skip)
   return true
 end
 X2LoginCharacter.CreateCharacter = function(self) UIParent:LogAlways("fake: CreateCharacter") end
+
+-- Character create -------------------------------------------------------------------------
+X2Ability.GetRaceBuffCount = function(self, race, gender) return 0 end
+X2Util.GetNamePolicyInfo = function(self, kind)
+  return { local_min = 2, local_max = 16, eng_min = 2, eng_max = 16 }
+end
+X2LoginCharacter.GetEditUnitRace = function(self) return FAKE.edit_race or "nuian" end
+X2LoginCharacter.GetEditUnitGender = function(self) return FAKE.edit_gender or "male" end
+X2LoginCharacter.ShowPreviewRaceGender = function(self, race, gender)
+  FAKE.edit_race, FAKE.edit_gender = race, gender
+end
+-- Step changes: the client hides one step's window and shows the next.
+X2LoginCharacter.EndCharacterCreate = function(self, gotoNext)
+  if gotoNext then
+    FAKE.fire_now("SHOW_CHARACTER_CREATE_WINDOW", false)
+    FAKE.fire_now("SHOW_CHARACTER_CUSTOMIZE_WINDOW", true)
+  else
+    UIParent:LogAlways("fake: back to character select")
+  end
+end
+X2LoginCharacter.EndCharacterCustomize = function(self, gotoNext)
+  FAKE.fire_now("SHOW_CHARACTER_CUSTOMIZE_WINDOW", false)
+  if gotoNext then
+    FAKE.fire_now("SHOW_CHARACTER_ABILITY_WINDOW", true)
+  else
+    FAKE.fire_now("SHOW_CHARACTER_CREATE_WINDOW", true)
+  end
+end
+X2LoginCharacter.EndCharacterAbility = function(self, gotoNext)
+  if not gotoNext then
+    FAKE.fire_now("SHOW_CHARACTER_ABILITY_WINDOW", false)
+    FAKE.fire_now("SHOW_CHARACTER_CUSTOMIZE_WINDOW", true)
+  end
+end

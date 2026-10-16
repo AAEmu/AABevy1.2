@@ -300,6 +300,14 @@ pub fn install_with(
         })
         .unwrap();
     fake.raw_set("fire_later", fire).unwrap();
+    // FAKE.fire_now(name, ...): a UI event right away (native state changes the scripts wait for).
+    let fire_now = lua
+        .create_function(|lua, (name, rest): (String, mlua::MultiValue)| {
+            aa_ui::lua::fire_ui_event(lua, &name, rest.into_iter().collect());
+            Ok(())
+        })
+        .unwrap();
+    fake.raw_set("fire_now", fire_now).unwrap();
     g.raw_set("FAKE", fake).unwrap();
     if let Err(e) = rt.exec("@fake_game.lua", include_str!("fake_game.lua")) {
         eprintln!("fake: fake_game.lua: {e}");
