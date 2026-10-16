@@ -219,6 +219,17 @@ window is forced to 1 physical pixel per pixel):
 
 WASD / Space / Ctrl fly (Shift fast), right mouse button looks.
 
+### Tests
+
+`cargo test -p aa-world`: 23 unit tests (coordinates, heightmap / cover / brush / vegetation / object / water parsers against the real pak
+incl. the spawn pond, BC1 round trip, env splines, sun path, cinema cameras, triangulation; they skip when the pak is missing).
+`cargo test -p aa-world --test all_cells -- --ignored --nocapture` parses every cell of both worlds (1205 + 3 cells, 162k brushes,
+1.75 M vegetation instances, 3181 water volumes, about 5 s) and builds every cover atlas and water mesh.
+
+Screenshots: `shots/aa-world/{nuian,elf,hariharan,ferre}_start.png` (`fly --spawn <race>`), `ingame_h12d.png` (the real in-game camera of
+`reference/ingame/spawn`, compare with its `real.png`), `coast.png` (ocean at level 100), `login2_*.png` (cinema camera, real character
+select / create cameras).
+
 ## 5. Performance
 
 Windows 11, Ryzen 5 5600X, Radeon RX 9070 XT, 1920 x 1080, workspace `dev` profile (`opt-level = 1` for this crate, 3 for dependencies),
@@ -248,7 +259,8 @@ share further.
   the login stage's training dummies and grass, `CameraSource` positions), clouds, sun shafts, the post processing of the zone's time of
   day (photofilter, film curve), SSAO, procedural grass blades, sprites for far vegetation (HLOD).
 * The real client's time of day: `e_time_of_day` in the capture says 19.17 (the spawn) and 6.17 (create step 3) while both pictures show
-  full daylight; the clock here is a free parameter (default 13).
+  full daylight, yet zone 179's `Sun color` spline is night blue at 19.17 in both of its layers (`relic_layer` 0 and 1, only the first is
+  used here). The clock here is a free parameter (default 13); matching the capture needs the engine's own time mapping.
 * login2: cinema cameras and the real cameras are supported, but the race training fields of create step 3 are not part of the cell
   brush data (entities / cinemas); the scene shows terrain and the stage props of `object.dat`.
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
