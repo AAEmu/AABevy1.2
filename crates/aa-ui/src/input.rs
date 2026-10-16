@@ -1,6 +1,7 @@
 //! Mouse input: hit testing by layer and paint order, then `OnEnter` / `OnLeave` / `OnClick` /
 //! `OnMouseDown` / `OnMouseUp` / `OnWheelUp` / `OnWheelDown` into Lua, plus the native
-//! behaviour of buttons (state art) and list controls (hover / selection).
+//! behaviour of buttons (state art), check buttons (toggle + `OnCheckChanged`), edit boxes
+//! (keyboard focus, see [`crate::lua::edit`]) and list controls (hover / selection).
 
 use mlua::{Lua, Value};
 
@@ -131,6 +132,11 @@ pub fn update(
     if down {
         mouse.pressed = hover;
         ui(lua).tree.touch();
+        // A press on an edit box focuses it; anywhere else drops the keyboard focus.
+        match hover {
+            Some(h) => lua::edit::clicked(lua, h),
+            None => lua::edit::set_focus(lua, None),
+        }
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
         }
@@ -175,6 +181,29 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         .last_click
         .is_some_and(|(id, t)| id == target && now - t < 350.0);
     mouse.last_click = Some((target, now));
+    // Check buttons toggle before their OnClick runs (scripts read the new state there).
+    if button == "LeftButton" {
+        let check = {
+            let u = ui(lua);
+            let mut t = Some(target);
+            let mut found = None;
+            while let Some(id) = t {
+                if let Some(w) = u.tree.widget(id).filter(|w| w.button.is_some()) {
+                    if w.ty == WidgetType::CheckButton && w.enabled {
+                        let checked = w.button.as_ref().is_some_and(|b| b.checked);
+                        found = Some((id, checked));
+                    }
+                    break;
+                }
+                t = u.tree.get(id).parent;
+            }
+            found
+        };
+        if let Some((id, checked)) = check {
+            lua::widget::set_checked(lua, id, !checked, true);
+            lua::flush(lua);
+        }
+    }
     // Script OnClick on the target or the nearest ancestor that has one (enabled only).
     let mut t = Some(target);
     while let Some(id) = t {

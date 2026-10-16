@@ -82,14 +82,25 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         }
         // Widget text above background/artwork, below overlay.
         if let Some(t) = w.text.as_ref() {
-            if !t.text.is_empty() {
-                let rect = u.tree.rect(id);
+            let edit = crate::lua::edit::is_edit(&w.ty);
+            let shown = if edit {
+                let mut d = t.clone();
+                d.text = crate::lua::edit::display_text(&t.text, w.edit.as_ref());
+                std::borrow::Cow::Owned(d)
+            } else {
+                std::borrow::Cow::Borrowed(t)
+            };
+            let rect = u.tree.rect(id);
+            if !shown.text.is_empty() {
                 let color = w
                     .button
                     .as_ref()
                     .and_then(|b| b.text_color[state_index(state)].or(b.text_color[0]))
                     .unwrap_or(t.style.color);
-                text_quads(u, t, rect, color, alpha, scale, &mut out);
+                text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+            }
+            if edit && u.focus == Some(id) && u.caret_visible {
+                caret_quad(u, &shown, w.edit.as_ref(), rect, alpha, scale, &mut out);
             }
         }
         if let Some(t) = w.title.as_ref() {
@@ -160,6 +171,21 @@ pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
     let Some(dr) = u.tree.get(d).drawable() else {
         return true;
     };
+    // Check marks: `SetCheckedBackground` while checked, `SetDisabledCheckedBackground`
+    // instead while checked and disabled.
+    if let Some(owner) = u.tree.get(d).parent {
+        if let Some(w) = u.tree.widget(owner) {
+            if let Some(b) = w.button.as_ref() {
+                let disabled = state == ButtonState::Disabled;
+                if b.checked_bg == Some(d) {
+                    return b.checked && !(disabled && b.disabled_checked_bg.is_some());
+                }
+                if b.disabled_checked_bg == Some(d) {
+                    return b.checked && disabled;
+                }
+            }
+        }
+    }
     if let Some((owner, _)) = dr.state_of {
         let Some(b) = u.tree.widget(owner).and_then(|w| w.button.as_ref()) else {
             return true;
@@ -399,6 +425,55 @@ fn text_quads(
             }
         }
     }
+}
+
+/// The caret of the focused edit box: a 1 px bar after the character at the cursor, as tall as
+/// a text line (or `SetCursorHeight`), in the text colour (or `SetCursorColor`).
+fn caret_quad(
+    u: &mut Ui,
+    t: &TextBlock,
+    edit: Option<&crate::lua::edit::EditData>,
+    rect: Rect,
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    let inner = Rect {
+        x: rect.x + t.inset[0],
+        y: rect.y + t.inset[1],
+        w: (rect.w - t.inset[0] - t.inset[2]).max(0.0),
+        h: (rect.h - t.inset[1] - t.inset[3]).max(0.0),
+    };
+    let size = t.style.size * scale;
+    let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w * scale);
+    let ls = t.line_space * scale;
+    let full = u.fonts.layout(&t.style.font, size, &t.text, maxw, ls, false);
+    let cursor = edit.map_or(usize::MAX, |e| e.cursor);
+    let head: String = t.text.chars().take(cursor).collect();
+    let lo = u.fonts.layout(&t.style.font, size, &head, maxw, ls, false);
+    let (_, lh) = u.fonts.metrics(&t.style.font, size);
+    let mut line = lo.line_widths.len().max(1) - 1;
+    let mut line_w = lo.line_widths.last().copied().unwrap_or(0.0);
+    if head.ends_with('\n') {
+        // Layout drops a trailing line break; the caret sits at the start of the next line.
+        line += 1;
+        line_w = 0.0;
+    }
+    let (fx, fy) = (t.style.align.fx(), t.style.align.fy());
+    let total_h = full.height.max(lh);
+    let ox = inner.x * scale + (inner.w * scale - full.width) * fx;
+    let oy = inner.y * scale + (inner.h * scale - total_h) * fy;
+    let full_line_w = full.line_widths.get(line).copied().unwrap_or(full.width);
+    let x = (ox + (full.width - full_line_w) * fx + line_w).round();
+    let h = edit.and_then(|e| e.cursor_height).map_or(lh, |h| h * scale);
+    let y = (oy + line as f32 * (lh + ls) + (lh - h) / 2.0).round();
+    let c = edit.and_then(|e| e.cursor_color).unwrap_or(t.style.color);
+    out.push(Quad {
+        tex: Tex::Atlas,
+        pos: [x, y, x + scale.max(1.0), y + h],
+        uv: white_uv(),
+        color: [c[0], c[1], c[2], c[3] * alpha],
+    });
 }
 
 /// Render-side state: textures, materials and the batch entities.

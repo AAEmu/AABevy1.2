@@ -8,7 +8,8 @@
 //!   handlers (`SetHandler`) and UI events (`RegisterEvent`, [`UiRuntime::fire_event`]);
 //! * [`text`] / [`texture`]: fonts (fonts.g fallback chains, hinted glyphs) and pak textures;
 //! * [`render`]: batched textured quads (one mesh per texture run) rebuilt only on change;
-//! * [`input`]: mouse hit testing and dispatch.
+//! * [`input`]: mouse hit testing and dispatch; keyboard focus and typing for edit boxes
+//!   ([`lua::edit`], [`UiRuntime::key`]).
 //!
 //! Game API objects (`X2World`, `X2LoginCharacter`, ...) are not part of the toolkit: register
 //! them from a [`UiSetup`] hook (see the `world_select` example for a fake set).
@@ -34,11 +35,13 @@ pub mod texture;
 pub mod tree;
 
 use bevy::camera::ScalingMode;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 pub use aa_lua::Stage;
+pub use lua::edit::UiKey;
 
 use crate::render::{UiBatch, UiCamera, UiRenderState};
 
@@ -70,6 +73,8 @@ impl UiRuntime {
             stub_calls: Default::default(),
             hover: None,
             focus: None,
+            caret_visible: false,
+            caret_t0: 0.0,
             cursor: (0.0, 0.0),
             queued_events: Vec::new(),
         };
@@ -178,6 +183,28 @@ impl UiRuntime {
     pub fn ui_scale(&self) -> f32 {
         lua::ui(&self.lua).ui_scale
     }
+
+    /// Deliver a key press to the widget with the keyboard focus: edit boxes insert text and
+    /// fire `OnTextChanged`, Enter / Escape / Tab fire `OnEnterPressed` / `OnEscapePressed` /
+    /// `OnTabPressed`. Returns false when no widget has the focus (the key is the game's).
+    pub fn key(&self, k: &UiKey) -> bool {
+        lua::edit::key(&self.lua, k)
+    }
+
+    /// Type text into the focused edit box (see [`Self::key`]).
+    pub fn type_text(&self, s: &str) -> bool {
+        self.key(&UiKey::Text(s.to_string()))
+    }
+
+    /// The widget with the keyboard focus.
+    pub fn focus(&self) -> Option<tree::Id> {
+        lua::ui(&self.lua).focus
+    }
+
+    /// Give the keyboard focus to a widget (`None` clears it), like `widget:SetFocus()`.
+    pub fn set_focus(&self, id: Option<tree::Id>) {
+        lua::edit::set_focus(&self.lua, id);
+    }
 }
 
 /// The client's default UI scale for a resolution (`GetDefaultUIScaleByResolution`).
@@ -227,6 +254,9 @@ pub struct UiStats {
     pub quads: usize,
     pub draw_calls: usize,
     pub rebuilds: u64,
+    /// A widget (edit box) has the keyboard focus: the app should not treat keys as game
+    /// bindings this frame.
+    pub keyboard_focus: bool,
 }
 
 /// Scripted pointer for tests and automation: while `pos` is set it replaces the OS cursor
@@ -251,7 +281,7 @@ impl Plugin for UiPlugin {
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_frame).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard, ui_frame).chain());
     }
 }
 
@@ -308,6 +338,39 @@ fn init_runtime(world: &mut World) {
         rt.ui_scale()
     );
     world.insert_non_send(rt);
+}
+
+/// Key presses -> the focused widget ([`UiRuntime::key`]).
+fn ui_keyboard(rt: Option<NonSend<UiRuntime>>, mut keys: MessageReader<KeyboardInput>) {
+    let Some(rt) = rt else {
+        keys.clear();
+        return;
+    };
+    for ev in keys.read() {
+        if ev.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        let k = match &ev.logical_key {
+            Key::Backspace => UiKey::Backspace,
+            Key::Delete => UiKey::Delete,
+            Key::ArrowLeft => UiKey::Left,
+            Key::ArrowRight => UiKey::Right,
+            Key::ArrowUp => UiKey::Up,
+            Key::ArrowDown => UiKey::Down,
+            Key::Home => UiKey::Home,
+            Key::End => UiKey::End,
+            Key::Enter => UiKey::Enter,
+            Key::Escape => UiKey::Escape,
+            Key::Tab => UiKey::Tab,
+            _ => match &ev.text {
+                Some(t) if !t.is_empty() && !t.chars().any(char::is_control) => {
+                    UiKey::Text(t.to_string())
+                }
+                _ => continue,
+            },
+        };
+        rt.key(&k);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -409,6 +472,7 @@ fn ui_frame(
         stats.draw_calls = state.draw_calls;
         stats.rebuilds += 1;
     }
+    stats.keyboard_focus = u.focus.is_some();
     drop(g);
     for (mut tf, mut proj) in camera.iter_mut() {
         *tf = Transform::from_xyz(pw / 2.0, -ph / 2.0, 0.0);

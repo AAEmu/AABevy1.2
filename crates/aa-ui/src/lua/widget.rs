@@ -6,6 +6,7 @@ use mlua::{Lua, MultiValue, Table, Value};
 use super::{Args, Fade, method, new_object_table, none, reg, ret, ui, value_id};
 use crate::tree::{
     Align, Anchor, ButtonState, DrawKind, DrawLayer, Id, Kind, Layer, Point, ROOT, TextBlock,
+    WidgetType,
 };
 
 /// Parse `AddAnchor(point, [relativeTo], [relativePoint], [x, y])` (after `self`).
@@ -108,6 +109,9 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     if was != visible && u.tree.get(id).is_widget() {
         let h = if visible { "OnShow" } else { "OnHide" };
         u.pending.push((id, h.to_string(), vec![]));
+        // `OnVisibleChanged(self, visible)` (character create step 3 resets its name box there).
+        u.pending
+            .push((id, "OnVisibleChanged".into(), vec![Value::Boolean(visible)]));
     }
 }
 
@@ -224,7 +228,9 @@ pub(crate) fn text_height(lua: &Lua, id: Id) -> f32 {
     lo.height
 }
 
-/// `SetAutoResize(true)` widgets: width = text width + horizontal insets.
+/// `SetAutoResize(true)` widgets: labels and buttons take the text width (+ horizontal
+/// insets); textboxes keep their width and take the height of the wrapped text (+ vertical
+/// insets), as the step 3 name guide in `reference/character_create/step3_*` shows.
 pub(crate) fn auto_size(lua: &Lua, id: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
@@ -232,6 +238,14 @@ pub(crate) fn auto_size(lua: &Lua, id: Id) {
         return;
     };
     if !t.auto_resize {
+        return;
+    }
+    if u.tree.widget(id).is_some_and(|w| w.ty == WidgetType::TextBox) {
+        drop(g);
+        let h = text_height(lua, id);
+        let mut u = ui(lua);
+        u.tree.get_mut(id).height = h + t.inset[1] + t.inset[3];
+        u.tree.touch();
         return;
     }
     let w = u
@@ -916,6 +930,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     def("IsNowAnimation", method(lua, |lua, _, _| ret(lua, false))?)?;
+    super::edit::focus_methods(lua, &m)?;
+    if matches!(ty, "editbox" | "editboxmultiline") {
+        super::edit::methods(lua, &m)?;
+    }
 
     // --- buttons -----------------------------------------------------------------------------
     if is_button_class(ty) {
@@ -1030,9 +1048,8 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         def(
             "SetChecked",
             method(lua, |lua, id, a| {
-                if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
-                    b.checked = a.b(1, true);
-                }
+                // (checked, fireEvent = true): OnCheckChanged when the state changes.
+                set_checked(lua, id, a.b(1, true), a.b(2, true));
                 none()
             })?,
         )?;
@@ -1056,6 +1073,17 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
                     b.checked_bg = d;
                 }
+                none()
+            })?,
+        )?;
+        def(
+            "SetDisabledCheckedBackground",
+            method(lua, |lua, id, a| {
+                let d = value_id(lua, &a.v(1));
+                if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
+                    b.disabled_checked_bg = d;
+                }
+                ui(lua).tree.touch();
                 none()
             })?,
         )?;
@@ -1275,6 +1303,23 @@ fn is_button_class(class: &str) -> bool {
     )
 }
 
+/// Check / uncheck a button; `OnCheckChanged(self)` runs (after the native returns) when the
+/// state changes and `fire` is set.
+pub(crate) fn set_checked(lua: &Lua, id: Id, checked: bool, fire: bool) {
+    let mut u = ui(lua);
+    let Some(b) = u.tree.widget_mut(id).and_then(|w| w.button.as_mut()) else {
+        return;
+    };
+    let changed = b.checked != checked;
+    b.checked = checked;
+    if changed {
+        u.tree.touch();
+        if fire {
+            u.pending.push((id, "OnCheckChanged".into(), vec![]));
+        }
+    }
+}
+
 fn set_slider(lua: &Lua, id: Id, v: f32, trigger: bool) {
     let mut g = ui(lua);
     let u = &mut *g;
@@ -1329,7 +1374,12 @@ fn set_button_bg(lua: &Lua, id: Id, state: usize, d: Option<Id>) {
             // A drawable can serve several states (SetBGPushed uses one for two).
             dr.state_of = Some((id, st));
         }
+        // Becoming a state background shows the drawable again: `SetBGPushed(btn, false)`
+        // restores `bgs[NORMAL]` after `SetBGPushed(btn, true)` hid it with `SetVisible(false)`
+        // (race / gender buttons in reference/character_create/step1_*).
+        u.tree.get_mut(d).shown = true;
     }
+    u.tree.touch();
 }
 
 /// `OnScale` after a size change of the root-anchored windows is what the client sends on

@@ -339,13 +339,16 @@ impl FontLib {
             color: Option<[f32; 4]>,
         }
         let mut items: Vec<Item> = Vec::new();
-        // A trailing line break does not start another (empty) line: the client counts
-        // `"We fear no death."\r\n\n` as 2 lines.
+        // A last line that is empty or only blanks does not count: the client gives
+        // `"We fear no death."\r\n\n` 2 lines and `"Claw to earth, ... fur to fire."\r\n\n `
+        // (wrapped in two) 3 lines (GetTextHeight in reference/character_create/step1_*).
         let mut expanded = expand_codes(text);
-        if expanded.ends_with('\n') {
-            expanded.pop();
-            if expanded.ends_with('\r') {
-                expanded.pop();
+        if let Some(nl) = expanded.rfind('\n') {
+            if expanded[nl + 1..].chars().all(|c| c == ' ' || c == '\t' || c == '\r') {
+                expanded.truncate(nl);
+                if expanded.ends_with('\r') {
+                    expanded.pop();
+                }
             }
         }
         let chars: Vec<char> = expanded.chars().collect();
