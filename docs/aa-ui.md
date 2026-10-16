@@ -6,8 +6,8 @@ unchanged in Lua 5.1 (through `aa-lua`) and build the screens the way the client
 lays the widgets out, draws them with Bevy and feeds mouse and keyboard input back to the
 scripts.
 
-Status: world select, character select and the 2D layer of character create (all three steps)
-run from the original scripts. The layout tree matches the real client's capture
+Status: world select, character select and the 2D layer of character create (all three steps,
+every race and gender) run from the original scripts with no script errors. The layout tree matches the real client's capture
 (`reference/*/ui.json`) by object path (class, offset, extent, visibility):
 
 | screen | reference | match |
@@ -16,8 +16,8 @@ run from the original scripts. The layout tree matches the real client's capture
 | world select at 1600x900 | `reference/world_select/ui_1600x900.json` | 51 of 51 |
 | character select, 0 / 1 characters | `reference/character_select/*/ui.json` | 53 of 53, 58 of 58 |
 | character create step 1, 8 race/gender combinations | `reference/character_create/step1_*` | 48 of 49 each (*) |
-| character create step 2 (nuian male, elf female) | `reference/character_create/step2_*` | 139 of 139 |
-| character create step 3 (nuian male, ferre female) | `reference/character_create/step3_*` | 44 of 44 |
+| character create step 2, 8 race/gender combinations | `reference/character_create/step2_*` | 139 of 139 each |
+| character create step 3, 8 race/gender combinations | `reference/character_create/step3_*` | 44 of 44 each |
 | character create step 3, skillset picked and a name entered | `step3_nuian_male/ui_ability_name.json` | 52 of 52 |
 
 (*) The one left is `step1.content.congestionTip_bg`, a drawable of a hidden tooltip that the
@@ -50,6 +50,7 @@ buttons, type into edit boxes. FPS, quads and draw calls are logged every few se
 | `--race nuian\|elf\|ferre\|hariharan`, `--gender male\|female`, `--step 1\|2\|3` | character create like the capture (button clicks, then `characterCreate:OnNextStep()`) |
 | `--click X Y T`, `--hover X Y T` | scripted mouse (physical pixels) at T seconds, through [`UiVirtualPointer`](#app-integration) |
 | `--lua CODE T` | run Lua at T seconds |
+| `--type TEXT T`, `--key NAME T` | type into the focused edit box / press `enter`, `escape`, `backspace`, `delete`, `tab`, `left`, `right`, `home`, `end` |
 | `--dump PATH`, `--dump-after S` | write the tree in the `reference/*/ui.json` format |
 | `--coverage` | print the per-class native coverage table (below) |
 
@@ -273,7 +274,11 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 * Fades and animations are simplified: `Show(visible, ms)` alpha fades work; `SetStartAnimation`,
   `SetAlphaAnimation`, `SetScaleAnimation` and effect drawables are no-ops.
 * Edit boxes: no text selection, clipboard, IME composition, or horizontal scrolling of long
-  text; history lines are stubs.
+  text; history lines are stubs. No capture shows a focused edit box, so the caret (a 1 px bar,
+  `SetCursorHeight` read as extra height, `SetCursorOffset` as an x offset) is a guess.
+* Game tooltips (item / skill tooltips on hover) run without script errors but their section
+  natives (`AttachUpperSpaceLine`, icon sections, ...) are stubs, so they lay out roughly and
+  without a background.
 * Many natives are stubs (table below): mostly in-game widgets (grid, slot, model view, chat
   window, road map) and rarely used setters.
 
@@ -288,7 +293,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `button` | 84 | 44 | 128 |
 | `chatwindow` | 63 | 62 | 125 |
 | `checkbutton` | 88 | 44 | 132 |
-| `circlediagram` | 63 | 39 | 102 |
+| `circlediagram` | 71 | 31 | 102 |
 | `cooldownactionbutton` | 84 | 48 | 132 |
 | `cooldownbutton` | 84 | 47 | 131 |
 | `cooldownconstantbutton` | 84 | 49 | 133 |
@@ -296,7 +301,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `damagedisplay` | 65 | 35 | 100 |
 | `drawable:color` | 15 | 9 | 24 |
 | `drawable:effect` | 17 | 31 | 48 |
-| `drawable:iconimage` | 18 | 11 | 29 |
+| `drawable:iconimage` | 20 | 9 | 29 |
 | `drawable:image` | 23 | 14 | 37 |
 | `drawable:ninepart` | 18 | 10 | 28 |
 | `drawable:text` | 16 | 13 | 29 |
@@ -304,7 +309,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `editbox` | 83 | 36 | 119 |
 | `editboxmultiline` | 73 | 34 | 107 |
 | `emptywidget` | 63 | 30 | 93 |
-| `folder` | 78 | 36 | 114 |
+| `folder` | 79 | 35 | 114 |
 | `gametooltip` | 70 | 37 | 107 |
 | `grid` | 63 | 85 | 148 |
 | `label` | 68 | 30 | 98 |
@@ -312,7 +317,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `listctrl` | 76 | 33 | 109 |
 | `message` | 65 | 54 | 119 |
 | `modelview` | 63 | 96 | 159 |
-| `paintcolorpicker` | 100 | 1941 | 2041 |
+| `paintcolorpicker` | 103 | 1938 | 2041 |
 | `roadmap` | 63 | 77 | 140 |
 | `slider` | 78 | 31 | 109 |
 | `slot` | 64 | 42 | 106 |
@@ -321,13 +326,11 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `textbox` | 70 | 34 | 104 |
 | `uiparent` | 20 | 15 | 35 |
 | `webbrowser` | 67 | 58 | 125 |
-| `window` | 70 | 45 | 115 |
+| `window` | 71 | 44 | 115 |
 
 `paintcolorpicker` is not in the capture's class list, so it gets our natives plus a stub for
 every method name any class has. Toolkit stubs the login screens still call (with the fake game
 API): `listbox` item colours (`SetDefaultItemTextColor`, `SetOveredItemColor`, ...),
-`paintcolorpicker:SetSpectrumBg` / `SetLuminanceBg` / `SetRGBColor` / `GetHLSColor`,
-`circlediagram` (`AddPoint`, `SetPointValue`, `SetMaxValue`, `SetDiagramColor`: the skillset
-diagram of character create step 3, empty until a skillset is picked), `message:SetMaxLines` /
-`SetTimeVisible`, `emptywidget:EnableScroll` / `ChangeChildAnchorByScrollValue`,
-`drawable:image:SetAnimFrameInfo` (frame animations), `button:IgnoreInputOnFading`.
+`message:SetMaxLines` / `SetTimeVisible`, `emptywidget:EnableScroll` /
+`ChangeChildAnchorByScrollValue`, `drawable:image:SetAnimFrameInfo` (frame animations),
+`button:IgnoreInputOnFading`, and the `gametooltip` section natives when a tooltip shows.
