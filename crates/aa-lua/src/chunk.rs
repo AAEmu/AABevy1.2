@@ -227,7 +227,7 @@ impl Reader<'_> {
         let is_vararg = self.byte()?;
         let max_stack_size = self.byte()?;
         let n = self.count()?;
-        let code = self.bytes(n * 4)?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+        let code = self.bytes(n * 4)?.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
         let n = self.count()?;
         let mut constants = Vec::with_capacity(n);
         for _ in 0..n {

@@ -14,6 +14,11 @@ local sfind, ssub, slower, sformat, sgsub = string.find, string.sub, string.lowe
 local SCRIPT_GLOBALS = __REC_SCRIPT_GLOBALS or {}
 local SCRIPT_FIELDS = __REC_SCRIPT_FIELDS or {}
 local NATIVE_NAMES = __REC_NATIVE_NAMES or {}
+-- Native non-function fields of widgets (the text style objects; see reference/api/widget_methods.json).
+local NATIVE_FIELDS = { style = true, titleStyle = true, itemStyle = true, extraStyle = true, childStyle = true, prefixStyle = true, cooltime_style = true }
+-- From the real client capture (reference/api): native constants/data tables, class method lists.
+local VALUES = __REC_VALUES or {}
+local CLASS_METHODS = __REC_CLASS_METHODS or {}
 
 local REC = { members = {}, handlers = {}, events = {}, callbacks = {}, errors = {}, hints = {}, widgets = {} }
 local CTX = { stage = "?", file = "?", phase = "load" }
@@ -63,17 +68,65 @@ local function argtype(v)
   return t
 end
 
--- Plausible return values so common control flow keeps going (`for i = 1, X:GetCount()`).
+-- Native behaviour the scripts depend on, and plausible return values so common control flow
+-- keeps going. Called as f(self, args...) (self = nil for global functions).
+local CONTENTS = {}
+-- Native widgets that create child widgets in array fields of themselves.
+local function push_child(parent, field, class)
+  if not parent then return end
+  local t = rawget(parent, field)
+  if type(t) ~= "table" or INFO[t] then t = {}; rawset(parent, field, t) end
+  local c = mkproxy(class, class, nil, true)
+  t[#t + 1] = c
+  return c
+end
+local function add_tab(self)
+  push_child(self, "window", "tab.window")
+  push_child(self, "selectedButton", "tab.selectedButton")
+  push_child(self, "unselectedButton", "tab.unselectedButton")
+end
 local OVERRIDES = {
   ["X2Locale:GetLocale"] = function() return "en_us" end,
+  -- content windows: GetContent returns what RegisterContentWidget stored (nil before)
+  ["ADDON:RegisterContentWidget"] = function(_, id, w) if id ~= nil then CONTENTS[id] = w end end,
+  ["ADDON:GetContent"] = function(_, id) if id == nil then return nil end return CONTENTS[id] end,
   ["X2Util:GetGameProvider"] = function() return NATIVE.TRION or _G.TRION end,
   ["UIParent:GetScreenWidth"] = function() return 1920 end,
   ["UIParent:GetScreenHeight"] = function() return 1080 end,
   ["UIParent:GetUIScale"] = function() return 1 end,
+  -- tab:AddSimpleTab/AddTab create tab.window[i], tab.selectedButton[i], tab.unselectedButton[i]
+  ["tab:AddSimpleTab"] = add_tab,
+  ["tab:AddTab"] = add_tab,
+  -- listctrl:InsertColumn(width, type) creates listctrl.column[i]
+  ["listctrl:InsertColumn"] = function(self) push_child(self, "column", "listctrl.column") end,
+  -- listctrl:InsertRows(count, ...) creates listctrl.items[i] with items[i].subItems[column]
+  ["listctrl:InsertRows"] = function(self, count)
+    if not self or type(count) ~= "number" then return end
+    local columns = rawget(self, "column")
+    local ncol = type(columns) == "table" and #columns or 0
+    for _ = 1, math.min(count, 200) do
+      local item = push_child(self, "items", "listctrl.item")
+      for _ = 1, ncol do push_child(item, "subItems", "listctrl.subItem") end
+    end
+  end,
 }
-local function guess_return(owner, member)
-  local o = OVERRIDES[owner .. ":" .. member]
-  if o then return { o() } end
+local RET = __REC_RET or {}
+local RET_M = __REC_RET_M or {}
+local NEUTRAL = { number = 0, string = "", boolean = false }
+local function guess_return(owner, member, widget)
+  -- what the scripts do with the result (static scan): numbers, strings, booleans
+  local kinds = RET[owner .. ":" .. member] or (widget and RET_M[member]) or nil
+  if kinds then
+    local out, n = {}, 0
+    for i = 1, 4 do
+      local k = kinds[i]
+      if k then out[i] = NEUTRAL[k]; n = i end
+    end
+    if n > 0 then
+      for i = 1, n do if out[i] == nil then out[i] = mkproxy(owner .. ":" .. member .. "()", member, nil, false) end end
+      return out
+    end
+  end
   if sfind(member, "^Is[A-Z_]") or sfind(member, "^Has[A-Z]") or sfind(member, "^Can[A-Z]") then return { false } end
   if sfind(member, "Extent$") or sfind(member, "Offset$") then return { 0, 0 } end
   if sfind(member, "Count$") or sfind(member, "Num$") or sfind(member, "^GetNum") or sfind(member, "Width$")
@@ -140,9 +193,23 @@ local function do_call(p, ...)
     w.count = w.count + 1
     bump(w.by, member)
     w.stages[CTX.stage] = true
-    return mkproxy(wtype, wtype, nil, true)
+    local child = mkproxy(wtype, wtype, nil, true)
+    -- parent:CreateChildWidget(type, name, index, true) also stores the child in the parent:
+    -- parent[name] (index 0) or parent[name][index] (scripts read window.closeButton,
+    -- window.button[1] without assigning them).
+    local name, index, flag = select(first + 1, ...)
+    if member ~= "CreateWidget" and parent and type(name) == "string" and flag then
+      if index == nil or index == 0 then
+        rawset(parent, name, child)
+      else
+        local t = rawget(parent, name)
+        if type(t) ~= "table" or INFO[t] then t = {}; rawset(parent, name, t) end
+        t[index] = child
+      end
+    end
+    return child
   end
-  if sfind(member, "^Create") and #member > 6 then
+  if sfind(member, "^Create") and #member > 6 and parent and INFO[parent].widget then
     local cls = ssub(member, 7)
     local w = REC.widgets[cls]
     if not w then w = { count = 0, by = {}, stages = {}, object = true }; REC.widgets[cls] = w end
@@ -151,7 +218,9 @@ local function do_call(p, ...)
     w.stages[CTX.stage] = true
     return mkproxy(cls, cls, nil, true)
   end
-  local g = guess_return(owner, member)
+  local o = OVERRIDES[owner .. ":" .. member]
+  if o then return o(parent, select(first, ...)) end
+  local g = guess_return(owner, member, parent ~= nil and (INFO[parent].widget or not NATIVE[owner]))
   if g then return unpack(g, 1, table.maxn(g)) end
   return mkproxy(owner .. ":" .. member .. "()", member, nil, false)
 end
@@ -165,8 +234,19 @@ PMT.__index = function(p, k)
     hint(info.class, "[" .. type(k) .. "]")
     return nil
   end
-  -- On widgets, names some script assigns are script fields (absent until assigned).
-  if info.widget and SCRIPT_FIELDS[k] and not NATIVE_NAMES[k] then return nil end
+  -- Classes captured from the real client: exactly their native methods (plus the text style
+  -- fields on widgets) exist; anything else is a script field not assigned yet.
+  local cm = CLASS_METHODS[info.class]
+    or (info.parent and (NATIVE_FIELDS[info.name] and CLASS_METHODS.style or CLASS_METHODS[info.name]))
+  if cm then
+    if not cm[k] and not (info.widget and NATIVE_FIELDS[k]) then
+      hint(info.class, "missing:" .. k)
+      return nil
+    end
+  -- Other widgets: names some script assigns are script fields (absent until assigned).
+  elseif info.widget and SCRIPT_FIELDS[k] and not NATIVE_NAMES[k] and not NATIVE_FIELDS[k] then
+    return nil
+  end
   rec(info.class, k, "member")
   kid = mkproxy(info.class .. "." .. k, k, p, false)
   info.kids[k] = kid
@@ -204,6 +284,11 @@ smt.__lt, smt.__le = cmp, cmp
 setmetatable(_G, {
   __index = function(_, k)
     if type(k) ~= "string" or SCRIPT_GLOBALS[k] then return nil end
+    local v = VALUES[k]
+    if v ~= nil then
+      rec("_G", k, "global")
+      return v
+    end
     local p = NATIVE[k]
     if not p then
       p = mkproxy(k, k, nil, k == "UIParent")
@@ -237,7 +322,11 @@ _G.unpack = function(t, ...) if is_proxy(t) then return end return _unpack(t, ..
 _G.tonumber = function(v, ...) if is_proxy(v) then hint(INFO[v].class, "number"); return 0 end return _tonumber(v, ...) end
 for _, lib in _ipairs({ string, math }) do
   for name, f in _pairs(lib) do
-    if type(f) == "function" then lib[name] = tolerant(f, lib == math and 0 or "") end
+    if type(f) == "function" then
+      local neutral = ""
+      if lib == math or name == "len" or name == "byte" then neutral = 0 elseif name == "find" or name == "match" then neutral = nil end
+      lib[name] = tolerant(f, neutral)
+    end
   end
 end
 local gmatch = string.gmatch
