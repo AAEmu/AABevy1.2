@@ -189,6 +189,19 @@ pub struct Preset {
     pub modifier: Vec<u8>,
 }
 
+/// A `face_decal_assets` row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecalAsset {
+    /// Decal DDS (normalised pak path).
+    pub path: String,
+    /// Default top-left position on the 512x512 face texture.
+    pub x: i32,
+    pub y: i32,
+    /// 1 scar (movable), 2 tattoo, 3 makeup, 4 eyebrow, 5 deco (cheek / beard / mustache).
+    pub category: u32,
+    pub movable: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Decal {
     pub asset_id: u32,
@@ -484,12 +497,22 @@ impl GameDb {
             .map_err(|e| Error::Db(format!("face_normal_maps {id}: {e}")))
     }
 
-    /// `face_decal_assets` row: `(texture path, default x, default y)`.
-    pub fn face_decal(&self, id: u32) -> Result<(String, i32, i32)> {
+    /// `face_decal_assets` row.
+    pub fn face_decal(&self, id: u32) -> Result<DecalAsset> {
         self.conn
-            .query_row("SELECT asset_path, defaultX, defaultY FROM face_decal_assets WHERE id = ?1", params![id], |r| {
-                Ok((norm(&r.get::<_, String>(0)?), r.get::<_, i32>(1)?, r.get::<_, i32>(2)?))
-            })
+            .query_row(
+                "SELECT asset_path, defaultX, defaultY, category_id, movable FROM face_decal_assets WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(DecalAsset {
+                        path: norm(&r.get::<_, String>(0)?),
+                        x: r.get::<_, Option<i64>>(1)?.unwrap_or(0) as i32,
+                        y: r.get::<_, Option<i64>>(2)?.unwrap_or(0) as i32,
+                        category: r.get::<_, Option<i64>>(3)?.unwrap_or(0) as u32,
+                        movable: r.get::<_, Option<String>>(4)?.as_deref() == Some("t"),
+                    })
+                },
+            )
             .map_err(|e| Error::Db(format!("face_decal_assets {id}: {e}")))
     }
 

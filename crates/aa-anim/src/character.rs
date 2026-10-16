@@ -27,6 +27,7 @@ use crate::cal::Cal;
 use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
+use crate::face::{FaceLayer, abgr, compose_face};
 use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, Rig, SampleOptions};
 use crate::{Error, Result};
@@ -81,6 +82,50 @@ impl CharacterDesc {
         })
     }
 
+    /// Face decals, lip colour and face normal map of the customisation.
+    fn face_customization(&self, db: &GameDb, dir: &str, prefix: &str) -> (Vec<FaceLayer>, Option<(String, [u8; 3])>, Option<(String, f32)>) {
+        let c = &self.customization;
+        let face_dir = dir.replace("/nude", "/face");
+        let mut layers: Vec<(u32, FaceLayer)> = Vec::new();
+        for d in &c.decals {
+            let Ok(asset) = db.face_decal(d.asset_id) else { continue };
+            let tint = match asset.category {
+                4 if c.eyebrow_color != 0 => Some(abgr(c.eyebrow_color)),
+                5 if c.deco_color != 0 => Some(abgr(c.deco_color)),
+                _ => None,
+            };
+            let (mx, my) = if asset.movable { (d.move_x, d.move_y) } else { (0, 0) };
+            layers.push((
+                asset.category,
+                FaceLayer {
+                    path: asset.path,
+                    x: (asset.x + mx) as f32,
+                    y: (asset.y + my) as f32,
+                    scale: if d.scale > 0.0 { d.scale } else { 1.0 },
+                    rotate: d.rotate,
+                    weight: if d.weight > 0.0 { d.weight } else { 1.0 },
+                    tint,
+                },
+            ));
+        }
+        // drawing order: tattoo, makeup, scar, eyebrow, deco
+        let rank = |cat: u32| match cat {
+            2 => 0,
+            3 => 1,
+            1 => 2,
+            4 => 3,
+            _ => 4,
+        };
+        layers.sort_by_key(|(cat, _)| rank(*cat));
+        let lips = (c.lip_color != 0).then(|| (format!("{face_dir}/{prefix}_face_mask_new.dds"), abgr(c.lip_color)));
+        let normal = (c.normal_map != 0)
+            .then(|| db.face_normal_map(c.normal_map).ok())
+            .flatten()
+            .filter(|(n, _)| !n.is_empty())
+            .map(|(n, _)| (n, c.normal_map_weight));
+        (layers.into_iter().map(|(_, l)| l).collect(), lips, normal)
+    }
+
     /// The default look of a race and gender: the first create-screen preset in the login costume.
     pub fn default_for(db: &GameDb, race: Race, gender: Gender) -> Result<CharacterDesc> {
         CharacterDesc::from_preset(db, race, gender, 0)
@@ -124,7 +169,15 @@ pub struct CharacterAssets {
     pub cal: String,
     pub parts: Vec<PartAsset>,
     pub skin: SkinColor,
+    /// Linear albedo multiplier of the skin materials derived from `skin` (see [`skin_albedo`]).
+    pub skin_albedo: [f32; 3],
     pub hair_color: Option<HairColor>,
+    /// Decals composited on the face texture (see [`crate::face`]), in drawing order.
+    pub face_layers: Vec<FaceLayer>,
+    /// Lip mask texture and colour.
+    pub face_lips: Option<(String, [u8; 3])>,
+    /// `face_normal_maps` normal texture and weight.
+    pub face_normal: Option<(String, f32)>,
 }
 
 impl CharacterDesc {
@@ -206,7 +259,9 @@ impl CharacterDesc {
             parts.push(part);
         }
 
-        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, hair_color })
+        let skin_albedo = skin_albedo(&skin, &db.skin_colors(model).unwrap_or_default());
+        let (face_layers, face_lips, face_normal) = self.face_customization(db, &dir, &prefix);
+        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, skin_albedo, hair_color, face_layers, face_lips, face_normal })
     }
 }
 
@@ -232,8 +287,13 @@ fn skin_variant(mtl_or_chr: &str, skin: &SkinColor) -> Option<String> {
         return None;
     }
     let (stem, _) = mtl_or_chr.rsplit_once('.')?;
-    let candidate = format!("{stem}_{}.mtl", skin.material_postfix);
-    aa_pak::Pak::global().exists(&candidate).then_some(candidate)
+    // `fe_m_nude.mtl` -> `fe_m_nude_brop01.mtl`; `fe_m_face00.mtl` / `fe_m_face01.chr` -> `fe_m_face_brop01.mtl`
+    let bare = stem.trim_end_matches(|c: char| c.is_ascii_digit());
+    let pak = aa_pak::Pak::global();
+    [stem, bare]
+        .into_iter()
+        .map(|s| format!("{s}_{}.mtl", skin.material_postfix))
+        .find(|c| pak.exists(c))
 }
 
 /// Marks the root entity of a spawned character.
@@ -332,6 +392,7 @@ fn load_part(
     let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
     let mtl_path = loaded.material_path.clone();
     let mtl = mtl_path.as_deref().and_then(|p| cry.mtl(p));
+    let face_look = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref()) } else { FaceLook::default() };
 
     let mut out = (*loaded).clone();
     out.parts.clear();
@@ -362,7 +423,7 @@ fn load_part(
             let Some(base) = cry.material(mtl_path.as_deref(), subset.material_id as usize) else { continue };
             let sub = mtl.as_deref().and_then(|m| m.sub(subset.material_id as usize));
             let material = match sub {
-                Some(sub) => restyle(cry, &base, sub, assets, part),
+                Some(sub) => restyle(cry, &base, sub, assets, part, &face_look),
                 None => base,
             };
             let Some((mesh, aabb)) = subset_mesh(data, subset, skinned, RenderAssetUsages::RENDER_WORLD) else { continue };
@@ -373,6 +434,50 @@ fn load_part(
         }
     }
     Ok(Arc::new(out))
+}
+
+/// The per-character textures of the customisable face.
+#[derive(Default)]
+struct FaceLook {
+    /// Pak path (lower case) of the material texture the composed texture replaces: only
+    /// sub-materials using this file get it (ferre heads have a separate fur sub-material).
+    replaces: String,
+    /// Base skin texture with decals and lip colour composited ([`crate::face`]).
+    texture: Option<Handle<Image>>,
+    normal: Option<Handle<Image>>,
+}
+
+/// Does the sub-material's diffuse texture match `path` (lower-case pak path)?
+fn uses_texture(sub: &CryMaterial, path: &str) -> bool {
+    use aa_cry::material::{TextureMap, texture_pak_path};
+    !path.is_empty() && sub.texture(&TextureMap::Diffuse).is_some_and(|t| texture_pak_path(&t.file).to_ascii_lowercase() == path)
+}
+
+/// Builds the face texture and normal map of the character for a face material.
+fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>) -> FaceLook {
+    use aa_cry::material::{TextureMap, texture_pak_path};
+    let mut look = FaceLook::default();
+    let Some(skin) = mtl.and_then(|m| m.sub_materials.iter().find(|s| s.shader.eq_ignore_ascii_case("humanskin"))) else { return look };
+    let Some(diffuse) = skin.texture(&TextureMap::Diffuse) else { return look };
+    // `face00_df` (named by the material; `... copy.dds` does not exist) is a placeholder: the
+    // customisable base is the `face01` texture of the same race
+    let named = texture_pak_path(&diffuse.file);
+    let pak = aa_pak::Pak::global();
+    let base = [named.replace("face00", "face01"), named.replace(" copy", "")].into_iter().find(|p| pak.exists(p));
+    let Some(base) = base else { return look };
+    look.replaces = named.to_ascii_lowercase();
+    if let Some((path, _)) = &assets.face_normal {
+        look.normal = cry.texture(path, false);
+    }
+    if assets.face_layers.is_empty() && assets.face_lips.is_none() && base == named {
+        return look;
+    }
+    let lips = assets.face_lips.as_ref().map(|(p, c)| (p.as_str(), *c));
+    match compose_face(&base, &assets.face_layers, lips) {
+        Ok(img) => look.texture = Some(cry.images.add(img)),
+        Err(e) => warn!("aa-anim: face texture {base}: {e}"),
+    }
+    look
 }
 
 /// Morph targets of the customisable head and the weights of this character, if any.
@@ -388,18 +493,36 @@ fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, V
 }
 
 /// Per-shader tuning of one sub-material for the character (see the module docs of `aa-anim`).
-fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMaterial, assets: &CharacterAssets, part: &PartAsset) -> Handle<StandardMaterial> {
+fn restyle(
+    cry: &mut CryAssets,
+    base: &Handle<StandardMaterial>,
+    sub: &CryMaterial,
+    assets: &CharacterAssets,
+    part: &PartAsset,
+    face: &FaceLook,
+) -> Handle<StandardMaterial> {
     let shader = sub.shader.to_ascii_lowercase();
     let Some(src) = cry.materials.get(base) else { return base.clone() };
     let mut m = src.clone();
     match shader.as_str() {
         "humanskin" => {
             // the textures carry the colour; the engine's `Diffuse` (0.2) and SSS colours are lighting terms
-            m.base_color = Color::WHITE;
+            if part.kind == PartKind::Face && uses_texture(sub, &face.replaces) {
+                if let Some(t) = &face.texture {
+                    m.base_color_texture = Some(t.clone());
+                }
+                if let Some(n) = &face.normal {
+                    m.normal_map_texture = Some(n.clone());
+                }
+            }
+            // the face textures are ~20% darker than the body textures of the same skin: even the
+            // two out so the neck does not look lighter than the face
+            let k = if part.kind == PartKind::Face { 1.2 } else { 0.9 };
+            let a = assets.skin_albedo.map(|c| (c * k).min(1.0));
+            m.base_color = Color::linear_rgb(a[0], a[1], a[2]);
             m.emissive = LinearRgba::BLACK;
             m.perceptual_roughness = 0.55;
             m.reflectance = 0.3;
-            let _ = &assets.skin;
         }
         "hair" => {
             let color = sub
@@ -407,12 +530,18 @@ fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMateri
                 .and_then(parse_rgb)
                 .map(|c| Color::srgb(c[0], c[1], c[2]))
                 .unwrap_or(Color::srgb(0.4, 0.3, 0.2));
-            m.base_color = color;
+            // the Hair shader's own Diffuse is ~0.07 and the colour mostly comes from the specular
+            // terms; a plain multiply of the full colour is too bright against the real screens
+            m.base_color = Color::from(color.to_linear() * 0.55);
             m.emissive = LinearRgba::BLACK;
             m.perceptual_roughness = 0.6;
             m.reflectance = 0.25;
         }
         "eye" => {
+            if let Some(t) = face.texture.as_ref().filter(|_| uses_texture(sub, &face.replaces)) {
+                // the iris lives in the face texture atlas
+                m.base_color_texture = Some(t.clone());
+            }
             m.base_color = Color::WHITE;
             m.emissive = LinearRgba::BLACK;
             m.perceptual_roughness = 0.12;
@@ -432,6 +561,21 @@ fn restyle(cry: &mut CryAssets, base: &Handle<StandardMaterial>, sub: &CryMateri
         _ => return base.clone(),
     }
     cry.materials.add(m)
+}
+
+/// Albedo multiplier of the HumanSkin materials for a `skin_colors` row. The body / face
+/// textures are the same for every skin of a race; the row's `diffuse_color` (a few dozen of 255,
+/// per model) sets how dark the skin is and its hue (relative to the model's brightest skin), e.g.
+/// Nuian male skin 1 `(22,22,16)` vs skin 8000002 `(3,4,4)`. `all` are the selectable skins of the
+/// model (empty = no normalisation). Calibrated against the real character-create screens.
+pub fn skin_albedo(skin: &SkinColor, all: &[SkinColor]) -> [f32; 3] {
+    let luma = |c: [u8; 3]| c[0] as f32 * 0.3 + c[1] as f32 * 0.59 + c[2] as f32 * 0.11;
+    let brightest = all.iter().map(|s| luma(s.diffuse)).fold(luma(skin.diffuse), f32::max).max(1.0);
+    let l = luma(skin.diffuse).max(1.0);
+    let level = 0.9 * (l / brightest).powf(0.7);
+    // hue of the diffuse colour, damped
+    let hue = skin.diffuse.map(|c| 1.0 + (c as f32 / l - 1.0).clamp(-0.5, 0.5) * 0.3);
+    hue.map(|h| (level * h).clamp(0.0, 1.0))
 }
 
 /// The dyed copy of a dyeable costume material's diffuse texture (see [`crate::dye`]).

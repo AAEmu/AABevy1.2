@@ -18,9 +18,15 @@ fn main() {
     App::new()
         .add_plugins((aa_dev::default_plugins("aa-anim lineup"), aa_dev::DevPlugin, CryPlugin, AnimPlugin))
         .insert_resource(ClearColor(Color::srgb(0.07, 0.075, 0.09)))
-        .insert_resource(GlobalAmbientLight { color: Color::srgb(0.75, 0.8, 0.9), brightness: 350.0, ..default() })
+        .insert_resource(GlobalAmbientLight { color: Color::srgb(0.75, 0.8, 0.9), brightness: 350.0 * light_scale(), ..default() })
         .add_systems(Startup, setup)
         .run();
+}
+
+/// Overall light level of the showroom (`--light K`, default 0.5): the lights are in lux against
+/// Bevy's default exposure, so full values wash the characters out.
+fn light_scale() -> f32 {
+    arg("--light").and_then(|v| v.parse().ok()).unwrap_or(0.5)
 }
 
 fn arg(name: &str) -> Option<String> {
@@ -34,7 +40,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     let db = GameDb::open().expect("game database");
 
     let only: Option<usize> = arg("--only").and_then(|v| v.parse().ok());
-    let mut x = -4.0;
+    let mut x = -3.85;
     let mut n = 0;
     for race in Race::ALL {
         for gender in Gender::ALL {
@@ -43,7 +49,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
                 continue;
             }
             let x0 = if only.is_some() { 0.0 } else { x };
-            x += 1.15;
+            x += 1.1;
             let mut desc = CharacterDesc::from_preset(&db, race, gender, preset).expect("preset");
             if arg("--no-hair").is_some() {
                 desc.hair = None;
@@ -67,7 +73,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     // showroom: dark floor disc, key + fill + rim light, camera in front
     let floor = cry.meshes.add(Cylinder::new(7.0, 0.04));
     let floor_mat = cry.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.045, 0.05, 0.06),
+        base_color: Color::srgb(0.1, 0.105, 0.12),
         perceptual_roughness: 1.0,
         reflectance: 0.0,
         ..default()
@@ -75,15 +81,15 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     commands.spawn((Mesh3d(floor), MeshMaterial3d(floor_mat), Transform::from_xyz(0.0, -0.02, 0.0)));
 
     commands.spawn((
-        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, color: Color::srgb(1.0, 0.96, 0.9), ..default() },
+        DirectionalLight { illuminance: 9000.0 * light_scale(), shadow_maps_enabled: true, color: Color::srgb(1.0, 0.96, 0.9), ..default() },
         Transform::from_xyz(2.0, 5.0, 6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 2500.0, color: Color::srgb(0.6, 0.7, 1.0), ..default() },
+        DirectionalLight { illuminance: 2500.0 * light_scale(), color: Color::srgb(0.6, 0.7, 1.0), ..default() },
         Transform::from_xyz(-5.0, 2.5, 4.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 4000.0, color: Color::srgb(1.0, 0.9, 0.8), ..default() },
+        DirectionalLight { illuminance: 4000.0 * light_scale(), color: Color::srgb(1.0, 0.9, 0.8), ..default() },
         Transform::from_xyz(0.0, 3.0, -6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
     let vec3 = |name: &str, d: Vec3| {
@@ -94,7 +100,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
             })
             .unwrap_or(d)
     };
-    let cam = vec3("--cam", Vec3::new(0.0, 1.15, 10.5));
+    let cam = vec3("--cam", Vec3::new(0.0, 1.15, 9.6));
     let look = vec3("--look", Vec3::new(0.0, 0.95, 0.0));
     let fov: f32 = arg("--fov").and_then(|v| v.parse().ok()).unwrap_or(28.0);
     let mut camera = commands.spawn((
@@ -105,7 +111,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     // the costume materials reference the game's own beach cubemap for reflections
     if arg("--no-env").is_none() {
         if let Some(env) = cry.texture("textures/cubemaps/beach_blur2.dds", true) {
-            let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0);
+            let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0) * light_scale();
             camera.insert(GeneratedEnvironmentMapLight { environment_map: env, intensity, ..default() });
         }
     }
