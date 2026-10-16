@@ -13,6 +13,7 @@ pub mod cdf;
 pub mod character;
 pub mod custom;
 pub mod db;
+pub mod dye;
 pub mod lmg;
 pub mod morph;
 pub mod pose;
