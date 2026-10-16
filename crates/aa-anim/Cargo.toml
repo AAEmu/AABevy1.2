@@ -6,3 +6,13 @@ license.workspace = true
 description = "Animations, CDF characters, character assembly and customizing"
 
 [dependencies]
+aa-pak.workspace = true
+aa-cry.workspace = true
+bevy.workspace = true
+glam = "0.33"
+rusqlite.workspace = true
+roxmltree.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+aa-dev.workspace = true

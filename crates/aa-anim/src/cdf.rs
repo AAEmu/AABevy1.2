@@ -1,0 +1,192 @@
+//! `.cdf` character definitions (XML): a base model plus attachments.
+//!
+//! ```xml
+//! <CharacterDefinition>
+//!  <Model File="objects/characters/elf/female/nude/el_f_base.chr" Material="....mtl"/>
+//!  <AttachmentList customize="6">
+//!   <Attachment AName="body" Type="CA_SKIN" Binding="objects/.../el_f_nude.chr" Flags="0"/>
+//!   <Attachment AName="mainhand" Type="CA_BONE" BoneName="item_hand_r" Binding=""
+//!               Rotation="w,x,y,z" Position="x,y,z" scale="0.9" Flags="1"/>
+//!  </AttachmentList>
+//!  <ShapeDeformation COL0="0" ... COL7="0"/>
+//! </CharacterDefinition>
+//! ```
+//!
+//! Three kinds of `.cdf` exist:
+//!
+//! * **base** (`nu_m.cdf`, `nu_m_base.cdf`): `Model` = the skeleton `.chr`, an attachment list with
+//!   the named slots of a player (`body`, `face`, `hair`, `head`, `chest`, `waist`, `legs`,
+//!   `hands`, `feet`, `arms`, `glasses`, `beard`, `cosplay` = `CA_SKIN`; `mainhand`, `offhand`,
+//!   `ranged`, `back`, ... = `CA_BONE`). `Flags="1"` marks an empty / hidden slot;
+//! * **part** (`el_f_ar_cloth001.cdf`, `el_f_face00.cdf`): only a `Model` (a skin `.chr`) and a
+//!   `Material`; the part is attached to a base skeleton by bone name;
+//! * `Attachment` elements of **part** files may also carry a `Material`.
+
+use glam::{Quat, Vec3};
+
+use crate::{Error, Result};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentKind {
+    /// `CA_SKIN`: a skinned mesh sharing the base skeleton.
+    Skin,
+    /// `CA_BONE`: a rigid object on a bone.
+    Bone,
+    /// `CA_FACE`, `CA_PROX`, ...
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Attachment {
+    pub name: String,
+    pub kind: AttachmentKind,
+    /// Pak path of the attached `.chr` / `.cgf` / `.cdf`, empty when the slot is unused.
+    pub binding: String,
+    pub material: Option<String>,
+    /// Bone of a `CA_BONE` attachment.
+    pub bone_name: String,
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub scale: f32,
+    pub flags: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cdf {
+    /// The base model (`.chr` skeleton or skin part).
+    pub model: String,
+    pub material: Option<String>,
+    pub attachments: Vec<Attachment>,
+    /// `AttachmentList@customize` (a bit set of customisable slots; 6 / 7 in player cdfs).
+    pub customize: Option<u32>,
+    /// `ShapeDeformation@COL0..COL7`.
+    pub shape_deformation: [f32; 8],
+}
+
+impl Cdf {
+    pub fn parse(xml: &str) -> Result<Cdf> {
+        let xml = xml.trim_start_matches('\u{feff}');
+        let doc = roxmltree::Document::parse(xml).map_err(|e| Error::Xml(e.to_string()))?;
+        let root = doc.root_element();
+        if !root.has_tag_name("CharacterDefinition") {
+            return Err(Error::Format(format!("cdf root is <{}>", root.tag_name().name())));
+        }
+        let child = |n: &str| root.children().find(|c| c.is_element() && c.has_tag_name(n));
+        let model = child("Model").ok_or_else(|| Error::Format("cdf without <Model>".into()))?;
+        let mut cdf = Cdf {
+            model: norm(model.attribute("File").unwrap_or("")),
+            material: model.attribute("Material").map(norm).filter(|m| !m.is_empty()),
+            attachments: Vec::new(),
+            customize: None,
+            shape_deformation: [0.0; 8],
+        };
+        if let Some(list) = child("AttachmentList") {
+            cdf.customize = list.attribute("customize").and_then(|v| v.parse().ok());
+            for a in list.children().filter(|c| c.is_element() && c.has_tag_name("Attachment")) {
+                let kind = match a.attribute("Type") {
+                    Some("CA_SKIN") => AttachmentKind::Skin,
+                    Some("CA_BONE") => AttachmentKind::Bone,
+                    _ => AttachmentKind::Other,
+                };
+                let rotation = a
+                    .attribute("Rotation")
+                    .and_then(|v| floats::<4>(v))
+                    .map(|[w, x, y, z]| Quat::from_xyzw(x, y, z, w).normalize())
+                    .unwrap_or(Quat::IDENTITY);
+                cdf.attachments.push(Attachment {
+                    name: a.attribute("AName").unwrap_or("").to_string(),
+                    kind,
+                    binding: norm(a.attribute("Binding").unwrap_or("")),
+                    material: a.attribute("Material").map(norm).filter(|m| !m.is_empty()),
+                    bone_name: a.attribute("BoneName").unwrap_or("").to_string(),
+                    position: a.attribute("Position").and_then(floats::<3>).map(Vec3::from).unwrap_or(Vec3::ZERO),
+                    rotation,
+                    scale: a.attribute("scale").or(a.attribute("Scale")).and_then(|v| v.trim().parse().ok()).unwrap_or(1.0),
+                    flags: a.attribute("Flags").and_then(|v| v.parse().ok()).unwrap_or(0),
+                });
+            }
+        }
+        if let Some(s) = child("ShapeDeformation") {
+            for (i, v) in cdf.shape_deformation.iter_mut().enumerate() {
+                *v = s.attribute(format!("COL{i}").as_str()).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            }
+        }
+        Ok(cdf)
+    }
+
+    /// Loads a `.cdf` from the global pak.
+    pub fn load(path: &str) -> Result<Cdf> {
+        let bytes = aa_cry::read(path)?;
+        Cdf::parse(&String::from_utf8_lossy(&bytes))
+    }
+
+    /// The attachment slot with this name (case-insensitive).
+    pub fn attachment(&self, name: &str) -> Option<&Attachment> {
+        self.attachments.iter().find(|a| a.name.eq_ignore_ascii_case(name))
+    }
+}
+
+fn floats<const N: usize>(s: &str) -> Option<[f32; N]> {
+    let mut out = [0f32; N];
+    let mut it = s.split(',');
+    for v in &mut out {
+        *v = it.next()?.trim().parse().ok()?;
+    }
+    Some(out)
+}
+
+/// Lowercase, `/` separators, without a leading `game/`.
+pub fn norm(p: &str) -> String {
+    let p = p.trim().replace('\\', "/").to_ascii_lowercase();
+    p.trim_start_matches("./").trim_start_matches('/').trim_start_matches("game/").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = r#"<CharacterDefinition>
+ <Model File="objects/characters/elf/female/nude/el_f_base.chr"/>
+ <AttachmentList customize="6">
+  <Attachment AName="body" Type="CA_SKIN" Binding="objects/characters/elf/female/nude/el_f_nude.chr" Flags="0"/>
+  <Attachment AName="chest" Type="CA_SKIN" Binding="" Flags="1"/>
+  <Attachment AName="mainhand" Type="CA_BONE" Rotation="0.98238242,-0.07097321,-0.17119513,-0.024078663" Position="0.4,0.006,1.02" AlignBoneAttachment="Bone" BoneName="item_hand_r" Flags="1" scale="0.9"/>
+ </AttachmentList>
+ <ShapeDeformation COL0="0" COL1="0.5" COL2="0" COL3="0" COL4="0" COL5="0" COL6="0" COL7="0"/>
+</CharacterDefinition>"#;
+
+    #[test]
+    fn parses_base_cdf() {
+        let c = Cdf::parse(BASE).unwrap();
+        assert_eq!(c.model, "objects/characters/elf/female/nude/el_f_base.chr");
+        assert_eq!(c.customize, Some(6));
+        assert_eq!(c.attachments.len(), 3);
+        let body = c.attachment("BODY").unwrap();
+        assert_eq!(body.kind, AttachmentKind::Skin);
+        assert_eq!(body.binding, "objects/characters/elf/female/nude/el_f_nude.chr");
+        assert!(c.attachment("chest").unwrap().binding.is_empty());
+        let hand = c.attachment("mainhand").unwrap();
+        assert_eq!(hand.kind, AttachmentKind::Bone);
+        assert_eq!(hand.bone_name, "item_hand_r");
+        assert!((hand.rotation.w - 0.98238).abs() < 1e-3);
+        assert_eq!(hand.scale, 0.9);
+        assert_eq!(c.shape_deformation[1], 0.5);
+    }
+
+    #[test]
+    fn parses_part_cdf() {
+        let c = Cdf::parse(
+            "<CharacterDefinition>\n<Model File=\"objects/Characters/elf/female/costume/a.chr\"\nMaterial=\"objects/Characters/elf/female/costume/a.mtl\"/>\n</CharacterDefinition>",
+        )
+        .unwrap();
+        assert_eq!(c.model, "objects/characters/elf/female/costume/a.chr");
+        assert_eq!(c.material.as_deref(), Some("objects/characters/elf/female/costume/a.mtl"));
+        assert!(c.attachments.is_empty());
+    }
+
+    #[test]
+    fn rejects_other_xml() {
+        assert!(Cdf::parse("<Material/>").is_err());
+        assert!(Cdf::parse("not xml").is_err());
+    }
+}

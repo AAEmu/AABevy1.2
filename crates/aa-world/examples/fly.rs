@@ -13,12 +13,16 @@
 //! * `--pitch <deg>`       up positive
 //! * `--look x,y,z`       look at this cry-space point instead of yaw / pitch
 //! * `--radius <m>`        cell load radius
+//! * `--hour <h>`          time of day (0..24, default 13), `--speed <h/s>` lets it run
+//! * `--zone <id>`         force a zone's time of day
+//! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
 
 use aa_world::{AaWorldPlugin, WorldConfig, bevy_to_cry, cry_to_bevy};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
+use bevy::window::{PresentMode, WindowResolution};
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -51,8 +55,33 @@ fn main() {
     if let Some(r) = arg("--radius").and_then(|v| v.parse().ok()) {
         plugin.config = WorldConfig { load_radius: r, unload_radius: r * 1.2, ..plugin.config };
     }
+    let flag = |name: &str| std::env::args().any(|a| a == name);
+    plugin.config.objects = !flag("--no-objects");
+    plugin.config.vegetation = !flag("--no-objects");
+    plugin.config.shadows = !flag("--no-shadows");
+    plugin.config.environment = !flag("--no-env");
+    let size = aa_dev::DevArgs::from_env().size;
+    let window = WindowPlugin {
+        primary_window: Some(Window {
+            title: "aa-world fly".into(),
+            // physical size = the requested size, whatever the desktop scaling
+            resolution: WindowResolution::new(size.0, size.1).with_scale_factor_override(1.0),
+            present_mode: PresentMode::AutoNoVsync,
+            ..default()
+        }),
+        ..default()
+    };
+    let mut clock = aa_world::WorldClock::default();
+    if let Some(h) = arg("--hour").and_then(|v| v.parse().ok()) {
+        clock.hour = h;
+    }
+    if let Some(s) = arg("--speed").and_then(|v| v.parse().ok()) {
+        clock.speed = s;
+    }
+    clock.zone = arg("--zone").and_then(|v| v.parse().ok());
     App::new()
-        .add_plugins(aa_dev::default_plugins("aa-world fly"))
+        .add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window))
+        .insert_resource(clock)
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(plugin)
         .insert_resource(start)
@@ -75,10 +104,6 @@ fn setup(mut commands: Commands, start: Res<Start>) {
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection { fov: 60f32.to_radians(), near: 0.3, far: 20000.0, ..default() }),
         transform,
-    ));
-    commands.spawn((
-        DirectionalLight { illuminance: 12000.0, ..default() },
-        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 0.6, -0.9, 0.0)),
     ));
 }
 

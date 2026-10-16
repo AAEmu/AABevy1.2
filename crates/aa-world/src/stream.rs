@@ -42,6 +42,30 @@ pub struct WorldConfig {
     pub spawns_per_frame: usize,
     /// Level of detail changes started per frame.
     pub lod_updates_per_frame: usize,
+    /// Spawn brushes (static objects).
+    pub objects: bool,
+    /// Spawn vegetation.
+    pub vegetation: bool,
+    /// Brushes are drawn at most this far (m); each also has its own view distance.
+    pub brush_distance: f32,
+    /// Vegetation is drawn at most this far (m).
+    pub vegetation_distance: f32,
+    /// Main thread time per frame for loading models and spawning object sectors (ms).
+    pub object_budget_ms: f32,
+    /// Drive sun, ambient light, fog, sky dome and ocean from the time of day data.
+    pub environment: bool,
+    /// Radius of the sky dome (m); the camera far plane must exceed it.
+    pub sky_radius: f32,
+    /// Sun shadows (cascaded).
+    pub shadows: bool,
+    /// Shadow distance (m).
+    pub shadow_distance: f32,
+    /// Lux per unit of `Sun color * multiplier` luminance (noon is about 6).
+    pub sun_lux_scale: f32,
+    /// Ambient brightness per unit of sky / ground colour luminance.
+    pub ambient_scale: f32,
+    /// Fog visibility distance (m) at the reference fog density.
+    pub fog_visibility: f32,
 }
 
 impl WorldConfig {
@@ -53,6 +77,18 @@ impl WorldConfig {
             max_loads: 3,
             spawns_per_frame: 1,
             lod_updates_per_frame: 6,
+            objects: true,
+            vegetation: true,
+            brush_distance: 1000.0,
+            vegetation_distance: 220.0,
+            object_budget_ms: 3.0,
+            environment: true,
+            sky_radius: 9000.0,
+            shadows: true,
+            shadow_distance: 300.0,
+            sun_lux_scale: 1700.0,
+            ambient_scale: 1300.0,
+            fog_visibility: 14000.0,
         }
     }
 }
@@ -79,10 +115,15 @@ impl Plugin for AaWorldPlugin {
             warn!("aa-world: cannot read world {}: {e}", self.config.world);
             World { name: self.config.world.clone(), ..default() }
         });
+        if !app.is_plugin_added::<aa_cry::CryPlugin>() {
+            app.add_plugins(aa_cry::CryPlugin);
+        }
         app.insert_resource(self.config.clone())
             .insert_resource(WorldInfo(Arc::new(world)))
+            .init_resource::<crate::objects::ObjectState>()
             .insert_resource(Streamer { cells: HashMap::new(), loading: HashSet::new(), missing: HashSet::new(), tx, rx: Mutex::new(rx) })
-            .add_systems(Update, (stream_cells, receive_cells, update_patch_lod).chain());
+            .add_systems(Update, (stream_cells, receive_cells, update_patch_lod, crate::objects::stream_objects).chain());
+        crate::sky::build(app);
     }
 }
 
