@@ -103,57 +103,69 @@ return __ref.json(o)
 '''
 
 
-def cmd_api(pid):
+PLAYER_ENTITY_LUA = r'''
+local name = %r
+for _, e in pairs(System.GetEntities() or {}) do
+  if e:GetName() == name then
+    local p, a = e:GetWorldPos(), e:GetAngles()
+    return __ref.json({ class = e.class, position = p, angles_rad = a, terrain_height = System.GetTerrainElevation(p) })
+  end
+end
+return ''
+'''
+
+def cmd_api(pid, suffix='', widgets=True):
     load_libs(pid)
-    # widget classes ------------------------------------------------------------------------
-    probe = lua_json(pid, 'return __ref.json(__ref.probe_classes())')
-    live = lua_json(pid, '''local R=__ref local order=R.enumerate(nil,10) local g={}
-for _,rec in ipairs(order) do local m=getmetatable(rec.obj).__index local e=g[m]
- if not e then e={count=0,paths={},kind=R.kind_of(rec.obj),class=R.class_of[m]} g[m]=e end
- e.count=e.count+1 if #e.paths<3 and rec.paths[1] then e.paths[#e.paths+1]=rec.paths[1] end end
-local out={} for m,e in pairs(g) do local n={} for k in pairs(m) do if k~="__index" then n[#n+1]=k end end table.sort(n) e.methods=n out[#out+1]=e end
-return R.json(out)''')
-    live_count = {}
-    for e in live:
-        if e.get('class'):
-            live_count[e['class']] = e['count']
-    wt = {}
-    for name, ms in probe['widgets'].items():
-        wt[name] = {'methods': ms, 'method_count': len(ms), 'live_instances': live_count.get(name, 0)} if isinstance(ms, list) else ms
-    dt = {}
-    for name, ms in probe['drawables'].items():
-        dt[name] = {'methods': ms, 'method_count': len(ms), 'live_instances': live_count.get('drawable:' + name, 0)} if isinstance(ms, list) else ms
-    common = None
-    for v in wt.values():
-        if 'methods' in v:
-            s = set(v['methods'])
-            common = s if common is None else common & s
-    unnamed = [{'kind': e['kind'], 'method_count': len(e['methods']), 'live_instances': e['count'], 'sample_paths': e['paths'], 'methods': e['methods']}
-               for e in live if not e.get('class')]
-    out = {
-        'note': 'Per class, the method list of metatable.__index. Every object of a class shares one flat method table '
-                '(the metatable is its own __index; there is no further __index chain and no Lua-level inheritance: each class '
-                'simply lists all methods, including the ~90 common widget methods). A widget is a Lua table {__this = userdata, '
-                '<script-defined fields>}. Drawables (image/color/text/ninepart/threepart/iconimage/effect) and the text style object '
-                '(.style / .titleStyle) are the same kind of table. GetId() is a creation counter (hex string) for widgets and '
-                'meaningless for drawables/styles. Widget NAMES, textures, coords, colours, fonts, anchors and layers have no getters.',
-        'create_widget': "UIParent:CreateWidget(type, name, parentName='UIParent') -> widget or nil (unknown type); "
-                         "widget:CreateChildWidget(type, name, ...)",
-        'widget_types': wt,
-        'widget_types_not_found': probe['widget_failed'],
-        'widget_types_crash_client': ['worldmap (native exception when created through UIParent:CreateWidget on its own)'],
-        'drawable_types': dt,
-        'drawable_creators': {
-            'image': "widget:CreateImageDrawable(texturePath, layer)", 'color': "widget:CreateColorDrawable(r,g,b,a,layer)",
-            'text': "widget:CreateTextDrawable(fontPath, fontSize, layer)", 'ninepart': "widget:CreateNinePartDrawable(texturePath, layer)",
-            'threepart': "widget:CreateThreePartDrawable(texturePath, layer)", 'iconimage': "widget:CreateIconImageDrawable(texturePath, layer)",
-            'effect': "widget:CreateEffectDrawable(texturePath, layer)",
-            'layers': "'background' (also seen: 'artwork', 'overlay'); see ui.json calls[] for what the scripts use"},
-        'textstyle': {'methods': probe.get('textstyle', []), 'note': 'object behind widget.style / titleStyle; created natively with label/button/textbox'},
-        'methods_common_to_all_widget_types': sorted(common or []),
-        'other_live_classes_without_a_creation_name': unnamed,
-    }
-    save_json(os.path.join(REF, 'api', 'widget_methods.json'), out)
+    if widgets:
+        # widget classes ------------------------------------------------------------------------
+        probe = lua_json(pid, 'return __ref.json(__ref.probe_classes())')
+        live = lua_json(pid, '''local R=__ref local order=R.enumerate(nil,10) local g={}
+    for _,rec in ipairs(order) do local m=getmetatable(rec.obj).__index local e=g[m]
+     if not e then e={count=0,paths={},kind=R.kind_of(rec.obj),class=R.class_of[m]} g[m]=e end
+     e.count=e.count+1 if #e.paths<3 and rec.paths[1] then e.paths[#e.paths+1]=rec.paths[1] end end
+    local out={} for m,e in pairs(g) do local n={} for k in pairs(m) do if k~="__index" then n[#n+1]=k end end table.sort(n) e.methods=n out[#out+1]=e end
+    return R.json(out)''')
+        live_count = {}
+        for e in live:
+            if e.get('class'):
+                live_count[e['class']] = e['count']
+        wt = {}
+        for name, ms in probe['widgets'].items():
+            wt[name] = {'methods': ms, 'method_count': len(ms), 'live_instances': live_count.get(name, 0)} if isinstance(ms, list) else ms
+        dt = {}
+        for name, ms in probe['drawables'].items():
+            dt[name] = {'methods': ms, 'method_count': len(ms), 'live_instances': live_count.get('drawable:' + name, 0)} if isinstance(ms, list) else ms
+        common = None
+        for v in wt.values():
+            if 'methods' in v:
+                s = set(v['methods'])
+                common = s if common is None else common & s
+        unnamed = [{'kind': e['kind'], 'method_count': len(e['methods']), 'live_instances': e['count'], 'sample_paths': e['paths'], 'methods': e['methods']}
+                   for e in live if not e.get('class')]
+        out = {
+            'note': 'Per class, the method list of metatable.__index. Every object of a class shares one flat method table '
+                    '(the metatable is its own __index; there is no further __index chain and no Lua-level inheritance: each class '
+                    'simply lists all methods, including the ~90 common widget methods). A widget is a Lua table {__this = userdata, '
+                    '<script-defined fields>}. Drawables (image/color/text/ninepart/threepart/iconimage/effect) and the text style object '
+                    '(.style / .titleStyle) are the same kind of table. GetId() is a creation counter (hex string) for widgets and '
+                    'meaningless for drawables/styles. Widget NAMES, textures, coords, colours, fonts, anchors and layers have no getters.',
+            'create_widget': "UIParent:CreateWidget(type, name, parentName='UIParent') -> widget or nil (unknown type); "
+                             "widget:CreateChildWidget(type, name, ...)",
+            'widget_types': wt,
+            'widget_types_not_found': probe['widget_failed'],
+            'widget_types_crash_client': ['worldmap (native exception when created through UIParent:CreateWidget on its own)'],
+            'drawable_types': dt,
+            'drawable_creators': {
+                'image': "widget:CreateImageDrawable(texturePath, layer)", 'color': "widget:CreateColorDrawable(r,g,b,a,layer)",
+                'text': "widget:CreateTextDrawable(fontPath, fontSize, layer)", 'ninepart': "widget:CreateNinePartDrawable(texturePath, layer)",
+                'threepart': "widget:CreateThreePartDrawable(texturePath, layer)", 'iconimage': "widget:CreateIconImageDrawable(texturePath, layer)",
+                'effect': "widget:CreateEffectDrawable(texturePath, layer)",
+                'layers': "'background' (also seen: 'artwork', 'overlay'); see ui.json calls[] for what the scripts use"},
+            'textstyle': {'methods': probe.get('textstyle', []), 'note': 'object behind widget.style / titleStyle; created natively with label/button/textbox'},
+            'methods_common_to_all_widget_types': sorted(common or []),
+            'other_live_classes_without_a_creation_name': unnamed,
+        }
+        save_json(os.path.join(REF, 'api', 'widget_methods.json'), out)
 
     # globals ------------------------------------------------------------------------------
     g = {'ui_state': lua_json(pid, open(os.path.join(HERE, 'globals.lua'), encoding='utf-8').read(), 'ui'),
@@ -161,10 +173,10 @@ return R.json(out)''')
          'third_state': lua_json(pid, open(os.path.join(HERE, 'globals.lua'), encoding='utf-8').read(), 'third')}
     stage = lua(pid, 'return X2LoginCharacter:GetCurrentStage(), tostring(X2:IsEnteredWorld())').strip()
     g['captured_at_login_stage'] = stage
-    save_json(os.path.join(REF, 'api', 'x2_globals.json'), g)
+    save_json(os.path.join(REF, 'api', 'x2_globals%s.json' % suffix), g)
 
     s = lua(pid, open(os.path.join(HERE, 'data_tables.lua'), encoding='utf-8').read())
-    save_json(os.path.join(REF, 'api', 'ui_data.json'), json.loads(s))
+    save_json(os.path.join(REF, 'api', 'ui_data%s.json' % suffix), json.loads(s))
 
 
 def cmd_screen(pid, name, do_ui=True, tag=None, camera=None):
@@ -190,6 +202,10 @@ def cmd_screen(pid, name, do_ui=True, tag=None, camera=None):
         ply = json.loads(lua(pid, PLAYER_LUA, 'ui').strip() or '{}')
         if ply:
             cam['player'] = ply
+            if ply.get('name'):
+                ent = lua(pid, PLAYER_ENTITY_LUA % ply['name'], 'system').strip()
+                if ent:
+                    cam['player']['entity'] = json.loads(ent)
         save_json(os.path.join(d, 'camera%s.json' % sfx), cam)
 
 
@@ -288,7 +304,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pid', type=int, default=0)
     sub = ap.add_subparsers(dest='cmd', required=True)
-    sub.add_parser('api')
+    p = sub.add_parser('api'); p.add_argument('--suffix', default=''); p.add_argument('--no-widgets', action='store_true')
     sub.add_parser('hooks')
     p = sub.add_parser('watch'); p.add_argument('--width', type=int, default=1920); p.add_argument('--height', type=int, default=1080)
     p = sub.add_parser('boot'); p.add_argument('--width', type=int, default=1920); p.add_argument('--height', type=int, default=1080)
@@ -296,6 +312,7 @@ def main():
     p = sub.add_parser('create-sweep'); p.add_argument('--races', default='1,2,3,4'); p.add_argument('--genders', default='1,2'); p.add_argument('--steps', default='1,2,3')
     p = sub.add_parser('launch')
     p = sub.add_parser('to-create')
+    p = sub.add_parser('click'); p.add_argument('x', type=int); p.add_argument('y', type=int); p.add_argument('--right', action='store_true')
     p = sub.add_parser('settle'); p.add_argument('--max', type=float, default=20)
     p = sub.add_parser('lua'); p.add_argument('code')
     p = sub.add_parser('luas'); p.add_argument('code')
@@ -303,7 +320,7 @@ def main():
     if a.cmd == 'launch':
         launch(); return
     if not a.pid and os.path.exists(PIDFILE): a.pid = int(open(PIDFILE).read())
-    if a.cmd == 'api': cmd_api(a.pid)
+    if a.cmd == 'api': cmd_api(a.pid, a.suffix, not a.no_widgets)
     elif a.cmd == 'hooks':
         load_libs(a.pid); print('hooks wrapped:', lua(a.pid, 'return __ref.install_hooks()').strip())
     elif a.cmd == 'watch': cmd_watch(a.pid, a.width, a.height)
@@ -311,10 +328,37 @@ def main():
     elif a.cmd == 'screen': cmd_screen(a.pid, a.name, not a.no_ui, a.tag, a.camera)
     elif a.cmd == 'create-sweep': sweep_create(a.pid, [int(x) for x in a.races.split(',')], [int(x) for x in a.genders.split(',')], [int(x) for x in a.steps.split(',')])
     elif a.cmd == 'to-create': to_create(a.pid)
+    elif a.cmd == 'click': print(click(a.pid, a.x, a.y, 'right_click' if a.right else 'click'))
     elif a.cmd == 'settle': print(wait_settled(a.pid, a.max))
     elif a.cmd == 'lua': print(lua(a.pid, a.code))
     elif a.cmd == 'luas': print(lua(a.pid, a.code, 'system'))
 
+
+
+def mcp_call(tool, args, timeout=40):
+    """One-shot call of an aaemu-clientdriver MCP tool (client_pointer, client_input, ...)."""
+    proc = subprocess.Popen([DRIVER, 'mcp', '--dll', os.environ['AADRIVER_DLL']], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    def send(msg):
+        proc.stdin.write((json.dumps(msg) + chr(10)).encode()); proc.stdin.flush()
+    def recv():
+        return json.loads(proc.stdout.readline().decode())
+    try:
+        send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25', 'capabilities': {}, 'clientInfo': {'name': 'ref', 'version': '1'}}})
+        recv()
+        send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+        send({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': tool, 'arguments': args}})
+        r = recv()
+        return r
+    finally:
+        proc.kill()
+
+
+def click(pid, x, y, action='click'):
+    """Real mouse click through the client's own input handler (client pixels)."""
+    r = mcp_call('client_pointer', {'pid': pid, 'action': 'move', 'x': x, 'y': y})
+    time.sleep(0.3)
+    r = mcp_call('client_pointer', {'pid': pid, 'action': action, 'x': x, 'y': y})
+    return r
 
 
 LAUNCHER = r'D:\aaemu-live-bevy\bin\aaemu-launcher.exe'
