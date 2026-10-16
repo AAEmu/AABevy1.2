@@ -36,7 +36,11 @@ use crate::water::water_mesh;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Brush,
+    /// Small vegetation (instances whose own view distance is at most [`WorldConfig::vegetation_distance`]).
     Vegetation,
+    /// Large vegetation (trees): own view distance beyond `vegetation_distance`, drawn up to
+    /// [`WorldConfig::tree_distance`].
+    Trees,
 }
 
 /// Placement data of one cell, binned by 64 m sector.
@@ -45,12 +49,15 @@ pub struct CellObjectData {
     /// Instance indices per sector (`sx * 16 + sy`).
     pub brush_bins: Vec<Vec<u32>>,
     pub veg_bins: Vec<Vec<u32>>,
+    pub tree_bins: Vec<Vec<u32>>,
 }
 
 impl CellObjectData {
-    pub fn new(objects: CellObjects) -> Self {
+    /// `tree_threshold`: vegetation whose own view distance exceeds it goes to the trees bins.
+    pub fn new(objects: CellObjects, tree_threshold: f32) -> Self {
         let mut brush_bins = vec![Vec::new(); 256];
         let mut veg_bins = vec![Vec::new(); 256];
+        let mut tree_bins = vec![Vec::new(); 256];
         let bin = |x: f32, y: f32| {
             let sx = ((x / SECTOR_SIZE) as usize).min(15);
             let sy = ((y / SECTOR_SIZE) as usize).min(15);
@@ -61,9 +68,10 @@ impl CellObjectData {
             brush_bins[bin(t.x, t.y)].push(i as u32);
         }
         for (i, v) in objects.vegetation.iter().enumerate() {
-            veg_bins[bin(v.pos.x, v.pos.y)].push(i as u32);
+            let bins = if v.max_view_dist > tree_threshold { &mut tree_bins } else { &mut veg_bins };
+            bins[bin(v.pos.x, v.pos.y)].push(i as u32);
         }
-        CellObjectData { objects, brush_bins, veg_bins }
+        CellObjectData { objects, brush_bins, veg_bins, tree_bins }
     }
 }
 
@@ -165,6 +173,7 @@ fn object_lod(kind: Kind, d: f32, current: Option<u8>) -> u8 {
     let bands: [f32; 2] = match kind {
         Kind::Brush => [140.0, 380.0],
         Kind::Vegetation => [55.0, 130.0],
+        Kind::Trees => [150.0, 350.0],
     };
     if let Some(c) = current {
         let lo = if c == 0 { 0.0 } else { bands[c as usize - 1] * 0.85 };
@@ -227,7 +236,7 @@ pub fn stream_objects(
     }
 
     // placement files of loaded terrain cells
-    let reach = cfg.brush_distance.max(cfg.vegetation_distance);
+    let reach = cfg.brush_distance.max(cfg.vegetation_distance).max(cfg.tree_distance);
     let load_reach = reach.max(cfg.water_distance);
     let loaded: Vec<(i32, i32)> = streamer.loaded_cells().collect();
     state.cells.retain(|c, _| loaded.contains(c));
@@ -266,10 +275,11 @@ pub fn stream_objects(
         state.loading.insert(c);
         let tx = state.tx.clone();
         let world = cfg.world.clone();
+        let threshold = cfg.vegetation_distance;
         pool.spawn(async move {
             let objects = load_cell_objects(&world, c.0, c.1);
             let water = water_mesh(&objects.water);
-            let data = CellObjectData::new(objects);
+            let data = CellObjectData::new(objects, threshold);
             let _ = tx.send((c, data, water));
         })
         .detach();
@@ -314,8 +324,9 @@ pub fn stream_objects(
             for (kind, bin, cap) in [
                 (Kind::Brush, &data.brush_bins[sector], cfg.brush_distance),
                 (Kind::Vegetation, &data.veg_bins[sector], cfg.vegetation_distance),
+                (Kind::Trees, &data.tree_bins[sector], cfg.tree_distance),
             ] {
-                if bin.is_empty() || (kind == Kind::Vegetation && !cfg.vegetation) {
+                if bin.is_empty() || (kind != Kind::Brush && !cfg.vegetation) {
                     continue;
                 }
                 let key = (c.0, c.1, sector as u8, kind);
@@ -387,12 +398,13 @@ pub fn stream_objects(
                     let view = if b.max_view_dist > 1.0 { b.max_view_dist } else { cfg.brush_distance };
                     (model.clone(), material, b.mat4(), view.min(cfg.brush_distance))
                 }
-                Kind::Vegetation => {
+                Kind::Vegetation | Kind::Trees => {
                     let v = &data.objects.vegetation[idx];
                     let Some(g) = groups.groups.get(&v.group) else { continue };
                     let material = (!g.material.is_empty()).then(|| format!("{}.mtl", g.material));
-                    let view = if v.max_view_dist > 1.0 { v.max_view_dist } else { cfg.vegetation_distance };
-                    (g.model.clone(), material, v.mat4(), view.min(cfg.vegetation_distance))
+                    let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
+                    let view = if v.max_view_dist > 1.0 { v.max_view_dist } else { cap };
+                    (g.model.clone(), material, v.mat4(), view.min(cap))
                 }
             };
             if state.failed_models.contains(&path) {
@@ -478,5 +490,6 @@ fn bin_of(data: &CellObjectData, kind: Kind, sector: usize) -> &[u32] {
     match kind {
         Kind::Brush => &data.brush_bins[sector],
         Kind::Vegetation => &data.veg_bins[sector],
+        Kind::Trees => &data.tree_bins[sector],
     }
 }

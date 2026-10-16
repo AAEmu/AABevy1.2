@@ -23,7 +23,7 @@
 //! * `--hour <h>`          time of day (0..24, default 13), `--speed <h/s>` lets it run
 //! * `--zone <id>`         force a zone's time of day
 //! * `--sun-scale <lux>`, `--ambient-scale <x>`   lighting calibration (see `WorldConfig`)
-//! * `--terrain-tint r,g,b`, `--fog-visibility <m>`
+//! * `--terrain-tint r,g,b`, `--fog-visibility <m>`, `--tree-distance <m>`
 //! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
 //!                         time statistics (average, 1 % low, worst frame, frames over 20 ms), then exit
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`
@@ -76,7 +76,7 @@ fn bench(
     mut exit: MessageWriter<AppExit>,
 ) {
     let dt = time.delta_secs();
-    if state.elapsed > 8.0 && dt > 0.02 && state.slow_logged < 12 {
+    if state.elapsed > 8.0 && (dt > 0.05 || (dt > 0.02 && state.slow_logged < 6)) && state.slow_logged < 40 {
         state.slow_logged += 1;
         info!(
             "slow frame {:.1} ms: cells {:.1} receive {:.1} lod {:.1} objects {:.1}",
@@ -214,6 +214,9 @@ fn main() {
     }
     if let Some(v) = arg("--ambient-scale").and_then(|v| v.parse().ok()) {
         plugin.config.ambient_scale = v;
+    }
+    if let Some(v) = arg("--tree-distance").and_then(|v| v.parse().ok()) {
+        plugin.config.tree_distance = v;
     }
     if let Some(v) = vec3_arg("--terrain-tint") {
         plugin.config.terrain_tint = v;
