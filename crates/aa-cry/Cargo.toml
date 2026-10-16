@@ -6,3 +6,13 @@ license.workspace = true
 description = "CryEngine asset formats (DDS, MTL, CGF/CHR/SKIN) to Bevy"
 
 [dependencies]
+aa-pak.workspace = true
+bevy.workspace = true
+# Same glam as bevy_math: the plain-data layer (chunk, skeleton, mesh) uses glam types only, which
+# are bevy::math types.
+glam = "0.33"
+thiserror.workspace = true
+roxmltree.workspace = true
+
+[dev-dependencies]
+aa-dev.workspace = true
