@@ -55,7 +55,10 @@ pub fn default_plugins(title: &str) -> impl PluginGroup {
     DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: title.to_string(),
-            resolution: WindowResolution::new(args.size.0, args.size.1),
+            // One window pixel per image pixel whatever the desktop scaling, so screenshots are
+            // the real client's 1920x1080 and compare pixel for pixel.
+            resolution: WindowResolution::new(args.size.0, args.size.1)
+                .with_scale_factor_override(1.0),
             present_mode: PresentMode::AutoNoVsync,
             ..default()
         }),
