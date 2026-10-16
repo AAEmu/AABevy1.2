@@ -151,6 +151,7 @@ impl Plugin for LoginPlugin {
             .add_systems(Startup, (start_login, spawn_world_anchor))
             .add_systems(Update, (sync_bridge, route_events, handle_requests, ensure_ui, run_lua).chain())
             .add_systems(OnEnter(Screen::InGame), release_world_anchor)
+            .add_systems(OnEnter(Screen::CharacterCreate), |mut grade: ResMut<stage3d::BackgroundGrade>| grade.0 = None)
             .add_plugins((stage3d::Stage3dPlugin, world_select::plugin, character_select::plugin, create::plugin, loading::plugin));
     }
 }
@@ -349,6 +350,15 @@ fn ensure_ui(world: &mut World) {
     };
     if built {
         world.resource_mut::<UiBuilt>().0 = Some(screen);
+        // the painted background is graded like the client's post processing, per screen
+        // (`stage3d::Grade`); the create screen sets its own when it builds
+        if screen != Screen::CharacterCreate {
+            world.resource_mut::<stage3d::BackgroundGrade>().0 = match screen {
+                Screen::WorldSelect => Some(stage3d::Grade::WORLD_SELECT),
+                Screen::CharacterSelect => Some(stage3d::Grade::CHARACTER_SELECT),
+                _ => None,
+            };
+        }
     }
 }
 
