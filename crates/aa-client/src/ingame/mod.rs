@@ -17,6 +17,7 @@ mod enter;
 mod player;
 mod terrain;
 mod units;
+mod weapons;
 
 use aa_anim::AnimPlugin;
 use aa_net::NetPlugin;
@@ -71,6 +72,7 @@ impl Plugin for InGamePlugin {
                     anim::drive_locomotion,
                     player::dev_hide_part,
                     appearance::layer_body_under_armour,
+                    weapons::attach_carried,
                     log_chat,
                     report,
                 )

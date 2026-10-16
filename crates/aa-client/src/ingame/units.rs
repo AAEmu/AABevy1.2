@@ -22,6 +22,7 @@ use super::anim::Motion;
 use super::appearance;
 use super::creature;
 use super::data::Db;
+use super::weapons;
 use super::player::{LocalPlayer, Mover, approach_angle, placement, spawn_with_locomotion};
 
 /// Units are drawn within this many metres of the player, and dropped again beyond `* 1.25`.
@@ -293,7 +294,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
         let assets = desc.resolve(&game).map_err(|e| debug!("unit {} {}: {e}", unit.obj_id, unit.name)).ok()?;
         drop(game);
         let t_resolve = t.elapsed().as_secs_f32() * 1000.0;
-        let e = spawn_with_locomotion(commands, cry, clips, assets, transform)?;
+        let e = spawn_with_locomotion(commands, cry, clips, assets, transform, weapons::carried(db, &unit.equipment))?;
         debug!("unit {} look {t_resolve:.0} ms, spawn {:.0} ms", unit.obj_id, t.elapsed().as_secs_f32() * 1000.0 - t_resolve);
         e
     } else {
