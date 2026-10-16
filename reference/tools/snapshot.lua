@@ -98,6 +98,7 @@ for _, rec in ipairs(order) do
   local a = rec.addr
   local st = states[a]
   local sh = shown(a)
+  if R.include_hidden and #rec.paths > 0 then sh = true end
   st.shown = sh
   if sh then
     nshown = nshown + 1
