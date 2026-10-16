@@ -27,8 +27,9 @@ need something from it, say so in your final report. The orchestrator wires crat
 ## Data
 
 * Client (read-only, never write): `D:\AA1.2` (`game_pak` 24 GB, 218,066 files). Read through
-  `aa-pak` only. `cargo run -p aa-pak --bin aa-pak -- ls ui/login_stage/` lists,
-  `cat <path>` dumps, `x <prefix> <outdir>` extracts.
+  `aa-pak` only. From the shell use the prebuilt `tools/aa-pak.exe` (no cargo, so it never waits
+  on the build lock): `tools/aa-pak.exe ls ui/login_stage/` lists, `cat <path>` dumps,
+  `x <prefix> <outdir>` extracts.
 * Pak index as text: `data/pak12.tsv` (`name \t offset \t size`) — grep it to find files.
 * Extracted samples go to `data/extract/<your-crate>/` (git-ignored). The UI scripts are already
   extracted under `data/extract/game/scriptsbin/` (`.alb` = Lua 5.1 bytecode, `toc.g` = load order).
@@ -46,6 +47,8 @@ need something from it, say so in your final report. The orchestrator wires crat
   "Blocking waiting for file lock", wait; never `cargo clean`, never point at another target dir.
 * Build/test only your crate: `cargo test -p aa-lua`, `cargo run -p aa-ui --example login`. No
   `--workspace` runs.
+* Your `Cargo.toml` must always parse: a broken manifest (e.g. an `[[example]]` whose file does
+  not exist yet) stops cargo for **every** agent. Create the file before declaring it.
 * Every visual deliverable is an example (or test) that uses `aa_dev::default_plugins` +
   `aa_dev::DevPlugin`, so it can be checked unattended:
   `cargo run -p <crate> --example <name> -- --shot shots/<crate>/<name>.png [--shot-after 8]`
