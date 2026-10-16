@@ -11,10 +11,11 @@ aa-lua.workspace = true
 anyhow.workspace = true
 bevy.workspace = true
 mlua.workspace = true
+# Read-only game database access for `X2Locale:LocalizeUiText` (`ui_texts`).
+rusqlite.workspace = true
 # Glyph outlines + hinted rasterisation; same version Bevy's text stack already builds.
 swash = "0.2.10"
 
 [dev-dependencies]
 aa-dev.workspace = true
 mlua.workspace = true
-rusqlite.workspace = true

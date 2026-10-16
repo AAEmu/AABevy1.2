@@ -204,6 +204,26 @@ App::new()
   all of them: give the 3D camera `CompositingSpace::Srgb` too, or set `gamma_blending: false`.
 * `UiSetup` runs once, when the window size is known, with the new `UiRuntime`. The runtime is
   a Bevy non-send resource (`NonSendMut<UiRuntime>`); call it from systems for later events.
+* Stage changes: the client builds a fresh UI Lua state per stage. `commands.queue(
+  aa_ui::ReloadUi::new(|ui| { ... }))` (or `aa_ui::reload_ui(world, setup)` in an exclusive
+  system) drops the current runtime with all its widgets and handlers and builds a new one with
+  the new setup at the next update; textures and the cameras stay. See
+  `examples/character_select_3d.rs --from-world-select 3`.
+* 3D between the background and the panels (character select / create): set
+  `UiConfig { background_camera_order: Some(-10), camera_order: 10, .. }`. Windows on the
+  `background` UI layer (the login backgrounds, `SetUILayer("background")`) are then drawn by
+  a second camera at `background_camera_order` (render layer `background_render_layer`, 31 by
+  default), which clears; the app's `Camera3d` goes in between with `order: 0` and
+  `clear_color: ClearColorConfig::None`; the UI camera at `camera_order` loads and draws the
+  rest. Bevy composites a camera stack that holds a `Camera3d` in linear space, so in split mode
+  the UI cameras blend in linear space too (translucent panels come out slightly lighter than
+  the client; mean error 7.9 instead of 6.4 on character select). Example:
+  `cargo run -p aa-ui --example character_select_3d` (a cube where the character stands).
+* UI texts: `UiConfig { ui_texts_db: Some("D:/aaemu-live/rs-game/Data/compact.sqlite3".into()), .. }`
+  serves `X2Locale:LocalizeUiText(category, key, ...)` from the game database (`ui_texts`
+  joined with the locale column of `localized_texts`, opened read-only, cached per path and
+  locale, `$1`.. replaced by the extra arguments, the key when missing). Or
+  `ui.load_ui_texts(path)` / `ui.set_ui_texts(Arc<UiTexts>)` from a setup.
 * Game API: `lua::install_game_stub(lua, "X2World")` registers a table where every method
   exists and returns nothing (logged once); replace methods by setting fields, from Rust
   (`create_function`) or Lua (`ui.exec`). Scripts call them as methods (`X2World:GetWorldList()`),
@@ -213,8 +233,8 @@ App::new()
   `ShowContent`, `ToggleContent`) and the `X2DialogManager` message boxes (`SetHandler`,
   `RequestDefaultDialog`, `RequestNoticeDialog`, `OnOK`, `OnCancel`, `DeleteByOwnerWindow`;
   the step 3 confirm dialog matches `real_confirm_dialog.png` to a mean error of 2 of 255).
-  `X2Locale:LocalizeUiText(category, key)` returns the key until the app installs the game's
-  UI text table (the fake reads `ui_texts` from the game database).
+  `X2Locale:LocalizeUiText(category, key)` returns the key unless `UiConfig::ui_texts_db` is
+  set (below).
   `examples/fake/fake_game.lua` is a complete fake of what the login stages call, a good map of
   what the app has to provide; `docs/ui-api.md` (aa-lua) lists every call site.
 * `fire_event(name, args)` / `queue_event(name, args)` raise UI events (`args` is anything

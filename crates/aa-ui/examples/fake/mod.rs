@@ -1,7 +1,6 @@
 //! Fake game API for the examples: permissive `X2*` objects, native constants, UI texts from the
 //! game database, and a small scenario (3 servers). The real app registers real objects.
 
-use std::collections::HashMap;
 
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -190,40 +189,15 @@ pub fn worlds_from_args() -> Vec<FakeWorld> {
 }
 
 /// `(category, key) -> text` for a locale, from the server's copy of the game database.
-fn load_ui_texts(locale: &str) -> HashMap<(i64, String), String> {
-    let mut out = HashMap::new();
-    let path = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
-    let flags =
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let Ok(db) = rusqlite::Connection::open_with_flags(path, flags) else {
-        eprintln!("fake: cannot open {path}; UI texts will show their keys");
-        return out;
-    };
-    let col = match locale {
-        "ko" | "en_us" | "zh_cn" | "ja" | "ru" | "de" | "fr" => locale,
-        _ => "en_us",
-    };
-    let sql = format!(
-        "SELECT u.category_id, u.key, COALESCE(l.{col}, u.text) FROM ui_texts u \
-         LEFT JOIN localized_texts l ON l.tbl_name = 'ui_texts' AND l.tbl_column_name = 'text' AND l.idx = u.id"
-    );
-    if let Ok(mut st) = db.prepare(&sql) {
-        let rows = st.query_map([], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<String>>(2)?,
-            ))
-        });
-        if let Ok(rows) = rows {
-            for (cat, key, text) in rows.flatten() {
-                if let Some(t) = text {
-                    out.insert((cat, key), t);
-                }
-            }
-        }
+/// The game database the fakes read UI texts from (read-only).
+pub const GAME_DB: &str = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
+
+/// Toolkit settings of the examples: UI texts from [`GAME_DB`].
+pub fn config() -> aa_ui::UiConfig {
+    aa_ui::UiConfig {
+        ui_texts_db: Some(GAME_DB.into()),
+        ..Default::default()
     }
-    out
 }
 
 /// Install the fake game layer into a fresh runtime (before any script runs).
@@ -262,12 +236,6 @@ pub fn install_with(
     // Scenario data.
     let fake = lua.create_table().unwrap();
     fake.raw_set("locale", locale).unwrap();
-    let texts = load_ui_texts(locale);
-    eprintln!("fake: {} UI texts", texts.len());
-    let ui_text = lua
-        .create_function(move |_, (cat, key): (i64, String)| Ok(texts.get(&(cat, key)).cloned()))
-        .unwrap();
-    fake.raw_set("ui_text", ui_text).unwrap();
     let list = lua.create_table().unwrap();
     for (i, w) in worlds.iter().enumerate() {
         let t = lua.create_table().unwrap();

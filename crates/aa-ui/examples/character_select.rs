@@ -17,7 +17,7 @@ fn main() {
     App::new()
         .add_plugins(aa_dev::default_plugins("aa-ui: character select"))
         .add_plugins(aa_dev::DevPlugin)
-        .add_plugins(aa_ui::UiPlugin::default())
+        .add_plugins(aa_ui::UiPlugin { config: Some(fake::config()) })
         .insert_resource(aa_ui::UiSetup::new(move |ui| {
             let worlds = fake::worlds_from_args();
             let chars = fake::characters_from_args();
