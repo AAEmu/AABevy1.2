@@ -870,10 +870,38 @@ pub mod stance {
 /// Movement flags (`MoveTypeFlags`).
 pub mod move_flags {
     pub const MOVING: u8 = 0x02;
+    /// "Braking": the last packet of a movement, or a unit standing still.
     pub const STOPPING: u8 = 0x04;
     pub const IN_COMBAT: u8 = 0x08;
     pub const HAS_SC_TYPE_AND_PHASE: u8 = 0x10;
+    /// `Moving | Stopping`: the flags of a jump.
+    pub const JUMPING: u8 = MOVING | STOPPING;
 }
+
+/// Actor flags of a unit movement (`MoveTypeActorFlags`).
+pub mod actor_flags {
+    /// Feet on terrain or a static collider.
+    pub const STANDING_ON_SOLID: u8 = 0x04;
+    /// In the air after a jump.
+    pub const JUMPING: u8 = 0x10;
+    /// Standing on a ship, vehicle or doodad; a block naming the object follows (not modelled).
+    pub const STANDING_ON_OBJECT: u8 = 0x20;
+    /// Hanging from an object; climb data follows (not modelled).
+    pub const HANGING_FROM_OBJECT: u8 = 0x40;
+    /// A `u16` fall velocity follows.
+    pub const FALL_VELOCITY: u8 = 0x80;
+}
+
+/// Alertness byte of a unit movement (`MoveTypeAlertness`).
+pub mod alertness {
+    pub const IDLE: u8 = 0;
+    pub const ALERT: u8 = 1;
+    pub const COMBAT: u8 = 2;
+}
+
+/// Wire units of a fall velocity per m/s (the server maps 32000 to the fatal 63.25 m/s). A fall is
+/// reported once, in the movement packet of the landing; the server ignores anything under 20 m/s.
+pub const FALL_VELOCITY_PER_MPS: f32 = 32000.0 / 63.25;
 
 /// A unit movement: what `CSMoveUnit` sends and `SCOneUnitMovement` broadcasts.
 #[derive(Clone, Debug, PartialEq)]
@@ -893,8 +921,13 @@ pub struct Movement {
     pub tilt: [i8; 2],
     pub delta_movement: [i8; 3],
     pub stance: u8,
+    /// [`alertness`] byte.
     pub alertness: u8,
+    /// [`actor_flags`] byte.
     pub actor_flags: u8,
+    /// Fall velocity in wire units ([`FALL_VELOCITY_PER_MPS`]); sent when `actor_flags` has
+    /// [`actor_flags::FALL_VELOCITY`].
+    pub fall_vel: u16,
 }
 
 impl Movement {
@@ -911,7 +944,8 @@ impl Movement {
             delta_movement: [0; 3],
             stance: stance::RELAXED,
             alertness: 0,
-            actor_flags: 0,
+            actor_flags: actor_flags::STANDING_ON_SOLID,
+            fall_vel: 0,
         }
     }
 
@@ -922,6 +956,8 @@ impl Movement {
 
     /// Body after the object id: type byte and `MoveType.Write`.
     pub fn write(&self, w: &mut Writer) {
+        // The supporting-object and climbing blocks are not modelled: never announce them.
+        let af = self.actor_flags & !(actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT);
         w.u8(self.move_type).u32(self.time).u8(self.flags);
         if self.flags & move_flags::HAS_SC_TYPE_AND_PHASE != 0 {
             w.u32(0).u8(0);
@@ -938,7 +974,10 @@ impl Movement {
             .i8(self.delta_movement[2])
             .u8(self.stance)
             .u8(self.alertness)
-            .u8(self.actor_flags);
+            .u8(af);
+        if af & actor_flags::FALL_VELOCITY != 0 {
+            w.u16(self.fall_vel);
+        }
     }
 
     /// Reads the type byte and `MoveType.Write`. Unit movements are decoded in full; vehicle,
@@ -964,6 +1003,7 @@ impl Movement {
                 stance: 0,
                 alertness: 0,
                 actor_flags: 0,
+                fall_vel: 0,
             });
         }
         let pos = r.position()?;
@@ -980,6 +1020,7 @@ impl Movement {
             stance: 0,
             alertness: 0,
             actor_flags: 0,
+            fall_vel: 0,
         };
         if move_type == 1 || move_type == 0 {
             m.tilt = [r.i8()?, r.i8()?];
@@ -988,7 +1029,10 @@ impl Movement {
             m.stance = r.u8()?;
             m.alertness = r.u8()?;
             m.actor_flags = r.u8()?;
-            // Optional blocks the actor flags announce are not needed here.
+            if m.actor_flags & actor_flags::FALL_VELOCITY != 0 {
+                m.fall_vel = r.u16()?;
+            }
+            // The supporting-object and climbing blocks that follow are not needed here.
         }
         Ok(m)
     }
@@ -1389,11 +1433,12 @@ mod tests {
         m.write(&mut w);
         let bytes = w.finish();
         // bc, type 1, time, flags 0x02, 9 position bytes, 3 x i16 velocity, 6 x i8, stance 1,
-        // alertness 0, actor flags 0.
+        // alertness 0, actor flags 0x04 (standing on solid ground).
         assert_eq!(bytes.len(), 3 + 1 + 4 + 1 + 9 + 6 + 6 + 3);
         assert_eq!(&bytes[..3], &[2, 1, 0]);
         assert_eq!(&bytes[3..9], &[1, 0xBC, 0x02, 0, 0, 0x02]);
         assert_eq!(bytes[bytes.len() - 3], 1);
+        assert_eq!(bytes[bytes.len() - 1], actor_flags::STANDING_ON_SOLID);
 
         let mut r = Reader::new(&bytes);
         assert_eq!(r.bc().unwrap(), 0x102);
@@ -1402,6 +1447,35 @@ mod tests {
         assert_eq!(back.time, 700);
         assert!((back.pos.x - 100.0).abs() < 0.01);
         assert_eq!(back.stance, stance::RELAXED);
+    }
+
+    #[test]
+    fn movement_state_bytes_follow_the_server_layout() {
+        // `UnitMove.Read`: ... delta movement x3, stance, alertness, actor flags, then `fallVel`
+        // (u16) when actor flag 0x80 is set.
+        let mut m = Movement::unit(Pos::new(10.0, 20.0, 30.0), 0.0, 5);
+        m.delta_movement = [-127, 127, 3];
+        m.alertness = alertness::COMBAT;
+        m.actor_flags = actor_flags::STANDING_ON_SOLID | actor_flags::FALL_VELOCITY;
+        m.fall_vel = 0x1234;
+        let mut w = Writer::new();
+        m.write(&mut w);
+        let bytes = w.finish();
+        let tail = &bytes[bytes.len() - 8..];
+        assert_eq!(tail, &[0x81, 127, 3, stance::RELAXED, 2, 0x84, 0x34, 0x12]);
+        let back = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(back.delta_movement, [-127, 127, 3]);
+        assert_eq!((back.alertness, back.fall_vel), (2, 0x1234));
+        assert_eq!(back.actor_flags, 0x84);
+
+        // The fall velocity block is only written when its flag is set, and the object / climb
+        // blocks (not modelled) are never announced.
+        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        let mut w = Writer::new();
+        m.write(&mut w);
+        let bytes = w.finish();
+        assert_eq!(*bytes.last().unwrap(), actor_flags::JUMPING);
+        assert_eq!(Movement::read(&mut Reader::new(&bytes)).unwrap().fall_vel, 0);
     }
 
     #[test]
