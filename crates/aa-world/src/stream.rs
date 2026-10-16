@@ -25,6 +25,7 @@ use crate::heightmap::CellHeights;
 use crate::terrain::{
     LOD_COUNT, PATCH_UNITS, PATCHES, build_patch_mesh, cover_image, lod_for_distance,
 };
+use crate::terrain_layers::{CellSurfaces, LayerLibrary, TerrainLayers, TerrainMaterial};
 use crate::world::{World, cell_dir};
 
 /// Plugin configuration (also a resource, adjustable at run time).
@@ -70,9 +71,12 @@ pub struct WorldConfig {
     pub ambient_scale: f32,
     /// Fog visibility distance (m) at the reference fog density.
     pub fog_visibility: f32,
-    /// Linear colour factor on the terrain's cover texture. The engine multiplies the colour map with detail
-    /// layers and a filmic curve we do not reproduce; this brings the result to the real client's brightness.
+    /// Linear colour factor on the decoded terrain colour (cover colour + detail layers). The engine's
+    /// exposure and film curve are not reproduced; this brings the ground to the brightness of the real
+    /// client (calibrated on `reference/ingame/spawn/real.png`, sunlit rock and hill grass).
     pub terrain_tint: Vec3,
+    /// Blend the surface type detail layers (grass, dirt, rock, ... with normal maps) over the cover colour.
+    pub terrain_detail: bool,
 }
 
 impl WorldConfig {
@@ -98,7 +102,8 @@ impl WorldConfig {
             sun_lux_scale: 1700.0,
             ambient_scale: 1700.0,
             fog_visibility: 2500.0,
-            terrain_tint: Vec3::new(0.3, 0.32, 0.45),
+            terrain_tint: Vec3::new(1.2, 1.2, 1.3),
+            terrain_detail: true,
         }
     }
 }
@@ -179,6 +184,8 @@ impl Plugin for AaWorldPlugin {
                     .chain(),
             );
         crate::sky::build(app);
+        crate::terrain_layers::build(app, &self.config);
+        crate::terrain_query::build(app, &self.config);
     }
 }
 
@@ -194,6 +201,8 @@ struct LoadedCell {
 struct CellLoad {
     heights: Arc<CellHeights>,
     cover: Option<crate::cover::CoverAtlas>,
+    /// Surface map and layer table for the terrain material.
+    surfaces: CellSurfaces,
     /// `(patch index, lod, mesh)` for the 16 patches.
     meshes: Vec<(usize, usize, Mesh)>,
 }
@@ -257,10 +266,11 @@ fn cell_distance(p: Vec3, x: i32, y: i32) -> f32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn stream_cells(
+pub(crate) fn stream_cells(
     mut commands: Commands,
     cfg: Res<WorldConfig>,
     info: Res<WorldInfo>,
+    layers: Res<TerrainLayers>,
     mut streamer: ResMut<Streamer>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
@@ -281,10 +291,12 @@ fn stream_cells(
         }
     }
 
-    // load: the closest wanted cells first
-    if streamer.loading.len() >= cfg.max_loads {
+    // load: the closest wanted cells first (after the terrain layers, which the cells' materials need)
+    if streamer.loading.len() >= cfg.max_loads || layers.is_loading() {
         return;
     }
+    let library = layers.library();
+    let tint = cfg.terrain_tint;
     let r = (cfg.load_radius / CELL_SIZE).ceil() as i32 + 1;
     let (cx, cy) = ((p.x / CELL_SIZE).floor() as i32, (p.y / CELL_SIZE).floor() as i32);
     let mut wanted: Vec<(f32, (i32, i32))> = Vec::new();
@@ -316,15 +328,22 @@ fn stream_cells(
         }
         streamer.loading.insert(c);
         let tx = streamer.tx.clone();
+        let library = library.clone();
         pool.spawn(async move {
-            let _ = tx.send((c, load_cell(&dir, c, p_bevy)));
+            let _ = tx.send((c, load_cell(&dir, c, p_bevy, library.as_deref(), tint)));
         })
         .detach();
     }
 }
 
 /// Background work: decode terrain files and build the patch meshes. `None` when the cell is unusable.
-fn load_cell(dir: &str, cell: (i32, i32), focus: Vec3) -> Option<CellLoad> {
+fn load_cell(
+    dir: &str,
+    cell: (i32, i32),
+    focus: Vec3,
+    layers: Option<&LayerLibrary>,
+    tint: Vec3,
+) -> Option<CellLoad> {
     let pak = aa_pak::Pak::global();
     let hm = pak.read(&format!("{dir}/client/terrain/heightmap.dat")).ok()?;
     let heights = match CellHeights::parse(&hm) {
@@ -349,7 +368,8 @@ fn load_cell(dir: &str, cell: (i32, i32), focus: Vec3) -> Option<CellLoad> {
         let lod = lod_for_distance(distance_to_box(focus, min, max), None);
         meshes.push((index, lod, build_patch_mesh(&heights, index % PATCHES, index / PATCHES, lod)));
     }
-    Some(CellLoad { heights, cover, meshes })
+    let surfaces = CellSurfaces::new(layers, cell, &heights.surface, tint);
+    Some(CellLoad { heights, cover, surfaces, meshes })
 }
 
 /// Bevy-space bounding box of patch `index` (`py * 4 + px` order: `index % 4` = patch x).
@@ -381,7 +401,8 @@ fn receive_cells(
     mut streamer: ResMut<Streamer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut terrain_materials: ResMut<Assets<TerrainMaterial>>,
+    layers: Res<TerrainLayers>,
 ) {
     for _ in 0..cfg.spawns_per_frame {
         let msg = streamer.rx.lock().unwrap().try_recv();
@@ -394,13 +415,9 @@ fn receive_cells(
         if streamer.cells.contains_key(&cell) {
             continue;
         }
-        let material = materials.add(StandardMaterial {
-            base_color_texture: load.cover.map(|atlas| images.add(cover_image(atlas))),
-            base_color: Color::linear_rgb(cfg.terrain_tint.x, cfg.terrain_tint.y, cfg.terrain_tint.z),
-            perceptual_roughness: 1.0,
-            reflectance: 0.05,
-            ..default()
-        });
+        let cover = load.cover.map(|atlas| images.add(cover_image(atlas)));
+        let Some(material) = layers.material(cover, load.surfaces, &mut images) else { continue };
+        let material = terrain_materials.add(material);
         let origin = cry_to_bevy(cell_origin(cell.0, cell.1));
         let size = PATCH_UNITS as f32 * 2.0;
         let root = commands

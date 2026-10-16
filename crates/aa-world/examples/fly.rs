@@ -26,7 +26,7 @@
 //! * `--terrain-tint r,g,b`, `--fog-visibility <m>`, `--tree-distance <m>`
 //! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
 //!                         time statistics (average, 1 % low, worst frame, frames over 20 ms), then exit
-//! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`
+//! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
 
@@ -228,6 +228,7 @@ fn main() {
     plugin.config.vegetation = !flag("--no-objects");
     plugin.config.shadows = !flag("--no-shadows");
     plugin.config.environment = !flag("--no-env");
+    plugin.config.terrain_detail = !flag("--no-terrain-detail");
     let size = aa_dev::DevArgs::from_env().size;
     let window = WindowPlugin {
         primary_window: Some(Window {

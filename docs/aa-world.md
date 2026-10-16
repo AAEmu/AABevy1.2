@@ -11,8 +11,8 @@ cargo run -p aa-world --example fly -- --world login2      # camera of cinemas/0
 cargo test -p aa-world
 ```
 
-Status: terrain, brushes, vegetation, water volumes, ocean, sky / sun / ambient / fog and streaming work and are committed. Gaps are listed
-at the end.
+Status: terrain (cover colour + detail layers with normal maps), brushes, vegetation, water volumes, ocean, sky / sun / ambient / fog and
+streaming work and are committed. Gaps are listed at the end.
 
 ## 1. Coordinates
 
@@ -54,8 +54,8 @@ Header (version, flags, chunk size, 4096 units, unit 2 m, sector 64 m, `zRatio`,
 or 17 for flat sectors: 6051 such leaves exist, resampled bilinearly). A sample is `height << 4 | surfaceType`; the height is
 `offset + (raw & 0xFFF0) * range` per node (node versions < 7, all of 1.2). Node boxes use the engine's 8 x 8 cell window coordinates, so
 positions are taken relative to the root box minimum. `CellHeights` has `heights` (`iy * 513 + ix`), `surface` (the 4 bit surface type per
-sample, an index into the `SurfaceTypes` of `leveldata.xml`; not rendered yet), `ocean_level`, `min_z`, `max_z`, bilinear `sample`,
-`normal`.
+sample, an index into the `SurfaceTypes` of `leveldata.xml`, see "client/leveldata.xml" below), `ocean_level`, `min_z`, `max_z`, bilinear
+`sample`, `normal`.
 
 ### terrain/cover.ctc
 
@@ -65,7 +65,41 @@ is followed by its four children `x0y0 x1y0 x0y1 x1y1`, so `nodeCount = 1 + 4 x 
 (0.5 m/px at the finest) for most, 2 or 3 for ocean cells, and coastal cells only have fine tiles on the land. Level `n` is mip
 `maxLevel - n` of the cell, so `Cover::atlas` just rearranges the blocks into one BC texture with a complete mip chain and never decodes a
 pixel; a missing fine tile is re-encoded from its parent (BC1 bilinear upsample + encoder). Image rows run along world **X**, columns along
-**Y**: sample with `uv = (y / 1024, x / 1024)`.
+**Y**: sample with `uv = (y / 1024, x / 1024)`. All 1205 cells have exactly one layer, BC1, `sunShadowIntensity` 1.
+
+**The texels are not colours.** The engine reads them with `tex2DTerrain` (`shaders/hwscripts/cryfx/common.cfi`, the shader sources are in
+the pak): after the bilinear fetch, `r' = (r + 0.001012) * 31 / 30`, `g' = g`, `b' = 1 - r' - g'` is a chromaticity (`r + g + b = 1`), the
+blue channel `B` of the texel the brightness, and `colour = saturate(chroma * 3 * B)` in gamma space (`pow(., 2.2)` for lighting). Read as
+RGB the picture is a yellow green with blue seas and no grey rock (this crate did that first, with `terrain_tint` as a fudge). The image
+must therefore be a non-sRGB texture and the shader decodes it (`terrain_layers.wesl`).
+
+### client/leveldata.xml and the terrain layer materials
+
+`leveldata.xml` is Sandbox's level data. `<SurfaceTypes>` lists 21 `<SurfaceType Name, DetailMaterial, DetailScaleX, DetailScaleY, ProjAxis="Z",
+Id>` (optional `<VegetationGroup Id>` children). The 4 bit surface nibble of `heightmap.dat` is the **position** in this list (only the first 16
+can be referenced; unused slots repeat `__default__` = `beach_white_sand_dry`), `Id` is the global surface type number (up to about 900).
+Checked on the spawn: cell `015_015` nibble 4 (`tr_field_dirt_001c`) is exactly the flat dirt square of the spawn (`terrain_height` 126.2),
+nibble 1 / 3 (rock) have mean slopes of 37 / 45 degrees. Ocean cells are all nibble 0 (`tr_snow_field_ground_708a`, the seabed). 306 different
+`DetailMaterial`s are used by the 1205 cells (`materials/aa_terrain/{field,canyon,mix,wasteland,wet,...}`, a few `materials/terrain/`), all
+with the shader `Terrain.Layer`.
+
+A layer `.mtl` is either one material (only the ground, z, projection exists) or **three sub-materials x, y, z** (84 of the 304: rock,
+cliffs; the same textures with a different `TexMod` tiling, e.g. 0.05 for x / y and 0.14 for z). Textures: `Diffuse` (BC1, 512 px, some 1024),
+`Bumpmap` or `Normalmap` (`_ddn`: ATI2 = BC5, 512 px, some 1024 or 256; 22 are DXT1 with plain RGB = xyz, same orientation as
+the BC5 ones: checked by the correlation with the diffuse luma gradient), `Specular` (`_sp`, BC1 256 px), `Detail` (a second normal map, mostly
+BC5 256 or 512 px). The DDS files stop at the 4 x 4 mip. `PublicParams`: `DetailTextureStrength`, `DetailBumpScale`, `DetailBumpTillingU / V`;
+`GenMask` bit `0x4` bump map, `0x8000` detail bump (`shaders/terrain.ext`). The layer's uv is `world * DetailScale * TexMod tile`.
+
+What the engine does with them (`terrain.cfx`, `fraglib.cfi`; verified on the spawn capture): the base pass draws the decoded cover colour; one
+alpha blended pass per surface type follows, with the weight `sqrt(w * axis weight * (1 - (d / 1024)^4))` where `w` is 1 at a vertex of that
+type, 0 at one of another type (linear over the triangle), and the axis weight selects the sub-material by the dominant axis of the normal
+(a single material is only drawn on the z axis, i.e. below about 45 degrees; steeper ground shows the cover colour alone). The layer colour is
+`pow(saturate(cover + (diffuse - 0.5) * DetailTextureStrength), 2.2)`, lit with the layer's normal map (ATI2: the first block is Y, the second X;
+`xy` = `2 * texel - 1`, z reconstructed, tangent = direction of growing u, bitangent = direction of growing v, i.e. world x / y for the z axis,
+y / z for x, x / z for y) plus the `Detail` map sampled at `DetailBumpTilling x uv` and added to the xy with `DetailBumpScale`. Checked: the
+decoded normal correlates 0.5 with the gradient of the diffuse luma (dark = low) for this swap and 0 for the other one.
+
+`materials.dat` / `material_list.dat` of a cell list object materials (3 entries in `015_015`: `lake_tank`, `cliff_rock_a_med`, ...), not terrain.
 
 ### client/brush.dat, statobjs.dat, material_list.dat
 
@@ -139,9 +173,25 @@ A cell is 4 x 4 patches of 256 m. A patch is a regular grid over the 2 m samples
 samples = 2 to 32 m), with a skirt (depth 3 steps) around its border so neighbours of different detail never show cracks. Normals always come
 from the full resolution heights (over the LOD step) so lighting does not pop. Level of detail by distance to the patch box: 350 / 750 /
 1500 / 2600 m with 12 % hysteresis; mesh rebuilds run on the task pool. One BC1 / BC3 texture per cell (`cover_image`, mip chain from the
-quadtree, anisotropy 8), `uv = (y / 1024, x / 1024)`. `WorldConfig::terrain_tint` (linear 0.30, 0.32, 0.45) scales the cover colour: the engine
-multiplies it with detail layers and a filmic curve that are not reproduced, this brings the picture to the real client's brightness
-(calibrated on `reference/ingame/spawn/real.png`).
+quadtree, anisotropy 8, **non-sRGB**: see the cover texel encoding), `uv = (y / 1024, x / 1024)`.
+
+**Detail layers** (`terrain_layers.rs`, `terrain_layers.wesl`): one `TerrainMaterial` per cell = `StandardMaterial` (cover texel as its base colour
+texture, lighting, shadows, fog) extended with a fragment shader that decodes the cover colour and blends the surface type layers in gamma
+space like the engine (see "client/leveldata.xml"). `LayerLibrary::build` runs once per world on a task (0.3 s for main_world, cells wait for it):
+it reads all 1205 `leveldata.xml`, the 315 `.mtl` and copies the DDS blocks of 240 diffuse (BC1, 512 px), 234 normal (BC5, 512 px) and 71 detail
+normal (BC5, 256 px) maps, mip chains down to 4 px, into three texture arrays (130 MB of VRAM; DXT1 normal maps are transcoded to BC5 (two
+BC4 blocks from the decoded red and green), normal maps that are only 256 px go to the detail array (slot + 1000 in the table), other sizes
+or formats are skipped, and a texture array may have 256 layers, so 255 per array at most; larger sources use their lower mips). Per cell, the background load adds
+an `R8Uint` image of the 513 x 513 surface nibbles and a 3 KB uniform table: for each of the 16 surface types and 3 projections the array
+slots, the uv scale, a uv offset (`fract(cell origin * scale)`, so that tiles continue across cell borders, unit tested), the detail strength
+and the detail map's tiling. The shader reads the four surrounding nibbles (bilinear weights, equal types merged), the dominant axis of the
+normal gives the projection weights, and each layer is sampled with explicit gradients (`textureSampleGrad`, the loops are not uniform
+control flow): up to about 4 types x 1 to 2 axes x 3 fetches, usually 3. No per-frame CPU work, no extra draw calls (the draw count is the
+cover texture's, one material per cell). `WorldConfig::terrain_detail = false` (`fly --no-terrain-detail`) shades the decoded cover colour only.
+`WorldConfig::terrain_tint` (linear 1.2, 1.2, 1.3, was 0.30 / 0.32 / 0.45 for the wrongly read cover) scales the result: the engine's exposure and
+film curve are not reproduced, this brings the ground to the real client's brightness (sunlit rock and hill grass of
+`reference/ingame/spawn/real.png`; the real picture's cooler grade, shadow depth and SSAO are not reproduced). Re-tune it when the lighting
+calibration (`sun_lux_scale`, `ambient_scale`) changes.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
@@ -189,16 +239,56 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 * `AaWorldPlugin { config: WorldConfig }`; `WorldConfig` fields: `world`, `load_radius`, `unload_radius`, `max_loads`, `spawns_per_frame`,
   `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `tree_distance`, `water_distance`, `object_budget_ms`,
   `environment`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1700), `ambient_scale`
-  (1700), `fog_visibility`, `terrain_tint`.
+  (1700), `fog_visibility`, `terrain_tint`, `terrain_detail`.
 * Resources: `WorldClock` (time of day: `hour`, `speed` in game hours per second, `zone` to force one), `Environment` (the applied sample),
   `WorldInfo(Arc<World>)`, `Streamer::loaded_cells()`, `ObjectState` (`stats`, `water_material()`), `WorldTimings` (per frame main thread ms
-  of the streaming systems). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `SunDisc`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
+  of the streaming systems), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
+  `TerrainQuery` (ground queries, see below). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `SunDisc`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
 * Parsers (no Bevy world needed, all tested against the pak): `heightmap::CellHeights::parse`, `cover::Cover::parse` (+ `atlas`),
   `placement::{parse_brush_dat, parse_vegetation_dat, parse_vegetation_sector, parse_object_dat, parse_water, load_cell_objects}`,
   `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay, Lighting, sun_direction}`,
-  `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, triangulate}`.
+  `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, triangulate}`,
+  `terrain_layers::{LayerLibrary::build, parse_surface_types, TerrainMaterial}`.
+
+### Ground queries (`terrain_query.rs`)
+
+`aa_world::TerrainQuery` answers "where is the ground" for gameplay code (the player controller of `aa-client`, which keeps its own
+`heightmap.dat` cache today, should use it instead). It is independent of render streaming: it reads the `heightmap.dat` files itself, needs
+no window and no `AaWorldPlugin`, and is a clonable `Arc` handle (`&self` methods, `Send + Sync`, usable from tasks) and a `Resource`
+(`AaWorldPlugin` inserts one for its world unless the app has one: `Res<TerrainQuery>`).
+
+```rust
+let terrain = TerrainQuery::new("main_world");                    // or Res<TerrainQuery>
+terrain.height_at(x, y)         // Option<f32>   game metres: x east, y north, as the server sends them
+terrain.ground_at(x, y)         // Option<Ground { height, normal }>, one cell lookup (normal: unit, up = +Z)
+terrain.normal_at(x, y)         // Option<Vec3>   terrain.slope_at(x, y)  // Option<f32> radians, 0 flat, pi / 2 wall
+terrain.prefetch(x, y, 600.0)   // load the cells around a position on a background thread (call when entering a cell)
+terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. for surface type nibbles
+```
+
+* The surface is the finest mesh the renderer draws (`CellHeights::mesh_height` / `mesh_normal`: 2 m quads split from the south west to the north
+  east corner, linear over the triangles), so feet and ground agree where you look. It differs from a bilinear interpolation of the four
+  corners (what `CellHeights::sample` and the client's old cache return) by up to 0.8 m on steep faces and a few cm on meadows. `normal_at` is
+  the face normal of that triangle, not the smoothed shading normal.
+* `None` outside the map: negative or non-finite coordinates, a cell that does not exist or fails to parse (`warn!` for the latter).
+* Cost: a cell is loaded on first use (2.6 ms: pak read + parse; the very first query of a process also opens the pak, 0.3 s if nothing else
+  did), then a query is about 0.1 microseconds. At most `TerrainQuery::DEFAULT_CACHE_CELLS` (48, 1.3 MB each) parsed cells are kept (least
+  recently used dropped; `with_capacity`); concurrent first queries of a cell load it once. Missing cells are remembered as `None`.
+* Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (`World::ocean_level`, `placement::parse_water`),
+  and the surface type (the nibble is in `CellHeights::surface`, its meaning in the cell's `leveldata.xml`, see `terrain_layers::parse_surface_types`).
+
+**Collision with brushes (buildings, rocks, bridges): how it would be exposed** (not implemented). The pieces exist: `placement::parse_brush_dat`
+gives every brush of a cell (model, transform; 162k in the world), `aa-cry` parses the `.cgf` models and marks the physics proxy nodes
+(`proxy*`, `$collision`, `$physics_proxy`, `NodeKind::Proxy`, the `MeshPhysicsData` chunk; materials with `COLLISION_PROXY` / `RAYCAST_PROXY`
+flags) that the renderer drops, falling back to the lowest level of detail of the visible mesh for models without a proxy. A
+`BrushColliders` next to `TerrainQuery` would build, per cell on a task, a static triangle soup in game space (proxy triangles transformed by the
+brush matrices, only brushes whose model has a proxy or a walkable surface), indexed by a 16 m grid, and drop it with the cell; then
+`TerrainQuery::ground_below(x, y, z, step_up) -> Option<Ground>` returns the highest surface not above `z + step_up` (the terrain triangle or a
+brush triangle whose normal is walkable), plus `raycast(origin, dir, max) -> Option<Hit>` and a capsule sweep for walls. The server stays
+authoritative for positions; the client only needs this for standing on stairs and bridges and for not walking through walls. Cost would be one
+CGF proxy load per distinct model (cached by `aa-cry`) and a few hundred thousand triangles near the player.
 
 ### Example `fly`
 
@@ -214,21 +304,25 @@ window is forced to 1 physical pixel per pixel):
 | `--cinema <name> [--t s] [--play]` | camera of `cinemas/<name>.xml` (default for login2: `01_world_select_e1`) |
 | `--hour h` `--speed h/s` `--zone id` | time of day |
 | `--sun-scale` `--ambient-scale` `--terrain-tint r,g,b` `--fog-visibility m` `--tree-distance m` | calibration |
-| `--radius m` `--no-objects` `--no-shadows` `--no-env` | |
+| `--radius m` `--no-objects` `--no-shadows` `--no-env` `--no-terrain-detail` | |
 | `--bench s [--bench-speed m/s]` | fly forward and print frame statistics, scene sizes and slow frames, then exit |
 
 WASD / Space / Ctrl fly (Shift fast), right mouse button looks.
 
 ### Tests
 
-`cargo test -p aa-world`: 23 unit tests (coordinates, heightmap / cover / brush / vegetation / object / water parsers against the real pak
-incl. the spawn pond, BC1 round trip, env splines, sun path, cinema cameras, triangulation; they skip when the pak is missing).
+`cargo test -p aa-world`: 36 unit tests (coordinates, heightmap / cover / brush / vegetation / object / water parsers against the real pak
+incl. the spawn pond, BC1 round trip, env splines, sun path, cinema cameras, triangulation, the terrain layer library of the spawn cells and
+the uv continuity of layers across cell borders, the BC1 to BC5 normal map transcoder, ground queries against the grid, the rendered
+triangulation, cell borders, threads, the cache bound and prefetch; they skip when the pak is missing).
 `cargo test -p aa-world --test all_cells -- --ignored --nocapture` parses every cell of both worlds (1205 + 3 cells, 162k brushes,
 1.75 M vegetation instances, 3181 water volumes, about 5 s) and builds every cover atlas and water mesh.
 
 Screenshots: `shots/aa-world/{nuian,elf,hariharan,ferre}_start.png` (`fly --spawn <race>`), `ingame_h12d.png` (the real in-game camera of
 `reference/ingame/spawn`, compare with its `real.png`), `coast.png` (ocean at level 100), `login2_*.png` (cinema camera, real character
-select / create cameras).
+select / create cameras). Terrain detail: `shots/terrain/spawn_before.png` (cover colour only, read as RGB) and `spawn.png` (layers) are
+the camera of `reference/ingame/spawn` (`fly --camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0`, compare with
+`real.png`), `close1.png` (ground level, no objects), `coast.png`, `{elf,hariharan,ferre}_start.png`, `login2.png`.
 
 ## 5. Performance
 
@@ -244,6 +338,13 @@ cells.
 | everything, flying 150 m/s (540 km/h) | 147 | 41 | 45 ms |
 | elf spawn (dense forest, 12.8k part entities, 475 sectors), standing | 120 | 82 | 18 ms |
 
+Terrain detail layers (`terrain_layers`), alternating A / B runs of the same machine state, `fly --spawn nuian --bench 15 --bench-speed 0
+--no-objects --no-shadows` (terrain, water and sky only, standing; 3 runs each): cover colour only 195 / 195 / 209 fps (5.0 ms), with the
+layers 185 / 178 / 199 fps (5.35 ms), i.e. the layer shader costs 0.35 ms per frame at 1080p (-6 %). The full scene (`--bench 30`, flying 80 m/s
+from the spawn, shadows and objects on, 4 runs each) went from 132 / 120 / 120 / 129 to 142 / 89 / 115 / 121 fps (-6 % on average; the 89 was a
+run while another session loaded the GPU). Start up: the layer library takes 0.3 s on a task (cells wait for it) and 130 MB of VRAM (240 + 234 + 71
+BC textures); each cell adds a 263 KB surface map and a 3 KB table, no per frame CPU work, and the draw count is unchanged (one material per cell).
+
 The numbers move by a factor of two with the load of the machine: while another session's real client rendered on the same GPU the same scene
 ran at 55 to 65 fps. Main thread cost of the streaming systems in slow frames (`WorldTimings`) is below 6 ms (`objects`); the rest of a slow
 frame is render world work (uploading 3 MB cover atlases, extraction of the part entities). A release build of this crate would cut the CPU
@@ -251,8 +352,12 @@ share further.
 
 ## 6. Known gaps
 
-* Terrain detail: only the baked `cover.ctc` colour (up to 0.5 m/px) is used, so ground is soft at close range. The surface type nibble
-  per sample and the `DetailMaterial` of each `SurfaceType` in `leveldata.xml` are available; a splat shader is not written.
+* Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
+  cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO); the layers have no specular /
+  gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
+  has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
+  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
+  (types 13 and 9, `aa_terrain/roads`, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure.
 * Ponds are one flat, semi-opaque surface: no depth based absorption (shallow beds show through a little), no waves, no flow along rivers,
   no foam. The sea is a flat blended plane at `oceanLevel`.
 * Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
