@@ -3,3 +3,4 @@
 /data/*.tsv
 /shots/
 *.log
+/tools/*.exe
