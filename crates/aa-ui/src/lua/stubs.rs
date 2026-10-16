@@ -2032,26 +2032,14 @@ pub(crate) const KNOWN_METHODS: &[&str] = &[
 pub(crate) fn add_stubs(lua: &Lua, methods: &Table, kind: &str) -> mlua::Result<()> {
     for &name in KNOWN_METHODS {
         if methods.raw_get::<mlua::Value>(name)?.is_nil() {
-            let key = format!("{kind}:{name}");
-            methods.raw_set(
-                name,
-                lua.create_function(move |lua, _: MultiValue| {
-                    let mut u = ui(lua);
-                    let n = u.stub_calls.entry(key.clone()).or_insert(0);
-                    if *n == 0 {
-                        bevy::log::debug!("aa-ui: stub {key}");
-                    }
-                    *n += 1;
-                    Ok(())
-                })?,
-            )?;
+            methods.raw_set(name, stub(lua, format!("{kind}:{name}"))?)?;
         }
     }
     Ok(())
 }
 
 fn stub(lua: &Lua, key: String) -> mlua::Result<mlua::Function> {
-    lua.create_function(move |lua, _: MultiValue| {
+    let f = lua.create_function(move |lua, _: MultiValue| {
         let mut u = ui(lua);
         let n = u.stub_calls.entry(key.clone()).or_insert(0);
         if *n == 0 {
@@ -2059,7 +2047,48 @@ fn stub(lua: &Lua, key: String) -> mlua::Result<mlua::Function> {
         }
         *n += 1;
         Ok(())
-    })
+    })?;
+    mark_stub(lua, &f)?;
+    Ok(f)
+}
+
+/// Remember `f` as a stub (for [`coverage`]).
+fn mark_stub(lua: &Lua, f: &mlua::Function) -> mlua::Result<()> {
+    let set = match lua.named_registry_value::<Option<Table>>("aa_ui_stub_set")? {
+        Some(t) => t,
+        None => {
+            let t = lua.create_table()?;
+            lua.set_named_registry_value("aa_ui_stub_set", &t)?;
+            t
+        }
+    };
+    set.raw_set(f.clone(), true)
+}
+
+/// Per native class: (class, implemented natives, stubbed natives), sorted by class.
+pub fn coverage(lua: &Lua) -> mlua::Result<Vec<(String, usize, usize)>> {
+    let set: Option<Table> = lua.named_registry_value("aa_ui_stub_set")?;
+    let r = super::reg(lua);
+    let mut out = Vec::new();
+    for (class, mt) in &r.mt {
+        let Ok(methods) = mt.raw_get::<Table>("__index") else { continue };
+        let (mut native, mut stubbed) = (0, 0);
+        for pair in methods.pairs::<mlua::Value, mlua::Value>() {
+            let Ok((_, mlua::Value::Function(f))) = pair else { continue };
+            let is_stub = match &set {
+                Some(set) => set.raw_get::<Option<bool>>(f)?.unwrap_or(false),
+                None => false,
+            };
+            if is_stub {
+                stubbed += 1;
+            } else {
+                native += 1;
+            }
+        }
+        out.push((class.clone(), native, stubbed));
+    }
+    out.sort();
+    Ok(out)
 }
 
 /// Make `methods` exactly the native class's method set: unimplemented ones become stubs, and

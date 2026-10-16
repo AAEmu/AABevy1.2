@@ -200,8 +200,62 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         )?;
         g.raw_set("Script", script)?;
     }
+
+    // The toolkit's part of the game API: `X2Locale:GetLocale()` and the `ADDON` content
+    // registry. `ADDON` and `X2` are one native table in the client. The app adds the rest
+    // (`install_game_stub` returns these tables).
+    let locale = ui(lua).textures.locale.clone();
+    let x2locale = install_game_stub(lua, "X2Locale")?;
+    x2locale.raw_set(
+        "GetLocale",
+        lua.create_function(move |_, _: MultiValue| Ok(locale.clone()))?,
+    )?;
+    let addon = install_game_stub(lua, "ADDON")?;
+    if g.raw_get::<Value>("X2")?.is_nil() {
+        g.raw_set("X2", &addon)?;
+    }
+    lua.load(ADDON_LUA).set_name("@aa-ui/addon").exec()?;
     Ok(())
 }
+
+/// `ADDON` content registry (`UIC_*` categories): `RegisterContentWidget(cat, widget, showFn)`,
+/// `GetContent(cat)` (nil when nothing registered), `RegisterContentTriggerFunc(cat, fn)`,
+/// `ShowContent(cat, show)`, `ToggleContent(cat)`. `X2Locale:LocalizeUiText` defaults to the
+/// key until the app provides the UI text table.
+const ADDON_LUA: &str = r#"
+local contents, shows, triggers = {}, {}, {}
+function ADDON:RegisterContentWidget(cat, widget, show)
+  contents[cat] = widget
+  shows[cat] = show
+end
+function ADDON:GetContent(cat)
+  return contents[cat]
+end
+function ADDON:RegisterContentTriggerFunc(cat, fn)
+  triggers[cat] = fn
+end
+function ADDON:ShowContent(cat, show)
+  if shows[cat] then
+    shows[cat](show)
+  elseif contents[cat] then
+    contents[cat]:Show(show)
+  elseif triggers[cat] and show then
+    triggers[cat]()
+  end
+end
+function ADDON:ToggleContent(cat)
+  if triggers[cat] then
+    triggers[cat]()
+  elseif contents[cat] then
+    ADDON:ShowContent(cat, not contents[cat]:IsVisible())
+  end
+end
+function ADDON:ImportAPI() end
+function ADDON:ImportObject() end
+function X2Locale:LocalizeUiText(cat, key)
+  return tostring(key)
+end
+"#;
 
 /// Register a permissive stand-in for a game API object (`X2World`, `X2Unit`, ...): every method
 /// exists and returns nothing (logged once). The app replaces methods with real ones by setting

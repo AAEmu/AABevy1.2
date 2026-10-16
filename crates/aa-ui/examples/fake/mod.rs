@@ -396,8 +396,18 @@ pub fn scripted_input(
     }
 }
 
-/// Log script errors and the stubbed natives the screen called.
+/// Log script errors and the stubbed natives the screen called; `--coverage` also prints the
+/// per-class native coverage as a markdown table.
 pub fn report(ui: &UiRuntime, screen: &str) {
+    if std::env::args().any(|a| a == "--coverage") {
+        if let Ok(cov) = aa_ui::lua::coverage(&ui.lua) {
+            println!("| class | native | stub | listed |");
+            println!("|---|---|---|---|");
+            for (class, n, s) in cov {
+                println!("| `{class}` | {n} | {s} | {} |", n + s);
+            }
+        }
+    }
     let stubs = ui.stub_calls();
     info!(
         "{screen}: {} script errors, {} stubbed natives called",

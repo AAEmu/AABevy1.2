@@ -366,6 +366,7 @@ pub struct ButtonData {
     pub text_color: [Option<[f32; 4]>; 4],
     pub checked: bool,
     pub checked_bg: Option<Id>,
+    pub disabled_checked_bg: Option<Id>,
 }
 
 /// Native list control state.
@@ -415,6 +416,7 @@ pub struct Widget {
     pub slider: Option<SliderData>,
     pub folder: Option<crate::lua::folder::FolderData>,
     pub tab: Option<crate::lua::tab::TabData>,
+    pub edit: Option<crate::lua::edit::EditData>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -902,6 +904,7 @@ impl Widget {
             slider,
             folder: None,
             tab: None,
+            edit: None,
             modal: false,
             raise: 0,
         }

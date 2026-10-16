@@ -13,11 +13,12 @@
 pub mod classes;
 pub mod constants;
 mod drawable;
+pub mod edit;
 pub mod folder;
 mod globals;
 mod stubs;
 pub mod tab;
-mod widget;
+pub(crate) mod widget;
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -28,6 +29,7 @@ use crate::texture::TextureDb;
 use crate::tree::{Id, Tree, WidgetType};
 
 pub use globals::{install_game_stub, set_global_value};
+pub use stubs::coverage;
 
 /// Native state reachable from every Lua callback (stored as Lua app data).
 pub struct Ui {
@@ -49,6 +51,9 @@ pub struct Ui {
     /// Widget under the mouse, keyboard focus.
     pub hover: Option<Id>,
     pub focus: Option<Id>,
+    /// Caret blink state of the focused edit box and the time its phase started.
+    pub caret_visible: bool,
+    pub caret_t0: f64,
     pub cursor: (f32, f32),
     /// UI events raised from inside Lua (game API callbacks), delivered at the next tick like a
     /// server answer would be.
@@ -331,6 +336,7 @@ pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
 
 pub fn tick(lua: &Lua, dt_ms: f32) {
     tab::relayout_all(lua);
+    edit::tick(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
     for (name, args) in queued {
         fire_ui_event(lua, &name, args);
