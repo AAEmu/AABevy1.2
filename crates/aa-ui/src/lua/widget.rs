@@ -914,7 +914,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "UseDynamicContentState",
         "SetMsgToParent",
         "ApplyUIScale",
-        "SetTitleInset",
         "SetMaxTextLength",
         "SetNumberOnly",
         "SetLimitWidth",
@@ -931,6 +930,16 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     def("IsNowAnimation", method(lua, |lua, _, _| ret(lua, false))?)?;
     super::edit::focus_methods(lua, &m)?;
+    def(
+        "SetTitleInset",
+        method(lua, |lua, id, a| {
+            let inset = [a.f(1), a.f(2), a.f(3), a.f(4)];
+            if let Some(t) = ui(lua).tree.widget_mut(id).and_then(|w| w.title.as_mut()) {
+                t.inset = inset;
+            }
+            none()
+        })?,
+    )?;
     // `titleBar:SetTitleText(text)` (baselib windows) is the title setter under another name.
     let set_title: mlua::Function = m.raw_get("SetTitle")?;
     def("SetTitleText", set_title)?;
@@ -1117,21 +1126,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         super::diagram::methods(lua, &m)?;
     }
     if ty == "paintcolorpicker" {
-        // Colour picker: a spectrum and a luminance child the scripts decorate.
-        for (getter, field) in [("GetSpectrumWidget", "__spectrum"), ("GetLuminanceWidget", "__luminance")] {
-            def(getter, method(lua, move |lua, id, _| {
-                let this = super::object_table(lua, id)?.unwrap();
-                if let Some(t) = this.raw_get::<Option<Table>>(field)? {
-                    return ret(lua, t);
-                }
-                let child = create_child(lua, Some(id), "emptywidget", field, 0, false)?;
-                if let Some(cid) = value_id(lua, &Value::Table(child.clone())) {
-                    ui(lua).tree.get_mut(cid).shown = true;
-                }
-                this.raw_set(field, &child)?;
-                ret(lua, child)
-            })?)?;
-        }
+        super::picker::methods(lua, &m)?;
     }
 
     // --- slider ------------------------------------------------------------------------------

@@ -391,6 +391,34 @@ pub fn scripted_input(
                     warn!("fake: --lua: {e}");
                 }
             }
+            // `--type TEXT T`: typed into the focused edit box; `--key NAME T`: enter, escape,
+            // backspace, tab, left, right, home, end, delete.
+            "--type" | "--key" => {
+                let (Some(s), Some(at)) = (args.get(i + 1), num(2)) else {
+                    continue;
+                };
+                if t < at {
+                    continue;
+                }
+                done.push(i);
+                let key = match (a.as_str(), s.as_str()) {
+                    ("--type", _) => aa_ui::UiKey::Text(s.clone()),
+                    (_, "enter") => aa_ui::UiKey::Enter,
+                    (_, "escape") => aa_ui::UiKey::Escape,
+                    (_, "backspace") => aa_ui::UiKey::Backspace,
+                    (_, "delete") => aa_ui::UiKey::Delete,
+                    (_, "tab") => aa_ui::UiKey::Tab,
+                    (_, "left") => aa_ui::UiKey::Left,
+                    (_, "right") => aa_ui::UiKey::Right,
+                    (_, "home") => aa_ui::UiKey::Home,
+                    (_, "end") => aa_ui::UiKey::End,
+                    _ => continue,
+                };
+                if !rt.key(&key) {
+                    warn!("fake: {a} {s}: no widget has the keyboard focus");
+                }
+                info!("fake: {a} {s} -> focus {:?}", rt.focus());
+            }
             _ => {}
         }
     }

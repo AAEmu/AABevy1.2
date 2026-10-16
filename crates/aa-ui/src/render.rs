@@ -39,6 +39,8 @@ pub struct Quad {
     /// Free vertex positions (top-left, top-right, bottom-right, bottom-left order) instead of
     /// the `pos` rectangle: triangles of the circle diagram.
     pub corners: Option<[[f32; 2]; 4]>,
+    /// Per-vertex sRGB colours (same corner order) instead of `color`: gradients.
+    pub vcolors: Option<[[f32; 4]; 4]>,
 }
 
 /// Collect the quads of the whole tree in paint order.
@@ -86,6 +88,9 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         if let Some(dg) = w.diagram.as_ref() {
             diagram_quads(u, id, dg, alpha, scale, &mut out);
         }
+        if let Some(p) = w.picker.as_ref() {
+            picker_quads(u, p, alpha, scale, &mut out);
+        }
         // Widget text above background/artwork, below overlay.
         if let Some(t) = w.text.as_ref() {
             let edit = crate::lua::edit::is_edit(&w.ty);
@@ -112,17 +117,21 @@ pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
         if let Some(t) = w.title.as_ref() {
             if !t.text.is_empty() {
                 let r = u.tree.rect(id);
-                // Centred in the top 45 units (the baselib title bar height), 1 unit lower:
-                // the step 3 confirm dialog in reference/character_create matches to the pixel.
-                let rect = Rect {
-                    x: r.x,
-                    y: r.y + 1.0,
-                    w: r.w,
-                    h: r.h.min(45.0),
+                // With `SetTitleInset` the title sits in the window minus the insets, aligned by
+                // `titleStyle` (step 2's tab titles: TOPLEFT at 15, 15). Without, it is placed in
+                // the top 45 units (the baselib title bar height), 1 unit lower: the step 3
+                // confirm dialog in reference/character_create matches to the pixel.
+                let rect = if t.inset != [0.0; 4] {
+                    r
+                } else {
+                    Rect {
+                        x: r.x,
+                        y: r.y + 1.0,
+                        w: r.w,
+                        h: r.h.min(45.0),
+                    }
                 };
-                let mut t = t.clone();
-                t.style.align = crate::tree::Align::Center;
-                text_quads(u, &t, rect, t.style.color, alpha, scale, &mut out);
+                text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
             }
         }
         for d in above {
@@ -233,6 +242,7 @@ fn drawable_quads(
             uv: white_uv(),
             color,
             corners: None,
+            vcolors: None,
         }),
         DrawKind::Text => {
             if let Some(t) = dr.text.as_ref() {
@@ -286,6 +296,7 @@ fn drawable_quads(
                                 uv: [sx[i] / tw, sy[j] / th, sx[i + 1] / tw, sy[j + 1] / th],
                                 color,
                                 corners: None,
+                                vcolors: None,
                             });
                         }
                     }
@@ -297,6 +308,7 @@ fn drawable_quads(
                         uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                         color,
                         corners: None,
+                        vcolors: None,
                     });
                     // Icon image overlays (`AddTexture`), whole texture over the same rect.
                     for extra in &dr.extra_textures {
@@ -307,6 +319,7 @@ fn drawable_quads(
                                 uv: [0.0, 0.0, 1.0, 1.0],
                                 color,
                                 corners: None,
+                                vcolors: None,
                             });
                         }
                     }
@@ -390,6 +403,7 @@ fn text_quads(
             ],
             color: c,
             corners: None,
+            vcolors: None,
         });
     };
     // Per-line horizontal alignment.
@@ -448,9 +462,61 @@ fn text_quads(
                     ],
                     color: [1.0, 1.0, 1.0, a],
                     corners: None,
+                    vcolors: None,
                 });
             }
         }
+    }
+}
+
+/// Colour picker gradients inside the spectrum / luminance frames (3 units in from the frame
+/// edge): hue across and saturation down at mid lightness; the luminance bar runs from white
+/// through the current hue and saturation to black.
+fn picker_quads(
+    u: &Ui,
+    p: &crate::lua::picker::PickerData,
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    use crate::lua::picker::{hls_to_rgb, rgb_to_hls};
+    let inner = |d: Id| {
+        let r = u.tree.rect(d);
+        Rect { x: r.x + 3.0, y: r.y + 3.0, w: (r.w - 6.0).max(0.0), h: (r.h - 6.0).max(0.0) }
+    };
+    let c4 = |[r, g, b]: [f32; 3]| [r, g, b, alpha];
+    let grad = |r: Rect, vc: [[f32; 4]; 4], out: &mut Vec<Quad>| {
+        if r.w > 0.0 && r.h > 0.0 {
+            out.push(Quad {
+                tex: Tex::Atlas,
+                pos: px(r, scale),
+                uv: white_uv(),
+                color: [1.0; 4],
+                corners: None,
+                vcolors: Some(vc),
+            });
+        }
+    };
+    if let Some(d) = p.spectrum_bg.filter(|&d| u.tree.visible(d)) {
+        let r = inner(d);
+        let grey = c4([0.5; 3]);
+        for i in 0..6 {
+            let (h0, h1) = (i as f32 / 6.0, (i + 1) as f32 / 6.0);
+            let x0 = r.x + r.w * h0;
+            let seg = Rect { x: x0, y: r.y, w: r.w / 6.0, h: r.h };
+            let (a, b) = (c4(hls_to_rgb([h0, 0.5, 1.0])), c4(hls_to_rgb([h1, 0.5, 1.0])));
+            grad(seg, [a, b, grey, grey], out);
+        }
+    }
+    if let Some(d) = p.luminance_bg.filter(|&d| u.tree.visible(d)) {
+        let r = inner(d);
+        let [h, _, s] = rgb_to_hls(p.rgb);
+        let mid = c4(hls_to_rgb([h, 0.5, s]));
+        let (white, black) = (c4([1.0; 3]), c4([0.0; 3]));
+        let top = Rect { h: r.h / 2.0, ..r };
+        let bottom = Rect { y: r.y + r.h / 2.0, h: r.h / 2.0, ..r };
+        grad(top, [white, white, mid, mid], out);
+        grad(bottom, [mid, mid, black, black], out);
     }
 }
 
@@ -488,12 +554,14 @@ fn diagram_quads(
             uv: white_uv(),
             color,
             corners: Some([c, a, b, b]),
+            vcolors: None,
         });
     }
 }
 
 /// The caret of the focused edit box: a 1 px bar after the character at the cursor, as tall as
-/// a text line (or `SetCursorHeight`), in the text colour (or `SetCursorColor`).
+/// a text line plus `SetCursorHeight`, moved by `SetCursorOffset`, in the text colour (or
+/// `SetCursorColor`).
 fn caret_quad(
     u: &mut Ui,
     t: &TextBlock,
@@ -529,8 +597,9 @@ fn caret_quad(
     let ox = inner.x * scale + (inner.w * scale - full.width) * fx;
     let oy = inner.y * scale + (inner.h * scale - total_h) * fy;
     let full_line_w = full.line_widths.get(line).copied().unwrap_or(full.width);
-    let x = (ox + (full.width - full_line_w) * fx + line_w).round();
-    let h = edit.and_then(|e| e.cursor_height).map_or(lh, |h| h * scale);
+    let offset = edit.map_or(0.0, |e| e.cursor_offset) * scale;
+    let x = (ox + (full.width - full_line_w) * fx + line_w + offset).round();
+    let h = lh + edit.and_then(|e| e.cursor_height).unwrap_or(0.0) * scale;
     let y = (oy + line as f32 * (lh + ls) + (lh - h) / 2.0).round();
     let c = edit.and_then(|e| e.cursor_color).unwrap_or(t.style.color);
     out.push(Quad {
@@ -539,6 +608,7 @@ fn caret_quad(
         uv: white_uv(),
         color: [c[0], c[1], c[2], c[3] * alpha],
         corners: None,
+        vcolors: None,
     });
 }
 
@@ -649,15 +719,15 @@ pub fn sync_batches(
                 ]),
             }
             uv.extend([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
-            let c = Color::srgba(
-                q.color[0],
-                q.color[1],
-                q.color[2],
-                q.color[3].clamp(0.0, 1.0),
-            )
-            .to_linear()
-            .to_f32_array();
-            col.extend([c; 4]);
+            let lin = |c: [f32; 4]| {
+                Color::srgba(c[0], c[1], c[2], c[3].clamp(0.0, 1.0))
+                    .to_linear()
+                    .to_f32_array()
+            };
+            match q.vcolors {
+                Some(vc) => col.extend(vc.map(lin)),
+                None => col.extend([lin(q.color); 4]),
+            }
             idx.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
         }
         let mesh = Mesh::new(

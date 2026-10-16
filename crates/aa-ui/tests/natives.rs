@@ -125,3 +125,27 @@ fn addon_content_registry() {
     assert!(eval::<bool>(&ui, "X2 == ADDON"));
     assert_eq!(eval::<String>(&ui, "X2Locale:GetLocale()"), "en_us");
 }
+
+#[test]
+fn caret_is_drawn() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        edit = UIParent:CreateWidget("editbox", "caretEdit", "UIParent")
+        edit:SetExtent(200, 30)
+        edit:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        edit:SetCursorColor(1, 0, 0, 1)
+        edit:Show(true)
+        edit:SetFocus()
+        "#,
+    )
+    .unwrap();
+    ui.type_text("abc");
+    let mut g = aa_ui::lua::ui(&ui.lua);
+    let quads = aa_ui::render::build_quads(&mut g, None);
+    let caret: Vec<_> = quads.iter().filter(|q| q.color == [1.0, 0.0, 0.0, 1.0]).collect();
+    assert_eq!(caret.len(), 1, "one caret quad");
+    let p = caret[0].pos;
+    assert!(p[0] > 100.0 && p[0] < 140.0 && p[1] >= 100.0 && p[3] <= 130.0, "{p:?}");
+}

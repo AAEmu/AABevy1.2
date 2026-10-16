@@ -174,17 +174,19 @@ impl WidgetType {
 
     /// Types that carry a text block (`SetText`, `style`). Windows use `title` / `titleStyle`.
     pub fn has_text(&self) -> bool {
-        matches!(
-            self,
+        match self {
             WidgetType::Button
-                | WidgetType::CheckButton
-                | WidgetType::Label
-                | WidgetType::TextBox
-                | WidgetType::EditBox
-                | WidgetType::EditBoxMultiline
-                | WidgetType::ListBox
-                | WidgetType::GameTooltip
-        )
+            | WidgetType::CheckButton
+            | WidgetType::Label
+            | WidgetType::TextBox
+            | WidgetType::EditBox
+            | WidgetType::EditBoxMultiline
+            | WidgetType::ListBox
+            | WidgetType::GameTooltip => true,
+            // Message frames (`custom_saveload.lua`: `wnd.style:SetAlign(...)`).
+            WidgetType::Other(s) => s == "message",
+            _ => false,
+        }
     }
 
     /// Types that take mouse input even without script handlers.
@@ -418,6 +420,7 @@ pub struct Widget {
     pub tab: Option<crate::lua::tab::TabData>,
     pub edit: Option<crate::lua::edit::EditData>,
     pub diagram: Option<crate::lua::diagram::DiagramData>,
+    pub picker: Option<crate::lua::picker::PickerData>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -865,7 +868,7 @@ impl Widget {
                 WidgetType::TextBox | WidgetType::GameTooltip | WidgetType::EditBoxMultiline
             ),
             style: TextStyle {
-                align: if matches!(ty, WidgetType::Button | WidgetType::CheckButton) {
+                align: if matches!(ty, WidgetType::Button | WidgetType::CheckButton | WidgetType::Label) {
                     Align::Center
                 } else if matches!(ty, WidgetType::TextBox | WidgetType::GameTooltip) {
                     Align::TopLeft
@@ -876,7 +879,14 @@ impl Widget {
             },
             ..Default::default()
         });
-        let title = matches!(ty, WidgetType::Window).then(TextBlock::default);
+        // Window titles default to centred (`SetTitleInset` + `titleStyle:SetAlign` move them).
+        let title = matches!(ty, WidgetType::Window).then(|| TextBlock {
+            style: TextStyle {
+                align: Align::Center,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
         let button =
             matches!(ty, WidgetType::Button | WidgetType::CheckButton).then(ButtonData::default);
         let list = matches!(ty, WidgetType::ListCtrl).then(|| ListCtrlData {
@@ -909,6 +919,7 @@ impl Widget {
             tab: None,
             edit: None,
             diagram: None,
+            picker: None,
             modal: false,
             raise: 0,
         }
