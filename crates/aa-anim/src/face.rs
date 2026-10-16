@@ -39,6 +39,14 @@ pub struct FaceLayer {
     pub tint: Option<[u8; 3]>,
 }
 
+/// Where the eye texture sits in the face atlas and the iris colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EyeTint {
+    /// `[u_min, v_min, u_max, v_max]` of the eye mesh's UVs (the square holding the eyeball texture).
+    pub uv: [f32; 4],
+    pub color: [u8; 3],
+}
+
 /// `0xAABBGGRR` -> `[r, g, b]`.
 pub fn abgr(c: u32) -> [u8; 3] {
     [(c & 0xFF) as u8, ((c >> 8) & 0xFF) as u8, ((c >> 16) & 0xFF) as u8]
@@ -46,7 +54,7 @@ pub fn abgr(c: u32) -> [u8; 3] {
 
 /// Composites `layers` (and the optional lip tint with its mask) on the base texture; the result
 /// is an sRGB image with a full mip chain.
-pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3])>) -> Result<Image> {
+pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3])>, eye: Option<EyeTint>) -> Result<Image> {
     let bytes = aa_cry::read(base)?;
     let dds = aa_cry::texture::Dds::parse(&bytes)?;
     let (w, h) = (dds.width as usize, dds.height as usize);
@@ -72,6 +80,10 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
                 }
             }
         }
+    }
+
+    if let Some(eye) = eye {
+        tint_iris(&mut px, w, h, eye);
     }
 
     for layer in layers {
@@ -118,6 +130,45 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
     image.data = Some(data);
     image.sampler = ImageSampler::Descriptor(aa_cry::texture::repeat_sampler());
     Ok(image)
+}
+
+/// Recolours the grey iris disc (about 21% of the eye square's width in radius, around its
+/// centre) keeping its shading; the pupil, sclera and veins are left alone.
+fn tint_iris(px: &mut [u8], w: usize, h: usize, eye: EyeTint) {
+    let [u0, v0, u1, v1] = eye.uv;
+    let (cx, cy) = ((u0 + u1) * 0.5 * w as f32, (v0 + v1) * 0.5 * h as f32);
+    let radius = 0.215 * (u1 - u0).min(v1 - v0) * w as f32;
+    if radius < 1.0 {
+        return;
+    }
+    let (x0, x1) = ((cx - radius).floor().max(0.0) as usize, ((cx + radius).ceil() as usize).min(w));
+    let (y0, y1) = ((cy - radius).floor().max(0.0) as usize, ((cy + radius).ceil() as usize).min(h));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt() / radius;
+            if d > 1.0 {
+                continue;
+            }
+            let p = &mut px[(y * w + x) * 4..][..4];
+            let (r, g, b) = (p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
+            let luma = r * 0.3 + g * 0.59 + b * 0.11;
+            let sat = r.max(g).max(b) - r.min(g).min(b);
+            // grey and not the black pupil
+            let grey = (1.0 - (sat / 0.3)).clamp(0.0, 1.0);
+            let lit = ((luma - 0.08) / 0.12).clamp(0.0, 1.0);
+            let edge = ((1.0 - d) / 0.12).clamp(0.0, 1.0);
+            let a = grey * lit * edge;
+            if a <= 0.0 {
+                continue;
+            }
+            let shade = (luma / 0.5).clamp(0.25, 1.3);
+            for i in 0..3 {
+                let tinted = (eye.color[i] as f32 / 255.0 * shade).min(1.0);
+                let v = p[i] as f32 / 255.0;
+                p[i] = ((v + (tinted - v) * a).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            }
+        }
+    }
 }
 
 /// Alpha-blends one decal (`src`, RGBA8 `sw x sh`) into `dst` (RGBA8 `w x h`).
@@ -204,7 +255,7 @@ mod tests {
             weight: 1.0,
             tint: Some([60, 35, 0]),
         };
-        let img = compose_face("game/objects/characters/nuian/male/face/face01/nu_m_face01_df.dds", &[layer], None).unwrap();
+        let img = compose_face("game/objects/characters/nuian/male/face/face01/nu_m_face01_df.dds", &[layer], None, None).unwrap();
         assert_eq!(img.texture_descriptor.mip_level_count, 10);
         assert_eq!(img.data.as_ref().unwrap().len(), (0..10).map(|m| ((512usize >> m).max(1)).pow(2) * 4).sum::<usize>());
     }
