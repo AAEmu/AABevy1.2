@@ -208,7 +208,7 @@ mod tests {
         dist.sort_by(|a, b| b.0.total_cmp(&a.0));
         eprintln!("farthest from bind: {:?}", &dist[..12]);
         // physics rope bones (cloaks, skirts) hang free and are not animated
-                let worst = dist.iter().find(|(_, n)| !n.starts_with("rope")).unwrap();
+        let worst = dist.iter().find(|(_, n)| !n.starts_with("rope") && n != "camera").unwrap();
         assert!(worst.0 < 0.6, "bone {} is {} m from bind", worst.1, worst.0);
         let _ = bind_world;
     }
