@@ -1,0 +1,2524 @@
+{
+ "hidden_named_total": 475,
+ "hidden_named_widgets": [
+  "ChangeRaceName^raceTitleInfo|textbox|360x63|selfvisible",
+  "ChangeRaceName^rightPanel.genderBtn[1]|button|63x54|selfvisible",
+  "ChangeRaceName^rightPanel.genderBtn[2]|button|63x54|selfvisible",
+  "ChangeRaceName^rightPanel.raceBgWindow[1].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[1]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[2].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[2]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[3].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[3]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[4].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[4]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceCongestionInfo|textbox|360x30",
+  "ChangeRaceName^rightPanel.raceDetailInfo|textbox|360x173|selfvisible",
+  "ChangeRaceName^rightPanel|window|455x1080|selfvisible",
+  "characterCreate.bgWindow.authMessage|textbox|250x20",
+  "characterCreate.bgWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bgWindow.nextStepBtn|button|171x57",
+  "characterCreate.bg[1].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[1]|window|1920x1080",
+  "characterCreate.bg[4].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[4]|window|1920x1080",
+  "characterCreate.bg[5].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[5]|window|1920x1080",
+  "characterCreate.bg[6].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[6]|window|1920x1080",
+  "step1.content.congestionTip|gametooltip|0x0",
+  "step1.content.continentDescFrame.desc|textbox|475x64|selfvisible",
+  "step1.content.continentDescFrame|emptywidget|475x325|selfvisible",
+  "step1.content.raceBtn[1]|button|100x123|selfvisible",
+  "step1.content.raceBtn[2]|button|100x123|selfvisible",
+  "step1.content.raceBtn[3]|button|100x123|selfvisible",
+  "step1.content.raceBtn[4]|button|100x123|selfvisible",
+  "step1.content.tooltipWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "step1.content|window|1920x810",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[1]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[2]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[3]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[4]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[5]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu|emptywidget|80x240",
+  "step2.content.cosmeticWindow.cosmeticTab.closeButton|button|35x57|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.textButton|button|97x16|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox|checkbutton|17x17|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[1]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[2]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[3]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[4]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[5]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[1]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[2]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[3]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[4]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[5]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1]|window|320x1080|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].sliderTitle|label|118x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1]|window|258x280|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].sliderTitle|label|81x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2]|window|258x280|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4]|window|260x130",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].sliderTitle|label|105x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1]|window|258x365|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1]|window|258x225|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^extentSlider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^extentSlider|slider|265x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^posButton|button|21x21|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^posWindow|emptywidget|260x91|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^rotateSlider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^rotateSlider|slider|265x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.extentLabel|label|22x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.posLabel|label|25x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.rotateLabel|label|32x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd|emptywidget|260x110|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab|tab|400x1080|selfvisible",
+  "step2.content.cosmeticWindow|emptywidget|432x0|selfvisible",
+  "step2.content.guide.guideContent.textbox|textbox|185x52|selfvisible",
+  "step2.content.guide.guideContent|emptywidget|185x50",
+  "step2.content.guide|emptywidget|62x54",
+  "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[1]|button|115x73|selfvisible",
+  "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[2]|button|115x48|selfvisible",
+  "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[3]|button|115x48|selfvisible",
+  "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[4]|button|115x48|selfvisible",
+  "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[5]|button|115x48|selfvisible",
+  "step2.content.rightPanel.plasticWnd.buttonMenu|emptywidget|115x365|selfvisible",
+  "step2.content.rightPanel.plasticWnd.customSaveWnd.loadBtn|button|130x33|selfvisible",
+  "step2.content.rightPanel.plasticWnd.customSaveWnd.saveBtn|button|130x33|selfvisible",
+  "step2.content.rightPanel.plasticWnd.customSaveWnd.systemAlert|message|1920x50|selfvisible",
+  "step2.content.rightPanel.plasticWnd.customSaveWnd|window|265x33|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailButton|button|54x68",
+  "step2.content.rightPanel.plasticWnd.detailWindow.cancelButton|button|84x33|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14].label|textbox|170x25|selfvisible"
+ ],
+ "meta": {
+  "captured": "2026-10-16 15:22:11",
+  "fps": 16,
+  "hooks_active": false,
+  "log_entries": 0,
+  "objects_shown": 66,
+  "objects_total": 2501,
+  "screen_height": 1080,
+  "screen_name": "character_create/step3_elf_male",
+  "screen_width": 1920,
+  "screenshot": {
+   "file": "real.png",
+   "height": 1080,
+   "width": 1920
+  },
+  "stage": 7,
+  "ui_scale": 1
+ },
+ "widgets": [
+  {
+   "addr": "501B512C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1803,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1803,
+    35
+   ],
+   "owner": "4ECFB37C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[6].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAB1DC",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    180,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    180,
+    1024
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAA874",
+   "class": "drawable:image",
+   "content_extent": [
+    24,
+    27
+   ],
+   "eextent": [
+    24,
+    27
+   ],
+   "eoffset": [
+    210,
+    1050
+   ],
+   "extent": [
+    24,
+    27
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    210,
+    1050
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAADD4",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    35
+   ],
+   "eextent": [
+    115,
+    35
+   ],
+   "eoffset": [
+    228,
+    1046
+   ],
+   "extent": [
+    115,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    228,
+    1046
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECE90CC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EDBE19C",
+   "paths": [
+    "step3.content.rightPanel.raceBgWindow[2].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECEC0EC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECFADB4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501B5D44",
+   "class": "drawable:image",
+   "content_extent": [
+    1920,
+    1200
+   ],
+   "eextent": [
+    1920,
+    1200
+   ],
+   "eoffset": [
+    0,
+    -60
+   ],
+   "extent": [
+    1920,
+    1200
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    -60
+   ],
+   "owner": "4EDBE19C",
+   "paths": [
+    "step3.content.rightPanel.raceBgWindow[2].bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECE9F3C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECFBF0C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CBA91C",
+   "class": "drawable:image",
+   "content_extent": [
+    238,
+    96
+   ],
+   "eextent": [
+    238,
+    96
+   ],
+   "eoffset": [
+    1672,
+    985
+   ],
+   "extent": [
+    238,
+    96
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1672,
+    985
+   ],
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.bgs[4]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CACA0C",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    1,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1,
+    1024
+   ],
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501AA4F4",
+   "class": "drawable:ninepart",
+   "content_extent": [
+    242,
+    36
+   ],
+   "eextent": [
+    242,
+    36
+   ],
+   "eoffset": [
+    1633,
+    904.5
+   ],
+   "extent": [
+    242,
+    36
+   ],
+   "kind": "drawable",
+   "method_count": 29,
+   "offset": [
+    1633,
+    904.5
+   ],
+   "owner": "4E706CBC",
+   "paths": [
+    "step3.content.nameWnd.characterName.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CA944C",
+   "class": "drawable:image",
+   "content_extent": [
+    294,
+    44
+   ],
+   "eextent": [
+    294,
+    44
+   ],
+   "eoffset": [
+    1624,
+    1034
+   ],
+   "extent": [
+    294,
+    44
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1624,
+    1034
+   ],
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.add_bgs1[4]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECEADAC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E706CBC",
+   "paths": [
+    "step3.content.nameWnd.characterName.prefixStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CAC604",
+   "class": "drawable:image",
+   "content_extent": [
+    97,
+    35
+   ],
+   "eextent": [
+    97,
+    35
+   ],
+   "eoffset": [
+    53,
+    1046
+   ],
+   "extent": [
+    97,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    53,
+    1046
+   ],
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECECA8C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "4EBB277C",
+   "paths": [
+    "step3.content.nameWnd.characterNameHelper.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECECCF4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "4E706CBC",
+   "paths": [
+    "step3.content.nameWnd.characterName.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECE959C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECFCA9C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECEB9B4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECFC4D4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501B410C",
+   "class": "drawable:image",
+   "content_extent": [
+    58,
+    60
+   ],
+   "eextent": [
+    58,
+    60
+   ],
+   "eoffset": [
+    1619,
+    49.5
+   ],
+   "extent": [
+    58,
+    60
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1619,
+    49.5
+   ],
+   "owner": "4ECF9C5C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[4].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501B30EC",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1488,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1488,
+    35
+   ],
+   "owner": "4ECFCA9C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[3].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501B3BAC",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1593,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1593,
+    35
+   ],
+   "owner": "4ECF9C5C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[4].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501B466C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1698,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1698,
+    35
+   ],
+   "owner": "4ECFC4D4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[5].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501B4BCC",
+   "class": "drawable:image",
+   "content_extent": [
+    47,
+    66
+   ],
+   "eextent": [
+    47,
+    66
+   ],
+   "eoffset": [
+    1728.5,
+    46.5
+   ],
+   "extent": [
+    47,
+    66
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1728.5,
+    46.5
+   ],
+   "owner": "4ECFC4D4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[5].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECE9334",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECF9C5C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501B364C",
+   "class": "drawable:image",
+   "content_extent": [
+    66,
+    64
+   ],
+   "eextent": [
+    66,
+    64
+   ],
+   "eoffset": [
+    1513,
+    47.5
+   ],
+   "extent": [
+    66,
+    64
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1513,
+    47.5
+   ],
+   "owner": "4ECFCA9C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[3].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501A898C",
+   "class": "drawable:image",
+   "content_extent": [
+    74,
+    68
+   ],
+   "eextent": [
+    74,
+    68
+   ],
+   "eoffset": [
+    1402,
+    39.5
+   ],
+   "extent": [
+    74,
+    68
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1402,
+    39.5
+   ],
+   "owner": "4ECFBF0C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[2].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECEBE84",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4ECFB37C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[6].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501A842C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1383,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1383,
+    35
+   ],
+   "owner": "4ECFBF0C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[2].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECECF5C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D45D33C",
+   "paths": [
+    "step3.content.nameWnd.characterName.guide.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501A796C",
+   "class": "drawable:image",
+   "content_extent": [
+    124,
+    103
+   ],
+   "eextent": [
+    124,
+    103
+   ],
+   "eoffset": [
+    1278,
+    35
+   ],
+   "extent": [
+    124,
+    103
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1278,
+    35
+   ],
+   "owner": "4ECFADB4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[1].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501A7ECC",
+   "class": "drawable:image",
+   "content_extent": [
+    66,
+    65
+   ],
+   "eextent": [
+    66,
+    65
+   ],
+   "eoffset": [
+    1301,
+    45
+   ],
+   "extent": [
+    66,
+    65
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1301,
+    45
+   ],
+   "owner": "4ECFADB4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[1].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "501B568C",
+   "class": "drawable:image",
+   "content_extent": [
+    93,
+    64
+   ],
+   "eextent": [
+    93,
+    64
+   ],
+   "eoffset": [
+    1812.5,
+    48.5
+   ],
+   "extent": [
+    93,
+    64
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1812.5,
+    48.5
+   ],
+   "owner": "4ECFB37C",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[6].add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECE9A6C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EBAB92C",
+   "paths": [
+    "step3.content.rightPanel.desc.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B1EAC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6AFA3C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E553AC4",
+   "paths": [
+    "step1.content.tooltipWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501B62A4",
+   "class": "drawable:image",
+   "content_extent": [
+    390,
+    155
+   ],
+   "eextent": [
+    390,
+    155
+   ],
+   "eoffset": [
+    1580,
+    850
+   ],
+   "extent": [
+    390,
+    155
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1580,
+    850
+   ],
+   "owner": "4EEF2C7C",
+   "paths": [
+    "step3.content.nameWnd.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "370B1C44",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B2114",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECEC354",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECE9CD4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "4D459994",
+   "paths": [
+    "step3.content.rightPanel.abilityDesc.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B12A4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E5551BC",
+   "paths": [
+    "characterCreate.bottomPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37132CD4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37115B5C",
+   "paths": [
+    "tooltip.rootWnd.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECEB74C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EDBB3AC",
+   "paths": [
+    "step3.content.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B284C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37115B5C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    5,
+    5
+   ],
+   "eextent": [
+    5,
+    5
+   ],
+   "enabled": true,
+   "eoffset": [
+    -100,
+    0
+   ],
+   "extent": [
+    5,
+    5
+   ],
+   "id": "604",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    -100,
+    0
+   ],
+   "order": 1540,
+   "parent": "UIParent",
+   "paths": [
+    "tooltip.rootWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3707E364",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "75a",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": true,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1882,
+   "parent": "UIParent",
+   "paths": [
+    "characterCreate.bgWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E5551BC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    21
+   ],
+   "eextent": [
+    1920,
+    21
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1059
+   ],
+   "extent": [
+    1920,
+    21
+   ],
+   "id": "765",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    1059
+   ],
+   "order": 1893,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bottomPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37148504",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CAE0E4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    1,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CAC8B4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "766",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CACA0C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1,
+    1024
+   ],
+   "order": 1894,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn"
+   ],
+   "pushedbackground": "40CAC75C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37149094",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CADE34",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    180,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CAB084",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "768",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CAB1DC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    180,
+    1024
+   ],
+   "order": 1896,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn"
+   ],
+   "pushedbackground": "40CAAF2C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "23F10024",
+   "alpha": 1,
+   "button_state": "DISABLED",
+   "class": "button",
+   "content_extent": [
+    238,
+    96
+   ],
+   "disabledbackground": "40CBA91C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    238,
+    96
+   ],
+   "enabled": false,
+   "eoffset": [
+    1672,
+    985
+   ],
+   "extent": [
+    238,
+    96
+   ],
+   "highlightbackground": "40CADB84",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "769",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CBABCC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1672,
+    985
+   ],
+   "order": 1897,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton"
+   ],
+   "pushedbackground": "40CBAA74",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E553AC4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1,
+    1
+   ],
+   "eextent": [
+    1,
+    1
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1,
+    1
+   ],
+   "id": "76d",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1901,
+   "parent": "UIParent",
+   "paths": [
+    "step1.content.tooltipWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EDBB3AC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    810
+   ],
+   "eextent": [
+    1920,
+    810
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    135
+   ],
+   "extent": [
+    1920,
+    810
+   ],
+   "id": "92d",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    135
+   ],
+   "order": 2349,
+   "parent": "3707E364",
+   "paths": [
+    "step3.content"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EDBE4E4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    600,
+    1080
+   ],
+   "eextent": [
+    600,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    1320,
+    0
+   ],
+   "extent": [
+    600,
+    1080
+   ],
+   "id": "92e",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": true,
+   "offset": [
+    1320,
+    0
+   ],
+   "order": 2350,
+   "parent": "4EDBB3AC",
+   "paths": [
+    "step3.content.rightPanel",
+    "step3.content.OnVisibleChanged^rightPanel",
+    "step3.content.rightPanel.SetSelctedAbilityButtonTexture^widget",
+    "step3.content.rightPanel.ResetSelctedAbilityButtonTexture^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EBAB92C",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    580,
+    40
+   ],
+   "eextent": [
+    580,
+    40
+   ],
+   "enabled": true,
+   "eoffset": [
+    1330,
+    130
+   ],
+   "extent": [
+    580,
+    40
+   ],
+   "id": "930",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1330,
+    130
+   ],
+   "order": 2352,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.desc",
+    "step3.content.rightPanel.pageDesc"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Select a Skillset.",
+   "visible": true
+  },
+  {
+   "addr": "4D459994",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    380,
+    100
+   ],
+   "eextent": [
+    380,
+    100
+   ],
+   "enabled": true,
+   "eoffset": [
+    1325,
+    165
+   ],
+   "extent": [
+    380,
+    100
+   ],
+   "id": "932",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 0,
+   "longest_line_width": 0,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    1325,
+    165
+   ],
+   "order": 2354,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityDesc",
+    "step3.content.rightPanel.abilityBtn[1].OnClick^abilityDesc",
+    "step3.content.rightPanel.abilityBtn[2].OnClick^abilityDesc",
+    "step3.content.rightPanel.abilityBtn[3].OnClick^abilityDesc"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": -5,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "4ECFADB4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501A7D74",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1285,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501A7AC4",
+   "highlightcolor": [
+    {
+     "a": 0.899999976,
+     "b": 0.184313729,
+     "g": 0.411764711,
+     "r": 0.752941191
+    }
+   ],
+   "id": "933",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501A796C",
+   "normalcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.184313729,
+     "g": 0.411764711,
+     "r": 0.752941191
+    }
+   ],
+   "offset": [
+    1285,
+    15
+   ],
+   "order": 2355,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[1]"
+   ],
+   "pushedbackground": "501A7C1C",
+   "pushedcolor": [
+    {
+     "a": 0.899999976,
+     "b": 0.184313729,
+     "g": 0.411764711,
+     "r": 0.752941191
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Battlerage",
+   "visible": true
+  },
+  {
+   "addr": "4ECFBF0C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501A8834",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1390,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501A8584",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.674509823,
+     "g": 0.474509805,
+     "r": 0.643137276
+    }
+   ],
+   "id": "934",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501A842C",
+   "normalcolor": [
+    {
+     "a": 0.899999976,
+     "b": 0.674509823,
+     "g": 0.474509805,
+     "r": 0.643137276
+    }
+   ],
+   "offset": [
+    1390,
+    15
+   ],
+   "order": 2356,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[2]"
+   ],
+   "pushedbackground": "501A86DC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.674509823,
+     "g": 0.474509805,
+     "r": 0.643137276
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Sorcery",
+   "visible": true
+  },
+  {
+   "addr": "4ECFCA9C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501B34F4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1495,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501B3244",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.0509803928,
+     "g": 0.396078438,
+     "r": 0.286274523
+    }
+   ],
+   "id": "935",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501B30EC",
+   "normalcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.0509803928,
+     "g": 0.396078438,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    1495,
+    15
+   ],
+   "order": 2357,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[3]"
+   ],
+   "pushedbackground": "501B339C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0509803928,
+     "g": 0.396078438,
+     "r": 0.286274523
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Archery",
+   "visible": true
+  },
+  {
+   "addr": "4ECF9C5C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501B3FB4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1600,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501B3D04",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.31764707,
+     "g": 0.70588237,
+     "r": 0.866666675
+    }
+   ],
+   "id": "936",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501B3BAC",
+   "normalcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.31764707,
+     "g": 0.70588237,
+     "r": 0.866666675
+    }
+   ],
+   "offset": [
+    1600,
+    15
+   ],
+   "order": 2358,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[4]"
+   ],
+   "pushedbackground": "501B3E5C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.31764707,
+     "g": 0.70588237,
+     "r": 0.866666675
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Vitalism",
+   "visible": true
+  },
+  {
+   "addr": "4ECFC4D4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501B4A74",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1705,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501B47C4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.329411775,
+     "g": 0.329411775,
+     "r": 0.713725507
+    }
+   ],
+   "id": "937",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501B466C",
+   "normalcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.329411775,
+     "g": 0.329411775,
+     "r": 0.713725507
+    }
+   ],
+   "offset": [
+    1705,
+    15
+   ],
+   "order": 2359,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[5]"
+   ],
+   "pushedbackground": "501B491C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.329411775,
+     "g": 0.329411775,
+     "r": 0.713725507
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Occultism",
+   "visible": true
+  },
+  {
+   "addr": "4ECFB37C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    100,
+    123
+   ],
+   "disabledbackground": "501B5534",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.5,
+     "g": 0.5,
+     "r": 0.5
+    }
+   ],
+   "eextent": [
+    100,
+    123
+   ],
+   "enabled": true,
+   "eoffset": [
+    1810,
+    15
+   ],
+   "extent": [
+    100,
+    123
+   ],
+   "highlightbackground": "501B5284",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.678431392,
+     "g": 0.643137276,
+     "r": 0.470588237
+    }
+   ],
+   "id": "938",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "501B512C",
+   "normalcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.678431392,
+     "g": 0.643137276,
+     "r": 0.470588237
+    }
+   ],
+   "offset": [
+    1810,
+    15
+   ],
+   "order": 2360,
+   "parent": "4EDBE4E4",
+   "paths": [
+    "step3.content.rightPanel.abilityBtn[6]"
+   ],
+   "pushedbackground": "501B53DC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.678431392,
+     "g": 0.643137276,
+     "r": 0.470588237
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Shadowplay",
+   "visible": true
+  },
+  {
+   "addr": "4EDBE19C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "93c",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2364,
+   "parent": "UIParent",
+   "paths": [
+    "step3.content.rightPanel.raceBgWindow[2]",
+    "step3.content.rightPanel.raceBgWindow[2].OnScale^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EEF2C7C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    340,
+    135
+   ],
+   "eextent": [
+    340,
+    135
+   ],
+   "enabled": true,
+   "eoffset": [
+    1580,
+    860
+   ],
+   "extent": [
+    340,
+    135
+   ],
+   "id": "948",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1580,
+    860
+   ],
+   "order": 2376,
+   "parent": "4EDBB3AC",
+   "paths": [
+    "step3.content.nameWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E706CBC",
+   "alpha": 1,
+   "class": "editbox",
+   "content_extent": [
+    242,
+    36
+   ],
+   "eextent": [
+    242,
+    36
+   ],
+   "enabled": false,
+   "eoffset": [
+    1633,
+    904.5
+   ],
+   "extent": [
+    242,
+    36
+   ],
+   "id": "949",
+   "kind": "widget",
+   "method_count": 120,
+   "mouse_over": false,
+   "offset": [
+    1633,
+    904.5
+   ],
+   "order": 2377,
+   "parent": "4EEF2C7C",
+   "paths": [
+    "step3.content.nameWnd.characterName"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EBB277C",
+   "alpha": 0.5,
+   "class": "label",
+   "content_extent": [
+    0,
+    0
+   ],
+   "eextent": [
+    0,
+    0
+   ],
+   "enabled": true,
+   "eoffset": [
+    1643,
+    922.5
+   ],
+   "extent": [
+    0,
+    0
+   ],
+   "id": "94a",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    1643,
+    922.5
+   ],
+   "order": 2378,
+   "parent": "4EEF2C7C",
+   "paths": [
+    "step3.content.nameWnd.characterNameHelper"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Enter a name.",
+   "visible": true
+  },
+  {
+   "addr": "4D45D33C",
+   "alpha": 0.5,
+   "class": "textbox",
+   "content_extent": [
+    340,
+    16
+   ],
+   "eextent": [
+    340,
+    16
+   ],
+   "enabled": true,
+   "eoffset": [
+    1584,
+    843.5
+   ],
+   "extent": [
+    340,
+    16
+   ],
+   "id": "94b",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 127,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    1584,
+    843.5
+   ],
+   "order": 2379,
+   "parent": "4E706CBC",
+   "paths": [
+    "step3.content.nameWnd.characterName.guide"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 16,
+   "text_length": 0,
+   "visible": true
+  }
+ ]
+}

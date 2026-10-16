@@ -1,0 +1,8365 @@
+{
+ "hidden_named_total": 416,
+ "hidden_named_widgets": [
+  "ChangeRaceName^raceTitleInfo|textbox|360x41|selfvisible",
+  "ChangeRaceName^rightPanel.genderBtn[1]|button|63x54|selfvisible",
+  "ChangeRaceName^rightPanel.genderBtn[2]|button|63x54|selfvisible",
+  "ChangeRaceName^rightPanel.raceBgWindow[1].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[1]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[2].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[2]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[3].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[3]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[4].modalBackgroundWindow|emptywidget|1920x1080",
+  "ChangeRaceName^rightPanel.raceBgWindow[4]|window|1920x1080",
+  "ChangeRaceName^rightPanel.raceCongestionInfo|textbox|360x30",
+  "ChangeRaceName^rightPanel.raceDetailInfo|textbox|360x151|selfvisible",
+  "ChangeRaceName^rightPanel|window|455x1080|selfvisible",
+  "characterCreate.bgWindow.authMessage|textbox|250x20",
+  "characterCreate.bgWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[1].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[1]|window|1920x1080",
+  "characterCreate.bg[4].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[4]|window|1920x1080",
+  "characterCreate.bg[5].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[5]|window|1920x1080",
+  "characterCreate.bg[6].modalBackgroundWindow|emptywidget|1920x1080",
+  "characterCreate.bg[6]|window|1920x1080",
+  "step1.content.congestionTip|gametooltip|0x0",
+  "step1.content.continentDescFrame.desc|textbox|475x64|selfvisible",
+  "step1.content.continentDescFrame|emptywidget|475x325|selfvisible",
+  "step1.content.raceBtn[1]|button|100x123|selfvisible",
+  "step1.content.raceBtn[2]|button|100x123|selfvisible",
+  "step1.content.raceBtn[3]|button|100x123|selfvisible",
+  "step1.content.raceBtn[4]|button|100x123|selfvisible",
+  "step1.content.tooltipWindow.modalBackgroundWindow|emptywidget|1920x1080",
+  "step1.content|window|1920x810",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[1]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[2]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[3]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[4]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu.buttons[5]|button|80x48|selfvisible",
+  "step2.content.cosmeticWindow.buttonMenu|emptywidget|80x240",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[2]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[3]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[4]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.selectedButton[5]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[1]|button|80x48",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].stylePageWnd[1]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[2]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2].styleWnd[3]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[2]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].sliderTitle|label|118x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[1]|window|258x280|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].sliderTitle|label|81x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].stylePageWnd[2]|window|258x280|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[3]|window|260x130|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^posButton|button|12x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^slider.thumb|button|18x12|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].SetUnitFromWidget^slider|slider|18x108|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet.luminanceWidget|emptywidget|18x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet.spectrumWidget|emptywidget|225x97|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].pallet|nil|254x99|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3].styleWnd[4]|window|260x130",
+  "step2.content.cosmeticWindow.cosmeticTab.window[3]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].slider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].sliderTitle|label|105x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].slider|slider|270x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[1]|window|258x365|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].deleteButton|button|29x31",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4].stylePageWnd[2]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[4]|window|320x1080",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[1]|window|258x225|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^extentSlider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^extentSlider|slider|265x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^posButton|button|21x21|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^posWindow|emptywidget|260x91|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^rotateSlider.thumb|button|17x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].SelectItem^rotateSlider|slider|265x26|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].deleteButton|button|29x31|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[1]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[2]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[3]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[4]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[5]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[6]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[7]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[8]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].item[9]|button|84x84|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.extentLabel|label|22x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.posLabel|label|25x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd.rotateLabel|label|32x13|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].modifierWnd|emptywidget|260x110|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.firstPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.lastPageButton|button|12x24|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.nextPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.pageLabel|label|80x30|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl.prevPageButton|button|16x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].pageControl|window|150x32|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2].title|textbox|260x15|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5].stylePageWnd[2]|window|258x315|selfvisible",
+  "step2.content.cosmeticWindow.cosmeticTab.window[5]|window|320x1080",
+  "step2.content.guide.guideContent.textbox|textbox|185x52|selfvisible",
+  "step2.content.guide.guideContent|emptywidget|185x50",
+  "step2.content.rightPanel.plasticWnd.detailButton|button|54x68",
+  "step2.content.rightPanel.plasticWnd.detailWindow.cancelButton|button|84x33|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[10]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[11]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[12]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[13]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[14]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[15].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[15].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[15].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[15].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[15]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[16].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[16].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[16].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[16].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[16]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[17].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[17].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[17].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[17].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[17]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[18].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[18].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[18].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[18].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[18]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[19].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[19].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[19].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[19].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[19]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[1].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[1].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[1].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[1].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[1]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[20].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[20].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[20].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[20].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[20]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[21].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[21].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[21].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[21].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[21]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[22].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[22].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[22].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[22].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[22]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[23].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[23].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[23].slider|slider|160x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[23].valueLabel|label|30x20|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[23]|window|355x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[24].label|textbox|170x25|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[24].slider.thumb|button|17x26|selfvisible",
+  "step2.content.rightPanel.plasticWnd.detailWindow.controller[24].slider|slider|160x26|selfvisible"
+ ],
+ "meta": {
+  "captured": "2026-10-16 15:20:55",
+  "fps": 132,
+  "hooks_active": false,
+  "log_entries": 0,
+  "objects_shown": 212,
+  "objects_total": 2501,
+  "screen_height": 1080,
+  "screen_name": "character_create/step2_nuian_female",
+  "screen_width": 1920,
+  "screenshot": {
+   "file": "real.png",
+   "height": 1080,
+   "width": 1920
+  },
+  "stage": 6,
+  "ui_scale": 1
+ },
+ "widgets": [
+  {
+   "addr": "4EC6E964",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4EBA34CC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.pageLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB74B4",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1492.5,
+    338
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1492.5,
+    338
+   ],
+   "owner": "4EB2B11C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB7A14",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1627.5,
+    338
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1627.5,
+    338
+   ],
+   "owner": "4EB2B6E4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB8224",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1762.5,
+    338
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1762.5,
+    338
+   ],
+   "owner": "37141CF4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB8784",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1492.5,
+    468
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1492.5,
+    468
+   ],
+   "owner": "371422BC",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB6CA4",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1762.5,
+    208
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1762.5,
+    208
+   ],
+   "owner": "4EB27184",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB61E4",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1492.5,
+    208
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1492.5,
+    208
+   ],
+   "owner": "4EB2A58C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].bgs[3]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB6744",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1627.5,
+    208
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1627.5,
+    208
+   ],
+   "owner": "4EB2AB54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC70644",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6E22C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B0174",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EB24ED4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB8F94",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1627.5,
+    468
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1627.5,
+    468
+   ],
+   "owner": "4E522764",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "376B6F64",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    73
+   ],
+   "eextent": [
+    115,
+    73
+   ],
+   "eoffset": [
+    1405,
+    0
+   ],
+   "extent": [
+    115,
+    73
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1405,
+    0
+   ],
+   "owner": "4EB25A64",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[1].bgs[3]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC708AC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "4D453D54",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].title.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC744D4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6DAF4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 18,
+   "method_count": 13,
+   "owner": "4D455464",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].title.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB94F4",
+   "class": "drawable:image",
+   "content_extent": [
+    175,
+    133
+   ],
+   "eextent": [
+    175,
+    133
+   ],
+   "eoffset": [
+    1762.5,
+    468
+   ],
+   "extent": [
+    175,
+    133
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1762.5,
+    468
+   ],
+   "owner": "4E5232F4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB1954",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    48
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "eoffset": [
+    1405,
+    305
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1405,
+    305
+   ],
+   "owner": "4EB24ED4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[5].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "376B61F4",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    48
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "eoffset": [
+    1405,
+    165
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1405,
+    165
+   ],
+   "owner": "4EB24344",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[3].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "376B4464",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    48
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "eoffset": [
+    1405,
+    235
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1405,
+    235
+   ],
+   "owner": "4EB2490C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[4].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "376B51D4",
+   "class": "drawable:image",
+   "content_extent": [
+    115,
+    48
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "eoffset": [
+    1405,
+    95
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1405,
+    95
+   ],
+   "owner": "4EB265F4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[2].bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6E6FC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B3D9C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EB2490C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B14B4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EB265F4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB7204",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1787.5,
+    222.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1787.5,
+    222.5
+   ],
+   "owner": "4EB27184",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B7024",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EB2B11C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB735C",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1517.5,
+    352.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1517.5,
+    352.5
+   ],
+   "owner": "4EB2B11C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B50DC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EB2B6E4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B5814",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EB27184",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B4E74",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EB2AB54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB6494",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1652.5,
+    222.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1652.5,
+    222.5
+   ],
+   "owner": "4EB2AB54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B6684",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EB2A58C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB5F34",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1517.5,
+    222.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1517.5,
+    222.5
+   ],
+   "owner": "4EB2A58C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B3194",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EB24344",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB78BC",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1652.5,
+    352.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1652.5,
+    352.5
+   ],
+   "owner": "4EB2B6E4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB80CC",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1787.5,
+    352.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1787.5,
+    352.5
+   ],
+   "owner": "37141CF4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B55AC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E5232F4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB939C",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1787.5,
+    482.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1787.5,
+    482.5
+   ],
+   "owner": "4E5232F4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B124C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 27,
+   "method_count": 13,
+   "owner": "4EB25A64",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B74F4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37141CF4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CB8E3C",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1652.5,
+    482.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1652.5,
+    482.5
+   ],
+   "owner": "4E522764",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CB862C",
+   "class": "drawable:image",
+   "content_extent": [
+    125,
+    120
+   ],
+   "eextent": [
+    125,
+    120
+   ],
+   "eoffset": [
+    1517.5,
+    482.5
+   ],
+   "extent": [
+    125,
+    120
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1517.5,
+    482.5
+   ],
+   "owner": "371422BC",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].icon",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].SetPresetItem^icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6D624",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D812C84",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.lastPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B5A7C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "371422BC",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "3D1AAADC",
+   "class": "drawable:ninepart",
+   "content_extent": [
+    320,
+    1030
+   ],
+   "eextent": [
+    320,
+    1030
+   ],
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    320,
+    1030
+   ],
+   "kind": "drawable",
+   "method_count": 29,
+   "offset": [
+    0,
+    0
+   ],
+   "owner": "4EE74E64",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC749A4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81956C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC74004",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D819B34",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA72EEC",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    154
+   ],
+   "owner": "4D81496C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[4].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6F304",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D8143A4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA73044",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    154
+   ],
+   "owner": "4D8143A4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[5].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6F56C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D814F34",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[6].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6F09C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81496C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6FCA4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D813DDC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA72D94",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    67
+   ],
+   "owner": "4D813DDC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[3].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6EE34",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D8126BC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA72C3C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    67
+   ],
+   "owner": "4D8126BC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[2].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CC38E4",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    67
+   ],
+   "owner": "4D81324C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[1].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA7319C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    154
+   ],
+   "owner": "4D814F34",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[6].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA732F4",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    241
+   ],
+   "owner": "4D815B9C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[7].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6CC84",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D80E724",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.firstPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6CEEC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D813814",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.prevPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6D154",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81040C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.nextPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6C07C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D815B9C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[7].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA735A4",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    241
+   ],
+   "owner": "4D817E4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[9].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA7344C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    241
+   ],
+   "owner": "4D81672C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[8].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC70174",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D817E4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[9].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6FF0C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81672C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[8].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA7675C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    397
+   ],
+   "owner": "4D81956C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[1].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC6D88C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81324C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC71984",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D817884",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.lastPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA76B64",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    484
+   ],
+   "owner": "4D816164",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[4].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC7171C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81A0FC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA76CBC",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    484
+   ],
+   "owner": "4D81A0FC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[5].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC7124C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81B81C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[6].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC70D7C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D816164",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC73D9C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D816CF4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA76A0C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    397
+   ],
+   "owner": "4D816CF4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[3].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA768B4",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    397
+   ],
+   "owner": "4D819B34",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[2].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC70B14",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 19,
+   "method_count": 13,
+   "owner": "4EBA3FD4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.pageLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA76E14",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    484
+   ],
+   "owner": "4D81B81C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[6].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA76F6C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    15,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    15,
+    571
+   ],
+   "owner": "4D81A6C4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[7].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC714B4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D818FA4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.firstPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC73194",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D8172BC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.prevPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC7473C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D8155D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.nextPageButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC70FE4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81A6C4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[7].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4FA7721C",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    189,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    189,
+    571
+   ],
+   "owner": "4D81BDE4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[9].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4FA770C4",
+   "class": "drawable:image",
+   "content_extent": [
+    84,
+    84
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "eoffset": [
+    102,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    102,
+    571
+   ],
+   "owner": "4D81AC8C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[8].icon"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4EC720BC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81BDE4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[9].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC74C0C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D81AC8C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[8].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6BE14",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 27,
+   "method_count": 13,
+   "owner": "4EE74E64",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B5344",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E522764",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "376B7214",
+   "class": "drawable:image",
+   "content_extent": [
+    418,
+    271
+   ],
+   "eextent": [
+    418,
+    271
+   ],
+   "eoffset": [
+    1502,
+    0
+   ],
+   "extent": [
+    418,
+    271
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1502,
+    0
+   ],
+   "owner": "4E2BB78C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.bg_deco"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "370B19DC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37147974",
+   "paths": [
+    "characterCreate.bgWindow.nextStepBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B1EAC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B1C44",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B2324",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E552DA4",
+   "paths": [
+    "step2.content.rightPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6AFA3C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E553AC4",
+   "paths": [
+    "step1.content.tooltipWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B2114",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B284C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4F067D84",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "44F4EA04",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "37132CD4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "37115B5C",
+   "paths": [
+    "tooltip.rootWnd.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "370B12A4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E5551BC",
+   "paths": [
+    "characterCreate.bottomPanel.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4F067FEC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4E748BFC",
+   "paths": [
+    "step2.content.rightPanel.raceBgWindow[1].titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6C54C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4D80F87C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.closeButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40CAC604",
+   "class": "drawable:image",
+   "content_extent": [
+    97,
+    35
+   ],
+   "eextent": [
+    97,
+    35
+   ],
+   "eoffset": [
+    53,
+    1046
+   ],
+   "extent": [
+    97,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    53,
+    1046
+   ],
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CBA7C4",
+   "class": "drawable:image",
+   "content_extent": [
+    76,
+    35
+   ],
+   "eextent": [
+    76,
+    35
+   ],
+   "eoffset": [
+    937,
+    1047
+   ],
+   "extent": [
+    76,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    937,
+    1047
+   ],
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAB1DC",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    180,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    180,
+    1024
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4F064894",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4EDBBA3C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.titleStyle"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "47DACC1C",
+   "class": "drawable:threepart",
+   "content_extent": [
+    80,
+    400
+   ],
+   "eextent": [
+    80,
+    400
+   ],
+   "eoffset": [
+    320,
+    0
+   ],
+   "extent": [
+    80,
+    400
+   ],
+   "kind": "drawable",
+   "method_count": 28,
+   "offset": [
+    320,
+    0
+   ],
+   "owner": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "3CE188EC",
+   "class": "drawable:ninepart",
+   "content_extent": [
+    515,
+    930
+   ],
+   "eextent": [
+    515,
+    930
+   ],
+   "eoffset": [
+    1405,
+    0
+   ],
+   "extent": [
+    515,
+    930
+   ],
+   "kind": "drawable",
+   "method_count": 29,
+   "offset": [
+    1405,
+    0
+   ],
+   "owner": "4E2BB78C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CACA0C",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    1,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1,
+    1024
+   ],
+   "owner": "37148504",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAA874",
+   "class": "drawable:image",
+   "content_extent": [
+    24,
+    27
+   ],
+   "eextent": [
+    24,
+    27
+   ],
+   "eoffset": [
+    215,
+    1050
+   ],
+   "extent": [
+    24,
+    27
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    215,
+    1050
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAC0A4",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    1719,
+    1023
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1719,
+    1023
+   ],
+   "owner": "37147974",
+   "paths": [
+    "characterCreate.bgWindow.nextStepBtn.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CBABCC",
+   "class": "drawable:image",
+   "content_extent": [
+    171,
+    57
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "eoffset": [
+    874.5,
+    1023
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    874.5,
+    1023
+   ],
+   "owner": "23F10024",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAADD4",
+   "class": "drawable:image",
+   "content_extent": [
+    108,
+    35
+   ],
+   "eextent": [
+    108,
+    35
+   ],
+   "eoffset": [
+    231.5,
+    1045
+   ],
+   "extent": [
+    108,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    231.5,
+    1045
+   ],
+   "owner": "37149094",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CABB44",
+   "class": "drawable:image",
+   "content_extent": [
+    135,
+    35
+   ],
+   "eextent": [
+    135,
+    35
+   ],
+   "eoffset": [
+    1737,
+    1044
+   ],
+   "extent": [
+    135,
+    35
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1737,
+    1044
+   ],
+   "owner": "37147974",
+   "paths": [
+    "characterCreate.bgWindow.nextStepBtn.add_bgs1[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "40CAB73C",
+   "class": "drawable:image",
+   "content_extent": [
+    24,
+    27
+   ],
+   "eextent": [
+    24,
+    27
+   ],
+   "eoffset": [
+    1866,
+    1049
+   ],
+   "extent": [
+    24,
+    27
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    1866,
+    1049
+   ],
+   "owner": "37147974",
+   "paths": [
+    "characterCreate.bgWindow.nextStepBtn.add_bgs2[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4E6B4C0C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EAF9B54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.pageLabel.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501A7004",
+   "class": "drawable:image",
+   "content_extent": [
+    1920,
+    1200
+   ],
+   "eextent": [
+    1920,
+    1200
+   ],
+   "eoffset": [
+    0,
+    -60
+   ],
+   "extent": [
+    1920,
+    1200
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    0,
+    -60
+   ],
+   "owner": "4E748BFC",
+   "paths": [
+    "step2.content.rightPanel.raceBgWindow[1].bg"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4ECEAB44",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4E5FA9E4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.systemAlert.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4F06BC14",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EBB8B94",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[4].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC733FC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4D81C3AC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[2].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECE9804",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4ED61BAC",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.loadBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4E6B44D4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4EB288A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.portraitWindow.readyMixButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4ECEA40C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4ED632CC",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.saveBtn.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4F07151C",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4ED596B4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[5].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC768EC",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4D467744",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[3].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "40C9E03C",
+   "class": "drawable:image",
+   "content_extent": [
+    35,
+    57
+   ],
+   "eextent": [
+    35,
+    57
+   ],
+   "eoffset": [
+    315,
+    511.5
+   ],
+   "extent": [
+    35,
+    57
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    315,
+    511.5
+   ],
+   "owner": "4D80F87C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.closeButton.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "4F065BD4",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 16,
+   "method_count": 13,
+   "owner": "4ED62D04",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.textButton.style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "4EC6E494",
+   "class": "textstyle",
+   "kind": "style",
+   "line_height": 22,
+   "method_count": 13,
+   "owner": "4D80FE44",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.selectedButton[1].style"
+   ],
+   "shown": true
+  },
+  {
+   "addr": "501A67F4",
+   "class": "drawable:image",
+   "content_extent": [
+    18,
+    17
+   ],
+   "eextent": [
+    18,
+    17
+   ],
+   "eoffset": [
+    327.5,
+    270
+   ],
+   "extent": [
+    18,
+    17
+   ],
+   "kind": "drawable",
+   "method_count": 38,
+   "offset": [
+    327.5,
+    270
+   ],
+   "owner": "44F4EA04",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.bgs[1]"
+   ],
+   "shown": true,
+   "visible": true
+  },
+  {
+   "addr": "37115B5C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    5,
+    5
+   ],
+   "eextent": [
+    5,
+    5
+   ],
+   "enabled": true,
+   "eoffset": [
+    -100,
+    0
+   ],
+   "extent": [
+    5,
+    5
+   ],
+   "id": "604",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    -100,
+    0
+   ],
+   "order": 1540,
+   "parent": "UIParent",
+   "paths": [
+    "tooltip.rootWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "3707E364",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "75a",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": true,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1882,
+   "parent": "UIParent",
+   "paths": [
+    "characterCreate.bgWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E5551BC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    21
+   ],
+   "eextent": [
+    1920,
+    21
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    1059
+   ],
+   "extent": [
+    1920,
+    21
+   ],
+   "id": "765",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    1059
+   ],
+   "order": 1893,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bottomPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37148504",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CAE0E4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    1,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CAC8B4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "766",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CACA0C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1,
+    1024
+   ],
+   "order": 1894,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.cancelCreateBtn"
+   ],
+   "pushedbackground": "40CAC75C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37147974",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CABC9C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    1719,
+    1023
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CABF4C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "767",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CAC0A4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1719,
+    1023
+   ],
+   "order": 1895,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.nextStepBtn"
+   ],
+   "pushedbackground": "40CABDF4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37149094",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CADE34",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    180,
+    1024
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CAB084",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "768",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CAB1DC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    180,
+    1024
+   ],
+   "order": 1896,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.prevStepBtn"
+   ],
+   "pushedbackground": "40CAAF2C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "23F10024",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    171,
+    57
+   ],
+   "disabledbackground": "40CBA91C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    171,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    874.5,
+    1023
+   ],
+   "extent": [
+    171,
+    57
+   ],
+   "highlightbackground": "40CADB84",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "769",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CBABCC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    874.5,
+    1023
+   ],
+   "order": 1897,
+   "parent": "3707E364",
+   "paths": [
+    "characterCreate.bgWindow.stepCompleteButton"
+   ],
+   "pushedbackground": "40CBAA74",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E553AC4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1,
+    1
+   ],
+   "eextent": [
+    1,
+    1
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1,
+    1
+   ],
+   "id": "76d",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 1901,
+   "parent": "UIParent",
+   "paths": [
+    "step1.content.tooltipWindow"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E2BE40C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    1920,
+    810
+   ],
+   "eextent": [
+    1920,
+    810
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    135
+   ],
+   "extent": [
+    1920,
+    810
+   ],
+   "id": "783",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    0,
+    135
+   ],
+   "order": 1923,
+   "parent": "3707E364",
+   "paths": [
+    "step2.content",
+    "characterCreate.bgWindow.content"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E2BEF2C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    62,
+    54
+   ],
+   "eextent": [
+    62,
+    54
+   ],
+   "enabled": true,
+   "eoffset": [
+    787.5,
+    1024.5
+   ],
+   "extent": [
+    62,
+    54
+   ],
+   "id": "784",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    787.5,
+    1024.5
+   ],
+   "order": 1924,
+   "parent": "4E2BE40C",
+   "paths": [
+    "step2.content.guide"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E552DA4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    400,
+    1080
+   ],
+   "eextent": [
+    400,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    0
+   ],
+   "extent": [
+    400,
+    1080
+   ],
+   "id": "787",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    1520,
+    0
+   ],
+   "order": 1927,
+   "parent": "4E2BE40C",
+   "paths": [
+    "step2.content.rightPanel",
+    "step2.SetRaceGender^rightPanel",
+    "step2.content.OnShow^rightPanel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E2BB78C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    515,
+    1080
+   ],
+   "eextent": [
+    515,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    0
+   ],
+   "extent": [
+    515,
+    1080
+   ],
+   "id": "789",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1405,
+    0
+   ],
+   "order": 1929,
+   "parent": "4E552DA4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd",
+    "step2.content.rightPanel.bodyWnd",
+    "step2.content.rightPanel.plasticWnd.ResetUI^window",
+    "step2.content.rightPanel.plasticWnd.presetWindow.Init^parent"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E2BBA54",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    115,
+    365
+   ],
+   "eextent": [
+    115,
+    365
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    0
+   ],
+   "extent": [
+    115,
+    365
+   ],
+   "id": "78a",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1405,
+    0
+   ],
+   "order": 1930,
+   "parent": "4E2BB78C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu",
+    "step2.content.rightPanel.plasticWnd.SetBeautyShopStyle^buttonMenu",
+    "step2.content.rightPanel.plasticWnd.buttonMenu.Init^window",
+    "step2.content.rightPanel.plasticWnd.buttonMenu.SelectPresetType^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB25A64",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    115,
+    73
+   ],
+   "disabledbackground": "376B532C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    115,
+    73
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    0
+   ],
+   "extent": [
+    115,
+    73
+   ],
+   "highlightbackground": "376B6F64",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "78b",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "376B6F64",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1405,
+    0
+   ],
+   "order": 1931,
+   "parent": "4E2BBA54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[1]"
+   ],
+   "pushedbackground": "376B6F64",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Premade",
+   "visible": true
+  },
+  {
+   "addr": "4EB265F4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    115,
+    48
+   ],
+   "disabledbackground": "376B634C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    95
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "highlightbackground": "376B5DEC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "78c",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "376B51D4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1405,
+    95
+   ],
+   "order": 1932,
+   "parent": "4E2BBA54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[2]"
+   ],
+   "pushedbackground": "376B5C94",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Eyes",
+   "visible": true
+  },
+  {
+   "addr": "4EB24344",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    115,
+    48
+   ],
+   "disabledbackground": "376B7CD4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    165
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "highlightbackground": "376B609C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "78d",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "376B61F4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1405,
+    165
+   ],
+   "order": 1933,
+   "parent": "4E2BBA54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[3]"
+   ],
+   "pushedbackground": "376B5484",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Nose",
+   "visible": true
+  },
+  {
+   "addr": "4EB2490C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    115,
+    48
+   ],
+   "disabledbackground": "376B6B5C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    235
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "highlightbackground": "376B6E0C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "78e",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "376B4464",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1405,
+    235
+   ],
+   "order": 1934,
+   "parent": "4E2BBA54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[4]"
+   ],
+   "pushedbackground": "376B6CB4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Mouth",
+   "visible": true
+  },
+  {
+   "addr": "4EB24ED4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    115,
+    48
+   ],
+   "disabledbackground": "40CB2414",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    115,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    1405,
+    305
+   ],
+   "extent": [
+    115,
+    48
+   ],
+   "highlightbackground": "40CB22BC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "78f",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB1954",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1405,
+    305
+   ],
+   "order": 1935,
+   "parent": "4E2BBA54",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.buttonMenu.buttons[5]"
+   ],
+   "pushedbackground": "40CB200C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Head",
+   "visible": true
+  },
+  {
+   "addr": "4E2BA14C",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    380,
+    165
+   ],
+   "eextent": [
+    380,
+    165
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    12.5
+   ],
+   "extent": [
+    380,
+    165
+   ],
+   "id": "791",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1520,
+    12.5
+   ],
+   "order": 1937,
+   "parent": "4E2BB78C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.portraitWindow",
+    "step2.content.rightPanel.plasticWnd.portraitWindow.SelectPresetItem^window",
+    "step2.content.rightPanel.plasticWnd.portraitWindow.SelectPresetType^window",
+    "step2.content.rightPanel.plasticWnd.portraitWindow.mixButton.OnClick^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB288A4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    200,
+    65
+   ],
+   "disabledbackground": "40CB302C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.600000024,
+     "g": 0.600000024,
+     "r": 0.600000024
+    }
+   ],
+   "eextent": [
+    200,
+    65
+   ],
+   "enabled": true,
+   "eoffset": [
+    1610,
+    62.5
+   ],
+   "extent": [
+    200,
+    65
+   ],
+   "highlightbackground": "40CB2ED4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "id": "794",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB2D7C",
+   "normalcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "offset": [
+    1610,
+    62.5
+   ],
+   "order": 1940,
+   "parent": "4E2BA14C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.portraitWindow.readyMixButton"
+   ],
+   "pushedbackground": "40CB358C",
+   "pushedcolor": [
+    {
+     "a": 0.699999988,
+     "b": 0.203921571,
+     "g": 0.431372553,
+     "r": 0.525490224
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Blend Looks",
+   "visible": true
+  },
+  {
+   "addr": "4E2BA9A4",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    380,
+    450
+   ],
+   "eextent": [
+    380,
+    450
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    187.5
+   ],
+   "extent": [
+    380,
+    450
+   ],
+   "id": "79a",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    1520,
+    187.5
+   ],
+   "order": 1946,
+   "parent": "4E2BB78C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow",
+    "step2.content.rightPanel.plasticWnd.SetBeautyShopStyle^presetWindow",
+    "step2.content.rightPanel.plasticWnd.presetWindow.ClearSelectedItem^window",
+    "step2.content.rightPanel.plasticWnd.presetWindow.ReadyToMix^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EAF9B54",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    370,
+    20
+   ],
+   "eextent": [
+    370,
+    20
+   ],
+   "enabled": true,
+   "eoffset": [
+    1525,
+    187.5
+   ],
+   "extent": [
+    370,
+    20
+   ],
+   "id": "79b",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 86,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    1525,
+    187.5
+   ],
+   "order": 1947,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.pageLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 22,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "4EB2A58C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB633C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    222.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB61E4",
+   "highlightcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a2",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB61E4",
+   "normalcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "offset": [
+    1520,
+    222.5
+   ],
+   "order": 1954,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[1].OnClick^btn"
+   ],
+   "pushedbackground": "40CB61E4",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB2AB54",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB6B4C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1655,
+    222.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB689C",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a3",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB6744",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1655,
+    222.5
+   ],
+   "order": 1955,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[2].OnClick^btn"
+   ],
+   "pushedbackground": "40CB69F4",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB27184",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB70AC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1790,
+    222.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB6DFC",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a4",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB6CA4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1790,
+    222.5
+   ],
+   "order": 1956,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[3].OnClick^btn"
+   ],
+   "pushedbackground": "40CB6F54",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB2B11C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB7E1C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    352.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB760C",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a5",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB74B4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1520,
+    352.5
+   ],
+   "order": 1957,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[4].OnClick^btn"
+   ],
+   "pushedbackground": "40CB7764",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EB2B6E4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB7F74",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1655,
+    352.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB7B6C",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a6",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB7A14",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1655,
+    352.5
+   ],
+   "order": 1958,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[5].OnClick^btn"
+   ],
+   "pushedbackground": "40CB7CC4",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "37141CF4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB84D4",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1790,
+    352.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB837C",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a7",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB8224",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1790,
+    352.5
+   ],
+   "order": 1959,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[6].OnClick^btn"
+   ],
+   "pushedbackground": "40CB8A34",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "371422BC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB8CE4",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1520,
+    482.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB88DC",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a8",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB8784",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1520,
+    482.5
+   ],
+   "order": 1960,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[7].OnClick^btn"
+   ],
+   "pushedbackground": "40CB8B8C",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E522764",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB9244",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1655,
+    482.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB964C",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7a9",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB8F94",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1655,
+    482.5
+   ],
+   "order": 1961,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[8].OnClick^btn"
+   ],
+   "pushedbackground": "40CB90EC",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E5232F4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    120,
+    120
+   ],
+   "disabledbackground": "40CB9A54",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    120,
+    120
+   ],
+   "enabled": true,
+   "eoffset": [
+    1790,
+    482.5
+   ],
+   "extent": [
+    120,
+    120
+   ],
+   "highlightbackground": "40CB97A4",
+   "highlightcolor": [
+    {
+     "a": 0.600000024,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "id": "7aa",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CB94F4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    1790,
+    482.5
+   ],
+   "order": 1962,
+   "parent": "4E2BA9A4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9]",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].OnEnter^btn",
+    "step2.content.rightPanel.plasticWnd.presetWindow.item[9].OnClick^btn"
+   ],
+   "pushedbackground": "40CB98FC",
+   "pushedcolor": [
+    {
+     "a": 0.800000012,
+     "b": 0.835294127,
+     "g": 1,
+     "r": 0.992156863
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E2BCDCC",
+   "alpha": 1,
+   "class": "emptywidget",
+   "content_extent": [
+    432,
+    0
+   ],
+   "eextent": [
+    432,
+    0
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    432,
+    0
+   ],
+   "id": "83b",
+   "kind": "widget",
+   "method_count": 94,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2107,
+   "parent": "4E2BE40C",
+   "paths": [
+    "step2.content.cosmeticWindow",
+    "step2.SetRaceGender^leftPanel",
+    "step2.content.OnShow^leftPanel",
+    "step2.content.cosmeticWindow.SelectCosmeticType^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "240BF5D4",
+   "alpha": 1,
+   "class": "tab",
+   "content_extent": [
+    400,
+    1080
+   ],
+   "eextent": [
+    400,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    400,
+    1080
+   ],
+   "id": "842",
+   "kind": "widget",
+   "method_count": 107,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2114,
+   "parent": "4E2BCDCC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab",
+    "step2.content.cosmeticWindow.cosmeticTab.Init^window",
+    "step2.content.cosmeticWindow.cosmeticTab.SetTabButtonBeautyShopStyle^tab",
+    "step2.content.cosmeticWindow.cosmeticTab.ReloadCosmetic^window"
+   ],
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D80F87C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    35,
+    57
+   ],
+   "disabledbackground": "38C68A34",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    35,
+    57
+   ],
+   "enabled": true,
+   "eoffset": [
+    315,
+    511.5
+   ],
+   "extent": [
+    35,
+    57
+   ],
+   "highlightbackground": "38C68CE4",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "843",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40C9E03C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    315,
+    511.5
+   ],
+   "order": 2115,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.closeButton"
+   ],
+   "pushedbackground": "38C68B8C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D80FE44",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    80,
+    48
+   ],
+   "disabledbackground": "38C684D4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    80,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    320,
+    0
+   ],
+   "extent": [
+    80,
+    48
+   ],
+   "highlightbackground": "38C68784",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "844",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "38C688DC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    320,
+    0
+   ],
+   "order": 2116,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.selectedButton[1]"
+   ],
+   "pushedbackground": "38C6862C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Hair",
+   "visible": true
+  },
+  {
+   "addr": "4EE74E64",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    320,
+    1080
+   ],
+   "eextent": [
+    320,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    320,
+    1080
+   ],
+   "id": "846",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2118,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1]",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].SetRaceGender^window",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].Init^window",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].UpdateRelatedStyle^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EE72A4C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    258,
+    315
+   ],
+   "eextent": [
+    258,
+    315
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    45
+   ],
+   "extent": [
+    258,
+    315
+   ],
+   "id": "847",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    15,
+    45
+   ],
+   "order": 2119,
+   "parent": "4EE74E64",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1]",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].styleWindow[1]",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].SetCosmeticItemByPage^window",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].deleteButton.OnClick^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D455464",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    260,
+    15
+   ],
+   "eextent": [
+    260,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    47
+   ],
+   "extent": [
+    260,
+    15
+   ],
+   "id": "848",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 135,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    15,
+    47
+   ],
+   "order": 2120,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].title"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 18,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "4EE719E4",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    150,
+    32
+   ],
+   "eextent": [
+    150,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    69,
+    327
+   ],
+   "extent": [
+    150,
+    32
+   ],
+   "id": "849",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    69,
+    327
+   ],
+   "order": 2121,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetTitleStyle^widget",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^widget",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.UpdatePageLabel^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D80E724",
+   "alpha": 1,
+   "button_state": "DISABLED",
+   "class": "button",
+   "content_extent": [
+    12,
+    24
+   ],
+   "disabledbackground": "40CC276C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    12,
+    24
+   ],
+   "enabled": false,
+   "eoffset": [
+    76,
+    331
+   ],
+   "extent": [
+    12,
+    24
+   ],
+   "highlightbackground": "40CC24BC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "84a",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CC2364",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    76,
+    331
+   ],
+   "order": 2122,
+   "parent": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.firstPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^firstPageButton"
+   ],
+   "pushedbackground": "40CC2614",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D813814",
+   "alpha": 1,
+   "button_state": "DISABLED",
+   "class": "button",
+   "content_extent": [
+    16,
+    32
+   ],
+   "disabledbackground": "40CC2CCC",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    16,
+    32
+   ],
+   "enabled": false,
+   "eoffset": [
+    88,
+    327
+   ],
+   "extent": [
+    16,
+    32
+   ],
+   "highlightbackground": "40CC2A1C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "84b",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CC28C4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    88,
+    327
+   ],
+   "order": 2123,
+   "parent": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.prevPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^prevPageButton"
+   ],
+   "pushedbackground": "40CC2B74",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81040C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    16,
+    32
+   ],
+   "disabledbackground": "38C66F54",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    16,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    184,
+    327
+   ],
+   "extent": [
+    16,
+    32
+   ],
+   "highlightbackground": "38C67204",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "84c",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "38C6735C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    184,
+    327
+   ],
+   "order": 2124,
+   "parent": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.nextPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^nextPageButton"
+   ],
+   "pushedbackground": "38C670AC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D812C84",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    12,
+    24
+   ],
+   "disabledbackground": "40CC378C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    12,
+    24
+   ],
+   "enabled": true,
+   "eoffset": [
+    200,
+    331
+   ],
+   "extent": [
+    12,
+    24
+   ],
+   "highlightbackground": "40CC34DC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "84d",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "40CC3384",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    200,
+    331
+   ],
+   "order": 2125,
+   "parent": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.lastPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^lastPageButton"
+   ],
+   "pushedbackground": "40CC3634",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EBA34CC",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    80,
+    30
+   ],
+   "eextent": [
+    80,
+    30
+   ],
+   "enabled": true,
+   "eoffset": [
+    104,
+    328
+   ],
+   "extent": [
+    80,
+    30
+   ],
+   "id": "84e",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    104,
+    328
+   ],
+   "order": 2126,
+   "parent": "4EE719E4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.pageLabel",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].pageControl.SetPageStyle^pageLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "1 / 3",
+   "visible": true
+  },
+  {
+   "addr": "4D81324C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AA4BC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AA644",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "84f",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AA644",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    15,
+    67
+   ],
+   "order": 2127,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[1]"
+   ],
+   "pushedbackground": "3D1AA644",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D8126BC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3CE18BFC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3CE18D84",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "850",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AB8A4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    67
+   ],
+   "order": 2128,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[2]"
+   ],
+   "pushedbackground": "3D1A987C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D813DDC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1A956C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    67
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1A9A04",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "851",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1A96F4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    189,
+    67
+   ],
+   "order": 2129,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[3]"
+   ],
+   "pushedbackground": "3CE18F0C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81496C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AC04C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3CE19094",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "852",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3CE18A74",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    15,
+    154
+   ],
+   "order": 2130,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[4]"
+   ],
+   "pushedbackground": "3D1A8DC4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D8143A4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AC66C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AC35C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "853",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AC1D4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    154
+   ],
+   "order": 2131,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[5]"
+   ],
+   "pushedbackground": "3D1AC4E4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D814F34",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1ACC8C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    154
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AC97C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "854",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AC7F4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    189,
+    154
+   ],
+   "order": 2132,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[6]"
+   ],
+   "pushedbackground": "3D1ACB04",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D815B9C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AD2AC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1ACF9C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "855",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1ACE14",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    15,
+    241
+   ],
+   "order": 2133,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[7]"
+   ],
+   "pushedbackground": "3D1AD124",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81672C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AD8CC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AD5BC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "856",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AD434",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    241
+   ],
+   "order": 2134,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[8]"
+   ],
+   "pushedbackground": "3D1AD744",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D817E4C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1ADEEC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    241
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1ADBDC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "857",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1ADA54",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    189,
+    241
+   ],
+   "order": 2135,
+   "parent": "4EE72A4C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[1].item[9]"
+   ],
+   "pushedbackground": "3D1ADD64",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EE71D2C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    258,
+    315
+   ],
+   "eextent": [
+    258,
+    315
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    375
+   ],
+   "extent": [
+    258,
+    315
+   ],
+   "id": "859",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    15,
+    375
+   ],
+   "order": 2137,
+   "parent": "4EE74E64",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2]",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].styleWindow[2]",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].SetCosmeticItemByPage^window",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].deleteButton.OnClick^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D453D54",
+   "alpha": 1,
+   "class": "textbox",
+   "content_extent": [
+    260,
+    15
+   ],
+   "eextent": [
+    260,
+    15
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    377
+   ],
+   "extent": [
+    260,
+    15
+   ],
+   "id": "85a",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "line_count": 1,
+   "longest_line_width": 150,
+   "method_count": 105,
+   "mouse_over": false,
+   "offset": [
+    15,
+    377
+   ],
+   "order": 2138,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].title"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "text_height": 18,
+   "text_length": 0,
+   "visible": true
+  },
+  {
+   "addr": "4EE730DC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    150,
+    32
+   ],
+   "eextent": [
+    150,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    69,
+    657
+   ],
+   "extent": [
+    150,
+    32
+   ],
+   "id": "85b",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    69,
+    657
+   ],
+   "order": 2139,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetTitleStyle^widget",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^widget",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.UpdatePageLabel^widget"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D818FA4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    12,
+    24
+   ],
+   "disabledbackground": "4FA755E4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    12,
+    24
+   ],
+   "enabled": true,
+   "eoffset": [
+    76,
+    661
+   ],
+   "extent": [
+    12,
+    24
+   ],
+   "highlightbackground": "4FA75334",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "85c",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA751DC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    76,
+    661
+   ],
+   "order": 2140,
+   "parent": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.firstPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^firstPageButton"
+   ],
+   "pushedbackground": "4FA7548C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D8172BC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    16,
+    32
+   ],
+   "disabledbackground": "4FA75B44",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    16,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    88,
+    657
+   ],
+   "extent": [
+    16,
+    32
+   ],
+   "highlightbackground": "4FA75894",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "85d",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA7573C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    88,
+    657
+   ],
+   "order": 2141,
+   "parent": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.prevPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^prevPageButton"
+   ],
+   "pushedbackground": "4FA759EC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D8155D4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    16,
+    32
+   ],
+   "disabledbackground": "4FA74B24",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    16,
+    32
+   ],
+   "enabled": true,
+   "eoffset": [
+    184,
+    657
+   ],
+   "extent": [
+    16,
+    32
+   ],
+   "highlightbackground": "4FA74874",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "85e",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA7471C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    184,
+    657
+   ],
+   "order": 2142,
+   "parent": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.nextPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^nextPageButton"
+   ],
+   "pushedbackground": "4FA749CC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D817884",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    12,
+    24
+   ],
+   "disabledbackground": "4FA76604",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0.435294122,
+     "g": 0.435294122,
+     "r": 0.435294122
+    }
+   ],
+   "eextent": [
+    12,
+    24
+   ],
+   "enabled": true,
+   "eoffset": [
+    200,
+    661
+   ],
+   "extent": [
+    12,
+    24
+   ],
+   "highlightbackground": "4FA76354",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0.164705887,
+     "g": 0.356862754,
+     "r": 0.513725519
+    }
+   ],
+   "id": "85f",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA761FC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0.0431372561,
+     "g": 0.176470593,
+     "r": 0.286274523
+    }
+   ],
+   "offset": [
+    200,
+    661
+   ],
+   "order": 2143,
+   "parent": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.lastPageButton",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^lastPageButton"
+   ],
+   "pushedbackground": "4FA764AC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0.0784313753,
+     "g": 0.215686277,
+     "r": 0.321568638
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EBA3FD4",
+   "alpha": 1,
+   "class": "label",
+   "content_extent": [
+    80,
+    30
+   ],
+   "eextent": [
+    80,
+    30
+   ],
+   "enabled": true,
+   "eoffset": [
+    104,
+    658
+   ],
+   "extent": [
+    80,
+    30
+   ],
+   "id": "860",
+   "inset": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "kind": "widget",
+   "method_count": 99,
+   "mouse_over": false,
+   "offset": [
+    104,
+    658
+   ],
+   "order": 2144,
+   "parent": "4EE730DC",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.pageLabel",
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].pageControl.SetPageStyle^pageLabel"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "4 / 7",
+   "visible": true
+  },
+  {
+   "addr": "4D81956C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AE50C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AE1FC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "861",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AE074",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    15,
+    397
+   ],
+   "order": 2145,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[1]"
+   ],
+   "pushedbackground": "3D1AE384",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D819B34",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "3D1AEB2C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "3D1AE81C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "862",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AE694",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    397
+   ],
+   "order": 2146,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[2]"
+   ],
+   "pushedbackground": "3D1AE9A4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D816CF4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA78D4C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    397
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA78A3C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "863",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "3D1AECB4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    189,
+    397
+   ],
+   "order": 2147,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[3]"
+   ],
+   "pushedbackground": "4FA78BC4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D816164",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA7936C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA7905C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "864",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA78ED4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    15,
+    484
+   ],
+   "order": 2148,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[4]"
+   ],
+   "pushedbackground": "4FA791E4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81A0FC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA7998C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA7967C",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "865",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA794F4",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    484
+   ],
+   "order": 2149,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[5]"
+   ],
+   "pushedbackground": "4FA79804",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81B81C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA79FAC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    484
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA79E24",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "866",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA79E24",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    189,
+    484
+   ],
+   "order": 2150,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[6]"
+   ],
+   "pushedbackground": "4FA79E24",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81A6C4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA7A5CC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    15,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA7A2BC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "867",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA7A134",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    15,
+    571
+   ],
+   "order": 2151,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[7]"
+   ],
+   "pushedbackground": "4FA7A444",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81AC8C",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA7ABEC",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    102,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA7A8DC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "868",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA7A754",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    102,
+    571
+   ],
+   "order": 2152,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[8]"
+   ],
+   "pushedbackground": "4FA7AA64",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81BDE4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    84,
+    84
+   ],
+   "disabledbackground": "4FA7B20C",
+   "disabledcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    84,
+    84
+   ],
+   "enabled": true,
+   "eoffset": [
+    189,
+    571
+   ],
+   "extent": [
+    84,
+    84
+   ],
+   "highlightbackground": "4FA7AEFC",
+   "highlightcolor": [
+    {
+     "a": 0.699999988,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "869",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA7AD74",
+   "normalcolor": [
+    {
+     "a": 0,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    189,
+    571
+   ],
+   "order": 2153,
+   "parent": "4EE71D2C",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.window[1].stylePageWnd[2].item[9]"
+   ],
+   "pushedbackground": "4FA7B084",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4D81C3AC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    80,
+    48
+   ],
+   "disabledbackground": "4FA8003C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    80,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    320,
+    49
+   ],
+   "extent": [
+    80,
+    48
+   ],
+   "highlightbackground": "4FA77F8C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "86c",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA77E34",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    320,
+    49
+   ],
+   "order": 2156,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[2]"
+   ],
+   "pushedbackground": "4FA780E4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Eyes",
+   "visible": true
+  },
+  {
+   "addr": "4D467744",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    80,
+    48
+   ],
+   "disabledbackground": "4FA8EBC4",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    80,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    320,
+    98
+   ],
+   "extent": [
+    80,
+    48
+   ],
+   "highlightbackground": "4FA8E914",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "891",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA8E7BC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    320,
+    98
+   ],
+   "order": 2193,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[3]"
+   ],
+   "pushedbackground": "4FA8EA6C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Style",
+   "visible": true
+  },
+  {
+   "addr": "4EBB8B94",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    80,
+    48
+   ],
+   "disabledbackground": "4FA9C324",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    80,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    320,
+    147
+   ],
+   "extent": [
+    80,
+    48
+   ],
+   "highlightbackground": "4FA9C074",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "8c8",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "4FA9BF1C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    320,
+    147
+   ],
+   "order": 2248,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[4]"
+   ],
+   "pushedbackground": "4FA9C1CC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Skin",
+   "visible": true
+  },
+  {
+   "addr": "4ED596B4",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    80,
+    48
+   ],
+   "disabledbackground": "50193B8C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    80,
+    48
+   ],
+   "enabled": true,
+   "eoffset": [
+    320,
+    196
+   ],
+   "extent": [
+    80,
+    48
+   ],
+   "highlightbackground": "501938DC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "8f2",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "50193784",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    320,
+    196
+   ],
+   "order": 2290,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.unselectedButton[5]"
+   ],
+   "pushedbackground": "50193A34",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Paint",
+   "visible": true
+  },
+  {
+   "addr": "44F4EA04",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "checkbutton",
+   "content_extent": [
+    17,
+    17
+   ],
+   "disabledbackground": "501A6BFC",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    17,
+    17
+   ],
+   "enabled": true,
+   "eoffset": [
+    328,
+    270
+   ],
+   "extent": [
+    17,
+    17
+   ],
+   "highlightbackground": "501A694C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "91f",
+   "kind": "widget",
+   "method_count": 133,
+   "mouse_over": false,
+   "normalbackground": "501A67F4",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    328,
+    270
+   ],
+   "order": 2335,
+   "parent": "240BF5D4",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox",
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.SetButtonStyle^button",
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.textButton.OnClick^button"
+   ],
+   "pushedbackground": "501A6AA4",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4ED62D04",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    97,
+    16
+   ],
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "eextent": [
+    97,
+    16
+   ],
+   "enabled": true,
+   "eoffset": [
+    345,
+    270.5
+   ],
+   "extent": [
+    97,
+    16
+   ],
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "id": "920",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "offset": [
+    345,
+    270.5
+   ],
+   "order": 2336,
+   "parent": "44F4EA04",
+   "paths": [
+    "step2.content.cosmeticWindow.cosmeticTab.fixCheckbox.textButton"
+   ],
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 0,
+     "g": 0,
+     "r": 0
+    }
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "Keep Appearance",
+   "visible": true
+  },
+  {
+   "addr": "4E748BFC",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    1920,
+    1080
+   ],
+   "eextent": [
+    1920,
+    1080
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    0
+   ],
+   "extent": [
+    1920,
+    1080
+   ],
+   "id": "921",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    0,
+    0
+   ],
+   "order": 2337,
+   "parent": "UIParent",
+   "paths": [
+    "step2.content.rightPanel.raceBgWindow[1]",
+    "step2.content.rightPanel.raceBgWindow[1].OnScale^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4EDBBA3C",
+   "alpha": 1,
+   "class": "window",
+   "content_extent": [
+    265,
+    33
+   ],
+   "eextent": [
+    265,
+    33
+   ],
+   "enabled": true,
+   "eoffset": [
+    1645,
+    967
+   ],
+   "extent": [
+    265,
+    33
+   ],
+   "id": "929",
+   "kind": "widget",
+   "method_count": 116,
+   "mouse_over": false,
+   "offset": [
+    1645,
+    967
+   ],
+   "order": 2345,
+   "parent": "4E552DA4",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd",
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.saveBtn.OnClick^window"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4E5FA9E4",
+   "alpha": 1,
+   "class": "message",
+   "content_extent": [
+    1920,
+    50
+   ],
+   "eextent": [
+    1920,
+    50
+   ],
+   "enabled": true,
+   "eoffset": [
+    0,
+    20
+   ],
+   "extent": [
+    1920,
+    50
+   ],
+   "id": "92a",
+   "kind": "widget",
+   "method_count": 120,
+   "mouse_over": false,
+   "offset": [
+    0,
+    20
+   ],
+   "order": 2346,
+   "parent": "4EDBBA3C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.systemAlert",
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.saveBtn.OnClick^systemAlertWnd"
+   ],
+   "rotation": "NONE",
+   "shown": true,
+   "text": "",
+   "visible": true
+  },
+  {
+   "addr": "4ED61BAC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    130,
+    33
+   ],
+   "disabledbackground": "47DAD09C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    130,
+    33
+   ],
+   "enabled": true,
+   "eoffset": [
+    1780,
+    967
+   ],
+   "extent": [
+    130,
+    33
+   ],
+   "highlightbackground": "47DACE5C",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "92b",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "47DACD3C",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1780,
+    967
+   ],
+   "order": 2347,
+   "parent": "4EDBBA3C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.loadBtn",
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.loadBtn.OnClick^loadBtn"
+   ],
+   "pushedbackground": "47DACF7C",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "shown": true,
+   "text": "Load Appearance",
+   "visible": true
+  },
+  {
+   "addr": "4ED632CC",
+   "alpha": 1,
+   "button_state": "NORMAL",
+   "class": "button",
+   "content_extent": [
+    130,
+    33
+   ],
+   "disabledbackground": "47DAD51C",
+   "disabledcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "eextent": [
+    130,
+    33
+   ],
+   "enabled": true,
+   "eoffset": [
+    1650,
+    967
+   ],
+   "extent": [
+    130,
+    33
+   ],
+   "highlightbackground": "47DAD2DC",
+   "highlightcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "id": "92c",
+   "kind": "widget",
+   "method_count": 129,
+   "mouse_over": false,
+   "normalbackground": "47DAD1BC",
+   "normalcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "offset": [
+    1650,
+    967
+   ],
+   "order": 2348,
+   "parent": "4EDBBA3C",
+   "paths": [
+    "step2.content.rightPanel.plasticWnd.customSaveWnd.saveBtn"
+   ],
+   "pushedbackground": "47DAD3FC",
+   "pushedcolor": [
+    {
+     "a": 1,
+     "b": 1,
+     "g": 1,
+     "r": 1
+    }
+   ],
+   "shown": true,
+   "text": "Save Appearance",
+   "visible": true
+  }
+ ]
+}

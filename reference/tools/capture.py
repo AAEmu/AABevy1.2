@@ -52,9 +52,19 @@ def load_libs(pid):
         lua_file(pid, 'lib.lua', t)
 
 
+def shrink_png(path):
+    """Lossless: the back buffer comes as RGBA with a constant alpha of 255; store RGB, zlib level 9."""
+    from PIL import Image
+    import numpy as np
+    im = Image.open(path)
+    if im.mode == 'RGBA' and bool((np.asarray(im)[:, :, 3] == 255).all()):
+        im.convert('RGB').save(path, optimize=True, compress_level=9)
+
+
 def screenshot(pid, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     drv(pid, ['screenshot', '--pid', str(pid), path])
+    shrink_png(path)
     with open(path, 'rb') as f:
         head = f.read(32)
     w = int.from_bytes(head[16:20], 'big'); h = int.from_bytes(head[20:24], 'big')
@@ -157,23 +167,53 @@ return R.json(out)''')
     save_json(os.path.join(REF, 'api', 'ui_data.json'), json.loads(s))
 
 
-def cmd_screen(pid, name, do_ui=True, shot_name='real.png'):
+def cmd_screen(pid, name, do_ui=True, tag=None, camera=None):
+    """Capture <name>/real[_tag].png, ui[_tag].json and (untagged, or camera=True) camera.json."""
     d = os.path.join(REF, name)
     os.makedirs(d, exist_ok=True)
+    sfx = '_' + tag if tag else ''
+    shot_name = 'real%s.png' % sfx
     w, h = screenshot(pid, os.path.join(d, shot_name))
     if do_ui:
-        load = lua_file(pid, 'lib.lua')  # idempotent
+        lua_file(pid, 'lib.lua')  # idempotent
         s = lua_file(pid, 'snapshot.lua')
         ui = json.loads(s)
-        ui['meta']['screen_name'] = name
+        ui['meta']['screen_name'] = name + (' (%s)' % tag if tag else '')
         ui['meta']['screenshot'] = {'file': shot_name, 'width': w, 'height': h}
         ui['meta']['captured'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        save_json(os.path.join(d, 'ui.json'), ui)
-    cam = json.loads(lua(pid, CAMERA_LUA, 'system').strip())
-    ply = json.loads(lua(pid, PLAYER_LUA, 'ui').strip() or '{}')
-    if ply:
-        cam['player'] = ply
-    save_json(os.path.join(d, 'camera.json'), cam)
+        save_json(os.path.join(d, 'ui%s.json' % sfx), ui)
+    if camera is None:
+        camera = not tag
+    if camera:
+        lua_file(pid, 'lib.lua', 'system')
+        cam = json.loads(lua(pid, CAMERA_LUA, 'system').strip())
+        ply = json.loads(lua(pid, PLAYER_LUA, 'ui').strip() or '{}')
+        if ply:
+            cam['player'] = ply
+        save_json(os.path.join(d, 'camera%s.json' % sfx), cam)
+
+
+def _gray(path, size=(240, 135)):
+    from PIL import Image
+    import numpy as np
+    return np.asarray(Image.open(path).convert('L').resize(size), dtype=float)
+
+
+def wait_settled(pid, max_s=20.0, thresh=0.6, need=2, tmp=None):
+    """Block until consecutive screenshots (0.8 s apart) differ by < thresh mean grey levels, need times in a row."""
+    tmp = tmp or os.path.join(os.environ.get('TEMP', '.'), 'aa_settle_%d.png' % pid)
+    t0 = time.time(); prev = None; ok = 0; last = None
+    while time.time() - t0 < max_s:
+        drv(pid, ['screenshot', '--pid', str(pid), tmp])
+        cur = _gray(tmp)
+        if prev is not None:
+            last = float(abs(cur - prev).mean())
+            ok = ok + 1 if last < thresh else 0
+            if ok >= need:
+                return round(time.time() - t0, 1), last
+        prev = cur
+        time.sleep(0.8)
+    return round(time.time() - t0, 1), last
 
 
 BOOT_TAIL = r'''
@@ -204,24 +244,159 @@ def cmd_boot(pid, width, height, timeout=240):
     print(lua(pid, 'System.SetCVar("r_width", %d) System.SetCVar("r_height", %d) return System.GetCVar("r_width"), System.GetCVar("r_height")' % (width, height), 'system').strip())
 
 
+WATCH_CHECK = "if rawget(_G, '__ref') and __ref.hooks_installed_at then return 'ok' end return 'missing'"
+WATCH_TAIL = r'''
+local late = {}
+for _, n in ipairs{'backgroundWindow', 'characterSelectWindow', 'characterCreateWindow', 'loginStageBlackWnd'} do
+  if rawget(_G, n) ~= nil then late[#late + 1] = n end
+end
+local n = __ref.install_hooks()
+__ref.epoch = (__ref.epoch or 0) + 1
+return n .. ',existing=' .. table.concat(late, '+') .. ',stage=' .. tostring(X2LoginCharacter:GetCurrentStage())
+'''
+
+
+def cmd_watch(pid, width, height, interval=0.02):
+    """Keep the call recorder installed: the client rebuilds its UI Lua state on stage changes (the
+    globals vanish), so poll fast and re-install as soon as __ref is gone. Runs until killed or the client exits."""
+    lib = open(os.path.join(HERE, 'lib.lua'), encoding='utf-8').read()
+    lib = lib[:lib.rindex('return ')]
+    code = lib + WATCH_TAIL
+    installs = 0
+    sized = False
+    t0 = time.time()
+    while True:
+        try:
+            r = subprocess.run([DRIVER, 'lua', '-t', 'ui', '--pid', str(pid), WATCH_CHECK], capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            continue
+        if r.returncode != 0:
+            time.sleep(0.05)
+            if not subprocess.run([DRIVER, 'list'], capture_output=True).stdout.decode().count('pid %d ' % pid) and installs:
+                print('client gone'); return
+            continue
+        if r.stdout.decode().strip() == 'ok':
+            time.sleep(interval); continue
+        r = subprocess.run([DRIVER, 'lua', '-t', 'ui', '--pid', str(pid), '-'], input=code.encode(), capture_output=True, timeout=60)
+        installs += 1
+        print('%7.2fs install #%d: %s %s' % (time.time() - t0, installs, r.stdout.decode().strip(), r.stderr.decode().strip()), flush=True)
+        if not sized and width:
+            lua(pid, 'System.SetCVar("r_width", %d) System.SetCVar("r_height", %d)' % (width, height), 'system'); sized = True
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--pid', type=int, required=True)
+    ap.add_argument('--pid', type=int, default=0)
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('api')
     sub.add_parser('hooks')
+    p = sub.add_parser('watch'); p.add_argument('--width', type=int, default=1920); p.add_argument('--height', type=int, default=1080)
     p = sub.add_parser('boot'); p.add_argument('--width', type=int, default=1920); p.add_argument('--height', type=int, default=1080)
-    p = sub.add_parser('screen'); p.add_argument('name'); p.add_argument('--no-ui', action='store_true'); p.add_argument('--shot', default='real.png')
+    p = sub.add_parser('screen'); p.add_argument('name'); p.add_argument('--no-ui', action='store_true'); p.add_argument('--tag'); p.add_argument('--camera', action='store_true', default=None)
+    p = sub.add_parser('create-sweep'); p.add_argument('--races', default='1,2,3,4'); p.add_argument('--genders', default='1,2'); p.add_argument('--steps', default='1,2,3')
+    p = sub.add_parser('launch')
+    p = sub.add_parser('to-create')
+    p = sub.add_parser('settle'); p.add_argument('--max', type=float, default=20)
     p = sub.add_parser('lua'); p.add_argument('code')
     p = sub.add_parser('luas'); p.add_argument('code')
     a = ap.parse_args()
+    if a.cmd == 'launch':
+        launch(); return
+    if not a.pid and os.path.exists(PIDFILE): a.pid = int(open(PIDFILE).read())
     if a.cmd == 'api': cmd_api(a.pid)
     elif a.cmd == 'hooks':
         load_libs(a.pid); print('hooks wrapped:', lua(a.pid, 'return __ref.install_hooks()').strip())
+    elif a.cmd == 'watch': cmd_watch(a.pid, a.width, a.height)
     elif a.cmd == 'boot': cmd_boot(a.pid, a.width, a.height)
-    elif a.cmd == 'screen': cmd_screen(a.pid, a.name, not a.no_ui, a.shot)
+    elif a.cmd == 'screen': cmd_screen(a.pid, a.name, not a.no_ui, a.tag, a.camera)
+    elif a.cmd == 'create-sweep': sweep_create(a.pid, [int(x) for x in a.races.split(',')], [int(x) for x in a.genders.split(',')], [int(x) for x in a.steps.split(',')])
+    elif a.cmd == 'to-create': to_create(a.pid)
+    elif a.cmd == 'settle': print(wait_settled(a.pid, a.max))
     elif a.cmd == 'lua': print(lua(a.pid, a.code))
     elif a.cmd == 'luas': print(lua(a.pid, a.code, 'system'))
+
+
+
+LAUNCHER = r'D:\aaemu-live-bevy\bin\aaemu-launcher.exe'
+PIDFILE = r'D:\aaemu-live-bevy\logs\ref-client.pid'
+LAUNCH_LOG = r'D:\aaemu-live-bevy\logs\launcher-ref.log'
+
+
+def launch(width=1920, height=1080):
+    """Start my own client against the bevy lane (ticket login, nothing typed), wait for the Lua driver,
+    force the resolution. Prints and returns the pid."""
+    import re
+    pw = r'D:\aaemu-live\cfg\client-test-password.txt'
+    log = open(LAUNCH_LOG, 'wb')
+    subprocess.Popen([LAUNCHER, '--client', r'D:\AA1.2\bin32\archeage.exe', '--login', '127.0.0.1:27237', '--user', 'clienttest',
+                      '--password-file', pw, '--driver-dll', os.environ['AADRIVER_DLL'], '--multi-client'], stdout=log, stderr=log)
+    t0 = time.time(); pid = None
+    while time.time() - t0 < 60 and not pid:
+        time.sleep(1)
+        m = re.search(r'client started \(pid (\d+)\)', open(LAUNCH_LOG, errors='replace').read())
+        if m: pid = int(m.group(1))
+    if not pid: raise SystemExit('client did not start')
+    open(PIDFILE, 'w').write(str(pid))
+    while time.time() - t0 < 300:
+        try:
+            lua(pid, 'return 1'); break
+        except Exception:
+            time.sleep(0.3)
+    lua(pid, 'System.SetCVar("r_width", %d) System.SetCVar("r_height", %d)' % (width, height), 'system')
+    print('pid', pid, 'ready after %.0fs' % (time.time() - t0), flush=True)
+    return pid
+
+
+def wait_stage(pid, stages, timeout=120):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            st = int(lua(pid, 'return X2LoginCharacter:GetCurrentStage()').strip())
+            if st in stages: return st
+        except Exception:
+            pass
+        time.sleep(1)
+    raise SystemExit('stage %s not reached' % (stages,))
+
+
+def to_create(pid):
+    """World select -> (0 characters) character create step 1."""
+    wait_stage(pid, (3,), 180); time.sleep(3)
+    lua(pid, 'backgroundWindow.mainWindow:SelectByDataKey(1) X2World:EnterWorld(1,0)')
+    st = wait_stage(pid, (4, 5), 120)
+    print('stage', st, flush=True)
+
+
+
+# ---------------------------------------------------------------------------------------------
+# Flow helpers (character create sweep)
+# ---------------------------------------------------------------------------------------------
+def create_state(pid):
+    r = lua(pid, 'return characterCreate.race, characterCreate.gender, characterCreate.state, X2LoginCharacter:GetCurrentStage()').strip().split('\t')
+    return r
+
+
+def sweep_create(pid, races=(1, 2, 3, 4), genders=(1, 2), steps=(1, 2, 3)):
+    for r in races:
+        for g in genders:
+            lua(pid, 'step1.content.raceBtn[%d]:OnClick("LeftButton")' % r)
+            time.sleep(0.5)
+            lua(pid, 'step1.content.rightPanel.genderBtn[%d]:OnClick("LeftButton")' % g)
+            race, gender, state, stage = create_state(pid)
+            print('== race', r, race, 'gender', g, gender, state, flush=True)
+            for step in steps:
+                if step == 1:
+                    print('settle', wait_settled(pid, 14, 1.3), flush=True)
+                elif step == 2:
+                    lua(pid, 'characterCreate:OnNextStep()'); time.sleep(3.0)
+                    print('settle', wait_settled(pid, 12, 2.0), flush=True)
+                else:
+                    lua(pid, 'characterCreate:OnNextStep()'); time.sleep(9.0)
+                    print('settle', wait_settled(pid, 12, 1.5), flush=True)
+                name = 'character_create/step%d_%s_%s' % (step, race, gender)
+                cmd_screen(pid, name)
+            for _ in range(len(steps) - 1):
+                lua(pid, 'characterCreate:OnPrevStep()'); time.sleep(3.5)
 
 
 if __name__ == '__main__':

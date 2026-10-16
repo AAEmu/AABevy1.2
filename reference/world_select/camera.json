@@ -1,0 +1,32 @@
+{
+ "angles_deg": {
+  "x": 45.0000038,
+  "y": 0,
+  "z": -89.9999924
+ },
+ "cvars": {
+  "cl_fov": 45,
+  "e_time_of_day": 12.1317005,
+  "e_view_dist_ratio": 60,
+  "r_colorbits": 32,
+  "r_driver": "DX10",
+  "r_fullscreen": 0,
+  "r_hdrrendering": 3,
+  "r_height": 1080,
+  "r_vsync": 0,
+  "r_width": 1920,
+  "sys_spec_full": 4
+ },
+ "dir": {
+  "x": 0.707106709,
+  "y": 5.96046448e-08,
+  "z": 0.707106829
+ },
+ "fov_deg": 80,
+ "fov_rad": 1.39626336,
+ "pos": {
+  "x": 624.904907,
+  "y": 472.834076,
+  "z": 233.244415
+ }
+}

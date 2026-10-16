@@ -163,7 +163,7 @@ end
 local SKIP = { _G = true, package = true, string = true, table = true, math = true, os = true,
                io = true, debug = true, coroutine = true, __ref = true, _LOADED = true }
 
-function R.enumerate(roots, maxdepth)
+function R.enumerate(roots, maxdepth, use_registry)
   maxdepth = maxdepth or 10
   local byaddr, order = {}, {}
   local function reg(w, path)
@@ -177,7 +177,10 @@ function R.enumerate(roots, maxdepth)
     if path and #rec.paths < 4 then rec.paths[#rec.paths + 1] = path end
     return rec
   end
-  -- 1) walk the globals breadth-first so the recorded path is the shortest one
+  -- breadth-first over global tables, and over the upvalues of Lua closures stored in them (scripts keep
+  -- many widgets in locals that only handlers see), so the recorded path is the shortest one.
+  -- Only objects the scripts still reference are touched: the registry also holds widgets that were
+  -- destroyed natively, and calling a getter on one can fault the client.
   local seen = {}
   local queue, qi = {}, 1
   local function visit(v, kp, depth)
@@ -188,27 +191,42 @@ function R.enumerate(roots, maxdepth)
   end
   roots = roots or _G
   for k, v in pairs(roots) do
-    if type(k) == 'string' and not SKIP[k] and type(v) == 'table' then visit(v, k, 1) end
+    if type(k) == 'string' and not SKIP[k] and (type(v) == 'table' or type(v) == 'function') then visit(v, k, 1) end
   end
   while qi <= #queue do
     local item = queue[qi] qi = qi + 1
     local t, path, depth = item[1], item[2], item[3]
     if depth < maxdepth then
-      for k, v in pairs(t) do
-        if type(v) == 'table' and k ~= '__this' and k ~= '__index' then
-          local kp
-          if type(k) == 'number' then kp = path .. '[' .. k .. ']'
-          elseif type(k) == 'string' then kp = path .. '.' .. k
-          else kp = path .. '.<' .. type(k) .. '>' end
-          visit(v, kp, depth + 1)
+      if type(t) == 'function' then
+        local info = debug.getinfo(t, 'S')
+        if info and info.what == 'Lua' then
+          local i = 1
+          while true do
+            local n, v = debug.getupvalue(t, i)
+            if not n then break end
+            if type(v) == 'table' and not SKIP[n] and v ~= roots then visit(v, path .. '^' .. n, depth + 1) end
+            i = i + 1
+          end
+        end
+      else
+        for k, v in pairs(t) do
+          local tv = type(v)
+          if (tv == 'table' or tv == 'function') and k ~= '__this' and k ~= '__index' then
+            local kp
+            if type(k) == 'number' then kp = path .. '[' .. k .. ']'
+            elseif type(k) == 'string' then kp = path .. '.' .. k
+            else kp = path .. '.<' .. type(k) .. '>' end
+            visit(v, kp, depth + 1)
+          end
         end
       end
     end
   end
-  -- 2) every other live widget is referenced from the registry
-  local r = debug.getregistry()
-  for k, v in pairs(r) do
-    if type(k) == 'number' and isw(v) then reg(v, nil) end
+  if use_registry then
+    local r = debug.getregistry()
+    for k, v in pairs(r) do
+      if type(k) == 'number' and isw(v) then reg(v, nil) end
+    end
   end
   return order, byaddr
 end
@@ -268,10 +286,17 @@ function R.state(w)
   s.eextent = v2(w, 'GetEffectiveExtent')
   s.content_extent = v2(w, 'GetContentExtent')
   s.rotation = v1(w, 'GetRotation')
+  if kind == 'widget' then
+    s.line_count = v1(w, 'GetLineCount')
+    s.longest_line_width = v1(w, 'GetLongestLineWidth')
+    s.text_height = v1(w, 'GetTextHeight')
+    s.text_length = v1(w, 'GetTextLength')
+    s.inset = v4(w, 'GetInset')
+  elseif kind == 'style' then
+    s.line_height = v1(w, 'GetLineHeight')
+  end
+  if kind ~= 'widget' then s.id = nil end
   s.text = v1(w, 'GetText')
-  s.value = v1(w, 'GetValue')
-  local mm = v2(w, 'GetMinMaxValues')
-  if mm then s.minmax = mm end
   if not dr then
     local p = v1(w, 'GetParent')
     if type(p) == 'table' then
