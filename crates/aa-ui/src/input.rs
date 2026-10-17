@@ -168,6 +168,7 @@ pub fn update(
         for &n in &new_chain {
             if !old_chain.contains(&n) {
                 call_handler(lua, n, "OnEnter", vec![]);
+                lua::sound::over_sound(lua, n);
             }
         }
         update_list_hover(lua, old, hover);
@@ -278,6 +279,7 @@ fn drag_slider(lua: &Lua, slider: Id, (cx, cy): (f32, f32)) {
 }
 
 fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
+    lua::sound::click_sound(lua, target, button);
     let now = ui(lua).time_ms;
     let double = mouse
         .last_click

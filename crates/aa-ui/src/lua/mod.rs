@@ -24,6 +24,7 @@ pub mod grid;
 pub mod picker;
 pub mod roadmap;
 pub mod slot;
+pub(crate) mod sound;
 pub mod statusbar;
 mod stubs;
 pub mod tab;
@@ -75,6 +76,8 @@ pub struct Ui {
     /// UI events raised from inside Lua (game API callbacks), delivered at the next tick like a
     /// server answer would be.
     pub queued_events: Vec<(String, Vec<Value>)>,
+    /// `SetSounds(set)` by widget ([`sound`]).
+    pub widget_sounds: HashMap<Id, String>,
 }
 
 /// `Show(visible, ms)` fade.

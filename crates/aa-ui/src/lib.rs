@@ -82,6 +82,7 @@ impl UiRuntime {
             caret_t0: 0.0,
             cursor: (0.0, 0.0),
             queued_events: Vec::new(),
+            widget_sounds: Default::default(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
         prof::wrap_natives(&lua).map_err(|e| anyhow::anyhow!("{e}"))?;

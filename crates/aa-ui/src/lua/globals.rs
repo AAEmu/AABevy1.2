@@ -286,6 +286,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     if g.raw_get::<Value>("AAUI")?.is_nil() {
         g.raw_set("AAUI", lua.create_table()?)?;
     }
+    // `X2Sound:PlayUISound` / `PlayMusic` ... call the `AAUI.PlaySound` / `PlayMusic` ... hooks (see [`super::sound`]).
+    install_game_stub(lua, "X2Sound")?;
+    lua.load(super::sound::X2SOUND_LUA).set_name("@aa-ui/x2sound").exec()?;
     lua.load(TOOLKIT_LUA).set_name("@aa-ui/toolkit").exec()?;
     Ok(())
 }
