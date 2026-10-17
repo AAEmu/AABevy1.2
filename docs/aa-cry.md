@@ -310,6 +310,72 @@ material (scene-level: use `stage::environment_light`), detail maps and blend la
 they occur on terrain and a few props only; no character material uses them), vertex bending,
 Kajiya-Kay's strand direction (the streaks come from the strand map, not from a tangent).
 
+## Character back lights (`shade::backlight`)
+
+The time of day has a `Char BackLight` group: `InShadowIntensity` (0.5) and, per light `i` = 1, 2, `"i Color"`,
+`"i Diffuse Multiplier"`, `"i HDR dynamic"` and `"i Specular Multiplier"` (zone 186: light 1 = 0.486 x 5, light 2 = 1.0 x 0.7,
+constant over the day). What the client does with them, from `cry3dengine.dll`, `cryanimation.dll`, the renderer's parameter
+table and the shader scripts in the pak:
+
+* **A shader term, not scene lights.** `illum`, `humanskin`, `hair`, `cloth` and `metal` have, under
+  `%_RT_OBJECT_BACKLIGHT` (a per-object flag, set for actor models and switched by the cvar `e_character_back_light`), a loop over
+  two `fragLightPass` directional lights: `cDiffuse = BackLightColor[i].xyz`, `cSpecular = BackLightColor[i].xyz *
+  BackLightColor[i].w`, `vLight = BackLightDir[i].xyz`, `fNdotL = dot(BackLightDir[i].xyz, N)`, `fFallOff = BackLightDir[i].w`,
+  no shadow, no filter. `X2BackLight` (`shadelib.cfi`: `saturate(N.L)` diffuse and `Phong(R, L, specPow)`) adds the result to
+  `cDiffuseAcc` / `cSpecularAcc`, i.e. to the light that is then multiplied by the diffuse map and `MatDifColor`
+  (`hair` uses its own per-light function, `humanskin` the same `X2BackLight` as `illum`, so skin gets plain
+  `colour * N.L`, not the skin shader's `pow(skin, 1.5) * 1.5` colour). The two per-instance parameters are
+  `PI_BackLightDir` and `PI_BackLightColor` (renderer parameters 0x86 / 0x87, read from the render object's extra data).
+* **Colour.** `TimeOfDayManager::UpdateEngineBackLightParameters` (`sub_300A5630`) sends, for index 0 and 1, renderer parameter 71 =
+  `Color.rgb * (powf(hdr, "i HDR dynamic") * "i Diffuse Multiplier")` and 72 = `"i Specular Multiplier"` (the power is 1 where
+  `HDR dynamic` is 0, as in the main world). The colour is gamma encoded like every time of day colour: `0.486` decodes to 0.2 and
+  `0.2 x 5` is exactly 1.0, which is how light 1 reads as "1.0".
+* **Direction: a property of the character, not of the camera.** Every player `.cdf` (`nu_m.cdf`, `el_f.cdf`, ...) has
+  `<BackLight><Light Index="1" Position="0.45,-1.1,0.25"/><Light Index="2" Position="-0.35,0.35,0.1"/></BackLight>` in the
+  character's own space (CryEngine: +Y forward, +X to its right, Z up), read by `cryanimation.dll`'s `CharacterDefinition`
+  loader and saved again by its writer; only the elf female (`0.55,-1.1,0.25` / `-0.35,0.5,-0.2`) and the ferre female
+  (`0.65,-1.1,0.25`) differ from the nuian and male values. Taken as directions: light 1 shines from behind, a little from the
+  right and above (it lights the back of a character seen by the default third person camera, and the rim of one seen from the
+  front); light 2, 0.7 times as strong, from the front left. They turn with the character. (The step from `Position` to
+  `BackLightDir.xyz` is in the render object setup, not found in the dumps; this reading, `normalize(Position)` rotated into the
+  world by the character, reproduces the Royal Palace capture, whose camera is behind the player: the back is evenly lit, and the
+  right hand brighter than the left. The real captures have the camera behind the player only, so the front lit by light 2 is
+  not checked.)
+* The zones of the login stage define only light 1 (`login2/zone/177`: white x 1.0, `zone/224`: a coloured, animated x 0 .. 3,
+  `login2` itself: animated x 5 with `HDR dynamic` 1.13); light 2 is missing from those files (colour 0).
+
+In Bevy a light cannot be restricted to some meshes (`RenderLayers` only select the views), so the term is a material extension:
+
+* `shade::backlight::CharMaterial` = `ExtendedMaterial<StandardMaterial, CharBackExt>`, shader `backlight.wesl`: the
+  `StandardMaterial` lighting, then for each light `diffuse_colour / pi * lux * saturate(N.L) + F0 * Blinn-Phong(roughness) * lux *
+  specular multiplier`, times the view exposure, added before fog / tone mapping. The direction is the `.cdf` position
+  (`CDF_POSITIONS`) turned by the mesh's `world_from_local` (the root of a character is its orientation; rigid attachments such as
+  swords use their own, which is only approximately the character's).
+* `shade::backlight::CharBackLight` (resource, `dirs` + `lights` = rgb lux, specular multiplier) is what the world feeds;
+  `CharLightPlugin` registers the material and two `PostUpdate` systems. **Nothing changes unless the plugin is added and a light has
+  a colour**: the material of an entity is swapped (one `CharMaterial` per `StandardMaterial`, shared) only while a light is on, and
+  the lights are uploaded to the `CharMaterial`s when they moved by more than 0.4 %.
+* Which materials: `convert_material` marks every `Shading::Full` material by `StandardMaterial::lightmap_exposure` (a field that is
+  only read with a lightmap, which nothing here has): `backlight::TAG`, or `2 + Diffuse luma` for `humanskin`, whose
+  base colour carries the lit skin colour that the engine puts into the sun and ambient light instead (the swap then multiplies
+  the base colour by `Diffuse / base colour`, i.e. the term lights `texture * Diffuse`). `Shading::Basic` (world props) is never swapped.
+* `aa_world::char_light` (added by `sky::build`) turns `EnvSample::char_back` (`"i Color"` x `"i Diffuse Multiplier"`, linear, and the
+  specular multiplier; the sample follows the time of day and the zone) into lux with **`pi * ambient_scale`** per engine unit
+  (`AA_CHAR_BACKLIGHT=<gain>` scales it, 0 turns it off). The term joins the ambient light in the engine's light sum, whose
+  units `ambient_scale` converts (a radiance `L`; an illuminance `pi L` gives a diffuse surface the same radiance); the sun's
+  `sun_lux_scale` (1000, fitted to sunlit ground) gave back lights 5.4 times too dark.
+* The login stages are **unchanged**: they do not add the plugin, and their rig (`StageLighting::login`, a fit to the captures with
+  its own "rim from behind", about half of whose chest brightness comes from it) stands in for the engine's lights.
+  `cargo run -p aa-anim --example compare -- --target select --backlight K` adds light 1 = K engine units to a stage render (from the
+  front it changes nothing, light 1 being behind the character).
+
+Numbers (mean sRGB luma, real / ours before / ours with the term, `--hour 9.6`, the player in the shade of the Royal Palace
+court yard seen from behind, `reference/ingame/royal_palace/real.png`; the player is Aanetwalker, the capture Refone, so the dye of the
+jacket and the hair differ, the white fur does not): collar 114 / 51 / 122, hem 47 / 13 / 61, jacket 31 / 7 / 36, trousers 13 / 5 / 16,
+hands 56 and 84 / 47 and 52 / 94 and 103 (before the skin albedo fix 117 and 114). At the spawn (`--hour 10`, sunlit, the same
+equipment difference): collar 135 / 101 / 129, jacket 36 / 30 / 47, hem 38 / 26 / 43, hands 68 and 90 / 39 and 65 / 61 and 83. The
+character select render is pixel identical to before (0 of 2,073,600 pixels differ).
+
 ## Tests
 
 * `cargo test -p aa-cry`: unit tests plus real-pak checks (skipped without the client):
