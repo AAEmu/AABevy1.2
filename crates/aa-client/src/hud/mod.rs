@@ -30,6 +30,7 @@ mod chat;
 mod data;
 mod input;
 mod panels;
+mod plates;
 mod session;
 mod targeting;
 
@@ -69,6 +70,7 @@ impl Plugin for HudPlugin {
         if !app.is_plugin_added::<aa_ui::UiPlugin>() {
             app.add_plugins(aa_ui::UiPlugin { config: Some(host::ui_config()) });
         }
+        plates::plugin(app);
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()

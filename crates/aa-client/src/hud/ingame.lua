@@ -165,7 +165,7 @@ end
 AAUI.RoadMap = function()
   local s = S()
   if s.zone_group == 0 then return nil end
-  local x, y = HUD.player_pos()
+  local x, y, _, yaw = HUD.player_pos()
   local r = s.zone_rect
   local u, v = 0, 0
   if r[3] > 0 and r[4] > 0 then
@@ -177,7 +177,8 @@ AAUI.RoadMap = function()
     u = (x - r[1]) / r[3] * scale
     v = 1 - (y - r[2]) / r[4]
   end
-  return { level = 2, zone = s.zone_group, player = { u = u, v = v } }
+  -- the heading: radians, 0 north, clockwise (the engine's yaw turns left)
+  return { level = 2, zone = s.zone_group, player = { u = u, v = v, angle = -yaw } }
 end
 
 -- Action bars and bag -----------------------------------------------------------------------------------
