@@ -354,7 +354,20 @@ In Bevy a light cannot be restricted to some meshes (`RenderLayers` only select 
 * `shade::backlight::CharBackLight` (resource, `dirs` + `lights` = rgb lux, specular multiplier) is what the world feeds;
   `CharLightPlugin` registers the material and two `PostUpdate` systems. **Nothing changes unless the plugin is added and a light has
   a colour**: the material of an entity is swapped (one `CharMaterial` per `StandardMaterial`, shared) only while a light is on, and
-  the lights are uploaded to the `CharMaterial`s when they moved by more than 0.4 %.
+  the lights are uploaded to the `CharMaterial`s when they moved by more than 0.4 %, at most every 0.5 s and 64 materials per frame
+  (every changed material asset is re-extracted and re-prepared by the render world, about 10 us each: the ~1000 materials of a town
+  in one frame were a 10 ms hitch).
+* **The extension must be bindless.** An `ExtendedMaterial` is only bindless if both halves are, and `StandardMaterial` is. With a
+  plain `#[uniform]` extension every `CharMaterial` got its own bind group and uniform buffer, the draws stopped batching (one batch
+  set per material) and the 90-character town cost 100 ms per frame instead of 14 (render thread: `write-buffers` 27 ms,
+  `bind-groups` 26 ms, GPU `uniform_allocation` 9 ms and `bin_unpacking` 6 ms instead of about 1 ms each). `CharBackExt` is
+  `#[data(50, BackData, binding_array(101))]` + `#[bindless(index_table(range(50..51), binding(100)))]` (the standard material owns
+  the indices 0..31 and the binding 0 / 10); the shader reads `back_array[back_indices[slot].data]` with
+  `slot = mesh[instance_index].material_and_lightmap_bind_group_slot & 0xffffu`, or a uniform at binding 50 without bindless
+  (`@if(BINDLESS)`). A test (`the_character_material_is_bindless_like_the_standard_material`) keeps it so.
+* The direction uses `get_world_from_local(instance_index)`: for a skinned mesh that is the mesh entity's transform (the skin moves the
+  vertices with the joint matrices, not this), i.e. the character root's facing; palace renders from the front, the side and the
+  back keep light 1 behind the character.
 * Which materials: `convert_material` marks every `Shading::Full` material by `StandardMaterial::lightmap_exposure` (a field that is
   only read with a lightmap, which nothing here has): `backlight::TAG`, or `2 + Diffuse luma` for `humanskin`, whose
   base colour carries the lit skin colour that the engine puts into the sun and ambient light instead (the swap then multiplies
@@ -375,6 +388,11 @@ jacket and the hair differ, the white fur does not): collar 114 / 51 / 122, hem 
 hands 56 and 84 / 47 and 52 / 94 and 103 (before the skin albedo fix 117 and 114). At the spawn (`--hour 10`, sunlit, the same
 equipment difference): collar 135 / 101 / 129, jacket 36 / 30 / 47, hem 38 / 26 / 43, hands 68 and 90 / 39 and 65 / 61 and 83. The
 character select render is pixel identical to before (0 of 2,073,600 pixels differ).
+
+Cost (release, `--enter-world --account perfbench`, `tools/perf.sh` alternating, medians of the quiet rounds; other sessions make the
+rest too noisy): at the Nuian spawn 12.4 / 12.6 / 12.8 / 13.0 ms with the term against 12.2 / 12.4 / 12.4 / 12.5 ms with
+`AA_CHAR_BACKLIGHT=0` (about +0.3 ms, the extra lighting in the pixel shader of the characters; it was +2.7 ms with the non-bindless
+extension), the town crowd (`game-crowd`, ~90 animated characters) 11.6 against 11.7 ms in a profiled run.
 
 ## Tests
 
