@@ -24,6 +24,7 @@ dependencies = [
  "aa-anim",
  "aa-cry",
  "aa-dev",
+ "aa-fx",
  "aa-net",
  "aa-pak",
  "aa-ui",
@@ -116,6 +117,7 @@ version = "0.1.0"
 dependencies = [
  "aa-cry",
  "aa-dev",
+ "aa-fx",
  "aa-pak",
  "bevy",
  "roxmltree",

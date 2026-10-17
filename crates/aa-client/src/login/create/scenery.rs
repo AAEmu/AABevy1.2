@@ -17,7 +17,9 @@
 //! * a time of day per race (`e_time_of_day` of the capture: Nuian and Elf at dawn, Hariharan and
 //!   Firran at dusk) which is only approximated here by a fog colour and a terrain tint.
 //!
-//! Not drawn: the ground mist particle effects (`flow_fog_01`, `elf_fog_01`, ...), birds, wind.
+//! The ground mist and leaves (`flow_fog_01`, `leaf_01`, ... of `entities.xml`, aa-fx) are spawned with the props; `elf_fog_01` is
+//! named by the level but missing from every particle library of the pak (nothing to draw).
+//! Not drawn: birds, wind.
 //!
 //! Everything is built from public API of aa-world and aa-cry inside this module; the file loading
 //! runs on a task when the screen opens, the models of the race are loaded ahead while steps 1 and 2
@@ -47,10 +49,11 @@ use std::time::Instant;
 
 use aa_anim::Race;
 use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, VertexHook, render_transform};
+use aa_fx::Effect;
 use aa_world::coords::CRY_TO_BEVY;
 use aa_world::cover::{Cover, CoverAtlas};
 use aa_world::heightmap::CellHeights;
-use aa_world::placement::{CellObjects, load_cell_objects};
+use aa_world::placement::{CellObjects, PlacedEffect, load_cell_objects};
 use aa_world::terrain::{LOD_COUNT, PATCHES, PATCH_UNITS, build_patch_mesh, cover_image, lod_for_distance};
 use aa_world::terrain_layers::{CellSurfaces, DETAIL_DISTANCE, LayerLibrary, TerrainExt, TerrainMaterial};
 use aa_world::vegetation::VegGroups;
@@ -70,6 +73,12 @@ const CELL: (i32, i32) = (0, 1);
 const OBJECT_RADIUS: f32 = 170.0;
 /// The arm logs of the dummy model end beyond this distance from its axis (m): triangles reaching further are dropped.
 const ARM_LOG_X: f32 = 0.32;
+/// Particle effects (ground mist, leaves) are placed within this distance of the camera (m).
+const EFFECT_RADIUS: f32 = 120.0;
+/// The mist: the library's plain colours and opacities (grey 0.2 alpha smoke over a dimmed field) vanish in the field; the captured mist
+/// is much stronger (the engine lights particles by the time of day and tone maps them). Fitted by eye to the elf capture.
+const EFFECT_ALPHA: f32 = 3.0;
+const EFFECT_BRIGHTNESS: f32 = 2.0;
 /// Main thread time spent on spawning per frame (ms).
 const SPAWN_BUDGET_MS: f32 = 6.0;
 
@@ -200,6 +209,8 @@ enum Kind {
 enum Item {
     Patch { px: usize, py: usize, lod: usize },
     Model { path: String, material: Option<String>, matrix: Mat4, shadows: bool, kind: Kind },
+    /// A `ParticleEffect` entity of the cell (aa-fx).
+    Effect(PlacedEffect),
 }
 
 /// The field of a race while it is up.
@@ -311,6 +322,13 @@ fn plan(field: &Field, race: Race) -> Vec<Item> {
         let spin: f32 = std::env::var("AA_DUMMY_YAW").ok().and_then(|v| v.parse().ok()).unwrap_or(90.0);
         let rot = d.rot * Quat::from_rotation_z(spin.to_radians());
         items.push(Item::Model { path: d.model.clone(), material: None, matrix: Mat4::from_rotation_translation(rot, d.pos), shadows: true, kind: Kind::Dummy });
+    }
+    // the ground mist, leaves and the like of the race's field (only the effects the capture has switched on)
+    for e in &field.objects.effects {
+        let to = e.pos - cam.pos;
+        if to.length() < EFFECT_RADIUS && to.dot(cam.dir) > -10.0 {
+            items.push(Item::Effect(e.clone()));
+        }
     }
     let o = &field.objects;
     let mut brushes: Vec<(f32, Item)> = Vec::new();
@@ -542,6 +560,28 @@ pub fn update(
                     Mesh3d(mesh),
                     MeshMaterial3d(shown.terrain.clone()),
                     Transform::from_translation(frame.transform_point3(origin)),
+                    layers(),
+                    ChildOf(shown.root),
+                ));
+            }
+            Item::Effect(e) => {
+                let mut effect = Effect::new(e.effect.clone());
+                effect.scale = e.scale;
+                effect.speed_scale = e.speed_scale;
+                effect.count_scale = e.count_scale;
+                effect.prime = e.prime;
+                if e.effect.contains("fog") {
+                    effect.alpha_scale = EFFECT_ALPHA;
+                    effect.brightness = EFFECT_BRIGHTNESS;
+                }
+                commands.spawn((
+                    Name::new("step 3 effect"),
+                    effect,
+                    Transform {
+                        translation: frame.transform_point3(e.pos),
+                        rotation: CRY_TO_BEVY * e.rot * CRY_TO_BEVY.inverse(),
+                        scale: Vec3::ONE,
+                    },
                     layers(),
                     ChildOf(shown.root),
                 ));
