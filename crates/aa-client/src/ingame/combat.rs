@@ -330,15 +330,13 @@ impl Stage<'_, '_> {
     /// which the `.cal` of most models names `..._mub`, else as given. `None` when the row or the model has none.
     fn upper_clip(&self, unit: Entity, name: &str) -> Option<aa_anim::BoundClip> {
         let upper = self.book.upper_clip(name)?;
-        let moving = upper.strip_suffix("_ub").map(|stem| format!("{stem}_mub"));
-        [moving.as_deref(), Some(&*upper)].into_iter().flatten().find_map(|n| self.clip(unit, n).map(|(clip, _)| clip))
+        skills::upper_candidates(&upper).find_map(|n| self.clip(unit, &n).map(|(clip, _)| clip))
     }
 
     /// The anim events of clip `name` of the unit's model.
     fn events(&self, unit: Entity, name: &str) -> clips::ClipEvents {
         let Some(cal) = self.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return clips::ClipEvents::default() };
-        let (Some(db), Some(entry)) = (cal.anim_events.as_deref(), cal.animation(name)) else { return clips::ClipEvents::default() };
-        clips::clip_events(db, &entry.path)
+        clips::ClipEvents::of(&cal, name)
     }
 
     /// Plays a clip on a unit as an action. `hold` is how long a looping clip may last. Returns the clip's length, `None` when the

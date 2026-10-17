@@ -36,6 +36,44 @@ pub mod ev {
     pub const END: u8 = 5;
 }
 
+/// What an effect group holds besides particle effects. The client draws none of it (sounds, voices, camera shakes, material
+/// flashes, models and ropes); counted so that `examples/skill_coverage.rs` can tell how many skills lose something.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Extras {
+    /// `FxSound` items.
+    pub sound: u16,
+    /// Particle effects that carry a sound of their own (`fx_particles.sound_id` / `sound_pack_id`).
+    pub particle_sound: u16,
+    /// `FxVoice`: the character's voice line.
+    pub voice: u16,
+    /// `FxShakeCamera`.
+    pub shake: u16,
+    /// `FxMaterial`: a material flash on the unit.
+    pub material: u16,
+    /// `FxChr`, `FxRope`, `FxCamFov`, `FxMotionBlur`, ...
+    pub other: u16,
+}
+
+impl Extras {
+    /// Read by `examples/skill_coverage.rs`.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        *self == Extras::default()
+    }
+
+    /// The two added up.
+    pub fn plus(self, o: Extras) -> Extras {
+        Extras {
+            sound: self.sound + o.sound,
+            particle_sound: self.particle_sound + o.particle_sound,
+            voice: self.voice + o.voice,
+            shake: self.shake + o.shake,
+            material: self.material + o.material,
+            other: self.other + o.other,
+        }
+    }
+}
+
 /// One particle effect of an effect group.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FxItem {
@@ -62,6 +100,7 @@ pub struct Projectile {
     pub id: u32,
     /// What it looks like in flight (an effect group: the items start at [`ev::START`] and ride the projectile).
     pub items: Arc<Vec<FxItem>>,
+    pub extras: Extras,
     /// Where it starts and ends (`fx_items.bone_id` numbering; 0 = the caster's launch bone from the effect item).
     pub src_bone: u8,
     pub dest_bone: u8,
@@ -76,7 +115,13 @@ pub struct SkillVisual {
     pub twohand_fire_anim: Option<Arc<str>>,
     pub dual_fire_anim: Option<Arc<str>>,
     pub fx: Arc<Vec<FxItem>>,
+    /// Not drawn by the client; counted by `examples/skill_coverage.rs`.
+    #[allow(dead_code)]
+    pub extras: Extras,
     pub projectile: Option<Projectile>,
+    /// `skills.channeling_anim_id` (not played yet; checked by `examples/skill_coverage.rs`).
+    #[allow(dead_code)]
+    pub channeling_anim: Option<Arc<str>>,
     /// `skills.effect_delay`: how long after the fire the shot leaves (the launch moment of the clip), ms.
     pub effect_delay_ms: u32,
     /// The skill is a plot: its steps carry the clips and effects ([`PlotVisual`]).
@@ -100,9 +145,24 @@ impl SkillVisual {
 /// What one step of a plot does (`SCPlotEvent::event_id`).
 #[derive(Clone, Debug, Default)]
 pub struct PlotVisual {
+    /// The clip the step plays: the last of its anims that is not a stop (see [`is_stop_clip`]).
     pub anim: Option<Arc<str>>,
+    /// Every anim of the step, in order (most steps with two start with a stop).
+    pub anims: Vec<Arc<str>>,
     pub fx: Arc<Vec<FxItem>>,
+    pub extras: Extras,
     pub projectile: Option<Projectile>,
+}
+
+/// `all_co_sk_stop` / `all_ac_stop`: the anim a plot step plays first to end the clip before it, followed by the clip it wants.
+pub fn is_stop_clip(name: &str) -> bool {
+    name.ends_with("_stop")
+}
+
+/// The clip names to try for the upper body variant `upper` (`anims.move_ub`): the `.cal` of most models calls
+/// `bow_co_sk_launch_ub` `bow_co_sk_launch_mub` ("move, upper body"), the others as given.
+pub fn upper_candidates(upper: &str) -> impl Iterator<Item = String> {
+    upper.strip_suffix("_ub").map(|stem| format!("{stem}_mub")).into_iter().chain(std::iter::once(upper.to_string()))
 }
 
 /// The skill database, cached by id. A resource: lookups take `&self` and a short lock.
@@ -117,6 +177,7 @@ struct Inner {
     /// Clip name -> the `move_ub` clip of its `anims` row.
     upper: HashMap<String, Option<Arc<str>>>,
     groups: HashMap<u32, Arc<Vec<FxItem>>>,
+    extras: HashMap<u32, Extras>,
     projectiles: HashMap<u32, Option<Projectile>>,
 }
 
@@ -132,6 +193,7 @@ impl SkillBook {
             anims: HashMap::new(),
             upper: HashMap::new(),
             groups: HashMap::new(),
+            extras: HashMap::new(),
             projectiles: HashMap::new(),
         })))
     }
@@ -161,6 +223,35 @@ impl SkillBook {
     }
 }
 
+/// Entry points for `examples/skill_coverage.rs`, which resolves every skill offline through the code above.
+#[allow(dead_code)]
+impl SkillBook {
+    /// The `plot_events` ids of a skill's plot, in order (what `SCPlotEvent::event_id` will name).
+    pub(crate) fn plot_steps(&self, skill_id: u32) -> Vec<u32> {
+        let inner = self.inner();
+        inner
+            .conn
+            .prepare("SELECT e.id FROM plot_events e JOIN skills s ON s.plot_id = e.plot_id WHERE s.id = ?1 ORDER BY e.position, e.id")
+            .and_then(|mut q| q.query_map(params![skill_id], |r| Ok(int(r, 0)? as u32)).map(|rows| rows.flatten().collect()))
+            .unwrap_or_default()
+    }
+
+    /// The particle effects of an effect group.
+    pub(crate) fn fx_group(&self, id: u32) -> Arc<Vec<FxItem>> {
+        self.inner().group(id)
+    }
+
+    /// What an effect group holds besides particle effects.
+    pub(crate) fn fx_extras(&self, id: u32) -> Extras {
+        self.inner().extras_of(id)
+    }
+
+    /// A projectile by id.
+    pub(crate) fn projectile(&self, id: u32) -> Option<Projectile> {
+        self.inner().projectile(id)
+    }
+}
+
 fn int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
     Ok(r.get::<_, Option<i64>>(i)?.unwrap_or(0))
 }
@@ -182,6 +273,8 @@ impl Inner {
             .query_row("SELECT name FROM anims WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0))
             .ok()
             .flatten()
+            // two rows (345, 435) have a leading space
+            .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty() && n != "none")
             .map(Arc::from);
         self.anims.insert(id, name.clone());
@@ -243,6 +336,41 @@ impl Inner {
         items
     }
 
+    /// What the group holds that is not a particle effect (see [`Extras`]).
+    fn extras_of(&mut self, id: u32) -> Extras {
+        if id == 0 {
+            return Extras::default();
+        }
+        if let Some(e) = self.extras.get(&id) {
+            return *e;
+        }
+        let mut extras = Extras::default();
+        let rows: Vec<(String, bool)> = self
+            .conn
+            .prepare(
+                "SELECT i.fx_detail_type, COALESCE(p.sound_id, 0) <> 0 OR COALESCE(p.sound_pack_id, 0) <> 0 \
+                 FROM fx_group_fx_items g JOIN fx_items i ON i.id = g.fx_item_id \
+                 LEFT JOIN fx_particles p ON p.id = i.fx_detail_id AND i.fx_detail_type = 'FxParticle' WHERE g.fx_group_id = ?1",
+            )
+            .and_then(|mut q| {
+                q.query_map(params![id], |r| Ok((r.get::<_, Option<String>>(0)?.unwrap_or_default(), r.get::<_, Option<bool>>(1)?.unwrap_or(false))))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
+        for (kind, with_sound) in rows {
+            match kind.as_str() {
+                "FxParticle" => extras.particle_sound += u16::from(with_sound),
+                "FxSound" => extras.sound += 1,
+                "FxVoice" => extras.voice += 1,
+                "FxShakeCamera" => extras.shake += 1,
+                "FxMaterial" => extras.material += 1,
+                _ => extras.other += 1,
+            }
+        }
+        self.extras.insert(id, extras);
+        extras
+    }
+
     fn projectile(&mut self, id: u32) -> Option<Projectile> {
         if id == 0 {
             return None;
@@ -256,7 +384,7 @@ impl Inner {
                 Ok((int(r, 0)? as u32, int(r, 1)? as u8, int(r, 2)? as u8))
             })
             .ok();
-        let projectile = row.map(|(group, src_bone, dest_bone)| Projectile { id, items: self.group(group), src_bone, dest_bone });
+        let projectile = row.map(|(group, src_bone, dest_bone)| Projectile { id, items: self.group(group), extras: self.extras_of(group), src_bone, dest_bone });
         self.projectiles.insert(id, projectile.clone());
         projectile
     }
@@ -268,7 +396,8 @@ impl Inner {
         let row = self
             .conn
             .query_row(
-                "SELECT start_anim_id, fire_anim_id, twohand_fire_anim_id, dual_wield_fire_anim_id, fx_group_id, projectile_id, effect_delay, plot_id                  FROM skills WHERE id = ?1",
+                "SELECT start_anim_id, fire_anim_id, twohand_fire_anim_id, dual_wield_fire_anim_id, fx_group_id, projectile_id, effect_delay, plot_id, channeling_anim_id \
+                 FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
                     Ok((
@@ -277,11 +406,12 @@ impl Inner {
                         int(r, 5)? as u32,
                         int(r, 6)?.max(0) as u32,
                         int(r, 7)? != 0,
+                        int(r, 8)? as u32,
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling)| {
             let [start, fire, twohand, dual] = anims;
             Arc::new(SkillVisual {
                 start_anim: self.anim(start),
@@ -289,7 +419,9 @@ impl Inner {
                 twohand_fire_anim: self.anim(twohand),
                 dual_fire_anim: self.anim(dual),
                 fx: self.group(group),
+                extras: self.extras_of(group),
                 projectile: self.projectile(projectile),
+                channeling_anim: self.anim(channeling),
                 effect_delay_ms,
                 plot,
             })
@@ -315,11 +447,22 @@ impl Inner {
         let mut fx: Vec<FxItem> = Vec::new();
         for (kind, value) in effects {
             match kind {
-                34 => visual.anim = visual.anim.take().or_else(|| self.anim(value)),
-                35 | 36 => fx.extend(self.group(value).iter().cloned()),
-                _ => visual.projectile = visual.projectile.take().or_else(|| self.projectile(value)),
+                34 => visual.anims.extend(self.anim(value)),
+                35 | 36 => {
+                    fx.extend(self.group(value).iter().cloned());
+                    visual.extras = visual.extras.plus(self.extras_of(value));
+                }
+                _ => {
+                    let first = visual.projectile.is_none();
+                    visual.projectile = visual.projectile.take().or_else(|| self.projectile(value));
+                    if first && let Some(p) = &visual.projectile {
+                        visual.extras = visual.extras.plus(p.extras);
+                    }
+                }
             }
         }
+        // 450 steps play two anims: `all_co_sk_stop` (end the clip before) and then the clip itself; the step is the latter
+        visual.anim = visual.anims.iter().rev().find(|a| !is_stop_clip(a)).or(visual.anims.first()).cloned();
         visual.fx = Arc::new(fx);
         let plot = (visual.anim.is_some() || !visual.fx.is_empty() || visual.projectile.is_some()).then(|| Arc::new(visual));
         self.plots.insert(event_id, plot.clone());
@@ -402,5 +545,42 @@ mod tests {
         let s = book.skill(2).expect("melee attack");
         assert!(s.fx.iter().any(|i| i.start == ev::HIT && i.on_target && i.effect.starts_with("X2_EFFECTS.p_effect")));
         assert!(book.skill(0xFF_FFFF).is_none());
+    }
+
+    /// 450 plot steps play two anims, `all_co_sk_stop` first and then the clip: the step is the clip.
+    #[test]
+    fn a_step_that_stops_first_plays_the_clip_after_it() {
+        let Some(book) = book() else { return };
+        let step = book.plot_event(73).expect("step 73");
+        assert_eq!(step.anims.iter().map(|a| &**a).collect::<Vec<_>>(), ["all_co_sk_stop", "all_co_sk_whirlwind_launch"]);
+        assert_eq!(step.anim.as_deref(), Some("all_co_sk_whirlwind_launch"));
+        // a step that only stops keeps the stop
+        assert_eq!(book.plot_event(32).and_then(|p| p.anim.clone()).as_deref(), Some("all_co_sk_stop"));
+        assert!(is_stop_clip("all_ac_stop") && !is_stop_clip("all_co_sk_stop_2"));
+    }
+
+    /// Two `anims` rows have a leading space; the `.cal` does not.
+    #[test]
+    fn clip_names_are_trimmed() {
+        let Some(book) = book() else { return };
+        assert_eq!(book.anim(345).as_deref(), Some("fist_ac_guide_01"));
+        assert_eq!(book.anim(435).as_deref(), Some("fist_pos_stn_handsback_idle"));
+    }
+
+    /// The upper body names the client tries: `_mub` first, then the name as given.
+    #[test]
+    fn upper_body_names() {
+        assert_eq!(upper_candidates("bow_co_sk_launch_ub").collect::<Vec<_>>(), ["bow_co_sk_launch_mub", "bow_co_sk_launch_ub"]);
+        assert_eq!(upper_candidates("fist_ac_x").collect::<Vec<_>>(), ["fist_ac_x"]);
+    }
+
+    /// Shoot Arrow's groups hold a voice and a material flash that the client does not draw.
+    #[test]
+    fn counts_what_is_not_a_particle() {
+        let Some(book) = book() else { return };
+        let s = book.skill(16064).expect("Shoot Arrow");
+        let all = s.extras.plus(s.projectile.as_ref().map(|p| p.extras).unwrap_or_default());
+        assert!(!all.is_empty(), "{all:?}");
+        assert_eq!(book.skill(0xFF_FFFF).map(|s| s.extras), None);
     }
 }
