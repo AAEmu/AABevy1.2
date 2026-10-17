@@ -106,6 +106,10 @@ impl Animations {
     pub fn clear_widget_alpha(&mut self, id: Id) {
         self.widgets.clear_alpha(id);
     }
+
+    pub(crate) fn set_widget_offset(&mut self, id: Id, offset: [f32; 2]) {
+        self.widgets.set_offset(id, offset);
+    }
 }
 
 pub(super) fn widget_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {

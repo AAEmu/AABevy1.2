@@ -16,6 +16,7 @@ pub mod chat;
 pub mod chat_input;
 pub mod classes;
 pub mod constants;
+pub(crate) mod damage;
 pub mod diagram;
 pub mod drag;
 mod drawable;
@@ -64,6 +65,7 @@ pub struct Ui {
     pub pending: Vec<(Id, String, Vec<Value>)>,
     pub fades: HashMap<Id, Fade>,
     pub animations: animation::Animations,
+    pub damage: damage::Damage,
     pub time_ms: f64,
     pub frame_ms: f32,
     /// Calls to stubbed (unimplemented) methods: name -> count.
@@ -462,6 +464,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         call_handler(lua, id, h, vec![]);
     }
     drop(p_fades);
+    damage::tick(lua);
     let _p = scope("on_update");
     for (id, h) in updates {
         let t0 = crate::prof::handler_start();

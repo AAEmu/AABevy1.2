@@ -459,6 +459,15 @@ impl FontLib {
         a
     }
 
+    /// Whether the configured font chain has every visible character (combat extraStyle).
+    pub(crate) fn supports(&mut self, font: &str, text: &str) -> bool {
+        if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
+            return text.chars().all(|c| c.is_whitespace() || f.glyphs.contains_key(&c));
+        }
+        let chain = self.chain_for(font);
+        text.chars().all(|c| c.is_whitespace() || self.lookup(&chain, c).is_some_and(|(_, glyph)| glyph != 0))
+    }
+
     /// Ascent (rounded) and line height for a font size.
     pub fn metrics(&mut self, font: &str, size: f32) -> (f32, f32) {
         if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {

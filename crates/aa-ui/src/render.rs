@@ -133,6 +133,8 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             // Tooltips: their `AddLine` lines.
             let rect = u.tree.rect(id);
             crate::lua::tooltip::quads(u, id, rect, alpha, scale, &mut out);
+        } else if w.class == "damagedisplay" {
+            crate::lua::damage::quads(u, id, &w, alpha, scale, &mut out);
         } else if let Some(t) = w.text.as_ref() {
             // Widget text above background/artwork, below overlay.
             let edit = crate::lua::edit::is_edit(&w.ty);
@@ -200,10 +202,10 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         let mut owner = Some(id);
         while let Some(ancestor) = owner {
             let animation = u.animations.widget_sample(ancestor);
-            if animation.scale != 1.0 {
+            if animation.scale != 1.0 || animation.offset != [0.0; 2] {
                 let r = u.tree.rect(ancestor);
                 let pivot = [(r.x + r.w * animation.pivot.fx()) * scale, (r.y + r.h * animation.pivot.fy()) * scale];
-                let point = |p: [f32; 2]| std::array::from_fn(|i| pivot[i] + (p[i] - pivot[i]) * animation.scale);
+                let point = |p: [f32; 2]| std::array::from_fn(|i| pivot[i] + (p[i] - pivot[i]) * animation.scale + animation.offset[i] * scale);
                 for q in &mut out[quads_start..] {
                     let lo = point([q.pos[0], q.pos[1]]);
                     let hi = point([q.pos[2], q.pos[3]]);
@@ -284,6 +286,7 @@ fn effective_alpha(u: &Ui, mut id: Id) -> f32 {
     let mut a = 1.0;
     loop {
         let o = u.tree.get(id);
+        if !crate::lua::damage::visible(u, id) { return 0.0; }
         a *= u.animations.widget_sample(id).alpha.unwrap_or(o.alpha);
         match o.parent {
             Some(p) => id = p,
