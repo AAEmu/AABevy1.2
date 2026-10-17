@@ -1388,9 +1388,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 none()
             })?,
         )?;
-        for name in ["SetFixedThumb", "SetMinThumbLength"] {
-            def(name, method(lua, |_, _, _| none())?)?;
-        }
+        def(
+            "SetFixedThumb",
+            method(lua, |lua, id, a| {
+                if let Some(s) = ui(lua).tree.widget_mut(id).and_then(|w| w.slider.as_mut()) {
+                    s.fixed_thumb = a.b(1, true);
+                }
+                none()
+            })?,
+        )?;
+        def(
+            "SetMinThumbLength",
+            method(lua, |lua, id, a| {
+                if let Some(s) = ui(lua).tree.widget_mut(id).and_then(|w| w.slider.as_mut()) {
+                    s.min_thumb = a.f(1).max(0.0);
+                }
+                none()
+            })?,
+        )?;
     }
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)

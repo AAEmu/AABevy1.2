@@ -12,6 +12,7 @@
 
 mod bounds;
 pub mod chat;
+pub mod chat_input;
 pub mod grid;
 pub mod classes;
 pub mod constants;

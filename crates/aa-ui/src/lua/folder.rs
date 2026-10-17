@@ -20,7 +20,10 @@ pub struct FolderData {
     pub configured: bool,
     /// `SetTitleButtonWidget`: the title button, placed in the title row inside `inset`.
     pub title_button: Option<Id>,
-    /// `SetInset(left, top, right, bottom)`: the title row's insets (positive = inward).
+    /// `SetInset(left, top, right, bottom)`: the title row's insets: `left` / `top` move the title
+    /// button's left / top edge in, `right` moves its right edge (negative = inward: the map
+    /// filter's `SetInset(20, 0, -20, 0)` gives a 170 wide folder a 130 wide title,
+    /// reference/ingame/worldmap_zone).
     pub inset: [f32; 4],
     /// `SetTitleText`: the folder's name (the `FOLDER_STATE_CHANGED` argument).
     pub title: String,
@@ -83,7 +86,7 @@ fn apply(lua: &Lua, id: Id) {
                 point: Point::TopRight,
                 target: id,
                 rel: Point::TopRight,
-                x: -r,
+                x: r,
                 y: top,
             },
         ];

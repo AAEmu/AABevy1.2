@@ -49,7 +49,9 @@ fn add_new_tab_lays_out_the_scripts_buttons() {
     // The first tab is selected: its selected button shows, the others show unselected buttons.
     assert!(eval::<bool>(&ui, "sel[1]:IsVisible() and not unsel[1]:IsVisible()"));
     assert!(eval::<bool>(&ui, "unsel[2]:IsVisible() and not sel[2]:IsVisible()"));
-    assert!(eval::<bool>(&ui, "win:IsVisible()"));
+    // Each tab shows its window when selected and hides it otherwise, in tab order: the window
+    // all three share ends up hidden (the bag's `tabWindow` in reference/ingame/bag).
+    assert!(eval::<bool>(&ui, "not win:IsVisible()"));
     // The text goes to both buttons of a tab.
     assert_eq!(eval::<String>(&ui, "sel[2]:GetText()"), "tab2");
     assert_eq!(eval::<String>(&ui, "unsel[2]:GetText()"), "tab2");
@@ -63,8 +65,10 @@ fn add_new_tab_selection_and_removal() {
     assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 3);
     assert_eq!(eval::<i64>(&ui, "changed[#changed]"), 3);
     assert!(eval::<bool>(&ui, "sel[3]:IsVisible() and unsel[1]:IsVisible() and not sel[1]:IsVisible()"));
-    // A window shared by every tab stays visible whichever tab is selected.
+    // With the last tab selected, the shared window shows.
     assert!(eval::<bool>(&ui, "win:IsVisible()"));
+    ui.exec("@select2", "tab:SelectTab(2)").unwrap();
+    assert!(eval::<bool>(&ui, "not win:IsVisible()"));
     // RemoveAllTabs forgets the tabs but leaves the script's widgets alive (it reuses them).
     ui.exec("@clear", "tab:RemoveAllTabs()").unwrap();
     assert_eq!(eval::<i64>(&ui, "tab:GetActivateTabCount()"), 0);

@@ -2,10 +2,22 @@
 //!
 //! The client draws text with FreeType at integer pixel sizes and integer pen positions. We do
 //! the same with `swash` (hinted outlines, 8-bit coverage): advances are rounded to whole pixels,
-//! so measured widths (`GetTextWidth`) and drawn text agree exactly.
+//! so measured widths (`GetTextWidth`) and drawn text agree exactly. Pairs of the font's `kern`
+//! table move the pen as FreeType's `FT_Get_Kerning(FT_KERNING_DEFAULT)` does: scaled, cut down
+//! by `ppem / 25` below 25 px and rounded to whole pixels ("Vo" is 1 px tighter at 13 px:
+//! "Vocation Badges" in reference/ingame/character_info).
 //!
 //! Logical font paths (`ui/font/yd_ygo540.ttf`) map to a fallback chain per locale through
 //! `fonts/fonts.g` (primary font + fonts that cover listed Unicode ranges).
+//!
+//! *Image fonts* are bitmap fonts of `ui/image_text.g` (the locale's copy first): a block
+//! `infomation` with `name characterInfo`, `size 37`, `width 29`, `height 37` and one
+//! `glyph ( key 1, x 0, y 465, insetLeft 0, insetRight 14)` per character, cut from
+//! `texturepath ui/image_text.dds`. The scripts select them by name
+//! (`style:SetFont("characterInfo", 37)`: the level digits of the character window; `actionBar`:
+//! the menu bar badges; `combat`, `arrest`). A glyph advances `width - insetLeft - insetRight`
+//! (the level label "1" is 15 px wide in reference/ingame/character_info) and is drawn in the
+//! texture's own colours, scaled by `size / font size`.
 
 use std::collections::HashMap;
 
@@ -22,6 +34,49 @@ struct Face {
     data: Vec<u8>,
     offset: u32,
     key: CacheKey,
+    /// Horizontal kerning pairs (left glyph, right glyph) -> font units, from `kern`.
+    kern: HashMap<(u16, u16), i16>,
+    units_per_em: u16,
+}
+
+/// Format 0 subtables of a TrueType `kern` table (version 0) that kern horizontally.
+fn parse_kern(t: &[u8]) -> HashMap<(u16, u16), i16> {
+    let u16_at = |o: usize| t.get(o..o + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+    let mut out = HashMap::new();
+    if u16_at(0) != Some(0) {
+        return out;
+    }
+    let n = u16_at(2).unwrap_or(0);
+    let mut sub = 4usize;
+    for _ in 0..n {
+        let (Some(len), Some(cov)) = (u16_at(sub + 2), u16_at(sub + 4)) else {
+            break;
+        };
+        // Format 0, horizontal, not minimum values, not cross-stream.
+        if cov >> 8 == 0 && cov & 0b111 == 0b001 {
+            let pairs = u16_at(sub + 6).unwrap_or(0) as usize;
+            for i in 0..pairs {
+                let o = sub + 14 + 6 * i;
+                if let (Some(l), Some(r), Some(v)) = (u16_at(o), u16_at(o + 2), u16_at(o + 4)) {
+                    out.insert((l, r), v as i16);
+                }
+            }
+        }
+        sub += len as usize;
+    }
+    out
+}
+
+/// A kerning value in whole pixels at `ppem`, as FreeType's `FT_KERNING_DEFAULT` gives it.
+fn kern_px(v: i16, ppem: u16, upem: u16) -> f32 {
+    if upem == 0 {
+        return 0.0;
+    }
+    let mut x = (v as f64 * ppem as f64 * 64.0 / upem as f64).round() as i64;
+    if ppem < 25 {
+        x = (x as f64 * ppem as f64 / 25.0).round() as i64;
+    }
+    (((x + 32) & !63) / 64) as f32
 }
 
 impl Face {
@@ -82,22 +137,52 @@ pub struct PlacedIcon {
     pub icon: usize,
 }
 
-/// Inline icons of the value codes, in `ui/common/money_window.dds`: (x, y, w, h) texels.
+/// Inline icons of the value codes, in `ui/common/money_window.dds`: (x, y, w, h) texels, drawn
+/// 1 px after the text and centred on the line (the honor medal hangs over the line's top:
+/// `reference/ingame/character_info`, Honor Points and Vocation Badges).
 pub const INLINE_ICON_TEXTURE: &str = "ui/common/money_window.dds";
-pub const INLINE_ICONS: [[f32; 4]; 4] = [
+pub const INLINE_ICONS: [[f32; 4]; 6] = [
     [0.0, 29.0, 16.0, 16.0],   // gold coin
     [16.0, 29.0, 16.0, 16.0],  // silver coin
     [32.0, 29.0, 16.0, 16.0],  // copper coin
     [206.0, 12.0, 16.0, 16.0], // loyalty token (BM mileage)
+    [47.0, 31.0, 16.0, 20.0],  // honor points medal (`|h`)
+    [189.0, 12.0, 17.0, 16.0], // vocation badge sprout (`|l`, living points)
 ];
 /// First private-use code point standing for an inline icon in expanded text.
 const ICON_BASE: u32 = 0xE000;
 const ICON_ADVANCE: f32 = 16.0;
 
+/// A glyph of an image font: `src` = texel rectangle (x, y, w, h) in `LaidOutText::image_texture`,
+/// drawn at `x, y` (top left in the block) with size `w, h`.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacedImage {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub line: u16,
+    pub src: [f32; 4],
+}
+
+/// A bitmap font of `ui/image_text.g`.
+#[derive(Clone, Debug)]
+struct ImageFont {
+    texture: String,
+    size: f32,
+    width: f32,
+    height: f32,
+    /// Character -> (x, y, insetLeft, insetRight) in texels.
+    glyphs: HashMap<char, [f32; 4]>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct LaidOutText {
     pub glyphs: Vec<PlacedGlyph>,
     pub icons: Vec<PlacedIcon>,
+    /// Glyphs of an image font, all from `image_texture`.
+    pub images: Vec<PlacedImage>,
+    pub image_texture: Option<String>,
     pub width: f32,
     pub height: f32,
     pub line_widths: Vec<f32>,
@@ -117,6 +202,8 @@ pub struct FontLib {
     shelf_y: u32,
     shelf_h: u32,
     advances: HashMap<(u16, u16, u16), f32>,
+    /// Image fonts by lower-case name.
+    image_fonts: HashMap<String, ImageFont>,
 }
 
 impl FontLib {
@@ -134,6 +221,7 @@ impl FontLib {
             shelf_y: 1,
             shelf_h: 0,
             advances: HashMap::new(),
+            image_fonts: HashMap::new(),
         };
         // A white texel at (0,0) for solid quads.
         lib.atlas[..4].copy_from_slice(&[255, 255, 255, 255]);
@@ -141,7 +229,52 @@ impl FontLib {
             Ok(text) => lib.parse_fonts_g(&text, locale),
             Err(e) => bevy::log::warn!("aa-ui: fonts/fonts.g: {e}"),
         }
+        let image_text = [format!("ui/{locale}/image_text.g"), "ui/image_text.g".to_string()]
+            .into_iter()
+            .find_map(|p| aa_pak::Pak::global().read_string(&p).ok());
+        if let Some(text) = image_text {
+            lib.image_fonts = parse_image_fonts(&text);
+        }
         lib
+    }
+
+    /// Lay out `text` in an image font (line breaks at `\n`; characters without a glyph are
+    /// skipped).
+    fn layout_image(f: &ImageFont, size: f32, text: &str, line_space: f32) -> LaidOutText {
+        let scale = if f.size > 0.0 { size / f.size } else { 1.0 };
+        let line_h = (f.height * scale).round();
+        let mut out = LaidOutText {
+            line_height: line_h,
+            image_texture: Some(f.texture.clone()),
+            ..Default::default()
+        };
+        let plain = strip_colors(&expand_codes(text));
+        let lines: Vec<&str> = plain.split('\n').collect();
+        for (li, line) in lines.iter().enumerate() {
+            let y = li as f32 * (line_h + line_space);
+            let mut x = 0.0f32;
+            for ch in line.chars().filter(|&c| c != '\r') {
+                let Some(&[gx, gy, il, ir]) = f.glyphs.get(&ch) else {
+                    continue;
+                };
+                let w = (f.width - il - ir).max(0.0);
+                let dw = (w * scale).round();
+                out.images.push(PlacedImage {
+                    x,
+                    y,
+                    w: dw,
+                    h: line_h,
+                    line: li as u16,
+                    src: [gx + il, gy, w, f.height],
+                });
+                x += dw;
+            }
+            out.line_widths.push(x);
+        }
+        out.width = out.line_widths.iter().copied().fold(0.0, f32::max);
+        let n = lines.len() as f32;
+        out.height = n * line_h + (n - 1.0) * line_space;
+        out
     }
 
     fn parse_fonts_g(&mut self, text: &str, locale: &str) {
@@ -211,12 +344,22 @@ impl FontLib {
                 return None;
             }
         };
-        let (offset, key) = {
+        let (offset, key, kern, units_per_em) = {
             let f = FontRef::from_index(&data, 0)?;
-            (f.offset, f.key)
+            let kern = f
+                .table(swash::tag_from_bytes(b"kern"))
+                .map(parse_kern)
+                .unwrap_or_default();
+            (f.offset, f.key, kern, f.metrics(&[]).units_per_em)
         };
         let i = self.faces.len();
-        self.faces.push(Face { data, offset, key });
+        self.faces.push(Face {
+            data,
+            offset,
+            key,
+            kern,
+            units_per_em,
+        });
         self.face_by_path.insert(path.to_string(), i);
         Some(i)
     }
@@ -295,15 +438,21 @@ impl FontLib {
 
     /// Ascent (rounded) and line height for a font size.
     pub fn metrics(&mut self, font: &str, size: f32) -> (f32, f32) {
+        if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
+            let h = (f.height * if f.size > 0.0 { size / f.size } else { 1.0 }).round();
+            return (h, h);
+        }
         let chain = self.chain_for(font);
         let px = size.round().max(1.0);
         match chain.first() {
             Some((face, _)) => {
                 // The client's line height is the font's ascent + descent, rounded (yd_ygo540:
                 // 13 px -> 16, 15 -> 18, 18 -> 22; yoon_snail_b 15 -> 19; checked against
-                // GetTextHeight in reference/*/ui.json).
+                // GetTextHeight in reference/*/ui.json). The baseline sits at the ascent rounded
+                // up, as FreeType grid-fits it: LibreBaskerville at 18 px (17.46) puts the window
+                // titles 1 px lower than rounding would (reference/ingame/character_info, bag).
                 let m = self.faces[*face].font().metrics(&[]).scale(px);
-                (m.ascent.round(), (m.ascent + m.descent).round())
+                (m.ascent.ceil(), (m.ascent + m.descent).round())
             }
             None => (px * 0.8, (px * 1.2).round()),
         }
@@ -326,6 +475,13 @@ impl FontLib {
         line_space: f32,
         outline: bool,
     ) -> LaidOutText {
+        if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
+            // Bitmap glyphs have no outline of their own.
+            if outline {
+                return LaidOutText::default();
+            }
+            return Self::layout_image(f, size, text, line_space);
+        }
         let chain = self.chain_for(font);
         let px = size.round().max(1.0) as u16;
         let (ascent, line_h) = self.metrics(font, size);
@@ -405,6 +561,13 @@ impl FontLib {
                 continue;
             };
             let adv = self.advance(face, px, gid);
+            // Kerning moves this glyph towards the previous one of the same face.
+            if let Some(prev) = items.last_mut().filter(|p| p.face == face) {
+                let f = &self.faces[face];
+                if let Some(&v) = f.kern.get(&(prev.gid, gid)) {
+                    prev.adv += kern_px(v, px, f.units_per_em);
+                }
+            }
             items.push(Item {
                 ch,
                 face,
@@ -468,8 +631,9 @@ impl FontLib {
             let mut width = 0.0f32;
             for it in &items[a..b] {
                 if it.face == ICON_FACE {
-                    let top = li as f32 * (line_h + line_space)
-                        + ((line_h - (it.adv - 2.0)) / 2.0).round();
+                    let [_, _, cw, ch] = INLINE_ICONS[it.gid as usize];
+                    let ih = (cw * size / 13.0).round().max(cw) * ch / cw;
+                    let top = li as f32 * (line_h + line_space) + ((line_h - ih) / 2.0).round();
                     out.icons.push(PlacedIcon {
                         x: x + 1.0,
                         y: top,
@@ -596,6 +760,122 @@ impl FontLib {
 /// Item face for inline icons.
 const ICON_FACE: usize = usize::MAX - 1;
 
+/// Remove colour codes (`|cAARRGGBB`, `|r`).
+fn strip_colors(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '|' && i + 1 < chars.len() {
+            match chars[i + 1] {
+                'c' | 'C' if i + 10 <= chars.len() => {
+                    i += 10;
+                    continue;
+                }
+                'r' | 'R' => {
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Parse `ui/image_text.g`: `texturepath <path>`, then `infomation` blocks (`name`, `size`,
+/// `width`, `height`, `fontset` with `glyph ( key K, x X, y Y, insetLeft L, insetRight R)`).
+fn parse_image_fonts(text: &str) -> HashMap<String, ImageFont> {
+    let mut out = HashMap::new();
+    let mut texture = String::new();
+    let mut cur: Option<(String, ImageFont)> = None;
+    let flush = |cur: &mut Option<(String, ImageFont)>, out: &mut HashMap<String, ImageFont>| {
+        if let Some((name, f)) = cur.take() {
+            if !name.is_empty() {
+                out.insert(name.to_ascii_lowercase(), f);
+            }
+        }
+    };
+    for raw in text.lines() {
+        let raw = raw.trim_start_matches('\u{feff}');
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let indented = raw.starts_with(' ') || raw.starts_with('\t');
+        let (word, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        let rest = rest.trim();
+        if !indented {
+            flush(&mut cur, &mut out);
+            match word {
+                "texturepath" => texture = aa_pak::normalize(rest),
+                "infomation" => {
+                    cur = Some((
+                        String::new(),
+                        ImageFont {
+                            texture: texture.clone(),
+                            size: 0.0,
+                            width: 0.0,
+                            height: 0.0,
+                            glyphs: HashMap::new(),
+                        },
+                    ))
+                }
+                _ => {}
+            }
+            continue;
+        }
+        let Some((name, f)) = cur.as_mut() else {
+            continue;
+        };
+        match word {
+            "name" => *name = rest.to_string(),
+            "size" => f.size = rest.parse().unwrap_or(0.0),
+            "width" => f.width = rest.parse().unwrap_or(0.0),
+            "height" => f.height = rest.parse().unwrap_or(0.0),
+            "glyph" => {
+                let body = rest.trim_start_matches('(').trim_end_matches(')');
+                // `key` is a quoted character (`" "`, `"항"`) or a bare one (`1`, `-`).
+                let Some(after_key) = body.trim_start().strip_prefix("key") else {
+                    continue;
+                };
+                let after_key = after_key.trim_start();
+                let (key, tail) = if let Some(q) = after_key.strip_prefix('"') {
+                    match q.find('"') {
+                        Some(end) => (q[..end].chars().next(), &q[end + 1..]),
+                        None => (None, ""),
+                    }
+                } else {
+                    let end = after_key.find(',').unwrap_or(after_key.len());
+                    (after_key[..end].trim().chars().next(), &after_key[end..])
+                };
+                let Some(key) = key else { continue };
+                let mut v = [0.0f32; 4];
+                for part in tail.split(',') {
+                    let mut it = part.split_whitespace();
+                    let (Some(k), Some(n)) = (it.next(), it.next()) else {
+                        continue;
+                    };
+                    let n: f32 = n.parse().unwrap_or(0.0);
+                    match k {
+                        "x" => v[0] = n,
+                        "y" => v[1] = n,
+                        "insetLeft" => v[2] = n,
+                        "insetRight" => v[3] = n,
+                        _ => {}
+                    }
+                }
+                f.glyphs.insert(key, v);
+            }
+            _ => {}
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
 fn icon_char(i: usize) -> char {
     char::from_u32(ICON_BASE + i as u32).unwrap_or(' ')
 }
@@ -622,7 +902,7 @@ fn money_text(body: &str) -> String {
 /// Expand the client's inline value codes, keeping colour codes (`|cAARRGGBB`, `|r`):
 /// `|,1234;` -> `1234` (the client shows `Labor 85/2000`, no separators at login); other `|x...;` codes (`|b` bold value, `|m`
 /// money with coin icons, `|p`, `|u`, ...) show their content (`|b` adds the loyalty token
-/// icon, `|m` coins).
+/// icon, `|h` the honor medal, `|l` the vocation badge, `|m` coins).
 pub fn expand_codes(text: &str) -> String {
     if !text.contains('|') {
         return text.to_string();
@@ -645,9 +925,13 @@ pub fn expand_codes(text: &str) -> String {
                     let body: String = chars[i + 2..i + 2 + n].iter().collect();
                     match k {
                         'm' => out.push_str(&money_text(&body)),
-                        'b' => {
+                        'b' | 'h' | 'l' => {
                             out.push_str(&body);
-                            out.push(icon_char(3));
+                            out.push(icon_char(match k {
+                                'b' => 3,
+                                'h' => 4,
+                                _ => 5,
+                            }));
                         }
                         _ => out.push_str(&body),
                     }
@@ -691,7 +975,38 @@ mod tests {
             format!("1{} 2{} 3{}", icon_char(0), icon_char(1), icon_char(2))
         );
         assert_eq!(expand_codes("|m0;"), format!("0{}", icon_char(2)));
+        assert_eq!(expand_codes("|h0;"), format!("0{}", icon_char(4)));
+        assert_eq!(expand_codes("|l12;"), format!("12{}", icon_char(5)));
         assert_eq!(expand_codes("a|b"), "a|b");
+    }
+
+    #[test]
+    fn kerning_like_freetype() {
+        // Flareserif 821 (2048 units): "Vo" -190 is -1 px at 13 px, "ke" -39 is 0, "P." -379
+        // is -1 at 13 px and -4 at 30 px (no small-size cut).
+        assert_eq!(kern_px(-190, 13, 2048), -1.0);
+        assert_eq!(kern_px(-39, 13, 2048), 0.0);
+        assert_eq!(kern_px(-379, 13, 2048), -1.0);
+        assert_eq!(kern_px(-379, 30, 2048), -6.0);
+        assert_eq!(kern_px(115, 13, 2048), 0.0);
+        let mut t = vec![0u8, 0, 0, 1, 0, 0, 0, 20, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0];
+        t.extend_from_slice(&[0, 57, 0, 82, 0xff, 0x42]);
+        assert_eq!(parse_kern(&t).get(&(57, 82)), Some(&-190));
+    }
+
+    #[test]
+    fn image_font_parse() {
+        let g = "\u{feff}texturepath ui/image_text.dds\n        \ninfomation\n    name characterInfo\n    size 37\n    width 29\n    height 37\n    fontset\n        glyph ( key 1, x 0, y 465, insetLeft 0, insetRight 14)\n        glyph ( key \" \", x 30, y 404, insetLeft 0, insetRight 40)\n\nlevel\n    coords ( 290, 465, 45, 21 )\n";
+        let fonts = parse_image_fonts(g);
+        let f = &fonts["characterinfo"];
+        assert_eq!(f.texture, "ui/image_text.dds");
+        assert_eq!((f.size, f.width, f.height), (37.0, 29.0, 37.0));
+        assert_eq!(f.glyphs[&'1'], [0.0, 465.0, 0.0, 14.0]);
+        assert_eq!(f.glyphs[&' '], [30.0, 404.0, 0.0, 40.0]);
+        assert_eq!(fonts.len(), 1);
+        let lo = FontLib::layout_image(f, 37.0, "1", 0.0);
+        assert_eq!((lo.width, lo.height), (15.0, 37.0));
+        assert_eq!(lo.images[0].src, [0.0, 465.0, 15.0, 37.0]);
     }
 
     /// Prints font metrics of the UI fonts (needs the client pak): `cargo test -p aa-ui font_metrics -- --ignored --nocapture`.

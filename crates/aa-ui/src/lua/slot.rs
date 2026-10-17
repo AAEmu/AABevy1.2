@@ -19,6 +19,8 @@
 //! --   cooldown = { remain = ms, total = ms },  -- optional, see below
 //! --   tooltip = {...}, extraInfo = {...} }
 //! AAUI.SlotHotKey(slotType, slotIdx)   -- slot:GetHotKey: "1", "SHIFT-1", "MINUS", ... or nil
+//! AAUI.UseSlot(slotType, slotIdx, button)  -- a click on a bound slot (`slot::clicked`)
+//! AAUI.UseSkill(skillType, button), AAUI.UseItem(itemType, grade, button)
 //! ```
 //!
 //! # Cooldowns
@@ -115,6 +117,51 @@ fn contents(lua: &Lua) -> mlua::Result<Table> {
 fn hook(lua: &Lua, name: &str) -> Option<Function> {
     let aaui: Table = lua.globals().raw_get("AAUI").ok()?;
     aaui.raw_get(name).ok()
+}
+
+/// A click on a slot uses what it holds, as the client does natively (the action bar scripts'
+/// own `OnClick` only hides the tooltip): `AAUI.UseSlot(slotType, slotIdx, button)` for
+/// `EstablishSlot`, `AAUI.UseSkill(skillType, button)` for `EstablishSkill`,
+/// `AAUI.UseItem(itemType, grade, button)` for `EstablishItem` (`button` = `"LeftButton"` /
+/// `"RightButton"`). The app runs the same path as the slot's hotkey. Disabled or empty slots
+/// do nothing. Returns whether a hook ran.
+pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
+    let found = {
+        let u = ui(lua);
+        let mut t = Some(target);
+        let mut found = None;
+        while let Some(id) = t {
+            if let Some(w) = u.tree.widget(id) {
+                if let Some(s) = w.slot.as_ref() {
+                    if w.enabled && s.binded.as_deref().is_some_and(|b| b != "none") {
+                        found = s.source.clone();
+                    }
+                    break;
+                }
+                if w.button.is_some() {
+                    break;
+                }
+            }
+            t = u.tree.get(id).parent;
+        }
+        found
+    };
+    let Some(source) = found else { return false };
+    let (name, args): (&str, Vec<Value>) = match source {
+        Source::Slot(t, i) => ("UseSlot", vec![Value::Integer(t), Value::Integer(i)]),
+        Source::Skill(s) => ("UseSkill", vec![Value::Integer(s)]),
+        Source::Item(it, g) => ("UseItem", vec![Value::Integer(it), Value::Integer(g)]),
+    };
+    let Some(f) = hook(lua, name) else { return false };
+    let mut args = args;
+    match lua.create_string(button) {
+        Ok(s) => args.push(Value::String(s)),
+        Err(_) => return false,
+    }
+    if let Err(e) = f.call::<()>(mlua::MultiValue::from_iter(args)) {
+        bevy::log::warn!("aa-ui: AAUI.{name}: {e}");
+    }
+    true
 }
 
 /// The text style a slot's remaining time is drawn in (`slot.cooltime_style`).

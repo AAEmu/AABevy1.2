@@ -32,15 +32,36 @@
 //!   zone  = 5,                        -- its id ("w_solzreed": Solzreed Peninsula)
 //!   player = { u = 0.76, v = 0.26,    -- optional: the player's place on that map image, 0..1
 //!              angle = -2.77 },       -- optional heading, radians clockwise from north (cursor rotation)
+//!   maps = {                          -- optional: the place on the maps above (up to 4)
+//!     { level = 1, id = 3, u = 0.695, v = 0.342 },   -- continent "west"
+//!     { level = 0, id = 2, u = 0.469, v = 0.605 },   -- the world map
+//!   },
 //! }
+//! AAUI.MapClimate(zoneId) -> nil or { climateId, ... }   -- optional: the climates of a map's zones
+//! AAUI.ConflictZones(worldId) -> { zoneId, ... }          -- optional: a continent's conflict zones
+//! AAUI.ConflictState(zoneId) -> state, remainMs            -- optional: HPWS_TROUBLE_0 .. 4, HPWS_BATTLE,
+//!                                                          -- HPWS_WAR, HPWS_PEACE; nil / -1 none
 //! ```
+//!
+//! The map ids are the game database's: `zone_groups.id` for zones, `world_groups.id` for the
+//! continents (3 west, 4 east, 5 origin) and the world (2). The client places the player from
+//! its global position `(x, y)` with the map's rectangle in those tables (`x, y, w, h`, y up):
+//! `u = (x - X) / W`, `v = 1 - (y - Y) / H` (checked against reference/ingame/worldmap_*: the
+//! Nuian spawn (15578.0, 15382.1) is u 0.7594 v 0.2657 on Solzreed, 0.6952 / 0.3418 on the
+//! western continent, 0.4688 / 0.6054 on the world map). Without `maps` the place on the maps
+//! above is estimated from the scripts' highlight rectangles and masks (a few pixels off).
+//! `MapClimate` gets the zone group id the scripts show (`GetClimateInfo`) and answers with
+//! `climates.id` values (2 temperate, 3 tropical, 4 subarctic, 5 arid: the zones'
+//! `zone_climate_id` through `zone_climate_elems`). `ConflictZones` gets a continent's
+//! `world_groups` id and lists `zone_groups` ids (west: 19 Karkasse Ridgelands, 20 Cinderstone
+//! Moor, 22 Halcyona, 26 Hellswamp, 27 Sanddeep); the continent map tints them by
+//! `ConflictState` (`reference/ingame/worldmap_continent`: four tension circles), the zone map's
+//! bottom panel shows the state of its zone.
 //!
 //! Without `AAUI.WorldMap` the hook `AAUI.RoadMap()` of the zone overlay is used (same `level`,
 //! `zone`, `player`). The map opens on the player's map, and follows it when the player changes
-//! maps; on the maps above (continent, world) the cursor sits at the player's map's colour in
-//! their mask. The conflict, climate, NPC, doodad, quest, telescope and ship markers are not
-//! drawn (their game data is not available): those natives are no-ops;
-//! `GetConflictZoneListByWorldId` is empty.
+//! maps. The NPC, doodad, quest, telescope and ship markers are not drawn (their game data is
+//! not available): those natives are no-ops.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -177,6 +198,8 @@ pub struct Place {
     pub v: f32,
     /// The player's heading, radians clockwise from north (the top of the map).
     pub angle: f32,
+    /// The place on maps above the player's (`maps` of the hook): `(level, id, u, v)`.
+    pub above: [Option<(i64, i64, f32, f32)>; 4],
 }
 
 #[derive(Clone, Debug)]
@@ -321,6 +344,10 @@ impl WorldMapData {
         if cur == mine {
             return Some(pos);
         }
+        // The app knows the place there.
+        if let Some((_, _, u, v)) = place.above.iter().flatten().find(|a| (a.0, a.1) == cur) {
+            return Some((u * BASE.0, v * BASE.1));
+        }
         // On a map above the player's: lift the place map by map.
         let mut child = self.index_of(mine)?;
         for _ in 0..4 {
@@ -412,7 +439,31 @@ fn read_place(lua: &Lua) -> Option<Place> {
         }
         _ => (0.5, 0.5, 0.0),
     };
-    Some(Place { level, zone, u, v, angle })
+    let mut above = [None; 4];
+    if let Ok(Some(maps)) = t.raw_get::<Option<Table>>("maps") {
+        for (slot, m) in above.iter_mut().zip(maps.sequence_values::<Table>().flatten()) {
+            let n = |k: &str| m.raw_get::<Option<f64>>(k).ok().flatten();
+            if let (Some(l), Some(i), Some(u), Some(v)) = (n("level"), n("id"), n("u"), n("v")) {
+                *slot = Some((l as i64, i as i64, u as f32, v as f32));
+            }
+        }
+    }
+    Some(Place { level, zone, u, v, angle, above })
+}
+
+/// Ask an optional `AAUI` map hook (`MapClimate`, `ConflictZones`, `ConflictState`); nothing
+/// when the app did not define it (or it failed, logged).
+fn map_hook(lua: &Lua, name: &str, arg: Value) -> mlua::MultiValue {
+    let Ok(aaui) = lua.globals().raw_get::<Table>("AAUI") else {
+        return mlua::MultiValue::new();
+    };
+    match aaui.raw_get::<Option<Function>>(name) {
+        Ok(Some(f)) => f.call::<mlua::MultiValue>(arg).unwrap_or_else(|e| {
+            bevy::log::warn!("aa-ui: AAUI.{name}: {e}");
+            mlua::MultiValue::new()
+        }),
+        _ => mlua::MultiValue::new(),
+    }
 }
 
 /// Show the map `(level, id)`: its image only, no hover. Queues the events the scripts
@@ -689,23 +740,41 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "RemoveGivenQuestInfo", "RemoveFishSchoolInfo", "RemoveCarryingBackpackSlaveInfo",
         "ExploredRegionUpdated", "ClearTransferTelescopeInfo", "ClearTelescopeInfo",
         "ClearNpcInfo", "ClearNotifyQuestInfo", "ClearMySlaveInfo", "ClearHousingInfo",
-        "GetClimateInfo", "GetConflictStateByZoneId", "SetExpandRatio", "ResetCursor",
+        "SetExpandRatio", "ResetCursor",
     ] {
         m.raw_set(name, method(lua, |_, _, _| none())?)?;
     }
     m.raw_set(
+        "GetClimateInfo",
+        method(lua, |lua, _, a| {
+            let v = map_hook(lua, "MapClimate", a.v(1)).into_iter().next();
+            ret(lua, v.unwrap_or(Value::Nil))
+        })?,
+    )?;
+    // Conflict zones: the continent map tints the zones the app lists (`map/world_map.lua`
+    // `UpdateContinentConflictState`, the scripts' `conflictImg` drawables), the zone map's
+    // bottom panel shows the zone's state and time left.
+    m.raw_set(
         "GetConflictZoneListByWorldId",
-        method(lua, |lua, _, _| ret(lua, lua.create_table()?))?,
+        method(lua, |lua, _, a| {
+            match map_hook(lua, "ConflictZones", a.v(1)).into_iter().next() {
+                Some(Value::Table(t)) => ret(lua, t),
+                _ => ret(lua, lua.create_table()?),
+            }
+        })?,
+    )?;
+    m.raw_set(
+        "GetConflictStateByZoneId",
+        method(lua, |lua, _, a| Ok(map_hook(lua, "ConflictState", a.v(1))))?,
     )?;
     // Drawables the scripts hand over.
     m.raw_set(
         "SetPlayerDrawable",
         method(lua, |lua, id, a| {
             let p = value_id(lua, &a.v(1));
-            // Hidden until the player's place on the shown map is known.
-            if let Some(p) = p {
-                ui(lua).tree.get_mut(p).shown = false;
-            }
+            // It stays as the scripts left it (shown): they show the cursor's pulse effects when
+            // the map opens only if the cursor is visible then. The per-frame update places it,
+            // or hides it while the player is not on the shown map.
             with(lua, id, |d| {
                 d.player = p;
                 d.applied = None;

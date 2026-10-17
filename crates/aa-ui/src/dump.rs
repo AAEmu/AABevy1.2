@@ -9,10 +9,10 @@ use mlua::{Lua, Table};
 use crate::lua::{reg, ui};
 use crate::tree::{Id, Kind};
 
-/// Paths of every object table reachable from `_G` (`a.b[2].c`), breadth first, at most
-/// `max_depth` fields deep. Like the reference capture, the shortest paths come first. Pass 0
-/// walks `_G`; pass 1 the tables held in global functions' upvalues (`Func^upvalue`, the
-/// reference's notation), so plain global paths win. The walk runs in Lua: holding tens of
+/// Paths of every object table reachable from `_G` (`a.b[2].c`, `Func^upvalue.x`), breadth
+/// first over tables and the upvalues of Lua functions, at most `max_depth` steps deep: the walk
+/// of the reference capture (`reference/tools/lib.lua`, `R.enumerate`), so the recorded paths
+/// are the same shortest ones (up to 4 per object). The walk runs in Lua: holding tens of
 /// thousands of table handles from Rust overflows Lua 5.1's C stack (`out of Lua stack`).
 fn object_paths(lua: &Lua, max_depth: usize) -> mlua::Result<HashMap<Id, Vec<String>>> {
     let r = reg(lua);
@@ -35,61 +35,54 @@ return function(ids, maxDepth)
     if not t then t = {}; out[id] = t end
     if #t < 4 then t[#t + 1] = p end
   end
+  local SKIP = { _G = true, package = true, string = true, table = true, math = true, os = true,
+                 io = true, debug = true, coroutine = true, __ref = true, _LOADED = true, FAKE = true }
   local getup = debug and debug.getupvalue
-  local upv = {}
-  local function keyOf(path, k)
-    local tk = type(k)
-    if tk == "string" then
-      if path == "" then return k end
-      return path .. "." .. k
-    elseif tk == "number" then
-      if k == math.floor(k) then return string.format("%s[%d]", path, k) end
-      return path .. "[" .. tostring(k) .. "]"
-    end
-    return nil
+  local getinfo = debug and debug.getinfo
+  local seen, queue, qi = {}, {}, 1
+  local function visit(v, kp, depth)
+    local id = ids[v]
+    if id then add(id, kp) end
+    if seen[v] then return end
+    seen[v] = true
+    queue[#queue + 1] = { v, kp, depth }
   end
-  local function walk(queue, seen, scanUpvalues)
-    for _ = 1, maxDepth do
-      local nextQ = {}
-      for qi = 1, #queue do
-        local t, path = queue[qi][1], queue[qi][2]
+  for k, v in next, _G do
+    local tv = type(v)
+    if type(k) == "string" and not SKIP[k] and (tv == "table" or tv == "function") then visit(v, k, 1) end
+  end
+  while qi <= #queue do
+    local item = queue[qi]
+    qi = qi + 1
+    local t, path, depth = item[1], item[2], item[3]
+    if depth < maxDepth then
+      if type(t) == "function" then
+        local info = getinfo and getinfo(t, "S")
+        if getup and info and info.what ~= "C" then
+          local i = 1
+          while true do
+            local n, v = getup(t, i)
+            if not n then break end
+            if type(v) == "table" and not SKIP[n] and v ~= _G then visit(v, path .. "^" .. n, depth + 1) end
+            i = i + 1
+          end
+        end
+      else
         for k, v in next, t do
-          if scanUpvalues and path == "" and type(v) == "function" and type(k) == "string" then
-            if getup then
-              for i = 1, 255 do
-                local name, uv = getup(v, i)
-                if name == nil then break end
-                if type(uv) == "table" then upv[#upv + 1] = { uv, k .. "^" .. name } end
-              end
-            end
-          elseif type(v) == "table" then
-            local key = keyOf(path, k)
-            if key and not (path == "" and (key == "_G" or key == "package" or key == "FAKE")) then
-              local id = ids[v]
-              if id then add(id, key) end
-              if not seen[v] then
-                seen[v] = true
-                nextQ[#nextQ + 1] = { v, key }
-              end
-            end
+          local tv = type(v)
+          if (tv == "table" or tv == "function") and k ~= "__this" and k ~= "__index" then
+            local kp
+            local tk = type(k)
+            if tk == "number" then
+              if k == math.floor(k) then kp = string.format("%s[%d]", path, k) else kp = path .. "[" .. tostring(k) .. "]" end
+            elseif tk == "string" then kp = path .. "." .. k
+            else kp = path .. ".<" .. tk .. ">" end
+            visit(v, kp, depth + 1)
           end
         end
       end
-      queue = nextQ
     end
   end
-  walk({ { _G, "" } }, {}, true)
-  local seen, queue = {}, {}
-  for i = 1, #upv do
-    local ut, p = upv[i][1], upv[i][2]
-    local id = ids[ut]
-    if id then add(id, p) end
-    if not seen[ut] then
-      seen[ut] = true
-      queue[#queue + 1] = { ut, p }
-    end
-  end
-  walk(queue, seen, false)
   return out
 end
 "#;
@@ -101,7 +94,8 @@ fn esc(s: &str) -> String {
 /// JSON with `widgets` (visible objects that have a script path, in paint order) and
 /// `hidden_named` (hidden ones), like the reference capture.
 pub fn dump_json(lua: &Lua) -> mlua::Result<String> {
-    let paths = object_paths(lua, 14)?;
+    // The reference capture walks 10 steps deep (`R.enumerate(nil, 10)`).
+    let paths = object_paths(lua, 10)?;
     let g = ui(lua);
     let tree = &g.tree;
     let order = tree.paint_order();

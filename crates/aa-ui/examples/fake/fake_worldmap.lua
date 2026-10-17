@@ -40,15 +40,43 @@ end
 -- AAUI.WorldMap(): where the player is for the world map window (M). level / zone: the map the player
 -- is on as the scripts register maps (`worldmap:SaveMapData(WMS_* - 1, id, ...)`: 2 zone, 3 city; id = zone
 -- group id, 5 = Solzreed Peninsula), player.u / v = place on that map's image (0..1) and angle = heading
--- (radians clockwise from north; same heading as AAUI.RoadMap). The spot is the road map's player (u 0.846,
--- v 0.265 on the 780 x 516 "5_100" road map image) moved to the zone map image: the road map is the zone
--- map at half size shifted by (-48, -8.5) px, so (0.846 * 780 + 48) * 2 / 1856, (0.265 * 516 + 8.5) * 2 / 1112.
+-- (radians clockwise from north; same heading as AAUI.RoadMap), maps = the place on the continent (3, west)
+-- and world (2) maps. The client computes these from the player's global position (the Nuian spawn of the
+-- server's CharTemplates.json, 15578.042 / 15382.122) and each map's rectangle in the game database
+-- (zone_groups / world_groups x, y, w, h): u = (x - X) / W, v = 1 - (y - Y) / H; the results put the cursor
+-- where reference/ingame/worldmap_zone, _continent and _world have it.
 -- Without this hook the world map reads AAUI.RoadMap.
+local function map_uv(x, y, X, Y, W, H) return (x - X) / W, 1 - (y - Y) / H end
+local PX, PY = 15578.042, 15382.122
+local zu, zv = map_uv(PX, PY, 11925, 13266, 4810.244629, 2882)  -- zone_groups 5 w_solzreed
+local cu, cv = map_uv(PX, PY, -6758, 2673, 32130, 19308)        -- world_groups 3 west
+local wu, wv = map_uv(PX, PY, -14731, 46, 64651, 38865)         -- world_groups 2 main_world
 AAUI.WorldMap = function()
   return {
     level = 2, zone = 5,
-    player = { u = 0.763, v = 0.262, angle = -2.77053833 },
+    player = { u = zu, v = zv, angle = -2.77053833 },
+    maps = { { level = 1, id = 3, u = cu, v = cv }, { level = 0, id = 2, u = wu, v = wv } },
   }
+end
+-- AAUI.MapClimate(zoneGroupId): climates.id of the zones of a map (zones.zone_climate_id ->
+-- zone_climate_elems.climate_id); Solzreed Peninsula is temperate (2).
+AAUI.MapClimate = function(zoneId)
+  if zoneId == 5 then return { 2 } end
+  return nil
+end
+-- Conflict zones of the western continent (world_groups 3), as in reference/ingame/worldmap_continent:
+-- Karkasse Ridgelands (19), Cinderstone Moor (20), Hellswamp (26) and Sanddeep (27) in tension (the
+-- orange circles), Halcyona (22) at peace. Solzreed (5) is no conflict zone.
+-- States: HPWS_TROUBLE_0 .. 4 = 0 .. 4, HPWS_BATTLE 5, HPWS_WAR 6, HPWS_PEACE 7.
+local CONFLICT = { [19] = 1, [20] = 1, [22] = 7, [26] = 1, [27] = 1 }
+AAUI.ConflictZones = function(worldId)
+  if worldId == 3 then return { 19, 20, 22, 26, 27 } end
+  return {}
+end
+AAUI.ConflictState = function(zoneId)
+  local state = CONFLICT[zoneId]
+  if state == nil then return -1 end
+  return state, 3600000
 end
 
 -- map/ping.lua reads M_EXPAND_CLICKED (a flag of a removed expand button that no script ever sets) and calls

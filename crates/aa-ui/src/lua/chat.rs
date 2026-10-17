@@ -78,6 +78,11 @@ pub struct ChatData {
     pub add_button: Id,
     pub use_add_button: bool,
     pub edit: Id,
+    /// The chat method selector (`GetChatMethodSelector`), a child of the edit.
+    pub selector: Id,
+    /// The input's channel (`CHAT_*`) and whisper target ([`super::chat_input`]).
+    pub method: i64,
+    pub whisper: String,
     pub left_line: Id,
     pub right_line: Id,
     /// Cursor over the window at the last update.
@@ -506,7 +511,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     let (edit, _) = native_child(lua, id, "chatEdit", "editbox", "chatEdit", false)?;
     let (add, _) = native_child(lua, id, "addButton", "button", "addButton", true)?;
     native_child(lua, id, "imeToggle", "button", "imeToggleButton", false)?;
-    let (_, selector) = native_child(lua, edit, "chatMethodSelector", "button", "chatMethodSelector", true)?;
+    let (selector_id, selector) = native_child(lua, edit, "chatMethodSelector", "button", "chatMethodSelector", true)?;
     let (_, list) = native_child(lua, edit, "chatMethodList", "listbox", "chatMethodList", false)?;
     set_getter(lua, &selector, "GetList", list)?;
     let (left_line, _) = native_drawable(lua, id, "leftLine")?;
@@ -527,12 +532,16 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             add_button: add,
             use_add_button: false,
             edit,
+            selector: selector_id,
+            method: 0,
+            whisper: String::new(),
             left_line,
             right_line,
             hovered: None,
         });
     }
     call_global(lua, "OnCreateChatWindow", t.clone());
+    super::chat_input::show_method(lua, id);
     Ok(())
 }
 
