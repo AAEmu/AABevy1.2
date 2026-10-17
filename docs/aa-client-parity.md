@@ -13,8 +13,8 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Loading and screen lifecycle | Full flow, prebuilt HUD, return-to-list/logout/disconnect, spawn focus tests | Broader interruption/race coverage and persistent driver pipeline cache |
 | Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement | Rebindable input; click-to-move/native interactions and less common locomotion modes need audit |
 | Water and mounted movement | Wading/swimming/diving; remote mount/rider placement and movement packets | Local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
-| World geometry | Terrain, brushes, vegetation, roads, forward decals, authored static entity props, streaming, collision; reference captures and unload tests | Deferred/wrapped decals, animated entities/FlowGraph, local lights (active), far impostors/HLOD, remaining placement types and procedural grass |
-| Environment | Data-driven time of day, fog, clouds, water, music/ambient/reverb/moods | Night sky, shafts/glow/adaptation, underwater fidelity, moving clouds, zone blending, remaining mood triggers |
+| World geometry | Terrain, brushes, vegetation, roads, forward decals, authored static entity props/local lights, streaming, collision; reference captures and unload tests | Deferred/wrapped decals (active), animated entities/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
+| Environment | Data-driven time of day, original 8,912-star catalogue, fog, clouds, water, music/ambient/reverb/moods | Moon discs/coronas, shafts/glow/adaptation, underwater fidelity, moving clouds, zone blending, remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization | Facial animation/lip sync/blinks, fur/hair/skin shading differences, clothing clipping and remaining clips |
 | Combat and HUD | Skill/cast timelines, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state | Broader progression/live coverage; cooldown and tooltip corner cases; damage breakdown option |
@@ -22,9 +22,9 @@ live or visual validation. No overall completion percentage is inferred from scr
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, trade, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons | Objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/ship/public-farm icons, climate/conflict overlays |
 | Chat | Live channels/whispers, original chat input and parsing, system/combat messages | Chat layout persistence, full command set, moderation/social integrations and less common channel events |
-| Party and raid | Invite/decline/accept/leave/kick/leader; original frames, sparse slots, offline/rejoin, live two-client coverage | Original UI bindings for role/move/convert/loot rules/markers/pings (protocol and two-peer live tests done), group loot, party buff/combat indicators; full raid UI coverage |
+| Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | 3D overhead marks, group loot, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original relationship/expedition/nation frames load | Friends/blocked-users protocol active; their original UI integration, family, guild/expedition, nation and management |
-| Mail, trade and auctions | Original content groups load | Real list/detail/attachments/send/claim/delete, trade agreement/locking, auction search/bid/list/cancel |
+| Mail, trade and auctions | Original content groups load; mail protocol/list/detail/send/claims/delete live-tested in aa-net | Original mailbox UI integration; trade agreement/locking (protocol active), auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | World entities and item/quest data present | Crafting recipes/actions/proficiencies, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data and some map icons | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion decoded and rendered | Owned mate/slave lifecycle, summon/unsummon/equipment/skills, mount UI, ships/cannons/transport controls |
@@ -34,10 +34,10 @@ live or visual validation. No overall completion percentage is inferred from scr
 
 ## Active ownership
 
-* Root: `aa-client`, finish commerce verification, then party/friends UI and account-backed input bindings.
-* Network agent: `aa-net`, repair/expansion/sort contracts; shop/bank, raid and friends protocol milestones landed.
+* Root: `aa-client`, raid UI/pings verified; friends/mail UI and account-backed input bindings next.
+* Network agent: `aa-net`, player trade; shop/bank, raid, friends, repair/expansion and mail milestones landed.
 * UI agent: `aa-ui`, effect clipping/persistent scale and native combat-text timelines; motion/keyboard milestones landed.
-* World agent: `aa-world`, authored local lights; forward decals and static entity props landed.
+* World agent: `aa-world`, deferred/wrapped decals; forward decals, static entity props, local lights and stars landed.
 
 The shared checkout also contains inherited calibration/performance edits in other crates. Those
 are preserved; they are not counted as newly verified features until their owner or an assigned
@@ -53,7 +53,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client 103 passed / 13 ignored, UI 88 passed / 1 ignored, network 136 library plus
+Current wave: client 107 passed / 13 ignored, UI 96 passed / 1 ignored, network 147 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.
@@ -61,3 +61,9 @@ Final captures/logs live under `shots/hud/sol61-commerce/`; these passed with ze
 Native lock/queued-sale regression refuses a replaced slot's identity instead of selling the
 replacement item. Four decal, five road and three static-entity focused checks passed; owning
 docs record exact assets, known variants, source addresses and performance.
+
+Fresh team9 also exercised original raid convert/role/drag/loot controls, marker identity,
+peer/root ping echoes, original ping removal, marker reset and dismissal. The inspected
+`shots/hud/sol61-raid/` captures/logs have zero Lua errors and 68-95 FPS at 1920x1080.
+The world agent inspected original stars at night/off/day and bounded authored local lights,
+including cell unloading; their own docs retain renderer approximations and moon limitations.
