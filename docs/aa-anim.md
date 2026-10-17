@@ -31,10 +31,11 @@ Nuian male / female (silver saint armour + cape), Harani (orange / red dyed jack
 eyes, skin tone), the metal shine of the client (specular terms of the Illum shader) is
 approximated with the game's own beach cubemap as environment light.
 
-Material / lighting comparison (`compare` example, `shots/materials/`): `after_sheet.png` is the
-contact sheet of the 8 `step1_<race>_<gender>` captures (real left, ours right; `before_sheet.png`
-is the same before the material work), `after_step2_elf_female.png` the face close-up,
-`after_select_refone.png` the Nuian male Refone of the select screen. `compare` places the figure
+Material / lighting comparison (`compare` example, `shots/materials/`): `after2_sheet.png` is the
+contact sheet of the 8 `step1_<race>_<gender>` captures (real left, ours right; `b2_sheet.png` is
+the same before the specular maps, per model skin calibration and ferre head fix, `before_sheet.png`
+before the material work), `after2_step2_elf_female.png` the face close-up,
+`after2_select_refone.png` the Nuian male Refone of the select screen. `compare` places the figure
 by the real camera (`camera.json`: position, angles, roll, FOV 1920x1080) and measured feet / head
 rows of each capture (figure height within 1 cm), lights it with `aa_cry::stage::StageLighting::login()`
 and the login colour grading, and clears to the mean colour of the capture's background. Options:
@@ -146,15 +147,22 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
    sub-materials per character through aa-cry's `material_hook` (`restyle`):
    * HumanSkin: the chosen `skin_colors` row replaces `BSkinColor` (stored b, g, r) / `Diffuse`
      (`aa_cry::shade::skin_base_color`: the shader's `bright^1.5 * 1.5` lit colour, pulled towards
-     pink and scaled; the calibration constants are in `shade.rs`). Body and face use the same
-     colour. (The old `skin_albedo` scale is still computed and exposed but no longer used.)
+     pink and scaled; the calibration constants are in `shade.rs`), times a per model multiplier
+     [`skin_tune`] (below); ferre fur has no skin sheen (`reflectance` 0.12, roughness >= 0.75).
+     (The old `skin_albedo` scale is still computed and exposed but no longer used.)
    * face: texture composited on the CPU (`face.rs`): `face01/<pfx>_face01_df.dds` (the material's
      `face00_df copy.dds` does not exist in the pak) + decals + lip tint + iris tint, with a full mip
      chain; the face normal map of the preset replaces the material's.
+   * lips: `face/<pfx>_face_mask_new.dds` (Nuian male only) or `<pfx>_face_mask.dds` (all others;
+     before only the first was read, so only the Nuian male had tinted lips); the orange part of
+     the mask (red and green set) is the lips.
    * Eye: the same composited texture (the eye lives in the face atlas), iris recoloured from
-     `left_pupil_color` inside the eye mesh's UV square.
-   * Hair: aa-cry's conversion (`HairColor^1.5 * 2 * Diffuse`, alpha-to-coverage); the colour `.mtl`
-     of the chosen hair colour is the material.
+     `left_pupil_color` inside the eyeball UV square: the two eye meshes that share one UV
+     rectangle (the ferre `Eye` sub-material also draws teeth and tongue of the same atlas, whose
+     union box covers the whole strip).
+   * Hair: aa-cry's conversion (`HairColor^1.5 * 2 * Diffuse`, alpha mask on the doubled alpha,
+     isotropic highlight masked by the strand pattern; see `docs/aa-cry.md` for why not
+     alpha-to-coverage / anisotropy); the colour `.mtl` of the chosen hair colour is the material.
    * Illum (cloth, armour): aa-cry's conversion; dyeable materials (`DyeingChannelMask`,
      `[1] Custom` mask) get a baked dyed diffuse (`dye.rs`) that replaces the base (and emissive) texture.
    Parts without a per-character change (most costumes) are the shared cached models; parts with
@@ -210,18 +218,51 @@ list the choices. `Clip::load`, `Cal::load`, `Cdf::load`, `Lmg::load`, `MorphSet
 `ModelOptions::shading` is set to `Shading::Full` for every character part.
 
 The examples are the reference usage: `compare` (the calibrated login stage, above), `lineup` (`--preset N`, `--costume none`, `--no-hair 1`,
-`--only N`, `--cam x,y,z --look x,y,z --fov deg`, `--light K`, `--env I`) and `faces` (`--race`,
+`--only N`, `--cam x,y,z --look x,y,z --fov deg`, `--light K`, `--env I`, `--ssao 1`, `--msaa off`,
+`--prepass 1`: the last three check the materials under SSAO / the normal prepass) and `faces` (`--race`,
 `--gender`, `--presets 0,1,2`, `--morph "4=35,25=65;..."`, `--skin`, `--hair`, `--hair-color`,
 `--fov`, `--full 1`). Lighting note: Bevy lights are in lux against its default exposure; the
 showroom uses ~0.5 of "nominal" values, higher washes characters out.
 
+### Skin calibration (`skin_tune`)
+
+`aa_cry::shade::skin_base_color` has one pink pull for every skin. The models differ (the elf's
+pale face texture needs it, the Nuian male's skin is already pink and turned red), so
+`aa_anim::skin_tune(race, gender)` is a table of linear rgb multipliers on top of it, one row per
+model, plus `body_skin_tune` (ferre male only: his body fur texture is greyer than the face's
+while the capture is dark brown all over; the face tune does not apply to the body there).
+
+The face rows are the output of `data/extract/aa-cry/tmp/skintune.py` (not committed: scratch):
+render the 8 `step1_*` targets nude and bald (`compare --costume none --no-hair 1`), take the
+mean linear colour of the eye-to-chin region in the render and in the real capture (same
+pixels), multiply each row by `ratio^0.8` and repeat until the ratios are within 5% (three
+rounds: Nuian male 1.0 / 1.01 / 1.0). The Nuian male row is `(0.93, 1.20, 0.79)` (less red); the
+Hariharan rows are about 0.7 (their skin was too bright), the Nuian / elf female rows 1.5-1.8.
+The ferre male row was set by hand from the `step2` close-up (`step1` shows him turned about 25
+degrees, so the same pixels are not his face): `(0.30, 0.33, 0.30)` face, `(0.75, 0.52, 0.45)` more
+on the body. The table is between `BEGIN SKIN TUNE` / `END SKIN TUNE` in `character.rs`.
+
+### Ferre heads (`FaceMaker::race_gender_weights`)
+
+The ferre face files (`fe_{m,f}_face01.chr`) hold one neutral head for both genders and carry
+`Male` (+0.14 m) and `Female` (-0.14 m) morph targets that are always on (like the elf's and
+hariharan's `<race>_Morph`, which `race_weights` already returns). Without them the same head sat
+at the wrong height on both bodies: sunk into the male's chest, floating above the female's
+shoulders. Not a skeleton problem: `cargo run -p aa-anim --example bind_check -- --race ferre
+--gender m [--all] [--pose] [--targets]` prints the bind displacement of every part against the
+base skeleton (all 0.000 m), the face mesh bounds, the morph targets and the idle pose against the
+bind pose, and the customisation colours of the preset. `face_dump` lists / sizes pak files
+(`face_dump "game/objects/characters/ferre/female/face/*"`).
+
 ## Gaps
 
 * Skin shading: the engine's HumanSkin shader (SSS map, rim, `bright` / `middle` colours per light
-  angle) is replaced by one calibrated colour; the pink of pale skins is a constant pull, so nuian
-  male skin is a little too red. `middle_skin_color` and the specular columns are not used. Ferre
-  fur is drawn flat (no fur shells), so ferre faces and bodies look paler than in the client.
-* Hair: no Kajiya-Kay highlights (strand streaks), no alpha-blend sorting; hat variants
+  angle) is replaced by one calibrated colour per model (`skin_tune`). `middle_skin_color` and the
+  specular columns are not used. Ferre fur is drawn flat (no fur shells), so ferre skin is a
+  brown tint of the grey fur texture; the ferre eyes are grey where the capture is blue (the
+  eyeball texel region), the face is a shade lighter than the capture.
+* Hair: the Kajiya-Kay streaks are a baked strand map, not a tangent highlight; no alpha-blend
+  sorting (alpha mask); hat variants
   (`asset_1..3`) and beards are not implemented; preset hair colours come from the colour `.mtl` of
   the chosen style (`hair_colors`).
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
@@ -229,9 +270,9 @@ showroom uses ~0.5 of "nominal" values, higher washes characters out.
 * Only the idle clips play. Locomotion blending (`Lmg`), facial animation (`.fsq`) and lip sync, eye
   blinks, dye choice for armour other than the default dye are not done. The `.dbh` track database
   is not decoded (not needed).
-* Costume specular: metal comes from the baked specular map; per-pixel specular tint (gold trims
-  stay a little duller) needs Bevy's `pbr_specular_textures` feature. Leather lacks the client's
-  sharp highlight streaks.
+* Costume specular: metal comes from the baked specular map; dielectric strength and (warm) tint
+  from Bevy's `specular_texture` / `specular_tint_texture` (gold trims, leather streaks). Silver
+  armour is still a bit duller than the captures.
 * The `Cut` removal tests vertices against the hulls in the rest pose of the costume's own
   vertex positions; a body triangle that straddles a hull stays.
 * The order of the 9 presets matches the screen by name; the order of hair / hair colour grids of the
