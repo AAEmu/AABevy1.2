@@ -61,6 +61,8 @@ pub struct FxSettings {
     pub size_scale: f32,
     /// Multiplier on every particle's opacity (1 = as authored).
     pub alpha_scale: f32,
+    /// A continuous emitter with a finite `EmitterLifeTime` emits `Count` over that life (otherwise `Count` per particle life).
+    pub count_over_life: bool,
     /// Quality level of the data: 0 low, 1 medium, 2 high, 3 very high (emitters outside their `ConfigMin`/`ConfigMax` are off).
     pub quality: u8,
     /// Soft particle distance in metres (0 = off); needs a `DepthPrepass` on the camera.
@@ -82,6 +84,7 @@ impl Default for FxSettings {
             emissive: 1.0,
             size_scale: 1.0,
             alpha_scale: 1.0,
+            count_over_life: std::env::var_os("AA_FX_COUNT_OLD").is_none(),
             quality: 2,
             soft_distance: 0.6,
             activations_per_frame: 6,
@@ -124,6 +127,8 @@ pub struct Effect {
     pub alpha_scale: f32,
     /// Multiplier on the colour of this effect's particles (the light that falls on them).
     pub brightness: f32,
+    /// Colour of that light, multiplied into every particle (white = `Vec3::ONE`).
+    pub tint: Vec3,
     /// Run the effect ahead when it starts so that it already looks established (`bPrime`).
     pub prime: bool,
     /// Start again when every emitter has finished (a one shot effect plays once per activation otherwise).
@@ -134,7 +139,7 @@ pub struct Effect {
 
 impl Effect {
     pub fn new(name: impl Into<String>) -> Effect {
-        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, prime: true, looping: false, despawn_when_finished: false }
+        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, prime: true, looping: false, despawn_when_finished: false }
     }
 
     pub fn with_scale(mut self, scale: f32) -> Effect {
@@ -506,6 +511,8 @@ fn simulate(
             count_scale: effect.count_scale,
             lod: 1.0 - 0.6 * far,
             size_scale: settings.size_scale,
+            count_over_life: settings.count_over_life,
+            tint: effect.tint,
             wind: settings.wind,
             budget: &budget,
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,

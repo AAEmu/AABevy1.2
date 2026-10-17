@@ -75,10 +75,32 @@ const OBJECT_RADIUS: f32 = 170.0;
 const ARM_LOG_X: f32 = 0.32;
 /// Particle effects (ground mist, leaves) are placed within this distance of the camera (m).
 const EFFECT_RADIUS: f32 = 120.0;
-/// The mist: the library's plain colours and opacities (grey 0.2 alpha smoke over a dimmed field) vanish in the field; the captured mist
-/// is much stronger (the engine lights particles by the time of day and tone maps them). Fitted by eye to the elf capture.
-const EFFECT_ALPHA: f32 = 3.0;
-const EFFECT_BRIGHTNESS: f32 = 2.0;
+/// How the flowing mist (`flow_fog_*`) and the haze (`fog_*`) are lit in a field: a colour gain on the library's colours (linear
+/// RGB, the stage's light) and, for the flowing mist only, an opacity factor and a particle count factor. The library's plain
+/// values (grey sprites at 0.2 alpha) vanish over the field; the captures' mist is a pale, warm veil. Fitted per race on the
+/// captures (the mist's peak colour and the band's mean excess over the grass, `docs/aa-fx.md`); the table is
+/// `(alpha, count, r, g, b)`, `AA_MIST=alpha,count,r,g,b` overrides it.
+#[derive(Clone, Copy)]
+struct Mist {
+    alpha: f32,
+    count: f32,
+    light: Vec3,
+}
+
+fn mist(race: Race) -> Mist {
+    let m = |alpha, count, r, g, b| Mist { alpha, count, light: Vec3::new(r, g, b) };
+    if let Some(v) = std::env::var("AA_MIST").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()) {
+        if v.len() == 5 {
+            return m(v[0], v[1], v[2], v[3], v[4]);
+        }
+    }
+    match race {
+        Race::Nuian => m(1.0, 1.0, 3.0, 3.15, 1.9),
+        Race::Elf => m(3.0, 1.0, 6.0, 6.0, 3.4),
+        Race::Hariharan => m(3.0, 3.0, 4.0, 3.6, 2.35),
+        Race::Ferre => m(1.3, 1.0, 7.6, 6.6, 4.1),
+    }
+}
 /// Main thread time spent on spawning per frame (ms).
 const SPAWN_BUDGET_MS: f32 = 6.0;
 
@@ -324,7 +346,7 @@ fn plan(field: &Field, race: Race) -> Vec<Item> {
         items.push(Item::Model { path: d.model.clone(), material: None, matrix: Mat4::from_rotation_translation(rot, d.pos), shadows: true, kind: Kind::Dummy });
     }
     // the ground mist, leaves and the like of the race's field (only the effects the capture has switched on)
-    for e in &field.objects.effects {
+    for e in field.objects.effects.iter().filter(|_| std::env::var_os("AA_CREATE_NO_FX").is_none()) {
         let to = e.pos - cam.pos;
         if to.length() < EFFECT_RADIUS && to.dot(cam.dir) > -10.0 {
             items.push(Item::Effect(e.clone()));
@@ -571,8 +593,12 @@ pub fn update(
                 effect.count_scale = e.count_scale;
                 effect.prime = e.prime;
                 if e.effect.contains("fog") {
-                    effect.alpha_scale = EFFECT_ALPHA;
-                    effect.brightness = EFFECT_BRIGHTNESS;
+                    let mist = mist(shown.race);
+                    if effect.name.contains("flow_fog") {
+                        effect.alpha_scale = mist.alpha;
+                        effect.count_scale *= mist.count;
+                    }
+                    effect.tint = mist.light;
                 }
                 commands.spawn((
                     Name::new("step 3 effect"),
