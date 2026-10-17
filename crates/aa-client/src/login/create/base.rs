@@ -103,8 +103,12 @@ pub fn install(ui: &mut UiRuntime, shared: &SharedRef) -> anyhow::Result<()> {
         }
     }
     crate::sound::bind(lua);
+    let settings = lua.create_table().map_err(|e| anyhow::anyhow!("{e}"))?;
+    crate::settings::install(lua, &settings).map_err(|e| anyhow::anyhow!("{e}"))?;
+    g.raw_set("NET", settings).map_err(|e| anyhow::anyhow!("{e}"))?;
     api::install(lua, shared).map_err(|e| anyhow::anyhow!("{e}"))?;
     ui.exec("@game_base.lua", include_str!("game_base.lua")).map_err(|e| anyhow::anyhow!("game_base.lua: {e}"))?;
+    crate::settings::install_options(lua).map_err(|e| anyhow::anyhow!("{e}"))?;
     ui.exec("@game_create.lua", include_str!("game_create.lua")).map_err(|e| anyhow::anyhow!("game_create.lua: {e}"))?;
     Ok(())
 }

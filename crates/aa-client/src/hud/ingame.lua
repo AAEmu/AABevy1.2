@@ -31,6 +31,7 @@ local function U(unit)
   if isPlayer(unit) then return S() end
   local t = HUD.target
   if t ~= nil and (unit == "target" or unit == t.unit_id) then return t end
+  if HUD.team_units ~= nil then return HUD.team_units[unit] end
   return nil
 end
 local function field(key, default)
@@ -56,9 +57,8 @@ end
 -- A unit's name by its id (the player's own, the target's): the death message prints the name of whoever died.
 X2Unit.GetUnitNameById = function(self, id)
   if id == nil then return nil end
-  if isPlayer(id) then return S().name end
-  local t = HUD.target
-  if t ~= nil and t.unit_id == id then return t.name end
+  local t = U(id)
+  if t ~= nil then return t.name end
   return nil
 end
 X2Unit.GetFactionName = field("faction", nil)
@@ -87,6 +87,11 @@ end
 -- Metres to the target.
 X2Unit.UnitDistance = function(self, unit)
   if unit == "target" and HUD.target ~= nil then return HUD.target_distance() end
+  local t = U(unit)
+  if t and t.x and t.online then
+    local x, y, z = HUD.player_pos()
+    return math.sqrt((t.x-x)^2 + (t.y-y)^2 + (t.z-z)^2)
+  end
   return nil
 end
 -- The id of what a unit targets (the player: the target frame's unit).

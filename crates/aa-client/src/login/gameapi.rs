@@ -204,6 +204,7 @@ pub fn install(rt: &UiRuntime, shared: &Shared) -> mlua::Result<()> {
     g.raw_set("NET", net_table(lua, shared)?)?;
     // sounds: `AAUI.PlaySound`, `PlayMusic`, `WidgetSound` ... (the HUD installs this first, too)
     crate::sound::bind(lua);
+    crate::settings::install_options(lua)?;
     lua.load(include_str!("gameapi.lua")).set_name("@gameapi.lua").exec()
 }
 
@@ -225,6 +226,7 @@ fn string(args: &MultiValue, i: usize) -> String {
 /// The `NET` table: data getters and `request`.
 fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
     let net = lua.create_table()?;
+    crate::settings::install(lua, &net)?;
 
     let s = shared.clone();
     net.set(

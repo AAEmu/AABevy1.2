@@ -18,14 +18,6 @@ X2.GetFeatureset = function(self) return true end
 X2.GetAddonInfos = function(self) return {} end
 X2.GetRaceCongestions = function(self) return CC.race_congestions() end
 
--- Options: the screen resolution is the window's, script options are unset so the scripts use
--- their defaults like on a fresh install.
-X2Option.GetOptionItemValue = function(self, id)
-  if id == OPTION_ITEM_SCREEN_RESOLUTION_WIDTH then return UIParent:GetScreenWidth() * UIParent:GetUIScale() end
-  if id == OPTION_ITEM_SCREEN_RESOLUTION_HEIGHT then return UIParent:GetScreenHeight() * UIParent:GetUIScale() end
-  return nil
-end
-X2Option.GetOptionItemValueByName = function(self, name) return nil end
 Console.GetAttribute = function(self, name) return nil end
 Console.ExecuteString = function(self, cmd) UIParent:LogAlways("console " .. tostring(cmd)) end
 

@@ -428,7 +428,17 @@ fn update_icons(
     }
     state.refresh_in = REFRESH_FRAMES;
     let facts = PlayerFacts::of(spawn, &stats, &inventory, &skills, &buffs, &quests);
-    let icons = build_icons(tables, &state.zone, game, &facts, &quests, &units, data.pos, spawn.character().faction_id, state.corpse);
+    let mut icons = build_icons(tables, &state.zone, game, &facts, &quests, &units, data.pos, spawn.character().faction_id, state.corpse);
+    let own_instance = spawn.state.instance_id;
+    for m in &data.party.members {
+        if m.id == spawn.character().id || m.instance_id != own_instance { continue; }
+        // Before the first remote status, only nearby units have a trustworthy position.
+        if !m.has_status && units.get(m.obj_id).is_none() { continue; }
+        if m.has_status && game.zones.get(&m.zone_id).map(|z| z.0) != Some(data.snapshot.zone_group) { continue; }
+        let kind = if !m.online { "offline_party" } else if m.id == data.party.owner_id && !data.party.is_party { "raidteam_owner" }
+            else if data.party.is_party { "party" } else { "raidteam" };
+        icons.push(Icon { x: m.pos.x, y: m.pos.y, kind, tip: m.name.clone(), city: city_at(game, m.pos.x, m.pos.y) });
+    }
     if icons != state.icons {
         state.version += 1;
         state.icons = icons;

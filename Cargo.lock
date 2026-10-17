@@ -53,6 +53,7 @@ dependencies = [
  "mlua",
  "roxmltree",
  "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

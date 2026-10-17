@@ -45,6 +45,8 @@ pub enum Request {
     LearnBuff { id: u32 },
     ResetSkills { ability: u8 },
     SwapAbility { old: u8, ability: u8 },
+    Party(aa_net::party::PartyCommand),
+    Target { obj_id: u32 },
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -92,6 +94,9 @@ pub struct HudData {
     pub revive_caster: std::cell::Cell<Option<u32>>,
     /// The player's attack numbers and worn items, what the tooltips are worked out from (`tips.rs`).
     pub tips: super::tips::TipState,
+    pub party: aa_net::Party,
+    pub party_pushed: Option<aa_net::Party>,
+    pub character_id: u32,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -127,6 +132,9 @@ impl Default for HudData {
             death_started: Default::default(),
             revive_caster: Default::default(),
             tips: Default::default(),
+            party: Default::default(),
+            party_pushed: None,
+            character_id: 0,
         }
     }
 }
@@ -188,6 +196,8 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
             warn!("hud: {name}: {e}");
         }
     }
+    // The fallback has its own option store. Restore the account-backed methods after it.
+    crate::settings::install_options(lua)?;
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
@@ -198,6 +208,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::drag::install(lua, &hud)?;
     super::skillbook::install(lua, &hud, bridge)?;
     super::markers::install(lua, &hud)?;
+    super::party::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
@@ -207,7 +218,9 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::markers::load_script(lua)?;
     super::drag::load_script(lua)?;
     super::skillbook::load_script(lua)?;
-    super::dialog::load_script(lua)
+    super::dialog::load_script(lua)?;
+    super::party::load_script(lua)?;
+    crate::settings::install_hud(lua)
 }
 
 /// The Rust functions of the `HUD` table.
@@ -472,6 +485,10 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     // the zone under the player (the world's sector map), else the zone channel's group, else the spawn's
     let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
+    data.character_id = spawn.character().id;
+    if let Some(party) = world.get_resource::<aa_net::Party>() {
+        if data.party != *party { data.party.clone_from(party); }
+    }
     if let Some(skills) = world.get_resource::<aa_net::state::Skills>() {
         if skills.known.len() != data.skill_levels.len() || skills.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level)) {
             data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
@@ -653,6 +670,8 @@ pub fn handle_requests(
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     for request in requests {
         match request {
+            Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
+            Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
             Request::Chat { chat_type, message, target } => {
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));
             }
