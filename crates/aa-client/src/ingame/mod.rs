@@ -44,7 +44,7 @@ mod prewarm;
 mod remote;
 mod sounds;
 mod swim;
-mod units;
+pub(crate) mod units;
 pub(crate) mod warm;
 pub(crate) mod weapons;
 

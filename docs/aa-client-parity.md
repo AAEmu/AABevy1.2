@@ -16,7 +16,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | World geometry | Terrain, brushes, vegetation, roads, forward decals, authored static entity props/local lights, verified rigid CGA windmills, streaming, collision; reference captures and unload tests | Deferred/wrapped decals, other animated entities/controllers/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
 | Environment | Data-driven time of day, original 8,912-star catalogue, fog, clouds, water, music/ambient/reverb/moods | Moon discs/coronas, shafts/glow/adaptation, underwater fidelity, moving clouds, zone blending, remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored static UCC composition with explicit binding limits | Facial animation/lip sync/blinks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/default binding and remaining clips |
-| Combat and HUD | Skill/cast timelines, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
+| Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state | Broader progression/live coverage; cooldown and tooltip corner cases; damage breakdown option |
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs | Repair/sorting/expansion, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, trade, specialty |
@@ -34,7 +34,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 
 ## Active ownership
 
-* Root: `aa-client`, native combat position hook/mail/trade and account-backed input bindings; friends UI milestone landed.
+* Root: `aa-client`, mailbox/group-loot/trade and account-backed input bindings; friends and native combat-display milestones landed.
 * Network agent: `aa-net`, loot rolls; shop/bank, raid, friends, repair/expansion, mail, trade and auction milestones landed.
 * UI agent: `aa-ui`, attached-widget lifecycle/name-link metadata; native edit and combat timeline milestones landed.
 * Material agent: `aa-cry`, referenced-subset UCC eligibility/cache and full sail fixture; static composition landed.
@@ -54,7 +54,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client 110 passed / 14 ignored, plus the opt-in original social-stage fixture passed; UI 110 passed / 1 ignored, network 161 library plus
+Current wave: client 109 passed / 14 ignored (two old approximation tests replaced by the native projection check), plus the opt-in original social-stage fixture passed; UI 110 passed / 1 ignored, network 161 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.

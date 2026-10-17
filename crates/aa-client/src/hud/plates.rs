@@ -625,7 +625,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(Screen::InGame), (despawn, super::marks::despawn))
         .add_systems(
             PostUpdate,
-            (update_plates, super::marks::update_marks, super::combat::update_texts, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
+            (update_plates, super::marks::update_marks, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
         .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
 }
