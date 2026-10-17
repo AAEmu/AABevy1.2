@@ -207,6 +207,20 @@ decals carry a constant grey; their colour is `eyebrow_color` / `deco_color` (`0
 Drawing order: tattoo, makeup, scar, eyebrow, deco. Lips: green channel of `<pfx>_face_mask_new.dds`
 tinted by `lip_color`.
 
+## Performance notes
+
+* Characters of one skeleton file share one `Rig` (`pose::shared_rig(path)`, any thread), so `ClipLibrary::bound` caches the clip
+  binding per `(rig.id, clip)` and aa-cry's skeleton-bound model cache hits across characters. `Cal::shared(path)` parses a `.cal`
+  once. A character that is spawned costs the main thread about 10 ms instead of 45: the composed face
+  (`character::prewarm_character_face`), the part models (`CryLoader::prepare_model`) and the clip set are prepared on a worker first
+  (see `crates/aa-client/src/ingame/prepare.rs`).
+* `Animator::interval` (seconds between updates, 0 = every frame) lets the caller animate far characters at a lower rate; the clip
+  time still advances in real time. The in-game client uses 30 Hz beyond 25 m and 15 Hz beyond 45 m. Sampling runs in parallel over
+  the animators (`par_iter_mut`, batches of 8), the bone `Transform`s are written serially. A crowd of 90 characters in view costs about
+  0.9 ms of `animate` and, mostly, the transform propagation of their 14,000 bones (2.1 ms before the rate limit, 0.9 ms after) and
+  Bevy's per skinned mesh joint extraction.
+* `aa_anim::animator::take_stats()` returns the animators updated and the nanoseconds spent in `animate` since the last call.
+
 ## Customisation parameters (what the create screen sets)
 
 `x2ui/customizing/*.lua` drives the native `X2Customizer` API; see the table in

@@ -207,14 +207,20 @@ calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
-Placement files are parsed on the task pool (max 2 cells in flight) and binned per 64 m sector. The main thread spawns sectors nearest first
-under a time budget (`object_budget_ms`, 3 ms per frame) through `aa_cry::CryAssets::load_model`; a sector fills in over a few frames. A
-part is one entity with the node transform baked, sharing the mesh and material handles of every instance of the model, so Bevy batches
+Placement files are parsed on the task pool (max 2 cells in flight) and binned per 64 m sector. Models are prepared (parsed, textures
+decoded and baked, materials and meshes built) on the `aa_cry::workers` threads, nearest sector first (at most 48 jobs queued, the rest
+wait as `Wanted`), and inserted into the asset collections by the main thread with `CryAssets::finish_model` (1 ms budget per frame). An
+instance whose model is not ready waits in its sector (`SectorState::waiting`) and is spawned when the model arrives; the instance to model
+lookup is a `(cell, kind, model or group, material, lod)` key, no strings per instance. The main thread spawns sectors nearest first
+under a time budget (`object_budget_ms`, 3 ms per frame). A level of detail change builds the new sector hidden next to the old one and swaps
+them when it is complete, so nothing vanishes while the models of the new level load. `ObjectStats::entities` carries a counter that
+changes every frame while models are still being prepared, so the loading screen (which waits for it to settle) waits for them; `models_pending`
+is the number of models in flight. A part is one entity with the node transform baked, sharing the mesh and material handles of every instance of the model, so Bevy batches
 them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` (its own `maxViewDist`, capped by `brush_distance` 1000 m /
 `vegetation_distance` 220 m / `tree_distance` 600 m); a sector is despawned when the camera is farther than that cap. Vegetation is split by its
 own view distance: instances up to 220 m are small plants (`Kind::Vegetation`), larger ones (trees, up to 1 km and more in the data) are
 `Kind::Trees` and are drawn up to 600 m. Level of detail: `_lodN` / `$lodN` by distance band (brush 140 / 380 m, vegetation 55 / 130 m, trees
-150 / 350 m, with hysteresis); a sector is respawned when its band changes. Models that fail to load
+150 / 350 m, with hysteresis). Models that fail to load
 are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environment"` cube maps as the base colour of 2D materials, which is
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
@@ -454,6 +460,64 @@ The numbers move by a factor of two with the load of the machine: while another 
 ran at 55 to 65 fps. Main thread cost of the streaming systems in slow frames (`WorldTimings`) is below 6 ms (`objects`); the rest of a slow
 frame is render world work (uploading 3 MB cover atlases, extraction of the part entities). A release build of this crate would cut the CPU
 share further.
+
+### Release build, hitches and the in-game client (perf pass)
+
+Everything above is the `dev` profile. The real measure is `cargo build --release`: `fly --bench 30` and
+`aa-client --enter-world --pos 15578.042,15382.122 --yaw 158.74 --bench 20` (with `--bench-after S` to skip the first S seconds). The
+shared machine made single runs useless (other sessions load the CPU and GPU: the same build ranges 70 to 110 fps), so the method is
+`tools/perf.sh <scenario> <rounds> <label>=<dir> ...`, which runs the builds alternately (copies of `fly.exe` / `aa-client.exe` in
+`target/perf/<label>/`) and prints the BENCH line of each run: average fps, 1 % low, worst frame, frames over 20 ms. Scenarios: `fly-full`
+(80 m/s over the Nuian start), `fly-stand`, `fly-elf` (dense forest), `game-spawn`, `game-run` (W held), `game-town` (the 132 NPC town,
+looking away from the crowd), `game-crowd` (looking at it: about 90 animated characters in view), `game-fill` (the crowd view measured from
+the first frame in game: the town filling in). `EXTRA=--no-hud` removes the HUD (which belongs to another crate) from the numbers.
+
+`ProfilePlugin` (`profile.rs`, `AA_PROFILE=1`, also in `aa-client`) logs every 3 s the main thread slices of a frame (update schedule,
+extract gap, wait for the render thread), `cpu N Mcycles/frame` of the whole process (stable under load, unlike milliseconds), the longest
+frames, the render thread stages, the `aa_cry::prof` scopes (thread CPU time and wall time per call site, the machine's clock in MHz), the
+render passes' CPU and GPU time (Bevy `RenderDiagnosticsPlugin`) and the entity, visible and distinct mesh + material counts. `AA_OFFSCREEN=1`
+renders into an image instead of the swap chain (no vsync and no window cap; the unfocused window of a background run is otherwise
+limited to 60 Hz by winit unless `WinitSettings::continuous()` is set, which `profile::uncapped` does), `AA_PROFILE_THREADS=1` adds cycles per
+thread, `AA_SAMPLE=<thread>` with `AA_SAMPLE_AFTER` / `AA_SAMPLE_SECONDS` runs `aa_cry::prof::sample_threads` (a sampling profiler over
+dbghelp, symbols from the PDB next to the exe). `tools/perf-profile.sh <exe> <args>` is one profiled run, printed compactly.
+
+What it showed: the GPU is not the limit (passes sum to 1.4 to 3.6 ms), and the steady state of every scenario is 100 to 130 fps with
+the world's own cost small. What hurt was the main thread doing loads and per unit work in bursts:
+
+* Model, texture and material loading ran on the main thread (`load_model` per placed model, `CryAssets::load_model` per unit part). Now
+  `aa_cry::workers` (2 to 4 threads, priority = distance) prepares them (`CryLoader::prepare_model`), `finish_model` (about 0.03 ms) runs
+  on the main thread under a 1 ms budget, a sector spawns when its models are ready, a new level of detail is built hidden and swapped.
+* Units and doodads of the client (`ingame/prepare.rs`): database rows, models, the composed face (`prewarm_character_face`, the face
+  cache of aa-anim) and the clip set are prepared on a worker; the main thread only spawns the entities (about 10 ms instead of 45 per
+  character). One shared `Rig` per skeleton file (`pose::shared_rig`), a cached clip binding per `(rig, clip)`, one parsed `.cal`.
+* Animation: far characters update at 30 Hz (beyond 25 m) and 15 Hz (beyond 45 m) (`ANIMATION_LOD`, `AA_ANIM_LOD=0` turns it off), sampling
+  is parallel; characters beyond 45 m (`AA_UNIT_SHADOW_RADIUS`) do not cast shadows. Looks identical in the screenshots (compare
+  `shots/ingame/spawn.png` and `reference/ingame/spawn/real.png`; `shots/perf/vis/` has before / after shots of the spawn and the elf forest).
+
+Release build, standing / running at the spawn and in the town (3 alternating rounds of 20 s, HUD off so that only this work is compared;
+the first number is the median of the rounds):
+
+| scenario | before | after |
+|---|---|---|
+| spawn, standing (avg fps, 1 % low, worst frame) | 109, 65, 25 to 52 ms | 108, 65, 23 to 24 ms |
+| spawn, running forward | 115 fps, 1 % low 39, worst 133 to 136 ms | 115 fps, 1 % low 68, worst 21 ms |
+| town (132 NPCs), looking away | 132, 84, 13 to 17 ms | 128, 81, 15 to 27 ms (equal within noise) |
+| town, looking at the crowd (90 characters in view) | 70 fps, median frame 14.1 ms | 87 fps, median frame 11.4 ms |
+| town fill (first 25 s after entering, crowd view) | 67 fps, 1 % low 8, 130 frames over 20 ms | 100 fps, 1 % low 37, 7 to 11 frames over 20 ms |
+| `fly --bench 30` (80 m/s) | 151 fps, 1 % low 80, worst 29 to 34 ms | 163 fps, 1 % low 90, worst 17.5 to 20 ms |
+| `fly --bench 20`, standing / elf forest | 108 / 99 | 108 / 103 |
+
+With the HUD on (aa-client, `--enter-world`, the HUD agent's numbers are not mine): 98 to 101 fps at the spawn for both builds. The HUD
+(`aa-ui` Lua frames) costs 4 to 6 ms of main thread per frame (`--no-hud`: update slice 1 ms instead of 6), the largest single item of the
+client now.
+
+What still costs most, in order: the HUD's per frame Lua; one stall of about 200 ms in the first frames after entering (the first
+skinned and water pipeline specialisations; the same in both builds); the render thread's per skinned mesh work in crowds (Bevy's
+`extract_skins` walks all 157 joints of every visible part, so a crowd is tens of thousands of joint matrices per frame; compacting
+a part's joint set to the bones it uses would cut it, not done: it touches `aa-anim::character` skinning); transform propagation of the
+animated bones (0.9 ms for a crowd after the rate limit, 2.1 ms before); 3,000 or more distinct skinned draws in a crowd (merging the parts
+of a character into one mesh per material would need the dye and face systems' cooperation). The Compute Task Pool threads of Bevy spin
+(74 % of the process cycles, mostly idle polling); fewer threads (`AA_COMPUTE_THREADS` in `fly`) did not change the frame time.
 
 ## 6. Known gaps
 
