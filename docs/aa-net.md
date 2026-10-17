@@ -752,7 +752,7 @@ sale/buyback entries and invalid containers are rejected locally before sending.
 `Shop` is installed by `NetPlugin` and lives at `WorldState::shop`. `sold: Vec<Item>` is the
 server's `SCSoldItemList` response, limited to twelve real items; negative, over-twelve and
 truncated counts are rejected. `loaded` distinguishes an empty response from no response;
-`dirty` becomes true after store item tasks (reason 52 buy / 53 sell), so request `ListSold`
+`dirty` becomes true after store item tasks (reason 54 buy / 53 sell), so request `ListSold`
 again. `Event::Shop(ShopEvent::SoldItems(items))` replaces that list and clears `dirty`.
 Transactions update `Inventory` and `PlayerStats` only through the server's existing item tasks.
 
