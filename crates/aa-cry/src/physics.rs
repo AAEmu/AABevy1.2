@@ -26,6 +26,14 @@
 //! The geometry is in the frame of the node that carries it ([`crate::mesh::Node`] transforms apply).
 //! [`collision_mesh`] returns the default-slot geometry of every node as one triangle list in model space; the
 //! primitives become small meshes (12 triangles for a box, a 12 sided prism for a cylinder).
+//!
+//! **Surfaces.** The 64 byte geometry header holds the geometry's default surface at `+52` (`u32`), and a trimesh
+//! one `u8` per triangle after its indices: both are indices into the sub-materials of the model's `.mtl`
+//! ([`crate::material::Material::sub`]), whose `SurfaceType` (`mat_wood`, `mat_rock`, ...) is the physical material
+//! (footsteps, impacts). The proxy has a sub-material of its own (named `proxy`, `proxy_trunk`, `nocollide`, ...), so
+//! the id says what the part is. [`CollisionMesh::materials`] has the id of every triangle (a trimesh that shares the
+//! render mesh takes the material of the render triangle's subset) and [`CollisionMesh::material_name`] the `.mtl`
+//! the ids refer to; [`material_paths`] lists where to look for it.
 
 use crate::chunk::{Chunk, ChunkFile, Reader, ty};
 use crate::{Error, Result};
@@ -48,6 +56,12 @@ pub struct CollisionMesh {
     /// Three indices per triangle.
     pub indices: Vec<u32>,
     pub source: Source,
+    /// Per triangle: the sub-material of [`material_name`](Self::material_name) it belongs to (see the module
+    /// documentation); as many entries as triangles.
+    pub materials: Vec<u16>,
+    /// The `.mtl` of the model as written in the file (relative to the model's folder, no extension), see
+    /// [`material_paths`].
+    pub material_name: Option<String>,
 }
 
 impl CollisionMesh {
@@ -59,11 +73,24 @@ impl CollisionMesh {
         self.indices.is_empty()
     }
 
-    fn push(&mut self, m: &Affine3A, positions: &[Vec3], indices: &[u32]) {
+    fn push(&mut self, m: &Affine3A, positions: &[Vec3], indices: &[u32], materials: Materials<'_>) {
         let base = self.positions.len() as u32;
         self.positions.extend(positions.iter().map(|p| Vec3::from(m.transform_point3a(Vec3A::from(*p)))));
         self.indices.extend(indices.iter().map(|i| base + i));
+        let triangles = indices.len() / 3;
+        match materials {
+            Materials::Uniform(id) => self.materials.extend(std::iter::repeat_n(id, triangles)),
+            Materials::Each(ids, default) => self.materials.extend((0..triangles).map(|i| ids.get(i).copied().unwrap_or(default))),
+        }
     }
+}
+
+/// Sub-material ids of the triangles pushed to a [`CollisionMesh`].
+#[derive(Clone, Copy)]
+enum Materials<'a> {
+    Uniform(u16),
+    /// One per triangle; `default` for the ones past the end.
+    Each(&'a [u16], u16),
 }
 
 /// One deserialized physics geometry (the frame of its node).
@@ -71,8 +98,9 @@ impl CollisionMesh {
 pub enum PhysGeom {
     /// `basis` rows are the box axes, `half` the half extents along them.
     Box { basis: Mat3, center: Vec3, half: Vec3 },
-    /// `positions` / `indices` are `None` when the geometry uses the render mesh's.
-    TriMesh { vertex_count: usize, triangle_count: usize, positions: Option<Vec<Vec3>>, indices: Option<Vec<u32>> },
+    /// `positions` / `indices` are `None` when the geometry uses the render mesh's. `materials`: the sub-material of
+    /// every triangle when the blob stores them.
+    TriMesh { vertex_count: usize, triangle_count: usize, positions: Option<Vec<Vec3>>, indices: Option<Vec<u32>>, materials: Option<Vec<u8>> },
     Sphere { center: Vec3, radius: f32 },
     Cylinder { center: Vec3, axis: Vec3, radius: f32, half_height: f32 },
     Capsule { center: Vec3, axis: Vec3, radius: f32, half_height: f32 },
@@ -80,12 +108,23 @@ pub enum PhysGeom {
 
 /// Parses the blob of a `MeshPhysicsData` chunk (what follows its 24 byte header).
 pub fn parse_blob(blob: &[u8]) -> Result<PhysGeom> {
+    parse_blob_surface(blob).map(|(geom, _)| geom)
+}
+
+/// [`parse_blob`] and the geometry's default surface (a sub-material id: that of the triangles without one of their own).
+pub fn parse_blob_surface(blob: &[u8]) -> Result<(PhysGeom, u32)> {
     let mut r = Reader::new(blob);
     let version = r.u32()?;
     if version != 1 {
         return Err(Error::Unsupported(format!("physics geometry version {version}")));
     }
-    r.skip(64)?;
+    r.skip(52)?;
+    let surface = r.u32()?;
+    r.skip(8)?;
+    Ok((parse_geom(&mut r)?, surface))
+}
+
+fn parse_geom(r: &mut Reader<'_>) -> Result<PhysGeom> {
     match r.u32()? {
         0 => {
             let mut m = [0f32; 9];
@@ -111,7 +150,7 @@ pub fn parse_blob(blob: &[u8]) -> Result<PhysGeom> {
                 r.skip(2 * nt)?;
             }
             if foreign && flags & 0x40_0000 == 0 {
-                return Ok(PhysGeom::TriMesh { vertex_count: nv, triangle_count: nt, positions: None, indices: None });
+                return Ok(PhysGeom::TriMesh { vertex_count: nv, triangle_count: nt, positions: None, indices: None, materials: None });
             }
             let positions = if flags & 1 == 0 {
                 let mut p = Vec::with_capacity(nv);
@@ -129,7 +168,9 @@ pub fn parse_blob(blob: &[u8]) -> Result<PhysGeom> {
             if let Some(bad) = indices.iter().find(|&&i| i as usize >= nv) {
                 return Err(Error::invalid(format!("physics index {bad} >= {nv} vertices")));
             }
-            Ok(PhysGeom::TriMesh { vertex_count: nv, triangle_count: nt, positions, indices: Some(indices) })
+            // a damaged tail only loses the materials
+            let materials = r.u8().ok().filter(|&has| has != 0).and_then(|_| r.bytes(nt).ok()).map(<[u8]>::to_vec);
+            Ok(PhysGeom::TriMesh { vertex_count: nv, triangle_count: nt, positions, indices: Some(indices), materials })
         }
         4 => Ok(PhysGeom::Sphere { center: r.vec3()?, radius: r.f32()? }),
         t @ (5 | 6) => {
@@ -146,6 +187,8 @@ struct NodeRec {
     chunk_id: i32,
     object: i32,
     parent: i32,
+    /// Chunk id of the node's `MtlName` chunk.
+    material: i32,
     local: Affine3A,
 }
 
@@ -157,7 +200,7 @@ fn read_nodes(file: &ChunkFile<'_>) -> Result<Vec<NodeRec>> {
         }
         let mut r = c.reader();
         let name = r.fixed_str(64)?;
-        let (object, parent, _children, _mat) = (r.i32()?, r.i32()?, r.i32()?, r.i32()?);
+        let (object, parent, _children, material) = (r.i32()?, r.i32()?, r.i32()?, r.i32()?);
         r.skip(4)?;
         let mut tm = [0f32; 16];
         for v in &mut tm {
@@ -170,9 +213,47 @@ fn read_nodes(file: &ChunkFile<'_>) -> Result<Vec<NodeRec>> {
             Vec3A::new(tm[8], tm[9], tm[10]),
             Vec3A::new(tm[12], tm[13], tm[14]) * 0.01,
         );
-        out.push(NodeRec { name, chunk_id: c.id, object, parent, local });
+        out.push(NodeRec { name, chunk_id: c.id, object, parent, material, local });
     }
     Ok(out)
+}
+
+/// The `.mtl` name of a model as the renderer finds it (`Model::material_name`): the first node's `MtlName`, else any.
+fn material_name(file: &ChunkFile<'_>, nodes: &[NodeRec]) -> Option<String> {
+    let name = |c: &Chunk<'_>| {
+        let mut r = c.reader();
+        r.skip(8).ok()?;
+        r.fixed_str(128).ok().filter(|n| !n.is_empty())
+    };
+    nodes.iter().find_map(|n| file.get_typed(n.material, ty::MTL_NAME).and_then(name)).or_else(|| file.of_type(ty::MTL_NAME).find_map(name))
+}
+
+/// Where the `.mtl` of a model may be, best first: the engine looks for the name stored in the file relative to the
+/// model's folder (a name with a folder is a path of its own), then for `<model>.mtl`. Characters (`.chr`) try
+/// `<model>.mtl` first. Pak paths; the first that exists is the material. `material` is
+/// [`CollisionMesh::material_name`]. Also used by the renderer so collision surfaces use the same material.
+pub fn material_paths(model: &str, material: Option<&str>) -> Vec<String> {
+    let path = aa_pak::normalize(model);
+    let base = crate::lod0_path(&path).unwrap_or_else(|| path.clone());
+    let dir = base.rsplit_once('/').map_or("", |(d, _)| d);
+    let same_name = format!("{}.mtl", base.rsplit_once('.').map_or(base.as_str(), |(s, _)| s));
+    let is_chr = base.ends_with(".chr");
+    let mut out = Vec::new();
+    if is_chr {
+        out.push(same_name.clone());
+    }
+    if let Some(name) = material.map(aa_pak::normalize).filter(|n| !n.is_empty()) {
+        let name = name.strip_suffix(".mtl").unwrap_or(&name);
+        if name.contains('/') {
+            out.push(format!("{name}.mtl"));
+        }
+        let file = name.rsplit('/').next().unwrap_or(name);
+        out.push(if dir.is_empty() { format!("{file}.mtl") } else { format!("{dir}/{file}.mtl") });
+    }
+    if !is_chr {
+        out.push(same_name);
+    }
+    out
 }
 
 fn node_world(nodes: &[NodeRec], i: usize, lod_local_identity: bool) -> Affine3A {
@@ -230,7 +311,7 @@ pub fn collision_mesh(bytes: &[u8], visible_fallback: bool) -> Result<Option<Col
         return Ok(None);
     }
     let nodes = read_nodes(&file)?;
-    let mut out = CollisionMesh::default();
+    let mut out = CollisionMesh { material_name: material_name(&file, &nodes), ..CollisionMesh::default() };
     // the render mesh of nodes whose physics shares it, parsed on demand
     let mut model: Option<crate::mesh::Model> = None;
     for (i, node) in nodes.iter().enumerate() {
@@ -243,30 +324,31 @@ pub fn collision_mesh(bytes: &[u8], visible_fallback: bool) -> Result<Option<Col
             continue;
         }
         let Some(blob) = physics_blob(&file, ids[0]) else { continue };
-        let geom = match parse_blob(blob) {
+        let (geom, surface) = match parse_blob_surface(blob) {
             Ok(g) => g,
             Err(_) => continue,
         };
+        let surface = surface.min(u32::from(u16::MAX)) as u16;
         let m = node_world(&nodes, i, false);
         match geom {
             PhysGeom::Box { basis, center, half } => {
                 let (p, t) = box_mesh(basis, center, half);
-                out.push(&m, &p, &t);
+                out.push(&m, &p, &t, Materials::Uniform(surface));
             }
             PhysGeom::Sphere { center, radius } => {
                 let (p, t) = sphere_mesh(center, radius);
-                out.push(&m, &p, &t);
+                out.push(&m, &p, &t, Materials::Uniform(surface));
             }
             PhysGeom::Cylinder { center, axis, radius, half_height } => {
                 let (p, t) = cylinder_mesh(center, axis, radius, half_height);
-                out.push(&m, &p, &t);
+                out.push(&m, &p, &t, Materials::Uniform(surface));
             }
             PhysGeom::Capsule { center, axis, radius, half_height } => {
                 // a prism one cap longer on each side
                 let (p, t) = cylinder_mesh(center, axis, radius, half_height + radius);
-                out.push(&m, &p, &t);
+                out.push(&m, &p, &t, Materials::Uniform(surface));
             }
-            PhysGeom::TriMesh { positions, indices, triangle_count, .. } => {
+            PhysGeom::TriMesh { positions, indices, triangle_count, materials, .. } => {
                 let render = if positions.is_none() || indices.is_none() {
                     if model.is_none() {
                         model = crate::mesh::Model::from_chunks(&file).ok();
@@ -280,7 +362,13 @@ pub fn collision_mesh(bytes: &[u8], visible_fallback: bool) -> Result<Option<Col
                 if let (Some(p), Some(t)) = (p, t) {
                     let t = &t[..t.len().min(triangle_count * 3) / 3 * 3];
                     if t.iter().all(|&i| (i as usize) < p.len()) {
-                        out.push(&m, p, t);
+                        // the blob's own ids, else those of the render triangles it shares
+                        let ids: Vec<u16> = match (&materials, indices.is_some(), render) {
+                            (Some(own), _, _) => own.iter().map(|&b| u16::from(b)).collect(),
+                            (None, false, Some(r)) => subset_materials(r),
+                            _ => Vec::new(),
+                        };
+                        out.push(&m, p, t, Materials::Each(&ids, surface));
                     }
                 }
             }
@@ -310,10 +398,22 @@ pub fn collision_mesh(bytes: &[u8], visible_fallback: bool) -> Result<Option<Col
         let mesh = &md.meshes[mi];
         // the transform as the renderer builds it: LOD nodes sit in their parent's frame
         let m = nodes.iter().position(|n| n.chunk_id == md.nodes[ni].chunk_id).map_or_else(|| md.world_transform(ni), |k| node_world(&nodes, k, true));
-        out.push(&m, &mesh.positions, &mesh.indices);
+        out.push(&m, &mesh.positions, &mesh.indices, Materials::Each(&subset_materials(mesh), 0));
     }
     out.source = Source::VisibleLod(lod);
     Ok((!out.is_empty()).then_some(out))
+}
+
+/// The sub-material of every triangle of a render mesh (its subsets cover the index list in order).
+fn subset_materials(mesh: &crate::mesh::MeshData) -> Vec<u16> {
+    let mut ids = vec![0u16; mesh.indices.len() / 3];
+    for s in &mesh.subsets {
+        let (first, count) = (s.first_index as usize / 3, s.index_count as usize / 3);
+        for id in ids.iter_mut().skip(first).take(count) {
+            *id = s.material_id.min(u32::from(u16::MAX)) as u16;
+        }
+    }
+    ids
 }
 
 /// Loads a model from the pak and returns its [`collision_mesh`].
@@ -438,6 +538,7 @@ mod tests {
         let mut blob = Vec::new();
         blob.extend_from_slice(&1u32.to_le_bytes());
         blob.extend_from_slice(&[0u8; 64]);
+        blob[56..60].copy_from_slice(&7u32.to_le_bytes());
         blob.extend_from_slice(&0u32.to_le_bytes());
         for v in [0.0f32, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
             blob.extend_from_slice(&v.to_le_bytes());
@@ -447,12 +548,52 @@ mod tests {
             blob.extend_from_slice(&v.to_le_bytes());
         }
         let PhysGeom::Box { basis, center, half } = parse_blob(&blob).unwrap() else { panic!() };
+        assert_eq!(parse_blob_surface(&blob).unwrap().1, 7);
         assert_eq!(center, Vec3::new(0.0, 0.0, 3.89));
         // axis 0 (4.93 long) is model Z, axis 1 (4.18) model X, axis 2 (2.6) model Y
         let (p, _) = box_mesh(basis, center, half);
         let (lo, hi) = p.iter().fold((Vec3::MAX, Vec3::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
         assert!((hi - lo - Vec3::new(2.0 * 4.18, 2.0 * 2.6, 2.0 * 4.93)).abs().max_element() < 1e-4, "{lo} {hi}");
         assert!(parse_blob(&blob[..40]).is_err());
+    }
+
+    #[test]
+    fn material_lookup_matches_rendering_for_lods_and_character_overrides() {
+        assert_eq!(material_paths("Objects\\House_LOD2.CGF", Some("Props\\Stone.MTL")), ["props/stone.mtl", "objects/stone.mtl", "objects/house.mtl"]);
+        assert_eq!(material_paths("Objects\\Hero_LOD1.CHR", Some("HeroSkin.MTL")), ["objects/hero.mtl", "objects/heroskin.mtl"]);
+        assert_eq!(material_paths("House.CGF", Some("Stone.MTL")), ["stone.mtl", "house.mtl"]);
+        assert_eq!(material_paths("House.CGF", Some("")), ["house.mtl"]);
+    }
+
+    #[test]
+    fn trimesh_surfaces_follow_triangle_order_and_missing_tail_keeps_geometry() {
+        let mut blob = vec![0u8; 68];
+        blob[..4].copy_from_slice(&1u32.to_le_bytes());
+        blob[56..60].copy_from_slice(&9u32.to_le_bytes());
+        for value in [1u32, 4, 2, 3, 0] {
+            blob.extend_from_slice(&value.to_le_bytes());
+        }
+        blob.extend_from_slice(&[0, 0]); // no vertex or foreign index map
+        for p in [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::ONE] {
+            for v in p.to_array() {
+                blob.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        for id in [0u16, 1, 2, 1, 3, 2] {
+            blob.extend_from_slice(&id.to_le_bytes());
+        }
+        let geometry_end = blob.len();
+        blob.extend_from_slice(&[1, 4, 7]);
+        let (PhysGeom::TriMesh { positions, indices, materials, .. }, surface) = parse_blob_surface(&blob).unwrap() else { panic!() };
+        assert_eq!(surface, 9);
+        assert_eq!(materials.as_deref(), Some([4u8, 7].as_slice()));
+        assert_eq!(positions.unwrap().len(), 4);
+        assert_eq!(indices.unwrap(), [0, 1, 2, 1, 3, 2]);
+        for end in [geometry_end, geometry_end + 1, geometry_end + 2] {
+            let PhysGeom::TriMesh { indices, materials, .. } = parse_blob(&blob[..end]).unwrap() else { panic!() };
+            assert_eq!(indices.unwrap().len(), 6);
+            assert!(materials.is_none());
+        }
     }
 
     /// Needs the real client; skipped when it is missing.
@@ -474,10 +615,36 @@ mod tests {
         // a trimesh proxy: stairs
         let stairs = load(&rel("si_woodbridge_stairs01"), false).unwrap().unwrap();
         assert_eq!(stairs.indices.len() / 3, 66);
+        assert_eq!(bridge.materials.len(), 12);
+        assert_eq!(shop.materials.len(), 206);
         // no physics: nothing, or the visible mesh with the fallback
         let straw = "objects/env/01_nuia/001_ndeco/ndeco_common_straw01.cgf";
         assert!(load(straw, false).unwrap().is_none());
         let visible = load(straw, true).unwrap().unwrap();
         assert!(matches!(visible.source, Source::VisibleLod(_)) && !visible.is_empty());
+    }
+
+    /// The sub-material of the physics triangles is the model's `proxy` one, whose `SurfaceType` says what it is made of.
+    #[test]
+    fn real_surfaces() {
+        if !crate::pak_available() {
+            return;
+        }
+        // (model, surface of every triangle)
+        for (model, surface) in [
+            ("objects/env/02_harihara/05_si/si_woodbridge_01.cgf", "mat_wood"),
+            ("objects/env/02_harihara/05_si/si_shop_g.cgf", "mat_wood"),
+            ("objects/env/02_harihara/05_si/si_stonwall02.cgf", "mat_rock"),
+            ("objects/env/05_nature/09_wb_nature/cross_plains_102b.cgf", "mat_rock"),
+        ] {
+            let mesh = load(model, false).unwrap().unwrap();
+            assert_eq!(mesh.materials.len(), mesh.indices.len() / 3, "{model}");
+            let mtl = material_paths(model, mesh.material_name.as_deref()).into_iter().find(|p| aa_pak::Pak::global().exists(p)).unwrap_or_else(|| panic!("no .mtl for {model}: {:?}", mesh.material_name));
+            let material = crate::material::Material::load(&mtl).unwrap();
+            for &id in &mesh.materials {
+                let sub = material.sub(id as usize).unwrap_or_else(|| panic!("{model}: no sub-material {id} in {mtl}"));
+                assert_eq!(sub.surface_type, surface, "{model}: sub-material {id} {} of {mtl}", sub.name);
+            }
+        }
     }
 }

@@ -467,28 +467,7 @@ pub fn render_transform(model: &Model, node: usize) -> glam::Affine3A {
 /// material name stored in the file, relative to the file's folder, then `<name>.mtl`.
 pub fn find_mtl(path: &str, model: &Model) -> Option<String> {
     let pak = aa_pak::Pak::global();
-    let path = aa_pak::normalize(path);
-    let base = crate::lod0_path(&path).unwrap_or(path.clone());
-    let dir = base.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-    let same_name = format!("{}.mtl", base.rsplit_once('.').map(|(s, _)| s).unwrap_or(&base));
-    let mut candidates = Vec::new();
-    let is_chr = base.ends_with(".chr");
-    if is_chr {
-        candidates.push(same_name.clone());
-    }
-    if let Some(name) = &model.material_name {
-        let name = name.replace('\\', "/");
-        let name = name.trim_end_matches(".mtl");
-        if name.contains('/') {
-            candidates.push(format!("{}.mtl", aa_pak::normalize(name)));
-        }
-        let file = name.rsplit('/').next().unwrap_or(name);
-        candidates.push(format!("{dir}/{}.mtl", file.to_ascii_lowercase()));
-    }
-    if !is_chr {
-        candidates.push(same_name);
-    }
-    candidates.into_iter().find(|c| pak.exists(c))
+    crate::physics::material_paths(path, model.material_name.as_deref()).into_iter().find(|c| pak.exists(c))
 }
 
 /// One subset as a Bevy mesh with its own compacted vertices (+ local bounds).
