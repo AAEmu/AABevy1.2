@@ -26,9 +26,61 @@ pub const WALK_SPEED: f32 = 2.4;
 
 /// Binds the clip called `name` in `cal` (a `.cal` entry, e.g. `fist_mo_normal_run_f`) to `rig`.
 pub fn bind_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Option<BoundClip> {
+    bind_clip_with(rig, cal, clips, name, true)
+}
+
+/// An action clip (a swing, a kick, a lunge): it moves the unit's body (the root bone) the way the clip says, as the real client
+/// does (a kick steps about a metre forward and comes back; the unit's own position, the camera and the server's idea of it stay
+/// where they are), unless the clip travels far (a dash or a charge: the server moves the unit then, the body stays with it).
+pub fn bind_action_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Option<BoundClip> {
+    let locked = bind_clip(rig, cal, clips, name)?;
+    if root_reach(rig, &locked) <= ROOT_REACH_MAX {
+        bind_clip_with(rig, cal, clips, name, false).or(Some(locked))
+    } else {
+        Some(locked)
+    }
+}
+
+/// The farthest an action clip may take the body from where it starts (m) and still be played with its root motion.
+const ROOT_REACH_MAX: f32 = 2.5;
+
+/// The farthest the root bone of a clip gets from its first position (m).
+fn root_reach(rig: &Rig, clip: &BoundClip) -> f32 {
+    let root = rig.skeleton.bones.get(rig.root).map(|b| b.controller_id);
+    let Some(track) = root.and_then(|c| clip.clip.track(c)) else { return 0.0 };
+    let Some(first) = track.sample_pos(0.0) else { return 0.0 };
+    let steps = 24;
+    (1..=steps)
+        .filter_map(|i| track.sample_pos(clip.clip.duration * i as f32 / steps as f32))
+        .map(|p| Vec2::new(p.x - first.x, p.y - first.y).length())
+        .fold(0.0, f32::max)
+        * clip.options.position_scale
+}
+
+/// [`bind_clip`] that lets the clip move the unit's body (the root bone) when `lock_root` is off.
+pub fn bind_clip_with(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str, lock_root: bool) -> Option<BoundClip> {
     let entry = cal.animation(name)?;
-    let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: true };
-    clips.bound(rig, &entry.path, options).ok()
+    let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: lock_root };
+    let bound = clips.bound(rig, &entry.path, options).ok()?;
+    remember_file(&bound, &entry.path);
+    Some(bound)
+}
+
+/// The `.caf` file of every clip the client bound, by the address of its data (the clip library never drops one): aa-anim's clips
+/// carry the name from their file header, not their path, and the sound events of a clip are listed by file name.
+fn files() -> &'static std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>> {
+    static FILES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>>> = std::sync::OnceLock::new();
+    FILES.get_or_init(Default::default)
+}
+
+fn remember_file(clip: &BoundClip, path: &str) {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase();
+    files().lock().unwrap_or_else(|e| e.into_inner()).entry(Arc::as_ptr(&clip.clip) as usize).or_insert_with(|| Arc::from(name.as_str()));
+}
+
+/// The file name (`fist_mo_normal_run_f.caf`, lower case) of a clip the client bound.
+pub fn clip_file(clip: &BoundClip) -> Option<Arc<str>> {
+    files().lock().unwrap_or_else(|e| e.into_inner()).get(&(Arc::as_ptr(&clip.clip) as usize)).cloned()
 }
 
 /// The clips a model can play while moving.
@@ -71,7 +123,8 @@ impl ClipSet {
 pub fn shared_clip_set(skeleton: &str, cal: &str, clips: &ClipLibrary) -> Option<Arc<ClipSet>> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static SETS: OnceLock<Mutex<HashMap<(String, String), Option<Arc<ClipSet>>>>> = OnceLock::new();
+    type Sets = Mutex<HashMap<(String, String), Option<Arc<ClipSet>>>>;
+    static SETS: OnceLock<Sets> = OnceLock::new();
     let key = (skeleton.to_string(), cal.to_string());
     let sets = SETS.get_or_init(Default::default);
     if let Some(set) = sets.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
