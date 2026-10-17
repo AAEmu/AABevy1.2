@@ -157,13 +157,26 @@ subsets, keeps the 4 strongest weights (normalised) and computes tangents
 ### Collision geometry (`physics.rs`)
 
 `physics::collision_mesh(bytes, visible_fallback)` / `physics::load(path, ..)` return the collision triangles of a static `.cgf` in model space
-(`CollisionMesh { positions, indices, source }`): the slot 0 (default, colliding) geometry of every node's `MeshPhysicsData` chunk (0xCCCC0018, the
+(`CollisionMesh { positions, indices, source, materials, material_name }`): the slot 0 (default, colliding) geometry of every node's `MeshPhysicsData` chunk (0xCCCC0018, the
 four physics chunk ids of a mesh chunk follow its 16 stream ids) transformed by the node chain, on `proxy` nodes (which `Model` does not read a mesh
 for) and on render nodes alike. `parse_blob` reads the CryPhysics blob: boxes (`basis` rows = axes, centre, half sizes; 12 triangles), trimeshes
 (`u32 nVerts, u32 nTris`, 16 bit indices; 341 models share the render mesh), spheres, cylinders and capsules (centre, axis, radius, half height;
 approximated by prisms and a coarse sphere). 93 % of the 162k placed brushes have such geometry; models without any (ivy, flags, straw,
 seedlings) have none in the real client either, `visible_fallback` returns their coarsest visible level of detail instead. All 3826 distinct
 models of the main world's brushes parse. Used by `aa_world::collide`, which documents the format and the survey in `docs/aa-world.md`.
+
+`materials` has one sub-material id per triangle: a primitive takes its default id from the geometry header (`+52`, after the version),
+and a trimesh uses its stored `u8` ids when present. Geometry that shares the render triangles takes their subset ids instead. A truncated
+material tail preserves the valid triangles and uses the default surface. Resolve `material_name` with `physics::material_paths(model, name)`
+and read the sub-material's `SurfaceType` (`mat_wood`, `mat_rock`, ...); this lookup is also used by `scene::find_mtl` so drawing and collision
+agree. It normalizes slashes/case before removing `.mtl`, handles root-level models, and falls back from `_lodN` to the base material.
+For `.chr`, the model's own `.mtl` takes precedence over the stored name.
+
+The installed pak's 6,441 environment models with collision all produce one material id per triangle and valid vertex indices, with no
+model parse errors or collision/render material-name differences. 74 reference sub-material ids absent from their `.mtl` (including older
+exports), and 32 have no material; callers should use the default surface for missing/out-of-range ids. Run the CPU-only audit with
+`cargo run -p aa-cry --example surface_audit`. Real-pak tests verify wooden bridges/shops and rock walls/terrain pieces; synthetic tests
+distinguish per-triangle ids and truncated tails.
 
 ### Skeletons
 

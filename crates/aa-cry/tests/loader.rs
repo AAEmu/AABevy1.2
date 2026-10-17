@@ -105,3 +105,18 @@ fn copy_suffix_and_cubes() {
     assert!(cry.texture("textures/cubemaps/beach_blur2.dds", true).is_none());
     assert!(cry.cube_texture("textures/cubemaps/beach_blur2.dds").is_some());
 }
+
+#[test]
+fn stored_material_extensions_are_case_insensitive() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    // This bridge has no same-name .mtl: only its stored material name can resolve it.
+    let path = "objects/env/02_harihara/05_si/si_woodbridge_01.cgf";
+    let mut model = aa_cry::Model::load(path).unwrap();
+    assert!(!aa_pak::Pak::global().exists(&path.replace(".cgf", ".mtl")));
+    let expected = aa_cry::scene::find_mtl(path, &model).expect("bridge material");
+    let name = aa_pak::normalize(model.material_name.as_deref().unwrap());
+    model.material_name = Some(format!("{}.MTL", name.trim_end_matches(".mtl").to_ascii_uppercase()));
+    assert_eq!(aa_cry::scene::find_mtl(path, &model), Some(expected));
+}
