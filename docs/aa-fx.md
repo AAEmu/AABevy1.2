@@ -63,7 +63,8 @@ Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (
 `ConfigMin`/`ConfigMax`, `MoveRelEmitter`/`BindToEmitter`.
 
 Not supported (ignored): collisions and everything that depends on them (`Bounciness`, `MaxCollisionEvents`, spawn on
-collision), geometry particles (`Geometry`), tails/trails, `Rotate*` (orbiting), lights (`LightSource*`), sounds, refraction
+collision), geometry particles (`Geometry`; `EffectDef::geometry()` returns the model and material an effect names so that an
+application can draw it: the combat code draws the arrow body of `st1000b` that way), tails/trails, `Rotate*` (orbiting), lights (`LightSource*`), sounds, refraction
 materials, `BindEmitterToCamera`/`SpaceLoop`, `AttachType`/`AttachForm` emission shapes, `ViewDistRatio`, `CameraMinDistance`
 (the data has values like 270 that would hide the quest beams), `VisibleUnderwater`/`VisibleIndoors`, per frame texture
 blending, terrain-facing nuances, `FillRateCost`.
