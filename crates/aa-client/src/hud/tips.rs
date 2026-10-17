@@ -1,11 +1,18 @@
 //! The tooltip info tables the client's tooltip scripts read (`baselib/tooltip/tooltip.lua`): `HUD.item_tip`,
-//! `HUD.skill_tip`. The shapes are the captured ones of `aa-ui/examples/fake/fake_bag.lua` /
+//! `HUD.skill_tip`, `HUD.buff_text`. The shapes are the captured ones of `aa-ui/examples/fake/fake_bag.lua` /
 //! `fake_ingame.lua` (`reference/ingame/tooltip_{item,skill,buff}`), filled from the game database. They
 //! are built when a slot asks for its content or a tooltip shows, not every frame.
+//!
+//! What the numbers are: [`tipcalc`](super::tipcalc) works out the placeholders of skill and buff descriptions
+//! over the player's attack numbers ([`TipState::attrs`], kept current by [`TipState::refresh`]);
+//! [`tipitem`](super::tipitem) the stats of weapons and armor (attack, defence, stat bonuses, durability).
 
+use aa_net::model::Equipment;
 use mlua::{Lua, Table};
 
 use super::data::GameData;
+use super::tipcalc::Attrs;
+use super::tipitem::{slot_type_name, Class};
 
 /// The tooltip's `item_impl` of an `items.impl_id` (`ItemImplEnum`). The equipment and portal ones have
 /// sections of their own; everything else is "etc" (a plain item).
@@ -22,9 +29,66 @@ fn item_impl(id: i64) -> &'static str {
 /// `skills.ability_id` -> the key of the tooltip's ability colour and name (`locale.common.abilityCategory`).
 const ABILITIES: [&str; 11] = ["general", "fight", "illusion", "adamant", "will", "death", "wild", "magic", "vocation", "romance", "love"];
 
+/// What the tooltips need of the player: its attack numbers and what it wears.
+#[derive(Default)]
+pub struct TipState {
+    /// The inputs `attrs` were worked out from.
+    key: Option<(u8, Equipment, Vec<(u32, i16)>, [i32; 11])>,
+    pub attrs: Attrs,
+    /// The template ids of the worn items (the set bonuses count them).
+    worn: Vec<u32>,
+}
+
+impl TipState {
+    /// Bring the numbers up to date with the player's level, gear, buffs (id, ability level) and ability
+    /// experience; nothing is worked out unless one of them changed.
+    pub fn refresh(&mut self, game: &GameData, level: u8, equipment: &Equipment, buffs: Vec<(u32, i16)>, ability_exp: &[i32; 11]) {
+        let abilities = ability_exp.map(|total| if total > 0 { i32::from(aa_net::model::exp::level_for_total(i64::from(total))) } else { 0 });
+        if self.key.as_ref().is_some_and(|k| k.0 == level && k.1 == *equipment && k.2 == buffs && k.3 == abilities) {
+            return;
+        }
+        let details = self.attrs.details;
+        self.attrs = game.tips.attrs(level, equipment, &buffs, &abilities);
+        self.attrs.details = details;
+        self.worn = equipment.slots.iter().enumerate().filter(|(i, _)| !aa_net::model::slot::is_body_part(*i)).filter_map(|(_, it)| it.as_ref().map(|it| it.template_id)).collect();
+        self.key = Some((level, equipment.clone(), buffs, abilities));
+    }
+}
+
+/// What the tooltip knows of one item beyond its template: the slot table the scripts built the item from
+/// (`HUD.bag[i]`): `dur` (durability), `tp` / `tm` (temper values), `fl` (item flags). Nothing for an item
+/// that is not in the bag (a shop's, a loot window's).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Instance {
+    pub durability: Option<u8>,
+    pub temper: (u16, u16),
+    pub flags: Option<u8>,
+}
+
+impl Instance {
+    pub fn of(table: Option<&Table>) -> Instance {
+        let Some(t) = table else { return Instance::default() };
+        let get = |k: &str| t.raw_get::<Option<i64>>(k).ok().flatten();
+        Instance {
+            durability: get("dur").filter(|d| *d >= 0).map(|d| d.min(255) as u8),
+            temper: (get("tp").unwrap_or(0).clamp(0, 65535) as u16, get("tm").unwrap_or(0).clamp(0, 65535) as u16),
+            flags: get("fl").map(|f| f as u8),
+        }
+    }
+}
+
+/// `item_grades.id` of a grade the HUD numbers by `grade_order` (the order swaps Basic and Crude).
+fn grade_id(order: i64) -> i32 {
+    match order {
+        1 => 0,
+        0 => 1,
+        g => g as i32,
+    }
+}
+
 /// The info of an item as `X2Bag:GetBagItemInfo` returns it: `grade` is the number the server and the icons
 /// use (1 basic, 2 grand ...; 0 takes the item's fixed grade or basic), `count` the stack.
-pub fn item_tip(lua: &Lua, game: &GameData, id: u32, grade: Option<i64>, count: Option<i64>) -> mlua::Result<Option<Table>> {
+pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Option<i64>, count: Option<i64>, instance: Instance) -> mlua::Result<Option<Table>> {
     let Some(info) = game.items.get(&id) else { return Ok(None) };
     let grade = match grade.unwrap_or(0) {
         0 if info.fixed_grade > 0 => info.fixed_grade,
@@ -42,8 +106,14 @@ pub fn item_tip(lua: &Lua, game: &GameData, id: u32, grade: Option<i64>, count: 
     t.raw_set("name", info.named.name.as_str())?;
     t.raw_set("category", info.category.as_str())?;
     t.raw_set("item_impl", item_impl(info.impl_id))?;
-    if info.soul_bound {
-        t.raw_set("soul_bound", 1)?;
+    match instance.flags {
+        Some(flags) if flags & 1 != 0 => t.raw_set("soul_bound", 1)?,
+        Some(_) => {}
+        None => {
+            if let Some(bind) = game.tips.items.soul_bind(id) {
+                t.raw_set("soul_bind", bind)?;
+            }
+        }
     }
     if info.use_skill != 0 {
         t.raw_set("skillType", info.use_skill)?;
@@ -56,12 +126,107 @@ pub fn item_tip(lua: &Lua, game: &GameData, id: u32, grade: Option<i64>, count: 
     t.raw_set("price", info.price)?;
     t.raw_set("refund", if info.refund > 0 { info.refund } else { info.price })?;
     t.raw_set("sellable", info.sellable && info.price > 0)?;
+    equipment_stats(lua, game, state, &t, id, grade_id(grade), instance)?;
+    Ok(Some(t))
+}
+
+/// The weapon / armor sections of an item's table: attack or defence, speed, stat bonuses, durability, set.
+fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: u32, grade: i32, instance: Instance) -> mlua::Result<()> {
+    let items = &game.tips.items;
+    let Some(s) = items.stats(id, grade, instance.temper.0, instance.temper.1) else { return Ok(()) };
+    let Some(class) = s.class else { return Ok(()) };
+    t.raw_set("itemUsage", "equip")?;
+    if let Some(name) = slot_type_name(s.slot_type) {
+        t.raw_set("slotType", name)?;
+    }
+    t.raw_set("slotTypeNum", s.slot_type)?;
+    if class == Class::Weapon {
+        t.raw_set("DPS", s.dps)?;
+        t.raw_set("minDamage", s.min_damage)?;
+        t.raw_set("maxDamage", s.max_damage)?;
+        if s.attack_delay > 0.0 {
+            t.raw_set("attackDelay", s.attack_delay)?;
+        }
+        if s.magic_dps.round() != 0.0 {
+            t.raw_set("magicDps", s.magic_dps.round())?;
+        }
+        if s.heal_dps.round() != 0.0 {
+            t.raw_set("healDps", s.heal_dps.round())?;
+        }
+        // how the weapon hits: piercing, slashing, blunt
+        if s.extra_damage.iter().any(|v| *v != 0) {
+            for (i, v) in s.extra_damage.iter().enumerate() {
+                t.raw_set(format!("extraDamage{}", i + 1), *v)?;
+            }
+        }
+    }
+    if s.armor != 0 {
+        t.raw_set("armor", s.armor)?;
+    }
+    if s.magic_resistance != 0 {
+        t.raw_set("magicResistance", s.magic_resistance)?;
+    }
+    if s.max_durability > 0 {
+        let durability = i32::from(instance.durability.unwrap_or(u8::MAX)).min(s.max_durability);
+        t.raw_set("durability", if instance.durability.is_some() { durability } else { s.max_durability })?;
+        t.raw_set("maxDurability", s.max_durability)?;
+        t.raw_set("repairable", s.repairable)?;
+    }
+    if !s.use_as_stat {
+        t.raw_set("useAsStat", false)?;
+    }
+    // the stat bonuses: {name, type 0 (a value), value}
+    let modifiers = lua.create_table()?;
+    for (name, value) in ["str", "dex", "sta", "int", "spi"].into_iter().zip(s.stats) {
+        if value != 0 {
+            let m = lua.create_table()?;
+            m.raw_set("name", name)?;
+            m.raw_set("type", 0)?;
+            m.raw_set("value", value)?;
+            modifiers.raw_push(m)?;
+        }
+    }
+    if modifiers.raw_len() > 0 {
+        t.raw_set("modifier", modifiers)?;
+    }
+    if let Some(set) = set_info(lua, game, state, s.set, game.items.get(&id).map_or(0, |i| i.level) as i32)? {
+        t.raw_set("equipSetInfo", set)?;
+    }
+    Ok(())
+}
+
+/// `equipSetInfo`: the set's name, its pieces (worn ones lit) and bonuses (the ones the worn pieces earn lit).
+fn set_info(lua: &Lua, game: &GameData, state: &TipState, set: u32, level: i32) -> mlua::Result<Option<Table>> {
+    let Some(set) = (set != 0).then(|| game.tips.items.set(set)).flatten() else { return Ok(None) };
+    let worn = set.items.iter().filter(|i| state.worn.contains(i)).count();
+    let t = lua.create_table()?;
+    t.raw_set("equipSetItemInfoDesc", set.name.as_str())?;
+    t.raw_set("equippedSetItemCount", worn)?;
+    t.raw_set("maxSetItemCount", set.items.len())?;
+    let pieces = lua.create_table()?;
+    for item in &set.items {
+        let p = lua.create_table()?;
+        p.raw_set("item_name", game.items.get(item).map_or("", |i| i.named.name.as_str()))?;
+        p.raw_set("equipped", state.worn.contains(item))?;
+        pieces.raw_push(p)?;
+    }
+    t.raw_set("setItems", pieces)?;
+    let bonuses = lua.create_table()?;
+    for (needed, buff) in &set.bonuses {
+        let b = lua.create_table()?;
+        b.raw_set("numPieces", *needed)?;
+        b.raw_set("satisfied", worn as i32 >= *needed)?;
+        let text = game.tips.buff_text(*buff, level, &state.attrs).or_else(|| game.buffs.get(buff).map(|b| b.desc.clone())).unwrap_or_default();
+        b.raw_set("bufDesc", text)?;
+        bonuses.raw_push(b)?;
+    }
+    t.raw_set("bonuses", bonuses)?;
     Ok(Some(t))
 }
 
 /// The info of a skill as `slot:GetTooltip` / `X2Skill:GetSkillTooltip` return it; `level` is the rank the
 /// player has learned (1 when unknown).
-pub fn skill_tip(lua: &Lua, game: &GameData, id: u32, level: u8) -> mlua::Result<Option<Table>> {
+pub fn skill_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, level: u8) -> mlua::Result<Option<Table>> {
     let Some(info) = game.skills.get(&id) else { return Ok(None) };
     let t = lua.create_table()?;
     t.raw_set("tipType", "skill")?;
@@ -70,12 +235,25 @@ pub fn skill_tip(lua: &Lua, game: &GameData, id: u32, level: u8) -> mlua::Result
     t.raw_set("path", info.named.icon.as_str())?;
     t.raw_set("ability", ABILITIES[usize::from(info.ability).min(ABILITIES.len() - 1)])?;
     t.raw_set("skillLevel", level)?;
-    t.raw_set("mana", info.mana)?;
+    t.raw_set("mana", game.tips.mana(id, &state.attrs).unwrap_or(info.mana))?;
     t.raw_set("casting", info.casting_ms)?;
     t.raw_set("channeling", info.channeling_ms)?;
-    t.raw_set("minRange", info.min_range)?;
-    t.raw_set("maxRange", info.max_range)?;
+    // a skill without a range is used on oneself (the script prints "Self" when there is no `minRange`)
+    if info.max_range > 0 {
+        t.raw_set("minRange", info.min_range)?;
+        t.raw_set("maxRange", info.max_range)?;
+    }
     t.raw_set("cooldown", info.cooldown_ms)?;
-    t.raw_set("description", info.desc.as_str())?;
+    let radius = game.tips.skill_radius(id);
+    if radius > 0 {
+        t.raw_set("targetAreaRadius", radius)?;
+    }
+    let desc = game.tips.skill_text(id, level, &state.attrs);
+    t.raw_set("description", desc.as_deref().unwrap_or(info.desc.as_str()))?;
     Ok(Some(t))
+}
+
+/// A buff's description with its numbers filled in (the buff tooltips); `None` when it has no placeholders.
+pub fn buff_text(game: &GameData, state: &TipState, id: u32, ab_level: i32) -> Option<String> {
+    game.tips.buff_text(id, ab_level, &state.attrs)
 }

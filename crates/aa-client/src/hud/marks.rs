@@ -156,22 +156,11 @@ pub fn update_marks(
     let data = bridge.0.borrow();
     let Some(game) = data.game.get() else { return };
     let me = data.pos;
+    // the quest dialog has the screen to itself
+    let shown = if data.dialog.directing { Visibility::Hidden } else { Visibility::Inherited };
     if state.refresh_in == 0 {
         state.refresh_in = REFRESH_FRAMES;
-        let character = spawn.character();
-        let facts = PlayerFacts {
-            level: stats.level.max(character.level),
-            race: character.race,
-            gender: character.gender,
-            faction: character.faction_id,
-            honor: stats.honor,
-            vocation: stats.vocation,
-            items: inventory.bag_items().map(|(_, it)| it.template_id).chain(inventory.equipment.slots.iter().flatten().map(|it| it.template_id)).collect(),
-            skills: skills.known.iter().map(|k| k.id).collect(),
-            buffs: buffs.of(spawn.obj_id).iter().map(|b| b.buff.buff_id).collect(),
-            equipped: inventory.equipment.slots.iter().flatten().map(|it| it.template_id).collect(),
-            quests: Some(&quests),
-        };
+        let facts = PlayerFacts::of(spawn, &stats, &inventory, &skills, &buffs, &quests);
         debug!("hud: quests: {} active, {} completed blocks, level {}", quests.active.len(), quests.completed.len(), facts.level);
         let mut wanted: HashMap<u32, Mark> = HashMap::new();
         for u in units.iter() {
@@ -236,8 +225,8 @@ pub fn update_marks(
         let height = super::plates::unit_height(plates.heights.get(id).map(|h| h.0), scale, false);
         transform.translation = root + Vec3::Y * (height + super::plates::head_gap(height, super::plates::HEAD_GAP) + GAP + BOB * (t * 3.0).sin());
         transform.rotation = Quat::from_rotation_y(t * SPIN);
-        if *visibility != Visibility::Inherited {
-            *visibility = Visibility::Inherited;
+        if *visibility != shown {
+            *visibility = shown;
         }
     }
 }

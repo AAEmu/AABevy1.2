@@ -152,6 +152,32 @@ fn say(engine: &Engine, packs: &Packs, me: &Snapshot, item: &str) -> Option<Stri
     Some(path.to_string())
 }
 
+/// Keep death state even while the loading screen is building the HUD. Offers may arrive before the death packet.
+pub fn track_death(mut events: MessageReader<NetEvent>, bridge: NonSend<HudBridge>, skills: Res<aa_net::state::Skills>) {
+    let data = bridge.0.borrow();
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::PlayerSpawn(_) | Event::CharacterSelected(_) => {
+                data.death_ends.set(None);
+                data.death_started.set(None);
+                data.revive_caster.set(None);
+            }
+            Event::ResurrectionOffered { caster } => data.revive_caster.set(Some(caster.obj_id)),
+            Event::DeathDetails { obj_id, resurrect_wait_ms, .. } if skills.obj_id != 0 && *obj_id == skills.obj_id => {
+                let now = super::panels::now_ms(data.start);
+                data.death_started.set(Some(now));
+                data.death_ends.set(Some(now + (*resurrect_wait_ms).max(0) as u64));
+            }
+            Event::Resurrected { obj_id, .. } if skills.obj_id != 0 && *obj_id == skills.obj_id => {
+                data.death_ends.set(None);
+                data.death_started.set(None);
+                data.revive_caster.set(None);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Shows the refusals and the server messages of this frame.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -195,12 +221,10 @@ pub fn show(
             Event::AbilitySwapped { obj_id, old_ability, ability } if own != 0 && *obj_id == own => ability_changed(&rt, *ability, *old_ability),
             // the death window (`UNIT_DEAD` shows it with the exp lost; the wait before standing up counts down on the HUD clock)
             Event::DeathDetails { obj_id, resurrect_wait_ms, lost_exp, .. } if own != 0 && *obj_id == own => {
-                data.death_ends.set(Some(super::panels::now_ms(data.start) + (*resurrect_wait_ms).max(0) as u64));
                 info!("hud: the player died, may stand up in {} ms, lost {lost_exp} exp", resurrect_wait_ms);
                 rt.fire_event("UNIT_DEAD", (own.to_string(), i64::from(*lost_exp), 0i64));
             }
             Event::Resurrected { obj_id, .. } if own != 0 && *obj_id == own => {
-                data.death_ends.set(None);
                 rt.fire_event("PLAYER_RESURRECTED", ());
             }
             Event::ServerError { code } => {

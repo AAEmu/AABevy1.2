@@ -41,6 +41,10 @@ pub enum Request {
     UseBag { slot: usize },
     /// `HUD.request("resurrect", inPlace)`: the death window's buttons (`X2Player:Resurrect(inPlace)`).
     Resurrect { in_place: bool },
+    LearnSkill { id: u32 },
+    LearnBuff { id: u32 },
+    ResetSkills { ability: u8 },
+    SwapAbility { old: u8, ability: u8 },
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -67,6 +71,7 @@ pub struct HudData {
     pub yaw: f32,
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,
+    pub passive_buffs: Vec<u32>,
     /// The floating combat texts that are playing (`combat.rs`).
     pub texts: super::combat::Texts,
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
@@ -76,10 +81,17 @@ pub struct HudData {
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
     pub loot: super::loot::LootView,
+    /// The NPC talked to, the quest dialog and the quest rows the scripts read (`dialog.rs`).
+    pub dialog: super::dialog::DialogView,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
     /// When the player may stand up again after dying (HUD clock, ms): `X2Player:GetResurrectionCountdown` counts down to it.
     pub death_ends: std::cell::Cell<Option<u64>>,
+    pub death_started: std::cell::Cell<Option<u64>>,
+    /// The server offered an in-place resurrection (the caster may be the player below level 10).
+    pub revive_caster: std::cell::Cell<Option<u32>>,
+    /// The player's attack numbers and worn items, what the tooltips are worked out from (`tips.rs`).
+    pub tips: super::tips::TipState,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -104,12 +116,17 @@ impl Default for HudData {
             pos: Vec3::ZERO,
             yaw: 0.0,
             skill_levels: Default::default(),
+            passive_buffs: Vec::new(),
             texts: Default::default(),
             local_combat: false,
             casts: Default::default(),
             loot: Default::default(),
+            dialog: Default::default(),
             afk: false,
             death_ends: Default::default(),
+            death_started: Default::default(),
+            revive_caster: Default::default(),
+            tips: Default::default(),
         }
     }
 }
@@ -177,6 +194,9 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::combat::install(lua, &hud, bridge)?;
     super::cast::install(lua, &hud, bridge)?;
     super::loot::install(lua, &hud, bridge)?;
+    super::dialog::install(lua, &hud, bridge)?;
+    super::drag::install(lua, &hud)?;
+    super::skillbook::install(lua, &hud, bridge)?;
     super::markers::install(lua, &hud)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
@@ -184,7 +204,10 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
-    super::markers::load_script(lua)
+    super::markers::load_script(lua)?;
+    super::drag::load_script(lua)?;
+    super::skillbook::load_script(lua)?;
+    super::dialog::load_script(lua)
 }
 
 /// The Rust functions of the `HUD` table.
@@ -230,6 +253,10 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 "use_action" => Request::UseAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
+                "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
+                "learn_buff" => Request::LearnBuff { id: num(1).max(0) as u32 },
+                "reset_skills" => Request::ResetSkills { ability: num(1).clamp(0, 255) as u8 },
+                "swap_ability" => Request::SwapAbility { old: num(1).clamp(0, 255) as u8, ability: num(2).clamp(0, 255) as u8 },
                 other => {
                     warn!("hud: unknown request {other:?}");
                     return Ok(());
@@ -258,9 +285,16 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |_, ()| {
             let d = b.borrow();
             let left = d.death_ends.get().map_or(0, |end| end.saturating_sub(panels::now_ms(d.start)));
-            Ok(left.div_ceil(1000) as i64)
+            Ok((left / 1000) as i64)
         })?,
     )?;
+    let b = bridge.clone();
+    hud.raw_set("death_timeout", lua.create_function(move |_, ()| {
+        let d = b.borrow();
+        Ok(death_timeout(d.death_started.get(), panels::now_ms(d.start)))
+    })?)?;
+    let b = bridge.clone();
+    hud.raw_set("can_resurrect_here", lua.create_function(move |_, ()| Ok(b.borrow().revive_caster.get().is_some()))?)?;
     // database lookups for the content hooks: name, icon (and the rest)
     let b = bridge.clone();
     hud.raw_set(
@@ -290,10 +324,10 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
     let b = bridge.clone();
     hud.raw_set(
         "item_tip",
-        lua.create_function(move |lua, (id, grade, count): (u32, Option<i64>, Option<i64>)| {
+        lua.create_function(move |lua, (id, grade, count, slot): (u32, Option<i64>, Option<i64>, Option<Table>)| {
             let d = b.borrow();
             match d.game.get() {
-                Some(g) => super::tips::item_tip(lua, g, id, grade, count),
+                Some(g) => super::tips::item_tip(lua, g, &d.tips, id, grade, count, super::tips::Instance::of(slot.as_ref())),
                 None => Ok(None),
             }
         })?,
@@ -304,9 +338,18 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |lua, id: u32| {
             let d = b.borrow();
             match d.game.get() {
-                Some(g) => super::tips::skill_tip(lua, g, id, d.skill_levels.get(&id).copied().unwrap_or(1)),
+                Some(g) => super::tips::skill_tip(lua, g, &d.tips, id, d.skill_levels.get(&id).copied().unwrap_or(1)),
                 None => Ok(None),
             }
+        })?,
+    )?;
+    // a buff's description with its numbers filled in (nil when it has none to fill)
+    let b = bridge.clone();
+    hud.raw_set(
+        "buff_text",
+        lua.create_function(move |_, (id, ab_level): (u32, Option<i32>)| {
+            let d = b.borrow();
+            Ok(d.game.get().and_then(|g| super::tips::buff_text(g, &d.tips, id, ab_level.unwrap_or(0))))
         })?,
     )?;
     // the chat window widget (the scripts create it; `GetEntityByName` is a stub)
@@ -324,6 +367,11 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         })?,
     )?;
     Ok(())
+}
+
+/// Native GetResurrectionCountdown (0x39495c00): a separate five-minute deadline, truncated to seconds.
+fn death_timeout(started: Option<u64>, now: u64) -> i64 {
+    started.map_or(0, |start| (300_000u64.saturating_sub(now.saturating_sub(start)) / 1000) as i64)
 }
 
 /// One row of `X2Ability:GetActiveAbility()`: the ability, its level and where its experience stands in the level
@@ -424,8 +472,13 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     // the zone under the player (the world's sector map), else the zone channel's group, else the spawn's
     let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
-    if let Some(skills) = world.get_resource::<aa_net::state::Skills>().filter(|s| s.known.len() != data.skill_levels.len() || s.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level))) {
-        data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
+    if let Some(skills) = world.get_resource::<aa_net::state::Skills>() {
+        if skills.known.len() != data.skill_levels.len() || skills.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level)) {
+            data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
+        }
+        if skills.passive_buffs != data.passive_buffs {
+            data.passive_buffs.clone_from(&skills.passive_buffs);
+        }
     }
     data.player_entity = entity;
     data.pos = pos;
@@ -519,6 +572,15 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let mut snapshot = snapshot;
     dev_sim(&mut snapshot);
     data.snapshot = snapshot;
+    // what the tooltips are worked out from: level, gear, buffs and abilities (only when one changed)
+    {
+        let (level, ability_exp) = (data.snapshot.level, data.snapshot.ability_exp);
+        let shared = data.game.clone();
+        if let (Some(g), Some(inv)) = (shared.get(), world.get_resource::<aa_net::state::Inventory>()) {
+            let buffs = world.get_resource::<aa_net::state::Buffs>().map_or_else(Vec::new, |b| super::stats::buff_list(b.of(spawn.obj_id)));
+            data.tips.refresh(g, level, &inv.equipment, buffs, &ability_exp);
+        }
+    }
     let own_obj_id = spawn.obj_id;
     let own_faction = character.faction_id;
     let start = data.start;
@@ -619,6 +681,21 @@ pub fn handle_requests(
             Request::Resurrect { in_place } => {
                 net.write(NetCommand(Command::Resurrect { in_place }));
             }
+            Request::LearnSkill { id } => super::skillbook::learn_skill(&bridge.0.borrow(), id, &mut net),
+            Request::LearnBuff { id } => super::skillbook::learn_buff(&bridge.0.borrow(), id, &mut net),
+            Request::ResetSkills { ability } => {
+                if bridge.0.borrow().snapshot.abilities.contains(&ability) {
+                    net.write(NetCommand(Command::ResetSkills { ability }));
+                }
+            }
+            Request::SwapAbility { old, ability } => {
+                let data = bridge.0.borrow();
+                let active = &data.snapshot.abilities;
+                let replace = active.contains(&old) || (old == super::skillbook::NO_ABILITY && active.len() < 3);
+                if replace && (1..=10).contains(&ability) && !active.contains(&ability) {
+                    net.write(NetCommand(Command::SwapAbility { old, ability }));
+                }
+            }
         }
     }
 }
@@ -710,6 +787,11 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     if old.level != new.level {
         rt.fire_event("LEVEL_CHANGED", (new.level as i64, id));
     }
+    if old.ability_exp != new.ability_exp {
+        // Refresh the book's level and progress together. ABILITY_EXP_CHANGED also prints a gain in chat;
+        // these snapshots carry totals, including initial sync and ability swaps, rather than an earned amount.
+        rt.fire_event("PLAYER_ABILITY_LEVEL_CHANGED", ());
+    }
     // EXP_CHANGED carries the amount gained: it comes with the server's event (`combat::route_combat`)
     // each labor change the server announced: the chat scripts print "Gained 10 Labor Point(s). (Total LP: 105)"
     // and the labor bar refreshes, both from the state pushed just now
@@ -734,6 +816,16 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_resurrection_uses_the_native_five_minute_deadline() {
+        assert_eq!(death_timeout(None, 1000), 0);
+        assert_eq!(death_timeout(Some(1000), 1000), 300);
+        assert_eq!(death_timeout(Some(1000), 1001), 299);
+        assert_eq!(death_timeout(Some(1000), 11_000), 290);
+        assert_eq!(death_timeout(Some(1000), 301_000), 0);
+        assert_eq!(death_timeout(Some(1000), 401_000), 0);
+    }
 
     /// An Archery character (ability 6) with 2000 ability exp: what the scripts read in `HUD.state`.
     #[test]

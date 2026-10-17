@@ -422,7 +422,10 @@ pub fn update_plates(
         match state.plates.get_mut(&w.id) {
             Some(p) => {
                 if let Ok((mut t, mut v)) = roots.get_mut(p.root) {
-                    t.translation = Vec3::new(x, y, 0.0);
+                    let at = Vec3::new(x, y, 0.0);
+                    if t.translation != at {
+                        t.translation = at;
+                    }
                     if *v != Visibility::Inherited {
                         *v = Visibility::Inherited;
                     }

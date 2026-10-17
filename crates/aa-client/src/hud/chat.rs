@@ -93,6 +93,7 @@ pub struct ScriptedKeys {
     started: Option<f32>,
     /// A scripted `tab` is waiting for `targeting::tab_target`.
     tab: bool,
+    escape: bool,
     /// A scripted `slotN` (action bar slot N, 1 based) waits for `panels::action_keys`.
     slot: Option<usize>,
     /// A scripted `f` (loot all, `Some(true)`) or `g` (open the loot) waits for `loot::loot_input`.
@@ -102,6 +103,10 @@ pub struct ScriptedKeys {
 impl ScriptedKeys {
     pub fn take_tab(&mut self) -> bool {
         std::mem::take(&mut self.tab)
+    }
+
+    pub fn take_escape(&mut self) -> bool {
+        std::mem::take(&mut self.escape)
     }
 
     pub fn take_slot(&mut self) -> Option<usize> {
@@ -124,7 +129,7 @@ impl ScriptedKeys {
         }
         steps.sort_by(|a, b| a.0.total_cmp(&b.0));
         steps.reverse(); // pop from the end
-        ScriptedKeys { steps, started: None, tab: false, slot: None, loot: None }
+        ScriptedKeys { steps, ..ScriptedKeys::default() }
     }
 }
 
@@ -189,6 +194,8 @@ pub fn chat_keys(
                 open = true;
             } else if k == UiKey::Tab {
                 script.tab = true;
+            } else if k == UiKey::Escape {
+                script.escape = true;
             }
         }
     }
