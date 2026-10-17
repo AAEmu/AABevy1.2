@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use bevy::math::{Affine3A, Mat3, Quat, Vec3};
 
-use crate::params::{EmitterDef, Facing, Spawn};
+use crate::geom::{Geom, GeomKey};
+use crate::params::{Blend, EmitterDef, Facing, Spawn};
 
 /// CryEngine (Z up) to Bevy (Y up).
 #[inline]
@@ -23,6 +24,8 @@ pub fn c2b(v: Vec3) -> Vec3 {
 const GRAVITY: f32 = 9.81;
 /// Particles one emitter may hold.
 pub const MAX_PER_EMITTER: usize = 2048;
+/// Vertices one mesh emitter may write.
+const MAX_MESH_VERTS: usize = 16_384;
 
 /// A tiny xorshift generator: 0..1 floats, no allocation, one per emitter.
 #[derive(Clone, Debug)]
@@ -77,6 +80,8 @@ pub struct StepCtx<'a> {
     pub count_over_life: bool,
     /// Colour of the light on the effect.
     pub tint: Vec3,
+    /// Direction to the sun in world space (shades opaque mesh particles).
+    pub sun: Vec3,
     pub wind: Vec3,
     pub budget: &'a AtomicI32,
     /// Alpha factor of the effect (distance fade).
@@ -123,6 +128,7 @@ pub struct Particle {
     size: f32,
     sx: f32,
     sy: f32,
+    sz: f32,
     stretch: f32,
     color: Vec3,
     alpha: f32,
@@ -145,6 +151,12 @@ pub struct EmitterState {
     /// The mesh entity (or `Entity::PLACEHOLDER` for an emitter that only triggers others).
     pub mesh: bevy::prelude::Entity,
     pub draws: bool,
+    /// The mesh a `Geometry` emitter instances, once it is loaded.
+    pub geom: Option<Arc<Geom>>,
+    /// The mesh a `Geometry` emitter waits for.
+    pub pending_geom: Option<GeomKey>,
+    /// Particle budget one particle costs (a mesh counts its vertices in quads).
+    cost: usize,
     rng: Rng,
     particles: Vec<Particle>,
     age: f32,
@@ -161,8 +173,11 @@ pub struct EmitterState {
     // output, effect-local space
     pub pos: Vec<[f32; 3]>,
     pub uv: Vec<[f32; 2]>,
+    /// Second texture coordinates of a mesh with an opacity map: the mesh's own, not animated.
+    pub uv1: Vec<[f32; 2]>,
     pub col: Vec<[f32; 4]>,
-    pub quads: usize,
+    /// Quads (sprite emitter) or mesh copies written.
+    pub units: usize,
     pub min: Vec3,
     pub max: Vec3,
     /// The vertex arrays changed since the last upload.
@@ -179,6 +194,9 @@ impl EmitterState {
             aspect,
             mesh,
             draws,
+            geom: None,
+            pending_geom: None,
+            cost: 1,
             rng: Rng::new(seed),
             particles: Vec::new(),
             age: 0.0,
@@ -194,8 +212,9 @@ impl EmitterState {
             lit: 1.0,
             pos: Vec::new(),
             uv: Vec::new(),
+            uv1: Vec::new(),
             col: Vec::new(),
-            quads: 0,
+            units: 0,
             min: Vec3::ZERO,
             max: Vec3::ZERO,
             dirty: false,
@@ -205,6 +224,34 @@ impl EmitterState {
 
     pub fn alive(&self) -> usize {
         self.particles.len()
+    }
+
+    /// Particle budget the live particles use.
+    pub fn load(&self) -> usize {
+        self.particles.len() * self.cost
+    }
+
+    /// Vertices of one unit (a quad or a mesh copy) and its triangle indices.
+    pub fn unit(&self) -> (u32, &[u32]) {
+        const QUAD: [u32; 6] = [0, 1, 2, 0, 2, 3];
+        match &self.geom {
+            Some(g) => (g.tmpl.pos.len() as u32, &g.tmpl.idx),
+            None => (4, &QUAD),
+        }
+    }
+
+    /// The mesh of a `Geometry` emitter arrived.
+    pub fn set_geom(&mut self, g: Arc<Geom>) {
+        self.cost = (g.tmpl.pos.len() / 4).max(1);
+        self.pending_geom = None;
+        self.geom = Some(g);
+    }
+
+    fn cap(&self) -> usize {
+        match &self.geom {
+            Some(g) => (MAX_MESH_VERTS / g.tmpl.pos.len().max(1)).clamp(4, MAX_PER_EMITTER),
+            None => MAX_PER_EMITTER,
+        }
     }
 
     /// Turns the emitter off for good (its quality level is not wanted).
@@ -226,9 +273,10 @@ impl EmitterState {
         self.spawn_acc = 0.0;
         self.burst_done = false;
         self.done = self.def.spawn != Spawn::Direct;
-        self.quads = 0;
+        self.units = 0;
         self.pos.clear();
         self.uv.clear();
+        self.uv1.clear();
         self.col.clear();
         self.dirty = true;
     }
@@ -239,17 +287,18 @@ impl EmitterState {
 
     /// Takes `n` particles from the global budget.
     fn grant(&self, ctx: &StepCtx, n: usize) -> usize {
-        let room = MAX_PER_EMITTER.saturating_sub(self.particles.len());
+        let room = self.cap().saturating_sub(self.particles.len());
         let n = n.min(room);
         if n == 0 {
             return 0;
         }
-        let before = ctx.budget.fetch_sub(n as i32, Ordering::Relaxed);
-        if before >= n as i32 {
+        let want = (n * self.cost) as i32;
+        let before = ctx.budget.fetch_sub(want, Ordering::Relaxed);
+        if before >= want {
             n
         } else {
-            ctx.budget.fetch_add(n as i32, Ordering::Relaxed);
-            before.max(0) as usize
+            ctx.budget.fetch_add(want, Ordering::Relaxed);
+            before.max(0) as usize / self.cost
         }
     }
 
@@ -392,6 +441,7 @@ impl EmitterState {
         let size = def.size.spawn(r.next(), strength) * scale * ctx.size_scale;
         let sx = def.size_x.spawn(r.next(), strength);
         let sy = def.size_y.spawn(r.next(), strength);
+        let sz = def.size_z.spawn(r.next(), strength);
         let mut color = def.color.base;
         if let Some(c) = def.color.strength.as_ref().and_then(|c| c.eval(strength)) {
             color *= c;
@@ -412,6 +462,7 @@ impl EmitterState {
             size,
             sx,
             sy,
+            sz,
             stretch: def.stretch.spawn(r.next(), strength),
             color,
             alpha,
@@ -483,7 +534,7 @@ impl EmitterState {
         self.col.clear();
         self.dirty = true;
         if n == 0 {
-            self.quads = 0;
+            self.units = 0;
             return;
         }
         self.pos.reserve(n * 4);
@@ -606,8 +657,102 @@ impl EmitterState {
             let colour = [colour.x, colour.y, colour.z, alpha.min(1.0)];
             self.col.extend_from_slice(&[colour, colour, colour, colour]);
         }
-        self.quads = self.pos.len() / 4;
-        if self.quads > 0 {
+        self.units = self.pos.len() / 4;
+        if self.units > 0 {
+            self.min = min;
+            self.max = max;
+        }
+    }
+
+    /// Writes the mesh copies of the live particles: the template transformed by every particle's position, orientation and scale.
+    fn build_mesh(&mut self, ctx: &StepCtx, time: f32) {
+        let Some(geom) = self.geom.clone() else { return };
+        let def = self.def.clone();
+        let luts = def.luts();
+        let frame = self.frame(ctx);
+        let (t, m) = (&geom.tmpl, &geom.mtl);
+        let nv = t.pos.len();
+        self.pos.clear();
+        self.uv.clear();
+        self.uv1.clear();
+        self.col.clear();
+        self.dirty = true;
+        if self.particles.is_empty() || nv == 0 {
+            self.units = 0;
+            return;
+        }
+        let n = self.particles.len();
+        self.pos.reserve(n * nv);
+        self.uv.reserve(n * nv);
+        self.col.reserve(n * nv);
+        let with_mask = !m.opacity_map.is_empty();
+        if with_mask {
+            self.uv1.reserve(n * nv);
+        }
+
+        let inv = ctx.global.inverse();
+        let inv3 = Mat3::from(inv.matrix3);
+        let to_bevy = aa_cry::CRY_TO_BEVY;
+        let static_uv = m.uv.is_static_identity();
+        let opaque = m.blend == Blend::Opaque;
+        let pivot = if def.no_offset { Vec3::ZERO } else { t.center };
+        let alpha_k = if def.no_material_alpha { 1.0 } else { m.opacity };
+        let lit = self.lit + m.emissive * 0.5;
+        let to_local = inv3.x_axis.length().max(inv3.y_axis.length()).max(inv3.z_axis.length()).max(1.0);
+        let mut min = Vec3::splat(f32::MAX);
+        let mut max = Vec3::splat(f32::MIN);
+        let mut units = 0;
+
+        for p in &self.particles {
+            let a = p.age * p.inv_life;
+            let sz = p.size * luts.size.at(a);
+            let alpha = p.alpha * luts.alpha.at(a) * ctx.fade * alpha_k;
+            if alpha < 0.003 || sz < 1e-5 {
+                continue;
+            }
+            // the scales are along the mesh's CryEngine axes: right, forward, up
+            let scale = Vec3::new(p.sx * luts.size_x.at(a), p.sz * luts.size_z.at(a), p.sy * luts.size_y.at(a)) * sz;
+            let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
+            let turn = Mat3::from_quat(to_bevy * q * to_bevy.inverse());
+            let vel = frame.to_world_dir(p.vel);
+            let speed = vel.length();
+            let rot = if def.orient_to_velocity && speed > 0.02 {
+                // the mesh's forward axis (CryEngine +Y) along the velocity
+                Mat3::from_quat(Quat::from_rotation_arc(Vec3::NEG_Z, vel / speed)) * turn
+            } else {
+                ctx.rot * turn
+            };
+            let center = inv.transform_point3(frame.to_world_point(p.pos));
+            let lin = inv3 * rot * Mat3::from_diagonal(scale);
+            let shift = center - lin * pivot;
+            let c = p.color * luts.color.at(a) * lit * ctx.tint * m.tint;
+
+            self.pos.extend(t.pos.iter().map(|v| (lin * *v + shift).to_array()));
+            if static_uv {
+                self.uv.extend_from_slice(&t.uv);
+            } else {
+                let f = m.uv.frame(if def.independent_uv_timer { p.age } else { time });
+                self.uv.extend(t.uv.iter().map(|u| f.apply(*u)));
+            }
+            if with_mask {
+                self.uv1.extend_from_slice(&t.uv);
+            }
+            if opaque {
+                self.col.extend(t.nrm.iter().map(|n| {
+                    let s = 0.45 + 0.75 * (rot * *n).dot(ctx.sun).max(0.0);
+                    [c.x * s, c.y * s, c.z * s, alpha.min(1.0)]
+                }));
+            } else {
+                self.col.extend(std::iter::repeat_n([c.x, c.y, c.z, alpha.min(1.0)], nv));
+            }
+            let mid = center + lin * (t.center - pivot);
+            let r = Vec3::splat(t.extent * scale.max_element() * 0.9 * to_local);
+            min = min.min(mid - r);
+            max = max.max(mid + r);
+            units += 1;
+        }
+        self.units = units;
+        if units > 0 {
             self.min = min;
             self.max = max;
         }
@@ -650,6 +795,11 @@ impl EffectSim {
         self.emitters.iter().map(|e| e.alive()).sum()
     }
 
+    /// Particle budget the effect uses.
+    pub fn load(&self) -> usize {
+        self.emitters.iter().map(|e| e.load()).sum()
+    }
+
     /// Every emitter is done and no particle is left.
     pub fn finished(&self) -> bool {
         self.emitters.iter().all(|e| e.finished())
@@ -690,9 +840,14 @@ impl EffectSim {
     pub fn step(&mut self, ctx: &StepCtx) {
         self.time += ctx.dt;
         self.advance(ctx, ctx.dt);
+        let time = self.time;
         for e in &mut self.emitters {
             if e.draws {
-                e.build(ctx);
+                if e.geom.is_some() {
+                    e.build_mesh(ctx, time);
+                } else if e.pending_geom.is_none() {
+                    e.build(ctx);
+                }
             }
         }
     }
@@ -736,6 +891,7 @@ mod tests {
             size_scale: 1.0,
             count_over_life: true,
             tint: Vec3::ONE,
+            sun: Vec3::Y,
             wind: Vec3::ZERO,
             budget,
             fade: 1.0,
@@ -765,7 +921,7 @@ mod tests {
         }
         let n = s.alive();
         assert!((16..=24).contains(&n), "alive {n}");
-        assert_eq!(s.emitters[0].quads, n);
+        assert_eq!(s.emitters[0].units, n);
         assert_eq!(s.emitters[0].pos.len(), n * 4);
     }
 
@@ -790,6 +946,48 @@ mod tests {
         }
         let n = s.alive();
         assert!((8..=12).contains(&n), "alive {n}");
+    }
+
+    fn triangle() -> std::sync::Arc<Geom> {
+        use crate::geom::{GeomMtl, GeomTemplate};
+        let tmpl = GeomTemplate {
+            pos: vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)],
+            nrm: vec![Vec3::Z; 3],
+            uv: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            idx: vec![0, 1, 2],
+            center: Vec3::new(0.5, 0.5, 0.0),
+            extent: 1.0,
+        };
+        std::sync::Arc::new(Geom { tmpl, mtl: GeomMtl { blend: Blend::Additive, ..Default::default() } })
+    }
+
+    #[test]
+    fn mesh_particles_instance_the_template() {
+        let budget = AtomicI32::new(10_000);
+        // two copies, twice the size, no centring: the first vertex stays at the particle
+        let mut s = sim(r#"Count="2" ParticleLifeTime="2" Geometry="x.cgf" NoOffset="true" Size="2" Speed="0""#);
+        s.emitters[0].set_geom(triangle());
+        let c = ctx(&budget);
+        s.step(&c);
+        let e = &s.emitters[0];
+        assert_eq!(e.units, 2);
+        assert_eq!(e.pos.len(), 6);
+        assert_eq!(e.col.len(), 6);
+        let (a, b) = (Vec3::from(e.pos[0]), Vec3::from(e.pos[1]));
+        assert!(a.length() < 0.01, "{a:?}");
+        // the template's +X is the mesh's right: along Bevy +X, scaled by Size
+        assert!(((b - a) - Vec3::new(2.0, 0.0, 0.0)).length() < 0.01, "{:?}", b - a);
+        // the template's +Y is Bevy up here: SizeZ would scale it; Size scales it by 2 as well
+        let u = Vec3::from(e.pos[2]) - a;
+        assert!((u - Vec3::new(0.0, 2.0, 0.0)).length() < 0.01, "{u:?}");
+        // the cost of a mesh particle in the budget is its vertices in quads
+        assert_eq!(e.load(), 2);
+        // centred: the box centre sits on the particle
+        let mut s = sim(r#"Count="1" ParticleLifeTime="2" Geometry="x.cgf" Size="2" Speed="0""#);
+        s.emitters[0].set_geom(triangle());
+        s.step(&c);
+        let mid = (Vec3::from(s.emitters[0].pos[1]) + Vec3::from(s.emitters[0].pos[2])) * 0.5;
+        assert!(mid.length() < 0.01, "{mid:?}");
     }
 
     #[test]

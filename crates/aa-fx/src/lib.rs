@@ -9,13 +9,15 @@
 //! when the first effect of it appears. An effect far from the camera costs one distance test; within its activation radius it
 //! gets one mesh entity (a child) per drawing emitter, a CPU simulation ([`sim`]) and is primed so that it looks burning at
 //! once; beyond the radius it is dropped again. Every emitter is one dynamic mesh of camera facing quads drawn with
-//! [`FxMaterial`] (unlit, additive / alpha, no depth write, soft against the depth prepass). A global particle budget
+//! [`FxMaterial`] (unlit, additive / alpha, no depth write, soft against the depth prepass). Emitters with a `Geometry` emit
+//! meshes instead ([`geom`]): the model is instanced on the CPU into the same kind of dynamic mesh. A global particle budget
 //! ([`FxSettings::max_particles`]) caps the work.
 //!
 //! The effect's local frame is CryEngine's, mapped into Bevy by [`c2b`]: place effects built from CryEngine data with the same
 //! rotation conversion as other cell objects. Effects that emit along "up" (`FocusGravityDir`, most of them) do not care.
 
 mod assets;
+pub mod geom;
 pub mod library;
 mod material;
 pub mod params;
@@ -35,13 +37,16 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 
-pub use assets::{FxAssets, FxLibraries, LibStatus, MatKey, SlotState, Source};
+pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, MatKey, MeshMat, SlotState, Source};
+pub use geom::{Geom, GeomKey};
 pub use library::{EffectDef, Library, split_name};
 pub use material::FxMaterial;
 pub use params::{Blend, EmitterDef, Facing, Spawn};
 pub use sim::c2b;
 
 use sim::{EffectSim, EmitterState, StepCtx, View};
+
+const QUAD_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
 /// Global tuning. Change it at any time; the colour gain applies to every material at once.
 #[derive(Resource, Clone, Debug)]
@@ -71,6 +76,8 @@ pub struct FxSettings {
     pub activations_per_frame: usize,
     /// Wind in world space (m/s), felt by emitters with `WindInfluence`.
     pub wind: Vec3,
+    /// Direction to the sun in world space: shades the opaque meshes (debris) of effects.
+    pub sun: Vec3,
     pub enabled: bool,
 }
 
@@ -89,6 +96,7 @@ impl Default for FxSettings {
             soft_distance: 0.6,
             activations_per_frame: 6,
             wind: Vec3::new(0.5, 0.0, 0.2),
+            sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
             enabled: true,
         }
     }
@@ -103,7 +111,9 @@ pub struct FxStats {
     pub active: usize,
     pub emitters: usize,
     pub particles: usize,
-    /// Quads drawn.
+    /// Particle budget the particles use (a mesh counts its vertices in quads).
+    pub load: usize,
+    /// Quads and mesh copies drawn.
     pub quads: usize,
     /// Main thread time of the simulation pass (ms), of the mesh upload, of the management systems.
     pub sim_ms: f32,
@@ -160,7 +170,7 @@ pub struct FxRun {
     acc_dt: f32,
     frame: u32,
     warmup: u8,
-    uploaded_quads: Vec<usize>,
+    uploaded_units: Vec<usize>,
 }
 
 impl FxRun {
@@ -229,7 +239,7 @@ impl Plugin for FxPlugin {
             .init_resource::<FxAssets>()
             .add_systems(
                 PostUpdate,
-                (camera_view, register, resolve, classify, apply, simulate, upload)
+                (camera_view, register, resolve, classify, apply, bind_geometry, simulate, upload)
                     .chain()
                     .run_if(|s: Res<FxSettings>| s.enabled)
                     .after(bevy::transform::TransformSystems::Propagate)
@@ -259,7 +269,7 @@ fn log_stats(time: Res<Time>, stats: Res<FxStats>, view: Res<FxView>, mut since:
             for e in &sim.emitters {
                 info!(
                     "aa-fx:   {} at {:?}: {} particles, {} quads, bounds {:?}..{:?}, drawn {}",
-                    effect.name, gt.translation(), e.alive(), e.quads, e.min, e.max, e.draws
+                    effect.name, gt.translation(), e.alive(), e.units, e.min, e.max, e.draws
                 );
             }
         }
@@ -364,13 +374,37 @@ fn classify(view: Res<FxView>, queue: Res<FxQueue>, mut stats: ResMut<FxStats>, 
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
 }
 
-fn new_mesh() -> Mesh {
+/// The dynamic mesh of an emitter: one quad until the first upload, or (`geometry`) no triangles yet.
+fn new_mesh(geometry: bool, with_uv1: bool) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; 4]);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32; 2]; 4]);
+    if with_uv1 {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[0.0f32; 2]; 4]);
+    }
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0f32; 4]; 4]);
-    mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+    mesh.insert_indices(Indices::U32(if geometry { Vec::new() } else { QUAD_INDICES.to_vec() }));
     mesh
+}
+
+/// The entity that draws an emitter's mesh (a child of the effect).
+fn spawn_mesh(commands: &mut Commands, effect: Entity, layers: Option<&RenderLayers>, mesh: Handle<Mesh>, material: Handle<FxMaterial>) -> Entity {
+    let mut spawned = commands.spawn((
+        FxMesh,
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::IDENTITY,
+        Visibility::Hidden,
+        Aabb::from_min_max(Vec3::splat(-0.01), Vec3::splat(0.01)),
+        NotShadowCaster,
+        NotShadowReceiver,
+        ChildOf(effect),
+    ));
+    // render layers are not inherited: the mesh is drawn for the cameras that see the effect
+    if let Some(layers) = layers {
+        spawned.insert(layers.clone());
+    }
+    spawned.id()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -399,7 +433,7 @@ fn apply(
             }
             run.sim = None;
             run.finished = false;
-            run.uploaded_quads.clear();
+            run.uploaded_units.clear();
             commands.entity(entity).remove::<FxActive>();
             continue;
         }
@@ -416,34 +450,33 @@ fn apply(
             let mut material = 0;
             let mut mesh = Entity::PLACEHOLDER;
             let mut handle = None;
+            let mut pending_geom = None;
             if d.draws() && enabled {
-                let source = if d.texture.is_empty() { Source::Material(d.material.clone()) } else { Source::Texture(d.texture.clone()) };
-                material = assets.slot(
-                    MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last },
-                    &mut materials,
-                    settings.gain,
-                    settings.soft_distance,
-                );
-                let mesh_handle = meshes.add(new_mesh());
-                let mut spawned = commands.spawn((
-                        FxMesh,
-                        Mesh3d(mesh_handle.clone()),
-                        MeshMaterial3d(assets.slots[material as usize].handle.clone()),
-                        Transform::IDENTITY,
-                        Visibility::Hidden,
-                        Aabb::from_min_max(Vec3::splat(-0.01), Vec3::splat(0.01)),
-                        NotShadowCaster,
-                        NotShadowReceiver,
-                        ChildOf(entity),
-                    ));
-                // render layers are not inherited: the mesh is drawn for the cameras that see the effect
-                if let Some(layers) = layers {
-                    spawned.insert(layers.clone());
+                if d.has_geometry {
+                    // the mesh and its material come first, see `bind_geometry`
+                    let key = GeomKey {
+                        path: d.geometry.clone(),
+                        material: d.material.clone(),
+                        texture: d.texture.clone(),
+                        blend: d.blend_explicit.then_some(d.blend),
+                    };
+                    assets.geom(&key);
+                    pending_geom = Some(key);
+                } else {
+                    let source = if d.texture.is_empty() { Source::Material(d.material.clone()) } else { Source::Texture(d.texture.clone()) };
+                    material = assets.slot(
+                        MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None },
+                        &mut materials,
+                        settings.gain,
+                        settings.soft_distance,
+                    );
+                    let mesh_handle = meshes.add(new_mesh(false, false));
+                    mesh = spawn_mesh(&mut commands, entity, layers, mesh_handle.clone(), assets.slots[material as usize].handle.clone());
+                    handle = Some((mesh, mesh_handle));
                 }
-                mesh = spawned.id();
-                handle = Some((mesh, mesh_handle));
             }
             let mut st = EmitterState::new(fe.def.clone(), fe.parent, material, 1.0, hash_seed(entity, i), mesh);
+            st.pending_geom = pending_geom;
             if !enabled {
                 st.draws = false;
                 st.disable();
@@ -455,10 +488,61 @@ fn apply(
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
-        run.uploaded_quads = vec![1; def.emitters.len()];
+        run.uploaded_units = vec![1; def.emitters.len()];
         commands.entity(entity).insert(FxActive);
     }
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// Gives the mesh emitters of active effects their mesh, material and entity once the model is loaded.
+fn bind_geometry(
+    mut commands: Commands,
+    settings: Res<FxSettings>,
+    mut assets: ResMut<FxAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<FxMaterial>>,
+    mut q: Query<(Entity, &mut FxRun, Option<&RenderLayers>), With<FxActive>>,
+) {
+    for (entity, mut run, layers) in &mut q {
+        let run = &mut *run;
+        let Some(sim) = run.sim.as_mut() else { continue };
+        for (i, e) in sim.emitters.iter_mut().enumerate() {
+            let Some(key) = e.pending_geom.clone() else { continue };
+            match assets.geom(&key) {
+                GeomState::Loading => {}
+                GeomState::Failed => {
+                    e.pending_geom = None;
+                    e.draws = false;
+                }
+                GeomState::Ready(g) => {
+                    let m = &g.mtl;
+                    let source = if m.texture.is_empty() { Source::White } else { Source::Repeat(m.texture.clone()) };
+                    let mesh_key = MeshMat {
+                        mask: m.opacity_map.clone(),
+                        mask_chan: m.opacity_mask.map(|c| (c * 255.0).round() as u8),
+                        cutoff: (m.cutoff * 255.0).round() as u8,
+                    };
+                    let slot = assets.slot(
+                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key) },
+                        &mut materials,
+                        settings.gain,
+                        settings.soft_distance,
+                    );
+                    let mesh_handle = meshes.add(new_mesh(true, !m.opacity_map.is_empty()));
+                    let mesh = spawn_mesh(&mut commands, entity, layers, mesh_handle.clone(), assets.slots[slot as usize].handle.clone());
+                    e.material = slot;
+                    e.mesh = mesh;
+                    e.set_geom(g);
+                    if let Some(h) = run.meshes.get_mut(i) {
+                        *h = Some((mesh, mesh_handle));
+                    }
+                    if let Some(u) = run.uploaded_units.get_mut(i) {
+                        *u = 0;
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn hash_seed(e: Entity, i: usize) -> u64 {
@@ -484,8 +568,9 @@ fn simulate(
     let t0 = Instant::now();
     let Some(view) = view.0 else { return };
     let dt_frame = time.delta_secs().clamp(0.0, 0.1);
-    let budget = AtomicI32::new(settings.max_particles.saturating_sub(stats.particles) as i32);
+    let budget = AtomicI32::new(settings.max_particles.saturating_sub(stats.load) as i32);
     let alive = AtomicUsize::new(0);
+    let load = AtomicUsize::new(0);
     let quads = AtomicUsize::new(0);
     let emitters = AtomicUsize::new(0);
     let despawn: Mutex<Vec<Entity>> = Mutex::new(Vec::new());
@@ -513,6 +598,7 @@ fn simulate(
             size_scale: settings.size_scale,
             count_over_life: settings.count_over_life,
             tint: effect.tint,
+            sun: settings.sun,
             wind: settings.wind,
             budget: &budget,
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,
@@ -522,14 +608,19 @@ fn simulate(
             // wait until every texture is there, then start
             let mut ready = true;
             for e in sim.emitters.iter_mut().filter(|e| e.draws) {
+                if e.pending_geom.is_some() {
+                    ready = false;
+                    continue;
+                }
                 let slot = &assets.slots[e.material as usize];
                 match slot.state {
                     SlotState::Loading => ready = false,
                     SlotState::Failed => e.draws = false,
-                    SlotState::Ready => {
+                    SlotState::Ready if e.geom.is_none() => {
                         let t = e.def.tiling;
                         e.aspect = (slot.size.y as f32 * t.x as f32 / (slot.size.x as f32 * t.y as f32)).clamp(0.25, 4.0);
                     }
+                    SlotState::Ready => {}
                 }
             }
             if ready {
@@ -554,7 +645,11 @@ fn simulate(
             if sim.finished() {
                 if effect.looping {
                     sim.reset();
-                    sim.prime(&ctx);
+                    if effect.prime {
+                        sim.prime(&ctx);
+                    } else {
+                        sim.primed = true;
+                    }
                 } else {
                     run.finished = true;
                     if effect.despawn_when_finished && let Ok(mut d) = despawn.lock() {
@@ -564,7 +659,8 @@ fn simulate(
             }
         }
         alive.fetch_add(sim.alive(), Ordering::Relaxed);
-        quads.fetch_add(sim.emitters.iter().map(|e| e.quads).sum::<usize>(), Ordering::Relaxed);
+        load.fetch_add(sim.load(), Ordering::Relaxed);
+        quads.fetch_add(sim.emitters.iter().map(|e| e.units).sum::<usize>(), Ordering::Relaxed);
         emitters.fetch_add(sim.emitters.len(), Ordering::Relaxed);
         run.sim = Some(sim);
     });
@@ -575,6 +671,7 @@ fn simulate(
     stats.effects = all.count();
     stats.active = q.iter().count();
     stats.particles = alive.into_inner();
+    stats.load = load.into_inner();
     stats.quads = quads.into_inner();
     stats.emitters = emitters.into_inner();
     stats.sim_ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -606,7 +703,7 @@ fn upload(
             let Some(Some((entity, handle))) = run.meshes.get(i) else { continue };
             let Ok((mut aabb, mut visibility)) = vis.get_mut(*entity) else { continue };
             e.dirty = false;
-            if e.quads == 0 {
+            if e.units == 0 {
                 if *visibility != Visibility::Hidden {
                     *visibility = Visibility::Hidden;
                 }
@@ -619,23 +716,31 @@ fn upload(
             if let Some(VertexAttributeValues::Float32x2(v)) = mesh.attribute_mut(Mesh::ATTRIBUTE_UV_0) {
                 std::mem::swap(v, &mut e.uv);
             }
+            if let Some(VertexAttributeValues::Float32x2(v)) = mesh.attribute_mut(Mesh::ATTRIBUTE_UV_1) {
+                std::mem::swap(v, &mut e.uv1);
+            }
             if let Some(VertexAttributeValues::Float32x4(v)) = mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR) {
                 std::mem::swap(v, &mut e.col);
             }
-            if run.uploaded_quads[i] != e.quads
+            if run.uploaded_units[i] != e.units
                 && let Some(Indices::U32(idx)) = mesh.indices_mut()
             {
-                let have = idx.len() / 6;
-                if e.quads > have {
-                    idx.reserve((e.quads - have) * 6);
-                    for q in have..e.quads {
-                        let b = (q * 4) as u32;
-                        idx.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+                // the triangles of one quad or one mesh copy, shifted by its vertices
+                let (verts, unit): (u32, &[u32]) = match &e.geom {
+                    Some(g) => (g.tmpl.pos.len() as u32, &g.tmpl.idx),
+                    None => (4, &QUAD_INDICES),
+                };
+                let have = idx.len() / unit.len();
+                if e.units > have {
+                    idx.reserve((e.units - have) * unit.len());
+                    for u in have..e.units {
+                        let b = u as u32 * verts;
+                        idx.extend(unit.iter().map(|i| i + b));
                     }
                 } else {
-                    idx.truncate(e.quads * 6);
+                    idx.truncate(e.units * unit.len());
                 }
-                run.uploaded_quads[i] = e.quads;
+                run.uploaded_units[i] = e.units;
             }
             *aabb = Aabb::from_min_max(e.min, e.max);
             if *visibility != Visibility::Inherited {

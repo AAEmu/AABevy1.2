@@ -11,8 +11,11 @@ use crate::params::Blend;
 /// Uniform of `fx.wesl`.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct FxParams {
-    /// x: colour gain, y: soft particle distance in metres (0 = off), z: blend mode (0 alpha, 1 premultiplied, 2 additive, 3 multiply).
+    /// x: colour gain, y: soft particle distance in metres (0 = off), z: blend mode (0 alpha, 1 premultiplied, 2 additive,
+    /// 3 multiply, 4 opaque), w: alpha test threshold (0 = none).
     pub gain: Vec4,
+    /// Weights of the opacity map's channels (all 0 = no opacity map).
+    pub mask: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -22,6 +25,9 @@ pub struct FxMaterial {
     #[texture(1)]
     #[sampler(2)]
     pub texture: Option<Handle<Image>>,
+    /// The separate opacity map of a mesh material (sampled with the mesh's second texture coordinates).
+    #[texture(3)]
+    pub mask: Option<Handle<Image>>,
     pub blend: Blend,
     /// Sort bias of `DrawLast`: larger draws later among equally distant emitters.
     pub depth_bias: f32,
@@ -33,9 +39,10 @@ impl FxParams {
             Blend::ColorBased => 1.0,
             Blend::Additive => 2.0,
             Blend::Multiplicative => 3.0,
+            Blend::Opaque => 4.0,
             _ => 0.0,
         };
-        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0) }
+        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0), mask: Vec4::ZERO }
     }
 }
 
@@ -49,7 +56,8 @@ impl Material for FxMaterial {
             Blend::Additive => AlphaMode::Add,
             Blend::ColorBased => AlphaMode::Premultiplied,
             Blend::Multiplicative => AlphaMode::Multiply,
-            Blend::Alpha | Blend::Opaque | Blend::None => AlphaMode::Blend,
+            Blend::Opaque => AlphaMode::Opaque,
+            Blend::Alpha | Blend::None => AlphaMode::Blend,
         }
     }
 

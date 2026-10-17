@@ -16,6 +16,10 @@
 //! * `--scale <x>`               scale of every effect (the cell entities scale them, e.g. 0.65)
 //! * `--fx-yaw <deg>`            turns every effect about the vertical axis (effects emit along their own forward, -Z)
 //! * `--day`                      a brighter ground (default: dark, so that additive glows show)
+//! * `--loop`                     start every effect again when it has finished (skill effects are one shots)
+//! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
+//!                                effect in a single shot; add `--loop` and `--no-prime`)
+//! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
 //! mesh upload passes.
@@ -63,6 +67,23 @@ struct Orbit {
 #[derive(Component)]
 struct Label(Vec3);
 
+/// An effect that starts `at` seconds after the program.
+#[derive(Component)]
+struct Later {
+    at: f32,
+    effect: Effect,
+    place: Transform,
+}
+
+fn start_later(mut commands: Commands, time: Res<Time>, later: Query<(Entity, &Later)>) {
+    for (e, l) in &later {
+        if time.elapsed_secs() >= l.at {
+            commands.spawn((l.effect.clone(), l.place));
+            commands.entity(e).despawn();
+        }
+    }
+}
+
 fn main() {
     let mut effects = args("--effect");
     if effects.is_empty() {
@@ -98,7 +119,7 @@ fn main() {
         .insert_resource(Spawn { effects, grid, spacing })
         .insert_resource(ClearColor(Color::srgb(0.01, 0.012, 0.02)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, labels, log_stats))
+        .add_systems(Update, (orbit_camera, labels, log_stats, start_later))
         .run();
 }
 
@@ -131,7 +152,12 @@ fn setup(
     let pillar_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.2, 0.22), perceptual_roughness: 0.9, ..default() });
 
     let mut positions = Vec::new();
-    if spawn.grid > 0 {
+    if spawn.grid > 0 && num("--stagger", 0.0) > 0.0 {
+        // a film strip: one row
+        for i in 0..spawn.grid {
+            positions.push((spawn.effects[0].clone(), Vec3::new((i as f32 - (spawn.grid as f32 - 1.0) * 0.5) * spawn.spacing, 0.0, 0.0)));
+        }
+    } else if spawn.grid > 0 {
         let side = (spawn.grid as f32).sqrt().ceil() as usize;
         for i in 0..spawn.grid {
             let (x, z) = ((i % side) as f32, (i / side) as f32);
@@ -146,8 +172,19 @@ fn setup(
             positions.push((name.clone(), Vec3::new((i as f32 - (n as f32 - 1.0) * 0.5) * spawn.spacing, 0.0, 0.0)));
         }
     }
-    for (name, pos) in positions {
-        commands.spawn((Effect::new(name.clone()).with_scale(num("--scale", 1.0)), Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()))));
+    let stagger = num("--stagger", 0.0);
+    for (i, (name, pos)) in positions.into_iter().enumerate() {
+        let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
+        let place = Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
+        if stagger > 0.0 {
+            // the copies start once the first one has loaded everything (an identical effect behind the camera loads it)
+            if i == 0 {
+                commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
+            }
+            commands.spawn(Later { at: 3.0 + i as f32 * stagger, effect, place });
+        } else {
+            commands.spawn((effect, place));
+        }
         commands.spawn((Mesh3d(pedestal.clone()), MeshMaterial3d(pedestal_mat.clone()), Transform::from_translation(pos + Vec3::Y * 0.06)));
         if spawn.grid == 0 {
             // a pillar behind each effect, to see the soft particles and the depth sorting
