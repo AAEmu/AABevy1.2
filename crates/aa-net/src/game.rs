@@ -590,6 +590,25 @@ mod tests {
     }
 
     #[test]
+    fn cancel_delete_response_golden_bytes() {
+        // SCCancelCharacterDeleteResponsePacket(characterId, status) as the server writes it: u32 id,
+        // u8 status (3 restored, 4 unknown character); body [9, 0, 0, 0, 3] in the server's
+        // `world_flow_tests`. Frame: [dd][01][hash 00][count 00][u16 opcode 0x3c][body].
+        let frame = [0xDD, 0x01, 0x00, 0x00, 0x3C, 0x00, 9, 0, 0, 0, 3];
+        assert_eq!(
+            ServerMsg::decode(&frame).unwrap(),
+            ServerMsg::CancelCharacterDeleteResponse { id: 9, status: 3 }
+        );
+        let frame = [0xDD, 0x01, 0x00, 0x00, 0x3C, 0x00, 77, 0, 0, 0, 4];
+        assert_eq!(
+            ServerMsg::decode(&frame).unwrap(),
+            ServerMsg::CancelCharacterDeleteResponse { id: 77, status: 4 }
+        );
+        // CSCancelCharacterDelete from the client: the u32 id only.
+        assert_eq!(ClientMsg::CancelDeleteCharacter { id: 258 }.encode_body(), [2, 1, 0, 0]);
+    }
+
+    #[test]
     fn character_list_chunk_with_one_character() {
         // A character with empty equipment, built field by field like the server's `Character.Write`.
         let mut w = Writer::new();

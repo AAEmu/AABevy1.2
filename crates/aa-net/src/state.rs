@@ -62,6 +62,10 @@ impl Characters {
         match e {
             Event::CharacterList(l) => self.list = l.clone(),
             Event::RaceCongestion(c) => self.race_congestion = *c,
+            Event::CharacterDeleteCancelled { character_id, restored: true } => {
+                let Some(c) = self.list.iter_mut().find(|c| c.id == *character_id) else { return false };
+                (c.delete_request_time, c.delete_time) = (0, 0);
+            }
             Event::Disconnected { .. } => *self = Self::default(),
             _ => return false,
         }
@@ -283,6 +287,23 @@ mod tests {
             obj_id: 99,
             movement: Movement::unit(Pos::default(), 0.0, 1),
         }));
+    }
+
+    #[test]
+    fn a_cancelled_delete_clears_the_timer() {
+        let mut s = Characters::default();
+        let pending = Character { id: 3, name: "A".into(), delete_request_time: 100, delete_time: 160, ..Default::default() };
+        s.list.push(pending);
+        assert!(s.by_id(3).unwrap().delete_requested());
+        // status 4 (unknown character) restores nothing
+        assert!(!s.apply(&Event::CharacterDeleteCancelled { character_id: 3, restored: false }));
+        assert!(s.by_id(3).unwrap().delete_requested());
+        assert!(s.apply(&Event::CharacterDeleteCancelled { character_id: 3, restored: true }));
+        let c = s.by_id(3).unwrap();
+        assert!(!c.delete_requested());
+        assert_eq!(c.delete_time, 0);
+        // a cancel for a character that is not listed changes nothing
+        assert!(!s.apply(&Event::CharacterDeleteCancelled { character_id: 9, restored: true }));
     }
 
     #[test]

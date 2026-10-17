@@ -20,7 +20,7 @@ cargo run -p aa-net --example walkthrough -- --roundtrip        # + back to char
 cargo run -p aa-net --example walkthrough -- --delete-test      # + create, delete and list a throw-away character
 cargo run -p aa-net --example walkthrough -- --move-secs 120    # + walk a circle for 2 minutes at 10 Hz (keep-alive soak test)
 cargo run -p aa-net --features bevy --example bevy_walkthrough  # same through NetPlugin in a headless Bevy app
-cargo test -p aa-net                                            # 41 unit tests + 2 scripted-server tests
+cargo test -p aa-net                                            # 43 unit tests + 2 scripted-server tests
 RUST_LOG=aa_net=debug cargo run -p aa-net --example walkthrough # protocol trace (trace = every game packet)
 ```
 
@@ -167,7 +167,8 @@ instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experi
 
 ### State tables (`state`)
 
-`Worlds { list, queue, account }`, `Characters { list, race_congestion }`, `Player { spawn }`,
+`Worlds { list, queue, account }`, `Characters { list, race_congestion }` (a cancelled delete clears the
+delete timer of its character), `Player { spawn }`,
 `Units { by_id }`, `Doodads { by_id }`, `Status { phase, last_error }`; each has `apply(&Event) -> bool`,
 `WorldState` bundles them. They clear themselves on `LeftWorld` / `Disconnected`.
 
@@ -204,7 +205,7 @@ The login-stage scripts (`x2ui/loginstage/world_select`, `character_select`, `ch
 | `X2LoginCharacter:GetNumLoginCharacters`, `GetLoginCharacterName/Level/Race/Gender/Abilities/Zone/Faction/FactionName/Money/BmPoint/LaborPower` | `Characters.list[i]`: `name`, `level`, `race`, `gender`, `abilities`, `zone_id`, `faction_id`, `faction_name`, `money`, `bm_point`, `labor_power` (+ `labor_power_modified`; the max is derived by the client) |
 | `IsDeleteRequestedCharacter`, `GetCharacterDeleteWaitingTime`, `IsTransferRequestedCharacter` | `delete_request_time != 0`, `delete_time`, `transfer_request_time` |
 | `GetLastPlayedCharacterIndex` | index of the highest `leave_time` |
-| `SelectCharacter`, `CreateCharacter`, `DeleteCharacter`, `CancelCharacterDelete`, `RequestCharacterListRefresh` | `Command::EnterGame`, `CreateCharacter`, `DeleteCharacter`, `CancelDeleteCharacter`, `RefreshCharacters` |
+| `SelectCharacter`, `CreateCharacter`, `DeleteCharacter`, `CancelCharacterDelete`, `RequestCharacterListRefresh` | `Command::EnterGame`, `CreateCharacter`, `DeleteCharacter`, `CancelDeleteCharacter`, `RefreshCharacters` (the cancel answer is `Event::CharacterDeleteCancelled`) |
 | `LeaveWorld` / `EXIT_TO_WORLD_LIST` (server button) | `Command::LeaveWorld(CharacterSelect)` then `Command::ReturnToWorldSelect` |
 
 Character creation data: `CreateCharacter { name, race, gender, body_items: [u32; 7], model_params, abilities, level }`.
@@ -216,7 +217,10 @@ case (`Bevytest`). `CharacterCreateFailed { reason }`: 3 failed / pending deleti
 5 invalid characters.
 Deleting is delayed: `CharacterDeleteResponse { status: 2, delete_request_time, delete_time }`
 (`delete_time` = request + 60 s at level 1, the character stays listed with `delete_requested()` until
-then); `CancelDeleteCharacter` answers status 3 (restored) or 4 (unknown character).
+then); `CancelDeleteCharacter` answers `SCCancelCharacterDeleteResponse { id, status }` (opcode `0x03c`, body
+`u32 id, u8 status`): status 3 (restored) becomes `Event::CharacterDeleteCancelled { character_id, restored:
+true }`, which clears the character's delete timer in `Characters`; status 4 (unknown character) gives
+`restored: false`. The session refreshes the character list after either answer.
 
 ## Evidence (lane `bevy`, `walkthrough`)
 
