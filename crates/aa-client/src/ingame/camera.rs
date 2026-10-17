@@ -78,14 +78,17 @@ pub fn orbit_input(
     scroll: Res<AccumulatedMouseScroll>,
     mut cameras: Query<&mut OrbitCamera>,
     mut window: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
 ) {
     let Ok(mut orbit) = cameras.single_mut() else { return };
-    let dragging = mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right);
+    // a drag that began on a HUD window (or the wheel over a list) is the HUD's
+    let over_ui = over_ui.is_some_and(|o| o.0);
+    let dragging = !over_ui && (mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right));
     if dragging {
         orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
         orbit.pitch = (orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.3, 1.45);
     }
-    if scroll.delta.y != 0.0 {
+    if scroll.delta.y != 0.0 && !over_ui {
         let lines = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y,
             MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
