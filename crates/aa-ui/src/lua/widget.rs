@@ -885,6 +885,16 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     // Widgets without a value (scroll windows: `scrollWnd:GetValue("vert")`) report 0; sliders
     // and status bars override it.
     def("GetValue", method(lua, |lua, _, _| ret(lua, 0.0))?)?;
+    def(
+        "SetCloseOnEscape",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            if let Some(w) = ui(lua).tree.widget_mut(id) {
+                w.close_on_escape = on;
+            }
+            none()
+        })?,
+    )?;
     // Lines of the (wrapped) text; tooltips: their `AddLine` lines too.
     def(
         "GetLineCount",
@@ -943,7 +953,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     // --- misc no-ops that scripts call during setup -------------------------------------
     for name in [
         "SetSounds",
-        "SetCloseOnEscape",
         "EnableHidingIsRemove",
         "RegisterForClicks",
         "RegisterForDrag",

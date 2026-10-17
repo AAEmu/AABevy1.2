@@ -383,9 +383,41 @@ pub fn scripted_input(
                     _ => continue,
                 };
                 if !rt.key(&key) {
-                    warn!("fake: {a} {s}: no widget has the keyboard focus");
+                    if key == aa_ui::UiKey::Escape {
+                        match rt.escape() {
+                            Ok(e) => info!("fake: escape -> {e:?}"),
+                            Err(e) => warn!("fake: escape: {e}"),
+                        }
+                    } else {
+                        warn!("fake: {a} {s}: no widget has the keyboard focus");
+                    }
                 }
                 info!("fake: {a} {s} -> focus {:?}", rt.focus());
+            }
+            // `--open ACTION T`: a key binding action (`toggle_bag`, `toggle_character`,
+            // `toggle_spellbook`, `toggle_quest`, `toggle_worldmap`, `open_config`) or a content
+            // constant (`UIC_BAG`).
+            "--open" => {
+                let (Some(s), Some(at)) = (args.get(i + 1), num(2)) else {
+                    continue;
+                };
+                if t < at {
+                    continue;
+                }
+                done.push(i);
+                let r = if s.starts_with("UIC_") {
+                    match rt.content_id(s) {
+                        Some(c) => rt.toggle_content(c).map(|_| true),
+                        None => Ok(false),
+                    }
+                } else {
+                    rt.hotkey(s)
+                };
+                match r {
+                    Ok(true) => info!("fake: --open {s}"),
+                    Ok(false) => warn!("fake: --open {s}: not a UI window"),
+                    Err(e) => warn!("fake: --open {s}: {e}"),
+                }
             }
             _ => {}
         }
@@ -396,8 +428,54 @@ pub fn scripted_input(
 /// of `reference/ingame/spawn`. Run after [`install_with`], before the world stage scripts.
 #[allow(dead_code)]
 pub fn install_ingame(rt: &mut UiRuntime) {
-    if let Err(e) = rt.exec("@fake_ingame.lua", include_str!("fake_ingame.lua")) {
-        eprintln!("fake: fake_ingame.lua: {e}");
+    // The HUD first, then the game data of the windows players open (one file per window).
+    for (name, code) in [
+        ("fake_ingame.lua", include_str!("fake_ingame.lua")),
+        ("fake_bag.lua", include_str!("fake_bag.lua")),
+        ("fake_character.lua", include_str!("fake_character.lua")),
+        ("fake_skill.lua", include_str!("fake_skill.lua")),
+        ("fake_quest.lua", include_str!("fake_quest.lua")),
+        ("fake_worldmap.lua", include_str!("fake_worldmap.lua")),
+        ("fake_options.lua", include_str!("fake_options.lua")),
+        ("fake_target.lua", include_str!("fake_target.lua")),
+    ] {
+        if let Err(e) = rt.exec(&format!("@{name}"), code) {
+            eprintln!("fake: {name}: {e}");
+        }
+    }
+}
+
+/// Key bindings of the examples, the client's defaults: I / B bag, C character, K skills,
+/// L quests, M world map, Escape closes the topmost window or opens the system menu.
+#[allow(dead_code)]
+pub fn hotkeys(
+    rt: Option<NonSend<UiRuntime>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut had_focus: Local<bool>,
+) {
+    let Some(rt) = rt else { return };
+    let focused = std::mem::replace(&mut *had_focus, rt.focus().is_some());
+    if focused || rt.focus().is_some() {
+        return;
+    }
+    for (key, action) in [
+        (KeyCode::KeyI, "toggle_bag"),
+        (KeyCode::KeyB, "toggle_bag"),
+        (KeyCode::KeyC, "toggle_character"),
+        (KeyCode::KeyK, "toggle_spellbook"),
+        (KeyCode::KeyL, "toggle_quest"),
+        (KeyCode::KeyM, "toggle_worldmap"),
+    ] {
+        if keys.just_pressed(key) {
+            if let Err(e) = rt.hotkey(action) {
+                warn!("fake: {action}: {e}");
+            }
+        }
+    }
+    if keys.just_pressed(KeyCode::Escape) {
+        if let Err(e) = rt.escape() {
+            warn!("fake: escape: {e}");
+        }
     }
 }
 
