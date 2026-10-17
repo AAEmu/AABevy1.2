@@ -712,17 +712,47 @@ Reviewed captures (existing `ingame_hud` + `aa_dev`, all windows closed):
   the panel, slots, tab icons and text return to the reference layout. The missing 3D scene is
   expected in this UI-only example. Zero script errors; 427–468 FPS in the popup capture.
 
-## Keyboard rebinding audit / app handoff
+## Keyboard capture and rebinding handoff
 
 The original `option/key_binding_option.alb` already supplies the editing UI, ignored-key
 list, modifier composition, primary/secondary rows, conflict tooltip and reset/release buttons.
-The missing toolkit piece is generic keyboard capture: `EnableKeyboard(true)` is a no-op and
-`ui_keyboard` currently forwards only key presses to edit boxes, synthesizing immediate
-`OnKeyUp`. Rebinding needs the enabled frame to receive real arbitrary-key release events
-(including function keys), plus wheel events while it owns capture. It must suppress game
-input through `UiStats::keyboard_focus` while that capture is active. `EnableFocus(true)`
-alone is not the original flow: the page uses `frame:RequestInput(button)`, enables keyboard
-on the page, and forwards `OnKeyUp` to `button:OnInput`.
+The toolkit now implements `EnableKeyboard(true)` as one visible capture owner, independent
+of edit/navigation focus (native `392789e0` / `392a6960`). A false call releases only its own
+capture, so an old page cannot release a newer owner's capture. `EnableFocus(true)` enables
+click focus on generic widgets; capture takes priority over that focus. The original page uses
+`frame:RequestInput(button)`, enables keyboard on the page, and forwards real `OnKeyUp` to
+`button:OnInput`. Wheel input goes to capture even outside its rectangle.
+
+Physical OS events produce `OnKeyDown` on presses/repeats and `OnKeyUp` on release. Edit text
+still uses the OS text, while binding names use the physical key table traced at native
+`39435c10` through `39436d90`. These include `number0`..`number9`, `number+`, `number-`,
+`apostrophe`, `backslash`, `minus`, `equals`, `{`, `}`, and `f1`..`f15`; Shift/CapsLock do not
+rename physical letter/digit keys. `UiRuntime::key` remains a programmatic press+release.
+
+Integration contracts:
+
+* Run gameplay keyboard systems after the public `aa_ui::UiInput` Update system set. Read
+  `UiRuntime::keyboard_captured()` or `UiStats::keyboard_focus`; both include capture/edit
+  focus, a consumed edge for the rest of its frame, and UI-owned held keys until release.
+  Releasing capture from its own `OnKeyUp` therefore cannot leak that release to gameplay.
+  `UiRuntime::focus()` includes ordinary navigation focus, which need not block gameplay.
+* `lua::keyboard::install_input(&rt.lua)` installs/restores `X2Input:IsShiftKeyDown`,
+  `IsControlKeyDown`, and `IsAltKeyDown` after application fallback scripts. These read
+  physical OS messages, independently of any `ButtonInput` clearing done by the app. Both
+  left/right modifiers are tracked; OS focus loss clears held state without inventing a
+  binding release. `UiRuntime::modifiers()` exposes the same state to Rust.
+* Headless callers forwarding physical events use `key_event(code, pressed, text)` and call
+  `lua::keyboard::begin_frame` once per simulated input frame. Bevy does this automatically.
+
+Keyboard tests exercise capture precedence over an edit box, actual release timing and
+repeats, wheel capture, transfer between owners, hidden captures, held-key/release suppression,
+modifier reset/restoration, and the Bevy `UiInput` handoff. A test executes the original
+`key_binding_option.alb` handlers: mouse click selects the primary row; F4 down does not bind;
+release binds `SHIFT-CTRL-ALT-F4`, returns hotkeys to gameplay, and captures a modified wheel
+binding on the secondary row. Its original `OnHide` ends capture. These are input changes;
+the motion milestone above contains the associated UI rendering verification.
+Final regression check: `cargo test -p aa-ui --tests` — **88 passed, one font metrics test
+ignored**.
 
 `aa-client` needs to own these contracts (no client changes in this milestone):
 
@@ -737,9 +767,8 @@ on the page, and forwards `OnKeyUp` to `button:OnInput`.
 * `GetOptionBinding(action,manager,true,arg)` / `GetOptionBindingButton(button,manager)` read
   the draft; `GetBinding(action,manager)` / `GetBindingButton(button,manager)` read active.
   `X2Hotkey:EnableHotkey(false)` suspends gameplay binding execution while capturing input.
-* Modifier queries `X2Input:IsShiftKeyDown`, `IsControlKeyDown`, `IsAltKeyDown` must reflect
-  real input after the fallback is installed (its current implementations always return
-  false). The Lua editor composes `SHIFT-CTRL-ALT-KEY` in that order.
+* Reinstall toolkit modifier queries after fallback scripts. The Lua editor composes
+  `SHIFT-CTRL-ALT-KEY` in that order.
 * Gameplay/window actions currently inspect fixed Bevy keys in `hud/input.rs` and the movement/
   combat systems; they need one active-binding resolver. Also remove the fixed quest-dialog
   `GetOptionBinding` wrapper in `hud/quest.lua` when bindings become authoritative.

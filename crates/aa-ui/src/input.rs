@@ -258,7 +258,14 @@ pub fn update(
         } else {
             "OnWheelDown"
         };
-        let mut t = hover;
+        let capture = {
+            let u = ui(lua);
+            u.keyboard.capture(&u.tree)
+        };
+        if capture.is_some() {
+            ui(lua).keyboard.consume();
+        }
+        let mut t = capture.or(hover);
         let mut handled = false;
         while let Some(id) = t {
             if has_handler(lua, id, name) {

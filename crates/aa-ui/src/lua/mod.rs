@@ -23,6 +23,7 @@ pub mod edit;
 pub mod folder;
 mod globals;
 pub mod grid;
+pub mod keyboard;
 pub mod picker;
 pub mod roadmap;
 pub mod slot;
@@ -72,6 +73,7 @@ pub struct Ui {
     /// client's mouse-over chain, each of them got `OnEnter`.
     pub entered: Vec<Id>,
     pub focus: Option<Id>,
+    pub keyboard: keyboard::Keyboard,
     /// Caret blink state of the focused edit box and the time its phase started.
     pub caret_visible: bool,
     pub caret_t0: f64,

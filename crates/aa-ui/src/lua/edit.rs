@@ -5,11 +5,11 @@
 //! widget: text is inserted at the caret (`SetMaxTextLength`, `SetDigit`, `SetDigitMax`,
 //! `SetReadOnly` apply) and fires `OnTextChanged(self)`; Enter fires `OnEnterPressed(self)`
 //! (multi-line boxes insert a line break), Escape `OnEscapePressed(self)`, Tab
-//! `OnTabPressed(self)`. Every key also fires `OnKeyDown(self, name)` / `OnKeyUp(self, name)`
-//! with lower-case names (`"enter"`, `"a"`), as `auction/bid.lua` expects.
+//! `OnTabPressed(self)`. Physical keys fire `OnKeyDown(self, name)` on press and
+//! `OnKeyUp(self, name)` on release; programmatic `UiRuntime::key` sends both.
 //! `SetText` does not fire `OnTextChanged` (the money edits call `SetText` from it).
 
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, Table};
 
 use super::{call_handler, method, none, ret, ui};
 use crate::tree::{Id, WidgetType};
@@ -102,7 +102,7 @@ pub fn set_focus(lua: &Lua, id: Option<Id>) {
         }
         u.focus = id;
         u.caret_t0 = u.time_ms;
-        u.caret_visible = id.is_some();
+        u.caret_visible = id.is_some_and(|id| u.tree.widget(id).is_some_and(|w| is_edit(&w.ty)));
         // Caret at the end of the text.
         if let Some(i) = id {
             let len = u.tree.get(i).text().map_or(0, |t| t.text.chars().count());
@@ -125,7 +125,7 @@ pub(crate) fn clicked(lua: &Lua, target: Id) {
         let mut found = None;
         while let Some(id) = t {
             if let Some(w) = u.tree.widget(id)
-                && is_edit(&w.ty)
+                && (is_edit(&w.ty) || u.keyboard.takes_focus(id))
             {
                 let takes = w.enabled && !w.edit.as_ref().is_some_and(|e| e.no_focus);
                 found = takes.then_some(id);
@@ -146,6 +146,9 @@ pub(crate) fn tick(lua: &Lua) {
         u.focus = None;
         u.caret_visible = false;
         u.tree.touch();
+        return;
+    }
+    if !u.tree.widget(f).is_some_and(|w| is_edit(&w.ty)) {
         return;
     }
     let on = ((u.time_ms - u.caret_t0) / BLINK_MS) as i64 % 2 == 0;
@@ -170,11 +173,10 @@ fn byte_at(s: &str, chars: usize) -> usize {
 
 /// Deliver a key press to the focused widget. Returns whether a widget had the focus.
 pub fn key(lua: &Lua, k: &UiKey) -> bool {
-    let Some(id) = ui(lua).focus else {
-        return false;
-    };
-    let name = Value::String(lua.create_string(k.name()).unwrap());
-    call_handler(lua, id, "OnKeyDown", vec![name.clone()]);
+    super::keyboard::key(lua, k)
+}
+
+pub(crate) fn press(lua: &Lua, id: Id, k: &UiKey) {
     let multiline = ui(lua)
         .tree
         .widget(id)
@@ -217,8 +219,6 @@ pub fn key(lua: &Lua, k: &UiKey) -> bool {
         UiKey::Tab => call_handler(lua, id, "OnTabPressed", vec![]),
         _ => {}
     }
-    call_handler(lua, id, "OnKeyUp", vec![name]);
-    true
 }
 
 /// Replace the text, caret at the end. Returns whether it changed.

@@ -1027,8 +1027,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "StartMoving",
         "StopMovingOrSizing",
         "SetEscEvent",
-        "EnableFocus",
-        "EnableKeyboard",
         "SetSaveConfig",
         "UseDynamicDrawableState",
         "UseDynamicContentState",
@@ -1080,6 +1078,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         })?,
     )?;
     super::edit::focus_methods(lua, &m)?;
+    super::keyboard::methods(lua, &m)?;
     def(
         "SetTitleInset",
         method(lua, |lua, id, a| {
