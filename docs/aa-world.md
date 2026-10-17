@@ -510,7 +510,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
   applied sample, `ocean_fog`), `AtmosphereTuning` (`AA_TUNE`), `WaterStyles` (materials by style), `TodCache`,
   `WorldInfo(Arc<World>)`, `Streamer::loaded_cells()`, `ObjectState` (`stats`), `WorldTimings` (per frame main thread ms
   of the streaming systems), `pipelines::PipelineStatus` (render pipelines waiting / requested, frames of the render world; for loading screens), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
-  `TerrainQuery` (ground queries, see below), `WaterQuery` (water height and kind, see Water). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
+  `TerrainQuery` (ground queries, see below), `WaterQuery` (water height and kind, see Water), `WorldCollision` (ground, rays, camera clipping and wall sliding against the brushes and the terrain, see Collision with brushes). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
 * Parsers (no Bevy world needed, all tested against the pak): `heightmap::CellHeights::parse`, `cover::Cover::parse` (+ `atlas`),
@@ -546,16 +546,114 @@ terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. 
 * Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (use `WaterQuery`, see Water),
   and the surface type (the nibble is in `CellHeights::surface`, its meaning in the cell's `leveldata.xml`, see `terrain_layers::parse_surface_types`).
 
-**Collision with brushes (buildings, rocks, bridges): how it would be exposed** (not implemented). The pieces exist: `placement::parse_brush_dat`
-gives every brush of a cell (model, transform; 162k in the world), `aa-cry` parses the `.cgf` models and marks the physics proxy nodes
-(`proxy*`, `$collision`, `$physics_proxy`, `NodeKind::Proxy`, the `MeshPhysicsData` chunk; materials with `COLLISION_PROXY` / `RAYCAST_PROXY`
-flags) that the renderer drops, falling back to the lowest level of detail of the visible mesh for models without a proxy. A
-`BrushColliders` next to `TerrainQuery` would build, per cell on a task, a static triangle soup in game space (proxy triangles transformed by the
-brush matrices, only brushes whose model has a proxy or a walkable surface), indexed by a 16 m grid, and drop it with the cell; then
-`TerrainQuery::ground_below(x, y, z, step_up) -> Option<Ground>` returns the highest surface not above `z + step_up` (the terrain triangle or a
-brush triangle whose normal is walkable), plus `raycast(origin, dir, max) -> Option<Hit>` and a capsule sweep for walls. The server stays
-authoritative for positions; the client only needs this for standing on stairs and bridges and for not walking through walls. Cost would be one
-CGF proxy load per distinct model (cached by `aa-cry`) and a few hundred thousand triangles near the player.
+### Collision with brushes (`collide.rs`, `collide/`, `aa_cry::physics`)
+
+`aa_world::WorldCollision` (`aa_world::collide`) is the collision of the world's brushes (buildings, rocks, bridges, walls, stairs) next to the
+terrain, for the camera and the player controller of `aa-client`. Like `TerrainQuery` it is a clonable `Arc` handle (`&self` methods,
+`Send + Sync`) and a `Resource` (`AaWorldPlugin` inserts one for its world unless the app has one; build your own with
+`WorldCollision::with_config(world, terrain, CollisionConfig { .. })` and insert it before the plugin to change the settings), in game
+coordinates (metres, x east, y north, z up).
+
+```rust
+let world = Res<WorldCollision>;                                   // or WorldCollision::new("main_world", TerrainQuery::new("main_world"))
+world.request_around(x, y, 150.0);                                 // the plugin does this for the camera / WorldFocus (follow(), 4 Hz)
+world.ready_around(x, y, 60.0)                                     // bool: every cell in that radius is built (loading screens, the first step)
+
+// camera: the arm from the pivot above the head towards the wanted camera position
+world.clip_camera(pivot, wanted, 0.3) -> Vec3                      // wanted, or short of the wall / ground (Mask::CAMERA, sphere of 0.3 m)
+world.sweep_sphere(origin, dir, max, radius, mask) -> Option<Hit>  // t = how far the sphere centre gets, point / normal = contact
+world.raycast(origin, dir, max) -> Option<Hit>                     // terrain + all brushes; raycast_mask(.., Mask::CAMERA | ALL | STRUCTURES | PROPS | TERRAIN)
+// Hit { t, point, normal (faces the origin), terrain: bool }
+
+// player: stand on bridges and stairs, slide along walls
+world.ground_below(x, y, z, step_up) -> Option<Ground>             // the highest walkable surface not above z + step_up, terrain or brush
+world.slide(from, Vec2 delta, radius, height, step_up) -> Pushed   // horizontal move of a standing capsule, sub-stepped, slides along walls
+world.push_out(feet, radius, height, step_up) -> Pushed            // the same without the move: Pushed { pos, blocked, normal }
+world.triangles_near(center, half_size, mask) -> Vec<[Vec3; 3]>    // for debug drawing (examples/collide.rs)
+```
+
+A controller frame is `let m = world.slide(pos, wish_dir * speed * dt, 0.35, 1.8, 0.5);` then
+`let z = world.ground_below(m.pos.x, m.pos.y, pos.z, 0.5).map_or(<fall>, |g| g.height);` and `pos = (m.pos.xy, z)`; the camera is
+`world.clip_camera(pivot, wanted, 0.3)` every frame.
+
+* **Semantics.** `ground_below` finds the highest surface under the point that is not above `z + step_up` (the feet height and the tallest
+  step), so a bridge deck 20 m over the water is invisible to someone on the shore and found by someone on the deck; a surface counts as
+  ground up to `CollisionConfig::max_slope` (55 degrees), both faces of a triangle; the terrain counts at any slope. The feet are a disc
+  (`foot_radius` 0.4): where nothing is under the centre the rim is probed, because the proxies of neighbouring pieces leave gaps (0.7 m
+  between a quay and the bridge deck at Lutesong Harbor) that would drop the character through; `None` when everything under the point is above
+  the limit (inside the ground: use `world.terrain().height_at`) or outside the map. `push_out` / `slide` use a vertical capsule as a
+  chain of spheres at most one radius apart, starting `step_up + radius` above the feet (so curbs and steps below `step_up` never push), and
+  only change x and y; terrain slopes are the controller's rule (the terrain is not a wall here). Thin walls cannot be crossed: `slide` pushes out
+  after every half radius of the move. A capsule that starts inside a model is pushed out by at most `2 * radius + 0.5`.
+* **Masks.** Brushes are split by the size of their bounding box: `Mask::STRUCTURES` (houses, walls, rocks, bridges, boats: 4 m^3 and
+  more, `prop_volume`) and `Mask::PROPS` (barrels, crates, fences, lamp posts). `Mask::CAMERA` = terrain + structures: the camera does not
+  jump at every barrel; the player collides with `Mask::ALL`.
+* **Not loaded yet.** A cell that is not built answers with the terrain only. `WorldCollision::follow(x, y)` (the plugin calls it every 0.25 s
+  for the `WorldFocus` entity, else the first `Camera3d`) requests the cells within `radius` (150 m) and drops those beyond `keep` (400 m);
+  `radius <= 0` switches it off (character select), `AA_NO_COLLISION=1` leaves the plugin's system out. The first cell of a process takes
+  0.1 to 0.4 s (pak open, models), so wait for `ready_around` before putting the player into a town.
+
+**Where the collision is.** `.cgf` files keep it as serialized CryPhysics geometry, not as triangles: `MeshPhysicsData` chunks (0xCCCC0018),
+referenced from the four `physicsChunkId` of a mesh chunk (after its 16 stream ids). Slot 0 collides, slot 1 is "no collide" (the `$picking`
+cylinders), slot 2 "obstruct" (a few models; not used). The geometry hangs on the node of a `proxy` (an empty mesh with only the physics, as in
+`si_woodbridge_01`: one box) or on the render node (`Merged`, the model's own name: `si_shop_g`, 206 triangles), and a model can have several
+(`daru_house`: 14). `aa_cry::physics` parses the blob (format in its module documentation; `D:\aa-re\zone\agent_geom\sub_cgf.md` has the engine side) and
+returns every node's slot 0 geometry transformed by its node chain as one triangle list: trimeshes as they are, boxes as 12 triangles
+(`basis` rows are the box axes, the sizes are along them), cylinders as 12 sided prisms, spheres as 8 x 3 meshes, capsules as prisms. Facts found
+on the way: the trimesh header is `u32 nVerts, u32 nTris` (vertex arrays are often longer than the triangles use); 341 trimeshes share the
+render mesh instead of storing their own (`foreign` index without flag 0x400000); box `basis` is a row matrix. Of the 162,386 brushes
+of the main world, 151,004 (93 %, 3446 models) have physics geometry, 11,339 (367 models) have none (ivy, flags, laundry, straw, seedlings,
+moss, waterfalls, spiderwebs, the floating cube parts of the air library; the real client walks through them too), 35 an empty one, 8 a missing
+file; none of the 3826 models fails to parse. `CollisionConfig::visible_fallback` collides such models as their coarsest visible mesh
+(`aa_cry::physics::collision_mesh(bytes, true)`); off by default. The physics triangles of all distinct models together are 1.1 M.
+
+**Build.** Per cell, on the `aa_cry::workers` threads (`WorldCollision::request`): `brush.dat` + `statobjs.dat` (else the `object.dat` octree, as
+`load_cell_objects`), each distinct model's proxy loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
+tens of MB), the brush matrix and the cell origin applied (mirrored matrices flip the winding), the triangles split into structures and props
+and each indexed by an 8 m grid over XY (`collide/soup.rs`: CSR rows of triangle ids, big triangles only in the cells they touch, ground
+candidates first in every row). Vegetation (trees, 2 M instances) is not included. Measured on the 140 cells with brushes of the middle of the
+world (dev profile, one thread, models cached): build median 29 ms, 90 % 112 ms, worst 221 ms; memory median 6.8 MB, 90 % 24.5 MB, worst 69 MB
+(cell 14,11: 1.7 M triangles, 1400 instances of two rock cover pieces of 800 to 960 triangles, `cross_plains_102b/c`; a dense town cell such as Lutesong Harbor or Marianople is 21 to 27 MB for 500 to 640 k
+triangles at 42 bytes each); the first cell of a process 100 to 400 ms with cold models and pak. A cell is dropped with `release_outside`, so a
+walk keeps one to four cells (a few tens of MB).
+
+**Queries** (Lutesong Harbor and Marianople, 2000 random calls near the player, dev profile with `opt-level = 1` for this crate; release is the same
+within noise): `raycast` of 10 m (terrain + brushes) 6 to 7 microseconds, with `Mask::CAMERA` 5 to 6, `sweep_sphere` of 10 m (r = 0.3) 6 to 9,
+`ground_below` 3, `push_out` 2.4, `slide` of 0.2 m 4 to 5. Rays walk the grid cells they cross (2D DDA) and test the triangles
+(Moller-Trumbore, two sided); the terrain is marched in 1 m steps and bisected (the same triangles as `TerrainQuery`); the sphere sweep is a
+conservative advancement against the few triangles near the ray (point to triangle distance), refined by bisection; the terrain under a sphere is
+a plane (`z = h + r / n.z`). With the plugin following the camera the main thread cost is the 4 Hz `follow` (microseconds) and the cell builds
+run on the workers. fps: `fly --bench 15 --bench-speed 5 --no-shadows` at Lutesong Harbor (14.5 k part entities), alternating runs with the cells built and
+with `AA_NO_COLLISION=1`: 128, 136, 151, 141, 137, 152 fps (and one run of 63 while another session loaded the machine) against 132, 152, 148, 150, the
+slow frames are not in the streaming systems (`WorldTimings` under 1 ms); the `collide` example at 1280 x 720 with 20 k wireframe triangles drawn over the
+scene (retained gizmo): 188 and 190 fps against 184 and 195 without.
+
+**Verification.** `cargo test -p aa-world --lib collide` (geometry, soup against brute force, terrain rays, Lutesong cell, camera at a wall, a walker over the arch
+bridge in both directions, 120 000 walking steps in two towns never crossing a wall), `cargo test -p aa-cry --lib physics` (primitives, a blob, real
+models); `-- --ignored --nocapture` for `survey_world` (the counts above), `survey_cells`, `query_costs`, `find_spots`, `find_camera_spots`,
+`climb_the_stairs` (36 of 46 staircase models of four towns are climbed from the low to the high end with step 0.5 and radius 0.35; the others are
+spiral or ladder like stairs of 64 to 80 degrees (6), two stone embankment stairs of 51 degrees and two long gentle ground stairs that something stands in). Visual: `cargo run -p aa-world --example collide -- --player 21140,10596.2 --yaw 244 --arm 7 --pitch 14
+--shot shots/aa-world/collide_a_clip.png --shot-after 14` draws the collision triangles near the player as a wireframe over the scene (cyan
+structures, orange props) and the camera arm (yellow wanted, green clipped, red contact; `--no-clip` shows the camera inside the wall, `--cam x,y,z
+--look x,y,z` a free camera, `--xray` the wireframe over everything, `--no-objects` collision only, `--bench n` times the queries). The wireframes
+sit on the visible walls, roofs, awnings, railing posts, hulls of boats and carts (`shots/aa-world/collide_a_clip.png`, `collide_a_noclip.png`,
+`collide_bridge.png`, `collide_stairs.png`).
+
+**Test coordinates (main_world, game coordinates).** Lutesong Harbor's `sub_zones` box (x 20510 to 21752, y 10222 to 10967) has its centre at
+21131, 10594 (the gallery's `--pos 21130,10594`). A camera that ends inside a house wall: the player at 21140.0, 10596.2 (feet 111.17) with the arm
+7 m long at 14 degrees pointing 26 degrees from +X (compass yaw 244 for `--yaw`): the arm is clipped at 1.26 m by a house wall; unclipped, the camera is inside
+the building. More: player 21123.4, 10622.7 (feet 103.17, wall at 1.97 m), 21139.3, 10535.1 (107.34, 2.55 m), 21016.4, 10620.2 (82.51, 1.80 m).
+Bridges: the stone arch bridge `si_bridge_b01` at 21091.0, 10551.2 (water at 89.7, deck 113.8 at the crest, 104.0 at the ends; axis along 0.98, 0.19;
+walk from 21055.7, 10544.3 to 21126.3, 10558.1), the wooden bridges at 21015.3, 10544.9 (deck 121.5 over terrain 118.7) and 21109.4, 10591.8 (brush z 101.0), the Marianople drain bridge at
+11023.1, 11751.5 (deck 120.5 over terrain 112.3). Stairs:
+`si_woodbridge_stairs02` at 20999.4, 10586.3 (rise 1.7 m over 1.8 m), `mari_stair_a` at 10855.9, 12053.0, `ncom_city_old_stair06` at 10946.3, 11991.6
+(rise 6.7 m over 10 m), `ncom_city_old_stair07` at 11078.3, 12083.0 (rise 9.3 m over 12.9 m), the dock stairs `si_seahouse_dockstair01` at 20567.5, 10296.4.
+
+**Not done.** Vegetation (tree trunks block the player in the real client); terrain steepness as a wall in `push_out`; doors, gates and the
+moving brushes (ships, tram) which are not in `brush.dat`; the per-triangle physics material (`matId` of the blob, surface types for
+footsteps) and the `RAYCAST_PROXY` / `COLLISION_PROXY` material flags (a triangle that only rays or only bodies see); gaps wider than 0.7 m
+between pieces drop the character (as they would a real capsule); proxies that are a solid hull keep the player out of buildings whose interior
+the real client lets you enter only through a separate interior model.
 
 ### Example `fly`
 
@@ -582,7 +680,7 @@ WASD / Space / Ctrl fly (Shift fast), right mouse button looks.
 `cargo test -p aa-world`: 36 unit tests (coordinates, heightmap / cover / brush / vegetation / object / water parsers against the real pak
 incl. the spawn pond, BC1 round trip, env splines, sun path, cinema cameras, triangulation, the terrain layer library of the spawn cells and
 the uv continuity of layers across cell borders, the BC1 to BC5 normal map transcoder, ground queries against the grid, the rendered
-triangulation, cell borders, threads, the cache bound and prefetch; they skip when the pak is missing).
+triangulation, cell borders, threads, the cache bound and prefetch; they skip when the pak is missing), and 12 collision tests (see Collision with brushes).
 `cargo test -p aa-world --test all_cells -- --ignored --nocapture` parses every cell of both worlds (1205 + 3 cells, 162k brushes,
 1.75 M vegetation instances, 3181 water volumes, about 5 s) and builds every cover atlas and water mesh.
 

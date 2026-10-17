@@ -154,6 +154,17 @@ i32 nVerts, nTVerts, nFaces, vertAnim; {Vec3 pos (cm), Vec3 normal}[nVerts];
 subsets, keeps the 4 strongest weights (normalised) and computes tangents
 (`mesh::compute_tangents`, also usable for generated meshes). Bone ids index the legacy skeleton.
 
+### Collision geometry (`physics.rs`)
+
+`physics::collision_mesh(bytes, visible_fallback)` / `physics::load(path, ..)` return the collision triangles of a static `.cgf` in model space
+(`CollisionMesh { positions, indices, source }`): the slot 0 (default, colliding) geometry of every node's `MeshPhysicsData` chunk (0xCCCC0018, the
+four physics chunk ids of a mesh chunk follow its 16 stream ids) transformed by the node chain, on `proxy` nodes (which `Model` does not read a mesh
+for) and on render nodes alike. `parse_blob` reads the CryPhysics blob: boxes (`basis` rows = axes, centre, half sizes; 12 triangles), trimeshes
+(`u32 nVerts, u32 nTris`, 16 bit indices; 341 models share the render mesh), spheres, cylinders and capsules (centre, axis, radius, half height;
+approximated by prisms and a coarse sphere). 93 % of the 162k placed brushes have such geometry; models without any (ivy, flags, straw,
+seedlings) have none in the real client either, `visible_fallback` returns their coarsest visible level of detail instead. All 3826 distinct
+models of the main world's brushes parse. Used by `aa_world::collide`, which documents the format and the survey in `docs/aa-world.md`.
+
 ### Skeletons
 
 CompiledBones (0xACDC0000) v0x801: 32 reserved bytes, then 324-byte records:
