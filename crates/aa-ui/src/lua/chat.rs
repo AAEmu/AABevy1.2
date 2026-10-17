@@ -104,7 +104,10 @@ fn chat(lua: &Lua, id: Id) -> Option<ChatData> {
 }
 
 fn global_fn(lua: &Lua, name: &str) -> Option<Function> {
-    lua.globals().raw_get::<Option<Function>>(name).ok().flatten()
+    lua.globals()
+        .raw_get::<Option<Function>>(name)
+        .ok()
+        .flatten()
 }
 
 fn call_global(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) {
@@ -177,8 +180,8 @@ pub(crate) fn compose(u: &mut super::Ui, id: Id, rect: Rect) -> Option<TextBlock
     t.text = shown.join("\n");
     t.wrap = true;
     t.style.align = match t.style.align.fx() {
-        f if f == 0.0 => Align::BottomLeft,
-        f if f == 1.0 => Align::BottomRight,
+        0.0 => Align::BottomLeft,
+        1.0 => Align::BottomRight,
         _ => Align::Bottom,
     };
     Some(t)
@@ -192,7 +195,9 @@ const WHEEL_LINES: i64 = 3;
 fn fit_top(u: &mut super::Ui, id: Id) -> usize {
     let rect = u.tree.rect(id);
     let Some(w) = u.tree.widget(id) else { return 0 };
-    let Some(m) = w.message.as_ref() else { return 0 };
+    let Some(m) = w.message.as_ref() else {
+        return 0;
+    };
     let base = w.text.clone().unwrap_or_default();
     let scale = u.ui_scale;
     let inner_w = (rect.w - base.inset[0] - base.inset[2]).max(1.0);
@@ -200,7 +205,11 @@ fn fit_top(u: &mut super::Ui, id: Id) -> usize {
     let size = base.style.size * scale;
     let (mut n, mut text) = (0usize, String::new());
     for (line, _) in &m.lines {
-        let test = if n == 0 { line.clone() } else { format!("{text}\n{line}") };
+        let test = if n == 0 {
+            line.clone()
+        } else {
+            format!("{text}\n{line}")
+        };
         let lo = u.fonts.layout(
             &base.style.font,
             size,
@@ -231,13 +240,18 @@ fn max_scroll(u: &mut super::Ui, id: Id) -> usize {
 
 /// The native slider of a message frame (`GetSlider()`), if it has one.
 fn frame_slider(lua: &Lua, msg: Id) -> Option<Id> {
-    let t = parts(lua, msg).ok()?.raw_get::<Option<Table>>("slider").ok()??;
+    let t = parts(lua, msg)
+        .ok()?
+        .raw_get::<Option<Table>>("slider")
+        .ok()??;
     value_id(lua, &Value::Table(t))
 }
 
 /// Move the slider to where the scroll is: the thumb at the top is the oldest messages.
 fn sync_slider(lua: &Lua, msg: Id) {
-    let Some(slider) = frame_slider(lua, msg) else { return };
+    let Some(slider) = frame_slider(lua, msg) else {
+        return;
+    };
     let mut g = ui(lua);
     let u = &mut *g;
     let max = max_scroll(u, msg);
@@ -252,11 +266,11 @@ fn sync_slider(lua: &Lua, msg: Id) {
         .widget(slider)
         .and_then(|w| w.slider.as_ref())
         .map(|s| (s.min, s.max, s.value));
-    if cur != Some(want) {
-        if let Some(s) = u.tree.widget_mut(slider).and_then(|w| w.slider.as_mut()) {
-            (s.min, s.max, s.value) = want;
-            s.step = 1.0;
-        }
+    if cur != Some(want)
+        && let Some(s) = u.tree.widget_mut(slider).and_then(|w| w.slider.as_mut())
+    {
+        (s.min, s.max, s.value) = want;
+        s.step = 1.0;
     }
 }
 
@@ -273,10 +287,10 @@ pub(crate) fn set_scroll(lua: &Lua, id: Id, to: i64) {
             .widget(id)
             .and_then(|w| w.message.as_ref())
             .map_or(0, |m| m.scroll);
-        if to != cur {
-            if let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut()) {
-                m.scroll = to;
-            }
+        if to != cur
+            && let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut())
+        {
+            m.scroll = to;
         }
         (to != cur, to)
     };
@@ -284,10 +298,10 @@ pub(crate) fn set_scroll(lua: &Lua, id: Id, to: i64) {
         return;
     }
     sync_slider(lua, id);
-    if now == 0 {
-        if let Ok(s) = lua.create_string("read_chat_message") {
-            call_handler(lua, id, "OnContentUpdated", vec![Value::String(s)]);
-        }
+    if now == 0
+        && let Ok(s) = lua.create_string("read_chat_message")
+    {
+        call_handler(lua, id, "OnContentUpdated", vec![Value::String(s)]);
     }
 }
 
@@ -382,28 +396,37 @@ fn scroll_controls(lua: &Lua, wins: &[Id]) {
                     .flatten()
                     .and_then(|t| value_id(lua, &Value::Table(t)))
             };
-            let controls = [id_of("upButton"), id_of("downButton"), id_of("slider"), id_of("downToBottomButton")];
+            let controls = [
+                id_of("upButton"),
+                id_of("downButton"),
+                id_of("slider"),
+                id_of("downToBottomButton"),
+            ];
             let mut g = ui(lua);
             let u = &mut *g;
             let (cx, cy) = u.cursor;
             let inside = i == c.selected
                 && u.tree.visible(msg)
                 && u.tree.rect(msg).contains(cx, cy)
-                && u.hover.is_none_or(|h| u.tree.top_of(h) == u.tree.top_of(msg));
+                && u.hover
+                    .is_none_or(|h| u.tree.top_of(h) == u.tree.top_of(msg));
             let (max, scroll) = if inside {
                 (
                     max_scroll(u, msg),
-                    u.tree.widget(msg).and_then(|w| w.message.as_ref()).map_or(0, |m| m.scroll),
+                    u.tree
+                        .widget(msg)
+                        .and_then(|w| w.message.as_ref())
+                        .map_or(0, |m| m.scroll),
                 )
             } else {
                 (0, 0)
             };
             let want = [max > 0, max > 0, max > 0, scroll > 0];
             for (ctl, show) in controls.into_iter().zip(want) {
-                if let Some(ctl) = ctl {
-                    if u.tree.get(ctl).shown != show {
-                        u.tree.get_mut(ctl).shown = show;
-                    }
+                if let Some(ctl) = ctl
+                    && u.tree.get(ctl).shown != show
+                {
+                    u.tree.get_mut(ctl).shown = show;
                 }
             }
             drop(g);
@@ -469,9 +492,10 @@ fn native_drawable(lua: &Lua, owner: Id, field: &str) -> mlua::Result<(Id, Table
         let cid = value_id(lua, &Value::Table(c.clone())).unwrap();
         return Ok((cid, c));
     }
-    let d = ui(lua)
-        .tree
-        .create_drawable(owner, DrawKind::Image, "drawable:image", DrawLayer::Overlay);
+    let d =
+        ui(lua)
+            .tree
+            .create_drawable(owner, DrawKind::Image, "drawable:image", DrawLayer::Overlay);
     let c = new_object_table(lua, d)?;
     t.raw_set(field, &c)?;
     Ok((d, c))
@@ -487,7 +511,14 @@ fn set_getter(lua: &Lua, t: &Table, name: &str, child: Table) -> mlua::Result<()
 
 /// The chat tab message frame: a `message` with scroll buttons and a slider.
 fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Table)> {
-    let t = create_child(lua, Some(window), "message", &format!("chatMessage{i}"), 0, false)?;
+    let t = create_child(
+        lua,
+        Some(window),
+        "message",
+        &format!("chatMessage{i}"),
+        0,
+        false,
+    )?;
     let id = value_id(lua, &Value::Table(t.clone())).unwrap();
     for (getter, class, name) in [
         ("GetUpButton", "button", "upButton"),
@@ -515,8 +546,22 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     let (edit, _) = native_child(lua, id, "chatEdit", "editbox", "chatEdit", false)?;
     let (add, _) = native_child(lua, id, "addButton", "button", "addButton", true)?;
     native_child(lua, id, "imeToggle", "button", "imeToggleButton", false)?;
-    let (selector_id, selector) = native_child(lua, edit, "chatMethodSelector", "button", "chatMethodSelector", true)?;
-    let (_, list) = native_child(lua, edit, "chatMethodList", "listbox", "chatMethodList", false)?;
+    let (selector_id, selector) = native_child(
+        lua,
+        edit,
+        "chatMethodSelector",
+        "button",
+        "chatMethodSelector",
+        true,
+    )?;
+    let (_, list) = native_child(
+        lua,
+        edit,
+        "chatMethodList",
+        "listbox",
+        "chatMethodList",
+        false,
+    )?;
     set_getter(lua, &selector, "GetList", list)?;
     let (left_line, _) = native_drawable(lua, id, "leftLine")?;
     let (right_line, _) = native_drawable(lua, id, "rightLine")?;
@@ -558,10 +603,12 @@ fn layout(lua: &Lua, id: Id) {
     let wr = u.tree.rect(id);
     let avail = (wr.w - c.tab_inset[0] - c.tab_inset[2]).max(0.0);
     let n = c.tabs.len().max(1) as f32;
-    let add_w = if c.use_add_button { u.tree.get(c.add_button).width } else { 0.0 };
-    let tw = c
-        .tab_width
-        .min(((avail - add_w) / n).max(c.min_tab_width));
+    let add_w = if c.use_add_button {
+        u.tree.get(c.add_button).width
+    } else {
+        0.0
+    };
+    let tw = c.tab_width.min(((avail - add_w) / n).max(c.min_tab_width));
     let mut x = c.tab_inset[0];
     let anchor = |point, x, y| Anchor {
         point,
@@ -588,7 +635,11 @@ fn layout(lua: &Lua, id: Id) {
             },
         ];
         m.shown = i == c.selected;
-        if let Some(b) = u.tree.widget_mut(tab.button).and_then(|w| w.button.as_mut()) {
+        if let Some(b) = u
+            .tree
+            .widget_mut(tab.button)
+            .and_then(|w| w.button.as_mut())
+        {
             b.checked = i == c.selected;
         }
         x += tw;
@@ -603,10 +654,7 @@ fn layout(lua: &Lua, id: Id) {
     o.shown = c.use_add_button;
     // The lines under the tab area, left and right of the selected tab.
     let sel_x = c.tab_inset[0] + tw * c.selected as f32;
-    for (d, x0, x1) in [
-        (c.left_line, 0.0, sel_x),
-        (c.right_line, sel_x + tw, wr.w),
-    ] {
+    for (d, x0, x1) in [(c.left_line, 0.0, sel_x), (c.right_line, sel_x + tw, wr.w)] {
         let o = u.tree.get_mut(d);
         o.anchors = vec![anchor(Point::TopLeft, x0, c.tab_area_height - 1.0)];
         o.width = (x1 - x0).max(0.0);
@@ -620,12 +668,12 @@ fn select(lua: &Lua, id: Id, idx: usize) {
     if idx >= c.tabs.len() {
         return;
     }
-    if let Some(w) = ui(lua).tree.widget_mut(id) {
-        if let Some(ch) = w.chat.as_mut() {
-            ch.selected = idx;
-            // Skins change on selection: apply the hover fade again.
-            ch.hovered = None;
-        }
+    if let Some(w) = ui(lua).tree.widget_mut(id)
+        && let Some(ch) = w.chat.as_mut()
+    {
+        ch.selected = idx;
+        // Skins change on selection: apply the hover fade again.
+        ch.hovered = None;
     }
     layout(lua, id);
     for (i, tab) in c.tabs.iter().enumerate() {
@@ -643,7 +691,9 @@ pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
     let Some(parent) = ui(lua).tree.get(target).parent else {
         return false;
     };
-    let Some(c) = chat(lua, parent) else { return false };
+    let Some(c) = chat(lua, parent) else {
+        return false;
+    };
     match c.tabs.iter().position(|t| t.button == target) {
         Some(i) => {
             select(lua, parent, i);
@@ -660,19 +710,20 @@ fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
         .globals()
         .raw_get::<Option<Table>>("AAUI")?
         .and_then(|t| t.raw_get::<Option<Function>>("ChatTabs").ok().flatten());
-    if let Some(f) = hook {
-        if let Value::Table(list) = f.call::<Value>(window_id)? {
-            for v in list.sequence_values::<Table>() {
-                let v = v?;
-                let filters = v
-                    .raw_get::<Option<Table>>("filters")?
-                    .map(|t| t.sequence_values::<i64>().filter_map(Result::ok).collect());
-                specs.push((
-                    v.raw_get::<Option<i64>>("id")?.unwrap_or(specs.len() as i64),
-                    v.raw_get::<Option<String>>("name")?.unwrap_or_default(),
-                    filters,
-                ));
-            }
+    if let Some(f) = hook
+        && let Value::Table(list) = f.call::<Value>(window_id)?
+    {
+        for v in list.sequence_values::<Table>() {
+            let v = v?;
+            let filters = v
+                .raw_get::<Option<Table>>("filters")?
+                .map(|t| t.sequence_values::<i64>().filter_map(Result::ok).collect());
+            specs.push((
+                v.raw_get::<Option<i64>>("id")?
+                    .unwrap_or(specs.len() as i64),
+                v.raw_get::<Option<String>>("name")?.unwrap_or_default(),
+                filters,
+            ));
         }
     }
     if specs.is_empty() {
@@ -707,12 +758,12 @@ fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
             filters,
         });
     }
-    if let Some(w) = ui(lua).tree.widget_mut(id) {
-        if let Some(c) = w.chat.as_mut() {
-            c.window_id = window_id;
-            c.tabs = tabs;
-            c.selected = 0;
-        }
+    if let Some(w) = ui(lua).tree.widget_mut(id)
+        && let Some(c) = w.chat.as_mut()
+    {
+        c.window_id = window_id;
+        c.tabs = tabs;
+        c.selected = 0;
     }
     if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
         c.hovered = None;
@@ -730,12 +781,16 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
     if let Some(t) = u.tree.get_mut(msg).text_mut() {
         t.style.size = 15.0;
     }
-    let ds = u.tree.widget(msg).map(|w| w.drawables.clone()).unwrap_or_default();
+    let ds = u
+        .tree
+        .widget(msg)
+        .map(|w| w.drawables.clone())
+        .unwrap_or_default();
     for d in ds {
-        if let Some(dr) = u.tree.drawable_mut(d) {
-            if dr.layer == DrawLayer::Background {
-                dr.color = [0.0, 0.0, 0.0, 0.45];
-            }
+        if let Some(dr) = u.tree.drawable_mut(d)
+            && dr.layer == DrawLayer::Background
+        {
+            dr.color = [0.0, 0.0, 0.0, 0.45];
         }
     }
 }
@@ -748,13 +803,21 @@ pub(crate) fn update(lua: &Lua) {
     // Lines that time out (`SetTimeVisible`) leave the live view without a call.
     let now = u.time_ms;
     for id in u.tree.of_class("message") {
-        let Some(m) = u.tree.widget(id).and_then(|w| w.message.as_ref()) else { continue };
-        let Some(s) = m.time_visible.filter(|_| m.scroll == 0) else { continue };
-        let live = m.lines.iter().filter(|(_, t)| now - t < s as f64 * 1000.0).count();
-        if live != m.live {
-            if let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut()) {
-                m.live = live;
-            }
+        let Some(m) = u.tree.widget(id).and_then(|w| w.message.as_ref()) else {
+            continue;
+        };
+        let Some(s) = m.time_visible.filter(|_| m.scroll == 0) else {
+            continue;
+        };
+        let live = m
+            .lines
+            .iter()
+            .filter(|(_, t)| now - t < s as f64 * 1000.0)
+            .count();
+        if live != m.live
+            && let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut())
+        {
+            m.live = live;
         }
     }
     let (cx, cy) = u.cursor;
@@ -766,7 +829,9 @@ pub(crate) fn update(lua: &Lua) {
         .collect();
     for &id in &wins {
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
-        let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else { continue };
+        let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else {
+            continue;
+        };
         if c.hovered == Some(inside) {
             continue;
         }
@@ -774,7 +839,11 @@ pub(crate) fn update(lua: &Lua) {
         // fade (the real client's idle chat window, `reference/ingame/spawn`).
         const IDLE_ALPHA: f32 = 0.6;
         for (i, t) in c.tabs.iter().enumerate() {
-            let ds = u.tree.widget(t.button).map(|w| w.drawables.clone()).unwrap_or_default();
+            let ds = u
+                .tree
+                .widget(t.button)
+                .map(|w| w.drawables.clone())
+                .unwrap_or_default();
             for d in ds {
                 u.tree.get_mut(d).alpha = if inside { 1.0 } else { 0.0 };
             }
@@ -793,11 +862,11 @@ pub(crate) fn update(lua: &Lua) {
 /// Default line colours by chat filter (`CMF_*`), when the app gives none.
 fn default_color(filter: i64) -> [f32; 3] {
     match filter {
-        2 => [1.0, 1.0, 1.0],              // CMF_SAY
-        3 => [1.0, 0.55, 0.85],            // CMF_WHISPER
-        4 => [0.45, 0.78, 1.0],            // CMF_PARTY
-        5 => [1.0, 0.55, 0.2],             // CMF_RAID
-        6 => [0.55, 0.9, 0.45],            // CMF_EXPEDITION
+        2 => [1.0, 1.0, 1.0],   // CMF_SAY
+        3 => [1.0, 0.55, 0.85], // CMF_WHISPER
+        4 => [0.45, 0.78, 1.0], // CMF_PARTY
+        5 => [1.0, 0.55, 0.2],  // CMF_RAID
+        6 => [0.55, 0.9, 0.45], // CMF_EXPEDITION
         _ => [1.0, 246.0 / 255.0, 94.0 / 255.0],
     }
 }
@@ -808,7 +877,11 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
         .globals()
         .raw_get::<Option<Table>>("AAUI")?
         .and_then(|t| t.raw_get::<Option<Function>>("ChatColor").ok().flatten());
-    let rgb = match hook.map(|f| f.call::<Option<Table>>(filter)).transpose()?.flatten() {
+    let rgb = match hook
+        .map(|f| f.call::<Option<Table>>(filter))
+        .transpose()?
+        .flatten()
+    {
         Some(t) => [
             t.raw_get::<f32>(1).unwrap_or(1.0),
             t.raw_get::<f32>(2).unwrap_or(1.0),
@@ -820,7 +893,12 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
     let line = if text.starts_with("|c") || text.starts_with("|C") {
         text.to_string()
     } else {
-        format!("|cFF{:02X}{:02X}{:02X}{text}", to(rgb[0]), to(rgb[1]), to(rgb[2]))
+        format!(
+            "|cFF{:02X}{:02X}{:02X}{text}",
+            to(rgb[0]),
+            to(rgb[1]),
+            to(rgb[2])
+        )
     };
     let frames: Vec<Id> = {
         let u = ui(lua);
@@ -838,7 +916,12 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
         add_line(lua, m, &line);
         // Scrolled back, the new line is below the view: the down-to-bottom button flickers.
         if with_msg(lua, m, |x| x.scroll).unwrap_or(0) > 0 {
-            call_handler(lua, m, "OnContentUpdated", vec![Value::String(lua.create_string("unread_chat_message")?)]);
+            call_handler(
+                lua,
+                m,
+                "OnContentUpdated",
+                vec![Value::String(lua.create_string("unread_chat_message")?)],
+            );
         }
     }
     Ok(())
@@ -915,9 +998,16 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "GetCurrentScroll",
-        method(lua, |lua, id, _| ret(lua, with_msg(lua, id, |m| m.scroll).unwrap_or(0)))?,
+        method(lua, |lua, id, _| {
+            ret(lua, with_msg(lua, id, |m| m.scroll).unwrap_or(0))
+        })?,
     )?;
-    for (name, delta) in [("ScrollUp", 1i64), ("ScrollDown", -1), ("PageUp", 5), ("PageDown", -5)] {
+    for (name, delta) in [
+        ("ScrollUp", 1i64),
+        ("ScrollDown", -1),
+        ("PageUp", 5),
+        ("PageDown", -5),
+    ] {
         def(
             name,
             method(lua, move |lua, id, _| {
@@ -950,7 +1040,12 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             ret(lua, t)
         })?,
     )?;
-    for name in ["SetFadeDuration", "EnableItemLink", "ChangeDefaultStyle", "ChangeTextStyle"] {
+    for name in [
+        "SetFadeDuration",
+        "EnableItemLink",
+        "ChangeDefaultStyle",
+        "ChangeTextStyle",
+    ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     Ok(())
@@ -1039,8 +1134,13 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "GetChatMethodSelector",
         method(lua, |lua, id, _| {
-            let Some(c) = chat(lua, id) else { return none() };
-            ret(lua, parts(lua, c.edit)?.raw_get::<Value>("chatMethodSelector")?)
+            let Some(c) = chat(lua, id) else {
+                return none();
+            };
+            ret(
+                lua,
+                parts(lua, c.edit)?.raw_get::<Value>("chatMethodSelector")?,
+            )
         })?,
     )?;
     for (getter, field) in [

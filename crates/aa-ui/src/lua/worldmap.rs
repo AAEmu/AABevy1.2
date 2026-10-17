@@ -89,7 +89,12 @@ impl Mask {
             return None;
         }
         let i = (y * self.w + x) as usize * 4;
-        Some([self.rgba[i], self.rgba[i + 1], self.rgba[i + 2], self.rgba[i + 3]])
+        Some([
+            self.rgba[i],
+            self.rgba[i + 1],
+            self.rgba[i + 2],
+            self.rgba[i + 3],
+        ])
     }
 }
 
@@ -221,8 +226,11 @@ pub struct WorldMapData {
     /// Cursor at the last press on the map: a click only counts when it did not move (a drag pans).
     pub press: Option<(f32, f32)>,
     /// What the player drawable was last placed for: (map, place, scale in 1/1000).
-    applied: Option<(Option<(i64, i64)>, Option<Place>, i32)>,
+    applied: Option<Applied>,
 }
+
+/// (map, place, scale in 1/1000) the player drawable was placed for.
+type Applied = (Option<(i64, i64)>, Option<Place>, i32);
 
 impl Default for WorldMapData {
     fn default() -> Self {
@@ -245,9 +253,7 @@ impl Default for WorldMapData {
 
 impl WorldMapData {
     fn index_of(&self, map: (i64, i64)) -> Option<usize> {
-        self.entries
-            .iter()
-            .position(|e| (e.level, e.id) == map)
+        self.entries.iter().position(|e| (e.level, e.id) == map)
     }
 
     fn mask_of(&self, i: usize) -> Option<Arc<Mask>> {
@@ -256,7 +262,13 @@ impl WorldMapData {
 
     /// The child map under the map point `(hx, hy)` (units at ratio 1) of the shown map `cur`:
     /// the entry one level down whose colour key is the mask pixel there.
-    fn child_at(&self, cur: usize, hx: f32, hy: f32, usable: impl Fn(&MapEntry) -> bool) -> Option<usize> {
+    fn child_at(
+        &self,
+        cur: usize,
+        hx: f32,
+        hy: f32,
+        usable: impl Fn(&MapEntry) -> bool,
+    ) -> Option<usize> {
         let e = &self.entries[cur];
         let mask = self.mask_of(cur)?;
         let [cx, cy, cw, ch] = e.mask_rect;
@@ -285,10 +297,10 @@ impl WorldMapData {
                 if p.level != c.level - 1 || p.mask.is_none() {
                     continue;
                 }
-                if let Some(m) = self.mask_of(i) {
-                    if key_pixels(&m, p.mask_rect, c.key).0 > 0 {
-                        return Some(i);
-                    }
+                if let Some(m) = self.mask_of(i)
+                    && key_pixels(&m, p.mask_rect, c.key).0 > 0
+                {
+                    return Some(i);
                 }
             }
         }
@@ -305,8 +317,14 @@ impl WorldMapData {
         if n == 0 {
             return None;
         }
-        let (mx, my) = (sx / n as f32 - p.mask_rect[0] as f32 + 0.5, sy / n as f32 - p.mask_rect[1] as f32 + 0.5);
-        Some((p.mask_offset[0] + mx * MASK_SCALE, p.mask_offset[1] + my * MASK_SCALE))
+        let (mx, my) = (
+            sx / n as f32 - p.mask_rect[0] as f32 + 0.5,
+            sy / n as f32 - p.mask_rect[1] as f32 + 0.5,
+        );
+        Some((
+            p.mask_offset[0] + mx * MASK_SCALE,
+            p.mask_offset[1] + my * MASK_SCALE,
+        ))
     }
 
     /// A point of `child`'s map (map units) as a point of its parent map. Zones and cities sit
@@ -318,19 +336,20 @@ impl WorldMapData {
             let r = c.over_rect;
             return Some((r[0] + pos.0 / BASE.0 * r[2], r[1] + pos.1 / BASE.1 * r[3]));
         }
-        if c.level == 1 && c.mask_rect[2] > 0 && c.mask_rect[3] > 0 {
-            if let Some(pm) = self.mask_of(parent) {
-                if let Some(bb) = key_bbox(&pm, p.mask_rect, c.key) {
-                    let nx = (pos.0 - c.mask_offset[0]) / MASK_SCALE / c.mask_rect[2] as f32;
-                    let ny = (pos.1 - c.mask_offset[1]) / MASK_SCALE / c.mask_rect[3] as f32;
-                    let tx = bb[0] as f32 + nx * (bb[2] - bb[0] + 1) as f32;
-                    let ty = bb[1] as f32 + ny * (bb[3] - bb[1] + 1) as f32;
-                    return Some((
-                        p.mask_offset[0] + (tx - p.mask_rect[0] as f32) * MASK_SCALE,
-                        p.mask_offset[1] + (ty - p.mask_rect[1] as f32) * MASK_SCALE,
-                    ));
-                }
-            }
+        if c.level == 1
+            && c.mask_rect[2] > 0
+            && c.mask_rect[3] > 0
+            && let Some(pm) = self.mask_of(parent)
+            && let Some(bb) = key_bbox(&pm, p.mask_rect, c.key)
+        {
+            let nx = (pos.0 - c.mask_offset[0]) / MASK_SCALE / c.mask_rect[2] as f32;
+            let ny = (pos.1 - c.mask_offset[1]) / MASK_SCALE / c.mask_rect[3] as f32;
+            let tx = bb[0] as f32 + nx * (bb[2] - bb[0] + 1) as f32;
+            let ty = bb[1] as f32 + ny * (bb[3] - bb[1] + 1) as f32;
+            return Some((
+                p.mask_offset[0] + (tx - p.mask_rect[0] as f32) * MASK_SCALE,
+                p.mask_offset[1] + (ty - p.mask_rect[1] as f32) * MASK_SCALE,
+            ));
         }
         self.centroid_in(parent, child)
     }
@@ -389,12 +408,13 @@ fn key_pixels(m: &Mask, rect: [i32; 4], key: [u8; 4]) -> (u32, f32, f32) {
     }
     for y in rect[1]..rect[1] + rect[3] {
         for x in rect[0]..rect[0] + rect[2] {
-            if let Some(p) = m.get(x, y) {
-                if p[3] > 0 && p[..3] == key[..3] {
-                    n += 1;
-                    sx += x as f32;
-                    sy += y as f32;
-                }
+            if let Some(p) = m.get(x, y)
+                && p[3] > 0
+                && p[..3] == key[..3]
+            {
+                n += 1;
+                sx += x as f32;
+                sy += y as f32;
             }
         }
     }
@@ -430,7 +450,11 @@ fn read_place(lua: &Lua) -> Option<Place> {
             return None;
         }
     };
-    let level = t.raw_get::<Option<i64>>("level").ok().flatten().unwrap_or(2);
+    let level = t
+        .raw_get::<Option<i64>>("level")
+        .ok()
+        .flatten()
+        .unwrap_or(2);
     let zone = t.raw_get::<Option<i64>>("zone").ok().flatten()?;
     let (u, v, angle) = match t.raw_get::<Option<Table>>("player") {
         Ok(Some(p)) => {
@@ -441,14 +465,24 @@ fn read_place(lua: &Lua) -> Option<Place> {
     };
     let mut above = [None; 4];
     if let Ok(Some(maps)) = t.raw_get::<Option<Table>>("maps") {
-        for (slot, m) in above.iter_mut().zip(maps.sequence_values::<Table>().flatten()) {
+        for (slot, m) in above
+            .iter_mut()
+            .zip(maps.sequence_values::<Table>().flatten())
+        {
             let n = |k: &str| m.raw_get::<Option<f64>>(k).ok().flatten();
             if let (Some(l), Some(i), Some(u), Some(v)) = (n("level"), n("id"), n("u"), n("v")) {
                 *slot = Some((l as i64, i as i64, u as f32, v as f32));
             }
         }
     }
-    Some(Place { level, zone, u, v, angle, above })
+    Some(Place {
+        level,
+        zone,
+        u,
+        v,
+        angle,
+        above,
+    })
 }
 
 /// Ask an optional `AAUI` map hook (`MapClimate`, `ConflictZones`, `ConflictState`); nothing
@@ -491,7 +525,11 @@ pub fn show_map(lua: &Lua, wm: Id, level: i64, id: i64) -> bool {
         x.hover = None;
         x.applied = None;
     });
-    queue_ui_event(lua, "UPDATE_ZONE_LEVEL_INFO", vec![Value::Integer(level), Value::Integer(id)]);
+    queue_ui_event(
+        lua,
+        "UPDATE_ZONE_LEVEL_INFO",
+        vec![Value::Integer(level), Value::Integer(id)],
+    );
     queue_ui_event(lua, "SET_DEFAULT_EXPAND_RATIO", vec![Value::Boolean(same)]);
     true
 }
@@ -598,7 +636,9 @@ fn place_player(lua: &Lua, wm: Id, d: &WorldMapData, scale: f32) {
 fn probe(lua: &Lua, wm: Id, d: &WorldMapData) -> Option<usize> {
     let cur = d.index_of(d.current?)?;
     let u = ui(lua);
-    let over_map = u.hover.is_some_and(|h| h == wm || u.tree.is_descendant(h, wm));
+    let over_map = u
+        .hover
+        .is_some_and(|h| h == wm || u.tree.is_descendant(h, wm));
     if !over_map {
         return None;
     }
@@ -665,10 +705,10 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
     if button == "LeftButton" {
         let press = d.press;
         with(lua, wm, |x| x.press = None);
-        if let Some(p) = press {
-            if (p.0 - cursor.0).abs() > 3.0 || (p.1 - cursor.1).abs() > 3.0 {
-                return true; // a drag
-            }
+        if let Some(p) = press
+            && ((p.0 - cursor.0).abs() > 3.0 || (p.1 - cursor.1).abs() > 3.0)
+        {
+            return true; // a drag
         }
     }
     let Some(cur) = d.current.and_then(|c| d.index_of(c)) else {
@@ -717,27 +757,53 @@ fn place_ping(lua: &Lua, wm: Id, d: &WorldMapData, cursor: (f32, f32)) {
 
 /// `widget:Show(on)` through the script-visible method (fires `OnShow` / `OnHide`).
 fn show_widget(lua: &Lua, id: Id, on: bool) {
-    if let Ok(Some(t)) = super::object_table(lua, id) {
-        if let Ok(f) = t.get::<Function>("Show") {
-            let _ = f.call::<()>((t, on));
-        }
+    if let Ok(Some(t)) = super::object_table(lua, id)
+        && let Ok(f) = t.get::<Function>("Show")
+    {
+        let _ = f.call::<()>((t, on));
     }
 }
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     // Information the app has no data for: shown nowhere.
     for name in [
-        "SetTempNotifyCoord", "UpdateTransferTelescopeInfo", "UpdateTransferTelescopeArea",
-        "UpdateTelescopeInfo", "UpdateTelescopeArea", "UpdatePingInfo", "UpdateNpcInfo",
-        "UpdateMySlaveInfo", "UpdateHousingInfo", "UpdateFishSchoolInfo", "UpdateFishSchoolArea",
-        "UpdateDoodadInfo", "UpdateDominionInfo", "UpdateCorpseInfo", "UpdateCompletedQuestInfo",
-        "UpdateCarryingBackpackSlaveInfo", "StartNotifyQuestEffect", "ShowQuest", "ShowPortal",
-        "ShowCommonFarm", "SetTempNotifyColor", "SaveConflictZoneImg",
-        "RemoveTransferTelescopeInfo", "RemoveTelescopeInfo", "RemoveNotifyQuestInfo",
-        "RemoveGivenQuestInfo", "RemoveFishSchoolInfo", "RemoveCarryingBackpackSlaveInfo",
-        "ExploredRegionUpdated", "ClearTransferTelescopeInfo", "ClearTelescopeInfo",
-        "ClearNpcInfo", "ClearNotifyQuestInfo", "ClearMySlaveInfo", "ClearHousingInfo",
-        "SetExpandRatio", "ResetCursor",
+        "SetTempNotifyCoord",
+        "UpdateTransferTelescopeInfo",
+        "UpdateTransferTelescopeArea",
+        "UpdateTelescopeInfo",
+        "UpdateTelescopeArea",
+        "UpdatePingInfo",
+        "UpdateNpcInfo",
+        "UpdateMySlaveInfo",
+        "UpdateHousingInfo",
+        "UpdateFishSchoolInfo",
+        "UpdateFishSchoolArea",
+        "UpdateDoodadInfo",
+        "UpdateDominionInfo",
+        "UpdateCorpseInfo",
+        "UpdateCompletedQuestInfo",
+        "UpdateCarryingBackpackSlaveInfo",
+        "StartNotifyQuestEffect",
+        "ShowQuest",
+        "ShowPortal",
+        "ShowCommonFarm",
+        "SetTempNotifyColor",
+        "SaveConflictZoneImg",
+        "RemoveTransferTelescopeInfo",
+        "RemoveTelescopeInfo",
+        "RemoveNotifyQuestInfo",
+        "RemoveGivenQuestInfo",
+        "RemoveFishSchoolInfo",
+        "RemoveCarryingBackpackSlaveInfo",
+        "ExploredRegionUpdated",
+        "ClearTransferTelescopeInfo",
+        "ClearTelescopeInfo",
+        "ClearNpcInfo",
+        "ClearNotifyQuestInfo",
+        "ClearMySlaveInfo",
+        "ClearHousingInfo",
+        "SetExpandRatio",
+        "ResetCursor",
     ] {
         m.raw_set(name, method(lua, |_, _, _| none())?)?;
     }
@@ -824,11 +890,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "OnLeftClick",
         method(lua, |lua, id, _| {
             // A click on the ping marker itself: place it again under the cursor.
-            if let Some(d) = snapshot(lua, id) {
-                if d.ping_mode {
-                    let c = ui(lua).cursor;
-                    place_ping(lua, id, &d, c);
-                }
+            if let Some(d) = snapshot(lua, id)
+                && d.ping_mode
+            {
+                let c = ui(lua).cursor;
+                place_ping(lua, id, &d, c);
             }
             none()
         })?,
@@ -848,14 +914,16 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             // `r` and `b` are swapped by the scripts: `r` is the blue channel of the mask pixel.
             let key = match a.v(7) {
                 Value::Table(t) => {
-                    let c = |k: &str| t.raw_get::<Option<f64>>(k).ok().flatten().unwrap_or(0.0) as u8;
+                    let c =
+                        |k: &str| t.raw_get::<Option<f64>>(k).ok().flatten().unwrap_or(0.0) as u8;
                     [c("b"), c("g"), c("r"), c("a")]
                 }
                 _ => [0; 4],
             };
             let (offset, rect) = match a.v(8) {
                 Value::Table(t) => {
-                    let f = |k: &str| t.raw_get::<Option<f64>>(k).ok().flatten().unwrap_or(0.0) as f32;
+                    let f =
+                        |k: &str| t.raw_get::<Option<f64>>(k).ok().flatten().unwrap_or(0.0) as f32;
                     (
                         [f("colorImgOffsetX"), f("colorImgOffsetY")],
                         [
@@ -961,7 +1029,11 @@ mod tests {
         for rle in [false, true] {
             let m = parse_tga(&tga(rle)).unwrap();
             assert_eq!((m.w, m.h), (4, 2));
-            assert_eq!(m.get(0, 0), Some([0, 255, 0, 255]), "top row is the last stored");
+            assert_eq!(
+                m.get(0, 0),
+                Some([0, 255, 0, 255]),
+                "top row is the last stored"
+            );
             assert_eq!(m.get(3, 1), Some([255, 0, 0, 255]));
             assert_eq!(m.get(4, 0), None);
         }

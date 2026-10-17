@@ -250,9 +250,7 @@ fn data(lua: &Lua, id: Id) -> RoadMapData {
 /// Ask the hook for every live roadmap: show the zone's map, move the player cursor.
 pub(crate) fn update(lua: &Lua) {
     let Some(f) = hook(lua) else { return };
-    let maps: Vec<Id> = {
-        ui(lua).tree.of_class("roadmap")
-    };
+    let maps: Vec<Id> = { ui(lua).tree.of_class("roadmap") };
     if maps.is_empty() {
         return;
     }
@@ -279,7 +277,10 @@ fn parse_markers(r: &Table) -> mlua::Result<Vec<Marker>> {
     let mut out = Vec::new();
     for v in list.sequence_values::<Table>() {
         let v = v?;
-        let (Some(mu), Some(mv)) = (v.raw_get::<Option<f32>>("u")?, v.raw_get::<Option<f32>>("v")?) else {
+        let (Some(mu), Some(mv)) = (
+            v.raw_get::<Option<f32>>("u")?,
+            v.raw_get::<Option<f32>>("v")?,
+        ) else {
             continue;
         };
         let coords = match v.raw_get::<Option<Table>>("coords")? {
@@ -335,9 +336,9 @@ fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Vec<Marker>) 
         let mut g = ui(lua);
         let u = &mut *g;
         while pool.len() < markers.len() {
-            let dr = u
-                .tree
-                .create_drawable(id, DrawKind::Image, "drawable:image", DrawLayer::Artwork);
+            let dr =
+                u.tree
+                    .create_drawable(id, DrawKind::Image, "drawable:image", DrawLayer::Artwork);
             u.tree.get_mut(dr).shown = false;
             pool.push(dr);
         }
@@ -384,7 +385,11 @@ fn update_tooltip(lua: &Lua, id: Id) {
     let d = data(lua, id);
     let hover = {
         let u = ui(lua);
-        let pickable = u.tree.widget(u.tree.top_of(id)).is_some_and(|w| w.clickable) && u.tree.visible(id);
+        let pickable = u
+            .tree
+            .widget(u.tree.top_of(id))
+            .is_some_and(|w| w.clickable)
+            && u.tree.visible(id);
         let (cx, cy) = u.cursor;
         if !pickable {
             None
@@ -407,11 +412,16 @@ fn update_tooltip(lua: &Lua, id: Id) {
     with(lua, id, |x| x.hover = hover);
     let controller = super::chat::parts(lua, id)
         .ok()
-        .and_then(|p| p.raw_get::<Option<Table>>("tooltipController").ok().flatten())
+        .and_then(|p| {
+            p.raw_get::<Option<Table>>("tooltipController")
+                .ok()
+                .flatten()
+        })
         .and_then(|t| value_id(lua, &Value::Table(t)));
     match hover {
         Some(i) => {
-            let (Some(text), Some(&dr)) = (d.markers[i].tooltip.clone(), d.marker_drawables.get(i)) else {
+            let (Some(text), Some(&dr)) = (d.markers[i].tooltip.clone(), d.marker_drawables.get(i))
+            else {
                 return;
             };
             if let Some(c) = controller {
@@ -531,7 +541,10 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
             x.last_player = None;
         });
         if let Some((level, key)) = &want {
-            let args = vec![Value::Integer(*level), Value::String(lua.create_string(key)?)];
+            let args = vec![
+                Value::Integer(*level),
+                Value::String(lua.create_string(key)?),
+            ];
             super::fire_ui_event(lua, "UPDATE_ROADMAP_ANCHOR", args);
         }
     }
@@ -615,7 +628,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    for name in ["UpdateAllDrawableAnchor", "SetTooltipColor", "ReloadAllInfo"] {
+    for name in [
+        "UpdateAllDrawableAnchor",
+        "SetTooltipColor",
+        "ReloadAllInfo",
+    ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     Ok(())

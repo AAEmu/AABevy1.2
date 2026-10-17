@@ -21,7 +21,10 @@ fn object_paths(lua: &Lua, max_depth: usize) -> mlua::Result<HashMap<Id, Vec<Str
     let mut out: HashMap<Id, Vec<String>> = HashMap::new();
     for pair in found.pairs::<i64, Table>() {
         let (id, paths) = pair?;
-        let ps: Vec<String> = paths.sequence_values::<String>().filter_map(Result::ok).collect();
+        let ps: Vec<String> = paths
+            .sequence_values::<String>()
+            .filter_map(Result::ok)
+            .collect();
         out.insert(id as Id, ps);
     }
     Ok(out)

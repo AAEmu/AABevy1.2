@@ -514,8 +514,10 @@ pub struct Drawable {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// Widgets (about 2 KB) are boxed, drawables (270 bytes, most of the objects) stay inline.
+#[allow(clippy::large_enum_variant)]
 pub enum Kind {
-    Widget(Widget),
+    Widget(Box<Widget>),
     Drawable(Drawable),
 }
 
@@ -538,13 +540,13 @@ pub struct Object {
 impl Object {
     pub fn widget(&self) -> Option<&Widget> {
         match &self.kind {
-            Kind::Widget(w) => Some(w),
+            Kind::Widget(w) => Some(&**w),
             _ => None,
         }
     }
     pub fn widget_mut(&mut self) -> Option<&mut Widget> {
         match &mut self.kind {
-            Kind::Widget(w) => Some(w),
+            Kind::Widget(w) => Some(&mut **w),
             _ => None,
         }
     }
@@ -612,7 +614,7 @@ impl Tree {
             height: screen_h,
             shown: true,
             alpha: 1.0,
-            kind: Kind::Widget(Widget::new(WidgetType::Root)),
+            kind: Kind::Widget(Box::new(Widget::new(WidgetType::Root))),
             alive: true,
         };
         Tree {
@@ -662,10 +664,10 @@ impl Tree {
             self.snaps.clear();
             return;
         }
-        if let Some(o) = self.objects.get(id as usize) {
-            if let std::collections::hash_map::Entry::Vacant(e) = self.snaps.entry(id) {
-                e.insert(o.clone());
-            }
+        if let Some(o) = self.objects.get(id as usize)
+            && let std::collections::hash_map::Entry::Vacant(e) = self.snaps.entry(id)
+        {
+            e.insert(o.clone());
         }
     }
 
@@ -706,9 +708,16 @@ impl Tree {
             if let Some((id, old)) = changed {
                 self.dirty = true;
                 if crate::prof::enabled() {
-                    let class = old.widget().map_or(old.drawable().map_or("", |d| d.class), |w| w.class.as_str());
-                    let owner = old.parent.map(|p| self.objects[p as usize].name.clone()).unwrap_or_default();
-                    crate::prof::change(|| format!("object {class} {:?} (parent {owner}) #{id}", old.name));
+                    let class = old
+                        .widget()
+                        .map_or(old.drawable().map_or("", |d| d.class), |w| w.class.as_str());
+                    let owner = old
+                        .parent
+                        .map(|p| self.objects[p as usize].name.clone())
+                        .unwrap_or_default();
+                    crate::prof::change(|| {
+                        format!("object {class} {:?} (parent {owner}) #{id}", old.name)
+                    });
                 }
             }
         }
@@ -781,7 +790,7 @@ impl Tree {
             // Child widgets start shown, top-level windows hidden until `Show(true)`.
             shown: parent.is_some(),
             alpha: 1.0,
-            kind: Kind::Widget(w),
+            kind: Kind::Widget(Box::new(w)),
             alive: true,
         });
         match parent {
@@ -846,7 +855,7 @@ impl Tree {
     /// `AddAnchor`: an anchor on the same point replaces the old one.
     pub fn add_anchor(&mut self, id: Id, a: Anchor) {
         // The same anchor again changes nothing (and keeps the layout cache).
-        if self.get(id).anchors.iter().any(|o| *o == a) {
+        if self.get(id).anchors.contains(&a) {
             return;
         }
         let o = self.get_mut(id);
@@ -976,13 +985,13 @@ impl Tree {
                     }
                 }
                 match a.point.fx() {
-                    f if f == 0.0 => l = l.or(Some(px)),
-                    f if f == 1.0 => r = r.or(Some(px)),
+                    0.0 => l = l.or(Some(px)),
+                    1.0 => r = r.or(Some(px)),
                     _ => cx = cx.or(Some(px)),
                 }
                 match a.point.fy() {
-                    f if f == 0.0 => t = t.or(Some(py)),
-                    f if f == 1.0 => b = b.or(Some(py)),
+                    0.0 => t = t.or(Some(py)),
+                    1.0 => b = b.or(Some(py)),
                     _ => cy = cy.or(Some(py)),
                 }
             }
@@ -1127,7 +1136,10 @@ impl Widget {
                 // in reference/world_select/real.png; every other script textbox sets its align.
                 align: if matches!(
                     ty,
-                    WidgetType::Button | WidgetType::CheckButton | WidgetType::Label | WidgetType::TextBox
+                    WidgetType::Button
+                        | WidgetType::CheckButton
+                        | WidgetType::Label
+                        | WidgetType::TextBox
                 ) {
                     Align::Center
                 } else if matches!(ty, WidgetType::GameTooltip) {

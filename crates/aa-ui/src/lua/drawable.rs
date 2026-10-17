@@ -296,7 +296,10 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         def(
             "IsStartEffect",
             method(lua, |lua, id, _| {
-                ret(lua, with(lua, id, |d| d.effect == Some(true)).unwrap_or(false))
+                ret(
+                    lua,
+                    with(lua, id, |d| d.effect == Some(true)).unwrap_or(false),
+                )
             })?,
         )?;
         // "ninepart" / "threepart" / "image": how the effect's texture is drawn.

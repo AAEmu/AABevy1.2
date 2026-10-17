@@ -24,7 +24,11 @@ pub fn rgb_to_hls([r, g, b]: [f32; 3]) -> [f32; 3] {
         return [0.0, l, 0.0];
     }
     let d = mx - mn;
-    let s = if l <= 0.5 { d / (mx + mn) } else { d / (2.0 - mx - mn) };
+    let s = if l <= 0.5 {
+        d / (mx + mn)
+    } else {
+        d / (2.0 - mx - mn)
+    };
     let h = if mx == r {
         ((g - b) / d).rem_euclid(6.0)
     } else if mx == g {
@@ -39,7 +43,11 @@ pub fn hls_to_rgb([h, l, s]: [f32; 3]) -> [f32; 3] {
     if s == 0.0 {
         return [l, l, l];
     }
-    let m2 = if l <= 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let m2 = if l <= 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let m1 = 2.0 * l - m2;
     let v = |hue: f32| {
         let hue = hue.rem_euclid(1.0);
@@ -65,7 +73,10 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut PickerData) -> R) -> Option<R>
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
     // Spectrum / luminance children, created on first use.
-    for (getter, field) in [("GetSpectrumWidget", "__spectrum"), ("GetLuminanceWidget", "__luminance")] {
+    for (getter, field) in [
+        ("GetSpectrumWidget", "__spectrum"),
+        ("GetLuminanceWidget", "__luminance"),
+    ] {
         def(
             getter,
             method(lua, move |lua, id, _| {
@@ -137,7 +148,12 @@ mod tests {
 
     #[test]
     fn hls_round_trip() {
-        for c in [[1.0, 0.0, 0.0], [0.2, 0.6, 0.4], [0.5, 0.5, 0.5], [0.9, 0.8, 0.1]] {
+        for c in [
+            [1.0, 0.0, 0.0],
+            [0.2, 0.6, 0.4],
+            [0.5, 0.5, 0.5],
+            [0.9, 0.8, 0.1],
+        ] {
             let back = hls_to_rgb(rgb_to_hls(c));
             for i in 0..3 {
                 assert!((back[i] - c[i]).abs() < 1e-5, "{c:?} -> {back:?}");

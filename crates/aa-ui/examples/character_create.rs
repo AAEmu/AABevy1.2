@@ -16,7 +16,10 @@ use bevy::prelude::*;
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 fn main() {
@@ -27,7 +30,9 @@ fn main() {
     App::new()
         .add_plugins(aa_dev::default_plugins("aa-ui: character create"))
         .add_plugins(aa_dev::DevPlugin)
-        .add_plugins(aa_ui::UiPlugin { config: Some(fake::config()) })
+        .add_plugins(aa_ui::UiPlugin {
+            config: Some(fake::config()),
+        })
         .insert_resource(aa_ui::UiSetup::new(move |ui| {
             let worlds = fake::worlds_from_args();
             fake::install_with(ui, locale, &worlds, &[]);

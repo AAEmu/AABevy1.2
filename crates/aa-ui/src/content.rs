@@ -82,8 +82,15 @@ pub fn hotkey(lua: &Lua, action: &str) -> mlua::Result<bool> {
     // The main menu's table: `{ hotkey = "toggle_bag", content = UIC_BAG, toggleFunc = ... }`.
     if let Ok(Some(menu)) = lua.globals().raw_get::<Option<Table>>("MAIN_MENU_INFO") {
         for entry in menu.pairs::<Value, Value>() {
-            let Ok((_, Value::Table(e))) = entry else { continue };
-            if e.raw_get::<Option<String>>("hotkey").ok().flatten().as_deref() != Some(action) {
+            let Ok((_, Value::Table(e))) = entry else {
+                continue;
+            };
+            if e.raw_get::<Option<String>>("hotkey")
+                .ok()
+                .flatten()
+                .as_deref()
+                != Some(action)
+            {
                 continue;
             }
             if let Some(c) = e.raw_get::<Option<i64>>("content")? {
@@ -100,7 +107,9 @@ pub fn hotkey(lua: &Lua, action: &str) -> mlua::Result<bool> {
     let Some(&(_, name)) = ACTIONS.iter().find(|(a, _)| *a == action) else {
         return Ok(false);
     };
-    let Some(c) = content_id(lua, name) else { return Ok(false) };
+    let Some(c) = content_id(lua, name) else {
+        return Ok(false);
+    };
     toggle(lua, c)?;
     Ok(true)
 }

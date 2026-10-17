@@ -249,9 +249,12 @@ impl FontLib {
             Ok(text) => lib.parse_fonts_g(&text, locale),
             Err(e) => bevy::log::warn!("aa-ui: fonts/fonts.g: {e}"),
         }
-        let image_text = [format!("ui/{locale}/image_text.g"), "ui/image_text.g".to_string()]
-            .into_iter()
-            .find_map(|p| aa_pak::Pak::global().read_string(&p).ok());
+        let image_text = [
+            format!("ui/{locale}/image_text.g"),
+            "ui/image_text.g".to_string(),
+        ]
+        .into_iter()
+        .find_map(|p| aa_pak::Pak::global().read_string(&p).ok());
         if let Some(text) = image_text {
             lib.image_fonts = parse_image_fonts(&text);
         }
@@ -495,7 +498,8 @@ impl FontLib {
         line_space: f32,
         outline: bool,
     ) -> LaidOutText {
-        self.layout_ref(font, size, text, max_width, line_space, outline).clone()
+        self.layout_ref(font, size, text, max_width, line_space, outline)
+            .clone()
     }
 
     /// Width and height of the laid out text, without copying the layout.
@@ -531,7 +535,11 @@ impl FontLib {
                 && k.text == text
                 && (k.size, k.max_width, k.line_space, k.outline) == (sz, mw, ls, outline)
         };
-        if let Some(i) = self.layouts.get(&hash).and_then(|v| v.iter().position(|(k, _)| same(k))) {
+        if let Some(i) = self
+            .layouts
+            .get(&hash)
+            .and_then(|v| v.iter().position(|(k, _)| same(k)))
+        {
             return &self.layouts[&hash][i].1;
         }
         let lo = self.layout_uncached(font, size, text, max_width, line_space, outline);
@@ -586,12 +594,14 @@ impl FontLib {
         // `"We fear no death."\r\n\n` 2 lines and `"Claw to earth, ... fur to fire."\r\n\n `
         // (wrapped in two) 3 lines (GetTextHeight in reference/character_create/step1_*).
         let mut expanded = expand_codes(text);
-        if let Some(nl) = expanded.rfind('\n') {
-            if expanded[nl + 1..].chars().all(|c| c == ' ' || c == '\t' || c == '\r') {
-                expanded.truncate(nl);
-                if expanded.ends_with('\r') {
-                    expanded.pop();
-                }
+        if let Some(nl) = expanded.rfind('\n')
+            && expanded[nl + 1..]
+                .chars()
+                .all(|c| c == ' ' || c == '\t' || c == '\r')
+        {
+            expanded.truncate(nl);
+            if expanded.ends_with('\r') {
+                expanded.pop();
             }
         }
         let chars: Vec<char> = expanded.chars().collect();
@@ -680,23 +690,25 @@ impl FontLib {
                 k += 1;
                 continue;
             }
-            if let Some(maxw) = max_width {
-                if it.ch != ' ' && x + it.adv > maxw && k > start {
-                    let brk = match last_space {
-                        Some(sp) if sp > start => sp,
-                        _ => k,
-                    };
-                    lines.push((start, brk));
-                    // Skip the space we broke at.
-                    start = if brk < items.len() && items[brk].ch == ' ' {
-                        brk + 1
-                    } else {
-                        brk
-                    };
-                    x = items[start..k].iter().map(|i| i.adv).sum();
-                    last_space = None;
-                    continue;
-                }
+            if let Some(maxw) = max_width
+                && it.ch != ' '
+                && x + it.adv > maxw
+                && k > start
+            {
+                let brk = match last_space {
+                    Some(sp) if sp > start => sp,
+                    _ => k,
+                };
+                lines.push((start, brk));
+                // Skip the space we broke at.
+                start = if brk < items.len() && items[brk].ch == ' ' {
+                    brk + 1
+                } else {
+                    brk
+                };
+                x = items[start..k].iter().map(|i| i.adv).sum();
+                last_space = None;
+                continue;
             }
             if it.ch == ' ' {
                 last_space = Some(k);
@@ -879,10 +891,10 @@ fn parse_image_fonts(text: &str) -> HashMap<String, ImageFont> {
     let mut texture = String::new();
     let mut cur: Option<(String, ImageFont)> = None;
     let flush = |cur: &mut Option<(String, ImageFont)>, out: &mut HashMap<String, ImageFont>| {
-        if let Some((name, f)) = cur.take() {
-            if !name.is_empty() {
-                out.insert(name.to_ascii_lowercase(), f);
-            }
+        if let Some((name, f)) = cur.take()
+            && !name.is_empty()
+        {
+            out.insert(name.to_ascii_lowercase(), f);
         }
     };
     for raw in text.lines() {

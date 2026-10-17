@@ -212,7 +212,8 @@ impl UiRuntime {
         let locale = lua::ui(&self.lua).textures.locale.clone();
         let texts = uitext::load(db, &locale)?;
         let n = texts.len();
-        self.set_ui_texts(texts).map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.set_ui_texts(texts)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(n)
     }
 
@@ -220,21 +221,23 @@ impl UiRuntime {
     /// the extra arguments, a missing text returns the key).
     pub fn set_ui_texts(&self, texts: std::sync::Arc<uitext::UiTexts>) -> mlua::Result<()> {
         let x2locale = lua::install_game_stub(&self.lua, "X2Locale")?;
-        let f = self.lua.create_function(move |lua, args: mlua::MultiValue| {
-            let mut it = args.into_iter().skip(1); // self
-            let cat = match it.next() {
-                Some(mlua::Value::Integer(i)) => i,
-                Some(mlua::Value::Number(n)) => n as i64,
-                _ => 0,
-            };
-            let key = match it.next() {
-                Some(mlua::Value::String(s)) => s.to_string_lossy(),
-                Some(v) => lua_tostring(lua, v),
-                None => String::new(),
-            };
-            let rest: Vec<String> = it.map(|v| lua_tostring(lua, v)).collect();
-            Ok(uitext::localize(&texts, cat, &key, &rest))
-        })?;
+        let f = self
+            .lua
+            .create_function(move |lua, args: mlua::MultiValue| {
+                let mut it = args.into_iter().skip(1); // self
+                let cat = match it.next() {
+                    Some(mlua::Value::Integer(i)) => i,
+                    Some(mlua::Value::Number(n)) => n as i64,
+                    _ => 0,
+                };
+                let key = match it.next() {
+                    Some(mlua::Value::String(s)) => s.to_string_lossy(),
+                    Some(v) => lua_tostring(lua, v),
+                    None => String::new(),
+                };
+                let rest: Vec<String> = it.map(|v| lua_tostring(lua, v)).collect();
+                Ok(uitext::localize(&texts, cat, &key, &rest))
+            })?;
         x2locale.raw_set("LocalizeUiText", f)
     }
 
@@ -360,7 +363,10 @@ pub fn reload_ui(world: &mut World, setup: UiSetup) {
     if let Some(mut stats) = world.get_resource_mut::<UiStats>() {
         stats.keyboard_focus = false;
     }
-    info!("aa-ui: reloading the UI (previous runtime {})", if had { "dropped" } else { "none" });
+    info!(
+        "aa-ui: reloading the UI (previous runtime {})",
+        if had { "dropped" } else { "none" }
+    );
 }
 
 /// Toolkit settings.
@@ -522,7 +528,10 @@ fn init_runtime(world: &mut World) {
     if let Some(db) = world.resource::<UiConfig>().ui_texts_db.clone() {
         match rt.load_ui_texts(&db) {
             Ok(n) => info!("aa-ui: {n} UI texts from {}", db.display()),
-            Err(e) => warn!("aa-ui: UI texts from {}: {e:#}; LocalizeUiText returns keys", db.display()),
+            Err(e) => warn!(
+                "aa-ui: UI texts from {}: {e:#}; LocalizeUiText returns keys",
+                db.display()
+            ),
         }
     }
     if let Some(setup) = world.remove_resource::<UiSetup>() {
@@ -654,9 +663,7 @@ fn ui_frame(
     let mut g = lua::ui(lua);
     let u = &mut *g;
     let content = u.tree.settle();
-    if content != state.generation
-        || u.fonts.atlas_dirty
-        || state.screen != (pw as u32, ph as u32)
+    if content != state.generation || u.fonts.atlas_dirty || state.screen != (pw as u32, ph as u32)
     {
         prof::count("rebuild");
         let p_build = prof::scope("build_quads");

@@ -10,8 +10,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// (category id, key) -> text.
 pub type UiTexts = HashMap<(i64, String), String>;
 
-fn cache() -> &'static Mutex<HashMap<(PathBuf, String), Arc<UiTexts>>> {
-    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, String), Arc<UiTexts>>>> = OnceLock::new();
+/// Texts per (database, locale).
+type Cache = Mutex<HashMap<(PathBuf, String), Arc<UiTexts>>>;
+
+fn cache() -> &'static Cache {
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
@@ -80,14 +83,14 @@ pub fn localize(texts: &UiTexts, category: i64, key: &str, args: &[String]) -> S
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '$' {
-            if let Some(d) = chars.peek().and_then(|d| d.to_digit(10)) {
-                chars.next();
-                if let Some(a) = (d as usize).checked_sub(1).and_then(|i| args.get(i)) {
-                    out.push_str(a);
-                }
-                continue;
+        if c == '$'
+            && let Some(d) = chars.peek().and_then(|d| d.to_digit(10))
+        {
+            chars.next();
+            if let Some(a) = (d as usize).checked_sub(1).and_then(|i| args.get(i)) {
+                out.push_str(a);
             }
+            continue;
         }
         out.push(c);
     }
@@ -102,7 +105,10 @@ mod tests {
     fn placeholders() {
         let mut t = UiTexts::new();
         t.insert((1, "k".into()), "Level $1 of $2".into());
-        assert_eq!(localize(&t, 1, "k", &["3".into(), "50".into()]), "Level 3 of 50");
+        assert_eq!(
+            localize(&t, 1, "k", &["3".into(), "50".into()]),
+            "Level 3 of 50"
+        );
         assert_eq!(localize(&t, 1, "k", &[]), "Level $1 of $2");
         assert_eq!(localize(&t, 2, "missing", &[]), "missing");
     }

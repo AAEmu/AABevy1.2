@@ -266,9 +266,11 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     let x2chat = install_game_stub(lua, "X2Chat")?;
     x2chat.raw_set(
         "DispatchChatMessage",
-        lua.create_function(|lua, (_this, filter, text): (Value, Option<i64>, Option<String>)| {
-            super::chat::dispatch(lua, filter.unwrap_or(0), &text.unwrap_or_default())
-        })?,
+        lua.create_function(
+            |lua, (_this, filter, text): (Value, Option<i64>, Option<String>)| {
+                super::chat::dispatch(lua, filter.unwrap_or(0), &text.unwrap_or_default())
+            },
+        )?,
     )?;
     // `X2Input:GetMousePos()`: the cursor in screen pixels (the colour pad of character create
     // drags with it from `OnUpdate`).

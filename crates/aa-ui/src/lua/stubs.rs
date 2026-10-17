@@ -2071,10 +2071,14 @@ pub fn coverage(lua: &Lua) -> mlua::Result<Vec<(String, usize, usize)>> {
     let r = super::reg(lua);
     let mut out = Vec::new();
     for (class, mt) in &r.mt {
-        let Ok(methods) = mt.raw_get::<Table>("__index") else { continue };
+        let Ok(methods) = mt.raw_get::<Table>("__index") else {
+            continue;
+        };
         let (mut native, mut stubbed) = (0, 0);
         for pair in methods.pairs::<mlua::Value, mlua::Value>() {
-            let Ok((_, mlua::Value::Function(f))) = pair else { continue };
+            let Ok((_, mlua::Value::Function(f))) = pair else {
+                continue;
+            };
             let is_stub = match &set {
                 Some(set) => set.raw_get::<Option<bool>>(f)?.unwrap_or(false),
                 None => false,

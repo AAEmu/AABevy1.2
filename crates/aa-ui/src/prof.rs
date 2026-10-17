@@ -187,7 +187,7 @@ pub fn frame_end() {
             .map(|(k, v)| format!("{k} {:.3}", v / n))
             .collect();
         let mut hs: Vec<(&String, &(f64, u32))> = a.handlers.iter().collect();
-        hs.sort_by(|x, y| y.1 .0.total_cmp(&x.1 .0));
+        hs.sort_by(|x, y| y.1.0.total_cmp(&x.1.0));
         let top: Vec<String> = hs
             .iter()
             .take(8)
@@ -218,24 +218,32 @@ pub fn frame_end() {
         }
         if !a.natives.is_empty() {
             let mut ns: Vec<(&String, &(f64, u32, u32))> = a.natives.iter().collect();
-            ns.sort_by(|x, y| y.1 .0.total_cmp(&x.1 .0));
+            ns.sort_by(|x, y| y.1.0.total_cmp(&x.1.0));
             let top: Vec<String> = ns
                 .iter()
                 .take(16)
                 .map(|(k, (ms, c, t))| {
-                    format!("{k} {:.3} ({:.1}/f, {:.1} changed)", ms / n, *c as f64 / n, *t as f64 / n)
+                    format!(
+                        "{k} {:.3} ({:.1}/f, {:.1} changed)",
+                        ms / n,
+                        *c as f64 / n,
+                        *t as f64 / n
+                    )
                 })
                 .collect();
             let mut ts: Vec<(&String, &(f64, u32, u32))> =
                 a.natives.iter().filter(|(_, v)| v.2 > 0).collect();
-            ts.sort_by(|x, y| y.1 .2.cmp(&x.1 .2));
+            ts.sort_by_key(|x| std::cmp::Reverse(x.1.2));
             let touch: Vec<String> = ts
                 .iter()
                 .take(16)
                 .map(|(k, (_, c, t))| format!("{k} {:.1}/{:.1}", *t as f64 / n, *c as f64 / n))
                 .collect();
             bevy::log::info!("aa-ui natives (ms per frame): {}", top.join(", "));
-            bevy::log::info!("aa-ui natives that changed the tree (per frame / calls): {}", touch.join(", "));
+            bevy::log::info!(
+                "aa-ui natives that changed the tree (per frame / calls): {}",
+                touch.join(", ")
+            );
         }
         *a = Acc::default();
     });

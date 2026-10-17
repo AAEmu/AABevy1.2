@@ -178,7 +178,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 apply(lua, id);
                 // A toggle (the title was clicked) tells the scripts: `FOLDER_STATE_CHANGED(title)`.
                 if state.is_none() {
-                    queue_ui_event(lua, "FOLDER_STATE_CHANGED", vec![Value::String(lua.create_string(title.unwrap_or_default())?)]);
+                    queue_ui_event(
+                        lua,
+                        "FOLDER_STATE_CHANGED",
+                        vec![Value::String(lua.create_string(title.unwrap_or_default())?)],
+                    );
                 }
                 none()
             })?,

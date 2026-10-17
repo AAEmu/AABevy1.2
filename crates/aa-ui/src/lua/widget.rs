@@ -29,11 +29,11 @@ pub(crate) fn parse_anchor(lua: &Lua, id: Id, a: &Args) -> Option<Anchor> {
         _ => {}
     }
     let mut rel = point;
-    if let Some(s) = a.s(i).filter(|_| !a.is_num(i)) {
-        if let Some(p) = Point::parse(&s) {
-            rel = p;
-            i += 1;
-        }
+    if let Some(s) = a.s(i).filter(|_| !a.is_num(i))
+        && let Some(p) = Point::parse(&s)
+    {
+        rel = p;
+        i += 1;
     }
     let x = a.f(i);
     let y = a.f(i + 1);
@@ -154,23 +154,22 @@ pub(crate) fn create_child(
         "chatwindow" => super::chat::init_window(lua, id, &t)?,
         _ => {}
     }
-    if reflect {
-        if let Some(p) = parent {
-            if let Some(pt) = super::object_table(lua, p)? {
-                if index > 0 {
-                    let sub = match pt.raw_get::<Value>(name)? {
-                        Value::Table(s) if reg(lua).ids.raw_get::<Option<Id>>(&s)?.is_none() => s,
-                        _ => {
-                            let s = lua.create_table()?;
-                            pt.raw_set(name, &s)?;
-                            s
-                        }
-                    };
-                    sub.raw_set(index, &t)?;
-                } else {
-                    pt.raw_set(name, &t)?;
+    if reflect
+        && let Some(p) = parent
+        && let Some(pt) = super::object_table(lua, p)?
+    {
+        if index > 0 {
+            let sub = match pt.raw_get::<Value>(name)? {
+                Value::Table(s) if reg(lua).ids.raw_get::<Option<Id>>(&s)?.is_none() => s,
+                _ => {
+                    let s = lua.create_table()?;
+                    pt.raw_set(name, &s)?;
+                    s
                 }
-            }
+            };
+            sub.raw_set(index, &t)?;
+        } else {
+            pt.raw_set(name, &t)?;
         }
     }
     Ok(t)
@@ -259,8 +258,19 @@ fn text_lines(lua: &Lua, id: Id) -> (usize, f32) {
         return (0, 0.0);
     };
     let maxw = (t.wrap && w > 0.0).then_some((w - t.inset[0] - t.inset[2]).max(1.0));
-    let lo = u.fonts.layout(&t.style.font, t.style.size, &t.text, maxw, t.line_space, false);
-    let n = if t.text.is_empty() { 0 } else { lo.line_widths.len() };
+    let lo = u.fonts.layout(
+        &t.style.font,
+        t.style.size,
+        &t.text,
+        maxw,
+        t.line_space,
+        false,
+    );
+    let n = if t.text.is_empty() {
+        0
+    } else {
+        lo.line_widths.len()
+    };
     (n, t.line_space)
 }
 
@@ -274,7 +284,10 @@ pub(crate) fn auto_size(lua: &Lua, id: Id) {
         Some(t) if t.auto_resize => t.clone(),
         _ => return,
     };
-    if u.tree.widget(id).is_some_and(|w| w.ty == WidgetType::TextBox) {
+    if u.tree
+        .widget(id)
+        .is_some_and(|w| w.ty == WidgetType::TextBox)
+    {
         drop(g);
         let h = text_height(lua, id) + t.inset[1] + t.inset[3];
         let mut u = ui(lua);
@@ -817,13 +830,12 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                     .widget(id)
                     .and_then(|w| w.text.as_ref().or(w.title.as_ref()))
                     .is_none_or(|t| t.text == s);
-                if !same {
-                    if let Some(w) = u.tree.widget_mut(id) {
-                        if let Some(t) = w.text.as_mut().or(w.title.as_mut()) {
-                            t.text = s;
-                            t.lines.clear();
-                        }
-                    }
+                if !same
+                    && let Some(w) = u.tree.widget_mut(id)
+                    && let Some(t) = w.text.as_mut().or(w.title.as_mut())
+                {
+                    t.text = s;
+                    t.lines.clear();
                 }
             }
             auto_size(lua, id);
@@ -855,10 +867,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetTitle",
         method(lua, |lua, id, a| {
             let s = a.s(1).unwrap_or_default();
-            if let Some(w) = ui(lua).tree.widget_mut(id) {
-                if let Some(t) = w.title.as_mut() {
-                    t.text = s;
-                }
+            if let Some(w) = ui(lua).tree.widget_mut(id)
+                && let Some(t) = w.title.as_mut()
+            {
+                t.text = s;
             }
             none()
         })?,
@@ -1012,10 +1024,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "EnableScroll",
         method(lua, |lua, id, a| {
             let on = a.b(1, true);
-            if ui(lua).tree.widget(id).is_some_and(|w| w.clip != on) {
-                if let Some(w) = ui(lua).tree.widget_mut(id) {
-                    w.clip = on;
-                }
+            if ui(lua).tree.widget(id).is_some_and(|w| w.clip != on)
+                && let Some(w) = ui(lua).tree.widget_mut(id)
+            {
+                w.clip = on;
             }
             none()
         })?,
@@ -1023,12 +1035,17 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "ChangeChildAnchorByScrollValue",
         method(lua, |lua, id, a| {
-            let axis = usize::from(!a.s(1).unwrap_or_default().to_ascii_lowercase().starts_with('h'));
+            let axis = usize::from(
+                !a.s(1)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .starts_with('h'),
+            );
             let v = a.f(2);
-            if ui(lua).tree.widget(id).is_some_and(|w| w.scroll[axis] != v) {
-                if let Some(w) = ui(lua).tree.widget_mut(id) {
-                    w.scroll[axis] = v;
-                }
+            if ui(lua).tree.widget(id).is_some_and(|w| w.scroll[axis] != v)
+                && let Some(w) = ui(lua).tree.widget_mut(id)
+            {
+                w.scroll[axis] = v;
             }
             none()
         })?,
@@ -1058,7 +1075,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     if matches!(
         ty,
-        "cooldownbutton" | "cooldownactionbutton" | "cooldownconstantbutton" | "cooldowninventorybutton"
+        "cooldownbutton"
+            | "cooldownactionbutton"
+            | "cooldownconstantbutton"
+            | "cooldowninventorybutton"
     ) {
         super::slot::cooldown_button_methods(lua, &m)?;
     }
@@ -1103,11 +1123,11 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                     let (kind, class) = state_drawable_kind(&ty);
                     let layer = a.s(7).unwrap_or_else(|| "artwork".into());
                     let t = create_drawable_class(lua, id, kind, class, &layer, a.s(6))?;
-                    if let Some(d) = value_id(lua, &Value::Table(t.clone())) {
-                        if let Some(dr) = ui(lua).tree.drawable_mut(d) {
-                            dr.state_only = Some(st);
-                            dr.color = color;
-                        }
+                    if let Some(d) = value_id(lua, &Value::Table(t.clone()))
+                        && let Some(dr) = ui(lua).tree.drawable_mut(d)
+                    {
+                        dr.state_only = Some(st);
+                        dr.color = color;
                     }
                     ret(lua, t)
                 })?,
@@ -1130,10 +1150,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 };
                 let layer = a.s(4).unwrap_or_else(|| "artwork".into());
                 let t = create_drawable_class(lua, id, kind, class, &layer, a.s(3))?;
-                if let Some(d) = value_id(lua, &Value::Table(t.clone())) {
-                    if let Some(dr) = ui(lua).tree.drawable_mut(d) {
-                        dr.state_only = Some(st);
-                    }
+                if let Some(d) = value_id(lua, &Value::Table(t.clone()))
+                    && let Some(dr) = ui(lua).tree.drawable_mut(d)
+                {
+                    dr.state_only = Some(st);
                 }
                 ret(lua, t)
             })?,
@@ -1810,10 +1830,10 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                         .get(col.wrapping_sub(1))
                         .copied()
                 });
-            if let Some(s) = sub {
-                if let Some(t) = u.tree.get_mut(s).text_mut() {
-                    t.text = text;
-                }
+            if let Some(s) = sub
+                && let Some(t) = u.tree.get_mut(s).text_mut()
+            {
+                t.text = text;
             }
             none()
         })?,

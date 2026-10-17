@@ -119,14 +119,14 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         // Message frames: their newest lines.
         if w.message.is_some() {
             let rect = u.tree.rect(id);
-            if let Some(t) = crate::lua::chat::compose(u, id, rect) {
-                if !t.text.is_empty() {
-                    let c = t.style.color;
-                    text_quads(u, &t, rect, c, alpha, scale, &mut out);
-                }
+            if let Some(t) = crate::lua::chat::compose(u, id, rect)
+                && !t.text.is_empty()
+            {
+                let c = t.style.color;
+                text_quads(u, &t, rect, c, alpha, scale, &mut out);
             }
         } else if let Some(t) = w.text.as_ref() {
-        // Widget text above background/artwork, below overlay.
+            // Widget text above background/artwork, below overlay.
             let edit = crate::lua::edit::is_edit(&w.ty);
             let rect = u.tree.rect(id);
             let shown = if edit {
@@ -137,7 +137,12 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                     let mut p = w.aux_style.clone().unwrap_or_default();
                     p.text = e.prefix.clone();
                     let pi = e.prefix_inset;
-                    p.inset = [t.inset[0] + pi[0], t.inset[1] + pi[1], t.inset[2], t.inset[3] + pi[3]];
+                    p.inset = [
+                        t.inset[0] + pi[0],
+                        t.inset[1] + pi[1],
+                        t.inset[2],
+                        t.inset[3] + pi[3],
+                    ];
                     p.style.align = crate::tree::Align::Left;
                     let pw = u.fonts.measure(&p.style.font, p.style.size, &p.text);
                     let c = p.style.color;
@@ -160,25 +165,25 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 caret_quad(u, &shown, w.edit.as_ref(), rect, alpha, scale, &mut out);
             }
         }
-        if let Some(t) = w.title.as_ref() {
-            if !t.text.is_empty() {
-                let r = u.tree.rect(id);
-                // With `SetTitleInset` the title sits in the window minus the insets, aligned by
-                // `titleStyle` (step 2's tab titles: TOPLEFT at 15, 15). Without, it is placed in
-                // the top 45 units (the baselib title bar height), 1 unit lower: the step 3
-                // confirm dialog in reference/character_create matches to the pixel.
-                let rect = if t.inset != [0.0; 4] {
-                    r
-                } else {
-                    Rect {
-                        x: r.x,
-                        y: r.y + 1.0,
-                        w: r.w,
-                        h: r.h.min(45.0),
-                    }
-                };
-                text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
-            }
+        if let Some(t) = w.title.as_ref()
+            && !t.text.is_empty()
+        {
+            let r = u.tree.rect(id);
+            // With `SetTitleInset` the title sits in the window minus the insets, aligned by
+            // `titleStyle` (step 2's tab titles: TOPLEFT at 15, 15). Without, it is placed in
+            // the top 45 units (the baselib title bar height), 1 unit lower: the step 3
+            // confirm dialog in reference/character_create matches to the pixel.
+            let rect = if t.inset != [0.0; 4] {
+                r
+            } else {
+                Rect {
+                    x: r.x,
+                    y: r.y + 1.0,
+                    w: r.w,
+                    h: r.h.min(45.0),
+                }
+            };
+            text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
         }
         for d in above {
             drawable_quads(u, d, alpha, state, scale, &mut out);
@@ -269,17 +274,16 @@ pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
     };
     // Check marks: `SetCheckedBackground` while checked, `SetDisabledCheckedBackground`
     // instead while checked and disabled.
-    if let Some(owner) = u.tree.get(d).parent {
-        if let Some(w) = u.tree.widget(owner) {
-            if let Some(b) = w.button.as_ref() {
-                let disabled = state == ButtonState::Disabled;
-                if b.checked_bg == Some(d) {
-                    return b.checked && !(disabled && b.disabled_checked_bg.is_some());
-                }
-                if b.disabled_checked_bg == Some(d) {
-                    return b.checked && disabled;
-                }
-            }
+    if let Some(owner) = u.tree.get(d).parent
+        && let Some(w) = u.tree.widget(owner)
+        && let Some(b) = w.button.as_ref()
+    {
+        let disabled = state == ButtonState::Disabled;
+        if b.checked_bg == Some(d) {
+            return b.checked && !(disabled && b.disabled_checked_bg.is_some());
+        }
+        if b.disabled_checked_bg == Some(d) {
+            return b.checked && disabled;
         }
     }
     if let Some((owner, _)) = dr.state_of {
@@ -331,10 +335,8 @@ fn drawable_quads(
     }
     let a = alpha * o.alpha;
     let color = [dr.color[0], dr.color[1], dr.color[2], dr.color[3] * a];
-    if color[3] <= 0.0 || rect.w == 0.0 || rect.h == 0.0 {
-        if dr.kind != DrawKind::Text {
-            return;
-        }
+    if (color[3] <= 0.0 || rect.w == 0.0 || rect.h == 0.0) && dr.kind != DrawKind::Text {
+        return;
     }
     match dr.kind {
         DrawKind::Color => out.push(Quad {
@@ -450,7 +452,10 @@ fn rotated_corners(p: [f32; 4], angle: f32) -> Option<[[f32; 2]; 4]> {
     let (cx, cy) = ((p[0] + p[2]) / 2.0, (p[1] + p[3]) / 2.0);
     let (hw, hh) = ((p[2] - p[0]) / 2.0, (p[3] - p[1]) / 2.0);
     let (s, c) = angle.sin_cos();
-    Some([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| [cx + x * c - y * s, cy + x * s + y * c]))
+    Some(
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+            .map(|(x, y)| [cx + x * c - y * s, cy + x * s + y * c]),
+    )
 }
 
 /// UI rect -> pixel rect, snapped to whole pixels.
@@ -560,23 +565,22 @@ pub(crate) fn text_quads(
         emit(g, 0.0, 0.0, c, lx);
     }
     // Image font glyphs, in the texture's own colours.
-    if let (false, Some(path)) = (lo.images.is_empty(), lo.image_texture.as_deref()) {
-        if let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path))
-        {
-            let (tw, th) = (tw as f32, th as f32);
-            for im in &lo.images {
-                let lx = line_offsets.get(im.line as usize).copied().unwrap_or(0.0);
-                let [sx, sy, sw, sh] = im.src;
-                let (x, y) = (ox + lx + im.x, oy + im.y);
-                out.push(Quad {
-                    tex: Tex::Image(resolved.clone()),
-                    pos: [x, y, x + im.w, y + im.h],
-                    uv: [sx / tw, sy / th, (sx + sw) / tw, (sy + sh) / th],
-                    color: [1.0, 1.0, 1.0, a],
-                    corners: None,
-                    vcolors: None,
-                });
-            }
+    if let (false, Some(path)) = (lo.images.is_empty(), lo.image_texture.as_deref())
+        && let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path))
+    {
+        let (tw, th) = (tw as f32, th as f32);
+        for im in &lo.images {
+            let lx = line_offsets.get(im.line as usize).copied().unwrap_or(0.0);
+            let [sx, sy, sw, sh] = im.src;
+            let (x, y) = (ox + lx + im.x, oy + im.y);
+            out.push(Quad {
+                tex: Tex::Image(resolved.clone()),
+                pos: [x, y, x + im.w, y + im.h],
+                uv: [sx / tw, sy / th, (sx + sw) / tw, (sy + sh) / th],
+                color: [1.0, 1.0, 1.0, a],
+                corners: None,
+                vcolors: None,
+            });
         }
     }
     // Inline icons (coins, loyalty token).
@@ -621,7 +625,12 @@ fn picker_quads(
     use crate::lua::picker::{hls_to_rgb, rgb_to_hls};
     let inner = |d: Id| {
         let r = u.tree.rect(d);
-        Rect { x: r.x + 3.0, y: r.y + 3.0, w: (r.w - 6.0).max(0.0), h: (r.h - 6.0).max(0.0) }
+        Rect {
+            x: r.x + 3.0,
+            y: r.y + 3.0,
+            w: (r.w - 6.0).max(0.0),
+            h: (r.h - 6.0).max(0.0),
+        }
     };
     let c4 = |[r, g, b]: [f32; 3]| [r, g, b, alpha];
     let grad = |r: Rect, vc: [[f32; 4]; 4], out: &mut Vec<Quad>| {
@@ -642,8 +651,16 @@ fn picker_quads(
         for i in 0..6 {
             let (h0, h1) = (i as f32 / 6.0, (i + 1) as f32 / 6.0);
             let x0 = r.x + r.w * h0;
-            let seg = Rect { x: x0, y: r.y, w: r.w / 6.0, h: r.h };
-            let (a, b) = (c4(hls_to_rgb([h0, 0.5, 1.0])), c4(hls_to_rgb([h1, 0.5, 1.0])));
+            let seg = Rect {
+                x: x0,
+                y: r.y,
+                w: r.w / 6.0,
+                h: r.h,
+            };
+            let (a, b) = (
+                c4(hls_to_rgb([h0, 0.5, 1.0])),
+                c4(hls_to_rgb([h1, 0.5, 1.0])),
+            );
             grad(seg, [a, b, grey, grey], out);
         }
     }
@@ -653,7 +670,11 @@ fn picker_quads(
         let mid = c4(hls_to_rgb([h, 0.5, s]));
         let (white, black) = (c4([1.0; 3]), c4([0.0; 3]));
         let top = Rect { h: r.h / 2.0, ..r };
-        let bottom = Rect { y: r.y + r.h / 2.0, h: r.h / 2.0, ..r };
+        let bottom = Rect {
+            y: r.y + r.h / 2.0,
+            h: r.h / 2.0,
+            ..r
+        };
         grad(top, [white, white, mid, mid], out);
         grad(bottom, [mid, mid, black, black], out);
     }
@@ -719,7 +740,9 @@ fn caret_quad(
     let size = t.style.size * scale;
     let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w * scale);
     let ls = t.line_space * scale;
-    let full = u.fonts.layout(&t.style.font, size, &t.text, maxw, ls, false);
+    let full = u
+        .fonts
+        .layout(&t.style.font, size, &t.text, maxw, ls, false);
     let cursor = edit.map_or(usize::MAX, |e| e.cursor);
     let head: String = t.text.chars().take(cursor).collect();
     let lo = u.fonts.layout(&t.style.font, size, &head, maxw, ls, false);

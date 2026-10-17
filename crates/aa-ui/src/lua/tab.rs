@@ -42,7 +42,9 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut TabData) -> R) -> Option<R> {
 /// bag's `commonInvenTab.tabWindow` (one window for the "All" tab and the four custom tabs, the
 /// first selected) is hidden, as in `reference/ingame/bag`; only its anchors matter.
 fn apply_selection(lua: &Lua, id: Id) {
-    let Some(td) = with(lua, id, |t| t.clone()) else { return };
+    let Some(td) = with(lua, id, |t| t.clone()) else {
+        return;
+    };
     for (i, &(win, sel, unsel)) in td.tabs.iter().enumerate() {
         let on = i + 1 == td.selected;
         show(lua, win, on, None);
@@ -74,14 +76,18 @@ pub(crate) fn select(lua: &Lua, id: Id, index: usize, fire: bool) {
 pub(crate) fn button_clicked(lua: &Lua, id: Id) -> bool {
     let found = {
         let u = ui(lua);
-        let Some(parent) = u.tree.get(id).parent else { return false };
+        let Some(parent) = u.tree.get(id).parent else {
+            return false;
+        };
         u.tree
             .widget(parent)
             .and_then(|w| w.tab.as_ref())
             .and_then(|t| t.tabs.iter().position(|&(_, s, un)| s == id || un == id))
             .map(|i| (parent, i + 1))
     };
-    let Some((tab, index)) = found else { return false };
+    let Some((tab, index)) = found else {
+        return false;
+    };
     select(lua, tab, index, true);
     true
 }
@@ -102,15 +108,33 @@ pub(crate) fn relayout_all(lua: &Lua) {
             continue;
         }
         let mut u = ui(lua);
-        let sizes: Vec<(f32, f32)> = td.tabs.iter().map(|&(_, s, _)| (u.tree.get(s).width, u.tree.get(s).height)).collect();
+        let sizes: Vec<(f32, f32)> = td
+            .tabs
+            .iter()
+            .map(|&(_, s, _)| (u.tree.get(s).width, u.tree.get(s).height))
+            .collect();
         let max_w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
         let max_h = sizes.iter().map(|s| s.1).fold(0.0, f32::max);
-        let corner = if td.corner_right { Point::TopRight } else { Point::TopLeft };
+        let corner = if td.corner_right {
+            Point::TopRight
+        } else {
+            Point::TopLeft
+        };
         let sign = if td.corner_right { -1.0 } else { 1.0 };
         let mut along = td.offset;
         for (i, &(win, sel, unsel)) in td.tabs.iter().enumerate() {
-            let (bx, by) = if td.vertical { (0.0, along) } else { (sign * along, 0.0) };
-            let a = vec![Anchor { point: corner, target: id, rel: corner, x: bx, y: by }];
+            let (bx, by) = if td.vertical {
+                (0.0, along)
+            } else {
+                (sign * along, 0.0)
+            };
+            let a = vec![Anchor {
+                point: corner,
+                target: id,
+                rel: corner,
+                x: bx,
+                y: by,
+            }];
             for b in [sel, unsel] {
                 if u.tree.get(b).anchors != a {
                     u.tree.get_mut(b).anchors = a.clone();
@@ -124,8 +148,20 @@ pub(crate) fn relayout_all(lua: &Lua) {
                 (false, _) => (0.0, max_h, 0.0),
             };
             let wa = vec![
-                Anchor { point: Point::TopLeft, target: id, rel: Point::TopLeft, x: l, y: t },
-                Anchor { point: Point::BottomRight, target: id, rel: Point::BottomRight, x: r, y: 0.0 },
+                Anchor {
+                    point: Point::TopLeft,
+                    target: id,
+                    rel: Point::TopLeft,
+                    x: l,
+                    y: t,
+                },
+                Anchor {
+                    point: Point::BottomRight,
+                    target: id,
+                    rel: Point::BottomRight,
+                    x: r,
+                    y: 0.0,
+                },
             ];
             if u.tree.get(win).anchors != wa {
                 u.tree.get_mut(win).anchors = wa;
@@ -142,9 +178,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             method(lua, |lua, id, a| {
                 let text = a.s(1).unwrap_or_default();
                 // `AddNewTab(text, selectedButton, unselectedButton, window)`: the script's own widgets.
-                if let (Some(sel), Some(unsel), Some(win)) =
-                    (value_id(lua, &a.v(2)), value_id(lua, &a.v(3)), value_id(lua, &a.v(4)))
-                {
+                if let (Some(sel), Some(unsel), Some(win)) = (
+                    value_id(lua, &a.v(2)),
+                    value_id(lua, &a.v(3)),
+                    value_id(lua, &a.v(4)),
+                ) {
                     {
                         let mut u = ui(lua);
                         for b in [sel, unsel] {
@@ -169,7 +207,8 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 let win = create_child(lua, Some(id), "window", "window", i, true)?;
                 let sel = create_child(lua, Some(id), "button", "selectedButton", i, true)?;
                 let unsel = create_child(lua, Some(id), "button", "unselectedButton", i, true)?;
-                let ids = [&win, &sel, &unsel].map(|t| value_id(lua, &Value::Table((*t).clone())).unwrap());
+                let ids = [&win, &sel, &unsel]
+                    .map(|t| value_id(lua, &Value::Table((*t).clone())).unwrap());
                 {
                     let mut u = ui(lua);
                     for b in [ids[1], ids[2]] {
@@ -200,8 +239,18 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    def("GetSelectedTab", method(lua, |lua, id, _| ret(lua, with(lua, id, |t| t.selected as i64).unwrap_or(0)))?)?;
-    def("GetActivateTabCount", method(lua, |lua, id, _| ret(lua, with(lua, id, |t| t.tabs.len() as i64).unwrap_or(0)))?)?;
+    def(
+        "GetSelectedTab",
+        method(lua, |lua, id, _| {
+            ret(lua, with(lua, id, |t| t.selected as i64).unwrap_or(0))
+        })?,
+    )?;
+    def(
+        "GetActivateTabCount",
+        method(lua, |lua, id, _| {
+            ret(lua, with(lua, id, |t| t.tabs.len() as i64).unwrap_or(0))
+        })?,
+    )?;
     def(
         "SetVertical",
         method(lua, |lua, id, a| {
@@ -214,7 +263,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SetCorner",
         method(lua, |lua, id, a| {
-            let right = a.s(1).is_some_and(|s| s.to_ascii_uppercase().ends_with("RIGHT"));
+            let right = a
+                .s(1)
+                .is_some_and(|s| s.to_ascii_uppercase().ends_with("RIGHT"));
             with(lua, id, |t| t.corner_right = right);
             relayout_all(lua);
             none()
