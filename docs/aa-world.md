@@ -511,6 +511,12 @@ With the HUD on (aa-client, `--enter-world`, the HUD agent's numbers are not min
 (`aa-ui` Lua frames) costs 4 to 6 ms of main thread per frame (`--no-hud`: update slice 1 ms instead of 6), the largest single item of the
 client now.
 
+Release profile: a `release-lto` profile (thin LTO, 4 codegen units) was built and compared with the plain `release` build, alternating
+3 rounds each of `game-spawn` and `game-crowd` with `--no-hud`: spawn 107 / 95 / 97 fps against 110 / 105 / 96 (release), crowd 90 / 91 / 94
+against 92 / 90 / 89, i.e. no difference outside the noise, while the link takes more than 20 minutes instead of 2. Not kept: the cost of a
+frame is in Bevy's own crates (already optimised with `opt-level = 3`) and in waiting on the render thread, not in cross crate inlining.
+The workspace `release` profile stays as it is (`debug = "line-tables-only"`, which the sampling profiler needs for names).
+
 What still costs most, in order: the HUD's per frame Lua; one stall of about 200 ms in the first frames after entering (the first
 skinned and water pipeline specialisations; the same in both builds); the render thread's per skinned mesh work in crowds (Bevy's
 `extract_skins` walks all 157 joints of every visible part, so a crowd is tens of thousands of joint matrices per frame; compacting
