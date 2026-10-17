@@ -9,7 +9,9 @@
 use std::time::Duration;
 
 use aa_net::model::{gender, race};
-use aa_net::state::{Characters, Doodads, Player, Status, Units, Worlds};
+use aa_net::state::{
+    ActionBar, Characters, Chat, Doodads, Inventory, Player, PlayerStats, Skills, Status, Units, WorldInfo, Worlds,
+};
 use aa_net::{Command, CreateCharacter, Event, LeaveTarget, NetCommand, NetEvent, NetPlugin};
 use bevy::app::{AppExit, ScheduleRunnerPlugin};
 use bevy::prelude::*;
@@ -80,6 +82,7 @@ fn drive(
     worlds: Res<Worlds>,
     units: Res<Units>,
     doodads: Res<Doodads>,
+    hud: Hud,
 ) {
     for NetEvent(event) in events.read() {
         match event {
@@ -138,6 +141,26 @@ fn drive(
                 doodads.by_id.len(),
                 worlds.list.worlds.len()
             );
+            // What the HUD reads: all of it plain resources.
+            let (s, w) = (&hud.stats, &hud.world);
+            println!(
+                "HUD: {} lvl {} hp {}/{} mp {}/{} exp {:?} labor {}; zone group {:?}, hour {:?}; {} chat channels; \
+                 {} action slots in use, {} bag items; skills {:?}",
+                s.name,
+                s.level,
+                s.hp,
+                s.max_hp,
+                s.mp,
+                s.max_mp,
+                s.exp_progress(),
+                s.labor,
+                w.zone_group_id,
+                w.hour_now(),
+                hud.chat.channels.len(),
+                hud.actions.slots.iter().filter(|a| !a.is_empty()).count(),
+                hud.inventory.bag_items().count(),
+                hud.skills.known
+            );
             out.write(NetCommand(Command::LeaveWorld(LeaveTarget::Quit)));
         }
     }
@@ -145,6 +168,17 @@ fn drive(
         println!("giving up");
         exit.write(AppExit::error());
     }
+}
+
+/// The HUD resources in one system parameter.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Hud<'w> {
+    stats: Res<'w, PlayerStats>,
+    world: Res<'w, WorldInfo>,
+    chat: Res<'w, Chat>,
+    actions: Res<'w, ActionBar>,
+    inventory: Res<'w, Inventory>,
+    skills: Res<'w, Skills>,
 }
 
 /// Resources are plain Bevy resources: this system only prints when they change.
