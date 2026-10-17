@@ -6,12 +6,13 @@
 //! `time:(r:g:b):flags`. Colours are sRGB encoded; `* multiplier` variables carry the HDR scale
 //! (sun ~ 6..8, sky ~ 2..6 at the engine's exposure).
 //!
-//! `lighting.xml` gives the sun path: `SunRotation` is the compass bearing (clockwise from north) the sun's
-//! light *travels towards* at midday, `SunHeight` the highest elevation (degrees).
+//! `lighting.xml` gives the sun path (see [`sun_direction`]): `SunRotation` is the compass bearing of the sun at its highest
+//! (the editor's `SunVector` points there), `SunHeight` that elevation in percent (`asin(SunHeight / 100)`: 80 is 53 degrees,
+//! the `SunVector`'s z of 0.8), `PlanetRotationAxis` the tilt of the axis the sun turns about (degrees from the vertical).
 
 use std::collections::HashMap;
 
-use bevy::math::{Vec3, Vec4};
+use bevy::math::{Quat, Vec2, Vec3, Vec4};
 
 /// A time of day spline (scalar or colour).
 #[derive(Clone, Debug, Default)]
@@ -135,21 +136,32 @@ impl TimeOfDay {
 pub struct Lighting {
     pub sun_rotation: f32,
     pub sun_height: f32,
+    /// `PlanetRotationAxis`: the tilt (degrees from the vertical) of the axis the sun turns about.
+    pub planet_axis: f32,
+    /// The hour at which the sun is highest (see [`HIGHEST_HOUR`]; `AA_TUNE=sun_noon`).
+    pub highest_hour: f32,
 }
 
 impl Default for Lighting {
     fn default() -> Self {
-        Lighting { sun_rotation: 188.0, sun_height: 80.0 }
+        Lighting { sun_rotation: 188.0, sun_height: 80.0, planet_axis: 25.0, highest_hour: HIGHEST_HOUR }
     }
 }
+
+/// The hour of the day at which the sun is highest, fitted so that the sun patch on the floor of the Royal Palace court yard
+/// falls where the real client's does at game time 9.56 and 10.0 (`reference/ingame/royal_palace/`).
+pub const HIGHEST_HOUR: f32 = 12.85;
 
 impl Lighting {
     pub fn parse(xml: &str) -> Option<Lighting> {
         let doc = roxmltree::Document::parse(xml).ok()?;
         let l = doc.descendants().find(|n| n.has_tag_name("Lighting"))?;
+        let number = |name: &str, default: f32| l.attribute(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         Some(Lighting {
             sun_rotation: l.attribute("SunRotation")?.parse().ok()?,
-            sun_height: l.attribute("SunHeight").and_then(|v| v.parse().ok()).unwrap_or(80.0),
+            sun_height: number("SunHeight", 80.0),
+            planet_axis: number("PlanetRotationAxis", 0.0),
+            highest_hour: HIGHEST_HOUR,
         })
     }
 }
@@ -203,6 +215,14 @@ pub struct EnvSample {
     /// `Sun shafts visibility`.
     pub sun_shafts: f32,
     pub sun_specular: f32,
+    /// The sky light's Rayleigh scattering: `Rayleigh scattering x (wavelength R / wavelength)^4 x Sky light: Sun intensity`
+    /// per channel (linear); blue scatters about five times more than red at 500 nm.
+    pub sky_rayleigh: Vec3,
+    /// The sky light's Mie scattering (white haze): `Mie scattering x Sky light: Sun intensity`, linear.
+    pub sky_mie: Vec3,
+    /// `Ambient min height` / `Ambient max height` (metres): below the first the ambient light has the `Ambient ground color`,
+    /// above the second the `Sky color`, in between a blend.
+    pub ambient_heights: Vec2,
 }
 
 /// Linear interpolation of the sample's field types.
@@ -218,6 +238,12 @@ impl Mix for f32 {
 
 impl Mix for Vec3 {
     fn mix(self, o: Vec3, t: f32) -> Vec3 {
+        self + (o - self) * t
+    }
+}
+
+impl Mix for Vec2 {
+    fn mix(self, o: Vec2, t: f32) -> Vec2 {
         self + (o - self) * t
     }
 }
@@ -239,7 +265,7 @@ impl EnvSample {
         mix!(
             sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
-            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular
+            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights
         )
     }
 }
@@ -274,6 +300,10 @@ impl TimeOfDay {
         let day = ((lum(sun_srgb) - 0.25) / 0.5).clamp(0.0, 1.0);
         let balance = self.color("Color balance", t);
         let photo = self.color("Filters: photofilter color", t);
+        let wavelength = |n: &str| self.scalar(n, t).max(1.0);
+        let (red, green, blue) = (wavelength("Sky light: Wavelength (R)"), wavelength("Sky light: Wavelength (G)"), wavelength("Sky light: Wavelength (B)"));
+        let scatter = Vec3::new(1.0, (red / green).powi(4), (red / blue).powi(4));
+        let sky_sun = srgb_to_linear(self.color("Sky light: Sun intensity", t));
         EnvSample {
             sun_dir: sun_direction(hour, lighting),
             sun,
@@ -319,32 +349,39 @@ impl TimeOfDay {
             hdr_dynamic: self.scalar("HDR dynamic power factor", t),
             sun_shafts: self.scalar("Sun shafts visibility", t),
             sun_specular: self.scalar("Sun specular multiplier", t),
+            sky_rayleigh: scatter * self.scalar("Sky light: Rayleigh scattering", t) * sky_sun,
+            sky_mie: Vec3::splat(self.scalar("Sky light: Mie scattering", t)) * sky_sun,
+            ambient_heights: Vec2::new(self.scalar("Ambient min height", t), self.scalar("Ambient max height", t)),
         }
     }
 }
 
-/// Direction towards the sun (cry space) at `hour`: rises in the east around 06:00, peaks at
-/// `sun_height` on the midday bearing and sets in the west around 18:00; below the horizon (moon side)
-/// otherwise.
+/// Direction towards the sun (cry space) at `hour`.
+///
+/// The sun turns at 15 degrees an hour about an axis that is tilted `PlanetRotationAxis` degrees from the vertical, away from
+/// the bearing `SunRotation`; at its highest ([`HIGHEST_HOUR`]) it stands at that bearing and at the elevation
+/// `asin(SunHeight / 100)`, in the morning it is east of that. With the main world's 188 / 80 / 25 the sun never sets: at
+/// midnight it skims the northern horizon at 3 degrees (the time of day colours make the night). The time of day data's own
+/// dawn and dusk (6:00 and 17:30) do not move it.
+///
+/// Measured: in the real client at game time 9.56 to 10.0 the court yard of the Royal Palace (zone 186) has one patch of sun on
+/// its floor; it is where the sun, at an azimuth of 123 degrees (9.56 h) to 132 degrees (10.0 h) and an elevation of 42 to 44
+/// degrees, shines through a gap of the buildings (found by rendering the court yard with the sun at every direction and
+/// comparing the patch, `docs/aa-world.md`). The path above, with the highest point at 12.85 h, passes through both
+/// (123 / 42 and 131 / 45); the two data points leave the culmination hour and the 15 degrees an hour
+/// uncertain by about half an hour. The older path (a 11 hour arc with the sun in the north at noon) lit none of the court yard.
 pub fn sun_direction(hour: f32, l: Lighting) -> Vec3 {
-    const RISE: f32 = 7.0;
-    const SET: f32 = 18.0;
-    let h = hour.rem_euclid(24.0);
-    let peak = l.sun_height.min(75.0);
-    // u: 0 at sunrise .. 1 at sunset; during the night the sun continues its circle below the horizon
-    let (u, elev) = if (RISE..=SET).contains(&h) {
-        let u = (h - RISE) / (SET - RISE);
-        (u, peak * (std::f32::consts::PI * u).sin())
-    } else {
-        let n = (h - SET).rem_euclid(24.0) / (24.0 - (SET - RISE));
-        (1.0 + n, -peak * (std::f32::consts::PI * n).sin())
+    let direction = |bearing: f32, elevation: f32| {
+        let (b, e) = (bearing.to_radians(), elevation.to_radians());
+        // bearing -> cry axes: north = +Y, east = +X
+        Vec3::new(b.sin() * e.cos(), b.cos() * e.cos(), e.sin())
     };
-    // bearing of the sun (clockwise from north): midday = rotation - 180
-    let noon = (l.sun_rotation - 180.0).to_radians();
-    let az = noon + (0.5 - u) * std::f32::consts::PI;
-    let e = elev.to_radians();
-    // bearing -> cry axes: north = +Y, east = +X
-    Vec3::new(az.sin() * e.cos(), az.cos() * e.cos(), e.sin()).normalize()
+    let highest = direction(l.sun_rotation, (l.sun_height / 100.0).clamp(0.05, 1.0).asin().to_degrees());
+    // the axis points up and towards the north (away from the sun at its highest)
+    let axis = direction(l.sun_rotation + 180.0, 90.0 - l.planet_axis);
+    // clockwise seen from above: the bearing grows with the hour
+    let angle = -(hour - l.highest_hour) * 15f32.to_radians();
+    Quat::from_axis_angle(axis, angle).mul_vec3(highest).normalize()
 }
 
 #[cfg(test)]
@@ -396,14 +433,24 @@ mod tests {
 
     #[test]
     fn sun_path() {
-        let l = Lighting { sun_rotation: 188.0, sun_height: 70.0 };
-        let noon = sun_direction(12.0, l);
-        assert!(noon.z > 0.9);
-        let rise = sun_direction(7.5, l);
-        assert!(rise.x > 0.5 && rise.z > 0.0, "{rise}");
-        let set = sun_direction(17.5, l);
-        assert!(set.x < -0.5 && set.z > 0.0, "{set}");
-        assert!(sun_direction(0.0, l).z < 0.0);
+        let l = Lighting { sun_rotation: 188.0, sun_height: 80.0, planet_axis: 25.0, highest_hour: HIGHEST_HOUR };
+        let degrees = |v: Vec3| ((v.x.atan2(v.y).to_degrees() + 360.0) % 360.0, v.z.asin().to_degrees());
+        // at its highest: the bearing SunRotation, asin(0.8) up
+        let (az, el) = degrees(sun_direction(HIGHEST_HOUR, l));
+        assert!((az - 188.0).abs() < 0.1 && (el - 53.13).abs() < 0.1, "{az} {el}");
+        // the real client at the Royal Palace: 123 / 42 at 9.56 h, 132 / 44 at 10.0 h
+        let (az, el) = degrees(sun_direction(9.563, l));
+        assert!((az - 123.0).abs() < 4.0 && (el - 42.0).abs() < 3.0, "{az} {el}");
+        let (az, el) = degrees(sun_direction(9.998, l));
+        assert!((az - 132.0).abs() < 4.0 && (el - 44.0).abs() < 3.0, "{az} {el}");
+        // east in the morning, west in the evening, never far below the horizon
+        assert!(sun_direction(6.0, l).x > 0.5 && sun_direction(18.0, l).x < -0.5);
+        for h in 0..24 {
+            assert!(sun_direction(h as f32, l).z > 0.0, "hour {h}");
+        }
+        // no axis tilt: the sun circles at the same height
+        let flat = Lighting { planet_axis: 0.0, ..l };
+        assert!((sun_direction(0.0, flat).z - 0.8).abs() < 1e-4 && (sun_direction(15.0, flat).z - 0.8).abs() < 1e-4);
     }
 
     #[test]
