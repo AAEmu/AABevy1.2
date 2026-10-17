@@ -70,6 +70,19 @@ impl Cal {
         Ok(Cal::parse(&latin1(&bytes), &mut loader))
     }
 
+    /// [`Cal::load`] once per file: the parsed table is shared (any thread).
+    pub fn shared(path: &str) -> Result<std::sync::Arc<Cal>> {
+        use std::sync::{Arc, Mutex, OnceLock};
+        static CALS: OnceLock<Mutex<HashMap<String, Arc<Cal>>>> = OnceLock::new();
+        let key = path.to_ascii_lowercase().replace('\\', "/");
+        let cals = CALS.get_or_init(Default::default);
+        if let Some(c) = cals.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+            return Ok(c.clone());
+        }
+        let cal = Arc::new(Cal::load(&key)?);
+        Ok(cals.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(cal).clone())
+    }
+
     /// Looks up an animation by (case-insensitive) name.
     pub fn animation(&self, name: &str) -> Option<&CalEntry> {
         self.animations.get(&name.to_ascii_lowercase())

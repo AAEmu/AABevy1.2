@@ -6,16 +6,21 @@
 //! into Bevy space once at its root.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use aa_cry::Skeleton;
 use glam::{Quat, Vec3};
 
 use crate::caf::Clip;
 
+static NEXT_RIG: AtomicU64 = AtomicU64::new(1);
+
 /// A skeleton prepared for animation.
 #[derive(Debug)]
 pub struct Rig {
+    /// Unique per rig (clip bindings are cached by it).
+    pub id: u64,
     pub skeleton: Arc<Skeleton>,
     /// Local bind rotations / translations.
     pub bind: Pose,
@@ -37,7 +42,7 @@ impl Rig {
             by_controller.insert(b.controller_id, i as u32);
         }
         let root = skeleton.bones.iter().position(|b| b.parent.is_none()).unwrap_or(0);
-        Rig { skeleton, bind, by_controller, root }
+        Rig { id: NEXT_RIG.fetch_add(1, Ordering::Relaxed), skeleton, bind, by_controller, root }
     }
 
     pub fn len(&self) -> usize {
@@ -62,6 +67,19 @@ impl Rig {
             .collect();
         ClipBinding { pairs }
     }
+}
+
+/// The rig of a skeleton file, loaded once and shared by every character of that skeleton (so bindings of clips and
+/// aa-cry's skeleton-bound models are shared too). Callable from any thread.
+pub fn shared_rig(path: &str) -> crate::Result<Arc<Rig>> {
+    static RIGS: OnceLock<Mutex<HashMap<String, Arc<Rig>>>> = OnceLock::new();
+    let key = path.to_ascii_lowercase().replace('\\', "/");
+    let rigs = RIGS.get_or_init(Default::default);
+    if let Some(r) = rigs.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return Ok(r.clone());
+    }
+    let rig = Arc::new(Rig::new(Skeleton::load(&key)?));
+    Ok(rigs.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(rig).clone())
 }
 
 /// Which bone each track of a clip drives (tracks for bones the rig lacks are dropped).
