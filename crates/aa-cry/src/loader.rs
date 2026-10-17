@@ -200,6 +200,7 @@ impl CryLoader {
         if let Some(m) = lock(&self.shared.raw_models).get(path) {
             return Ok(m.clone());
         }
+        let _t = crate::prof::scope("cry.parse_model");
         let m = Arc::new(Model::load(path)?);
         Ok(lock(&self.shared.raw_models).entry(path.to_string()).or_insert(m).clone())
     }
@@ -256,6 +257,7 @@ impl CryLoader {
 
     /// Decodes a flat (2D) texture; `None` for missing files and for cube / volume textures.
     fn load_flat(&self, key: &str, srgb: bool) -> Option<Image> {
+        let _t = crate::prof::scope("cry.texture");
         let Some((file, bytes)) = self.read_dds(key) else {
             debug!("aa-cry: texture {key}: not found");
             lock(&self.shared.missing).push(key.to_string());
@@ -429,6 +431,7 @@ impl<'a> Prep<'a> {
         if let Some(entry) = lock(&self.loader.shared.materials_cache).get(&key).cloned() {
             return entry.map(|e| self.use_material(&e));
         }
+        let _t = crate::prof::scope("cry.material");
         let mtl = mtl_path.and_then(|p| self.loader.mtl(p));
         let entry = match mtl.as_deref().and_then(|m| m.sub(sub).or(Some(m))) {
             Some(m) => {
@@ -460,6 +463,7 @@ impl<'a> Prep<'a> {
 
     /// A fresh (uncached) material for a sub-material with the caller's tweaks applied.
     pub fn material_with(&mut self, mtl_path: Option<&str>, sub: usize, hook: &MaterialHook) -> Option<Handle<StandardMaterial>> {
+        let _t = crate::prof::scope("cry.material_with");
         let mtl = mtl_path.and_then(|p| self.loader.mtl(p));
         let cry = mtl.as_deref().and_then(|m| m.sub(sub).or(Some(m))).cloned();
         let mut sm = match &cry {
@@ -488,6 +492,7 @@ impl CryLoader {
     /// `vertex_hook` every call builds its own meshes and materials (the parsed file is still
     /// shared).
     pub fn prepare_model(&self, path: &str, options: &ModelOptions) -> Result<PreparedModel> {
+        let _t = crate::prof::scope(if options.material_hook.is_some() || options.vertex_hook.is_some() { "cry.prepare_model(hooked)" } else { "cry.prepare_model" });
         let path = aa_pak::normalize(path);
         let hooked = options.material_hook.is_some() || options.vertex_hook.is_some();
         let key: ModelKey = (path.clone(), options.material.as_deref().map(aa_pak::normalize), options.lod, options.keep_cpu_mesh, options.shading);
@@ -585,7 +590,10 @@ impl CryLoader {
                     None => prep.material(material_path.as_deref(), subset.material_id as usize),
                 };
                 let Some(material) = material else { continue };
-                let Some((bevy_mesh, aabb)) = subset_mesh_with(data, subset, skinned, usage, flip) else { continue };
+                let t_mesh = crate::prof::scope("cry.mesh");
+                let built = subset_mesh_with(data, subset, skinned, usage, flip);
+                drop(t_mesh);
+                let Some((bevy_mesh, aabb)) = built else { continue };
                 node_parts.push(Part { mesh: prep.mesh(bevy_mesh), material, aabb, skinned });
             }
             if !node_parts.is_empty() {

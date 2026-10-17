@@ -6,6 +6,7 @@
 //!   between one frame's `Last` and the next `First` that is not main world work (waiting for the render thread + extraction),
 //! * the render thread split by `RenderSystems` stage (`render+present` includes waiting for the GPU when it is the bottleneck),
 //! * Bevy's render diagnostics (CPU and GPU time of each pass, `RenderDiagnosticsPlugin`),
+//! * with `AA_PROFILE_THREADS=1` the CPU cycles per thread (where the process burns its cycles; costs a frame spike per report),
 //! * named timers of systems that call [`Timers::time`] (`Option<Res<Timers>>`, present only with the plugin),
 //! * entity, mesh entity, visible mesh and distinct mesh x material counts.
 
@@ -33,33 +34,20 @@ pub fn requested() -> bool {
     std::env::var_os("AA_PROFILE").is_some() || std::env::args().any(|a| a == "--profile")
 }
 
-/// Named millisecond timers that any system can feed (`let _t = timers.as_deref().map(|t| t.time("name"));`).
+/// Named timers that any system can feed (`let _t = timers.as_deref().map(|t| t.time("name"));`); they share the registry of
+/// [`aa_cry::prof`], so scopes inside aa-cry / aa-anim show up in the same line.
 #[derive(Resource, Clone, Default)]
-pub struct Timers(Arc<Mutex<BTreeMap<&'static str, (f64, u32)>>>);
+pub struct Timers;
 
 impl Timers {
     /// Times until the guard is dropped.
-    pub fn time(&self, name: &'static str) -> TimerGuard<'_> {
-        TimerGuard { timers: self, name, start: Instant::now() }
+    pub fn time(&self, name: &'static str) -> aa_cry::prof::Scope {
+        aa_cry::prof::scope(name)
     }
 
+    /// Adds a measurement made elsewhere (wall and CPU milliseconds).
     pub fn add(&self, name: &'static str, ms: f64) {
-        let mut m = self.0.lock().unwrap();
-        let e = m.entry(name).or_default();
-        e.0 += ms;
-        e.1 += 1;
-    }
-}
-
-pub struct TimerGuard<'a> {
-    timers: &'a Timers,
-    name: &'static str,
-    start: Instant,
-}
-
-impl Drop for TimerGuard<'_> {
-    fn drop(&mut self) {
-        self.timers.add(self.name, self.start.elapsed().as_secs_f64() * 1000.0);
+        aa_cry::prof::add(name, ms, ms);
     }
 }
 
@@ -69,15 +57,22 @@ struct Sums {
     gap: f64,
     frame: f64,
     frames: u32,
+    /// Process CPU cycles over all threads, in millions.
+    cycles: f64,
+    /// The longest frame of the window and its main thread slices.
+    worst: (f64, [f64; MAIN - 1]),
     render: [f64; RENDER - 1],
     render_frames: u32,
 }
 
 #[derive(Resource)]
 struct Stamps {
+    /// Thread cycles at the last report, by thread id.
+    thread_cycles: BTreeMap<u32, u64>,
     t: [Option<Instant>; MAIN],
     last_end: Option<Instant>,
     last_first: Option<Instant>,
+    last_cycles: u64,
     sums: Arc<Mutex<Sums>>,
 }
 
@@ -102,11 +97,12 @@ impl Plugin for ProfilePlugin {
             app.add_plugins(RenderDiagnosticsPlugin);
         }
         uncapped(app);
+        aa_cry::prof::enable(true);
         if std::env::var_os("AA_OFFSCREEN").is_some() {
             app.add_systems(Update, offscreen);
         }
         app.init_resource::<Timers>()
-            .insert_resource(Stamps { t: [None; MAIN], last_end: None, last_first: None, sums: sums.clone() })
+            .insert_resource(Stamps { thread_cycles: BTreeMap::new(), t: [None; MAIN], last_end: None, last_first: None, last_cycles: aa_cry::prof::process_cycles(), sums: sums.clone() })
             .add_systems(First, stamp::<0>)
             .add_systems(SpawnScene, stamp::<1>)
             .add_systems(
@@ -173,28 +169,36 @@ fn report(
     time: Res<Time<Real>>,
     mut since: Local<f32>,
     diagnostics: Res<DiagnosticsStore>,
-    timers: Res<Timers>,
     world_timings: Option<Res<WorldTimings>>,
     meshes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &ViewVisibility)>,
     cameras: Query<(&Camera, Option<&Name>, &bevy::camera::RenderTarget, Has<Camera3d>)>,
 ) {
     let first = stamps.t[0].unwrap_or_else(Instant::now);
     let end = stamps.t[MAIN - 1].unwrap_or(first);
+    let cycles = aa_cry::prof::process_cycles();
     {
         let mut s = stamps.sums.lock().unwrap();
         if let Some(prev_end) = stamps.last_end {
             s.gap += first.saturating_duration_since(prev_end).as_secs_f64() * 1000.0;
         }
-        if let Some(prev_first) = stamps.last_first {
-            s.frame += first.saturating_duration_since(prev_first).as_secs_f64() * 1000.0;
-        }
+        let mut slices = [0.0; MAIN - 1];
         for i in 0..MAIN - 1 {
             if let (Some(a), Some(b)) = (stamps.t[i], stamps.t[i + 1]) {
-                s.main[i] += b.saturating_duration_since(a).as_secs_f64() * 1000.0;
+                slices[i] = b.saturating_duration_since(a).as_secs_f64() * 1000.0;
+                s.main[i] += slices[i];
+            }
+        }
+        if let Some(prev_first) = stamps.last_first {
+            let frame = first.saturating_duration_since(prev_first).as_secs_f64() * 1000.0;
+            s.frame += frame;
+            if frame > s.worst.0 {
+                s.worst = (frame, slices);
             }
         }
         s.frames += 1;
+        s.cycles += cycles.saturating_sub(stamps.last_cycles) as f64 / 1e6;
     }
+    stamps.last_cycles = cycles;
     stamps.last_end = Some(end);
     stamps.last_first = Some(first);
 
@@ -210,7 +214,12 @@ fn report(
     for (i, name) in MAIN_NAMES.iter().enumerate() {
         line += &format!(" {name} {:.2}", sums.main[i] / n);
     }
-    line += &format!(" gap {:.2}", sums.gap / n);
+    line += &format!(" gap {:.2} | cpu {:.1} Mcycles/frame (all threads)", sums.gap / n, sums.cycles / n);
+    info!("{line}");
+    let mut line = format!("aa-profile: longest frame {:.1} ms, its main thread slices:", sums.worst.0);
+    for (i, name) in MAIN_NAMES.iter().enumerate() {
+        line += &format!(" {name} {:.1}", sums.worst.1[i]);
+    }
     info!("{line}");
     let mut line = String::from("aa-profile: render thread:");
     for (i, name) in RENDER_NAMES.iter().enumerate() {
@@ -218,10 +227,31 @@ fn report(
     }
     info!("{line}");
 
-    let timed = std::mem::take(&mut *timers.0.lock().unwrap());
-    let mut line = String::from("aa-profile: timers (ms per frame, per call):");
-    for (name, (sum, calls)) in &timed {
-        line += &format!(" {name} {:.3} ({:.3} x{});", sum / n, sum / f64::from((*calls).max(1)), calls);
+    // CPU per thread (threads of one kind are summed): where the cycles of the process go
+    if std::env::var_os("AA_PROFILE_THREADS").is_some() {
+        // slow (a system wide thread snapshot, tens of ms): a spike in the frame time of the report itself
+        let now = aa_cry::prof::all_thread_cycles();
+        let mut by_name: BTreeMap<String, (f64, u32)> = BTreeMap::new();
+        for (id, name, cycles) in &now {
+            let used = cycles.saturating_sub(stamps.thread_cycles.get(id).copied().unwrap_or(*cycles));
+            let name = if name.is_empty() { "(unnamed)".to_string() } else { name.trim_end_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '(' || c == ')').to_string() };
+            let e = by_name.entry(name).or_default();
+            e.0 += used as f64 / 1e6 / n;
+            e.1 += 1;
+        }
+        stamps.thread_cycles = now.into_iter().map(|(id, _, c)| (id, c)).collect();
+        let mut rows: Vec<_> = by_name.into_iter().filter(|(_, v)| v.0 >= 0.05).collect();
+        rows.sort_by(|a, b| b.1.0.total_cmp(&a.1.0));
+        let mut line = String::from("aa-profile: threads (Mcycles per frame, count):");
+        for (name, (m, count)) in rows {
+            line += &format!(" {name} {m:.1} (x{count});");
+        }
+        info!("{line}");
+    }
+    let timed = aa_cry::prof::take();
+    let mut line = format!("aa-profile: timers (ms per frame: thread cpu / wall; calls, longest call; clock {:.0} MHz):", aa_cry::prof::mhz());
+    for (name, stat) in &timed {
+        line += &format!(" {name} {:.3}/{:.3} (x{}, max {:.2});", stat.cpu / n, stat.wall / n, stat.calls, stat.max);
     }
     if let Some(t) = world_timings {
         line += &format!(" world: cells {:.2} receive {:.2} lod {:.2} objects {:.2}", t.cells_ms, t.receive_ms, t.lod_ms, t.objects_ms);

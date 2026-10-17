@@ -13,6 +13,7 @@ pub mod chunk;
 pub mod loader;
 pub mod material;
 pub mod mesh;
+pub mod prof;
 pub mod scene;
 pub mod shade;
 pub mod skeleton;
