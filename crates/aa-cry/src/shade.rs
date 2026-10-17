@@ -29,6 +29,7 @@ use crate::material::{Material as CryMaterial, TextureMap};
 use crate::scene::Shading;
 
 pub mod backlight;
+mod ucc;
 
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
 pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial) -> Option<StandardMaterial> {
@@ -46,6 +47,7 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         }
     }
     bake_hair_colour(prep, m, &mut out);
+    ucc::bake(prep, m, &mut out);
     bake_terrain_blend(prep, m, &mut out);
     if prep.shading == Shading::Full {
         // characters get the `Char BackLight` term when `backlight::CharLightPlugin` is on
