@@ -8,6 +8,7 @@
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 //! * [`flow`], [`warm`]: the way in and out timed (`flow:` log lines), and what the world behind the loading screen has
 //!   got done
+//! * [`prewarm`]: the world's render pipelines compiled while the player sits on the character list
 //!
 //! ## Entering and leaving
 //!
@@ -34,6 +35,7 @@ pub(crate) mod enter;
 mod flow;
 mod player;
 mod prepare;
+mod prewarm;
 mod units;
 pub(crate) mod warm;
 mod weapons;
@@ -89,6 +91,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(flow::plugin)
+            .add_plugins(prewarm::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
@@ -110,6 +113,7 @@ impl Plugin for InGamePlugin {
                     player::dev_hide_part,
                     weapons::attach_carried,
                     warm::update,
+                    sync_clock,
                     log_chat,
                     report,
                 )
@@ -117,6 +121,28 @@ impl Plugin for InGamePlugin {
             )
             .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)));
     }
+}
+
+/// The world's time of day follows the server's game clock (`aa_net::state::WorldInfo`, extrapolated from its last packet: the
+/// HUD's clock reads the same), on the loading screen as well as in game. Nothing happens until the server has sent the time;
+/// `--hour H` pins the hour for screenshot tests.
+fn sync_clock(info: Option<Res<aa_net::state::WorldInfo>>, dev: Res<dev::DevOptions>, mut clock: ResMut<aa_world::WorldClock>, mut logged: Local<bool>) {
+    if dev.hour.is_some() {
+        return;
+    }
+    let Some(hour) = info.and_then(|w| w.hour_now()) else { return };
+    if (clock.hour - hour).abs() > 1e-5 {
+        clock.hour = hour;
+    }
+    if !*logged {
+        *logged = true;
+        info!("world clock follows the server: {hour:.2} h");
+    }
+}
+
+/// The character list is up and built (`--enter-world` has no login stage: no `UiBuilt`, no list).
+pub(crate) fn list_is_up(built: Option<Res<crate::login::UiBuilt>>, screen: Res<State<Screen>>) -> bool {
+    *screen.get() == Screen::CharacterSelect && built.is_some_and(|b| b.0 == Some(Screen::CharacterSelect))
 }
 
 /// The screens the world is up on: the loading screen (everything is built behind it) and the game.

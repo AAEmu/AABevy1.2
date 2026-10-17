@@ -74,6 +74,8 @@ struct Loading {
     entities: usize,
     announced: usize,
     pipelines: usize,
+    /// Pipelines requested when the screen came up (what the character list's prewarm got done).
+    pipelines_at_start: Option<usize>,
     stable: f32,
     /// Seconds into the loading screen when each part was last seen unfinished: terrain, camera frames, models, units,
     /// pipelines (for the log: what the loading screen waited for).
@@ -136,6 +138,7 @@ fn progress(
 ) {
     let dt = time.delta_secs();
     loading.t += dt;
+    loading.pipelines_at_start.get_or_insert(pipelines.total());
     if let Some(hold) = args.hold_loading {
         rt.fire_event("STILL_LOADING", hold);
         return;
@@ -208,8 +211,14 @@ fn progress(
         if loading.done > HOLD {
             rt.fire_event("LEFT_LOADING", ());
             info!(
-                "loading: done after {:.1} s ({}/{} terrain cells within {NEAR} m, {} objects, {} units, {} pipelines), entering the game",
-                loading.t, loading.cells.0, loading.cells.1, loading.entities, loading.announced, loading.pipelines
+                "loading: done after {:.1} s ({}/{} terrain cells within {NEAR} m, {} objects, {} units, {} pipelines of which {} compiled here), entering the game",
+                loading.t,
+                loading.cells.0,
+                loading.cells.1,
+                loading.entities,
+                loading.announced,
+                loading.pipelines,
+                loading.pipelines.saturating_sub(loading.pipelines_at_start.unwrap_or(0))
             );
             let b = loading.busy_until;
             info!(

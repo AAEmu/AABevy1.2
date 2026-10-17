@@ -5,11 +5,14 @@
 //!   side character too. `--yaw` alone only turns it.
 //! * `--walk START:END[:KEYS]`  press KEYS (default `W`, any of `WASDQE` and `J` for jump, `S`hift is
 //!   `H`) from START to END seconds after the player appeared. Repeatable.
-//! * `--hour H`, `--zone ID`  time of day (aa-world's `WorldClock`).
+//! * `--hour H`, `--zone ID`  time of day (aa-world's `WorldClock`); without `--hour` the hour follows the server's game clock.
 //! * `--hair-color ID`  `hair_colors.id` to use instead of the one the server saved.
 //! * `--hide-part N`  hide the N-th part of the player character (0 = body, 1 = face, ...)
 //! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit.
 //! * `--leave-after S`  go back to the character list S seconds after the player appeared (client side only).
+//! * `--no-prewarm`  do not compile the world's pipelines on the character list (`prewarm`).
+//! * `--start-after S`  press Start S seconds after the character list came up (every visit; `--goto` presses it itself
+//!   after 2 s).
 //! * `--leave-world S`  ask the server to go back to the character list S seconds after the game screen came up
 //!   (the real leave flow); `--again` presses Start when the list is back (see `flow`).
 
@@ -30,6 +33,8 @@ pub struct DevOptions {
     pub leave_after: Option<f32>,
     pub leave_world: Option<f32>,
     pub again: bool,
+    pub no_prewarm: bool,
+    pub start_after: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +87,8 @@ impl DevOptions {
             leave_after: num("--leave-after"),
             leave_world: num("--leave-world"),
             again: args.iter().any(|a| a == "--again"),
+            no_prewarm: args.iter().any(|a| a == "--no-prewarm"),
+            start_after: num("--start-after"),
         }
     }
 
