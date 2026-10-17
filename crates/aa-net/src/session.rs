@@ -222,6 +222,14 @@ pub enum Command {
     /// in [`Command::UseSkill`]. The effect arrives as `ItemsChanged` (the stack shrinks), buffs
     /// and `UnitPoints`.
     UseItem { item_id: u64, template_id: u32, skill_id: u32, target_obj_id: u32 },
+    /// Take everything out of the loot of the corpse `obj_id` (`loot_all`) or open it (the answer is `LootBag` with what
+    /// is left). Only corpses that came as `Lootable` have loot for the player.
+    LootOpen { obj_id: u32, loot_all: bool },
+    /// Take one item out of an opened bag: `item_index` and the owner are in the item id ([`state::item_index`],
+    /// [`state::item_owner`]). Answered by `LootItemTook` (and `ItemsChanged`) or `LootItemFailed`.
+    LootItem { owner_type: u16, owner_obj_id: u32, item_index: u16 },
+    /// The loot window of the corpse was closed.
+    LootClose { owner_type: u16, owner_obj_id: u32 },
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
     /// shrine). Answered by `Resurrected` and `UnitPoints`.
     Resurrect { in_place: bool },
@@ -343,6 +351,16 @@ pub enum Event {
     },
     /// A character stands up again at `pos`, facing `yaw`.
     Resurrected { obj_id: u32, pos: Pos, yaw: f32 },
+    /// The unit or doodad has loot for the player (`has_loot`) or no longer has ([`state::Loot`]).
+    Lootable { owner_type: u16, obj_id: u32, has_loot: bool },
+    /// A unit started (`looting` 1) or stopped looting.
+    UnitLooting { obj_id: u32, looting: u8 },
+    /// The items left in the loot the player opened; `loot_all`: it was opened with "loot all", the rest is what could not be taken.
+    LootBag { items: Vec<crate::model::Item>, loot_all: bool },
+    /// The player took an item out of a corpse.
+    LootItemTook { template_id: u32, item_index: u16, owner_type: u16, owner_obj_id: u32, count: i32 },
+    /// The server refused an item (`error`: an `ErrorMessageType`, bag full ...).
+    LootItemFailed { error: i32, item_index: u16, owner_type: u16, owner_obj_id: u32, item_template_id: u32 },
     /// `delta` experience gained (negative: lost) by the unit; the total is in
     /// `state::PlayerStats::exp`.
     ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
@@ -786,6 +804,15 @@ impl Session {
             Command::Resurrect { in_place } => {
                 self.send_game(game::ClientMsg::Resurrect { in_place }).await;
             }
+            Command::LootOpen { obj_id, loot_all } => {
+                self.send_game(game::ClientMsg::LootOpenBag { obj_id, loot_all }).await;
+            }
+            Command::LootItem { owner_type, owner_obj_id, item_index } => {
+                self.send_game(game::ClientMsg::LootItem { item_index, owner_type, owner_obj_id }).await;
+            }
+            Command::LootClose { owner_type, owner_obj_id } => {
+                self.send_game(game::ClientMsg::LootCloseBag { owner_type, owner_obj_id }).await;
+            }
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
@@ -1051,6 +1078,15 @@ impl Session {
                 self.emit(Event::DeathDetails { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer });
             }
             M::CharacterResurrected { obj_id, pos, yaw } => self.emit(Event::Resurrected { obj_id, pos, yaw }),
+            M::Lootable { owner_type, obj_id, has_loot } => self.emit(Event::Lootable { owner_type, obj_id, has_loot }),
+            M::UnitLooting { obj_id, looting } => self.emit(Event::UnitLooting { obj_id, looting }),
+            M::LootBag { items, loot_all } => self.emit(Event::LootBag { items, loot_all }),
+            M::LootItemTook { template_id, item_index, owner_type, owner_obj_id, count } => {
+                self.emit(Event::LootItemTook { template_id, item_index, owner_type, owner_obj_id, count });
+            }
+            M::LootItemFailed { error, item_index, owner_type, owner_obj_id, template_id } => {
+                self.emit(Event::LootItemFailed { error, item_index, owner_type, owner_obj_id, item_template_id: template_id });
+            }
             M::ExpChanged { obj_id, delta, add_ability_exp } => {
                 self.emit(Event::ExpChanged { obj_id, delta, add_ability_exp });
             }
