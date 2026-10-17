@@ -73,6 +73,10 @@ pub struct StepCtx<'a> {
     /// 1 = full emission, less thins far effects.
     pub lod: f32,
     pub size_scale: f32,
+    /// A continuous emitter with a finite life spreads `Count` over that life (see `EmitterState::emit`).
+    pub count_over_life: bool,
+    /// Colour of the light on the effect.
+    pub tint: Vec3,
     pub wind: Vec3,
     pub budget: &'a AtomicI32,
     /// Alpha factor of the effect (distance fade).
@@ -278,7 +282,14 @@ impl EmitterState {
         if active {
             if def.continuous {
                 if plife > 0.0 {
-                    self.spawn_acc += count / plife * dt * ctx.lod;
+                    // `Count` particles over the emitter's life, or alive at once when the emitter never ends; a pulse shorter than
+                    // the life restarts the emitter while the last emission still runs (`life / pulse` of them at a time)
+                    let (period, overlap) = if life > 0.0 && ctx.count_over_life {
+                        (life, if pulse > 0.0 && life > pulse { (life / pulse).ceil() } else { 1.0 })
+                    } else {
+                        (plife, 1.0)
+                    };
+                    self.spawn_acc += count / period * overlap * dt * ctx.lod;
                     let n = self.spawn_acc as usize;
                     self.spawn_acc -= n as f32;
                     let n = self.grant(ctx, n);
@@ -512,7 +523,7 @@ impl EmitterState {
                 let t = orbit_speed * p.age + p.seed;
                 center += (Vec3::X * t.cos() + Vec3::Z * t.sin()) * orbit;
             }
-            let colour = p.color * luts.color.at(a) * lit;
+            let colour = p.color * luts.color.at(a) * lit * ctx.tint;
 
             // frame in the texture atlas
             let mut f = tiling.first + p.variant as u32;
@@ -723,6 +734,8 @@ mod tests {
             count_scale: 1.0,
             lod: 1.0,
             size_scale: 1.0,
+            count_over_life: true,
+            tint: Vec3::ONE,
             wind: Vec3::ZERO,
             budget,
             fade: 1.0,
@@ -754,6 +767,29 @@ mod tests {
         assert!((16..=24).contains(&n), "alive {n}");
         assert_eq!(s.emitters[0].quads, n);
         assert_eq!(s.emitters[0].pos.len(), n * 4);
+    }
+
+    #[test]
+    fn count_spreads_over_the_emitter_life_and_pulses_overlap() {
+        // flow_fog_01: Count 10 over EmitterLifeTime 1, restarted every 0.5 s, particles live 3.5 s: 2 emissions of 10 / s
+        let xml = r#"Continuous="true" Count="10" EmitterLifeTime="1" PulsePeriod="0.5" ParticleLifeTime="3.5" Texture="textures/x.dds" Speed="1""#;
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(xml);
+        let c = ctx(&budget);
+        for _ in 0..600 {
+            s.step(&c);
+        }
+        let n = s.alive();
+        assert!((60..=80).contains(&n), "alive {n}");
+        // the old reading: Count alive at once
+        let mut old = ctx(&budget);
+        old.count_over_life = false;
+        let mut s = sim(xml);
+        for _ in 0..600 {
+            s.step(&old);
+        }
+        let n = s.alive();
+        assert!((8..=12).contains(&n), "alive {n}");
     }
 
     #[test]
