@@ -55,6 +55,11 @@ pub fn abgr(c: u32) -> [u8; 3] {
 /// Composites `layers` (and the optional lip tint with its mask) on the base texture; the result
 /// is an sRGB image with a full mip chain.
 pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3])>, eye: Option<EyeTint>) -> Result<Image> {
+    compose_face_eyes(base, layers, lips, eye.as_slice())
+}
+
+/// [`compose_face`] with any number of eyeball rectangles (the ferre atlas has one per eye).
+pub fn compose_face_eyes(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3])>, eyes: &[EyeTint]) -> Result<Image> {
     let bytes = aa_cry::read(base)?;
     let dds = aa_cry::texture::Dds::parse(&bytes)?;
     let (w, h) = (dds.width as usize, dds.height as usize);
@@ -68,9 +73,14 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
                     for (p, m) in px.chunks_exact_mut(4).zip(m.chunks_exact(4)) {
                         // lips are the yellow-orange part of the mask (red and green both set); the
                         // red disc around them and the green patches of some masks are not lips
-                        let a = (m[0].min(m[1]) as f32 / 255.0) * 0.55;
-                        if a > 0.0 {
+                        let mask = m[0].min(m[1]) as f32 / 255.0;
+                        if mask > 0.0 {
                             let luma = (p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11) / 255.0;
+                            // skin-coloured lips are tinted part way; the ferre lips are painted grey
+                            // for the lip colour to replace (a pink-red mouth, not a lilac one)
+                            let sat = (p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2])) as f32 / 255.0;
+                            let grey = 1.0 - (sat / 0.15).clamp(0.0, 1.0);
+                            let a = mask * 0.55 + ((mask * 2.2).min(0.7) - mask * 0.55) * grey;
                             for i in 0..3 {
                                 let tinted = (color[i] as f32 / 255.0 * (0.35 + luma * 0.9)).min(1.0);
                                 let v = p[i] as f32 / 255.0;
@@ -83,8 +93,8 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
         }
     }
 
-    if let Some(eye) = eye {
-        tint_iris(&mut px, w, h, eye);
+    for eye in eyes {
+        tint_iris(&mut px, w, h, *eye);
     }
 
     for layer in layers {
@@ -110,13 +120,18 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
         for y in 0..nh {
             for x in 0..nw {
                 for c in 0..4 {
-                    let mut sum = 0u32;
+                    let mut sum = 0f32;
                     for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
                         let sx = (x * 2 + dx).min(mw - 1);
                         let sy = (y * 2 + dy).min(mh - 1);
-                        sum += level[(sy * mw + sx) * 4 + c] as u32;
+                        let v = level[(sy * mw + sx) * 4 + c];
+                        // colour is averaged as light, not as sRGB codes (which darken contrasty
+                        // textures: tattoos on skin lose a quarter of their brightness in the mips
+                        // a face uses at game distance); alpha is plain
+                        sum += if c < 3 { srgb_to_linear(v) } else { v as f32 / 255.0 };
                     }
-                    next[(y * nw + x) * 4 + c] = ((sum + 2) / 4) as u8;
+                    let avg = sum / 4.0;
+                    next[(y * nw + x) * 4 + c] = if c < 3 { linear_to_srgb(avg) } else { (avg * 255.0).round() as u8 };
                 }
             }
         }
@@ -131,6 +146,16 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
     image.data = Some(data);
     image.sampler = ImageSampler::Descriptor(aa_cry::texture::repeat_sampler());
     Ok(image)
+}
+
+fn srgb_to_linear(v: u8) -> f32 {
+    let c = v as f32 / 255.0;
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(l: f32) -> u8 {
+    let c = if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    (c.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// Recolours the grey iris disc (about 21% of the eye square's width in radius, around its
@@ -198,9 +223,21 @@ fn draw_layer(dst: &mut [u8], w: usize, h: usize, src: &[u8], sw: usize, sh: usi
             let (iu, iv) = (fu.floor() as i32, fv.floor() as i32);
             let (tu, tv) = (fu - iu as f32, fv - iv as f32);
             let (a, b, c, d) = (texel(iu, iv), texel(iu + 1, iv), texel(iu, iv + 1), texel(iu + 1, iv + 1));
+            // bilinear with colour weighted by alpha: the colour of transparent texels (black or
+            // white in the decal files) must not bleed into the edge of the shape
+            let weights = [(1.0 - tu) * (1.0 - tv), tu * (1.0 - tv), (1.0 - tu) * tv, tu * tv];
+            let texels = [a, b, c, d];
             let mut s = [0f32; 4];
-            for k in 0..4 {
-                s[k] = (a[k] * (1.0 - tu) + b[k] * tu) * (1.0 - tv) + (c[k] * (1.0 - tu) + d[k] * tu) * tv;
+            let mut wa = 0.0;
+            for (t, w) in texels.iter().zip(weights) {
+                s[3] += t[3] * w;
+                wa += t[3] * w;
+                for k in 0..3 {
+                    s[k] += t[k] * t[3] * w;
+                }
+            }
+            for v in s.iter_mut().take(3) {
+                *v = if wa > 0.0 { *v / wa } else { 0.0 };
             }
             let alpha = (s[3] / 255.0 * layer.weight).clamp(0.0, 1.0);
             if alpha <= 0.0 {
@@ -227,6 +264,21 @@ mod tests {
         // eyebrow colour of the first Nuian male preset: ABGR 0xFF00233C = rgb(60, 35, 0)
         assert_eq!(abgr(0xFF00_233C), [0x3C, 0x23, 0x00]);
         assert_eq!(abgr(4294489434), [0x5A, 0xB5, 0xF8]);
+    }
+
+    #[test]
+    fn mips_average_light_and_decal_edges_keep_their_colour() {
+        // half black, half white averages to sRGB 188 (linear 0.5), not to the code 128
+        assert_eq!(linear_to_srgb((srgb_to_linear(0) + srgb_to_linear(255)) / 2.0), 188);
+        // a decal texel of colour (200, 100, 0) next to a transparent black one: the edge keeps its colour
+        let mut dst = vec![0u8; 4 * 4 * 4];
+        let src = [200, 100, 0, 255, 0, 0, 0, 0];
+        let layer = FaceLayer { path: String::new(), x: 1.0, y: 1.0, scale: 1.0, rotate: 0.0, weight: 1.0, tint: None };
+        draw_layer(&mut dst, 4, 4, &src, 2, 1, &layer);
+        let r = dst[(1 * 4 + 1) * 4];
+        assert_eq!(r, 200, "opaque texel unchanged: {r}");
+        let edge = dst[(1 * 4 + 2) * 4..][..3].to_vec();
+        assert!(edge == vec![0, 0, 0], "fully transparent texel draws nothing: {edge:?}");
     }
 
     #[test]
