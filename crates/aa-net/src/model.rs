@@ -610,6 +610,8 @@ pub struct CharacterState {
     pub jury_point: i32,
     /// Seconds played in total.
     pub play_time: i32,
+    /// Expert-specialization expansion count; the final byte of SCCharacterState.
+    pub expanded_expert: u8,
 }
 
 impl CharacterState {
@@ -639,7 +641,7 @@ impl CharacterState {
         r.skip(4 + 8 + 8 + 4 + 4)?;
         let play_time = r.i32()?;
         let created = r.i64()?;
-        r.skip(1)?; // expanded expert
+        let expanded_expert = r.u8()?;
         Ok(Self {
             instance_id,
             guid,
@@ -656,6 +658,7 @@ impl CharacterState {
             unread_mail,
             jury_point,
             play_time,
+            expanded_expert,
         })
     }
 }
@@ -1667,7 +1670,7 @@ mod tests {
         }
         w.i32(0).i32(0).i32(0).u8(50).i16(200);
         w.i64(1).i64(2).i64(0).i64(0).bool(true).i32(0).i32(0).i64(0).i64(0);
-        w.i32(0).i32(0).i32(600).i64(1_700_000_000).u8(0);
+        w.i32(0).i32(0).i32(600).i64(1_700_000_000).u8(7);
         let bytes = w.finish();
         let mut r = Reader::new(&bytes);
         let s = CharacterState::read(&mut r).unwrap();
@@ -1679,6 +1682,7 @@ mod tests {
         assert_eq!((s.experience, s.recoverable_exp), (100, 10));
         assert_eq!((s.num_inventory_slots, s.num_bank_slots), (50, 200));
         assert_eq!(s.created, 1_700_000_000);
+        assert_eq!(s.expanded_expert, 7);
     }
 
     #[test]

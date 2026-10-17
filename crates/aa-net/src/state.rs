@@ -38,6 +38,7 @@ pub use crate::repair::Repair;
 pub use crate::mail::Mailbox;
 pub use crate::auction::Auction;
 pub use crate::loot_roll::LootRolls;
+pub use crate::actability::Actabilities;
 pub use crate::trade::Trade;
 
 resource! {
@@ -314,6 +315,7 @@ pub struct WorldState {
     pub trade: Trade,
     pub auction: Auction,
     pub loot_rolls: LootRolls,
+    pub actabilities: Actabilities,
 }
 
 impl WorldState {
@@ -342,6 +344,7 @@ impl WorldState {
         self.mailbox.apply(e);
         self.auction.apply(e);
         self.loot_rolls.apply(e);
+        self.actabilities.apply(e);
         self.trade.apply(e);
         self.trade.seed_inventory(e, &self.inventory);
     }
