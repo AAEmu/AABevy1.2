@@ -205,6 +205,23 @@ pub struct LaidOutText {
     pub carets: Vec<TextCaret>,
     /// Literal character ranges for visual edit lines, excluding a wrapping separator/newline.
     pub line_ranges: Vec<(usize, usize)>,
+    /// Display geometry and payload of native `|kName,hostile;` character links.
+    pub character_links: Vec<CharacterLink>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharacterLink {
+    pub name: String,
+    pub is_hostile: bool,
+    /// Pixel bounds relative to the layout origin, before per-line horizontal alignment.
+    pub rect: [f32; 4],
+    pub line: usize,
+}
+
+struct CharacterRun {
+    range: std::ops::Range<usize>,
+    name: String,
+    is_hostile: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -631,7 +648,11 @@ impl FontLib {
         // A last line that is empty or only blanks does not count: the client gives
         // `"We fear no death."\r\n\n` 2 lines and `"Claw to earth, ... fur to fire."\r\n\n `
         // (wrapped in two) 3 lines (GetTextHeight in reference/character_create/step1_*).
-        let mut expanded = if edit { text.to_string() } else { expand_codes(text) };
+        let (mut expanded, character_runs) = if edit {
+            (text.to_string(), Vec::new())
+        } else {
+            expand_with_links(text)
+        };
         if !edit && let Some(nl) = expanded.rfind('\n')
             && expanded[nl + 1..]
                 .chars()
@@ -799,6 +820,24 @@ impl FontLib {
                         });
                     }
                     width = x + it.adv;
+                }
+                if let Some(link) = character_runs.iter().find(|r| r.range.contains(&it.index)) {
+                    if let Some(last) = out.character_links.last_mut().filter(|last| {
+                        last.line == li
+                            && last.name == link.name
+                            && last.is_hostile == link.is_hostile
+                            && last.rect[2] == x
+                    }) {
+                        last.rect[2] = x + it.adv;
+                    } else {
+                        let top = li as f32 * (line_h + line_space);
+                        out.character_links.push(CharacterLink {
+                            name: link.name.clone(),
+                            is_hostile: link.is_hostile,
+                            rect: [x, top, x + it.adv, top + line_h],
+                            line: li,
+                        });
+                    }
                 }
                 x += it.adv;
                 if edit { carets[it.index+1] = Some(TextCaret { x, line: li }); }
@@ -1058,12 +1097,18 @@ fn money_text(body: &str) -> String {
 /// `|,1234;` -> `1234` (the client shows `Labor 85/2000`, no separators at login); other `|x...;` codes (`|b` bold value, `|m`
 /// money with coin icons, `|p`, `|u`, ...) show their content (`|b` adds the loyalty token
 /// icon, `|h` the honor medal, `|l` the vocation badge, `|m` coins).
+/// Character links `|kName,hostile;` display only the name; layout retains their click payload.
 pub fn expand_codes(text: &str) -> String {
+    expand_with_links(text).0
+}
+
+fn expand_with_links(text: &str) -> (String, Vec<CharacterRun>) {
     if !text.contains('|') {
-        return text.to_string();
+        return (text.to_string(), Vec::new());
     }
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
+    let mut links = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -1079,6 +1124,22 @@ pub fn expand_codes(text: &str) -> String {
                 if let Some(n) = end.filter(|&n| chars[i + 2 + n] == ';') {
                     let body: String = chars[i + 2..i + 2 + n].iter().collect();
                     match k {
+                        'k' => {
+                            if let Some((name, hostile)) = body.rsplit_once(',')
+                                && !name.is_empty()
+                                && matches!(hostile, "0" | "1")
+                            {
+                                let start = out.chars().count();
+                                out.push_str(name);
+                                links.push(CharacterRun {
+                                    range: start..start + name.chars().count(),
+                                    name: name.to_string(),
+                                    is_hostile: hostile == "1",
+                                });
+                            } else {
+                                out.push_str(&body);
+                            }
+                        }
                         'm' => out.push_str(&money_text(&body)),
                         'b' | 'h' | 'l' => {
                             out.push_str(&body);
@@ -1098,7 +1159,7 @@ pub fn expand_codes(text: &str) -> String {
         out.push(c);
         i += 1;
     }
-    out
+    (out, links)
 }
 
 #[allow(dead_code)]
