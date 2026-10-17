@@ -71,7 +71,12 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         "SetUIScale",
         method(lua, |lua, _, a| {
             let s = a.opt_f(1).unwrap_or(1.0).clamp(0.5, 2.0);
-            ui(lua).ui_scale = s;
+            let mut u = ui(lua);
+            u.animations.set_ui_scale(s);
+            if u.ui_scale != s {
+                u.ui_scale = s;
+                u.tree.repaint();
+            }
             none()
         })?,
     )?;

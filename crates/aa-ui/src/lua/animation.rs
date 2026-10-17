@@ -22,6 +22,7 @@ pub struct Sample {
     pub offset: [f32; 2],
     pub rotation: f32,
     pub pivot: Point,
+    pub clip: bool,
 }
 
 impl Default for Sample {
@@ -34,6 +35,7 @@ impl Default for Sample {
             offset: [0.0; 2],
             rotation: 0.0,
             pivot: Point::Center,
+            clip: false,
         }
     }
 }
@@ -59,6 +61,16 @@ pub struct Animations {
 }
 
 impl Animations {
+    pub fn with_ui_scale(ui_scale: f32) -> Self {
+        let mut this = Self::default();
+        this.widgets.set_ui_scale(ui_scale);
+        this
+    }
+
+    pub fn set_ui_scale(&mut self, ui_scale: f32) {
+        self.widgets.set_ui_scale(ui_scale);
+    }
+
     pub fn sample(&self, id: Id) -> Sample {
         self.samples.get(&id).copied().unwrap_or_default()
     }
@@ -132,6 +144,7 @@ struct Phase {
     scale: [f32; 4],
     rotation: [f32; 2],
     pivot: Point,
+    clip: bool,
 }
 
 impl Default for Phase {
@@ -145,6 +158,7 @@ impl Default for Phase {
             scale: [1.0; 4],
             rotation: [0.0; 2],
             pivot: Point::Center,
+            clip: false,
         }
     }
 }
@@ -195,6 +209,7 @@ impl Phase {
             ],
             rotation: lerp(self.rotation[0], self.rotation[1], t).to_radians(),
             pivot: self.pivot,
+            clip: self.clip,
             ..Default::default()
         }
     }
@@ -361,6 +376,13 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             phase(lua, id, a, |p| {
                 p.final_color = [a.f(2), a.f(3), a.f(4), a.f(5)]
             });
+            none()
+        })?,
+    )?;
+    m.set(
+        "SetEffectClip",
+        method(lua, |lua, id, a| {
+            phase(lua, id, a, |p| p.clip = a.b(2, false));
             none()
         })?,
     )?;
