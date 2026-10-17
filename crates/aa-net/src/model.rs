@@ -759,6 +759,9 @@ pub struct Unit {
     /// announced at full health, so this is exact for them until they are healed above it).
     pub max_hp: i32,
     pub max_mp: i32,
+    /// The unit is dead: announced without health (a corpse in view), or killed since (`UnitDeath`). Cleared by a
+    /// resurrection or by health points above zero.
+    pub dead: bool,
     /// `16 * gender + race`.
     pub race_gender: u8,
     /// Last movement received for this unit.
@@ -895,6 +898,7 @@ impl Unit {
             mp: 0,
             max_hp: 0,
             max_mp: 0,
+            dead: false,
             race_gender: 0,
             movement: None,
             faction_id: 0,
@@ -907,11 +911,14 @@ impl Unit {
             active_abilities: Vec::new(),
             buffs: Vec::new(),
         };
+        let mut tail_read = false;
         if tail_ok {
             // Ignore failures: a short or unexpected tail only costs the optional fields.
-            let _ = unit.read_tail(r, kind_byte);
+            tail_read = unit.read_tail(r, kind_byte).is_ok();
         }
         (unit.max_hp, unit.max_mp) = (unit.hp, unit.mp);
+        // a character or monster announced with no health is a corpse (a failed tail leaves the health at 0 as well)
+        unit.dead = tail_read && unit.hp <= 0 && (unit.is_npc() || unit.is_character());
         Ok(unit)
     }
 

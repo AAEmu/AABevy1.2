@@ -141,6 +141,17 @@ impl Units {
                 (u.hp, u.mp) = (*hp, *mp);
                 u.max_hp = u.max_hp.max(*hp);
                 u.max_mp = u.max_mp.max(*mp);
+                if *hp > 0 {
+                    u.dead = false;
+                }
+            }
+            Event::UnitDeath { obj_id } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                (u.dead, u.hp) = (true, 0);
+            }
+            Event::Resurrected { obj_id, .. } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.dead = false;
             }
             Event::LevelChanged { obj_id, level } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
@@ -319,6 +330,7 @@ mod tests {
             buffs: Vec::new(),
             max_hp: 10,
             max_mp: 0,
+            dead: false,
         }
     }
 
@@ -335,6 +347,16 @@ mod tests {
         assert!((s.units.get(5).unwrap().pos.x - 9.0).abs() < 1e-6);
         s.apply(&Event::UnitPoints { obj_id: 5, hp: 3, mp: 4 });
         assert_eq!(s.units.get(5).unwrap().hp, 3);
+        // a death marks the unit dead until it is resurrected or has health again
+        assert!(!s.units.get(5).unwrap().dead);
+        s.apply(&Event::UnitPoints { obj_id: 5, hp: 0, mp: 4 });
+        assert!(!s.units.get(5).unwrap().dead, "health 0 alone is not the death packet");
+        assert!(s.units.apply(&Event::UnitDeath { obj_id: 5 }));
+        assert!(s.units.get(5).unwrap().dead && s.units.get(5).unwrap().hp == 0);
+        assert!(s.units.apply(&Event::Resurrected { obj_id: 5, pos: Pos::default(), yaw: 0.0 }));
+        assert!(!s.units.get(5).unwrap().dead);
+        assert!(!s.units.apply(&Event::UnitDeath { obj_id: 99 }));
+        s.apply(&Event::UnitPoints { obj_id: 5, hp: 3, mp: 4 });
         s.apply(&Event::UnitsRemoved(vec![5]));
         assert!(s.units.get(5).is_none() && s.units.get(6).is_some());
         // Leaving the world clears the view.

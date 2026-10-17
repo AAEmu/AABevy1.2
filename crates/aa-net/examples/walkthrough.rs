@@ -404,13 +404,17 @@ async fn main() -> Result<()> {
     nearest.sort_by(|a, b| a.pos.distance(here).total_cmp(&b.pos.distance(here)));
     for u in nearest.iter().take(5) {
         println!(
-            "  {:>6.1} m  {:<10} {:?} lvl {} model {} hp {}",
+            "  {:>6.1} m  {:<10} {:?} lvl {} model {} hp {} at ({:.1}, {:.1}, {:.1}) obj {}",
             u.pos.distance(here),
             if u.name.is_empty() { "(unnamed)" } else { &u.name },
             u.kind,
             u.level,
             u.model_id,
-            u.hp
+            u.hp,
+            u.pos.x,
+            u.pos.y,
+            u.pos.z,
+            u.obj_id
         );
     }
 
@@ -554,6 +558,7 @@ async fn main() -> Result<()> {
         for cmd in uses {
             println!("  send {cmd:?}");
             client.send(cmd);
+            let sent = Instant::now();
             let end = Instant::now() + Duration::from_millis(3000);
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
             while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
@@ -564,7 +569,7 @@ async fn main() -> Result<()> {
                 if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_) | Event::TargetChanged { .. }) {
                     continue;
                 }
-                println!("  event {}", if line.len() > 300 { format!("{}...", &line[..300]) } else { line });
+                println!("  event +{:>4} ms {}", sent.elapsed().as_millis(), if line.len() > 300 { format!("{}...", &line[..300]) } else { line });
             }
             println!("  event counts: {counts:?}");
             let s = &state.skills;

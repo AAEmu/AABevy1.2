@@ -1335,6 +1335,34 @@ mod tests {
     }
 
     #[test]
+    fn a_combat_batch_reports_fire_hit_and_death_in_order() {
+        // What the lane server sends for the killing arrow of Shoot Arrow, in one DD04 batch: the skill fires
+        // (target a unit, fire anim 32, effects land 370 ms later), the hit, the death with its killer, the end.
+        let mut raw = Writer::new();
+        raw.u16(0).u16(sc::SCSkillFiredPacket);
+        raw.u32(16064).u16(1291).u8(0).bc(0x10).u8(0).bc(0x20).u8(0);
+        raw.i16(37 + 10).i16(10).u8(0).u32(32).u8(0);
+        raw.u16(0).u16(sc::SCUnitDamagedPacket);
+        raw.u8(0).u32(16064).u16(1291).u8(0).bc(0x10).bc(0x10).bc(0x20).u8(0);
+        raw.pisc(&[24, 0, 0]).pisc(&[0, 0, 0]).u8(0).u16(288 | 0x09).u8(1).u8(1);
+        raw.u16(0).u16(sc::SCUnitDeathPacket).bc(0x20).u8(1).i32(10).i32(0).u8(0).bc(0x10);
+        raw.u8(0).u16(0).u8(0).u8(0).u8(0).string("Bevytest");
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(1291);
+        let raw = raw.finish();
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 4, 0];
+        frame.extend(stored(&raw, true));
+        let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
+        assert_eq!(list.len(), 4, "{list:?}");
+        let ServerMsg::SkillFired(f) = &list[0] else { panic!("not a fire: {:?}", list[0]) };
+        assert_eq!((f.skill_id, f.tl, f.caster.obj_id, f.target.obj_id, f.delay_ms, f.fire_anim_id), (16064, 1291, 0x10, 0x20, 370, 32));
+        let ServerMsg::UnitDamaged(d) = &list[1] else { panic!("not a hit: {:?}", list[1]) };
+        assert_eq!((d.caster_obj_id, d.target_obj_id, d.damage, d.action.tl), (0x10, 0x20, 24, 1291));
+        assert_eq!(d.hit_type, crate::skill::hit_type::RANGED_HIT);
+        assert!(matches!(&list[2], ServerMsg::UnitDeath { obj_id: 0x20, killer: Some((0x10, name)), .. } if name == "Bevytest"));
+        assert_eq!(list[3], ServerMsg::SkillEnded { tl: 1291 });
+    }
+
+    #[test]
     fn cancel_delete_response_golden_bytes() {
         // SCCancelCharacterDeleteResponsePacket(characterId, status) as the server writes it: u32 id,
         // u8 status (3 restored, 4 unknown character); body [9, 0, 0, 0, 3] in the server's

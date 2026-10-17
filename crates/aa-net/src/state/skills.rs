@@ -403,6 +403,8 @@ mod tests {
             skill_id: 16064,
             caster_obj_id: 5,
             target_obj_id: 9,
+            caster_pos: None,
+            target_pos: None,
             casting_ms: 800,
         });
         assert!(s.apply(&plot));
@@ -412,7 +414,16 @@ mod tests {
         assert!(s.casting.is_empty());
         // Later steps without a cast time change nothing.
         let step = |tl, casting_ms| {
-            Event::PlotEvent(PlotEvent { tl, event_id: 2, skill_id: 16064, caster_obj_id: 5, target_obj_id: 9, casting_ms })
+            Event::PlotEvent(PlotEvent {
+                tl,
+                event_id: 2,
+                skill_id: 16064,
+                caster_obj_id: 5,
+                target_obj_id: 9,
+                caster_pos: None,
+                target_pos: None,
+                casting_ms,
+            })
         };
         assert!(s.apply(&step(12, 0)));
         assert!(!s.apply(&step(12, 0)));
