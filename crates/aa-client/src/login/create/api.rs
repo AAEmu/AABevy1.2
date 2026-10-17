@@ -31,6 +31,9 @@ pub enum Request {
     GotoSelect,
     /// `ShowSkillAction(ability)`
     SkillAction(u32),
+    /// A premade face replaced hair, colours and decals: the left panel reloads its lists
+    /// (`RELOAD_COSMETIC_WINDOW`, which the real client raises).
+    ReloadCosmetic,
     /// `NewCharacterCBT2`: create the character.
     Create { name: String, ability: u32 },
 }
@@ -162,7 +165,12 @@ pub fn install(lua: &Lua, shared: &SharedRef) -> mlua::Result<()> {
 
     // ---- premade faces, sliders -------------------------------------------------------------
     def!("apply_preset", |_, s, (part, index, fixed): (f64, f64, Option<bool>)| {
-        lock(s).cz.apply_preset(part.max(0.0) as usize, index as i32, fixed.unwrap_or(false));
+        let mut g = lock(s);
+        let fixed = fixed.unwrap_or(false);
+        g.cz.apply_preset(part.max(0.0) as usize, index as i32, fixed);
+        if part < 1.0 && !fixed {
+            g.requests.push(Request::ReloadCosmetic);
+        }
         Ok(())
     });
     def!("save_slot", |_, s, slot: f64| {
