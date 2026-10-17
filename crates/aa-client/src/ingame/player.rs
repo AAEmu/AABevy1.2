@@ -11,7 +11,7 @@ use aa_cry::Skeleton;
 use aa_cry::scene::CryAssets;
 use aa_net::model::stance;
 use aa_net::state::Player;
-use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
+use aa_net::{Command, Event, MoveCommand, MoveState, NetCommand, NetEvent, Pos};
 use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::prelude::*;
 
@@ -271,11 +271,14 @@ pub fn control_player(
             pos.z = ground;
         }
     }
+    // impact speed (m/s) of a landing in this step: sent once, in the movement packet of the landing
+    let mut landed = None;
     if !mover.grounded {
         mover.vz -= GRAVITY * dt;
         pos.z += mover.vz * dt;
         if pos.z <= ground && mover.vz <= 0.0 {
             pos.z = ground;
+            landed = Some(-mover.vz);
             mover.vz = 0.0;
             mover.grounded = true;
         }
@@ -288,21 +291,38 @@ pub fn control_player(
     let moving = local_dir != Vec2::ZERO && step.length() > 0.0;
     *motion = Motion { speed: if moving { step.length() } else { 0.0 }, local_dir, airborne: !mover.grounded };
 
-    // movement packets: every SEND_INTERVAL while moving, facing or airborne; one more when it stops
+    // movement packets: every SEND_INTERVAL while moving, facing or airborne; one more when it stops,
+    // and one at once when the character lands
     state.since_sent += dt;
     let active = moving || !mover.grounded || (mover.facing - before_facing).abs() > 1e-4;
     let due = state.since_sent >= SEND_INTERVAL;
     let first = !state.sent_first && state.since_spawn > 0.5;
-    if (active && due) || (!active && state.was_active) || first {
+    if (active && due) || (!active && state.was_active) || first || landed.is_some() {
         let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
-        out.write(NetCommand(Command::Move(MoveCommand {
+        // pressed direction relative to the facing, [right, forward, up]; forward is [0, 127, 0]
+        let delta = [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, 0];
+        // rising after a jump, falling otherwise in the air, on the ground when standing on the terrain
+        let move_state = if mover.grounded {
+            MoveState::Ground
+        } else if mover.vz > 0.0 {
+            MoveState::Jump
+        } else {
+            MoveState::Fall
+        };
+        let mut cmd = MoveCommand {
             pos: Pos::new(pos.x, pos.y, pos.z),
             yaw: mover.facing,
             moving: active,
             stance: stance::RELAXED,
             velocity: if active { [to_wire(velocity.x), to_wire(velocity.y), to_wire(velocity.z)] } else { [0; 3] },
+            delta_movement: delta,
             ..MoveCommand::default()
-        })));
+        }
+        .with_state(move_state);
+        if let Some(speed) = landed {
+            cmd = cmd.landing(speed);
+        }
+        out.write(NetCommand(Command::Move(cmd)));
         state.since_sent = 0.0;
         state.sent_first = true;
         state.moves_sent += 1;
