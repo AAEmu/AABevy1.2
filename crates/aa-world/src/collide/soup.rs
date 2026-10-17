@@ -6,7 +6,7 @@
 
 use bevy::math::{Vec2, Vec3};
 
-use super::geom::{Tri, cross_normal, ray_tri, segment_near_box, tri_max, tri_min, tri_overlaps_square};
+use super::geom::{Tri, cross_normal, plan_height, ray_tri, segment_near_box, tri_max, tri_min, tri_overlaps_square};
 
 /// Most grid cells per side (a 1024 m cell at 8 m is 128; stray far away triangles must not blow this up).
 const MAX_DIM: usize = 256;
@@ -17,6 +17,8 @@ pub struct Soup {
     cell: f32,
     dim: [usize; 2],
     tris: Vec<Tri>,
+    /// Surface id of every triangle (`surface::DEFAULT` for all when built without).
+    surf: Vec<u16>,
     starts: Vec<u32>,
     ids: Vec<u32>,
     /// Per grid cell: how many of its first ids are triangles that can be ground (`|n.z| >= min_nz`).
@@ -28,8 +30,16 @@ pub struct Soup {
 impl Soup {
     /// Indexes `tris` with grid cells `cell` metres wide. Degenerate triangles are dropped. Triangles whose unit
     /// normal has `|n.z| >= min_nz` are the ones [`Soup::highest_below`] looks at.
+    #[cfg(test)]
     pub fn build(tris: Vec<Tri>, cell: f32, min_nz: f32) -> Soup {
-        let tris: Vec<Tri> = tris.into_iter().filter(|t| cross_normal(t).length_squared() > 1e-10 && t.iter().all(|v| v.is_finite())).collect();
+        let surf = vec![0; tris.len()];
+        Soup::build_with(tris, surf, cell, min_nz)
+    }
+
+    /// [`Soup::build`] with the surface id of every triangle (`surf` as long as `tris`).
+    pub fn build_with(tris: Vec<Tri>, surf: Vec<u16>, cell: f32, min_nz: f32) -> Soup {
+        let (tris, surf): (Vec<Tri>, Vec<u16>) =
+            tris.into_iter().zip(surf).filter(|(t, _)| cross_normal(t).length_squared() > 1e-10 && t.iter().all(|v| v.is_finite())).unzip();
         if tris.is_empty() {
             return Soup::default();
         }
@@ -41,7 +51,7 @@ impl Soup {
         // very large soups get coarser cells instead of clamped ones
         let cell = cell.max((hi.x - lo.x).max(hi.y - lo.y) / (MAX_DIM - 1) as f32);
         let dim = [0, 1].map(|k| (((hi[k] - lo[k]) / cell).floor() as usize + 1).min(MAX_DIM));
-        let mut soup = Soup { min: lo.truncate(), cell, dim, tris, starts: Vec::new(), ids: Vec::new(), flat: Vec::new(), lo, hi };
+        let mut soup = Soup { min: lo.truncate(), cell, dim, tris, surf, starts: Vec::new(), ids: Vec::new(), flat: Vec::new(), lo, hi };
         let mut counts = vec![0u32; dim[0] * dim[1] + 1];
         for t in &soup.tris {
             soup.for_cells(t, |c| counts[c] += 1);
@@ -94,11 +104,16 @@ impl Soup {
 
     /// Heap bytes of the soup.
     pub fn bytes(&self) -> usize {
-        self.tris.len() * std::mem::size_of::<Tri>() + (self.starts.len() + self.ids.len() + self.flat.len()) * 4
+        self.tris.len() * (std::mem::size_of::<Tri>() + 2) + (self.starts.len() + self.ids.len() + self.flat.len()) * 4
     }
 
     pub fn tri(&self, id: u32) -> &Tri {
         &self.tris[id as usize]
+    }
+
+    /// Surface id of a triangle.
+    pub fn surface(&self, id: u32) -> u16 {
+        self.surf[id as usize]
     }
 
     #[cfg(test)]
@@ -208,30 +223,18 @@ impl Soup {
     }
 
     /// The highest surface under `(x, y)` that is not above `limit_z` among the ground candidates (`|n.z| >= min_nz`
-    /// of [`Soup::build`]; two sided, the normal returned faces up): `(height, normal)`.
-    pub fn highest_below(&self, x: f32, y: f32, limit_z: f32) -> Option<(f32, Vec3)> {
+    /// of [`Soup::build`]; two sided, the normal returned faces up): `(height, normal, triangle id)`.
+    pub fn highest_below(&self, x: f32, y: f32, limit_z: f32) -> Option<(f32, Vec3, u32)> {
         let [ix, iy, _, _] = self.range(Vec2::new(x, y), Vec2::new(x, y))?;
         let cell = iy * self.dim[0] + ix;
         let row = &self.ids[self.starts[cell] as usize..][..self.flat[cell] as usize];
-        let mut best: Option<(f32, Vec3)> = None;
-        let p = Vec2::new(x, y);
+        let mut best: Option<(f32, Vec3, u32)> = None;
         for &id in row {
-            let t = &self.tris[id as usize];
-            // barycentric test in plan, with a hair of tolerance for the shared edges
-            let (a, b, c) = (t[0].truncate(), t[1].truncate(), t[2].truncate());
-            let area = (b - a).perp_dot(c - a);
-            let u = (c - b).perp_dot(p - b) / area;
-            let v = (a - c).perp_dot(p - c) / area;
-            let w = (b - a).perp_dot(p - a) / area;
-            const EDGE: f32 = -1e-5;
-            if u < EDGE || v < EDGE || w < EDGE {
-                continue;
-            }
-            let n = cross_normal(t);
-            let z = t[0].z - (n.x * (x - t[0].x) + n.y * (y - t[0].y)) / n.z;
-            if z <= limit_z && best.is_none_or(|(h, _)| z > h) {
-                let up = if n.z > 0.0 { n } else { -n };
-                best = Some((z, up.normalize()));
+            if let Some((z, up)) = plan_height(&self.tris[id as usize], x, y)
+                && z <= limit_z
+                && best.is_none_or(|(h, _, _)| z > h)
+            {
+                best = Some((z, up, id));
             }
         }
         best
@@ -343,12 +346,12 @@ mod tests {
     #[test]
     fn ground_under_a_point() {
         let s = Soup::build(scene(), 8.0, 0.5);
-        let (z, n) = s.highest_below(30.0, 30.0, 10.0).unwrap();
+        let (z, n, _) = s.highest_below(30.0, 30.0, 10.0).unwrap();
         assert!((z - 2.0).abs() < 1e-4 && n.z > 0.99);
         assert!(s.highest_below(30.0, 30.0, 1.0).is_none());
         assert!(s.highest_below(300.0, 30.0, 10.0).is_none());
         // a vertical wall is no ground
-        assert!(s.highest_below(50.0, 30.0, 10.0).map(|(z, _)| z) == Some(2.0));
+        assert!(s.highest_below(50.0, 30.0, 10.0).map(|(z, _, _)| z) == Some(2.0));
     }
 
     #[test]
