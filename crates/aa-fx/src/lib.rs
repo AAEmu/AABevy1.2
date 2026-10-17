@@ -175,6 +175,10 @@ pub struct FxRun {
     frame: u32,
     warmup: u8,
     uploaded_units: Vec<usize>,
+    /// Where the entity was last frame and how fast it moves (`InheritVelocity`).
+    last_pos: Vec3,
+    has_last: bool,
+    vel: Vec3,
 }
 
 impl FxRun {
@@ -489,12 +493,12 @@ fn apply(
                     };
                     if !is_refraction || refract.is_some() {
                         material = assets.slot(
-                            MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None, refract },
+                            MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None, refract, atest: d.has_alpha_test() },
                             &mut materials,
                             settings.gain,
                             settings.soft_distance,
                         );
-                        let mesh_handle = meshes.add(new_mesh(false, false));
+                        let mesh_handle = meshes.add(new_mesh(false, d.has_alpha_test()));
                         mesh = spawn_mesh(&mut commands, entity, layers, mesh_handle.clone(), assets.slots[material as usize].handle.clone());
                         handle = Some((mesh, mesh_handle));
                     } else {
@@ -518,6 +522,8 @@ fn apply(
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
+        run.has_last = false;
+        run.vel = Vec3::ZERO;
         run.uploaded_units = vec![1; def.emitters.len()];
         commands.entity(entity).insert(FxActive);
     }
@@ -553,7 +559,7 @@ fn bind_geometry(
                         cutoff: (m.cutoff * 255.0).round() as u8,
                     };
                     let slot = assets.slot(
-                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key), refract: None },
+                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key), refract: None, atest: false },
                         &mut materials,
                         settings.gain,
                         settings.soft_distance,
@@ -614,6 +620,14 @@ fn simulate(
         let (lx, ly, lz) = (m.x_axis.length().max(1e-6), m.y_axis.length().max(1e-6), m.z_axis.length().max(1e-6));
         let rot = Mat3::from_cols(Vec3::from(m.x_axis) / lx, Vec3::from(m.y_axis) / ly, Vec3::from(m.z_axis) / lz);
         let dist = gt.translation().distance(view.pos);
+        let pos = gt.translation();
+        if run.has_last && dt_frame > 1e-4 {
+            // a teleport is not a speed
+            let v = ((pos - run.last_pos) / dt_frame).clamp_length_max(40.0);
+            run.vel = run.vel.lerp(v, 0.5);
+        }
+        run.last_pos = pos;
+        run.has_last = true;
         let near = (dist / run.radius.max(1.0)).clamp(0.0, 1.0);
         let far = ((near - 0.45) / 0.55).clamp(0.0, 1.0);
         let mut ctx = StepCtx {
@@ -629,6 +643,7 @@ fn simulate(
             count_over_life: settings.count_over_life,
             tint: effect.tint,
             sun: settings.sun,
+            emitter_vel: run.vel,
             wind: settings.wind,
             budget: &budget,
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,
