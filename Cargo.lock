@@ -55,6 +55,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aa-fx"
+version = "0.1.0"
+dependencies = [
+ "aa-cry",
+ "aa-dev",
+ "aa-pak",
+ "bevy",
+ "roxmltree",
+]
+
+[[package]]
 name = "aa-lua"
 version = "0.1.0"
 dependencies = [
