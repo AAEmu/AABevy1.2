@@ -121,12 +121,18 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
             }
         }
     }
+    let mut sound = false;
     if was != visible && u.tree.get(id).is_widget() {
         let h = if visible { "OnShow" } else { "OnHide" };
         u.pending.push((id, h.to_string(), vec![]));
         // `OnVisibleChanged(self, visible)` (character create step 3 resets its name box there).
         u.pending
             .push((id, "OnVisibleChanged".into(), vec![Value::Boolean(visible)]));
+        sound = u.widget_sounds.contains_key(&id);
+    }
+    drop(g);
+    if sound {
+        super::sound::widget_sound(lua, id, if visible { "show" } else { "hide" });
     }
 }
 
@@ -987,8 +993,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     )?;
 
     // --- misc no-ops that scripts call during setup -------------------------------------
-    for name in [
+    def(
         "SetSounds",
+        method(lua, |lua, id, a| {
+            super::sound::set_sounds(lua, id, a.s(1).unwrap_or_default());
+            none()
+        })?,
+    )?;
+    for name in [
         "EnableHidingIsRemove",
         "RegisterForClicks",
         "RegisterForDrag",

@@ -191,6 +191,8 @@ pub fn key(lua: &Lua, k: &UiKey) -> bool {
         _ => false,
     };
     if changed {
+        // `SetSounds("edit_box")`: a key click per typed or erased character
+        super::sound::widget_sound(lua, id, if matches!(k, UiKey::Backspace | UiKey::Delete) { "text_deleted" } else { "text_added" });
         // The chat input takes its slash commands (`/s `, `/w name `) out of the text.
         super::chat_input::text_changed(lua, id);
         call_handler(lua, id, "OnTextChanged", vec![]);
