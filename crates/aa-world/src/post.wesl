@@ -25,6 +25,10 @@ struct Post {
     grade: vec4<f32>,
     // rgb: colour balance, w: 1 when the fog is on
     balance: vec4<f32>,
+    // under water: x water level (world Y), y extinction per metre, z in-scattering gain, w 1 when the camera is below the surface
+    under: vec4<f32>,
+    // under water: rgb colour of the deep water at the surface (pre-exposed)
+    under_color: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -67,8 +71,43 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let pixel = vec2<i32>(in.position.xy);
     var color = textureLoad(color_texture, pixel, 0).rgb;
 
+    // ---- under water: the engine's `OceanOutof` / `WaterVolumeOutof` fog ----
+    let under_water = post.under.w > 0.5;
+    if under_water {
+        let depth = textureLoad(depth_texture, pixel, 0);
+        let ndc = vec3<f32>(in.uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
+        let wp = view.world_from_clip * vec4<f32>(ndc, 1.0);
+        let world = wp.xyz / wp.w;
+        let to = world - view.world_position;
+        let dist = length(to);
+        let dir = to / max(dist, 1e-4);
+        let level = post.under.x;
+        let k = post.under.y;
+        let depth_cam = max(level - view.world_position.y, 0.0);
+        // a ray that reaches the surface before the scene leaves the water: through the window of the surface (Snell's cone,
+        // 49 degrees around the vertical) it sees what is above, outside it the surface is a mirror of the water below
+        var path = dist;
+        var seen_depth = max(level - world.y, 0.0);
+        var window = 1.0;
+        let to_surface = depth_cam / max(dir.y, 1e-3);
+        if dir.y > 1e-3 && to_surface < dist {
+            path = to_surface;
+            seen_depth = 0.0;
+            window = smoothstep(0.62, 0.72, dir.y);
+        }
+        // light scattered towards the eye along the path (the sunlight dims with the depth), the scene dims with the path
+        // and with its own depth
+        let kt = k * (dir.y - 1.0);
+        let along = select((exp(kt * path) - 1.0) / kt, path, abs(kt) < 1e-6);
+        let scatter = post.under_color.rgb * (exp(-k * depth_cam) * along * k * post.under.z);
+        let far_along = select((exp(kt * 20000.0) - 1.0) / kt, 20000.0, abs(kt) < 1e-6);
+        let far_scatter = post.under_color.rgb * (exp(-k * depth_cam) * far_along * k * post.under.z);
+        let seen = color * exp(-k * (path + seen_depth)) + scatter;
+        color = mix(far_scatter, seen, window);
+    }
+
     // ---- fog ----
-    if post.balance.w > 0.5 {
+    if post.balance.w > 0.5 && !under_water {
         let depth = textureLoad(depth_texture, pixel, 0);
         let ndc = vec3<f32>(in.uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
         let wp = view.world_from_clip * vec4<f32>(ndc, 1.0);

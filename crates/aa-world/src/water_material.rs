@@ -296,6 +296,17 @@ fn luminance(c: Vec3) -> f32 {
     c.dot(Vec3::new(0.2126, 0.7152, 0.0722))
 }
 
+/// The colour of the deep water of the sea (pre-exposed): the zone's ocean fog lit by sky and sun.
+pub(crate) fn sea_color(env: &Environment, cur: &crate::env::EnvSample, tuning: &AtmosphereTuning, rs: f32) -> Vec3 {
+    let light = (luminance(cur.sky) + 0.25 * luminance(cur.sun)) * 0.35;
+    env.ocean_fog * tuning.sea_body * light * rs
+}
+
+/// The colour of the deep water of a pond, lake or river (pre-exposed): the volume's fog colour lit by sky and sun.
+pub(crate) fn volume_color(fog: Vec3, cur: &crate::env::EnvSample, tuning: &AtmosphereTuning, rs: f32) -> Vec3 {
+    fog * (cur.sky + cur.sun * tuning.water_lit) * tuning.water_body * rs
+}
+
 /// Refreshes the environment dependent part of every water material: sky for the reflections, the sun, the body colour.
 pub fn update_water(
     env: Res<Environment>,
@@ -310,19 +321,16 @@ pub fn update_water(
     let sun_up = ((cur.sun_dir.z + 0.04) / 0.1).clamp(0.0, 1.0);
     let sky_h = (cur.horizon * rs * tuning.sky_gain).extend(tuning.sky_exp);
     let sky_z = (cur.zenith * rs * tuning.sky_gain).extend(0.0);
-    // the sea's own lighting: the fog colour of the ocean is the colour of the lit water body
-    let light = (luminance(cur.sky) + 0.25 * luminance(cur.sun)) * 0.35;
     // foam and the surface shading use the engine's `sun + sky` colour
     let foam_light = (cur.sun + cur.sky) * rs;
     for (handle, base) in &styles.bases {
         let density = if base.density > 0.0 { base.density } else { 0.2 };
         let (body, f0, weight, amount, foam, sun_gain, ssr, cube) = if base.sea {
-            let body = (env.ocean_fog * tuning.sea_body * light * rs).extend(density * tuning.sea_absorb);
+            let body = sea_color(&env, cur, &tuning, rs).extend(density * tuning.sea_absorb);
             (body, (base.fresnel_bias * 0.25).clamp(0.02, 0.08), tuning.sea_refl, 1.0, Vec3::ZERO, tuning.sea_sun, tuning.ssr, 0.0)
         } else {
             // the volume fog: constant colour, `exp2(-density * thickness)`
-            let lit = cur.sky + cur.sun * tuning.water_lit;
-            let body = (base.fog * lit * tuning.water_body * rs).extend(density * tuning.water_absorb);
+            let body = volume_color(base.fog, cur, &tuning, rs).extend(density * tuning.water_absorb);
             let foam = foam_light * base.foam * tuning.water_foam;
             let amount = base.reflection * tuning.water_env;
             (body, base.fresnel_bias, base.transparency * tuning.water_refl, amount, foam, tuning.water_sun, tuning.water_ssr, 1.0)

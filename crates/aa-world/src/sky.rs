@@ -29,6 +29,7 @@ use crate::post::{Post, PostUniform};
 use crate::sky_material::{SkyBox, SkyMaterial, ZoneSky, load_sky_box};
 use crate::water::WaterStyle;
 use crate::water_material::{SEA, WaterMaterial, WaterStyles};
+use crate::water_query::{WaterKind, WaterQuery};
 use crate::stream::{WorldConfig, WorldFocus, WorldInfo};
 use crate::world::World;
 
@@ -133,6 +134,11 @@ pub struct AtmosphereTuning {
     pub sea_body: f32,
     /// Sea: absorption per metre = the sea's fog density x this.
     pub sea_absorb: f32,
+    /// Under water (camera below the surface): multiplier of the extinction per metre (the zone's `Ocean fog density under water`
+    /// for the sea, the volume's density for ponds and lakes).
+    pub under_absorb: f32,
+    /// Under water: gain of the light scattered towards the eye (the colour of the water itself).
+    pub under_scatter: f32,
     /// Sea: reflection gain on the Fresnel term.
     pub sea_refl: f32,
     /// Sea: sun glint multiplier.
@@ -184,6 +190,8 @@ impl Default for AtmosphereTuning {
             water_rough: 0.06,
             sea_body: 2.5,
             sea_absorb: 6.0,
+            under_absorb: 1.0,
+            under_scatter: 1.0,
             sea_refl: 0.5,
             sea_sun: 3.0,
             sun_az: f32::NAN,
@@ -238,6 +246,8 @@ impl AtmosphereTuning {
                 "water_rough" => t.water_rough = v,
                 "sea_body" => t.sea_body = v,
                 "sea_absorb" => t.sea_absorb = v,
+                "under_absorb" => t.under_absorb = v,
+                "under_scatter" => t.under_scatter = v,
                 "sea_refl" => t.sea_refl = v,
                 "sea_sun" => t.sea_sun = v,
                 "sun_az" => t.sun_az = v,
@@ -748,10 +758,11 @@ fn update_post(
     env: Res<Environment>,
     cfg: Res<WorldConfig>,
     tuning: Res<AtmosphereTuning>,
-    mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>)>,
+    water: Option<Res<WaterQuery>>,
+    mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform)>,
 ) {
     let Some(cur) = &env.sample else { return };
-    for (post, mut u, exposure) in &mut cameras {
+    for (post, mut u, exposure, camera) in &mut cameras {
         let expo = exposure.map_or(Exposure::BLENDER.exposure(), |e| e.exposure());
         let rs = tuning.radiance * expo;
         let (film, grade, balance) = PostUniform::film_from(cur, 2f32.powf(post.exposure_ev));
@@ -766,6 +777,24 @@ fn update_post(
         u.film = film;
         u.grade = grade * Vec4::new(tuning.saturation, 1.0, 1.0, tuning.exposure);
         u.balance = balance.truncate().extend(if post.fog { 1.0 } else { 0.0 });
+        // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
+        u.under = Vec4::ZERO;
+        let pos = camera.translation();
+        let body = water.as_ref().and_then(|w| w.body_at(bevy_to_cry(pos))).filter(|b| pos.y < b.height - 0.02);
+        if let Some(body) = body {
+            let (colour, extinction) = match body.kind {
+                WaterKind::Sea => {
+                    let density = if cur.ocean_under > 0.0 { cur.ocean_under } else { 0.04 };
+                    (crate::water_material::sea_color(&env, cur, &tuning, rs), density * std::f32::consts::LN_2)
+                }
+                _ => {
+                    let density = if body.fog_density > 0.0 { body.fog_density } else { 0.2 };
+                    (crate::water_material::volume_color(body.fog_color, cur, &tuning, rs), density * tuning.water_absorb)
+                }
+            };
+            u.under = Vec4::new(body.height, extinction * tuning.under_absorb, tuning.under_scatter, 1.0);
+            u.under_color = colour.extend(0.0);
+        }
     }
 }
 

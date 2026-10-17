@@ -31,7 +31,7 @@ pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
 pub use sky::{AmbientCubes, WorldClock};
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
 pub use terrain_query::{Ground, TerrainQuery};
-pub use water_query::{WaterKind, WaterQuery};
+pub use water_query::{WaterBody, WaterKind, WaterQuery};
 pub use world::World;
 
 /// Whether the real client pak can be opened (tests that need it skip otherwise).
