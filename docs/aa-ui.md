@@ -556,13 +556,13 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   post effect of the login stage's 3D scene or the gamma setting, not a UI element (not found in
   the scripts). The login background sits 1 px higher than in the capture.
 * 3D is not drawn: the character model view, the login stage scene behind the UI.
-* `Show(visible, ms)` alpha fades, drawable atlas/move/alpha/scale frame lists and effect
-  colour/scale/rotation phases run over elapsed time. `Animation(true, false)` plays once,
-  while `Animation(true, true)` repeats (the second argument is not visibility). The effect
-  phase duration and hold/delay are implemented, with linear interpolation; the original
-  `SetEffectPriority` priority/easing parameter, `SetEffectScaleAxis`, the separate
-  `SetMoveEffect*` circle/edge channels and widget-level `SetStartAnimation`,
-  `SetAlphaAnimation` / `SetScaleAnimation` remain unimplemented.
+* `Show(visible, ms)` alpha fades, drawable atlas/move/alpha/scale frame lists, effect
+  colour/scale/rotation and circle/edge movement phases, and widget alpha/scale animations
+  run over elapsed time. `Animation(true, false)` plays once; `Animation(true, true)` repeats.
+  Widget `SetStartAnimation(alpha, scale)` instead enables the two independent channels.
+  Native velocity/acceleration timing and priority-controlled phase completion are
+  implemented, including `SetEffectScaleAxis` pivots. Effect clipping and arbitrary widget `SetScale` /
+  `SetAnimFrameInfo` timelines remain gaps.
 * In-game HUD: what the 3D engine draws is not here (name plates over units, the world, the
   player model between the equipment slot columns). Cooldown sweeps: the direction and the
   time label format (`8`, `5m`, `2h`, `6d`) are guesses; no label on cooldowns of 1.5 s or less
@@ -655,8 +655,8 @@ The original `components/action_slot.alb` now pulses autoattack backgrounds, com
 toggle highlights through their configured alpha and scale phases. The original
 `baselib/common_texture.alb` attention arrow moves back and forth and fades out instead of
 being hidden by its `Animation(true, false)` call. Character-select arrows and timer icons
-cycle their configured atlas frames. The autoattack arrow's separate circular movement is
-still a `SetMoveEffect*` gap; its alpha phase works.
+cycle their configured atlas frames. The subsequent motion milestone below adds the
+autoattack arrow's circular movement and the toggle highlight's edge movement.
 
 Checked with `cargo test -p aa-ui --tests` (78 passed, one font metrics test ignored), including
 the renderer regression in `tests/animation.rs`. Those tests include the original action-slot
@@ -673,3 +673,76 @@ Visual captures use the existing `aa_dev` examples, which close after the captur
   with `reference/character_select/1_character/real.png`; UI geometry remains aligned (the
   2D-only example omits the reference's character model). Zero Lua errors; 307–432 FPS
   (2.4–3.7 ms).
+
+## Native motion and widget animation milestone
+
+Motion and curves were traced in the read-only
+`D:/aa-re/client12/x2game_unpacked.dll`, rather than inferred from parameter names:
+
+| native VA | verified behaviour |
+|---|---|
+| `3928a8d0`, `3928df00`, `3928ea80` | effect displacement `v*t + a*t*t/2`; `v=delta/velocityTime`, `a=2*(delta-v*accelerationTime)/accelerationTime²`; phase finishes when its priority component reaches its final value |
+| `3928a950` | top/bottom move X along `width*(edge-.5)`; right/left move Y along `height*(edge-.5)`; radius values are fractions of the drawable width/height; art rotates 0/90/180/270 degrees |
+| `3928e080` | circle rotates a ray from the top onto the ellipse defined by extent-relative radii; unequal radii use the ray/ellipse intersection, not independently scaled sine/cosine |
+| `39291b30`, `39291d60`, `39291e20`, `3928f460` | independent move phases, start delay, phase hold, repeat count (0 means infinite), and optional art rotation |
+| `39291c90`, `39290e20`, `39290e80` | scale-axis anchor; clear stops both channels and hides the drawable, clearing only the selected colour or movement phase list |
+| `392771c0`, `39277230`, `3927db80`, `3927e017` | widget alpha/scale configure their own velocities and accelerations; the start booleans independently enable them; widget integration updates velocity before position, clamps at the final value, then emits `OnAlphaAnimeEnd` / `OnScaleAnimeEnd` |
+
+The native movement channel is independent of the colour phase: an autoattack arrow still
+orbits after its constant-alpha phase finishes. Finite movement holds its final transform.
+`ClearEffect` / `ClearMoveEffect` stop both channels and hide the drawable, clear their
+respective phase lists, and retain the other channel's configuration. Zero-delta priority phases
+finish immediately. Effects and widgets only tick their active IDs and repaint visible
+changes; neither invalidates anchor layout. Parent widget scaling includes child art/text and
+their input rectangles; scroll clips follow animated ancestors. Explicit `SetAlpha` resumes
+direct alpha control, and normal `Show(..., ms)` fades can take over an animation.
+
+`cargo test -p aa-ui --tests`: **83 passed, one font metrics test ignored**. Ten animation
+integration tests include original `action_slot.alb`, `common_texture.alb` and
+`window_view.alb`; tests verify independent motion, ellipse/edge positions, rendered rotation,
+parent scaling/picking, end callbacks once, repeats, clear, and native timing coefficients.
+
+Reviewed captures (existing `ingame_hud` + `aa_dev`, all windows closed):
+
+* `shots/aa-ui/animation/motion-quarter.png` and `motion-half.png`: autoattack arrow rotates
+  around slot 2, combo pulse on slot 3, toggle line follows slot 4's edge. Zero script errors;
+  174–188 FPS with movement active, 293–340 FPS before activation.
+* `shots/aa-ui/animation/window-pop.png` and `window-settled.png`: original popup helper at
+  mid-fade and after completion. Compared the settled bag with `reference/ingame/bag/real.png`:
+  the panel, slots, tab icons and text return to the reference layout. The missing 3D scene is
+  expected in this UI-only example. Zero script errors; 427–468 FPS in the popup capture.
+
+## Keyboard rebinding audit / app handoff
+
+The original `option/key_binding_option.alb` already supplies the editing UI, ignored-key
+list, modifier composition, primary/secondary rows, conflict tooltip and reset/release buttons.
+The missing toolkit piece is generic keyboard capture: `EnableKeyboard(true)` is a no-op and
+`ui_keyboard` currently forwards only key presses to edit boxes, synthesizing immediate
+`OnKeyUp`. Rebinding needs the enabled frame to receive real arbitrary-key release events
+(including function keys), plus wheel events while it owns capture. It must suppress game
+input through `UiStats::keyboard_focus` while that capture is active. `EnableFocus(true)`
+alone is not the original flow: the page uses `frame:RequestInput(button)`, enables keyboard
+on the page, and forwards `OnKeyUp` to `button:OnInput`.
+
+`aa-client` needs to own these contracts (no client changes in this milestone):
+
+* Active and draft bindings keyed by action/button name, primary/secondary manager (1/2),
+  and indexed-action argument (0 for ordinary actions). `BindingToOption()` copies active to
+  draft on open; `InitOptionHotKey()` resets the draft; `SaveHotKey()` commits and persists.
+* `SetOptionBindingWithIndex(action,key,manager,arg)`,
+  `SetOptionBindingButtonWithIndex(button,key,manager)` and
+  `RemoveOptionBinding(action,manager,arg)` modify the draft and resolve key conflicts.
+  Queue `UPDATE_OPTION_BINDINGS(overridden,oldAction,newAction)` for the original editor;
+  queue `UPDATE_BINDINGS` after commit for HUD labels.
+* `GetOptionBinding(action,manager,true,arg)` / `GetOptionBindingButton(button,manager)` read
+  the draft; `GetBinding(action,manager)` / `GetBindingButton(button,manager)` read active.
+  `X2Hotkey:EnableHotkey(false)` suspends gameplay binding execution while capturing input.
+* Modifier queries `X2Input:IsShiftKeyDown`, `IsControlKeyDown`, `IsAltKeyDown` must reflect
+  real input after the fallback is installed (its current implementations always return
+  false). The Lua editor composes `SHIFT-CTRL-ALT-KEY` in that order.
+* Gameplay/window actions currently inspect fixed Bevy keys in `hud/input.rs` and the movement/
+  combat systems; they need one active-binding resolver. Also remove the fixed quest-dialog
+  `GetOptionBinding` wrapper in `hud/quest.lua` when bindings become authoritative.
+
+The captured contract is in `docs/ui-api.md` under X2Hotkey; original defaults are in the pak's
+`default_binding.g`. No application integration hook is needed for the animation milestone.

@@ -6,7 +6,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use mlua::{Lua, Table};
 
 use super::{Args, Ui, method, none, ret, ui};
-use crate::tree::{Id, Rect};
+use crate::tree::{Id, Point, Rect};
+
+mod motion;
+mod timing;
+pub mod widgets;
+use timing::Timing;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
@@ -16,6 +21,7 @@ pub struct Sample {
     pub scale: [f32; 2],
     pub offset: [f32; 2],
     pub rotation: f32,
+    pub pivot: Point,
 }
 
 impl Default for Sample {
@@ -27,6 +33,7 @@ impl Default for Sample {
             scale: [1.0; 2],
             offset: [0.0; 2],
             rotation: 0.0,
+            pivot: Point::Center,
         }
     }
 }
@@ -34,8 +41,8 @@ impl Default for Sample {
 impl Sample {
     pub fn rect(self, mut rect: Rect) -> Rect {
         let (w, h) = (rect.w * self.scale[0], rect.h * self.scale[1]);
-        rect.x += self.offset[0] + (rect.w - w) * 0.5;
-        rect.y += self.offset[1] + (rect.h - h) * 0.5;
+        rect.x += self.offset[0] + (rect.w - w) * self.pivot.fx();
+        rect.y += self.offset[1] + (rect.h - h) * self.pivot.fy();
         rect.w = w;
         rect.h = h;
         rect
@@ -48,6 +55,7 @@ pub struct Animations {
     frames: HashMap<Id, Frames>,
     active: BTreeSet<Id>,
     samples: HashMap<Id, Sample>,
+    widgets: widgets::Widgets,
 }
 
 impl Animations {
@@ -61,36 +69,82 @@ impl Animations {
         self.active.remove(&id);
         self.samples.remove(&id);
     }
+
+    pub fn widget_sample(&self, id: Id) -> widgets::WidgetSample {
+        self.widgets.sample(id)
+    }
+
+    pub fn widget_rect(&self, tree: &crate::tree::Tree, id: Id) -> Rect {
+        widgets::transform_rect(&self.widgets, tree, id, tree.rect(id))
+    }
+
+    pub fn widget_clip_rect(&self, tree: &crate::tree::Tree, id: Id) -> Option<Rect> {
+        let mut out: Option<Rect> = None;
+        let mut owner = tree.get(id).parent;
+        while let Some(p) = owner {
+            if tree.widget(p).is_some_and(|w| w.clip) {
+                let rect = self.widget_rect(tree, p);
+                out = Some(out.map_or(rect, |old| old.intersect(&rect)));
+            }
+            owner = tree.get(p).parent;
+        }
+        out
+    }
+
+    pub fn clear_widget_alpha(&mut self, id: Id) {
+        self.widgets.clear_alpha(id);
+    }
 }
 
-#[derive(Default)]
+pub(super) fn widget_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    widgets::methods(lua, m)
+}
+
 struct Effect {
     phases: BTreeMap<i64, Phase>,
     repeat: u32,
     delay: f32,
     elapsed: f64,
     running: bool,
+    motion: motion::Motion,
+}
+
+impl Default for Effect {
+    fn default() -> Self {
+        Self {
+            phases: Default::default(),
+            repeat: 1,
+            delay: 0.0,
+            elapsed: 0.0,
+            running: false,
+            motion: motion::Motion::new(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 struct Phase {
-    duration: f32,
+    timing: Timing,
+    priority: usize,
     hold: f32,
     initial: [f32; 4],
     final_color: [f32; 4],
     scale: [f32; 4],
     rotation: [f32; 2],
+    pivot: Point,
 }
 
 impl Default for Phase {
     fn default() -> Self {
         Self {
-            duration: 0.0,
+            timing: Default::default(),
+            priority: 3,
             hold: 0.0,
             initial: [1.0; 4],
             final_color: [1.0; 4],
             scale: [1.0; 4],
             rotation: [0.0; 2],
+            pivot: Point::Center,
         }
     }
 }
@@ -108,11 +162,28 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
 }
 
 impl Phase {
-    fn sample(self, elapsed: f64) -> Sample {
-        let t = if self.duration > 0.0 {
-            (elapsed / self.duration as f64).clamp(0.0, 1.0) as f32
+    fn duration(self) -> f64 {
+        let delta = match self.priority {
+            0 => self.scale[1] - self.scale[0],
+            1 => self.scale[3] - self.scale[2],
+            2 => self.rotation[1] - self.rotation[0],
+            p => {
+                self.final_color[[3, 0, 1, 2][p.saturating_sub(3).min(3)]]
+                    - self.initial[[3, 0, 1, 2][p.saturating_sub(3).min(3)]]
+            }
+        };
+        if delta == 0.0 {
+            0.0
         } else {
+            self.timing.duration()
+        }
+    }
+
+    fn sample(self, elapsed: f64) -> Sample {
+        let t = if self.duration() == 0.0 {
             1.0
+        } else {
+            self.timing.fraction(elapsed)
         };
         Sample {
             color: Some(std::array::from_fn(|i| {
@@ -123,17 +194,26 @@ impl Phase {
                 lerp(self.scale[2], self.scale[3], t),
             ],
             rotation: lerp(self.rotation[0], self.rotation[1], t).to_radians(),
+            pivot: self.pivot,
             ..Default::default()
         }
     }
 }
 
 impl Effect {
-    fn sample(&self) -> (Sample, bool) {
+    fn sample(&self, rect: Rect) -> (Sample, bool) {
+        let (mut sample, color_running) = self.color_sample();
+        let (movement, move_running) = self.motion.sample(self.elapsed, rect);
+        sample.offset = movement.offset;
+        sample.rotation += movement.rotation;
+        (sample, color_running || move_running)
+    }
+
+    fn color_sample(&self) -> (Sample, bool) {
         let duration: f64 = self
             .phases
             .values()
-            .map(|p| (p.duration + p.hold) as f64)
+            .map(|p| p.duration() + p.hold as f64)
             .sum();
         let elapsed = self.elapsed - self.delay as f64;
         if elapsed < 0.0 {
@@ -156,7 +236,7 @@ impl Effect {
         }
         let mut t = elapsed % duration;
         for p in self.phases.values() {
-            let len = (p.duration + p.hold) as f64;
+            let len = p.duration() + p.hold as f64;
             if t < len {
                 return (p.sample(t), true);
             }
@@ -234,10 +314,37 @@ fn phase(lua: &Lua, id: Id, a: &Args, change: impl FnOnce(&mut Phase)) {
 }
 
 pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    motion::methods(lua, m)?;
+    m.set(
+        "SetEffectScaleAxis",
+        method(lua, |lua, id, a| {
+            phase(lua, id, a, |p| {
+                p.pivot = a
+                    .s(2)
+                    .and_then(|s| Point::parse(&s))
+                    .unwrap_or(Point::Center)
+            });
+            none()
+        })?,
+    )?;
     m.set(
         "SetEffectPriority",
         method(lua, |lua, id, a| {
-            phase(lua, id, a, |p| p.duration = positive(a.f(3)) * 1000.0);
+            phase(lua, id, a, |p| {
+                p.timing = Timing {
+                    velocity: positive(a.f(3)) * 1000.0,
+                    acceleration: positive(a.f(4)) * 1000.0,
+                };
+                p.priority = match a.s(2).unwrap_or_default().as_str() {
+                    "scalex" => 0,
+                    "scaley" => 1,
+                    "rotate" => 2,
+                    "colorr" => 4,
+                    "colorg" => 5,
+                    "colorb" => 6,
+                    _ => 3,
+                };
+            });
             none()
         })?,
     )?;
@@ -306,13 +413,14 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let on = a.b(1, true);
             let mut u = ui(lua);
             let old_sample = u.animations.sample(id);
+            let rect = u.tree.rect(id);
             if on {
                 let e = u.animations.effects.entry(id).or_insert_with(|| Effect {
                     repeat: 1,
                     ..Default::default()
                 });
                 e.elapsed = 0.0;
-                let (sample, running) = e.sample();
+                let (sample, running) = e.sample(rect);
                 e.running = running;
                 u.animations.samples.insert(id, sample);
                 if running {
@@ -355,10 +463,16 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "ClearEffect",
         method(lua, |lua, id, _| {
             let mut u = ui(lua);
-            u.animations.remove(id);
+            if let Some(e) = u.animations.effects.get_mut(&id) {
+                e.phases.clear();
+                e.running = false;
+            }
+            u.animations.active.remove(&id);
+            u.animations.samples.remove(&id);
             if let Some(d) = u.tree.drawable_mut(id) {
                 d.effect = Some(false);
             }
+            u.tree.get_mut(id).shown = false;
             none()
         })?,
     )?;
@@ -439,7 +553,7 @@ pub(super) fn frame_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
+pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
     let active = u.animations.active.iter().copied().collect::<Vec<_>>();
     let mut repaint = false;
     for id in active {
@@ -447,9 +561,10 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
             u.animations.remove(id);
             continue;
         }
+        let rect = u.tree.rect(id);
         let (sample, running, hide) = if let Some(e) = u.animations.effects.get_mut(&id) {
             e.elapsed += positive(dt_ms) as f64;
-            let (sample, running) = e.sample();
+            let (sample, running) = e.sample(rect);
             e.running = running;
             (sample, running, false)
         } else if let Some(f) = u.animations.frames.get_mut(&id) {
@@ -476,4 +591,5 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
     if repaint {
         u.tree.repaint();
     }
+    widgets::tick(u, dt_ms)
 }

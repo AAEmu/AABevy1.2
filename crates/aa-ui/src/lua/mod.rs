@@ -420,8 +420,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         let mut u = ui(lua);
         u.time_ms += dt_ms as f64;
         u.frame_ms = dt_ms;
-        animation::tick(&mut u, dt_ms);
-        let mut ended = Vec::new();
+        let mut ended = animation::tick(&mut u, dt_ms);
         let fades: Vec<(Id, Fade)> = u.fades.iter().map(|(k, v)| (*k, *v)).collect();
         for (id, mut f) in fades {
             f.t += dt_ms;

@@ -70,7 +70,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         {
             background_end = Some(out.len());
         }
-        let alpha = effective_alpha(&u.tree, id);
+        let alpha = effective_alpha(u, id);
         if alpha <= 0.0 {
             continue;
         }
@@ -192,8 +192,27 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         for d in above {
             drawable_quads(u, d, alpha, state, scale, &mut out);
         }
-        // Inside a scroll window (`EnableScroll`): only what is in its rectangle.
-        if let Some(c) = u.tree.clip_rect(id) {
+        // A widget's scale animation carries its text, art and descendants together.
+        let mut owner = Some(id);
+        while let Some(ancestor) = owner {
+            let animation = u.animations.widget_sample(ancestor);
+            if animation.scale != 1.0 {
+                let r = u.tree.rect(ancestor);
+                let pivot = [(r.x + r.w * animation.pivot.fx()) * scale, (r.y + r.h * animation.pivot.fy()) * scale];
+                let point = |p: [f32; 2]| std::array::from_fn(|i| pivot[i] + (p[i] - pivot[i]) * animation.scale);
+                for q in &mut out[quads_start..] {
+                    let lo = point([q.pos[0], q.pos[1]]);
+                    let hi = point([q.pos[2], q.pos[3]]);
+                    q.pos = [lo[0], lo[1], hi[0], hi[1]];
+                    if let Some(corners) = q.corners.as_mut() {
+                        for corner in corners { *corner = point(*corner); }
+                    }
+                }
+            }
+            owner = u.tree.get(ancestor).parent;
+        }
+        // Clip after animation transforms, in the scaled ancestors' screen rectangles.
+        if let Some(c) = u.animations.widget_clip_rect(&u.tree, id) {
             clip_quads(&mut out[quads_start..], px(c, scale));
         }
     }
@@ -257,11 +276,11 @@ pub fn button_state(u: &Ui, id: Id, pressed: Option<Id>) -> ButtonState {
     }
 }
 
-fn effective_alpha(tree: &Tree, mut id: Id) -> f32 {
+fn effective_alpha(u: &Ui, mut id: Id) -> f32 {
     let mut a = 1.0;
     loop {
-        let o = tree.get(id);
-        a *= o.alpha;
+        let o = u.tree.get(id);
+        a *= u.animations.widget_sample(id).alpha.unwrap_or(o.alpha);
         match o.parent {
             Some(p) => id = p,
             None => return a,
@@ -446,7 +465,10 @@ fn drawable_quads(
     let angle = dr.rotation + animation.rotation;
     if angle != 0.0 {
         let p = px(rect, scale);
-        let center = [(p[0] + p[2]) * 0.5, (p[1] + p[3]) * 0.5];
+        let center = [
+            p[0] + (p[2] - p[0]) * animation.pivot.fx(),
+            p[1] + (p[3] - p[1]) * animation.pivot.fy(),
+        ];
         let (sin, cos) = angle.sin_cos();
         for q in &mut out[first_quad..] {
             let [x0, y0, x1, y1] = q.pos;
