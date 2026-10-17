@@ -29,7 +29,8 @@
 //! the skill or item is cooling down right now. The native then draws the client's sweep over the
 //! icon (a dark clockwise wipe from 12 o'clock, the dark part being the time left, in the colour
 //! of `ui/icon/cooldown_mask.dds`: 46/255 grey at 78 % opacity) and the time left as text in
-//! `slot.cooltime_style` (whole seconds rounded up below a minute, then `5m`, `2h`, `6d`), counts it
+//! `slot.cooltime_style` (whole seconds rounded up below a minute, then `5m`, `2h`, `6d`; no label
+//! on a cooldown of 1.5 s or less, [`LABEL_MIN_TOTAL_MS`]: the global cooldown only dims), counts it
 //! down per frame in `update` on its own, and when it runs out removes the sweep and raises
 //! `OnContentUpdated(self, "skill_cooldown_done")`. Binding a cooling slot raises
 //! `OnContentUpdated(self, "skill_cooldown_start", total)`. The hook is asked again by
@@ -406,10 +407,19 @@ pub fn time_label(remain_ms: f64) -> String {
     }
 }
 
+/// Cooldowns this long or shorter (ms, the whole cooldown) get the sweep but no time label: the
+/// global cooldown (0.5-1.5 s) only dims the slots in the client.
+pub const LABEL_MIN_TOTAL_MS: f32 = 1500.0;
+
+/// The time label a cooldown shows with `remain` ms left (none for a short cooldown).
+fn label_of(cd: &Cooldown, remain: f64) -> Option<String> {
+    (cd.total_ms > LABEL_MIN_TOTAL_MS).then(|| time_label(remain))
+}
+
 /// What the screen shows of a cooldown with `remain` ms left: (sweep step, label).
 fn drawn_state(cd: &Cooldown, remain: f64) -> (i32, String) {
     let frac = (remain as f32 / cd.total_ms.max(1.0)).clamp(0.0, 1.0);
-    ((frac * SWEEP_STEPS).floor() as i32, time_label(remain))
+    ((frac * SWEEP_STEPS).floor() as i32, label_of(cd, remain).unwrap_or_default())
 }
 
 /// Per frame, before the clock advances by `dt_ms`: finish the cooldowns that ran out (the sweep
@@ -554,8 +564,9 @@ pub(crate) fn cooldown_quads(
             vcolors: None,
         });
     }
+    let Some(label) = label_of(cd, remain) else { return };
     let mut tb = w.aux_style.clone().unwrap_or_else(cooltime_block);
-    tb.text = time_label(remain);
+    tb.text = label;
     let rect: Rect = widget_rect;
     crate::render::text_quads(u, &tb, rect, tb.style.color, alpha, scale, out);
 }
