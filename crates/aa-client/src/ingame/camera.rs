@@ -8,13 +8,18 @@
 //! behind the character, level with the pivot `PIVOT_HEIGHT` above its feet, vertical field of
 //! view 42.75 degrees.
 
+use aa_ui::UiBackgroundCamera;
+use aa_ui::render::UiCamera;
 use aa_world::{TerrainQuery, cry_to_bevy};
+use bevy::camera::{Hdr, RenderTarget};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
+use bevy::render::view::Msaa;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::dev::DevOptions;
 use super::player::{LocalPlayer, Mover, height_or};
+use crate::Screen;
 
 /// Height of the camera pivot above the character's feet (m): the real client's camera sits 1.754 m
 /// above the ground at pitch 0.
@@ -41,11 +46,22 @@ impl Default for OrbitCamera {
     }
 }
 
-/// Spawns the camera behind the player (the world streams around the first `Camera3d`).
+/// The world camera still draws into an image behind the loading screen ([`show_world`] puts it on the window).
+#[derive(Component)]
+pub struct BehindLoading;
+
+/// Spawns the camera behind the player (the world streams around the first `Camera3d`). On the loading screen it renders into
+/// an image the size of the window instead: the world draws, compiles its pipelines and loads its models behind the loading
+/// UI, and the screen switches to the game when that is done.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_camera(
     mut commands: Commands,
     player: Query<&Mover, With<LocalPlayer>>,
     existing: Query<(), With<OrbitCamera>>,
+    anchors: Query<Entity, With<crate::login::WorldAnchor>>,
+    screen: Res<State<Screen>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut images: ResMut<Assets<Image>>,
     dev: Res<DevOptions>,
 ) {
     let (Ok(mover), true) = (player.single(), existing.is_empty()) else { return };
@@ -55,13 +71,45 @@ pub fn spawn_camera(
         distance: dev.cam_dist.unwrap_or(DEFAULT_DISTANCE),
     };
     let transform = camera_transform(&orbit, mover.pos);
-    commands.spawn((
+    let mut camera = commands.spawn((
         Name::new("camera"),
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 0.2, far: 20000.0, ..default() }),
         transform,
         orbit,
     ));
+    if *screen.get() == Screen::Loading
+        && let Ok(window) = windows.single()
+    {
+        let image = Image::new_target_texture(window.physical_width(), window.physical_height(), bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb, None);
+        camera.insert((RenderTarget::Image(images.add(image).into()), BehindLoading));
+    }
+    // this camera is the world's focus from now on (the anchor kept the world off the login stage camera)
+    for e in &anchors {
+        commands.entity(e).despawn();
+    }
+}
+
+/// Puts the world camera on the window once the UI cameras agree with it (HDR and MSAA, see `hud::cameras`; cameras that
+/// disagree get separate main textures and the UI would replace the world), or after a second.
+pub fn show_world(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut waited: Local<f32>,
+    hidden: Query<(Entity, Has<Hdr>, Option<&Msaa>), (With<BehindLoading>, With<OrbitCamera>)>,
+    ui: Query<(Has<Hdr>, Option<&Msaa>), (With<UiCamera>, Without<UiBackgroundCamera>)>,
+) {
+    let Ok((entity, hdr, msaa)) = hidden.single() else {
+        *waited = 0.0;
+        return;
+    };
+    *waited += time.delta_secs();
+    let msaa = msaa.copied().unwrap_or_default();
+    let agree = ui.iter().all(|(ui_hdr, ui_msaa)| ui_hdr == hdr && ui_msaa.copied() == Some(msaa));
+    if agree || *waited > 1.0 {
+        commands.entity(entity).insert(RenderTarget::default()).remove::<BehindLoading>();
+        info!("world camera on the window (UI cameras agree: {agree})");
+    }
 }
 
 /// Camera pose for an orbit around the pivot above `pos` (game coordinates of the feet).
