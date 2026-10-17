@@ -7,7 +7,9 @@
 //!
 //! The sampler is deliberately simple (no `AnimationGraph`): one current clip, an optional
 //! cross-fade from the previous pose, an optional clip to run once and then return from, and an
-//! optional random-idle schedule, which is all the login stage and the in-game idle need.
+//! optional random-idle schedule, which is all the login stage and the in-game idle need. One
+//! partial-body layer can play over it ([`Animator::play_layer`]): a cast on the upper body while the
+//! legs keep running.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -18,7 +20,7 @@ use bevy::ecs::batching::BatchingStrategy;
 use bevy::prelude::*;
 
 use crate::caf::Clip;
-use crate::pose::{BoundClip, ClipBinding, Pose, Rig, SampleOptions};
+use crate::pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
 
 /// One clip being played.
 #[derive(Clone, Debug)]
@@ -93,6 +95,43 @@ impl RandomIdle {
     }
 }
 
+/// A clip playing over part of the body, on top of the base clip.
+#[derive(Clone, Debug)]
+struct Layer {
+    mask: BoneMask,
+    playing: Playing,
+    /// Seconds to fade in, and out at the end of a one-shot or after [`Animator::stop_layer`].
+    fade: f32,
+    /// Seconds since it started (a layer that replaces another starts at the old one's weight).
+    age: f32,
+    /// Fading out after a stop: the weight when the fade began, the seconds since, its length.
+    stopping: Option<(f32, f32, f32)>,
+    weight: f32,
+}
+
+impl Layer {
+    /// Moves the clip and the weight on by `dt` real seconds. `false` once the layer is over.
+    fn advance(&mut self, dt: f32) -> bool {
+        self.playing.advance(dt);
+        self.age += dt;
+        let fade = self.fade;
+        let ramp = |x: f32| if fade > 0.0 { (x / fade).clamp(0.0, 1.0) } else { 1.0 };
+        let mut w = ramp(self.age);
+        let mut alive = true;
+        if !self.playing.looping {
+            w = w.min(ramp(self.playing.clip.clip.duration - self.playing.time));
+            alive = !self.playing.finished();
+        }
+        if let Some((from, t, len)) = &mut self.stopping {
+            *t += dt;
+            w = w.min(*from * if *len > 0.0 { 1.0 - (*t / *len).min(1.0) } else { 0.0 });
+            alive &= *t < *len;
+        }
+        self.weight = w;
+        alive
+    }
+}
+
 /// Animation state of one character; lives on the character root.
 #[derive(Component)]
 pub struct Animator {
@@ -114,6 +153,7 @@ pub struct Animator {
     /// The pose changed and its bones still have to be written.
     fresh: bool,
     fade: Option<Fade>,
+    layer: Option<Layer>,
     /// The idle that `random_idle` interrupts.
     base_idle: Option<Playing>,
     pose: Pose,
@@ -143,6 +183,7 @@ impl Animator {
             accum: 0.0,
             fresh: false,
             fade: None,
+            layer: None,
             base_idle: None,
             pose,
             scratch,
@@ -170,6 +211,31 @@ impl Animator {
         self.then = Some(Playing::new(after, true));
     }
 
+    /// Plays `clip` over the base clip on the bones `mask` selects (the base clip keeps playing everywhere else, and underneath),
+    /// fading in over `fade` seconds. A one-shot layer (`looping == false`) fades out over `fade` seconds at its end and removes
+    /// itself; a looping one plays until [`Animator::stop_layer`]. A layer already playing is replaced, the new one continuing
+    /// from its weight. The layer runs in real time: [`Animator::speed`] (which matches the base clip to the ground speed) does
+    /// not apply to it, [`Animator::paused`] does.
+    pub fn play_layer(&mut self, mask: BoneMask, clip: BoundClip, looping: bool, fade: f32) {
+        let weight = self.layer.as_ref().map_or(0.0, |l| l.weight);
+        self.layer = Some(Layer { mask, playing: Playing::new(clip, looping), fade, age: weight * fade, stopping: None, weight });
+    }
+
+    /// Fades the layer out over `fade` seconds and removes it (at once with 0).
+    pub fn stop_layer(&mut self, fade: f32) {
+        if fade <= 0.0 {
+            self.layer = None;
+        } else if let Some(l) = &mut self.layer {
+            // a layer that is already going out is left to it
+            l.stopping.get_or_insert((l.weight, 0.0, fade));
+        }
+    }
+
+    /// Whether a layer is playing (fading out ones included).
+    pub fn has_layer(&self) -> bool {
+        self.layer.is_some()
+    }
+
     /// The pose written to the bones last frame.
     pub fn pose(&self) -> &Pose {
         &self.pose
@@ -178,7 +244,8 @@ impl Animator {
     /// Advances time and refreshes [`Animator::pose`]. Separate from the bevy system so tests can
     /// drive it without an `App`.
     pub fn update(&mut self, dt: f32) {
-        let dt = if self.paused { 0.0 } else { dt * self.speed };
+        let real_dt = if self.paused { 0.0 } else { dt };
+        let dt = real_dt * self.speed;
         if let Some(cur) = &mut self.current {
             cur.advance(dt);
             let mut start_variant = None;
@@ -215,6 +282,14 @@ impl Animator {
             std::mem::swap(&mut self.scratch, &mut self.pose);
             if w >= 1.0 {
                 self.fade = None;
+            }
+        }
+        if let Some(layer) = &mut self.layer {
+            if layer.advance(real_dt) {
+                let (c, w) = (&layer.playing, layer.weight);
+                self.pose.sample_masked(&self.rig, &c.clip.clip, &c.clip.binding, c.time, c.clip.options, &layer.mask, w);
+            } else {
+                self.layer = None;
             }
         }
     }
@@ -325,5 +400,147 @@ impl ClipLibrary {
             }
         };
         Ok(BoundClip { clip, binding, options })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SKELETON: &str = "objects/characters/nuian/male/nude/nu_m_base.chr";
+
+    fn bound(rig: &Rig, clips: &ClipLibrary, name: &str) -> BoundClip {
+        clips.bound(rig, &format!("animations/nuian/male/{name}.caf"), SampleOptions::default()).unwrap()
+    }
+
+    fn animator(rig: &Arc<Rig>) -> Animator {
+        Animator::new(rig.clone(), Vec::new())
+    }
+
+    fn bone(rig: &Rig, name: &str) -> usize {
+        rig.skeleton.bones.iter().position(|b| b.name == name).unwrap_or_else(|| panic!("no bone {name}"))
+    }
+
+    #[test]
+    fn upper_body_mask_keeps_the_legs_out() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let rig = Rig::new(aa_cry::Skeleton::load(SKELETON).unwrap());
+        let mask = BoneMask::upper_body(&rig).unwrap();
+        for name in ["Bip01 Spine", "Bip01 Spine3", "Bip01 Neck", "Bip01 Head", "Bip01 L Clavicle", "Bip01 R Hand", "Bip01 L Finger21", "item_hand_r"] {
+            assert_eq!(mask.weight(bone(&rig, name)), 1.0, "{name}");
+        }
+        for name in ["Bip01", "Bip01 Pelvis", "Bip01 L Thigh", "Bip01 R Foot", "Bip01 R Toe0"] {
+            assert_eq!(mask.weight(bone(&rig, name)), 0.0, "{name}");
+        }
+        assert!(BoneMask::subtree(&rig, "no such bone").is_none());
+    }
+
+    /// A full-body cast clip on the upper-body mask changes the arms and leaves the legs the base clip's.
+    #[test]
+    fn layer_overrides_the_upper_body_only() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let rig = shared_rig_for_test();
+        let clips = ClipLibrary::default();
+        let run = bound(&rig, &clips, "fist/fist_mo_normal_run_f");
+        let cast = bound(&rig, &clips, "bow/bow_co_sk_cast_ub");
+        let mask = BoneMask::upper_body(&rig).unwrap();
+
+        let mut base = animator(&rig);
+        base.play(run.clone(), true, 0.0);
+        base.update(0.2);
+
+        let mut layered = animator(&rig);
+        layered.play(run, true, 0.0);
+        layered.play_layer(mask, cast.clone(), true, 0.0);
+        layered.update(0.2);
+
+        // what the layer clip alone gives at its own time
+        let mut alone = rig.bind.clone();
+        alone.sample(&rig, &cast.clip, &cast.binding, 0.2, cast.options);
+
+        let (hand, thigh, foot, pelvis) = (bone(&rig, "Bip01 R Hand"), bone(&rig, "Bip01 L Thigh"), bone(&rig, "Bip01 R Foot"), bone(&rig, "Bip01 Pelvis"));
+        for b in [thigh, foot, pelvis] {
+            assert_eq!(layered.pose().rot[b], base.pose().rot[b], "{}", rig.skeleton.bones[b].name);
+            assert_eq!(layered.pose().pos[b], base.pose().pos[b], "{}", rig.skeleton.bones[b].name);
+        }
+        assert_eq!(layered.pose().rot[hand], alone.rot[hand]);
+        assert!(layered.pose().rot[hand].angle_between(base.pose().rot[hand]) > 0.05, "the hand should differ from the run's");
+    }
+
+    /// Fade in, a one-shot ends by itself, a looping layer stops when told to; the base clip is not touched by any of it.
+    #[test]
+    fn layer_fades_and_clears() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let rig = shared_rig_for_test();
+        let clips = ClipLibrary::default();
+        let idle = bound(&rig, &clips, "fist/fist_ba_relaxed_idle");
+        let shot = bound(&rig, &clips, "bow/bow_co_sk_launch_mub");
+        let length = shot.clip.duration;
+        let mask = BoneMask::upper_body(&rig).unwrap();
+        let hand = bone(&rig, "Bip01 R Hand");
+
+        let mut a = animator(&rig);
+        a.play(idle.clone(), true, 0.0);
+        // the same base clip without a layer, advanced by the same times
+        let mut plain = animator(&rig);
+        plain.play(idle, true, 0.0);
+        let step = |a: &mut Animator, plain: &mut Animator, dt: f32| {
+            a.update(dt);
+            plain.update(dt);
+        };
+        step(&mut a, &mut plain, 0.0);
+
+        // fades in: after half the fade the hand is part way
+        a.play_layer(mask.clone(), shot.clone(), false, 0.2);
+        step(&mut a, &mut plain, 0.1);
+        assert!(a.has_layer());
+        let half = a.layer.as_ref().unwrap().weight;
+        assert!((half - 0.5).abs() < 1e-3, "{half}");
+        // full weight in the middle, then it fades out and removes itself after the clip
+        step(&mut a, &mut plain, length * 0.5);
+        assert_eq!(a.layer.as_ref().unwrap().weight, 1.0);
+        assert!(a.pose().rot[hand].angle_between(plain.pose().rot[hand]) > 0.05);
+        step(&mut a, &mut plain, length);
+        assert!(!a.has_layer());
+        step(&mut a, &mut plain, 0.0);
+        assert_eq!(a.pose().rot[hand], plain.pose().rot[hand], "back to the base clip");
+
+        // a looping layer stays until stopped, then fades out
+        a.play_layer(mask, shot, true, 0.1);
+        a.update(length * 3.0);
+        assert!(a.has_layer());
+        a.stop_layer(0.2);
+        a.update(0.1);
+        assert!(a.has_layer());
+        assert!((a.layer.as_ref().unwrap().weight - 0.5).abs() < 1e-3);
+        a.update(0.2);
+        assert!(!a.has_layer());
+    }
+
+    /// The layer runs in real time while `speed` retimes the base clip (the run cycle follows the ground speed).
+    #[test]
+    fn layer_ignores_the_base_speed() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let rig = shared_rig_for_test();
+        let clips = ClipLibrary::default();
+        let mut a = animator(&rig);
+        a.play(bound(&rig, &clips, "fist/fist_mo_normal_run_f"), true, 0.0);
+        a.play_layer(BoneMask::upper_body(&rig).unwrap(), bound(&rig, &clips, "bow/bow_co_sk_cast_ub"), true, 0.0);
+        a.speed = 2.0;
+        a.update(0.25);
+        assert!((a.current.as_ref().unwrap().time - 0.5).abs() < 1e-4);
+        assert!((a.layer.as_ref().unwrap().playing.time - 0.25).abs() < 1e-4);
+    }
+
+    fn shared_rig_for_test() -> Arc<Rig> {
+        crate::pose::shared_rig(SKELETON).unwrap()
     }
 }

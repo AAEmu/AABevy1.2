@@ -29,7 +29,7 @@ pub use custom::Customization;
 pub use db::{GameDb, Gender, Race};
 pub use lmg::Lmg;
 pub use morph::{FaceMaker, MorphSet};
-pub use pose::{BoundClip, ClipBinding, Pose, Rig, SampleOptions};
+pub use pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
 
 /// Errors of every loader in this crate.
 #[derive(Debug, thiserror::Error)]
