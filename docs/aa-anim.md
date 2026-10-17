@@ -221,6 +221,39 @@ tinted by `lip_color`.
   Bevy's per skinned mesh joint extraction.
 * `aa_anim::animator::take_stats()` returns the animators updated and the nanoseconds spent in `animate` since the last call.
 
+## Partial-body layer (`Animator::play_layer`)
+
+One clip can play over part of the body while the base clip (locomotion) keeps playing everywhere else: a cast or a shot on the
+upper body while the legs run.
+
+```rust
+let mask = BoneMask::upper_body(&rig).unwrap();        // Bip01 Spine and everything below it in the tree
+animator.play_layer(mask, clip, /* looping */ false, /* fade */ 0.1);
+animator.stop_layer(0.12);                              // fades out (0 = at once); a one-shot ends by itself
+```
+
+* **Mask.** `BoneMask` is one weight per bone (shared, cheap to clone). `BoneMask::subtree(rig, "Bip01 Spine")` is 1 on that bone
+  and its descendants (arms, hands, fingers, neck, head, the `item_*` and twist bones) and 0 on the pelvis, legs and root;
+  `upper_body` is that, `with_weight` softens a bone (a join at 0.5). The 1.2 player skeletons (162 bones) all have `Bip01 Spine`;
+  creature rigs without it get `None` (play the clip on the whole body).
+* **Data.** `anims.move_ub` names the upper body variant of a clip. The `.cal` calls most of them `..._mub` ("move, upper body":
+  `bow_co_sk_launch_ub` in the table is `bowow_co_sk_launch_mub.caf`) and they only carry tracks for `Bip01 Spine1` and up
+  (51 to 60 tracks: no root, pelvis, spine or legs). A few are real `_ub` clips with the whole skeleton (`bow_co_sk_cast_ub`, 75
+  tracks); the mask cuts those. 229 of the 329 `move_ub` names resolve in `global_player.cal` (199 via `_mub`, 30 as is); for the
+  other 100 the client plays the clip itself through the mask.
+* **Blend.** After the base pose (cross-fade included) is final, each bone the layer clip drives is lerped towards the clip by
+  `mask weight * layer weight` (`Pose::sample_masked`: one lerp per driven bone, no second pose, no allocation). Bones the clip
+  does not drive or the mask excludes keep the base pose.
+* **Time.** The layer runs in real time: `Animator::speed` (which retimes the run cycle to the ground speed) does not apply to it,
+  `paused` does. With the animation LOD the layer is advanced by the accumulated time like the base clip. The layer fades in over
+  `fade`; a one-shot fades out over `fade` before its last frame and removes itself; a layer that replaces another continues
+  from its weight (cast loop to shot without a pop).
+* **Cost** (`cargo run -p aa-anim --example layerbench`, headless, 150 Nuian males with 162 bone entities each, the real `animate`
+  system, per frame): no layer 0.50 to 0.54 ms (`animate`) and 2.1 to 2.2 ms with Bevy's transform propagation;
+  a layer on every tenth unit the same within noise; a layer on every unit 0.63 ms (+0.8 us per layered unit; `animate`
+  3.4 -> 4.2 us per update) and the same 2.1 to 2.3 ms in total. Units without a layer only test an `Option`. The LOD still
+  scales it: at 30 Hz 0.21 ms (0.25 with layers on all 120), at 15 Hz 0.12 ms (0.15).
+
 ## Customisation parameters (what the create screen sets)
 
 `x2ui/customizing/*.lua` drives the native `X2Customizer` API; see the table in
@@ -247,7 +280,7 @@ let root = spawn_character(&mut commands, &mut cry, &clips, assets, Transform::d
 ```
 
 Add `aa_cry::scene::CryPlugin` and `aa_anim::AnimPlugin` to the app. The root entity has an
-`Animator` (`play`, `play_once_then`, `random_idle`, `speed`, `pose`) and a `Character`
+`Animator` (`play`, `play_once_then`, `play_layer`, `stop_layer`, `random_idle`, `speed`, `pose`) and a `Character`
 (`assets`, `model_root`, `parts`). `Costume::{None, Login, Items(Vec<item id>), Meshes(Vec<path>)}`
 picks the outfit; `GameDb::{playable, presets, skin_colors, hair_colors_for, body_parts, ...}`
 list the choices. `Clip::load`, `Cal::load`, `Cdf::load`, `Lmg::load`, `MorphSet::load`,
@@ -255,6 +288,7 @@ list the choices. `Clip::load`, `Cal::load`, `Cdf::load`, `Lmg::load`, `MorphSet
 
 `ModelOptions::shading` is set to `Shading::Full` for every character part.
 
+`clipinfo` prints the bones a clip drives, `layerbench` times the animation system with and without layers.
 The examples are the reference usage: `compare` (the calibrated login stage, above), `lineup` (`--preset N`, `--costume none`, `--no-hair 1`,
 `--only N`, `--cam x,y,z --look x,y,z --fov deg`, `--light K`, `--env I`, `--ssao 1`, `--msaa off`,
 `--prepass 1`: the last three check the materials under SSAO / the normal prepass) and `faces` (`--race`,

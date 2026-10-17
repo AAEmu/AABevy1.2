@@ -82,6 +82,45 @@ pub fn shared_rig(path: &str) -> crate::Result<Arc<Rig>> {
     Ok(rigs.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(rig).clone())
 }
 
+/// How much of a layer shows on each bone (0..1, indexed like the rig's bones): the bones a partial-body clip drives.
+/// Cheap to clone (shared).
+#[derive(Clone, Debug)]
+pub struct BoneMask(Arc<[f32]>);
+
+impl BoneMask {
+    /// Weight 1 on the bone called `root` and everything below it, 0 elsewhere. `None` when the rig has no such bone.
+    pub fn subtree(rig: &Rig, root: &str) -> Option<BoneMask> {
+        let start = rig.skeleton.bones.iter().position(|b| b.name == root)?;
+        let mut w = vec![0.0; rig.len()];
+        // parents come before their children in the bone list
+        for (i, b) in rig.skeleton.bones.iter().enumerate() {
+            if i == start || b.parent.is_some_and(|p| w[p] > 0.0) {
+                w[i] = 1.0;
+            }
+        }
+        Some(BoneMask(w.into()))
+    }
+
+    /// The upper body of a player skeleton: `Bip01 Spine` and the spine, arms, hands, neck and head above it (the legs and pelvis
+    /// stay with the base layer). The 1.2 `_mub` ("move, upper body") clips drive `Bip01 Spine1` upward, the `_ub` ones are full
+    /// body and need this mask.
+    pub fn upper_body(rig: &Rig) -> Option<BoneMask> {
+        BoneMask::subtree(rig, "Bip01 Spine")
+    }
+
+    /// Scales the weight of the bone called `name` (a softer join: `Bip01 Spine` at 0.5, say). Returns `self` when there is no such bone.
+    pub fn with_weight(self, rig: &Rig, name: &str, weight: f32) -> BoneMask {
+        let Some(i) = rig.skeleton.bones.iter().position(|b| b.name == name) else { return self };
+        let mut w = self.0.to_vec();
+        w[i] = weight.clamp(0.0, 1.0);
+        BoneMask(w.into())
+    }
+
+    pub fn weight(&self, bone: usize) -> f32 {
+        self.0.get(bone).copied().unwrap_or(0.0)
+    }
+}
+
 /// Which bone each track of a clip drives (tracks for bones the rig lacks are dropped).
 #[derive(Clone, Debug, Default)]
 pub struct ClipBinding {
@@ -132,6 +171,30 @@ impl Pose {
             let at = if opt.lock_root_motion && bone == rig.root { 0.0 } else { t };
             if let Some(p) = track.sample_pos(at) {
                 self.pos[bone] = p * opt.position_scale;
+            }
+        }
+    }
+
+    /// Blends `clip` at `t` seconds over the pose: each bone the clip drives moves towards the clip by `mask weight * weight`
+    /// (bones the clip does not drive, or the mask excludes, are left alone). Unlike [`Pose::sample`] it costs one lerp per
+    /// driven bone and needs no second pose.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sample_masked(&mut self, rig: &Rig, clip: &Clip, binding: &ClipBinding, t: f32, opt: SampleOptions, mask: &BoneMask, weight: f32) {
+        for &(bone, track) in &binding.pairs {
+            let bone = bone as usize;
+            let w = mask.weight(bone) * weight;
+            if w <= 0.0 {
+                continue;
+            }
+            let track = &clip.tracks[track as usize];
+            if let Some(q) = track.sample_rot(t) {
+                let a = self.rot[bone];
+                let q = if a.dot(q) < 0.0 { -q } else { q };
+                self.rot[bone] = if w >= 1.0 { q } else { a.lerp(q, w).normalize() };
+            }
+            let at = if opt.lock_root_motion && bone == rig.root { 0.0 } else { t };
+            if let Some(p) = track.sample_pos(at) {
+                self.pos[bone] = self.pos[bone].lerp(p * opt.position_scale, w.min(1.0));
             }
         }
     }
