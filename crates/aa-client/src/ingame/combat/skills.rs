@@ -139,13 +139,12 @@ pub struct Look {
     pub projectile: Option<Projectile>,
 }
 
-/// What cancels a cast of the player, from the skill's flags: most casts (and every combat spell of the trees) go on while the
-/// player runs (`move_ub` clips on the upper body); the ones that do not are flagged, and their tooltips say "cancelled by
-/// movement" (Invincibility, Twilight, Absorb Lifeforce, the place a pot casts).
+/// What cancels a cast of the player besides moving, which always ends the cast time (live game behaviour, not a flag): the skill's
+/// flags say whether moving also ends its channel (`channeling_cancelable`: Invincibility, Twilight, Absorb Lifeforce, the tooltips say
+/// "canceled if you move") and whether turning ends the cast (`stop_casting_by_turn`). `casting_cancelable` is not read: it is
+/// most likely the player's own cancel of the cast.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CancelRules {
-    /// `casting_cancelable`: moving ends the cast before it fires.
-    pub cast_on_move: bool,
     /// `channeling_cancelable`: moving ends the channel.
     pub channel_on_move: bool,
     /// `stop_casting_by_turn`: turning the character ends the cast.
@@ -559,7 +558,7 @@ impl Inner {
                         (SELECT start_anim_id FROM skill_controllers c WHERE c.id = skills.skill_controller_id), \
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
-                        casting_cancelable = 't', channeling_cancelable = 't', stop_casting_by_turn = 't' \
+                        channeling_cancelable = 't', stop_casting_by_turn = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -573,7 +572,7 @@ impl Inner {
                         int(r, 9)? as u32,
                         std::array::from_fn(|i| int(r, 10 + i).unwrap_or(0) as u32),
                         std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
-                        CancelRules { cast_on_move: int(r, 16).unwrap_or(0) != 0, channel_on_move: int(r, 17).unwrap_or(0) != 0, on_turn: int(r, 18).unwrap_or(0) != 0 },
+                        CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0 },
                     ))
                 },
             )
@@ -843,17 +842,16 @@ mod tests {
         assert!(book.skill(16064).unwrap().shakes.is_empty());
     }
 
-    /// Moving cancels only the flagged skills: Invincibility's channel, Telekinesis' channel (not its cast), placing a pot; Return and
-    /// the combat spells go on while the player walks.
+    /// Moving always ends a cast time; the flags add the channels that moving ends (Invincibility, Telekinesis) and turning.
     #[test]
     fn cancel_flags() {
         let Some(book) = book() else { return };
         let rules = |id| book.skill(id).expect("skill").cancel;
-        assert_eq!(rules(10372), CancelRules { channel_on_move: true, ..Default::default() });
-        assert_eq!(rules(11504), CancelRules { channel_on_move: true, ..Default::default() });
-        assert_eq!(rules(21959), CancelRules { cast_on_move: true, ..Default::default() });
+        assert_eq!(rules(10372), CancelRules { channel_on_move: true, on_turn: false });
+        assert_eq!(rules(11504), CancelRules { channel_on_move: true, on_turn: false });
         assert!(rules(26860).on_turn);
-        for id in [10594, 10752, 10546, 16064, 18132] {
+        // Return and the combat spells have no flag: only their cast time is cancelled by moving
+        for id in [10594, 10752, 10546, 16064, 18132, 21959] {
             assert_eq!(rules(id), CancelRules::default(), "{id}");
         }
     }
