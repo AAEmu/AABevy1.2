@@ -239,7 +239,7 @@ pub enum Spawn {
     ParentStart,
     /// Emits when a particle of the parent dies.
     ParentDeath,
-    /// Emits when a particle of the parent collides: never (nothing collides).
+    /// Emits when a particle of the parent hits the ground (see [`crate::FxSettings::ground`]).
     ParentCollide,
 }
 
@@ -330,6 +330,12 @@ pub struct EmitterDef {
     /// `RotateWorldSpace`: the axis is a world axis, not the emitter's.
     pub rotate_world: bool,
     pub bind_to_emitter: bool,
+    /// `CollideTerrain`: the particles bounce on the ground.
+    pub collide: bool,
+    /// `Bounciness`: 0 stops dead, 1 bounces fully, below 0 the particle dies on impact.
+    pub bounciness: f32,
+    /// `DynamicFriction`: how fast a particle on the ground slows down.
+    pub friction: f32,
     /// `InheritVelocity`: how much of the emitter's own velocity a new particle gets.
     pub inherit_velocity: f32,
     pub attach: Attach,
@@ -411,6 +417,9 @@ impl Default for EmitterDef {
             rotate_init: Var::constant(0.0),
             rotate_world: false,
             bind_to_emitter: false,
+            collide: false,
+            bounciness: 0.0,
+            friction: 0.0,
             inherit_velocity: 0.0,
             attach: Attach::None,
             attach_form: AttachForm::Surface,
@@ -556,6 +565,9 @@ impl EmitterDef {
                 "RotateInitAngle" => d.rotate_init = Var::parse(v, 0.0),
                 "RotateWorldSpace" => d.rotate_world = truth(v),
                 "BindToEmitter" | "MoveRelEmitter" => d.bind_to_emitter |= truth(v),
+                "CollideTerrain" => d.collide = truth(v),
+                "Bounciness" => d.bounciness = Var::parse(v, 0.0).base,
+                "DynamicFriction" => d.friction = Var::parse(v, 0.0).base,
                 "InheritVelocity" => d.inherit_velocity = Var::parse(v, 0.0).base,
                 "AttachType" => {
                     d.attach = match v {

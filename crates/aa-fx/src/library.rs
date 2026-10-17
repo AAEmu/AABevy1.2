@@ -57,7 +57,7 @@ impl EffectDef {
 }
 
 fn flatten(node: &Node, parent: Option<usize>, out: &mut Vec<FlatEmitter>) {
-    let triggers = node.children.iter().any(|c| matches!(c.def.spawn, Spawn::ParentStart | Spawn::ParentDeath) && c.def.enabled);
+    let triggers = node.children.iter().any(|c| matches!(c.def.spawn, Spawn::ParentStart | Spawn::ParentDeath | Spawn::ParentCollide) && c.def.enabled);
     let mut mine = parent;
     if node.def.enabled && (node.def.draws() || triggers) {
         out.push(FlatEmitter { def: node.def.clone(), parent: if matches!(node.def.spawn, Spawn::Direct) { None } else { parent } });
