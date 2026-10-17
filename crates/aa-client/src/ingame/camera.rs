@@ -8,12 +8,16 @@
 //! behind the character, level with the pivot `PIVOT_HEIGHT` above its feet, vertical field of
 //! view 42.75 degrees.
 //!
+//! Walls: the arm from the pivot to the camera is swept with a sphere against the terrain and the world's big structures
+//! ([`WorldCollision::clip_camera`]); the camera stops before the first hit at once and comes back out smoothly
+//! ([`ARM_RETURN`]) when the hit clears.
+//!
 //! Blows and spells shake it: [`CameraShake`] holds the shakes of the effect data (`fx_shake_cameras`), `follow_player` adds
 //! their sum to the pose.
 
 use aa_ui::UiBackgroundCamera;
 use aa_ui::render::UiCamera;
-use aa_world::{TerrainQuery, cry_to_bevy};
+use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
 use bevy::camera::{Hdr, RenderTarget};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::pbr::{ScreenSpaceTransmission, ScreenSpaceTransmissionQuality};
@@ -31,6 +35,10 @@ pub const PIVOT_HEIGHT: f32 = 1.754;
 pub const DEFAULT_DISTANCE: f32 = 4.0;
 const MIN_DISTANCE: f32 = 0.8;
 const MAX_DISTANCE: f32 = 30.0;
+/// Radius of the sphere the camera arm is swept with (m): more than the near plane (0.2) reaches.
+const CAMERA_RADIUS: f32 = 0.3;
+/// How fast the camera comes back out after a wall let go of it (1 / s of an exponential approach).
+const ARM_RETURN: f32 = 5.0;
 const FOV_DEG: f32 = 42.75;
 /// Radians per mouse count.
 const MOUSE_SENSITIVITY: f32 = 0.004;
@@ -284,7 +292,30 @@ pub struct Chase(pub Option<Transform>);
 #[derive(Resource)]
 pub struct CamRel(pub f32);
 
-/// Puts the camera on its orbit around the player; keeps it above the ground.
+/// How far the wall (or the ground) has shortened the camera arm (m), the part of it that is still being given back.
+#[derive(Default)]
+pub struct ArmClip {
+    shortened: f32,
+    /// A wall holds the camera (for the log line when that starts and stops).
+    held: bool,
+    /// `AA_CAMERA_NO_CLIP=1`: the walls do not stop the camera (for before / after shots), read on the first frame.
+    off: Option<bool>,
+}
+
+impl ArmClip {
+    /// Takes the shortening the walls ask for this frame: more of it at once, less of it smoothly over `dt` seconds.
+    fn update(&mut self, wanted: f32, dt: f32) -> f32 {
+        if wanted >= self.shortened {
+            self.shortened = wanted;
+        } else {
+            self.shortened += (wanted - self.shortened) * (1.0 - (-ARM_RETURN * dt).exp());
+        }
+        self.shortened
+    }
+}
+
+/// Puts the camera on its orbit around the player; stops it at walls and keeps it above the ground.
+#[allow(clippy::too_many_arguments)]
 pub fn follow_player(
     time: Res<Time>,
     mut shake: ResMut<CameraShake>,
@@ -293,6 +324,8 @@ pub fn follow_player(
     player: Query<&Mover, With<LocalPlayer>>,
     mut camera: Query<(&mut OrbitCamera, &mut Transform)>,
     terrain: Res<TerrainQuery>,
+    collision: Res<WorldCollision>,
+    mut clip: Local<ArmClip>,
 ) {
     let (Ok(mover), Ok((mut orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
     if let Some(pose) = chase.and_then(|c| c.0) {
@@ -305,12 +338,31 @@ pub fn follow_player(
     }
     let orbit = &*orbit;
     let mut t = camera_transform(orbit, mover.pos);
-    // not below the terrain (bevy y = game z)
-    let ground = height_or(&terrain, t.translation.x, -t.translation.z, mover.pos.z) + 0.35;
+    // the arm from the pivot above the head to the wanted place stops before the first wall
+    let pivot_game = mover.pos + Vec3::Z * PIVOT_HEIGHT;
+    let pivot = cry_to_bevy(pivot_game);
+    let wanted = bevy_to_cry(t.translation);
+    let full = wanted.distance(pivot_game);
+    let off = *clip.off.get_or_insert_with(|| std::env::var_os("AA_CAMERA_NO_CLIP").is_some());
+    let free = if off { full } else { collision.clip_camera(pivot_game, wanted, CAMERA_RADIUS).distance(pivot_game) };
+    let wanted_cut = (full - free).max(0.0);
+    let shortened = clip.update(wanted_cut, time.delta_secs());
+    if (wanted_cut > 0.02) != clip.held {
+        clip.held = wanted_cut > 0.02;
+        if clip.held {
+            info!("camera: a wall stops the arm at {free:.2} m of {full:.2} m (player {:.1}, {:.1}, {:.2})", mover.pos.x, mover.pos.y, mover.pos.z);
+        } else {
+            debug!("camera: the arm is free again ({full:.2} m)");
+        }
+    }
+    if shortened > 1e-4 && full > 1e-4 {
+        t.translation = pivot + (t.translation - pivot) * ((full - shortened).max(0.0) / full);
+    }
+    // not below the terrain (bevy y = game z), whatever the sweep did on a steep slope
+    let ground = height_or(&terrain, t.translation.x, -t.translation.z, mover.pos.z) + 0.15;
     if t.translation.y < ground {
         t.translation.y = ground;
         // look at the pivot from the corrected position
-        let pivot = cry_to_bevy(mover.pos + Vec3::Z * PIVOT_HEIGHT);
         t.look_at(pivot, Vec3::Y);
     }
     if !shake.is_idle() {

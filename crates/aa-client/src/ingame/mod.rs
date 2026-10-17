@@ -1,7 +1,8 @@
 //! In game: world around the player, the player character, other units, camera and movement.
 //!
 //! * [`enter`]: `--enter-world`, logs in and enters the game without the login screens
-//! * [`player`]: the local player (spawn from the server's data, keyboard movement, movement packets)
+//! * [`player`]: the local player (spawn from the server's data, keyboard movement, collision, movement packets)
+//! * [`swim`]: swimming (when it starts, the swim clips, the actor parameters of the database)
 //! * [`camera`]: ArcheAge's third person orbit camera
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
@@ -39,6 +40,7 @@ mod player;
 mod prepare;
 mod prewarm;
 mod sounds;
+mod swim;
 mod units;
 pub(crate) mod warm;
 mod weapons;
@@ -115,6 +117,7 @@ impl Plugin for InGamePlugin {
                         .chain(),
                     (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
+                    swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
                     weapons::attach_carried,
                     warm::update,
