@@ -2,8 +2,8 @@
 //!
 //! `GeomEntity` uses `Geometry`; `BasicEntity` and `AnimObject` use
 //! `Properties.object_Model` (the original BasicEntity.lua calls `LoadObject(0, ...)`).
-//! Only CGF geometry and stopped CGA objects belong here. Characters and playing CGAs need
-//! their own animation lifecycle. Hidden slots are retained as data but never put in draw bins.
+//! Static CGFs / stopped CGAs and playing rigid CGAs have separate parsers and draw bins.
+//! Character actors retain their own lifecycle. Hidden slots remain data and never enter bins.
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +23,16 @@ pub struct PlacedProp {
     pub matrix: Mat4,
     pub hidden: bool,
     pub cast_shadow: bool,
+    pub animation: Option<EntityAnimation>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityAnimation {
+    pub name: String,
+    pub looped: bool,
+    pub speed: f32,
+    pub always_update: bool,
+    pub physicalize_after: bool,
 }
 
 impl PlacedProp {
@@ -83,6 +93,16 @@ fn transform(
 
 /// Parses native static slots, without creating editor boxes or loading animation actors.
 pub fn parse_static_entities(xml: &str) -> Vec<PlacedProp> {
+    parse_entities(xml, false)
+}
+
+/// Authored playing rigid CGA slots. Named clips / controller curves are validated by the
+/// animation loader, not replaced with frozen render slots when unsupported.
+pub fn parse_animated_entities(xml: &str) -> Vec<PlacedProp> {
+    parse_entities(xml, true)
+}
+
+fn parse_entities(xml: &str, animated: bool) -> Vec<PlacedProp> {
     let Ok(doc) = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')) else {
         return Vec::new();
     };
@@ -106,14 +126,23 @@ pub fn parse_static_entities(xml: &str) -> Vec<PlacedProp> {
         let Some(model) = model.map(asset_path).filter(|s| !s.is_empty()) else {
             continue;
         };
-        let playing = class == "AnimObject"
-            && props
-                .and_then(|n| n.children().find(|a| a.has_tag_name("Animation")))
-                .and_then(|a| a.attribute("bPlaying"))
-                == Some("1");
-        if playing || !(model.ends_with(".cgf") || model.ends_with(".cga")) {
+        let anim = props.and_then(|n| n.children().find(|a| a.has_tag_name("Animation")));
+        let playing = class == "AnimObject" && anim.and_then(|a| a.attribute("bPlaying")) == Some("1");
+        if playing != animated || !(model.ends_with(".cgf") || model.ends_with(".cga")) || (animated && !model.ends_with(".cga")) {
             continue;
         }
+        let animation = if animated {
+            let anim = anim.unwrap();
+            let speed: f32 = anim.attribute("Speed").and_then(|v| v.parse().ok()).unwrap_or(1.0);
+            if !speed.is_finite() || speed < 0.0 { continue; }
+            Some(EntityAnimation {
+                name: anim.attribute("Animation").unwrap_or("Default").to_string(),
+                looped: anim.attribute("bLoop") == Some("1"),
+                speed,
+                always_update: anim.attribute("bAlwaysUpdate") == Some("1"),
+                physicalize_after: anim.attribute("bPhysicalizeAfterAnimation") == Some("1"),
+            })
+        } else { None };
         let Some((matrix, hidden)) = transform(node, &nodes, &mut HashSet::new()) else {
             continue;
         };
@@ -130,6 +159,7 @@ pub fn parse_static_entities(xml: &str) -> Vec<PlacedProp> {
             matrix,
             hidden,
             cast_shadow: node.attribute("CastShadow") != Some("0"),
+            animation,
         });
     }
     out

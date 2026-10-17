@@ -196,6 +196,7 @@ impl Plugin for AaWorldPlugin {
         crate::objects::effects::build(app);
         crate::objects::sounds::build(app);
         crate::objects::lights::build(app);
+        crate::objects::rigid::build(app);
         crate::roads::build(app);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);

@@ -249,6 +249,15 @@ diverge. Radii above 128 m or projection bounds above a cell width are rejected 
 Specular/gloss/cubemap effects retain the existing material approximation, and `entities.xml`
 static render props are not yet decal receivers.
 
+Follow-up native audit: `sub_3005CA30` scales the deferred projection basis XY by radius and Z by
+`radius * max(frontDepth, backDepth)`; `sub_3005DE50` maps projection 4..7 to flags 0x12 / 0x32 /
+0x52 / 0x72. The original `deferredshading.cfx` contains the wrapped/fake-wrapped UV correction
+and the front/back asymmetric depth attenuation. The missing native renderer CPU matrix setup
+must still connect the two authored depths to `g_mLightProj`, `g_worldToDecal` and `g_decalSize`.
+The newer public single-depth implementation differs, so it has not been used as a substitute.
+A bounded 48-cell sample found 81 mode-0 deferred siegefield decals in (2,29), confirming this is
+real authored content rather than an unused enum. No guessed deferred volumes are emitted.
+
 Water volume (type 11), cell-local, cry space: `f32 bbox[6]` @0 (z range = `[surface - depth, surface]`), `f32 maxViewDist` @28, `u8 viewDistRatio,
 lodRatio` @36, `u32` volume type @39 (low 2 bits: 2 = area, 3 = river; 515 / 1027 have flags above), an editor guid @43, `u32` material index @51 (into the
 cell's material list: `game/materials/ocean/lilyut_lake01`, `.../watervolumes/mp/shore_watervol_loka_800a`, ...; empty for 223), `f32` fog
@@ -399,12 +408,67 @@ platform is occluded by the tower shell from the exterior QA camera, so this is 
 check, not a clear elevator visual comparison. No exact real-client captures of these two sites
 are available in `reference/`; no pixel-match claim. All own example windows exit automatically.
 
-Remaining entity limits: playing CGAs, skinned actors, FlowGraph movement/events, rigid-body
+Remaining entity limits: unsupported CGA curves / named clips, skinned actors, FlowGraph movement/events, rigid-body
 simulation are not implemented by this static-prop path. Local lights have their own path below.
 The elevator is visible at its initial position and does not execute its move/wait graph.
 Visibility uses the configured brush cap; the XML `ViewDistRatio` has no recovered native bound
 conversion here. As with existing brush parts, compound matrix shear is not represented by Bevy's
 decomposed `Transform`.
+
+### Playing rigid entities (`objects/rigid.rs`)
+
+`CellObjects.animated_props` separately retains authored playing `AnimObject` CGAs, with the same
+parent/material/hidden/shadow transform semantics as static slots. `EntityAnimation` records the
+clip name, `bLoop`, nonnegative `Speed`, `bAlwaysUpdate` and `bPhysicalizeAfterAnimation`. Hidden
+slots never enter the `Kind::Animated` sector bins. The original `AnimObject.lua` starts exactly
+the authored animation, uses its loop flag, then applies Speed. The supported path does the same
+for the embedded `Default` clip; it does not turn unsupported playing objects into frozen props.
+
+The near CGA node hierarchy / render parts come from aa-cry. Node v0x823 references the position,
+rotation and scale controller chunk IDs at payload 188 / 192 / 196. Controller v0x826 has type,
+key count, flags and exporter ID, followed by typed keys. Some real files retain stale offsets in
+their copied controller headers after repacking: the chunk table remains authoritative, and this
+reader recognizes that header by type/version/ID. The Mari windmill's two near controllers are
+TCBQ rotation (type 10, 40-byte keys) and Bezier3 scale (type 6, 40-byte keys).
+
+Playback currently accepts constant vector curves (Linear3 / Bezier3 with zero tangents / TCB3)
+and constant-rate relative axis-angle TCBQ rotations with zero tension/continuity/bias/ease and
+default controller out-of-range mode. This is a checked subset, not an approximation for arbitrary
+TCB curves. Relative rotations accumulate and the result is conjugated; position tracks use
+centimetres, scale is unchanged. The matching public Cry
+[`LoaderCGA.cpp`](https://github.com/aws/lumberyard/blob/master/dev/Gems/CryLegacy/Code/Source/CryAnimation/LoaderCGA.cpp),
+[`ControllerTCB.cpp`](https://github.com/aws/lumberyard/blob/master/dev/Gems/CryLegacy/Code/Source/CryAnimation/ControllerTCB.cpp)
+and [`TCBSpline.h`](https://github.com/aws/lumberyard/blob/master/dev/Gems/CryLegacy/Code/Source/CryAnimation/TCBSpline.h)
+establish the controller binding, timing, relative rotation and conjugation. In this constant-rate
+subset the native quaternion spline reduces to constant angular velocity, including complete turns.
+Varying vectors, shaped rotation splines, named external ANM clips and negative playback rates
+remain unsupported. Physics / FlowGraph events and animation sounds are not executed.
+
+Models, controller decoding, textures and materials use the existing at-most-48 queued model jobs,
+spawn / finish budgets and shared asset cache. Animated instances stay at LOD0 within the configured
+brush visibility cap. The runtime touches only spawned controlled node transforms, with no XML,
+mesh rebuilding or asset reads per frame. `RigidEntity { cell, guid }` marks each instance root;
+sector / cell unload despawns its whole hierarchy. `ObjectStats.animated_props` counts drawn parts,
+also included in `entities`. `RigidSettings.enabled=false` / `AA_NO_RIGID_ANIMATION=1` pauses poses.
+
+The original (11,11) `AnimObject30` is the Mari windmill at cell-local (386.02881,733.87646,110.51576),
+looping Default at Speed .1. Its 100-frame / 30 FPS clip turns the wing 360 degrees; authored speed
+therefore makes a complete turn take 33.333 seconds. The real-asset test checks quarter-turn
+orientation, conjugation, constant scale, loop / end timing and runtime Speed; a complex Beroe
+wheel fixture is rejected rather than frozen. `rigid_entities` is the aa-dev visual fixture;
+`--freeze` holds the native first pose and `--stream-check --exit-after 18` checks unload.
+Inspected 1920 x 1080 captures `shots/aa-world/rigid/windmill.png` and `rigid/frozen.png` show the
+original blades at different orientations, with the tower / placement unchanged. Three authored
+instances / six animated parts / 1,299 total parts stream at this camera. Active FPS 167-197,
+frozen 169-197 on the shared RX 9070 XT; separate runs are not a controlled benchmark. The unload
+run verifies zero actual `RigidEntity` roots and zero `RigidPart` mesh entities after leaving.
+Both focused rigid tests, the three existing entity tests and `cargo check -p aa-world --examples`
+pass. No renderer errors appeared. There is no exact real-client windmill capture under
+`reference/`; this validates real geometry / motion / lifetime, not a lighting pixel match.
+An audit of the 64 largest main-world entities files found 83 playing CGAs in 24 cells; none of
+their model paths also appeared in the matching brush model tables. No unparented static-slot
+origins lay within a forward decal's radius plus 3 m in that sample; this did not test larger
+receiver meshes or parented slots. The static-entity decal receiver extension remains open.
 
 ### Local lights (`entities/lights.rs`, `objects/lights.rs`)
 
@@ -528,6 +592,12 @@ are under `textures/skys/night/`. `x2moon.cfx` specifies the textured alpha disc
 splines contain separate Moon 0 / Moon 1 colours and multipliers. The ArcheAge CPU mapping from these sizes to the moon quad
 has not been recovered. Public Cry / Lumberyard single-moon sizing differs and is not sufficient evidence for the two authored
 discs here. Moon discs / coronas remain undrawn pending that mapping; no substitute discs have been added.
+
+A bounded follow-up audit of `D:/aa-re/client12/x2game_unpacked.dll` (18,483,712-byte x86 PE,
+image base `0x38ff0000`) found no ASCII/UTF-16 `x2moon`, `MoonDirSize`, `SecondayMoons` or moon
+parameter identifiers. The provided client DLL copies do not include the native renderer /
+3DEngine DLL; the available server `cry3dengine_dedicate` retains the Moon 0..3 time-of-day
+field names. Thus the renderer's CPU disc construction is still unavailable in these copies.
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
 `CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
@@ -1174,7 +1244,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: deferred object.dat decals (type 9), types 6 and 14, animated/skinned `entities.xml` render slots, indirect/projected local lights.
+* Not rendered: deferred object.dat decals (type 9), types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon discs / coronas (original stars are drawn), procedural grass blades, sprites for far vegetation (HLOD).
