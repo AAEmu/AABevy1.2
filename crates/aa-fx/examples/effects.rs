@@ -12,7 +12,9 @@
 //! * `--grid <n>`                 `n` copies of the first effect in a grid (a cost test); labels off
 //! * `--spacing <m>`              distance between the effects (default 3.2)
 //! * `--dist <m>` `--height <m>` `--yaw <deg>` `--orbit <deg/s>`   the camera (orbit defaults to 12 deg/s, 0 with `--shot`)
-//! * `--gain <x>` `--light <x>` `--size-scale <x>` `--no-soft` `--max-particles <n>`   `FxSettings`
+//! * `--gain <x>` `--light <x>` `--size-scale <x>` `--alpha-scale <x>` `--no-soft` `--max-particles <n>`   `FxSettings`
+//! * `--scale <x>`               scale of every effect (the cell entities scale them, e.g. 0.65)
+//! * `--fx-yaw <deg>`            turns every effect about the vertical axis (effects emit along their own forward, -Z)
 //! * `--day`                      a brighter ground (default: dark, so that additive glows show)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
@@ -82,6 +84,7 @@ fn main() {
     settings.gain = num("--gain", settings.gain);
     settings.light = num("--light", settings.light);
     settings.size_scale = num("--size-scale", settings.size_scale);
+    settings.alpha_scale = num("--alpha-scale", settings.alpha_scale);
     settings.max_particles = num("--max-particles", settings.max_particles as f32) as usize;
     if flag("--no-soft") {
         settings.soft_distance = 0.0;
@@ -144,7 +147,7 @@ fn setup(
         }
     }
     for (name, pos) in positions {
-        commands.spawn((Effect::new(name.clone()), Transform::from_translation(pos + Vec3::Y * 0.12)));
+        commands.spawn((Effect::new(name.clone()).with_scale(num("--scale", 1.0)), Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()))));
         commands.spawn((Mesh3d(pedestal.clone()), MeshMaterial3d(pedestal_mat.clone()), Transform::from_translation(pos + Vec3::Y * 0.06)));
         if spawn.grid == 0 {
             // a pillar behind each effect, to see the soft particles and the depth sorting
