@@ -100,8 +100,10 @@ local function buffAt(unit, index, good)
   local list = buffList(unit, good)
   local b = list and list[index]
   if b == nil then return nil end
+  -- the tooltip info (tipType "buff" / "debuff", the category line "Buff" above the name)
   local info = {
     buff_id = b.buff_id, name = b.name, path = b.path, description = b.description, stack = b.stack,
+    tipType = good and "buff" or "debuff", category = good and "Buff" or "Debuff",
   }
   if b.ends ~= nil then
     info.timeLeft = math.max(0, b.ends - HUD.now_ms())
@@ -236,6 +238,9 @@ local function slotContent(s)
   if s.kind == "item" then
     if s.stack then c.stack = s.count end
     c.canUse = s.count > 0
+    c.tooltip = HUD.item_tip(s.id, s.grade, s.count)
+  elseif s.kind == "skill" then
+    c.tooltip = HUD.skill_tip(s.id)
   end
   if s.cd_end ~= nil then
     local remain = s.cd_end - HUD.now_ms()
@@ -261,12 +266,20 @@ local fakeSkillContent, fakeItemContent = AAUI.SkillContent, AAUI.ItemContent
 AAUI.SkillContent = function(skillType)
   local name, icon = HUD.skill_info(skillType)
   if icon == nil then return fakeSkillContent(skillType) end
-  return { type = "skill", id = skillType, icon = icon }
+  return { type = "skill", id = skillType, icon = icon, tooltip = HUD.skill_tip(skillType) }
 end
 AAUI.ItemContent = function(itemType, grade)
   local name, icon, maxStack, fixedGrade = HUD.item_info(itemType)
   if icon == nil then return fakeItemContent(itemType, grade) end
-  return { type = "item", id = itemType, icon = icon, grade = grade or fixedGrade }
+  return { type = "item", id = itemType, icon = icon, grade = grade or fixedGrade, tooltip = HUD.item_tip(itemType, grade) }
+end
+
+-- The description of an item's use skill ("Use ..." in the item tooltip) and of an action bar skill.
+local fakeSkillTooltip = X2Skill.GetSkillTooltip
+X2Skill.GetSkillTooltip = function(self, skillType, itemType, flags)
+  local t = HUD.skill_tip(skillType)
+  if t ~= nil then return t end
+  return fakeSkillTooltip(self, skillType, itemType, flags)
 end
 
 -- Items for the bag and character windows -----------------------------------------------------------------
@@ -280,6 +293,8 @@ local function gradeFrame(grade)
   return string.format("ui/icon/item_grade_%d%s.dds", grade, name)
 end
 local function realInfo(s)
+  local tip = HUD.item_tip(s.id, s.grade, s.count)
+  if tip ~= nil then return tip end
   return {
     itemType = s.id, lookType = s.id, itemGrade = s.grade, name = s.name, description = s.desc, stack = s.count,
     level_requirement = s.level, price = 0, refund = 0, sellable = false,
