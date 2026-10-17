@@ -37,10 +37,22 @@ pub mod ev {
     pub const HIT: u8 = 4;
     /// The skill ends.
     pub const END: u8 = 5;
+    /// The voice line of the launch (`FxVoice` items; the clip's `voice_launch` anim event says when).
+    pub const VOICE: u8 = 7;
 }
 
-/// What an effect group holds besides particle effects. The client draws none of it (sounds, voices, camera shakes, material
-/// flashes, models and ropes); counted so that `examples/skill_coverage.rs` can tell how many skills lose something.
+/// What a sound of an effect group plays.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Sfx {
+    /// An event path (`FxSound`, `fx_particles.sound_id`).
+    Event(Arc<str>),
+    /// An item of the caster's sound pack (`FxVoice`: `sv_fight_triple_slash_1_launch`).
+    Voice(Arc<str>),
+}
+
+/// What an effect group holds besides particle effects. The client plays the sounds and voices (see [`FxItem::sound`]) and the camera
+/// shakes ([`ShakeItem`]) and none of the rest (material flashes, models, ropes); all counted so that `examples/skill_coverage.rs` can
+/// tell how many skills lose something.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Extras {
     /// `FxSound` items.
@@ -97,11 +109,13 @@ pub struct ShakeItem {
     pub shake: Shake,
 }
 
-/// One particle effect of an effect group.
+/// One particle effect of an effect group, or one sound of it (`effect` is empty then and `sound` the whole item).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FxItem {
-    /// `library.group.name` for aa-fx (`X2_EFFECTS.p_effect.p0000`).
+    /// `library.group.name` for aa-fx (`X2_EFFECTS.p_effect.p0000`); empty for a sound item.
     pub effect: String,
+    /// A sound item (`FxSound`, `FxVoice`), or the sound a particle effect carries in its database row (`fx_particles.sound_id`).
+    pub sound: Option<Sfx>,
     /// [`ev`] it starts at and ends at (an effect that has played out by itself needs no end).
     pub start: u8,
     pub end: u8,
@@ -115,6 +129,13 @@ pub struct FxItem {
     pub axis: u8,
     /// `fx_particles.scale`.
     pub scale: f32,
+}
+
+impl FxItem {
+    /// A buff visual or sound (damage over time, auras): it belongs to the buff, not to the skill.
+    pub fn is_dot(&self) -> bool {
+        self.effect.to_ascii_lowercase().contains("_dot") || matches!(&self.sound, Some(Sfx::Event(p)) if self.effect.is_empty() && p.to_ascii_lowercase().contains("_dot"))
+    }
 }
 
 /// A thing that flies from the caster to the target (`projectiles`).
@@ -454,7 +475,7 @@ impl Inner {
         rows.into_iter().map(|(level, group, projectile)| (level, Look { fx: self.group(group), shakes: self.shakes_of(group), projectile: self.projectile(projectile) })).collect()
     }
 
-    /// The particle effects of an effect group (sounds, voices, camera shakes, materials and models are left out).
+    /// The particle effects and sounds of an effect group (camera shakes, materials and models are left out).
     fn group(&mut self, id: u32) -> Arc<Vec<FxItem>> {
         if id == 0 {
             return Arc::default();
@@ -466,17 +487,31 @@ impl Inner {
             .conn
             .prepare(
                 "SELECT i.asset_name, i.fx_event_start_id, i.fx_event_end_id, i.fx_location_id, i.bone_id, i.offset_x, i.offset_y, i.offset_z, \
-                        i.offset_axis_id, p.scale \
+                        i.offset_axis_id, p.scale, i.fx_detail_type, s.path, v.sound_pack_item_name \
                  FROM fx_group_fx_items g JOIN fx_items i ON i.id = g.fx_item_id \
-                 LEFT JOIN fx_particles p ON p.id = i.fx_detail_id \
-                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type = 'FxParticle' ORDER BY g.rowid",
+                 LEFT JOIN fx_particles p ON p.id = i.fx_detail_id AND i.fx_detail_type = 'FxParticle' \
+                 LEFT JOIN sounds s ON s.id = p.sound_id \
+                 LEFT JOIN fx_voices v ON v.id = i.fx_detail_id AND i.fx_detail_type = 'FxVoice' \
+                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type IN ('FxParticle', 'FxSound', 'FxVoice') ORDER BY g.rowid",
             )
             .and_then(|mut q| {
                 q.query_map(params![id], |r| {
-                    let effect = r.get::<_, Option<String>>(0)?.unwrap_or_default().trim().to_string();
+                    let asset = r.get::<_, Option<String>>(0)?.unwrap_or_default().trim().to_string();
                     let scale = num(r, 9)?;
+                    let kind = r.get::<_, Option<String>>(10)?.unwrap_or_default();
+                    let path = r.get::<_, Option<String>>(11)?.map(|p| p.trim().to_string()).filter(|p| p.contains(':')).map(|p| Sfx::Event(Arc::from(p.as_str())));
+                    let (effect, sound) = match kind.as_str() {
+                        // the asset of a sound item is the event path (a few rows hold a bare name: no sound)
+                        "FxSound" => {
+                            let sound = asset.contains(':').then(|| Sfx::Event(Arc::from(asset.as_str())));
+                            (String::new(), sound)
+                        }
+                        "FxVoice" => (String::new(), r.get::<_, Option<String>>(12)?.filter(|n| !n.trim().is_empty()).map(|n| Sfx::Voice(Arc::from(n.trim())))),
+                        _ => (asset, path),
+                    };
                     Ok(FxItem {
                         effect,
+                        sound,
                         start: int(r, 1)? as u8,
                         end: int(r, 2)? as u8,
                         on_target: int(r, 3)? == 2,
@@ -486,7 +521,7 @@ impl Inner {
                         scale: if scale > 0.0 { scale } else { 1.0 },
                     })
                 })
-                .map(|rows| rows.flatten().filter(|i| i.effect.contains('.')).collect::<Vec<_>>())
+                .map(|rows| rows.flatten().filter(|i| if i.effect.is_empty() { i.sound.is_some() } else { i.effect.contains('.') }).collect::<Vec<_>>())
             })
             .unwrap_or_default();
         let items = Arc::new(items);

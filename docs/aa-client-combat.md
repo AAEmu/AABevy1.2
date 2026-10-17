@@ -2,7 +2,8 @@
 
 What a skill looks like on the units that use it and the ones it hits: cast and attack clips, particle effects at the right
 bones, flying arrows, hit reactions, death. Code: `crates/aa-client/src/ingame/combat.rs` (events to clips and effects),
-`combat/skills.rs` (the database side), `combat/clips.rs` (anim events of a clip), `weapons.rs` (weapon in the hand).
+`combat/skills.rs` (the database side), `combat/clips.rs` (anim events of a clip), `weapons.rs` (weapon in the hand), `sounds.rs`
+(skill sounds, voices, footsteps, blows).
 The server only reports results (`aa_net::Event`, see `docs/aa-net.md`, "Combat events for visuals"); everything visible is derived
 from the 1.2 game database and the model's own animation data.
 
@@ -34,7 +35,8 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 * **Effect groups.** `fx_items`: `asset_name` is the aa-fx effect (`library.group.name` of `game/libs/particles/*.xml`),
   `fx_event_start_id` / `fx_event_end_id` the moment of the skill it starts and ends at, `fx_location_id` 1 caster / 2 target,
   `bone_id` where, `offset_*` (cry axes), `offset_axis_id` (4 = turn the effect towards the attacker), `fx_particles.scale`.
-  Only `FxParticle` details are drawn here (sounds, voices, camera shakes, `FxMaterial` flashes are left out).
+  `FxParticle` items are particle effects, `FxSound` and `FxVoice` items are played as sounds (see Sounds), `FxShakeCamera` items shake the
+  player's camera; `FxMaterial` flashes are left out.
 
   | id | moment | seen on |
   |---|---|---|
@@ -123,18 +125,30 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   data's: `ang_*` degrees and `shift_*` metres per axis (cry axes), alternating every `frequency` s (at least 0.03) with
   `randomness`, fading out linearly over `duration`. Because this camera sits 4 m behind the character the amplitudes are halved
   (`SHAKE_SCALE`) and capped at 0.2 m / 2 degrees, at most 6 at once; it is added in `follow_player` after the orbit pose.
-* **Effects** are aa-fx `Effect` entities (`prime: false`): held ones loop and follow their bone every frame (`follow_fx`, before
-  transform propagation) until their END moment, short ones despawn themselves. A hit effect with axis 4 is turned towards the
-  attacker and keeps that orientation. An effect that never finishes dies after 12 s.
+* **Effects** are aa-fx `Effect` entities (`prime: false`). An effect on a bone is a child of that bone (of the unit for the origin),
+  its local pose giving it the world pose it would have had (the unit's orientation and scale), so aa-fx sees the motion of the bone
+  (tails, `InheritVelocity`) and nothing is copied per frame; held ones loop until their END moment, short ones despawn themselves.
+  The one exception is a hit effect with axis 4: it is turned towards the attacker and keeps that orientation, so it stays a root
+  entity and only follows the bone's position (`follow_fx`). An effect that never finishes dies after 12 s. `feed_fx` hands aa-fx the
+  sun (the direction of aa-world's `SunLight`) and the ground (`TerrainQuery::height_at`, so sparks bounce on the real terrain) every
+  frame (`FxSettings.sun` / `ground`; the coverage example counts collisions as supported since `GROUND_WIRED`).
+  The world camera and the prewarm camera carry `ScreenSpaceTransmission` from the start (`camera::transmission()`): it is what aa-fx
+  adds to a camera when the first refraction effect appears, and it is part of the view layout every pipeline is keyed on, so a camera
+  that got it in the middle of the game would compile every material again. `AA_PIPELINE_DUMP` of the prewarm against a normal run
+  shows no difference: the loading screen still compiles 21 to 22 pipelines in both (the build before this change: 22).
 * **Arrows**: the projectile is an anchor entity flying caster launch bone -> target `Bip01 Hit` over the flight time (homing: the
-  end follows the bone), carrying the effect of group 115. aa-fx does not draw `Geometry` emitters (the arrow body of
-  `st1000b` is a mesh emitter), so the client draws the `.cgf` the effect names (`EffectDef::geometry`, new in aa-fx) as an
-  additive, unlit model, widened as the emitter's `SizeX` asks. When the arrow arrives, its glow fades out in 0.6 s.
+  end follows the bone). The effect group of the projectile (115 for Shoot Arrow) is an `aa_fx::Effect` child of the anchor
+  (`prime: false`, forward = the flight direction = Bevy -Z): aa-fx draws the arrow body from the effect's own `Geometry` emitter, the
+  client has no special case for it any more (the `.cgf` hand drawing and `EffectDef::geometry` are gone). When the arrow arrives the
+  emitters stop (`looping = false`) and the effect finishes by itself. aa-fx emits the first particle of a continuous emitter one
+  pulse period after the start and waits for its textures and models: in a short flight (8 m, 0.6 s) the arrow is therefore faint or
+  missing on the first frames. `AA_COMBAT_CHASE=1` puts the camera behind the arrow to look at it.
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
-  clips), and all go back to their sheath bones 4 s after the last action (`Drawn { out }`). The shield stays on the arm. The
-  `drawn_scale` of `item_weapons` applies in the hand.
+  clips), and all go back to their sheath bones 4 s after the last action (`Drawn { out }`). The shield is on the arm only while
+  the sword is out (the real client shows none on a character at peace: it comes onto the arm with the sword, `Grip::Shield` in
+  `weapons.rs`; with the bow or an instrument out it is away too). The `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
   (aa-anim's `Animator::play_layer` with `BoneMask::upper_body`, `docs/aa-anim.md`) while `drive_locomotion` keeps running the
   8-way run / walk clips underneath (the layer ignores the run clip's playback speed). The clip is the `move_ub` variant of the
@@ -145,6 +159,10 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   and a layered action never invalidates the locomotion state (no restart of the run cycle); an action that had the whole body
   restarts locomotion when `Acting` is removed by an end event (`release_layers`). Hit reactions stay whole-body and
   never interrupt a run. `AA_COMBAT_FULLBODY=1` turns the layer off (to compare shots).
+* **Root motion** (`anim::bind_action_clip`): an action clip moves the unit's body (the root bone) the way the clip says, as the real
+  client does: the kick steps about a metre towards its target and comes back while the unit's own position, the camera and the
+  server's idea of the position stay where they are (`reference/ingame/combat_kick`). A clip whose root travels more than 2.5 m
+  from where it starts (a dash, a charge: the server moves the unit then) stays locked, and so do the locomotion clips.
 * **Cost.** Skills are read from the database once and cached by id (`SkillBook`, plus the effect group, anim and plot step
   tables); a frame touches no database. Per frame: `follow_fx` / `fly_projectiles` iterate the live effect entities (a handful),
   `hold_weapons` the carried weapons (3 per character), `end_actions` the `Acting` units. Measured with `AA_FX_LOG=1` during a
@@ -152,6 +170,10 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   without the combat code is the same within the noise (about 80 to 110 fps in the dev build on this box, 10 to 12 ms). With the
   round 2 additions (clip loop lookups, `Wield`, shakes) a fight with arrows, three slashes and melee on the lane showed
   `frame_ms` 11.3 to 14.8: a loop lookup is one cached map hit per clip, a shake a few multiplications per frame while it runs.
+  Round 3 (release build, a fight at the pond with an arrow, the 3-hit slash and seven melee swings, same script for both binaries):
+  `frame_ms` 10.4 to 12.0 (83 to 97 fps) during the fight and 9.4 to 10.6 before it; the build from before round 3 measured 10.7 to
+  11.0 in the fight. aa-fx `sim_ms` 0.04 to 0.08 with 200 particles (single spikes of 0.3 to 0.9 ms), `upload_ms` about 0.01. The
+  difference is inside the noise of the shared box (a second client was running); the sounds cost nothing when muted.
 
 Upper body layer frames (`shots/aa-anim/`, not committed; `--walk 9:12` runs the player from second 9 while slot 3 fires at 9.5,
 `--cam-dist 5 --cam-pitch -12`, `--cam-yaw 120` for the arrow pair and 40 for the casts): `walk_arrow_before.png` (`AA_COMBAT_FULLBODY=1`: the legs stand planted in the
@@ -159,10 +181,43 @@ shooting pose while the player slides forward) and `walk_arrow_after.png` (the a
 `cast_standing.png` (Return from standing: whole-body cast, unchanged) and `cast_walking.png` (Return while running: the cast on
 the upper body, the legs running).
 
+## Sounds (`ingame/sounds.rs`)
+
+`aa-audio` plays event paths (`sounds/x2skills:wild:fire_arrow_form`); `sounds.rs` decides which, when and where. Every sound is an
+`aa_audio::Sound` entity under the bone it comes from (3D at the bone, follows the unit, ends with it). Nothing is read or decoded
+in a muted run (`--shot`, `--exit-after`, `--mute`, `AA_MUTE=1`); `AA_AUDIO_LOG=1` makes the databases load anyway and logs every
+sound (`sound: voice Sounds/x2voice_combat:nuian_male:attack on 563v0`) and, every 2 s, the counts.
+
+| what | data | when and where |
+|---|---|---|
+| skill sounds | `fx_items` of type `FxSound` (`asset_name` = the event path), `fx_particles.sound_id` of a particle item, and the `Sound=""` attribute of the emitters in `libs/particles/<lib>.xml` (aa-fx ignores it: `SoundBook::particle_sounds` scans the library text) | at the item's moment (START, FORM, THROW, LAUNCH, HIT, END) on the item's bone of the caster or the target; a sound of a held effect hangs under the effect and stops with it; the projectile's sounds fly with the arrow |
+| voices | `FxVoice` items (`fx_voices.sound_pack_item_name`, moment id 7 = `voice_launch`) -> `sound_pack_items` of the caster's pack (`models.sound_pack_id`: `nuian_male`, `elf_female`, ...) -> `Sounds/x2voice_combat:nuian_male:attack` | at the clip's `voice_launch` event (else the release moment) at the caster's head; the pack comes from the model, so race and gender follow |
+| blows | `combat_sounds` (weapon material x target material), `holdables.sound_material_id` of the main hand weapon (fists without), `models.sound_material_id` of the target | when a melee hit lands (`UnitDamaged` that did not fly), at the target's `Bip01 Hit`: sword on flesh, knuckles on a player |
+| animation sounds | the `$SoundEventDatabase` of the model's `.cal`: `sound` (event path), `sound_pack` (an item of the unit's pack) and `footstep` events of every clip | by the clip's playhead (`anim_sounds`), a clip on the upper body of a moving unit by the clock (`LayerSounds`); at the event's bone, else the unit |
+| footsteps | `footstep` event -> row of `libs/materialeffects/materialeffects.xml` (`footstep_nuian_walk`) -> column by the ground surface (`mat_dirt`, `mat_water` below the sea level, `mat_default`) -> `lib:effect` -> `fxlibs/<lib>.xml` -> `sounds/x2physics:mid_fs:grass_run` | the run and walk clips have no events of their own: the steps are phases of the cycle (0.25 / 0.75) in the `.lmg` of their group (`fist_mo_normal_run.lmg`) |
+
+* **The ground surface** is read client side: aa-world's `CellHeights::surface` holds one of 16 surface type indices per terrain
+  sample, `leveldata.xml` of the world says which layer material each index is and its `.mtl` has `SurfaceType="mat_dirt"`
+  (`SoundBook::surface`, read on a thread the first time a cell is stepped on). Not covered: the object material under the foot
+  (a floor, a bridge) and a water body above the terrain (a pond is `mat_dirt` / `mat_grass` of its bed; only the sea is `mat_water`).
+* **Cap and culling**: at most 4 sounds per unit at a time (`UNIT_CAP`; a new one replaces the oldest of the same or a lower class,
+  classes are Foley < Voice < Skill, else it is dropped), a sound is not started when its source is further from the camera than
+  32 m (foley), 55 m (voices) or 75 m (skills), and units further than 45 m from the camera do not play animation sounds at all.
+* **Not done**: the sounds of songs (`fx_particles.sound_pack_id`, `$holdable_N`: the bard's instruments), the object material under
+  the foot, the hit sounds of skills that hit through a projectile (the arrow's own hit sound is the item of the group).
+
+Runs on lane `bevy` (muted, `AA_AUDIO_LOG=1`): one pond fight (Shoot Arrow, the 3-hit slash, seven melee swings, the rat dies) started
+**21 foley, 6 voice and 12 skill sounds, none too far, 3 foley left out for the cap**: the swing sounds of the clips
+(`swing:pc_med`, `swing:large_1`), the nuian_male voices (`attack`, `skill`), `bow:bow_proj`, `slash3_launch`, `fight:hitup`, the blows
+(`sword:sword_flesh` on the rat, `knuckle_flesh` on the player) and the rats' own (`rat_attack`, `rat_damage`, `rat_relax_idle`); a
+4 s run on grass, dirt (the pond edge) and the beach played 21 footsteps (`mid_fs:grass_run`, `dirt_run`, `water_run`). One quiet
+`--sound` run (`AA_VOLUME=0.05`) played them through the device without errors. In the data: 168 player skills have a sound (27 skills
+with `FxSound` items, 151 with a sound bound to a particle, 12 with an emitter `Sound`) and 138 have a voice.
+
 ## What it was checked against
 
-There are no real-client combat captures (`reference/` has none), so the check was the data itself and the server's behaviour on
-lane `bevy` (account `bevytest`, the character with Shoot Arrow on slot 3, the 3-hit slash on 2, the melee attack on 4, Return on
+The first two rounds had no real-client combat capture (`reference/ingame/combat_*` came later, see Real captures below), so the check
+was the data itself and the server's behaviour on lane `bevy` (account `bevytest`, the character with Shoot Arrow on slot 3, the 3-hit slash on 2, the melee attack on 4, Return on
 slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all environment variables, off by default):
 
 * `AA_COMBAT_LOG=1`: one line per combat event, clip, projectile and unit death.
@@ -173,6 +228,12 @@ slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all enviro
 * `AA_DEV_MAINHAND=<item>` / `AA_DEV_OFFHAND=<item>` / `AA_DEV_MUSICAL=<item>` (0 for none): the item the character holds in that
   slot instead of its own, to see the two handed (5660 is the first two handed sword), dual wield (5569 in both) and instrument (6177
   the first lute) clips with the one handed test character.
+* `AA_COMBAT_SHOT=<png>@<event>+<s>[,<s>...]`: with several times a series `<png>_01.png`, `_02.png`, ... (game seconds after the
+  event; `fire2` is the second time the player fires, `plot` a step of its plot skill, `death` a unit's death).
+* `AA_COMBAT_CHASE=1`: the camera follows the projectile in flight. `AA_COMBAT_CAM_REL=-90`: the camera stays at that heading from
+  the way the player faces (the real client's `right_camera` is -90 until the character turns to its target). `--cam-fov DEG`: the
+  lens (the game's is 42.75; the real captures used `cl_fov 75` = 71.25). `AA_FX_SCALE=2`: scales every skill effect.
+* `AA_AUDIO_LOG=1`: logs every sound the combat code starts and the per class counts (see Sounds).
 * `AA_COMBAT_NO_CANCEL=1`: moving, jumping and turning cancel no cast of the player (no `CSStopCasting`), to look at casts while it runs.
 * `AA_COMBAT_FAKE="T:op:args;..."`: server events for the local player, `T` seconds after the first frame (the test character has
   no channeled or two handed skills, and the lane does not interrupt a cast when the player walks): `start:TL:SKILL:CAST_MS`,
@@ -200,19 +261,37 @@ Frames (`shots/combat/`, not committed):
 | `r2_wallop_one.png` / `_two.png` / `_dual.png` | Wallop (12029) 0.3 s into the swing with a sword and shield (`onehand_co_sk_fastattack_1`), with the two handed sword (`AA_DEV_MAINHAND=5660`: `twohand_co_sk_fastattack_1`, the greatsword in the hands) and with a sword in each hand (`twoswords_co_sk_fastattack_1`, both out) |
 | `r2_song.png` | a song (11377) cast with the lute (`AA_DEV_MUSICAL=6177`): `music_co_sk_lute_cast`, the lute in the hands |
 
-Matched: the clip names and timing (launch 0.358 s into `bow_co_sk_launch`, bite sync 0.487 s), the effect bones (bow hand for the
+Matched in rounds 1 and 2: the clip names and timing (launch 0.358 s into `bow_co_sk_launch`, bite sync 0.487 s), the effect bones (bow hand for the
 arrow, `Bip01 Hit` for the hit spark), flight time and hit moment from `SCSkillFired.delay_ms` (the hit reaction starts when the arrow
 arrives, 0.3 to 0.7 s after the shot), and the rat / fox attack clips on the player. Not matched against a real capture: the hit sparks (`st1000c`, `fight.hitup`) and the Return charge-up glow do spawn (aa-fx counts
 the extra effects) but are short and small in the frames; effect
 brightness, the arrow's glow (the mesh is a flat additive model; the particle trail of `st1000b` is aa-fx's), and the exact hand
 pose of the bow.
 
+## Real captures (`reference/ingame/combat_*`)
+
+Real 1.2 client, Refone (Nuian male, sword and shield, bow on the back), the spawn pond, camera 4 m side-on with `cl_fov 75`. Mine:
+bevytest at the same spot, `--cam-fov 71.25 --cam-yaw -90 --cam-dist 4 --cam-pitch 0`, `AA_COMBAT_CAM_REL`, and
+`AA_COMBAT_SHOT=...@fire2+<t_req + 0.05 of each real frame>`; the rats here are not at the same place, so the viewpoints differ by up
+to a quarter turn. Frames and sheets are in `shots/combat/cmp/` (not committed).
+
+| capture | matches | does not match |
+|---|---|---|
+| melee (skill 2, `combat_melee`) | the clips (`onehand_co_attack_r_slash_2`, then `_slash`), about 1.5 s per swing as in the real frames, the sword in the right hand, the cut ending with the blade extended and the low guard between swings, the shield forward on the arm | the real first swing starts about 0.5 s after the key (the shield comes up and the stance changes first, the damage number shows at 0.8 to 0.9 s): mine starts the clip when the server's `SkillFired` arrives; the rat is not visible in the pond (the water of aa-world is too opaque for a rat on the bed) |
+| Triple Slash (18132) | the three clips of the plot (`streakattack_1` / `_2` / `_3`) from the server's steps, the body pose of the third slam (sword down to the right, body bent) at the same time as the real frame, the jump of stage 3, a red streak on the hit | the jump of stage 3 comes about 0.4 s before the real one; the blue-white weapon trail is not visible in my frames (nor clearly in the real ones at the 0.3 s spacing) |
+| Kick (14495) | the clip `all_co_sk_lowkick` of plot step 2517 (a standing target; `all_co_sk_trample` is the fallen target's), the body now steps towards the target and back (root motion, about 0.7 m against about 1 m) | the real character already has the sword out and the shield on the arm from an earlier fight (mine is at peace: an `all_` clip draws nothing); the kick is not on bevytest's bar, the frames are from `AA_COMBAT_FAKE="16:plot:300:2517:14495"` |
+| Return (10594) | the cast pose (hands out at chest height, palms together), the 10 s cast, the effect group (`return_skill_form` on the right hand: 110 particles alive); with the shield no longer shown at peace the pose is the real one | the glowing sphere: at the effect's own scale 1 mine is a faint haze hidden by the hands, the real one is a bright spiky white-purple orb about 0.39 m across; with `AA_FX_SCALE=2` mine has the same size, colour, halo and place (but less bright). The emitter says `Size 0.2`: aa-fx draws its sprites at half the size the real client does here (not changed: aa-fx). In the real the arms hang for the first 4 s and the pose comes in slowly; mine plays the pose at once |
+| death, death_2 | the death clip once, then the last frame; the name plate | the real rat is thrown back, lies on its side on the surface and sinks over seconds; mine is invisible (below the water, the corpse is not lifted) and is not thrown back |
+
+Changes this made: the shield is shown only while the sword is out, action clips move the body (root motion), the hit effects and
+sounds of plot steps were checked against the real frames.
+
 ## Coverage
 
 How many skills would look right, measured from the data alone (no server, no window):
 
 ```
-cargo run -p aa-client --example skill_coverage [-- --out data/extract/combat/skill_coverage.tsv]
+cargo run -p aa-client --example skill_coverage [-- --out data/extract/aa-client-combat/skill_coverage.tsv]
 ```
 
 The example (about 3 s once built) includes `combat/skills.rs` and `combat/clips.rs` as they are, so every skill is resolved by the
@@ -256,24 +335,31 @@ marked `*` change how an effect looks; the rest (a light, a sound, a rendering d
 | uses a stop marker (no clip) | 22 | 17 | 0 | 30 |
 | `move_ub` variant unresolved on the model (plays the whole clip through the mask) | 31 | 21 | 2 | 49 |
 | with particle effects | 173 | 110 | 5 | 219 |
-| **effects all found, nothing ignored by aa-fx** | 5 | 5 | 0 | 4 |
-| effects all found, minor loss only (light / sound / detail) | 10 | 7 | 2 | 34 |
-| effects all found, at least one looks different (`*` features) | 156 | 96 | 3 | 180 |
+| **effects all found, nothing ignored by aa-fx** | 11 | 11 | 0 | 29 |
+| effects all found, minor loss only (light / sound / detail) | 128 | 77 | 5 | 170 |
+| effects all found, at least one looks different (`*` features) | 32 | 20 | 0 | 19 |
 | **effects missing** (at least one) | 2 | 2 | 0 | 1 |
-| at least one effect invisible (a mesh / trail / orbit and no sprite) | 10 | 7 | 0 | 16 |
-| uses a sound (any kind) | 168 | 109 | 4 | 222 |
-| ... `FxSound` item / sound bound to a particle item / emitter `Sound` | 26 / 151 / 12 | 7 / 109 / 2 | 0 / 1 / 3 | 18 / 207 / 20 |
-| voice (`FxVoice`) | 137 | 97 | 2 | 54 |
+| at least one effect invisible (a mesh / trail / orbit and no sprite) | 0 | 0 | 0 | 0 |
+| at least one effect with nothing to draw by design (off / sound / light only) | 24 | 14 | 0 | 22 |
+| uses a sound (any kind, all played by `sounds.rs`) | 168 | 109 | 4 | 222 |
+| ... `FxSound` item / sound bound to a particle item / emitter `Sound` | 27 / 151 / 12 | 8 / 109 / 2 | 0 / 1 / 3 | 18 / 207 / 20 |
+| voice (`FxVoice`) | 138 | 98 | 2 | 54 |
 | camera shake | 22 | 11 | 0 | 18 |
-| material flash (`FxMaterial`) | 24 | 9 | 2 | 34 |
+| material flash (`FxMaterial`, not played) | 24 | 9 | 2 | 34 |
 | **channeling** (channeling time or clip) | 12 | 10 | 2 | 10 |
 | **plot skills** | 40 | 31 | 1 | 19 |
 
+The effects rows changed with aa-fx: the counts of round 1 (5 plain, 10 minor, 156 different, 10 invisible of 173 skills) were made when
+aa-fx had no geometry, tails, refraction, orbiting or collisions; they are now (aa-fx with those, `GROUND_WIRED = true`, the
+projectile group wired as an effect) 11 plain, 128 minor, 32 different, 0 invisible. The sound rows count what `sounds.rs` plays
+(the example needs no change: it counts the items of the groups).
+
 Distinct things of the player skills: **202 clips needed, none missing on any model** (the elf and hariharan `.cal` take the player clips of
-`global_player.cal` from the Nuian folders, and those files exist); **356 effects, 354 found** (37 plain, 50 with a minor loss, 267 that look different, of which 9
-draw nothing at all; 17 have nothing to draw by design: every emitter is switched off, or it only carries a sound or a light), 2
-missing. Of the 2,364 switched on emitters of the 354 effects, 674 (28 %) carry a feature that changes the look; the other 72 % draw as
-authored. Items that are not particles: 49 `FxSound`, 641 sounds bound to particles, 231 voices, 46 camera shakes, 55 material flashes.
+`global_player.cal` from the Nuian folders, and those files exist); **356 effects, 354 found** (88 plain, 232 with a minor loss, 34 that
+look different, none that draw nothing at all; 17 have nothing to draw by design: every emitter is switched off, or it only carries a
+sound or a light), 2 missing. Of the 2,364 switched on emitters of the 354 effects, 55 (2 %) carry a feature that changes the look;
+the other 98 % draw as authored. Items that are not particles: 50 `FxSound`, 641 sounds bound to particles, 232 voices, 46 camera
+shakes, 55 material flashes.
 
 **Top missing clips (player skills): none.** The only names that no `.cal` has are the two stop markers (`all_co_sk_stop`, 20 skills;
 `all_ac_stop`, 4). Monsters (skills that use a clip their model's `.cal` lacks): `all_co_sk_spell_launch_d` 3, then 1 each:
@@ -293,28 +379,18 @@ enabled emitters of the effects that have the feature that carry it):
 | skills | tree | effects | emitters | share | feature |
 |---:|---:|---:|---:|---:|---|
 | 157 | 96 | 242 | 312 | 15 % | light (`LightSource*`, `LightHDRDynamic`) |
-| 98 | 57 | 120 | 150 | 13 % | **refraction** `*` (`.mtl` with `RefrBumpScale`; drawn as the plain diffuse map) |
-| 78 | 49 | 100 | 167 | 20 % | **geometry** `*` (47 skills in projectile groups, 53 elsewhere; 9 effects are nothing but meshes) |
-| 75 | 43 | 72 | 159 | 25 % | `InheritVelocity` |
-| 75 | 49 | 78 | 140 | 19 % | `NoOffset` |
-| 68 | 34 | 62 | 92 | 18 % | **tails** `*` (`TailLength`, `TailSteps`) |
-| 62 | 34 | 62 | 135 | 19 % | **collisions** `*` (`PhysicsType`, `Collide*`, `Bounciness`, `ParentCollide`) |
 | 61 | 35 | 58 | 113 | 21 % | `EmissiveHDRDynamic` |
-| 58 | 26 | 48 | 81 | 29 % | `IndependentUVTimer` |
-| 58 | 38 | 67 | 103 | 23 % | `SizeZ` |
-| 57 | 37 | 65 | 116 | 18 % | **`Rotate*` orbiting** `*` |
-| 37 | 23 | 47 | 72 | 21 % | **`AttachType` / `AttachForm`** `*` (emission shapes) |
 | 31 | 19 | 33 | 50 | 11 % | **decals** `*` (`DecalMode`, ...) |
-| 27 | 14 | 23 | 39 | 13 % | `AlphaTest` |
 | 20 | 13 | 22 | 24 | 13 % | `ForceGeneration` |
-| 12 | 2 | 10 | 14 | 8 % | emitter `Sound` |
+| 12 | 2 | 10 | 14 | 8 % | emitter `Sound` (played by `sounds.rs`) |
 | 10 | 1 | 5 | 12 | 20 % | `BindToOffset` |
 | 8 | 4 | 15 | 38 | 16 % | `OceanParticle` |
-| 5 / 4 / 4 / 3 / 2 | | | | | `SecondGenerationRemoveCamera`, `NoUseMaterialAlpha`, `Thickness`, `LocalRotate`, `SurfaceType` |
+| 5 / 4 / 3 / 2 / 2 | | | | | `SecondGenerationRemoveCamera`, `Thickness`, `LocalRotate`, **geometry** `*` (`GeometryInPieces`: aa-fx draws it whole; 1 skill in a projectile group, 1 elsewhere), `SurfaceType` |
 
 Ignored cost and visibility hints, not counted: `IgnoreAttractor` 39 skills, `VisibleUnderwater` 27, `NotAffectedByFog` 23,
-`FillRateCost` 14, `DisableVisClipping` 3, `ViewDistanceAdjust` 2, `CastShadows` 1. By set, every ability tree has 11 to 22 skills that
-look different and at most 2 plain ones.
+`FillRateCost` 14, `CollideStaticObjects` 5, `DisableVisClipping` 3, `CollideDynamicObjects` 2, `MaxCollisionEvents` 2,
+`ViewDistanceAdjust` 2, `CastShadows` 1. By set, the 32 skills that look different are spread over the trees (tree 7: 11, tree 9: 5, tree 5: 4, tree 10: 3, the others 1 to 2);
+the 11 plain ones are in trees 2, 3, 5, 6, 7, 8 (4) and 10.
 
 **What the client does with them** (counted over the player skills; the `client handling` block of the example is computed by the code
 the client runs; "shown" = the shown tree skills):
@@ -337,20 +413,8 @@ the client runs; "shown" = the shown tree skills):
   Freezing Arrow, Arc Lightning, Flamebolt, Skewer) use a looping cast clip that has no `launch` / `combat_sync` event, which is
   right: the effects start with the clip (release 0). Every other launch timed clip has a `launch` event on all 8 models.
 
-**Build next**, in order of skills fixed per effort:
-
-1. **Geometry emitters in aa-fx** (2 to 3 days): mesh particles (size from `Size` / `SizeX` / `SizeY` / `SizeZ`, material from the
-   `.mtl`, aa-cry's `MaterialHook` for the additive look; the arrow is done by hand in `combat.rs`). 78 skills, 49 tree skills, and the
-   main shape of the slash, lightning and shock effects; 9 effects draw nothing without it.
-2. **`Rotate*` orbiting in aa-fx** (0.5 to 1 day, simulation only): 57 skills, 37 tree skills.
-3. **Refraction** (0.25 day to stop drawing them as plain glow sprites if the frames show blobs, then 1 to 2 days for a screen space
-   distortion pass): 98 skills, 57 tree skills; the largest group after the light.
-4. **Tails** (0.5 day as `Stretch` streaks, 1.5 days as ribbons): 68 skills, 34 tree skills.
-5. **Lights** (1 day: a budgeted `PointLight` per effect): 157 skills, 96 tree skills, but only 15 % of the emitters.
-6. **Decals** on terrain (1 day, 31 skills: ground rings) and **material flashes** (1 day, 24 skills).
-7. **Collisions** (1 day, terrain only: sparks that bounce, 62 skills) and **emission shapes** (1 to 2 days, 37 skills) last.
-8. **Sounds and voices** (168 skills with a sound, 137 with a voice) need a sound system first (`Sounds/x2skills:...` names); a
-   separate project.
+**What is left**: what changes the look is decals (31 skills: ground rings) and `GeometryInPieces` (2), the rest is lights (a budget
+`PointLight` per effect), `EmissiveHDRDynamic` and `ForceGeneration`. `FxMaterial` flashes (24 skills) are not played.
 
 ## Not done
 
@@ -364,9 +428,12 @@ the client runs; "shown" = the shown tree skills):
 * Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
   starts at HIT plays when the damage lands (a miss does not shake).
 * Mounted, swimming and flying casters, doodad and ship cannon projectiles.
-* Sounds and voices (`FxSound`, `FxVoice`), decals of the effect groups, `FxMaterial` flashes on the hit.
-* Particle features aa-fx lacks (refraction materials, geometry particles, trails) show as their plain emitters: the
-  `skill_refraction_*` distortions of the cast and hit effects are missing.
+* Decals of the effect groups, `FxMaterial` flashes on the hit; the sounds of songs (bard instruments) and the object material under the
+  foot for footsteps (see Sounds).
+* The weapon draw and the combat stance of the real client: the first swing from peace starts about 0.5 s after the key there, with
+  the shield coming up and a stance change first, and between swings the real unit idles in `<weapon>_ba_combat_idle` (and runs
+  `<weapon>_mo_combat_run_*` while it fights); mine plays the swing at once and idles in the relaxed pose.
+* The real rat is thrown back when it dies and lies on the surface before it sinks; mine is submerged and not thrown back.
 * A dead rat in a pond lies below the water surface (the corpse is not lifted).
 * The player's own movement while a cast clip plays is not blocked (the cast is cancelled instead); the upper body layer is for
   one-shot clips of the player while it runs (Shoot Arrow, slashes), for other units that move while they act, and for casts the
@@ -374,6 +441,10 @@ the client runs; "shown" = the shown tree skills):
 
 ## Needed from other crates
 
-* aa-fx: `Geometry` emitters (`EffectDef::geometry` only finds the model, the application has to draw it); refraction materials
-  (`skill_refraction_*`, `RefrBumpScale`) are on 385 effect emitters in `x2_effects.xml` alone.
-* aa-cry: `Shading` has no additive "particle" mode, the arrow mesh is restyled through a `MaterialHook`.
+* aa-fx: the sprite sizes look half of what the real client draws (the Return orb: `Size 0.2` is 0.39 m across in the real capture,
+  0.19 m in aa-fx; `AA_FX_SCALE=2` matches it), so check the `Size` convention against a second effect; a continuous emitter's first
+  particle comes one pulse period after the start and after its assets loaded, so an arrow in a short flight is faint on its first
+  frames (an option to start at once, or to emit at time 0, would do).
+* aa-world: the water is too opaque for things standing in a pond (a rat on the bed is invisible); a surface query under the foot
+  (object materials: floors, bridges) and a water body height / type query for footsteps in ponds.
+* hud: `hud::combat::tests::moves_add_up` fails (not part of this work).

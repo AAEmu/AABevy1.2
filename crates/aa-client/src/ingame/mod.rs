@@ -38,6 +38,7 @@ mod flow;
 mod player;
 mod prepare;
 mod prewarm;
+mod sounds;
 mod units;
 pub(crate) mod warm;
 mod weapons;
@@ -93,6 +94,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(combat::plugin)
+            .add_plugins(sounds::plugin)
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(bench::plugin)

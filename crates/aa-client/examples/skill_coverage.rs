@@ -52,7 +52,7 @@ const MAJOR: &[&str] = &["geometry", "refraction", "tail", "rotate", "collision"
 /// Whether the client gives aa-fx a ground height (`FxSettings::ground`): until it does, particles that bounce on the ground (and the
 /// emitters that start where they land) are reported as an unsupported `collision`. Meshes (`Geometry`), tails, orbits, refraction
 /// materials and emission from the body are drawn by aa-fx itself and are not listed any more.
-const GROUND_WIRED: bool = false;
+const GROUND_WIRED: bool = true;
 
 /// Attributes that only hint at cost or visibility; the effect is not degraded by an engine that ignores them.
 const HINTS: &[&str] = &[
@@ -559,7 +559,7 @@ impl Ctx<'_> {
         row.extras = extras;
         row.stops = stops;
         // buff visuals (`_dot`) belong to the buff: the client leaves them out
-        let names = |g: &[Arc<Vec<FxItem>>]| g.iter().flat_map(|g| g.iter()).map(|i| i.effect.to_ascii_lowercase()).filter(|e| !e.contains("_dot")).collect::<BTreeSet<_>>();
+        let names = |g: &[Arc<Vec<FxItem>>]| g.iter().flat_map(|g| g.iter()).map(|i| i.effect.to_ascii_lowercase()).filter(|e| !e.is_empty() && !e.contains("_dot")).collect::<BTreeSet<_>>();
         row.proj_fx = names(&flying);
         row.fx = names(&fx).union(&row.proj_fx).cloned().collect();
 
