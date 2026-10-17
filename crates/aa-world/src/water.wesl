@@ -151,6 +151,10 @@ fn trace(p: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.world_position.xyz;
+    // from below the surface is the post pass's business (the window to the sky, the mirror beyond it)
+    if view.world_position.y < p.y {
+        discard;
+    }
     let to_eye = view.world_position - p;
     let dist = length(to_eye);
     let v = to_eye / max(dist, 1e-4);

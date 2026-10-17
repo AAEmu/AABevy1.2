@@ -78,6 +78,10 @@ pub struct PostUniform {
     pub film: Vec4,
     pub grade: Vec4,
     pub balance: Vec4,
+    /// Under water: x water level (world Y, metres), y extinction per metre, z in-scattering gain, w 1 when the camera is below the surface.
+    pub under: Vec4,
+    /// Under water: rgb colour of the deep water at the surface (pre-exposed), a: unused.
+    pub under_color: Vec4,
 }
 
 impl Default for PostUniform {
@@ -92,6 +96,8 @@ impl Default for PostUniform {
             film: Vec4::new(0.9, 1.0, 0.8, 1.8),
             grade: Vec4::new(1.0, 1.0, 0.0, 1.0),
             balance: Vec4::new(1.0, 1.0, 1.0, 0.0),
+            under: Vec4::ZERO,
+            under_color: Vec4::ZERO,
         }
     }
 }

@@ -223,6 +223,8 @@ pub struct EnvSample {
     pub char_back: [Vec4; 2],
     /// `Char BackLight: InShadowIntensity`.
     pub char_back_shadow: f32,
+    /// `Ocean fog density under water`: the sea's extinction per metre (base 2) seen from below the surface.
+    pub ocean_under: f32,
 }
 
 /// Linear interpolation of the sample's field types.
@@ -276,7 +278,7 @@ impl EnvSample {
             sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
             color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
-            char_back, char_back_shadow
+            char_back, char_back_shadow, ocean_under
         )
     }
 }
@@ -369,6 +371,7 @@ impl TimeOfDay {
             ambient_heights: Vec2::new(self.scalar("Ambient min height", t), self.scalar("Ambient max height", t)),
             char_back: [back(1), back(2)],
             char_back_shadow: self.scalar("InShadowIntensity", t),
+            ocean_under: self.scalar("Ocean fog density under water", t),
         }
     }
 }

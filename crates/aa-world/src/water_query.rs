@@ -45,11 +45,23 @@ pub enum WaterKind {
     River,
 }
 
+/// A body of water at a position: the height of its surface, its kind and (volumes only) the fog of the volume.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WaterBody {
+    pub height: f32,
+    pub kind: WaterKind,
+    /// The volume's own fog colour (linear) and density; zero for the sea (its colour is the zone's).
+    pub fog_color: Vec3,
+    pub fog_density: f32,
+}
+
 /// One volume of a cell: the outline in cell-local game coordinates and its heights.
 struct Volume {
     surface: f32,
     floor: f32,
     kind: WaterKind,
+    fog_color: Vec3,
+    fog_density: f32,
     ring: Vec<Vec2>,
     min: Vec2,
     max: Vec2,
@@ -61,7 +73,16 @@ impl Volume {
         let first = *ring.first()?;
         let (min, max) = ring.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
         let kind = if w.kind & 3 == 3 { WaterKind::River } else { WaterKind::Lake };
-        (ring.len() >= 3).then_some(Volume { surface: w.surface, floor: w.surface - w.depth, kind, ring, min, max })
+        (ring.len() >= 3).then_some(Volume {
+            surface: w.surface,
+            floor: w.surface - w.depth,
+            kind,
+            fog_color: Vec3::from(w.fog_color),
+            fog_density: w.fog_density,
+            ring,
+            min,
+            max,
+        })
     }
 
     /// Even-odd test of a cell-local point against the outline.
@@ -164,6 +185,11 @@ impl WaterQuery {
     /// The surface height (metres) and kind of the water under `pos` (game coordinates, z up), `None` on dry land or
     /// outside the map. See the module documentation for which volume wins and how the sea is decided.
     pub fn water_at(&self, pos: Vec3) -> Option<(f32, WaterKind)> {
+        self.body_at(pos).map(|b| (b.height, b.kind))
+    }
+
+    /// Like [`WaterQuery::water_at`] with the volume's fog (what the renderer tints the view under water with).
+    pub fn body_at(&self, pos: Vec3) -> Option<WaterBody> {
         if !pos.is_finite() || pos.x < 0.0 || pos.y < 0.0 {
             return None;
         }
@@ -177,16 +203,16 @@ impl WaterQuery {
             .iter()
             .filter(|v| pos.z >= v.floor && v.contains(local))
             .max_by(|a, b| a.surface.total_cmp(&b.surface))
-            .map(|v| (v.surface, v.kind));
+            .map(|v| WaterBody { height: v.surface, kind: v.kind, fog_color: v.fog_color, fog_density: v.fog_density });
         best.or_else(|| self.sea_at(pos.x, pos.y))
     }
 
     /// The sea plane where the terrain is below it (or missing: open sea).
-    fn sea_at(&self, x: f32, y: f32) -> Option<(f32, WaterKind)> {
+    fn sea_at(&self, x: f32, y: f32) -> Option<WaterBody> {
         let level = self.inner.ocean_level?;
         match self.inner.terrain.height_at(x, y) {
             Some(ground) if ground >= level => None,
-            _ => Some((level, WaterKind::Sea)),
+            _ => Some(WaterBody { height: level, kind: WaterKind::Sea, fog_color: Vec3::ZERO, fog_density: 0.0 }),
         }
     }
 }
@@ -246,6 +272,9 @@ mod tests {
         // above the surface (a jump) still answers, below the floor of the volume (a cave) does not
         assert_eq!(q.water_at(Vec3::new(15_577.3, 15_379.9, 130.0)), Some((127.0, WaterKind::Lake)));
         assert_eq!(q.water_at(Vec3::new(15_577.3, 15_379.9, 100.0)), None);
+        // the volume's fog (the renderer's under water tint): lake_tank, density 0.6
+        let pond = q.body_at(Vec3::new(15_577.3, 15_379.9, 126.25)).unwrap();
+        assert!((pond.fog_density - 0.6).abs() < 1e-5 && pond.fog_color.y > pond.fog_color.x, "{pond:?}");
         // the meadow next to it is dry
         assert_eq!(q.water_at(Vec3::new(15_540.0, 15_330.0, 130.5)), None);
         // a river in cell (9, 12) and a mountain lake in cell (27, 6)
