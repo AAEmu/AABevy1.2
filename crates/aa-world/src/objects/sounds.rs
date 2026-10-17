@@ -413,10 +413,15 @@ pub(crate) fn build(app: &mut App) {
 
 /// Spawns the sound entities of a cell; returns them.
 pub fn spawn_cell(commands: &mut Commands, cell: (i32, i32), placed: &SoundEntities) -> Vec<Entity> {
+    spawn_at(commands, cell_origin(cell.0, cell.1), placed)
+}
+
+/// Spawns the sound entities of a cell whose cell-local cry space starts at `origin` (cry space of the scene the
+/// listener is in: the world, or a login stage that places a cell elsewhere); returns them.
+pub fn spawn_at(commands: &mut Commands, origin: Vec3, placed: &SoundEntities) -> Vec<Entity> {
     if disabled() || (placed.sounds.is_empty() && placed.reverbs.is_empty()) {
         return Vec::new();
     }
-    let origin = cell_origin(cell.0, cell.1);
     let areas: Vec<Arc<AreaWorld>> = placed.areas.iter().map(|a| Arc::new(AreaWorld::new(a, origin))).collect();
     let pick = |idx: &[usize]| Areas(idx.iter().filter_map(|&i| areas.get(i).cloned()).collect());
     let mut out = Vec::new();
@@ -443,7 +448,7 @@ pub fn spawn_cell(commands: &mut Commands, cell: (i32, i32), placed: &SoundEntit
                         inside: false,
                         next: 0.0,
                         current: None,
-                        seed: (cell.0 as u64) << 40 ^ (cell.1 as u64) << 24 ^ (n as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+                        seed: (origin.x.to_bits() as u64) << 32 ^ origin.y.to_bits() as u64 ^ (n as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15),
                     },
                 ))
                 .id(),

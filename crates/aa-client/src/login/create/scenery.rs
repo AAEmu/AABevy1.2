@@ -281,6 +281,8 @@ struct Shown {
     look: Look,
     /// The grass material made for each of the models' materials.
     grass: HashMap<AssetId<StandardMaterial>, Handle<GrassMaterial>>,
+    /// The placed sounds of the field (aa-world `objects::sounds`, top level: they keep their own positions).
+    sounds: Vec<Entity>,
 }
 
 /// What the race's mood does to the grass and rocks (the terrain's is set on its material).
@@ -355,6 +357,13 @@ impl Models {
 }
 
 impl Scenery {
+    /// Despawns the field's placed sounds (they are not under the stage root).
+    pub fn despawn_sounds(&self, commands: &mut Commands) {
+        for &e in self.shown.iter().flat_map(|s| &s.sounds) {
+            commands.entity(e).despawn();
+        }
+    }
+
     /// Starts reading the field (call when the screen opens).
     pub fn start() -> Scenery {
         let task = std::env::var_os("AA_CREATE_NO_FIELD").is_none().then(|| AsyncComputeTaskPool::get().spawn(async { load_field() }));
@@ -558,6 +567,9 @@ pub fn update(
     if let Some(shown) = &scenery.shown {
         if want != Some(shown.race) {
             commands.entity(shown.root).despawn();
+            for &e in &shown.sounds {
+                commands.entity(e).despawn();
+            }
             commands.entity(screen.stage.camera).remove::<DistanceFog>();
             scenery.shown = None;
         }
@@ -579,7 +591,10 @@ pub fn update(
         material.extension.params.tint = Vec3::splat(m.ground).extend(DETAIL_DISTANCE);
         let terrain = terrain_materials.add(material);
         let look = Look { grass: m.grass, brush: m.brush, curve: m.curve };
-        scenery.shown = Some(Shown { race, root, items: plan(field, race), next: 0, terrain, look, grass: HashMap::new() });
+        // the field's winds and birds: the cell's placed sounds in stage space (the cell's cry origin is -STAGE_ORIGIN
+        // there, see `to_stage`), heard by the stage camera's listener
+        let sounds = aa_world::objects::sounds::spawn_at(&mut commands, -STAGE_ORIGIN, &field.objects.sounds);
+        scenery.shown = Some(Shown { race, root, items: plan(field, race), next: 0, terrain, look, grass: HashMap::new(), sounds });
         // models loaded ahead for another race are dimmed for that race
         if scenery.warm.as_ref().is_none_or(|w| w.0 != race) {
             scenery.models.forget_dimmed();
