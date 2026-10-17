@@ -10,6 +10,7 @@ aa-pak.workspace = true
 aa-cry.workspace = true
 aa-fx.workspace = true
 bevy.workspace = true
+half = "2"
 roxmltree.workspace = true
 thiserror.workspace = true
 
