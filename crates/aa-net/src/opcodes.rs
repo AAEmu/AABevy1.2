@@ -69,6 +69,8 @@ opcodes! {
         CSDestroyItemPacket = 0x038,
         CSSplitBagItemPacket = 0x039,
         CSSwapItemsPacket = 0x03a,
+        CSRepairSingleEquipmentPacket = 0x03c,
+        CSRepairAllEquipmentsPacket = 0x03d,
         CSExpandSlotsPacket = 0x041,
         CSDepositMoneyPacket = 0x047,
         CSWithdrawMoneyPacket = 0x048,

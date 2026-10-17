@@ -255,6 +255,7 @@ pub enum Command {
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     Friend(crate::friend::FriendCommand),
+    Repair(crate::repair::RepairCommand),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
     /// shrine). Answered by `Resurrected` and `UnitPoints`.
     Resurrect { in_place: bool },
@@ -476,6 +477,7 @@ pub enum Event {
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
     Friend(crate::friend::FriendEvent),
+    Repair(crate::repair::RepairEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -920,6 +922,13 @@ impl Session {
                     }));
                 } else if self.send_game(game::ClientMsg::Friend(command.clone())).await {
                     self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
+                }
+            }
+            Command::Repair(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::Repair(command)).await {
+                    self.emit(Event::Repair(crate::repair::RepairEvent::Requested(command)));
                 }
             }
             Command::UseSkill { skill_id, target_obj_id } => {

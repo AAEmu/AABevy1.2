@@ -34,6 +34,7 @@ pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT}
 pub use crate::party::Party;
 pub use crate::shop::Shop;
 pub use crate::friend::Friends;
+pub use crate::repair::Repair;
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -304,6 +305,7 @@ pub struct WorldState {
     pub party: Party,
     pub shop: Shop,
     pub friends: Friends,
+    pub repair: Repair,
 }
 
 impl WorldState {
@@ -328,6 +330,7 @@ impl WorldState {
         self.party.seed_visible(e, &self.player, &self.units);
         self.shop.apply(e);
         self.friends.apply(e);
+        self.repair.apply(e);
     }
 }
 
