@@ -20,7 +20,7 @@ cargo run -p aa-net --example walkthrough -- --roundtrip        # + back to char
 cargo run -p aa-net --example walkthrough -- --delete-test      # + create, delete and list a throw-away character
 cargo run -p aa-net --example walkthrough -- --move-secs 120    # + walk a circle for 2 minutes at 10 Hz (keep-alive soak test)
 cargo run -p aa-net --features bevy --example bevy_walkthrough  # same through NetPlugin in a headless Bevy app
-cargo test -p aa-net                                            # 82 unit tests + 2 scripted-server tests
+cargo test -p aa-net                                            # unit + scripted-server tests; live lane check ignored
 RUST_LOG=aa_net=debug cargo run -p aa-net --example walkthrough # protocol trace (trace = every game packet)
 ```
 
@@ -91,8 +91,8 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 |---|---|
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
-| client → game | `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `CompressedGamePackets` |
+| client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
 Everything else the server sends (mail, houses, guilds, trading, looting windows ...) is decoded as
@@ -158,7 +158,8 @@ Commands (`session::Command`):
 Events (`session::Event`), in the order of a normal run:
 `PhaseChanged(Phase)`, `LoginSucceeded(AccountInfo)`, `WorldList`, `WorldQueue`, `ReadyToConnect`,
 `LobbyReady`, `RaceCongestion`, `CharacterList`, `CharacterCreated`, `CharacterSelected`, `PlayerSpawn`,
-`EnteredWorld`, then `UnitSpawned`, `UnitMoved`, `UnitsRemoved`, `UnitPoints`, `UnitDeath`,
+`EnteredWorld`, then `UnitSpawned`, `UnitMoved`, `UnitsRemoved`, `UnitAttached`, `UnitDetached`, `UnitPosture`,
+`UnitPoints`, `UnitDeath`, `CombatFirstHit`, `AiAggro`,
 `DoodadsSpawned`, `DoodadsRemoved`, `DoodadPhaseChanged`, `Teleported`, `Chat`, `ServerError`, `Kicked`,
 and for leaving `LeavePending`, `LeftWorld`, `Disconnected`. Failures: `LoginFailed`, `EnterWorldDenied`,
 `ConnectFailed`, `CharacterCreateFailed`, `RequestTimedOut`.
@@ -421,6 +422,9 @@ Quests can be changed on the lane server with the GM chat commands `/quest add <
 | `Command::StopCasting { tl, plot_tl }` | `CSStopCasting` (`u16 tl`, `u16 plot_tl`, `bc` the player's unit; `tl` for a plain skill, `plot_tl` for a plot, the other 0) | `SkillEnded` + `CastingStopped` (`PlotStopped` for a plot) if the skill still ran; the server logs and ignores it otherwise |
 | `Command::UseItem { item_id, template_id, skill_id, target_obj_id }` | `CSStartSkill`, item caster | `SkillFired`, `UnitHealed`, `ItemsChanged` (`Count` delta -1), `SkillEnded` |
 | `Command::SetActionSlot { slot, action }` | `CSUpdateActionSlot` | `ActionSlotChanged` (raised by the session) |
+| `Command::SwapItems(ItemMove)` | `CSSwapItems` (0x03a) | `ItemsChanged` reason 5 (`Move`s), or `ServerError` |
+| `Command::SplitItem { mv, count }` | `CSSplitBagItem` (0x039) | `ItemsChanged` reason 6 (`Count` on the source, `Add` on the target) |
+| `Command::DestroyItem { item_id, container, slot, count }` | `CSDestroyItem` (0x038) | `ItemsChanged` reason 1 (`Remove` or `Count`) |
 | `Command::Chat { chat_type, target, message }` | `CSSendChatMessage` | `Chat` echo |
 | `Command::Resurrect { in_place }` | `CSResurrectCharacter` | `Resurrected`, `UnitPoints`, weakening `BuffCreated`s |
 | `Command::LootOpen { obj_id, loot_all }` | `CSLootOpenBag` (`bc` corpse, `bc` 0, `bool` loot all) | `LootItemTook` per item taken (+ `ItemsChanged`), `LootBag` with what is left |
@@ -432,6 +436,49 @@ For `UseItem`, `item_id` is `Item::id` of the bag item, `skill_id` its `items.us
 server refuses any other skill for the item), `Inventory::find_template(template)` gives the item.
 The server only runs skills the character learned (`Skills::known`) or default skills (the melee
 auto attack, id 2). A refused skill comes back as `SkillStarted` with `result` != 0 and `tl` 0.
+
+## Quests and NPC dialogs
+
+`aa_net::interaction` holds what the client sends when the player talks to an NPC and takes, hands in or
+drops a quest (`Command::Interact(Interact)`), and the server's answers that are not quest state
+(`Event::Interaction(InteractEvent)`). The quest state itself is `Quests` (above). The layouts come from
+the server's `systems/npcs/npc/packets.rs` and `systems/quests/packets.rs`. The unit tests check them
+byte for byte against the server's own test vectors. `bc` is the 3-byte object id.
+
+| `Interact` | wire | server answer |
+|---|---|---|
+| `Npc { obj_id, target_changed }` | `CSInteractNPC` 0x065: `bc` npc, `bool` | sets the interaction object (and the target), answers an empty `SCAiAggro` (skipped) |
+| `NpcEnd { obj_id }` | `CSInteractNPCEnd` 0x066: `bc` | none |
+| `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's function skills) |
+| `QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id }` | `CSStartQuestContext` 0x0d5: `u32 bc bc u32` | `SCQuestContextStarted` (+ `Updated`), nothing when refused |
+| `QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }` | `CSCompleteQuestContext` 0x0d6: `u32 bc bc i32` | `SCQuestContextCompleted`, `SCExpChanged`, items / money |
+| `QuestDrop { quest_id }` | `CSDropQuestContext` 0x0d7: `u32` | `SCQuestContextUpdated` with status 4 (dropped) |
+| `QuestTalk { npc_obj_id, quest_id, component_id, act_id }` | `CSQuestTalkMade` 0x0da: `bc u32 u32 u32` | `SCQuestContextUpdated` |
+
+| `InteractEvent` | packet |
+|---|---|
+| `SkillList { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, skills, interactable, modifier_keys }` | `SCNpcInteractionSkillList` 0x07b (the request's values echoed, `i32` count + `u32` skills, `bool`, `i32`) |
+| `DoodadQuestAccept { doodad_obj_id, quest_id }` | `SCDoodadQuestAccept` 0x111 (a doodad's quest function offers a quest: the client opens the dialog) |
+| `RewardedByMail { quests }` | `SCQuestRewardedByMail` 0x14e (`u8` count + `u32` ids) |
+| `NpcChat { chat_type, faction_id, npc_obj_id, npc_name, character_obj_id, kind, text_id, message }` | `SCNpcChatMessage` 0x0cf (`kind` 1: a text id, else a string) |
+
+`SCQuestContextStarted` and `SCQuestContextUpdated` are read by `quest::read_context`. After the quest,
+they carry the component the quest is at as a trailing `u32` (`Updated` then has four more values). The
+server's `Quest.Write` only fills its own component field for timed quests, so `Quest::component_id` is
+set from the trailing one. This is how the HUD knows which step's objectives to show.
+
+The client side of the dialog, which NPC offers what and the quest windows, is the HUD's
+(`docs/aa-client-hud.md`, "Quests and NPC dialogs"). There the sequence is: right click or F →
+`CSChangeTarget` + `CSInteractNPC`, the dialog's confirm button → `CSStartQuestContext` /
+`CSCompleteQuestContext` / `CSQuestTalkMade`, the dialog's end → `CSInteractNPCEnd`.
+
+What the lane server (`bevy`) does not do:
+
+* It sends no refusal: `SCQuestContextFailed` and `SCQuestUnitReqFailed` are never sent, so a refused
+  accept or hand-in gets no answer (the HUD's dialog stays open until Escape).
+* `CSQuestStartWith` and `CSRestartMainQuest` are only logged.
+* No distance check on talk, accept or hand-in: any NPC in view can be talked to.
+* `CSInteractNPC` only gets an empty `SCAiAggro`: no greeting, no `SCNpcChatMessage`.
 
 ## What the UI scripts need
 
@@ -540,29 +587,107 @@ Not causes (checked): the movement rate (10 Hz for 2 minutes, 1200 packets, no d
 `time` field, flags and actor flags, packets far from the spawn, below the terrain, jump / fall
 sequences with a 25 m/s landing; the server's move verifier is off by default and only logs.
 
+## Other units' motion (`unit_msg`, `model::Movement`)
+
+What decides how NPCs, mobs, other players and mounts move on screen, from the server's writers (`models/movement.rs`,
+`systems/skills/packets.rs`, `systems/vehicles/packets.rs`, `systems/npcs/npc/packets.rs`) and their byte tests, which the
+unit tests here repeat:
+
+| Packet | Event | Layout |
+|---|---|---|
+| `SCOneUnitMovement` 0x06c | `UnitMoved` | `bc id`, type byte, `MoveType.Write` |
+| `SCUnitMovements` 0x06b | one `UnitMoved` per entry | `u16 count` (at most 400), per entry `bc id` and `MoveType.Write` **without** the type byte: the real client takes the type from the object, here every entry is read as a unit movement (players, NPCs, mounts). The lane server has the writer but never sends it (every NPC step is a `SCOneUnitMovement`, 10 per second per moving NPC); it is decoded for the real servers |
+| `SCUnitAttached` 0x076 | `UnitAttached` | `bc rider`, `u8 attach point` (1 driver, 2.. passengers), `bc mount`, `u8 reason`; `Unit::attached_to` |
+| `SCUnitDetached` 0x077 | `UnitDetached` | `bc rider`, `u8 reason` |
+| `SCUnitModelPostureChanged` 0x103 | `UnitPosture` | `bc id`, `Unit.ModelPosture` (posture byte, loot flag, per posture: 4 = `u32 anim_actions.id` + `bool activate`); `Unit::anim_action` is the pose an NPC stands in (`SCUnitState` carries it too) |
+| `SCCombatFirstHit` 0x089 | `CombatFirstHit` | `bc victim`, `bc hitter`, `u32 hit type` |
+| `SCAiAggro` 0x1c4 | `AiAggro` | `bc npc`, `i32 count`, per hostile unit `bc`, three `i32` (the first is the damage it did) and a flag byte (135) |
+
+`Movement::read_typed(type, r)` reads all movement types: unit (1; `Movement::support` holds the object the unit stands on or
+hangs from, with its world position, when the actor flags say so), vehicle (2) and ship (3) (rotation shorts as a quaternion
+without the scalar -> `vehicle_yaw`, angular velocity, steering ...), ship request (4, no position) and transfer (5). The
+state resource puts a unit that stands on an object at its world position and sets the yaw of vehicles from the rotation.
+
+NPC movements: the server sends a step every 100 ms with `flags` 0, `actor_flags` 4 (running) or 5 (walking), `delta_movement`
+`[0, 127 | 63, 0]`, the stance and alertness of the NPC (`alertness` 2 = in combat) and a **velocity of a fixed 4000** (3.9 m/s
+whatever the speed): the speed has to be measured from the positions. Players send their own velocity (1/1024 m/s), the
+pressed direction in `delta_movement` and, in the air, no `STANDING_ON_SOLID` (a jump: `JUMPING` and flags `Moving | Stopping`).
+Mounts move like any unit; the rider gets no movement of its own (the server puts its local position at 0, 0, 0 under the mount).
+An announced player is not announced again to itself: a later `SCUnitState` with our own object id is dropped (it would draw a
+second figure on top of the player).
+
+## Moving items
+
+The session does not track the inventory, so the item commands are plain data and carry the item ids; the
+application builds them from the `Inventory` resource: `plan_move(from, to)` (bag to bag, bag to bank, worn to bag,
+worn to worn), `plan_equip(bag_slot, equip_slot)`, `plan_unequip(equip_slot, bag_slot)`, with `item_at(container, i)` and
+`first_free_bag_slot()`. All three client packets start with the same block (`items::ItemMove`): `u64` item id of
+the first slot, `u64` item id of the second (0 for an empty slot), then container, slot of the first and container,
+slot of the second as `u8`s (`items::container`: equipment 1, bag 2, bank 3; slots are the indexes of
+`Inventory::bag` / `bank` and the `model::slot` of `Inventory::equipment`). `CSSplitBagItem` adds an `i32` count after
+it, `CSDestroyItem` is `u64` item id, container, slot, `i32` count. Moving to an empty slot, swapping, merging two
+stacks, wearing (`from` the worn slot with its item, or 0 when it is empty, `to` the bag item) and taking off are all
+`CSSwapItems`; the server decides and answers with `SCItemTaskSuccess` (`ItemsChanged`: reason 5 swap, 6 split, 1
+destroy) that `Inventory::apply_task` folds, or with an error message (`ServerError`) and no change. Nothing is applied
+before the answer.
+
+### First-session checks and unit lifecycle (2026-10-17)
+
+The item planners reject unknown containers and slots outside the current bag, bank or equipment
+capacity before sending a request. A ship request (movement type 4, throttle and steering only)
+does not produce a position update or replace the last movement report. Remote death clears old
+motion; resurrection applies the server's position and facing and clears old motion and the mount
+attachment. Removing a unit also removes its outstanding cast, so a despawned caster cannot keep
+showing a cast bar.
+
+Aggro lists are consumed in full instead of being truncated at 64 entries. Their announced count
+is checked against the available bytes; an oversized list used to leave entry bytes in place of
+the following opcode in a compressed packet batch.
+
+`cargo test -p aa-net --test live_first_session -- --ignored --nocapture` is an opt-in lane check.
+It creates a uniquely named throw-away account and Nuian character on login port 27237, moves a
+bag item to an empty slot and back, takes off and re-equips the starter weapon, splits and merges
+a stack while checking its total count, and resets Battlerage and relearns Triple Slash. It logs
+out even when one of those checks fails. The normal test run skips this server-dependent check.
+
+Skill reset packets carry an ability id rather than the removed skill ids. The application must
+use its database to remove the tree's skills/passives and replay any following learn packets in
+order before taking a HUD snapshot. `NetPlugin` folds all incoming events before `Update`; simply
+clearing a tree afterward can otherwise erase a skill learned later in the same frame.
+
+Verified on 2026-10-17: 111 library tests and 2 scripted login-session tests pass;
+`cargo check -p aa-net --features bevy --examples` passes. The opt-in live first-session check
+passed on the bevy lane in 10.39 s, including a clean logout, with a fresh timestamped account
+(the shared `bevytest` account was not used).
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): mail, houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  parties, trading, shops, loot dice (`SCLootDice*`, rolls for group loot), mounts, `SCBuffUpdated`,
-  `SCCombatFirstHit`, `SCAiAggro`, `SCUnitMovements` (batched, no per-entry type byte). Add a
+  parties, trading, shops, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
+  (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
+  "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
+  layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
   that is not decoded ends that batch.
-* Client → server: skills, items, target, action bar, resurrect, chat and logout only; no
-  interaction (NPC dialogs, shops), inventory moves, party or `CSStopCasting` packets yet.
+* Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and the quest
+  requests, item moves (swap, split, destroy; not yet the bank, trade or mail windows' own packets); no shops
+  or other NPC functions (`CSStartInteraction` is encoded, nothing uses it yet) or party packets yet.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
-* Quests: only the lists and the context started / updated / completed / reset packets are decoded; the
-  objective texts, `SCQuestContextFailed` / `Dropped` style notices and the NPC dialog packets are not.
+* Quests: `SCQuestContextFailed`, `SCQuestUnitReqFailed` and the quest error notices are not decoded
+  (the lane server never sends them). The objective texts are not on the wire: the HUD makes them from
+  the game database.
 * The sub zone name of the minimap header is not sent: derive it from the position and the
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
 * `DD04` batches with real Huffman compression (the C# server) are skipped; the Rust server writes
   stored blocks.
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
   template id. Slaves / transfers / shipyards only decode their core fields.
-* Movement: a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships, standing
-  on / hanging from objects are not written. The server does not echo our own movement back.
+* Movement: we only write a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships,
+  standing on / hanging from objects are read (`Movement::read_typed`) but not written. The server does not
+  echo our own movement back.
 * Reconnect after a dropped game connection is not attempted (the session reports `Disconnected` and
   returns to idle).

@@ -785,6 +785,18 @@ pub struct Unit {
     pub active_abilities: Vec<u8>,
     /// Buffs on the unit when it was announced (later changes arrive as buff events).
     pub buffs: Vec<Buff>,
+    /// `anim_actions.id` of the idle pose an NPC stands in (a merchant's, a guard's); 0 for none. Changes arrive as
+    /// `Event::UnitPosture`.
+    pub anim_action: u32,
+    /// What the unit sits on (a mount, a vehicle, a ship) and where, set while `UnitAttached` is in force.
+    pub attached_to: Option<Attachment>,
+}
+
+/// A rider's seat: the object it is attached to and the attach point (`1` driver, `2` and up passengers).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attachment {
+    pub obj_id: u32,
+    pub point: u8,
 }
 
 impl Unit {
@@ -910,6 +922,8 @@ impl Unit {
             ability_exp: Vec::new(),
             active_abilities: Vec::new(),
             buffs: Vec::new(),
+            anim_action: 0,
+            attached_to: None,
         };
         let mut tail_read = false;
         if tail_ok {
@@ -943,7 +957,10 @@ impl Unit {
         match posture {
             0 => {}
             1 => r.skip(8)?,
-            4 => r.skip(5)?,
+            4 => {
+                self.anim_action = r.u32()?;
+                r.skip(1)?; // activate
+            }
             7 => r.skip(14)?,
             8 => r.skip(8)?,
             _ => return Ok(()),
@@ -1039,6 +1056,8 @@ pub mod stance {
     pub const COMBAT: u8 = 0;
     pub const RELAXED: u8 = 1;
     pub const SWIM: u8 = 2;
+    /// Swimming with a weapon drawn.
+    pub const CO_SWIM: u8 = 3;
     pub const COMBAT2: u8 = 4;
     pub const STEALTH: u8 = 5;
     pub const CROUCH: u8 = 6;
@@ -1107,6 +1126,27 @@ pub struct Movement {
     /// Fall velocity in wire units ([`FALL_VELOCITY_PER_MPS`]); sent when `actor_flags` has
     /// [`actor_flags::FALL_VELOCITY`].
     pub fall_vel: u16,
+    /// The object the unit stands on or hangs from (a ship deck, a vehicle, a mount): the blocks that follow the actor flags
+    /// when [`actor_flags::STANDING_ON_OBJECT`] or [`actor_flags::HANGING_FROM_OBJECT`] is set.
+    pub support: Option<MoveSupport>,
+    /// Facing of a vehicle, ship or transfer movement in radians (they carry a rotation, not a direction byte).
+    pub vehicle_yaw: Option<f32>,
+}
+
+/// What a unit stands on or hangs from, as a unit movement reports it. While it stands on something, the movement's `pos` is
+/// relative to that object and [`MoveSupport::world`] is where the unit really is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MoveSupport {
+    /// Object id (`gcId`).
+    pub obj_id: u32,
+    /// Which id space `obj_id` is in (the lowest set bit wins: 1 unit, 2 gimmick, 4 doodad); 0 when only hanging.
+    pub kind: u8,
+    /// Part of the object (`gcPartId`).
+    pub part: u16,
+    /// World position and rotation bytes (roll, pitch, yaw), when standing on the object.
+    pub world: Option<(Pos, [i8; 3])>,
+    /// Climbing data, when hanging from the object.
+    pub climb: Option<u32>,
 }
 
 impl Movement {
@@ -1125,12 +1165,14 @@ impl Movement {
             alertness: 0,
             actor_flags: actor_flags::STANDING_ON_SOLID,
             fall_vel: 0,
+            support: None,
+            vehicle_yaw: None,
         }
     }
 
     /// Facing in radians.
     pub fn yaw(&self) -> f32 {
-        f32::from(self.direction) * MOVE_DIRECTION_STEP
+        self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
     }
 
     /// Body after the object id: type byte and `MoveType.Write`.
@@ -1159,40 +1201,26 @@ impl Movement {
         }
     }
 
-    /// Reads the type byte and `MoveType.Write`. Unit movements are decoded in full; vehicle,
-    /// ship and transfer movements only yield time, position and velocity.
+    /// Reads the type byte and `MoveType.Write` (see [`Self::read_typed`]).
     pub fn read(r: &mut Reader) -> Result<Self> {
         let move_type = r.u8()?;
+        Self::read_typed(move_type, r)
+    }
+
+    /// `MoveType.Write` of a movement of `move_type` (0 / 1 unit, 2 vehicle, 3 ship, 4 ship request, 5 transfer; other types
+    /// have the layout of a unit's first fields). `SCUnitMovements` has no type byte per entry: the type is the object's.
+    pub fn read_typed(move_type: u8, r: &mut Reader) -> Result<Self> {
         let time = r.u32()?;
         let flags = r.u8()?;
         if flags & move_flags::HAS_SC_TYPE_AND_PHASE != 0 {
             r.skip(5)?;
         }
-        if move_type == 4 {
-            // Ship request: no position.
-            return Ok(Self {
-                move_type,
-                time,
-                flags,
-                pos: Pos::default(),
-                velocity: [0; 3],
-                direction: 0,
-                tilt: [0; 2],
-                delta_movement: [0; 3],
-                stance: 0,
-                alertness: 0,
-                actor_flags: 0,
-                fall_vel: 0,
-            });
-        }
-        let pos = r.position()?;
-        let velocity = [r.i16()?, r.i16()?, r.i16()?];
         let mut m = Self {
             move_type,
             time,
             flags,
-            pos,
-            velocity,
+            pos: Pos::default(),
+            velocity: [0; 3],
             direction: 0,
             tilt: [0; 2],
             delta_movement: [0; 3],
@@ -1200,21 +1228,83 @@ impl Movement {
             alertness: 0,
             actor_flags: 0,
             fall_vel: 0,
+            support: None,
+            vehicle_yaw: None,
         };
-        if move_type == 1 || move_type == 0 {
-            m.tilt = [r.i8()?, r.i8()?];
-            m.direction = r.i8()?;
-            m.delta_movement = [r.i8()?, r.i8()?, r.i8()?];
-            m.stance = r.u8()?;
-            m.alertness = r.u8()?;
-            m.actor_flags = r.u8()?;
-            if m.actor_flags & actor_flags::FALL_VELOCITY != 0 {
-                m.fall_vel = r.u16()?;
+        if move_type == 4 {
+            // Ship request (throttle, steering): no position.
+            r.skip(2)?;
+            return Ok(m);
+        }
+        m.pos = r.position()?;
+        if move_type == 5 {
+            // Transfer: velocity / 50 as shorts, rotation quaternion (x, y, z as shorts), angular velocity, steering, path point,
+            // speed, reverse.
+            m.velocity = [r.i16()?, r.i16()?, r.i16()?].map(|v| (f32::from(v) / 32767.0 * 50.0 * 1024.0).clamp(-32767.0, 32767.0) as i16);
+            m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
+            r.skip(12 + 4 + 4 + 4 + 1)?;
+            return Ok(m);
+        }
+        m.velocity = [r.i16()?, r.i16()?, r.i16()?];
+        match move_type {
+            2 | 3 => {
+                // Vehicle and ship: rotation as three shorts (a quaternion without its scalar), angular velocity, then the
+                // vehicle's steering (f32) and wheel speeds, or the ship's steering, throttle, zone and stuck flag.
+                m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
+                r.skip(12)?;
+                if move_type == 2 {
+                    r.skip(4)?;
+                    let wheels = r.u8()?;
+                    r.skip(usize::from(wheels) * 4)?;
+                } else {
+                    r.skip(1 + 1 + 2 + 1)?;
+                }
             }
-            // The supporting-object and climbing blocks that follow are not needed here.
+            _ => {
+                m.tilt = [r.i8()?, r.i8()?];
+                m.direction = r.i8()?;
+                m.delta_movement = [r.i8()?, r.i8()?, r.i8()?];
+                m.stance = r.u8()?;
+                m.alertness = r.u8()?;
+                m.actor_flags = r.u8()?;
+                let af = m.actor_flags;
+                if af & actor_flags::FALL_VELOCITY != 0 {
+                    m.fall_vel = r.u16()?;
+                }
+                let mut support = MoveSupport::default();
+                if af & actor_flags::STANDING_ON_OBJECT != 0 {
+                    support.kind = r.u8()?;
+                    support.part = r.u16()?;
+                    let world = r.position()?;
+                    support.world = Some((world, [r.i8()?, r.i8()?, r.i8()?]));
+                }
+                if af & (actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) != 0 {
+                    support.obj_id = r.u32()?;
+                }
+                if af & actor_flags::HANGING_FROM_OBJECT != 0 {
+                    support.climb = Some(r.u32()?);
+                }
+                if af & (actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) != 0 {
+                    m.support = Some(support);
+                }
+            }
         }
         Ok(m)
     }
+}
+
+/// A rotation quaternion from three shorts (x, y, z; the scalar is rebuilt as the server does).
+fn short_quat(r: &mut Reader) -> Result<[f32; 4]> {
+    const SCALE: f32 = 1.0 / 32767.0;
+    let [x, y, z] = [r.i16()?, r.i16()?, r.i16()?].map(|v| f32::from(v) * SCALE);
+    let norm = x * x + y * y + z * z;
+    let w = if norm < 0.9975 { (1.0 - f64::from(norm)).sqrt() as f32 } else { 0.0 };
+    Ok([x, y, z, w])
+}
+
+/// The yaw (radians, 0 faces +y, positive turns left) of a rotation quaternion `[x, y, z, w]`.
+fn quat_yaw([x, y, z, w]: [f32; 4]) -> f32 {
+    (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
 }
 
 /// The direction byte for a yaw in radians (inverse of [`Movement::yaw`]).

@@ -16,9 +16,10 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::buff::Buff;
 use crate::game::{self, LeaveTarget, VisualOptions};
-use crate::items::{ActionSlot, InvenChunk, ItemTasks};
+use crate::items::{ActionSlot, InvenChunk, ItemMove, ItemTasks};
 use crate::quest::{CompletedBlock, Quest};
 use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
+use crate::unit_msg::AggroEntry;
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
@@ -204,6 +205,13 @@ pub enum Command {
     /// Put `action` into hotbar slot `slot` (0 based). The server does not echo it: the session
     /// reports `ActionSlotChanged` itself.
     SetActionSlot { slot: u8, action: ActionSlot },
+    /// Move the item in one slot to another, swap it with the item there or merge two stacks (also wearing and taking
+    /// off gear, see [`ItemMove`]). The server answers with `ItemsChanged` (reason 5), or `ServerError` when it refuses.
+    SwapItems(ItemMove),
+    /// Move `count` of a stack to another slot (reason 6).
+    SplitItem { mv: ItemMove, count: i32 },
+    /// Throw `count` of the item in `container` / `slot` away (reason 1).
+    DestroyItem { item_id: u64, container: u8, slot: u8, count: i32 },
     /// Select a unit (`obj_id`) as the target, 0 clears the target. The server answers with
     /// `TargetChanged` for the player (also to the sender).
     Target { obj_id: u32 },
@@ -230,6 +238,18 @@ pub enum Command {
     LootItem { owner_type: u16, owner_obj_id: u32, item_index: u16 },
     /// The loot window of the corpse was closed.
     LootClose { owner_type: u16, owner_obj_id: u32 },
+    /// Spend skill points on a skill (`CSLearnSkill`): answered by `SkillLearned`.
+    LearnSkill { skill_id: u32 },
+    /// Learn a passive buff by its `passive_buffs` id (`CSLearnBuff`): answered by `PassiveBuffLearned`.
+    LearnBuff { passive_id: u32 },
+    /// Give the skill points of `ability` back (`CSResetSkills`): answered by `SkillsReset`.
+    ResetSkills { ability: u8 },
+    /// Replace the active ability `old` (11: an empty slot) by `ability` (`CSSwapAbility`): answered by `SkillsReset` for the old one
+    /// and `AbilitySwapped`.
+    SwapAbility { old: u8, ability: u8 },
+    /// Talk to an NPC, accept / hand in / drop a quest, report a talk objective
+    /// ([`crate::interaction::Interact`]); the answers are quest events and `Interaction`.
+    Interact(crate::interaction::Interact),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
     /// shrine). Answered by `Resurrected` and `UnitPoints`.
     Resurrect { in_place: bool },
@@ -334,8 +354,15 @@ pub enum Event {
     /// The enter-world sequence is complete; units and doodads around start to arrive.
     EnteredWorld,
     UnitSpawned(Box<Unit>),
+    /// A unit moved: one `SCOneUnitMovement`, or an entry of a batched `SCUnitMovements`.
     UnitMoved { obj_id: u32, movement: Movement },
     UnitsRemoved(Vec<u32>),
+    /// `obj_id` sits on `mount` (a mate, a vehicle, a ship) at attach point `point`; the server moves it with the mount.
+    UnitAttached { obj_id: u32, mount: u32, point: u8, reason: u8 },
+    /// `obj_id` got off its mount and stands where the mount is.
+    UnitDetached { obj_id: u32, reason: u8 },
+    /// An NPC took (`activate`) or left an idle pose: `anim_action` is an `anim_actions.id`, `kind` the `ModelPostureType`.
+    UnitPosture { obj_id: u32, kind: u8, anim_action: u32, activate: bool },
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     UnitDeath { obj_id: u32 },
     /// The details of a death (follows [`Event::UnitDeath`] for the same packet).
@@ -380,6 +407,10 @@ pub enum Event {
     LoyaltyChanged { bm_point: i64 },
     /// A unit entered or left combat.
     CombatChanged { obj_id: u32, engaged: bool },
+    /// `hitter` struck `victim` first: the fight starts (`hit_type` as in [`UnitDamage`]).
+    CombatFirstHit { victim: u32, hitter: u32, hit_type: u32 },
+    /// The hostile units on an NPC's aggro list; empty when the NPC left combat.
+    AiAggro { npc: u32, hostiles: Vec<AggroEntry> },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
     /// The game clock: `hour` 0..24, `speed` in game hours per real second when the server sent it
     /// (the first packet after spawning; later ones only move `hour`).
@@ -432,6 +463,8 @@ pub enum Event {
     QuestCompleted { quest_id: u32, block: CompletedBlock },
     /// Quest `quest_id` can be taken again.
     QuestReset { quest_id: u32, block: CompletedBlock },
+    /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
+    Interaction(crate::interaction::InteractEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -798,6 +831,15 @@ impl Session {
                     self.emit(Event::ActionSlotChanged { slot, action });
                 }
             }
+            Command::SwapItems(mv) => {
+                self.send_game(game::ClientMsg::SwapItems(mv)).await;
+            }
+            Command::SplitItem { mv, count } => {
+                self.send_game(game::ClientMsg::SplitItem { mv, count }).await;
+            }
+            Command::DestroyItem { item_id, container, slot, count } => {
+                self.send_game(game::ClientMsg::DestroyItem { item_id, container, slot, count }).await;
+            }
             Command::Target { obj_id } => {
                 self.send_game(game::ClientMsg::ChangeTarget { obj_id }).await;
             }
@@ -812,6 +854,22 @@ impl Session {
             }
             Command::LootClose { owner_type, owner_obj_id } => {
                 self.send_game(game::ClientMsg::LootCloseBag { owner_type, owner_obj_id }).await;
+            }
+            Command::LearnSkill { skill_id } => {
+                self.send_game(game::ClientMsg::LearnSkill { skill_id }).await;
+            }
+            Command::LearnBuff { passive_id } => {
+                self.send_game(game::ClientMsg::LearnBuff { passive_id }).await;
+            }
+            Command::ResetSkills { ability } => {
+                self.send_game(game::ClientMsg::ResetSkills { ability }).await;
+            }
+            Command::SwapAbility { old, ability } => {
+                let obj_id = self.self_obj;
+                self.send_game(game::ClientMsg::SwapAbility { obj_id, old, ability }).await;
+            }
+            Command::Interact(m) => {
+                self.send_game(game::ClientMsg::Interact(m)).await;
             }
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
@@ -1071,7 +1129,25 @@ impl Session {
             }
             M::UnitState(unit) => self.unit_state(*unit).await,
             M::UnitsRemoved(ids) => self.emit(Event::UnitsRemoved(ids)),
-            M::UnitMoved { obj_id, movement } => self.emit(Event::UnitMoved { obj_id, movement }),
+            M::UnitMoved { obj_id, movement } => {
+                // A ship request has no transform; raw-event consumers must not treat its
+                // default position as a movement report either.
+                if movement.move_type != 4 {
+                    self.emit(Event::UnitMoved { obj_id, movement });
+                }
+            }
+            M::UnitMovements(list) => {
+                for (obj_id, movement) in list {
+                    self.emit(Event::UnitMoved { obj_id, movement });
+                }
+            }
+            M::UnitAttached { obj_id, mount, point, reason } => self.emit(Event::UnitAttached { obj_id, mount, point, reason }),
+            M::UnitDetached { obj_id, reason } => self.emit(Event::UnitDetached { obj_id, reason }),
+            M::UnitPosture { obj_id, posture } => {
+                self.emit(Event::UnitPosture { obj_id, kind: posture.kind, anim_action: posture.anim_action, activate: posture.activate });
+            }
+            M::CombatFirstHit { victim, hitter, hit_type } => self.emit(Event::CombatFirstHit { victim, hitter, hit_type }),
+            M::AiAggro { npc, hostiles } => self.emit(Event::AiAggro { npc, hostiles }),
             M::UnitPoints { obj_id, hp, mp } => self.emit(Event::UnitPoints { obj_id, hp, mp }),
             M::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer, .. } => {
                 self.emit(Event::UnitDeath { obj_id });
@@ -1144,6 +1220,7 @@ impl Session {
             M::QuestUpdated(q) => self.emit(Event::QuestUpdated(q)),
             M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
             M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
+            M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
             M::SkillsReset { obj_id, ability } => self.emit(Event::SkillsReset { obj_id, ability }),
@@ -1252,6 +1329,11 @@ impl Session {
             && self.self_obj == 0
             && matches!(unit.kind, UnitKind::Character { char_id } if char_id == self.selected);
         if !is_self {
+            // the server announces the player to itself only when it spawns; a later copy must not become a second figure
+            if self.self_obj != 0 && unit.obj_id == self.self_obj {
+                tracing::debug!("the server announced the local player ({}) again: ignored", unit.obj_id);
+                return;
+            }
             self.emit(Event::UnitSpawned(Box::new(unit)));
             return;
         }
@@ -1327,6 +1409,19 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn ship_requests_are_not_announced_as_position_updates() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+        movement.move_type = 4;
+        session.game_one(game::ServerMsg::UnitMoved { obj_id: 5, movement }).await;
+        assert!(events.try_recv().is_err());
+        let movement = Movement::unit(Pos::new(500.0, 600.0, 7.0), 0.0, 2);
+        session.game_one(game::ServerMsg::UnitMoved { obj_id: 5, movement }).await;
+        assert!(matches!(events.try_recv(), Ok(Event::UnitMoved { obj_id: 5, movement }) if movement.pos.x == 500.0));
+    }
 
     #[test]
     fn the_zone_channel_is_shout_trade_and_party_search() {
