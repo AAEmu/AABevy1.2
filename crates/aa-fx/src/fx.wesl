@@ -11,16 +11,19 @@ import bevy_pbr::render::{
     view_transformations::depth_ndc_to_view_z,
 };
 @if(DEPTH_PREPASS) import bevy_pbr::prepass::utils::prepass_depth;
+@if(VIEW_TRANSMISSION_TEXTURE) import bevy_pbr::render::mesh_view_bindings as view_bindings;
 
 struct FxParams {
     gain: vec4<f32>,
     mask: vec4<f32>,
+    refr: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> fx: FxParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var fx_texture: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var fx_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(3) var fx_mask: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var fx_normal: texture_2d<f32>;
 
 fn linear_depth(ndc_z: f32) -> f32 {
     return -depth_ndc_to_view_z(max(ndc_z, 1e-9));
@@ -57,9 +60,27 @@ fn mask_opacity(in: VertexOutput) -> f32 {
     return 1.0;
 }
 
+// A refraction particle shows the scene behind it, shifted by its normal map: alpha blended over the same scene it copies.
+@if(VIEW_TRANSMISSION_TEXTURE)
+fn refract_scene(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {
+    let a = t.a * in.color.a * soft_fade(in.position);
+    let n = textureSample(fx_normal, fx_sampler, in.uv).xy * 2.0 - 1.0;
+    let full = vec2<f32>(textureDimensions(view_bindings::view_transmission_texture));
+    let shift = n * fx.refr.x * view_bindings::view.viewport.w * a;
+    let bg = textureSampleLevel(view_bindings::view_transmission_texture, view_bindings::view_transmission_sampler, (in.position.xy + shift) / full, 0.0);
+    return vec4<f32>(bg.rgb, a);
+}
+@else
+fn refract_scene(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(0.0);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(fx_texture, fx_sampler, in.uv);
+    if fx.refr.y > 0.5 {
+        return refract_scene(in, t);
+    }
     let a = t.a * mask_opacity(in) * in.color.a * soft_fade(in.position);
     if a < fx.gain.w {
         discard;

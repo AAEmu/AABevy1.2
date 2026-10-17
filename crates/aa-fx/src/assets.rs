@@ -100,8 +100,27 @@ pub enum Source {
     Repeat(String),
     /// A pak path of an opacity map: repeats, and holds data (no sRGB decoding).
     Mask(String),
+    /// A pak path of a normal map: repeats, linear.
+    Normal(String),
     /// No texture (white).
     White,
+}
+
+/// A refraction material: the normal map that shifts the scene and how strongly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refraction {
+    /// Pak path of the normal map ("" = the material has none).
+    pub normal: String,
+    /// `RefrBumpScale`.
+    pub bump: f32,
+}
+
+/// [`Refraction`] as a material key.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RefrKey {
+    pub normal: String,
+    /// `RefrBumpScale` in 1/1000.
+    pub bump: u16,
 }
 
 /// What a mesh material adds to a sprite material.
@@ -122,6 +141,7 @@ pub struct MatKey {
     pub soft: bool,
     pub draw_last: i32,
     pub mesh: Option<MeshMat>,
+    pub refract: Option<RefrKey>,
 }
 
 impl MatKey {
@@ -134,9 +154,16 @@ impl MatKey {
                 p.mask = Vec4::from_array(m.mask_chan.map(|c| c as f32 / 255.0));
             }
         }
+        if let Some(r) = &self.refract {
+            // a unit normal moves the scene by `bump` times this fraction of the viewport height
+            p.refr = Vec4::new(r.bump as f32 / 1000.0 * REFRACTION_SCALE, 1.0, 0.0, 0.0);
+        }
         p
     }
 }
+
+/// Fraction of the viewport height that `RefrBumpScale = 1` shifts the scene by (a guess, tuned by eye).
+const REFRACTION_SCALE: f32 = 0.2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotState {
@@ -178,6 +205,9 @@ pub struct FxAssets {
     jobs: HashMap<Source, Task<Option<Loaded>>>,
     loaded: HashMap<Source, Option<(Handle<Image>, UVec2)>>,
     geoms: HashMap<GeomKey, GeomEntry>,
+    refractions: HashMap<String, Option<Refraction>>,
+    /// A refraction material was asked for: the camera needs `ScreenSpaceTransmission`.
+    pub refractive: bool,
 }
 
 fn load_image(path: &str, repeat: bool, srgb: bool) -> Option<Image> {
@@ -201,6 +231,7 @@ fn load_source(source: &Source) -> Option<Loaded> {
         Source::Texture(p) => (p.clone(), false, true),
         Source::Repeat(p) => (p.clone(), true, true),
         Source::Mask(p) => (p.clone(), true, false),
+        Source::Normal(p) => (p.clone(), true, false),
         Source::Material(m) => {
             let mtl = aa_cry::material::Material::load(m).ok()?;
             let tex = std::iter::once(&mtl)
@@ -230,7 +261,9 @@ impl FxAssets {
             return i;
         }
         let params = key.params(gain, soft_distance);
-        let handle = materials.add(FxMaterial { params, texture: None, mask: None, blend: key.blend, depth_bias: key.draw_last as f32 * 0.02 });
+        let refract = key.refract.is_some();
+        self.refractive |= refract;
+        let handle = materials.add(FxMaterial { params, texture: None, mask: None, normal: None, refract, blend: key.blend, depth_bias: key.draw_last as f32 * 0.02 });
         let index = self.slots.len() as u32;
         self.request_texture(&key.source.clone());
         if let Some(m) = key.mesh.clone()
@@ -238,9 +271,26 @@ impl FxAssets {
         {
             self.request_texture(&Source::Mask(m.mask));
         }
+        if let Some(r) = &key.refract {
+            self.request_texture(&Source::Normal(r.normal.clone()));
+        }
         self.slots.push(MatSlot { handle, state: SlotState::Loading, size: UVec2::ONE, key: key.clone() });
         self.keys.insert(key, index);
         index
+    }
+
+    /// Whether a `.mtl` is a refraction material (`RefrBumpScale`), with its normal map; cached.
+    pub fn refraction(&mut self, mtl: &str) -> Option<Refraction> {
+        self.refractions
+            .entry(mtl.to_string())
+            .or_insert_with(|| {
+                let m = aa_cry::material::Material::load(mtl).ok()?;
+                let sub = std::iter::once(&m).chain(m.sub_materials.iter()).find(|m| m.public_param("RefrBumpScale").is_some())?;
+                let bump = sub.public_param("RefrBumpScale")?.trim().parse().unwrap_or(0.1);
+                let normal = sub.texture(&aa_cry::material::TextureMap::Normal).map(|t| t.pak_path()).unwrap_or_default();
+                Some(Refraction { normal, bump })
+            })
+            .clone()
     }
 
     /// The mesh a key names: requested on first use.
@@ -307,6 +357,14 @@ impl FxAssets {
                 },
                 _ => None,
             };
+            let normal = match &slot.key.refract {
+                Some(r) => match self.loaded.get(&Source::Normal(r.normal.clone())) {
+                    Some(Some((image, _))) => Some(Some(image.clone())),
+                    Some(None) => Some(None),
+                    None => continue,
+                },
+                None => None,
+            };
             let color = match &slot.key.source {
                 Source::White => Some(None),
                 source => match self.loaded.get(source) {
@@ -324,6 +382,11 @@ impl FxAssets {
                 match mask {
                     Some(Some(image)) => m.mask = Some(image),
                     Some(None) => m.params.mask = Vec4::ZERO,
+                    None => {}
+                }
+                match normal {
+                    Some(Some(image)) => m.normal = Some(image),
+                    Some(None) => m.params.refr = Vec4::ZERO,
                     None => {}
                 }
             }
