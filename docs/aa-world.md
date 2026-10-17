@@ -332,7 +332,7 @@ usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. O
   sun glow; skipped beyond 0.9 `sky_radius` (the dome has its own haze),
 * **grade**: exposure, contrast around 0.18, colour balance, saturation (data `Saturation` x 0.85),
 * the engine's **film curve** (`postprocess.cfx`: `x (a 6.2 x + b 0.5) / (x (a 6.2 x + 1.7) + c 0.06)` with shoulder / midtones / toe scales from the
-  data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input`.
+  data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input` (in 0..255 as in the engine's `AdjustLevels`, so the data's 0.07 is a black point of 0.07 / 255, not 7 % of the range).
 
 **SSAO** is on by default (`Post.ssao`; set it to `false` to turn it off): Bevy's `ScreenSpaceAmbientOcclusion` (low quality, radius 1.2 m,
 thickness 0.25), which needs `Msaa::Off` (SMAA High replaces it) and a normal prepass. It deepens the shade under bushes and trees the way the

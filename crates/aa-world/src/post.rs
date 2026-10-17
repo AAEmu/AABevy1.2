@@ -103,7 +103,8 @@ impl PostUniform {
         let saturation = if sample.saturation > 0.01 { sample.saturation } else { 1.0 };
         let contrast = if sample.contrast > 0.01 { sample.contrast } else { 1.0 };
         let balance = sample.color_balance;
-        (film, Vec4::new(saturation, contrast, sample.levels_min.clamp(0.0, 0.5), exposure), balance.extend(0.0))
+        // `Levels: min input` is in 0..255 like the engine's AdjustLevels ((c * 255 - min) / (max - min)).
+        (film, Vec4::new(saturation, contrast, (sample.levels_min / 255.0).clamp(0.0, 0.5), exposure), balance.extend(0.0))
     }
 }
 
