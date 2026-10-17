@@ -21,6 +21,7 @@ pub mod model;
 pub mod net;
 pub mod opcodes;
 pub mod session;
+pub mod skill;
 pub mod state;
 pub mod stream;
 pub mod wire;

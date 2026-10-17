@@ -17,6 +17,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::buff::Buff;
 use crate::game::{self, LeaveTarget, VisualOptions};
 use crate::items::{ActionSlot, InvenChunk, ItemTasks};
+use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
@@ -195,6 +196,20 @@ pub enum Command {
     /// Select a unit (`obj_id`) as the target, 0 clears the target. The server answers with
     /// `TargetChanged` for the player (also to the sender).
     Target { obj_id: u32 },
+    /// Cast `skill_id` (a skill the character knows, `Unit::skills`) at the unit `target_obj_id`
+    /// (0 = the player itself, for self buffs and heals). The answer is `SkillStarted`: with a
+    /// non zero `result` when the server refuses.
+    UseSkill { skill_id: u32, target_obj_id: u32 },
+    /// Cast `skill_id` at a spot of the ground (area skills).
+    UseSkillAt { skill_id: u32, pos: Pos },
+    /// Use a bag item: `item_id` is `Item::id`, `template_id` its template and `skill_id` the
+    /// template's `use_skill_id` (`items.use_skill_id` in the game database). `target_obj_id` as
+    /// in [`Command::UseSkill`]. The effect arrives as `ItemsChanged` (the stack shrinks), buffs
+    /// and `UnitPoints`.
+    UseItem { item_id: u64, template_id: u32, skill_id: u32, target_obj_id: u32 },
+    /// Stand up after dying: `in_place` where the character fell, else at the return point (a
+    /// shrine). Answered by `Resurrected` and `UnitPoints`.
+    Resurrect { in_place: bool },
     /// Leave the game: `Quit` logs out, `CharacterSelect` returns to the character list.
     LeaveWorld(LeaveTarget),
     CancelLeave,
@@ -359,6 +374,31 @@ pub enum Event {
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots` slots.
     InventoryExpanded { container: u8, slots: u8 },
+    /// A unit began casting `skill_id` (or, with a non zero `result` and `tl` 0, the server
+    /// refused a skill the player asked for).
+    SkillStarted(SkillStarted),
+    /// The cast completed: the effects follow.
+    SkillFired(SkillFired),
+    /// The cast `tl` is over.
+    SkillEnded { tl: u16 },
+    /// The unit's skill was interrupted.
+    SkillStopped { obj_id: u32, skill_id: u32 },
+    /// The cast `tl` was cancelled.
+    CastingStopped { tl: u16, duration_ms: u32 },
+    /// The cooldown of `skill_id` (or of all skills with `tag_id`) was reset.
+    SkillCooldownReset { obj_id: u32, skill_id: u32, tag_id: u32, gcd: bool },
+    SkillLearned { skill_id: u32, level: u8 },
+    SkillUpgraded { skill_id: u32, level: u8 },
+    /// The skills of `ability` were forgotten.
+    SkillsReset { obj_id: u32, ability: u8 },
+    /// A hit: damage numbers for the combat text.
+    UnitDamaged(UnitDamage),
+    UnitHealed(UnitHeal),
+    CombatText { source: u32, target: u32, text_type: u8 },
+    /// A step of a plot skill (`casting_ms` > 0: the next step is cast).
+    PlotEvent(PlotEvent),
+    PlotEnded { tl: u16 },
+    PlotStopped { tl: u16, duration_ms: u32, last_event: u8, channeling: bool },
     /// A buff or debuff started on a unit (or was refreshed: same `index`).
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
@@ -716,6 +756,20 @@ impl Session {
             Command::Target { obj_id } => {
                 self.send_game(game::ClientMsg::ChangeTarget { obj_id }).await;
             }
+            Command::Resurrect { in_place } => {
+                self.send_game(game::ClientMsg::Resurrect { in_place }).await;
+            }
+            Command::UseSkill { skill_id, target_obj_id } => {
+                let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
+                self.start_skill(skill_id, StartCaster::Unit, target).await;
+            }
+            Command::UseSkillAt { skill_id, pos } => {
+                self.start_skill(skill_id, StartCaster::Unit, SkillTarget::position(pos)).await;
+            }
+            Command::UseItem { item_id, template_id, skill_id, target_obj_id } => {
+                let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
+                self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, target).await;
+            }
             Command::LeaveWorld(target) => {
                 self.send_game(game::ClientMsg::LeaveWorld(target)).await;
             }
@@ -886,6 +940,18 @@ impl Session {
             }
             Err(e) => return self.game_lost(e),
         };
+        match msg {
+            // A batch holds packets that would each have arrived alone.
+            game::ServerMsg::Batch(list) => {
+                for m in list {
+                    self.game_one(m).await;
+                }
+            }
+            msg => self.game_one(msg).await,
+        }
+    }
+
+    async fn game_one(&mut self, msg: game::ServerMsg) {
         use game::ServerMsg as M;
         match msg {
             M::ChangeState(state) => {
@@ -993,6 +1059,28 @@ impl Session {
             M::ItemTasks(tasks) => self.emit(Event::ItemsChanged(tasks)),
             M::EquipmentChanged { obj_id, items } => self.emit(Event::EquipmentChanged { obj_id, items }),
             M::InvenExpanded { container, slots } => self.emit(Event::InventoryExpanded { container, slots }),
+            M::SkillStarted(s) => self.emit(Event::SkillStarted(s)),
+            M::SkillFired(s) => self.emit(Event::SkillFired(s)),
+            M::SkillEnded { tl } => self.emit(Event::SkillEnded { tl }),
+            M::SkillStopped { obj_id, skill_id } => self.emit(Event::SkillStopped { obj_id, skill_id }),
+            M::CastingStopped { tl, duration_ms } => self.emit(Event::CastingStopped { tl, duration_ms }),
+            M::SkillCooldownReset { obj_id, skill_id, tag_id, gcd } => {
+                self.emit(Event::SkillCooldownReset { obj_id, skill_id, tag_id, gcd });
+            }
+            M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
+            M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
+            M::SkillsReset { obj_id, ability } => self.emit(Event::SkillsReset { obj_id, ability }),
+            M::UnitDamaged(d) => self.emit(Event::UnitDamaged(d)),
+            M::UnitHealed(h) => self.emit(Event::UnitHealed(h)),
+            M::CombatText { source, target, text_type } => {
+                self.emit(Event::CombatText { source, target, text_type });
+            }
+            M::PlotEvent(e) => self.emit(Event::PlotEvent(e)),
+            M::PlotEnded { tl } => self.emit(Event::PlotEnded { tl }),
+            M::PlotStopped { tl, duration_ms, last_event, channeling } => {
+                self.emit(Event::PlotStopped { tl, duration_ms, last_event, channeling });
+            }
+            M::Batch(_) => {} // flattened by `game_msg`
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
@@ -1023,6 +1111,15 @@ impl Session {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");
             }
         }
+    }
+
+    async fn start_skill(&mut self, skill_id: u32, caster: StartCaster, target: SkillTarget) {
+        if self.phase != Phase::InWorld {
+            tracing::warn!("skill {skill_id} ignored: not in the world");
+            return;
+        }
+        let self_obj_id = self.self_obj;
+        self.send_game(game::ClientMsg::StartSkill { skill_id, self_obj_id, caster, target }).await;
     }
 
     /// The CryNetwork handshake finished: the lobby is usable.

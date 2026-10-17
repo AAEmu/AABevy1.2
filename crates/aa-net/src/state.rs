@@ -20,9 +20,11 @@ macro_rules! resource {
 }
 
 mod gear;
+mod skills;
 mod stats;
 mod world;
 pub use gear::{ActionBar, Inventory};
+pub use skills::{Casting, KnownSkill, SkillFailure, Skills};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
 pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT};
 
@@ -257,6 +259,7 @@ pub struct WorldState {
     pub world: WorldInfo,
     pub chat: Chat,
     pub target: Target,
+    pub skills: Skills,
 }
 
 impl WorldState {
@@ -274,6 +277,7 @@ impl WorldState {
         self.world.apply(e);
         self.chat.apply(e);
         self.target.apply(e);
+        self.skills.apply(e);
     }
 }
 
