@@ -104,12 +104,11 @@ fn count_reveal_afterimages_and_culling_use_native_frame_rules() {
     for (a, b) in plain.iter().zip(counted) {
         assert_eq!((a.pos, a.uv, a.color), (b.pos, b.uv, b.color));
     }
-    // Culled targets skip the timeline update and all attached art, then consume one phase
-    // when visible again, using the absolute elapsed time.
+    // Missing projection suppresses all attached art while the finite timeline still ends.
     ui.exec("@cull", "culled=true").unwrap();
     lua::tick(&ui.lua, 2000.);
     assert!(quads(&ui).is_empty());
-    assert!(eval::<bool>(&ui, "d:IsVisible()"));
+    assert!(!eval::<bool>(&ui, "d:IsVisible()"));
     ui.exec("@uncull", "culled=false").unwrap();
     lua::tick(&ui.lua, 0.);
     assert!(!eval::<bool>(&ui, "d:IsVisible()"));
@@ -215,5 +214,90 @@ fn original_combat_text_uses_authored_phases_and_releases_pool_slot() {
     let own: String = eval(&ui, "X2Unit:GetUnitId('player')");
     ui.fire_event("UNIT_COMBAT_STATE_CHANGED", (true, own));
     lua::tick(&ui.lua, 100.);
-    assert!(eval::<bool>(&ui,"for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then return true end end return false"));
+    assert!(eval::<bool>(
+        &ui,
+        "for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then return true end end return false"
+    ));
+}
+
+#[test]
+fn original_offscreen_pool_finishes_and_reuses_slots_with_fresh_units() {
+    let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    fake::install(&mut ui, "en_us", &fake::default_worlds());
+    fake::install_ingame(&mut ui);
+    ui.run_stage(aa_ui::Stage::World);
+    assert!(ui.errors.is_empty(), "{:?}", ui.errors);
+    ui.exec(
+        "@missing_projection",
+        r#"
+        culled=true
+        AAUI.CombatTextPosition=function(source,target)
+            calls=(calls or 0)+1
+            lastSource,lastTarget=source,target
+            if not culled then return {x=800,y=400} end
+        end
+    "#,
+    )
+    .unwrap();
+    let count: usize = eval(&ui, "#combatTextFrame.combatTexts-1");
+    for _ in 0..count + 3 {
+        ui.fire_event(
+            "COMBAT_TEXT",
+            (
+                "old-source",
+                "old-enemy",
+                -22,
+                "SWING",
+                "HIT",
+                0,
+                false,
+                0.0,
+            ),
+        );
+    }
+    let shown = || {
+        eval::<usize>(
+            &ui,
+            "local n=0; for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then n=n+1 end end return n",
+        )
+    };
+    assert_eq!(shown(), count);
+    assert!(eval::<bool>(
+        &ui,
+        "for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then return true end end return false"
+    ));
+    for _ in 0..20 {
+        lua::tick(&ui.lua, 1000.);
+    }
+    assert_eq!(shown(), 0);
+    assert!(!eval::<bool>(
+        &ui,
+        "for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then return true end end return false"
+    ));
+    let calls = eval::<u32>(&ui, "calls");
+    lua::tick(&ui.lua, 1000.);
+    assert_eq!(eval::<u32>(&ui, "calls"), calls);
+    ui.fire_event(
+        "COMBAT_TEXT",
+        (
+            "new-source",
+            "new-enemy",
+            -77,
+            "SWING",
+            "HIT",
+            0,
+            false,
+            0.0,
+        ),
+    );
+    assert_eq!(shown(), 1);
+    assert_eq!(eval::<String>(&ui, "lastSource"), "new-source");
+    assert_eq!(eval::<String>(&ui, "lastTarget"), "new-enemy");
+    ui.exec("@same_frame_projection", "culled=false").unwrap();
+    lua::tick(&ui.lua, 0.);
+    assert_eq!(shown(), 1);
+    for _ in 0..20 {
+        lua::tick(&ui.lua, 1000.);
+    }
+    assert_eq!(shown(), 0);
 }

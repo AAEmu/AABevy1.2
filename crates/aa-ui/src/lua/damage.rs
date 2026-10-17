@@ -298,8 +298,12 @@ fn update_one(lua: &Lua, id: Id, advance: bool) {
                 state.update(now, &text, alpha, advance)
             }
         } else {
+            // No projected anchor suppresses drawing, but must not strand a finite pool
+            // slot. Native 39287500 proceeds from projection into the authored timeline;
+            // only explicit distance culling hides the widget before phase sampling.
+            let ended = !text.is_empty() && state.update(now, &text, 1.0, advance);
             state.sample.visible = false;
-            false
+            ended
         };
         let changed = state.sample != before || offset != offset_before;
         u.animations.set_widget_offset(id, offset);
