@@ -187,7 +187,7 @@ impl Marker {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RoadMapData {
     pub map_size: i64,
     /// (level, key, drawable) from `SaveMapData`.
@@ -251,14 +251,7 @@ fn data(lua: &Lua, id: Id) -> RoadMapData {
 pub(crate) fn update(lua: &Lua) {
     let Some(f) = hook(lua) else { return };
     let maps: Vec<Id> = {
-        let u = ui(lua);
-        u.tree
-            .objects
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.class == "roadmap"))
-            .map(|(i, _)| i as Id)
-            .collect()
+        ui(lua).tree.of_class("roadmap")
     };
     if maps.is_empty() {
         return;

@@ -49,6 +49,9 @@ pub struct Ui {
     pub ui_scale: f32,
     /// Handler names set per widget (for hit testing and `OnUpdate`).
     pub handlers: HashMap<Id, Vec<String>>,
+    /// The per-frame handlers (`OnUpdate`, `OnEffect`) by widget, kept with `handlers`, so the
+    /// tick does not search every widget's list.
+    pub frame_handlers: std::collections::BTreeSet<(Id, &'static str)>,
     /// Registered UI events -> widgets, in registration order.
     pub events: HashMap<String, Vec<Id>>,
     /// Handler calls queued by natives, run once the native returns.
@@ -100,8 +103,10 @@ pub fn ui(lua: &Lua) -> mlua::AppDataRefMut<'_, Ui> {
         .expect("aa-ui: Ui app data missing")
 }
 
-pub fn reg(lua: &Lua) -> Reg {
-    lua.app_data_ref::<Reg>()
+/// The registries. Shared (`Rc`): every native call looks its `self` up here, and cloning the
+/// tables and the class map each time cost more than the natives themselves.
+pub fn reg(lua: &Lua) -> std::rc::Rc<Reg> {
+    lua.app_data_ref::<std::rc::Rc<Reg>>()
         .expect("aa-ui: Reg app data missing")
         .clone()
 }
@@ -151,7 +156,7 @@ pub fn install(lua: &Lua, ui_state: Ui) -> mlua::Result<()> {
         mt,
         style_mt,
     };
-    lua.set_app_data(r);
+    lua.set_app_data(std::rc::Rc::new(r));
     // UIParent.
     let root = new_object_table(lua, 0)?;
     lua.globals().raw_set("UIParent", &root)?;
@@ -361,18 +366,44 @@ pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
 }
 
 pub fn tick(lua: &Lua, dt_ms: f32) {
-    tab::relayout_all(lua);
-    grid::update(lua);
-    bounds::update(lua);
-    roadmap::update(lua);
-    worldmap::update(lua);
-    chat::update(lua);
-    slot::update(lua, dt_ms);
+    use crate::prof::scope;
+    {
+        let _p = scope("tabs");
+        tab::relayout_all(lua);
+    }
+    {
+        let _p = scope("grids");
+        grid::update(lua);
+    }
+    {
+        let _p = scope("bounds");
+        bounds::update(lua);
+    }
+    {
+        let _p = scope("roadmap");
+        roadmap::update(lua);
+    }
+    {
+        let _p = scope("worldmap");
+        worldmap::update(lua);
+    }
+    {
+        let _p = scope("chat");
+        chat::update(lua);
+    }
+    {
+        let _p = scope("slots");
+        slot::update(lua, dt_ms);
+    }
     edit::tick(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
-    for (name, args) in queued {
-        fire_ui_event(lua, &name, args);
+    {
+        let _p = scope("events");
+        for (name, args) in queued {
+            fire_ui_event(lua, &name, args);
+        }
     }
+    let p_fades = scope("fades");
     let (updates, ended) = {
         let mut u = ui(lua);
         u.time_ms += dt_ms as f64;
@@ -402,18 +433,12 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
                 u.fades.insert(id, f);
             }
         }
+        // `OnEffect(self, dt)` is the per-frame effect tick (the clock bar refreshes the zone name
+        // and the sun there).
         let updates: Vec<(Id, &'static str)> = u
-            .handlers
+            .frame_handlers
             .iter()
-            .flat_map(|(id, hs)| {
-                hs.iter().filter_map(move |h| match h.as_str() {
-                    "OnUpdate" => Some((*id, "OnUpdate")),
-                    // `OnEffect(self, dt)`: the per-frame effect tick (the clock bar refreshes
-                    // the zone name and the sun there).
-                    "OnEffect" => Some((*id, "OnEffect")),
-                    _ => None,
-                })
-            })
+            .copied()
             .filter(|&(id, _)| u.tree.visible(id))
             .collect();
         (updates, ended)
@@ -421,10 +446,12 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
     for (id, h) in ended {
         call_handler(lua, id, h, vec![]);
     }
-    let mut updates = updates;
-    updates.sort_unstable();
+    drop(p_fades);
+    let _p = scope("on_update");
     for (id, h) in updates {
+        let t0 = crate::prof::handler_start();
         call_handler(lua, id, h, vec![Value::Number(dt_ms as f64)]);
+        crate::prof::handler_done(t0, || format!("{h} {}", ui(lua).tree.get(id).name));
     }
 }
 

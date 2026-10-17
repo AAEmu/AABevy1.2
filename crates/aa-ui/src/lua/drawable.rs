@@ -10,6 +10,11 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut crate::tree::Drawable) -> R) -
     ui(lua).tree.drawable_mut(id).map(f)
 }
 
+/// Read a drawable's state (no change: the layout cache stays).
+fn read<R>(lua: &Lua, id: Id, f: impl FnOnce(&crate::tree::Drawable) -> R) -> Option<R> {
+    ui(lua).tree.get(id).drawable().map(f)
+}
+
 pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     let m = lua.create_table()?;
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
@@ -26,7 +31,10 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     def(
         "RemoveAllAnchors",
         method(lua, |lua, id, _| {
-            ui(lua).tree.get_mut(id).anchors.clear();
+            let mut u = ui(lua);
+            if !u.tree.get(id).anchors.is_empty() {
+                u.tree.get_mut(id).anchors.clear();
+            }
             none()
         })?,
     )?;
@@ -102,7 +110,7 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     def(
         "GetCoords",
         method(lua, |lua, id, _| {
-            let c = with(lua, id, |d| d.coords).flatten().unwrap_or_default();
+            let c = read(lua, id, |d| d.coords).flatten().unwrap_or_default();
             ret(lua, (c[0], c[1], c[2], c[3]))
         })?,
     )?;
@@ -125,7 +133,9 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         "SetColor",
         method(lua, |lua, id, a| {
             let c = [a.f(1), a.f(2), a.f(3), a.opt_f(4).unwrap_or(1.0)];
-            with(lua, id, |d| d.color = c);
+            if read(lua, id, |d| d.color) != Some(c) {
+                with(lua, id, |d| d.color = c);
+            }
             none()
         })?,
     )?;
@@ -133,14 +143,17 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         "GetColor",
         method(lua, |lua, id, _| {
             // A table `{ r, g, b, a }` (`colorTable[4] == 0` in item_icon_button).
-            let c = with(lua, id, |d| d.color).unwrap_or([1.0; 4]);
+            let c = read(lua, id, |d| d.color).unwrap_or([1.0; 4]);
             ret(lua, lua.create_sequence_from(c)?)
         })?,
     )?;
     def(
         "SetAlpha",
         method(lua, |lua, id, a| {
-            ui(lua).tree.get_mut(id).alpha = a.f(1);
+            let (mut u, v) = (ui(lua), a.f(1));
+            if u.tree.get(id).alpha != v {
+                u.tree.get_mut(id).alpha = v;
+            }
             none()
         })?,
     )?;

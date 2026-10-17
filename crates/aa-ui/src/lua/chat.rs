@@ -34,7 +34,7 @@ use super::widget::create_child;
 use super::{call_handler, method, new_object_table, none, object_table, ret, ui, value_id};
 use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MessageData {
     /// (text, time added in UI ms).
     pub lines: Vec<(String, f64)>,
@@ -43,6 +43,9 @@ pub struct MessageData {
     pub time_visible: Option<f32>,
     /// Lines scrolled up from the bottom.
     pub scroll: usize,
+    /// Lines of the live view still within `time_visible` at the last frame: when one times
+    /// out this changes, and the change redraws the frame.
+    pub live: usize,
 }
 
 impl Default for MessageData {
@@ -52,11 +55,12 @@ impl Default for MessageData {
             max_lines: 100,
             time_visible: None,
             scroll: 0,
+            live: 0,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChatTab {
     pub id: i64,
     pub button: Id,
@@ -65,7 +69,7 @@ pub struct ChatTab {
     pub filters: Option<Vec<i64>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChatData {
     pub window_id: i64,
     pub tabs: Vec<ChatTab>,
@@ -741,14 +745,24 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
 pub(crate) fn update(lua: &Lua) {
     let mut g = ui(lua);
     let u = &mut *g;
+    // Lines that time out (`SetTimeVisible`) leave the live view without a call.
+    let now = u.time_ms;
+    for id in u.tree.of_class("message") {
+        let Some(m) = u.tree.widget(id).and_then(|w| w.message.as_ref()) else { continue };
+        let Some(s) = m.time_visible.filter(|_| m.scroll == 0) else { continue };
+        let live = m.lines.iter().filter(|(_, t)| now - t < s as f64 * 1000.0).count();
+        if live != m.live {
+            if let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut()) {
+                m.live = live;
+            }
+        }
+    }
     let (cx, cy) = u.cursor;
     let wins: Vec<Id> = u
         .tree
-        .objects
-        .iter()
-        .enumerate()
-        .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.chat.is_some()))
-        .map(|(i, _)| i as Id)
+        .of_class("chatwindow")
+        .into_iter()
+        .filter(|&i| u.tree.widget(i).is_some_and(|w| w.chat.is_some()))
         .collect();
     for &id in &wins {
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);

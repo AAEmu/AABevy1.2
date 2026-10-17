@@ -8,7 +8,7 @@ use mlua::{Lua, Table, Value};
 use super::{method, none, new_object_table, ret, ui};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StatusBarData {
     pub min: f32,
     pub max: f32,
@@ -63,7 +63,6 @@ fn sync(lua: &Lua, id: Id) {
         d.coords = s.coords;
         d.color = s.color;
     }
-    u.tree.touch();
 }
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {

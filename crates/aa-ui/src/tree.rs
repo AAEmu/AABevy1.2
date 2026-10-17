@@ -387,7 +387,7 @@ pub enum ButtonState {
     Disabled,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ButtonData {
     /// Drawables per state: normal, highlight, pushed, disabled.
     pub bg: [Option<Id>; 4],
@@ -399,7 +399,7 @@ pub struct ButtonData {
 }
 
 /// Native list control state.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ListCtrlData {
     pub columns: Vec<Id>,
     pub column_widths: Vec<f32>,
@@ -418,7 +418,7 @@ pub struct ListCtrlData {
     pub selected_image: Option<Id>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SliderData {
     pub min: f32,
     pub max: f32,
@@ -435,7 +435,7 @@ pub struct SliderData {
     pub min_thumb: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Widget {
     pub ty: WidgetType,
     /// Native class name (`button`, `emptywidget`, ...), selects the Lua method table.
@@ -481,7 +481,7 @@ pub struct Widget {
     pub raise: u32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drawable {
     pub kind: DrawKind,
     /// Native class (`drawable:image`, `drawable:ninepart`, ...).
@@ -513,13 +513,13 @@ pub struct Drawable {
     pub rotation: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     Widget(Widget),
     Drawable(Drawable),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Object {
     pub name: String,
     /// Parent widget (for drawables: the owning widget).
@@ -589,7 +589,18 @@ pub struct Tree {
     /// Bumped on every change that can move or restyle something.
     pub generation: u64,
     rects: std::cell::RefCell<(u64, Vec<Option<Rect>>)>,
+    /// Widget ids by lower-case class, in creation order (destroyed ones included: check
+    /// `alive`), for the per-frame passes over one kind (`tab`, `roadmap`, `chatwindow`, ...)
+    /// without walking every object.
+    by_class: std::collections::HashMap<String, Vec<Id>>,
+    /// See [`Tree::settle`].
+    content: u64,
+    dirty: bool,
+    snaps: std::collections::HashMap<Id, Object>,
 }
+
+/// More objects written in one frame than this count as a change without comparing.
+const MAX_SNAPSHOTS: usize = 2048;
 
 impl Tree {
     pub fn new(screen_w: f32, screen_h: f32) -> Tree {
@@ -612,11 +623,101 @@ impl Tree {
             raise_counter: 0,
             generation: 1,
             rects: std::cell::RefCell::new((0, Vec::new())),
+            by_class: Default::default(),
+            content: 1,
+            dirty: true,
+            snaps: Default::default(),
         }
     }
 
+    /// Live widgets of a class (lower case).
+    pub fn of_class(&self, class: &str) -> Vec<Id> {
+        self.by_class
+            .get(class)
+            .map(|v| v.iter().copied().filter(|&i| self.get(i).alive).collect())
+            .unwrap_or_default()
+    }
+
+    /// A change that is not one object's own state (creation, the screen size, input state the
+    /// drawing reads): the next [`Tree::settle`] counts it.
+    #[track_caller]
     pub fn touch(&mut self) {
         self.generation += 1;
+        if !self.dirty && crate::prof::enabled() {
+            let at = std::panic::Location::caller();
+            crate::prof::change(|| format!("touch {}:{}", at.file(), at.line()));
+        }
+        self.dirty = true;
+    }
+
+    /// Keep the state of `id` from before its first mutable access since the last settle, so
+    /// [`Tree::settle`] can tell a real change from a write of the same values (the HUD scripts
+    /// re-anchor, re-texture and re-show their widgets every frame).
+    fn snapshot(&mut self, id: Id) {
+        if self.dirty {
+            return;
+        }
+        if self.snaps.len() >= MAX_SNAPSHOTS {
+            self.dirty = true;
+            self.snaps.clear();
+            return;
+        }
+        if let Some(o) = self.objects.get(id as usize) {
+            if let std::collections::hash_map::Entry::Vacant(e) = self.snaps.entry(id) {
+                e.insert(o.clone());
+            }
+        }
+    }
+
+    /// The content version of the last [`Tree::settle`].
+    pub fn content(&self) -> u64 {
+        self.content
+    }
+
+    /// Whether something changed since the last [`Tree::settle`] (without settling).
+    pub fn changed(&self) -> bool {
+        self.dirty
+            || self
+                .snaps
+                .iter()
+                .any(|(id, old)| self.objects.get(*id as usize) != Some(old))
+    }
+
+    /// Fix the comparison point (a pass that read the layout, `OnBoundChanged`): a change so
+    /// far still counts at the next settle, later writes compare against the state from now.
+    pub fn checkpoint(&mut self) {
+        if !self.dirty && self.changed() {
+            self.dirty = true;
+        }
+        self.snaps.clear();
+    }
+
+    /// The content version: advances when something changed since the last call (an object's
+    /// state differs from before its first mutable access, or [`Tree::touch`]). The UI frame
+    /// rebuilds the meshes when it moves; `generation` (every mutable access) only guards the
+    /// layout cache.
+    pub fn settle(&mut self) -> u64 {
+        if !self.dirty {
+            let objects = &self.objects;
+            let changed = self
+                .snaps
+                .iter()
+                .find(|(id, old)| objects.get(**id as usize) != Some(*old));
+            if let Some((id, old)) = changed {
+                self.dirty = true;
+                if crate::prof::enabled() {
+                    let class = old.widget().map_or(old.drawable().map_or("", |d| d.class), |w| w.class.as_str());
+                    let owner = old.parent.map(|p| self.objects[p as usize].name.clone()).unwrap_or_default();
+                    crate::prof::change(|| format!("object {class} {:?} (parent {owner}) #{id}", old.name));
+                }
+            }
+        }
+        if self.dirty {
+            self.content += 1;
+        }
+        self.dirty = false;
+        self.snaps.clear();
+        self.content
     }
 
     pub fn set_screen(&mut self, w: f32, h: f32) {
@@ -635,6 +736,7 @@ impl Tree {
 
     pub fn get_mut(&mut self, id: Id) -> &mut Object {
         self.generation += 1;
+        self.snapshot(id);
         &mut self.objects[id as usize]
     }
 
@@ -644,6 +746,7 @@ impl Tree {
 
     pub fn widget_mut(&mut self, id: Id) -> Option<&mut Widget> {
         self.generation += 1;
+        self.snapshot(id);
         self.objects
             .get_mut(id as usize)
             .and_then(Object::widget_mut)
@@ -651,6 +754,7 @@ impl Tree {
 
     pub fn drawable_mut(&mut self, id: Id) -> Option<&mut Drawable> {
         self.generation += 1;
+        self.snapshot(id);
         self.objects
             .get_mut(id as usize)
             .and_then(Object::drawable_mut)
@@ -662,6 +766,7 @@ impl Tree {
         let parent = parent.filter(|&p| p != ROOT && self.get(p).is_widget());
         let mut w = Widget::new(WidgetType::parse(class));
         w.class = class.to_ascii_lowercase();
+        self.by_class.entry(w.class.clone()).or_default().push(id);
         if let Some(p) = parent {
             w.layer = self.widget(p).map(|pw| pw.layer).unwrap_or_default();
         }
@@ -740,6 +845,10 @@ impl Tree {
 
     /// `AddAnchor`: an anchor on the same point replaces the old one.
     pub fn add_anchor(&mut self, id: Id, a: Anchor) {
+        // The same anchor again changes nothing (and keeps the layout cache).
+        if self.get(id).anchors.iter().any(|o| *o == a) {
+            return;
+        }
         let o = self.get_mut(id);
         if let Some(old) = o.anchors.iter_mut().find(|o| o.point == a.point) {
             *old = a;

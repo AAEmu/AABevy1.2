@@ -63,6 +63,18 @@ fn set_handler(lua: &Lua, id: Id, name: &str, f: Option<mlua::Function>) -> mlua
     if f.is_some() {
         list.push(name.to_string());
     }
+    let per_frame = match name {
+        "OnUpdate" => Some("OnUpdate"),
+        "OnEffect" => Some("OnEffect"),
+        _ => None,
+    };
+    if let Some(h) = per_frame {
+        if f.is_some() {
+            u.frame_handlers.insert((id, h));
+        } else {
+            u.frame_handlers.remove(&(id, h));
+        }
+    }
     Ok(())
 }
 
@@ -101,9 +113,12 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
         }
         _ => {
             u.fades.remove(&id);
-            let o = u.tree.get_mut(id);
-            o.shown = visible;
-            o.alpha = 1.0;
+            let o = u.tree.get(id);
+            if (o.shown, o.alpha) != (visible, 1.0) {
+                let o = u.tree.get_mut(id);
+                o.shown = visible;
+                o.alpha = 1.0;
+            }
         }
     }
     if was != visible && u.tree.get(id).is_widget() {
@@ -230,15 +245,9 @@ pub(crate) fn text_height(lua: &Lua, id: Id) -> f32 {
     };
     let inset = t.inset[0] + t.inset[2];
     let maxw = (t.wrap && w > 0.0).then_some((w - inset).max(1.0));
-    let lo = u.fonts.layout(
-        &t.style.font,
-        t.style.size,
-        &t.text,
-        maxw,
-        t.line_space,
-        false,
-    );
-    lo.height
+    u.fonts
+        .layout_size(&t.style.font, t.style.size, &t.text, maxw, t.line_space)
+        .1
 }
 
 /// Line count of a widget's text (wrapped at its width) and its line spacing.
@@ -261,32 +270,28 @@ fn text_lines(lua: &Lua, id: Id) -> (usize, f32) {
 pub(crate) fn auto_size(lua: &Lua, id: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
-    let Some(t) = u.tree.get(id).text().cloned() else {
-        return;
+    let t = match u.tree.get(id).text() {
+        Some(t) if t.auto_resize => t.clone(),
+        _ => return,
     };
-    if !t.auto_resize {
-        return;
-    }
     if u.tree.widget(id).is_some_and(|w| w.ty == WidgetType::TextBox) {
         drop(g);
-        let h = text_height(lua, id);
+        let h = text_height(lua, id) + t.inset[1] + t.inset[3];
         let mut u = ui(lua);
-        u.tree.get_mut(id).height = h + t.inset[1] + t.inset[3];
-        u.tree.touch();
+        if u.tree.get(id).height != h {
+            u.tree.get_mut(id).height = h;
+        }
         return;
     }
     let w = u
         .fonts
-        .layout(
-            &t.style.font,
-            t.style.size,
-            &t.text,
-            None,
-            t.line_space,
-            false,
-        )
-        .width;
-    u.tree.get_mut(id).width = w + t.inset[0] + t.inset[2];
+        .layout_size(&t.style.font, t.style.size, &t.text, None, t.line_space)
+        .0
+        + t.inset[0]
+        + t.inset[2];
+    if u.tree.get(id).width != w {
+        u.tree.get_mut(id).width = w;
+    }
 }
 
 fn longest_line(lua: &Lua, id: Id) -> f32 {
@@ -331,7 +336,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "RemoveAllAnchors",
         method(lua, |lua, id, _| {
-            ui(lua).tree.get_mut(id).anchors.clear();
+            let mut u = ui(lua);
+            if !u.tree.get(id).anchors.is_empty() {
+                u.tree.get_mut(id).anchors.clear();
+            }
             none()
         })?,
     )?;
@@ -457,7 +465,10 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetAlpha",
         method(lua, |lua, id, a| {
-            ui(lua).tree.get_mut(id).alpha = a.f(1);
+            let (mut u, v) = (ui(lua), a.f(1));
+            if u.tree.get(id).alpha != v {
+                u.tree.get_mut(id).alpha = v;
+            }
             none()
         })?,
     )?;
@@ -800,10 +811,18 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             let s = a.s(1).unwrap_or_default();
             {
                 let mut u = ui(lua);
-                if let Some(w) = u.tree.widget_mut(id) {
-                    if let Some(t) = w.text.as_mut().or(w.title.as_mut()) {
-                        t.text = s;
-                        t.lines.clear();
+                // The same text again (the HUD's per-frame updates) changes nothing.
+                let same = u
+                    .tree
+                    .widget(id)
+                    .and_then(|w| w.text.as_ref().or(w.title.as_ref()))
+                    .is_none_or(|t| t.text == s);
+                if !same {
+                    if let Some(w) = u.tree.widget_mut(id) {
+                        if let Some(t) = w.text.as_mut().or(w.title.as_mut()) {
+                            t.text = s;
+                            t.lines.clear();
+                        }
                     }
                 }
             }
@@ -1511,7 +1530,6 @@ fn set_button_bg(lua: &Lua, id: Id, state: usize, d: Option<Id>) {
         // (race / gender buttons in reference/character_create/step1_*).
         u.tree.get_mut(d).shown = true;
     }
-    u.tree.touch();
 }
 
 /// `OnScale` after a size change of the root-anchored windows is what the client sends on

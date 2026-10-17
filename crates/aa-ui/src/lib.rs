@@ -30,6 +30,7 @@ pub mod content;
 pub mod dump;
 pub mod input;
 pub mod lua;
+pub mod prof;
 pub mod render;
 pub mod text;
 pub mod texture;
@@ -67,6 +68,7 @@ impl UiRuntime {
             textures: texture::TextureDb::new(locale),
             ui_scale,
             handlers: Default::default(),
+            frame_handlers: Default::default(),
             events: Default::default(),
             pending: Vec::new(),
             fades: Default::default(),
@@ -81,6 +83,7 @@ impl UiRuntime {
             queued_events: Vec::new(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
+        prof::wrap_natives(&lua).map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(UiRuntime {
             lua,
             mouse: Default::default(),
@@ -590,6 +593,7 @@ fn ui_frame(
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
     let t0 = std::time::Instant::now();
+    let p_frame = prof::scope("frame");
     let (pw, ph) = (
         window.resolution.physical_width() as f32,
         window.resolution.physical_height() as f32,
@@ -632,6 +636,7 @@ fn ui_frame(
         std::mem::take(&mut virt.press),
         std::mem::take(&mut virt.release),
     );
+    let p_input = prof::scope("input");
     input::update(
         lua,
         &mut rt.mouse,
@@ -641,17 +646,23 @@ fn ui_frame(
         buttons.just_released(MouseButton::Right) || std::mem::take(&mut virt.right_release),
         wheel,
     );
+    drop(p_input);
     // Script time.
     lua::tick(lua, time.delta_secs() * 1000.0);
     // Rebuild the meshes when anything changed.
     let pressed = rt.mouse.pressed;
     let mut g = lua::ui(lua);
     let u = &mut *g;
-    if u.tree.generation != state.generation
+    let content = u.tree.settle();
+    if content != state.generation
         || u.fonts.atlas_dirty
         || state.screen != (pw as u32, ph as u32)
     {
+        prof::count("rebuild");
+        let p_build = prof::scope("build_quads");
         let (quads, background_quads) = render::build_quads_split(u, pressed);
+        drop(p_build);
+        let _p_sync = prof::scope("sync_meshes");
         debug!(
             "aa-ui: rebuild {} quads, {} background (split layer {:?})",
             quads.len(),
@@ -670,7 +681,7 @@ fn ui_frame(
             formats.as_deref(),
             &batches,
         );
-        state.generation = u.tree.generation;
+        state.generation = content;
         state.screen = (pw as u32, ph as u32);
         stats.quads = state.quads;
         stats.draw_calls = state.draw_calls;
@@ -679,6 +690,8 @@ fn ui_frame(
     stats.keyboard_focus = u.focus.is_some();
     drop(g);
     stats.frame_us = t0.elapsed().as_secs_f32() * 1e6;
+    drop(p_frame);
+    prof::frame_end();
     for (mut tf, mut proj) in camera.iter_mut() {
         *tf = Transform::from_xyz(pw / 2.0, -ph / 2.0, 0.0);
         if let Projection::Orthographic(o) = &mut *proj {
