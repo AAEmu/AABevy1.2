@@ -1,0 +1,53 @@
+{
+ "angles_deg": {
+  "x": 0,
+  "y": 0,
+  "z": 0
+ },
+ "cvars": {
+  "cl_fov": 75,
+  "e_time_of_day": 9.98733521,
+  "e_view_dist_ratio": 60,
+  "r_colorbits": 32,
+  "r_driver": "DX10",
+  "r_fullscreen": 0,
+  "r_hdrrendering": 3,
+  "r_height": 1080,
+  "r_vsync": 0,
+  "r_width": 1920,
+  "sys_spec_full": 4
+ },
+ "dir": {
+  "x": 0,
+  "y": 1,
+  "z": 0
+ },
+ "fov_deg": 71.2499924,
+ "fov_rad": 1.24354708,
+ "player": {
+  "entity": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": 0
+   },
+   "class": "nuian_male",
+   "position": {
+    "x": 4421,
+    "y": 4305,
+    "z": 238.676056
+   },
+   "terrain_height": 238.676056
+  },
+  "name": "Refone",
+  "world_id": 1,
+  "world_name": "Lane-bevy",
+  "world_pos": [],
+  "zone_text": "Two Crowns"
+ },
+ "pos": {
+  "x": 4421,
+  "y": 4300.99414,
+  "z": 240.410263
+ }
+}
