@@ -207,7 +207,7 @@ calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
-Placement files are parsed on the task pool (max 2 cells in flight) and binned per 64 m sector. Models are prepared (parsed, textures
+Placement files are parsed on the `aa_cry::workers` threads (max 2 cells in flight, ahead of the models in the queue) and binned per 64 m sector. Models are prepared (parsed, textures
 decoded and baked, materials and meshes built) on the `aa_cry::workers` threads, nearest sector first (at most 48 jobs queued, the rest
 wait as `Wanted`), and inserted into the asset collections by the main thread with `CryAssets::finish_model` (1 ms budget per frame). An
 instance whose model is not ready waits in its sector (`SectorState::waiting`) and is spawned when the model arrives; the instance to model
@@ -322,7 +322,8 @@ reflection (about 6 %); the real picture shows stronger reflections than that (p
 ### Streaming (`stream.rs`)
 
 `stream_cells` picks cells whose square is within `load_radius` (3000 m) of the focus (the entity with `WorldFocus`, else the first
-`Camera3d`) and starts `load_cell` on `AsyncComputeTaskPool` (max 3 at a time): read `heightmap.dat` and `cover.ctc`, build the atlas
+`Camera3d`) and starts `load_cell` on the `aa_cry::workers` threads (max 3 at a time, nearest first, ahead of everything else the workers
+do; Bevy's async compute pool is where the render pipelines compile, and behind a first frame full of shaders it was busy for seconds): read `heightmap.dat` and `cover.ctc`, build the atlas
 and all 16 patch meshes at the likely level of detail. A channel returns them; `receive_cells` moves at most `spawns_per_frame` cells into
 the world per frame. Cells farther than `unload_radius` (3600 m) are despawned. Failed loads (no terrain, e.g. empty ocean) are remembered.
 
@@ -335,12 +336,12 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 
 * `AaWorldPlugin { config: WorldConfig }`; `WorldConfig` fields: `world`, `load_radius`, `unload_radius`, `max_loads`, `spawns_per_frame`,
   `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `tree_distance`, `water_distance`, `object_budget_ms`,
-  `environment`, `post`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1000), `ambient_scale`
+  `finish_budget_ms` (main thread time per frame for inserting prepared models, 1 ms; the loading screen raises it), `environment`, `post`, `sky_radius` (the camera far plane must exceed it), `shadows`, `shadow_distance`, `sun_lux_scale` (1000), `ambient_scale`
   (1700), `fog_visibility`, `terrain_tint`, `terrain_detail`.
 * Resources: `WorldClock` (time of day: `hour`, `speed` in game hours per second, `zone` to force one, `layer` of the zone files), `Environment` (the
   applied sample, `ocean_fog`), `AtmosphereTuning` (`AA_TUNE`), `WaterStyles` (materials by style), `TodCache`,
   `WorldInfo(Arc<World>)`, `Streamer::loaded_cells()`, `ObjectState` (`stats`), `WorldTimings` (per frame main thread ms
-  of the streaming systems), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
+  of the streaming systems), `pipelines::PipelineStatus` (render pipelines waiting / requested, frames of the render world; for loading screens), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
   `TerrainQuery` (ground queries, see below). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
@@ -485,7 +486,7 @@ What it showed: the GPU is not the limit (passes sum to 1.4 to 3.6 ms), and the 
 the world's own cost small. What hurt was the main thread doing loads and per unit work in bursts:
 
 * Model, texture and material loading ran on the main thread (`load_model` per placed model, `CryAssets::load_model` per unit part). Now
-  `aa_cry::workers` (2 to 4 threads, priority = distance) prepares them (`CryLoader::prepare_model`), `finish_model` (about 0.03 ms) runs
+  `aa_cry::workers` (a third of the hardware threads, priority = distance) prepares them (`CryLoader::prepare_model`), `finish_model` (about 0.03 ms) runs
   on the main thread under a 1 ms budget, a sector spawns when its models are ready, a new level of detail is built hidden and swapped.
 * Units and doodads of the client (`ingame/prepare.rs`): database rows, models, the composed face (`prewarm_character_face`, the face
   cache of aa-anim) and the clip set are prepared on a worker; the main thread only spawns the entities (about 10 ms instead of 45 per
@@ -524,6 +525,41 @@ a part's joint set to the bones it uses would cut it, not done: it touches `aa-a
 animated bones (0.9 ms for a crowd after the rate limit, 2.1 ms before); 3,000 or more distinct skinned draws in a crowd (merging the parts
 of a character into one mesh per material would need the dye and face systems' cooperation). The Compute Task Pool threads of Bevy spin
 (74 % of the process cycles, mostly idle polling); fewer threads (`AA_COMPUTE_THREADS` in `fly`) did not change the frame time.
+
+### Entering the world (normal login flow)
+
+The first frames of a world are expensive once: Bevy compiles the render pipelines (80 to 160 of them, about 1 s on this machine
+however many threads it gets; they run on the async compute pool), the first skinned meshes, models and textures are uploaded. They used to
+happen in the first frames in game (one frame of 90 to 215 ms, 1.3 to 1.8 s with the HUD build, and meshes popping in while the pipelines
+compiled). Now the loading screen does them: as soon as the server's spawn is known `ingame::player::spawn_player` builds the character and
+`ingame::camera::spawn_camera` the world camera, which renders into an image of the window's size, behind the loading UI;
+`login::loading` waits until terrain cells, objects, models, the units near the spawn and the pipelines
+(`aa_world::pipelines::PipelineStatus`: waiting and total counts of the render world's `PipelineCache`, shared through atomics) have stopped
+changing for 0.4 s, then switches to `Screen::InGame`, where the camera is put on the window as soon as the UI cameras agree with it.
+Terrain cells and placement files moved from Bevy's async compute pool (where the shader compilation starves them) to the `aa_cry::workers`
+queue, ahead of the models: models were done after 1.4 to 2.2 s before, 0.5 s now. The loading screen raises the per frame streaming budgets
+(`object_budget_ms` 10, `finish_budget_ms` 4) and puts them back when it ends.
+
+`tools/perf-flow.sh <rounds> <label>=<dir> ...` runs the real flow through the original scripts (`--account bevycreate --goto loading`) and
+prints the `flow:` lines of `ingame/flow.rs`; `CYCLES=1` adds `--leave-world 6 --again` (leave through the server, press Start again).
+Release, 1920 x 1080, alternating runs of the build before (`before`: world built on the first game frame) and after:
+
+| | before | after |
+|---|---|---|
+| no HUD: loading screen | 1.3 s | 2.4 s (4.9 s with a cold file cache) |
+| no HUD: Start pressed to first in-game frame | 1.4 to 1.6 s | 2.4 s |
+| no HUD: worst frame of the first 5 s in game | 113 to 215 ms (frame 2) | 21 to 45 ms |
+| HUD (built during loading by the HUD): Start pressed to first in-game frame | 2.7 to 3.2 s | 2.4 to 2.7 s |
+| HUD: worst frame of the first 5 s in game | 1.35 to 1.85 s | 39 to 50 ms |
+| HUD: worst frame on the loading screen | 44 ms | 540 to 595 ms (the HUD stage build, 1.2 s of Lua before it moved) |
+
+The machine was loaded by other sessions (300 to 580 frames in 5 s instead of 600), the worst frames in game are the noise floor. What the
+loading screen waits for is logged (`loading: waited for (s): terrain, camera frames, models, units, pipelines`): terrain 0.3 to 0.6 s, models
+0.5 s, units 0.4 s, pipelines 1.6 to 1.8 s, which is the critical path (more async compute threads do not shorten it: 3, 6 and 10 threads
+all settle in 1.0 s in `fly`, which logs `render pipelines settled after ...`). Leaving the game (`OnExit(Screen::InGame)`) restores the UI
+cameras the HUD had made HDR without MSAA (`hud::cameras`), which the login stage camera cannot share a window with (a wgpu validation
+error that ended the app); five round trips in a row are clean and the character list looks the same as on the first visit
+(`shots/perf/flow-charlist-first.png`, `flow-charlist-after-leave.png`: the only difference is the idle pose of the character).
 
 ## 6. Known gaps
 

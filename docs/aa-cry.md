@@ -62,8 +62,8 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
   decodes DDS on any thread (`PreparedModel::loaded()` already has final handles);
   `CryAssets::finish_model(prepared) -> Arc<LoadedModel>` inserts the assets on the main thread.
   `load_model` is `prepare` + `finish`, so both share one cache.
-* **Worker pool** (`aa_cry::workers`). `Workers::global().spawn(priority, job)` runs `job` on 2 to 4 background threads, lowest
-  priority value first (use the distance to the camera); `pending()` counts queued and running jobs; a panicking job does not kill
+* **Worker pool** (`aa_cry::workers`). `Workers::global().spawn(priority, job)` runs `job` on a third of the hardware threads (2 to 5,
+  `AA_WORKERS=N` overrides), lowest priority value first (use the distance to the camera); `pending()` counts queued and running jobs; a panicking job does not kill
   its worker. aa-world prepares object models on it and the in-game client prepares units and doodads (database rows, models,
   composed faces, clips); the main thread only calls `finish_model` (about 0.03 ms) and spawns entities.
 * **Profiling** (`aa_cry::prof`). `prof::scope("name")` times a scope (wall time and, on Windows, the thread's CPU time from its
