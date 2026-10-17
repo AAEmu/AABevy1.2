@@ -66,11 +66,13 @@ impl Plugin for InGamePlugin {
         }
         app.insert_resource(dev)
             .init_resource::<units::Views>()
+            .init_resource::<player::SendState>()
             .add_plugins(enter::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnEnter(Screen::InGame), player::spawn_player)
+            .add_systems(OnExit(Screen::InGame), leave_game)
             .add_systems(
                 Update,
                 (
@@ -82,9 +84,49 @@ impl Plugin for InGamePlugin {
                     weapons::attach_carried,
                     log_chat,
                     report,
+                    leave_after,
                 )
                     .run_if(in_state(Screen::InGame)),
             );
+    }
+}
+
+/// `OnExit(Screen::InGame)` (back to the character or server list): removes everything of the game screen, the world follows
+/// by itself once its focus is far away. The player, the other units and doodads, the orbit camera (the world's focus and post
+/// processing target) go; the views of the units are forgotten, the movement packet state starts over, and the world gets its
+/// anchor back (see `login::WorldAnchor`: an inactive camera far outside the map, so nothing streams and the loaded cells unload).
+fn leave_game(
+    mut commands: Commands,
+    doomed: Query<Entity, Or<(With<player::LocalPlayer>, With<units::RemoteUnit>, With<units::RemoteDoodad>, With<camera::OrbitCamera>)>>,
+    anchor: Query<(), With<crate::login::WorldAnchor>>,
+) {
+    let mut n = 0;
+    for e in &doomed {
+        commands.entity(e).despawn();
+        n += 1;
+    }
+    commands.insert_resource(units::Views::default());
+    commands.insert_resource(player::SendState::default());
+    if anchor.is_empty() {
+        commands.spawn((
+            Name::new("world anchor"),
+            crate::login::WorldAnchor,
+            aa_world::WorldFocus,
+            Camera3d::default(),
+            Camera { is_active: false, ..default() },
+            Transform::from_xyz(-1.0e6, 0.0, 1.0e6),
+        ));
+    }
+    info!("left the game screen: {n} entities removed");
+}
+
+/// `--leave-after S`: go back to the character list S seconds after the player appeared (client side only; checks
+/// [`leave_game`]).
+fn leave_after(time: Res<Time>, dev: Res<dev::DevOptions>, mut since: Local<f32>, mut next: ResMut<NextState<Screen>>) {
+    let Some(after) = dev.leave_after else { return };
+    *since += time.delta_secs();
+    if *since >= after {
+        next.set(Screen::CharacterSelect);
     }
 }
 

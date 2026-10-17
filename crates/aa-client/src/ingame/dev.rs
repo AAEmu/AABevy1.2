@@ -9,6 +9,7 @@
 //! * `--hair-color ID`  `hair_colors.id` to use instead of the one the server saved.
 //! * `--hide-part N`  hide the N-th part of the player character (0 = body, 1 = face, ...)
 //! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit.
+//! * `--leave-after S`  go back to the character list S seconds after the player appeared (client side only).
 
 use bevy::prelude::*;
 
@@ -24,6 +25,7 @@ pub struct DevOptions {
     pub cam_dist: Option<f32>,
     pub hide_part: Option<usize>,
     pub hair_color: Option<u32>,
+    pub leave_after: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +75,7 @@ impl DevOptions {
             cam_dist: num("--cam-dist"),
             hide_part: num("--hide-part").map(|n| n as usize),
             hair_color: one("--hair-color").and_then(|v| v.parse().ok()),
+            leave_after: num("--leave-after"),
         }
     }
 
