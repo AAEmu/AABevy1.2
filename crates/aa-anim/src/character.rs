@@ -629,7 +629,6 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
     let Some(key) = inputs.key else { return look };
     let id = key.id();
     let known = FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&id).copied());
-    eprintln!("FACEDBG known={:?} contains={:?} id={}", known, known.map(|a| cry.images.contains(a)), id.len());
     if let Some(handle) = known.and_then(|asset| cry.images.get_strong_handle(asset)) {
         crate::face::discard_face(&key);
         look.texture = Some(handle);
