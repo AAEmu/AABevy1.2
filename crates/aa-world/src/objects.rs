@@ -1,4 +1,4 @@
-//! Cell objects: brushes (`brush.dat`) and vegetation as meshes, spawned per 64 m sector near the camera.
+//! Cell objects: brushes (`brush.dat`), static entity slots and vegetation as meshes, spawned per 64 m sector near the camera.
 //!
 //! * placement files are parsed on background tasks and binned per sector;
 //! * models are prepared (parsed, textures decoded, materials and meshes built) on the worker threads of
@@ -49,6 +49,8 @@ pub mod sounds;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Brush,
+    /// Static `entities.xml` render slots; separate from brush/vegetation records.
+    Entity,
     /// Small vegetation (instances whose own view distance is at most [`WorldConfig::vegetation_distance`]).
     Vegetation,
     /// Large vegetation (trees): own view distance beyond `vegetation_distance`, drawn up to
@@ -61,6 +63,7 @@ pub struct CellObjectData {
     pub objects: CellObjects,
     /// Instance indices per sector (`sx * 16 + sy`).
     pub brush_bins: Vec<Vec<u32>>,
+    pub entity_bins: Vec<Vec<u32>>,
     pub veg_bins: Vec<Vec<u32>>,
     pub tree_bins: Vec<Vec<u32>>,
 }
@@ -69,6 +72,7 @@ impl CellObjectData {
     /// `tree_threshold`: vegetation whose own view distance exceeds it goes to the trees bins.
     pub fn new(objects: CellObjects, tree_threshold: f32) -> Self {
         let mut brush_bins = vec![Vec::new(); 256];
+        let mut entity_bins = vec![Vec::new(); 256];
         let mut veg_bins = vec![Vec::new(); 256];
         let mut tree_bins = vec![Vec::new(); 256];
         let bin = |x: f32, y: f32| {
@@ -80,11 +84,31 @@ impl CellObjectData {
             let t = b.translation();
             brush_bins[bin(t.x, t.y)].push(i as u32);
         }
+        // Avoid drawing a slot twice if an export also includes its identical brush. Compare
+        // once on the placement worker, not while deciding sector visibility every frame.
+        let brush_paths: Vec<_> = objects.models.iter().map(|p| crate::entities::asset_path(p)).collect();
+        for (i, prop) in objects.entity_props.iter().enumerate() {
+            if prop.hidden { continue; }
+            let duplicate = objects.brushes.iter().any(|brush| {
+                let material = usize::try_from(brush.material).ok().and_then(|i| objects.materials.get(i))
+                    .filter(|m| !m.is_empty()).map(|m| {
+                        let path = crate::entities::asset_path(m);
+                        if path.ends_with(".mtl") { path } else { format!("{path}.mtl") }
+                    });
+                brush_paths.get(brush.model as usize) == Some(&prop.model)
+                    && brush.mat4().abs_diff_eq(prop.matrix, 1e-4)
+                    && material == prop.material
+            });
+            if !duplicate {
+                let t = prop.translation();
+                entity_bins[bin(t.x, t.y)].push(i as u32);
+            }
+        }
         for (i, v) in objects.vegetation.iter().enumerate() {
             let bins = if v.max_view_dist > tree_threshold { &mut tree_bins } else { &mut veg_bins };
             bins[bin(v.pos.x, v.pos.y)].push(i as u32);
         }
-        CellObjectData { objects, brush_bins, veg_bins, tree_bins }
+        CellObjectData { objects, brush_bins, entity_bins, veg_bins, tree_bins }
     }
 }
 
@@ -94,6 +118,13 @@ pub struct ObjectSector {
     pub cell: (i32, i32),
     pub sector: u8,
     pub kind: Kind,
+}
+
+/// Marks a drawn part of a static `entities.xml` slot (not an editor helper or actor).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct StaticEntityPart {
+    pub cell: (i32, i32),
+    pub guid: u64,
 }
 
 struct SectorState {
@@ -147,8 +178,8 @@ struct Models {
     keys: Vec<ModelKey>,
     states: Vec<ModelState>,
     by_key: HashMap<ModelKey, u32>,
-    /// `(cell, brush?, model or group, material, lod)` -> id: the per instance lookup builds no strings.
-    fast: HashMap<(i32, i32, bool, u32, i32, u8), u32>,
+    /// `(cell, kind, model/group/entity index, material, lod)` -> id: no per-frame strings.
+    fast: HashMap<(i32, i32, Kind, u32, i32, u8), u32>,
 }
 
 impl Models {
@@ -221,6 +252,8 @@ pub struct ObjectStats {
     pub roads: usize,
     /// Drawn decal meshes (a combined terrain/object decal can produce two).
     pub decals: usize,
+    /// Drawn parts of static `entities.xml` slots, also included in `entities`.
+    pub entity_props: usize,
 }
 
 impl ObjectState {
@@ -272,7 +305,7 @@ fn sector_distance(p: Vec3, cell: (i32, i32), sector: usize) -> f32 {
 /// LOD for a distance band, with hysteresis around the current level.
 fn object_lod(kind: Kind, d: f32, current: Option<u8>) -> u8 {
     let bands: [f32; 2] = match kind {
-        Kind::Brush => [140.0, 380.0],
+        Kind::Brush | Kind::Entity => [140.0, 380.0],
         Kind::Vegetation => [55.0, 130.0],
         Kind::Trees => [150.0, 350.0],
     };
@@ -381,6 +414,7 @@ pub fn stream_objects(
     for k in dead {
         if let Some(s) = state.sectors.remove(&k) {
             commands.entity(s.entity).despawn();
+            for e in s.retired { commands.entity(e).despawn(); }
         }
     }
     for &c in &loaded {
@@ -535,10 +569,11 @@ pub fn stream_objects(
             let d = sector_distance(p, c, sector);
             for (kind, bin, cap) in [
                 (Kind::Brush, &data.brush_bins[sector], cfg.brush_distance),
+                (Kind::Entity, &data.entity_bins[sector], cfg.brush_distance),
                 (Kind::Vegetation, &data.veg_bins[sector], cfg.vegetation_distance),
                 (Kind::Trees, &data.tree_bins[sector], cfg.tree_distance),
             ] {
-                if bin.is_empty() || (kind != Kind::Brush && !cfg.vegetation) {
+                if bin.is_empty() || (matches!(kind, Kind::Vegetation | Kind::Trees) && !cfg.vegetation) {
                     continue;
                 }
                 let key = (c.0, c.1, sector as u8, kind);
@@ -638,7 +673,7 @@ pub fn stream_objects(
                 match &models.states[id as usize] {
                     ModelState::Ready(inst) => {
                         let inst = inst.clone();
-                        spawn_instance(&mut commands, entry, &cfg, &data, kind, idx as usize, &inst, sector_origin);
+                        spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin);
                     }
                     ModelState::Failed => {}
                     _ => {
@@ -656,7 +691,7 @@ pub fn stream_objects(
             let idx = bin[entry.next];
             entry.next += 1;
             let Some((a, b)) = instance_model(&data, kind, idx as usize, &groups) else { continue };
-            let fast = (c.0, c.1, kind == Kind::Brush, a, b, lod);
+            let fast = (c.0, c.1, kind, a, b, lod);
             let id = match models.fast.get(&fast) {
                 Some(&id) => id,
                 None => {
@@ -669,7 +704,7 @@ pub fn stream_objects(
             match &models.states[id as usize] {
                 ModelState::Ready(inst) => {
                     let inst = inst.clone();
-                    spawn_instance(&mut commands, entry, &cfg, &data, kind, idx as usize, &inst, sector_origin);
+                    spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin);
                 }
                 ModelState::Failed => {}
                 _ => {
@@ -694,6 +729,7 @@ pub fn stream_objects(
     state.stats.models_pending = pending;
     state.stats.models_failed = state.models.states.iter().filter(|m| matches!(m, ModelState::Failed)).count();
     let spawned: usize = state.sectors.values().map(|s| s.spawned).sum();
+    state.stats.entity_props = state.sectors.iter().filter(|(k, _)| k.3 == Kind::Entity).map(|(_, s)| s.spawned).sum();
     let busy = pending > 0 || waiting > 0;
     if busy {
         state.busy_ticks += 1;
@@ -709,6 +745,7 @@ fn instance_model(data: &CellObjectData, kind: Kind, idx: usize, groups: &VegGro
             let b = data.objects.brushes.get(idx)?;
             ((b.model as usize) < data.objects.models.len()).then_some((b.model, b.material))
         }
+        Kind::Entity => data.objects.entity_props.get(idx).map(|_| (idx as u32, -1)),
         Kind::Vegetation | Kind::Trees => {
             let v = data.objects.vegetation.get(idx)?;
             groups.groups.contains_key(&v.group).then_some((u32::from(v.group), -1))
@@ -728,6 +765,10 @@ fn model_names(data: &CellObjectData, kind: Kind, a: u32, b: i32, groups: &VegGr
                 .map(|m| format!("{m}.mtl"));
             Some((path, material))
         }
+        Kind::Entity => {
+            let prop = data.objects.entity_props.get(a as usize)?;
+            Some((prop.model.clone(), prop.material.clone()))
+        }
         Kind::Vegetation | Kind::Trees => {
             let g = groups.groups.get(&(a as u16))?;
             Some((g.model.clone(), (!g.material.is_empty()).then(|| format!("{}.mtl", g.material))))
@@ -740,6 +781,7 @@ fn model_names(data: &CellObjectData, kind: Kind, a: u32, b: i32, groups: &VegGr
 fn spawn_instance(
     commands: &mut Commands,
     entry: &mut SectorState,
+    cell: (i32, i32),
     cfg: &WorldConfig,
     data: &CellObjectData,
     kind: Kind,
@@ -753,6 +795,7 @@ fn spawn_instance(
             let view = if b.max_view_dist > 1.0 { b.max_view_dist } else { cfg.brush_distance };
             (b.mat4(), view.min(cfg.brush_distance))
         }
+        Kind::Entity => (data.objects.entity_props[idx].matrix, cfg.brush_distance),
         Kind::Vegetation | Kind::Trees => {
             let v = &data.objects.vegetation[idx];
             let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
@@ -768,7 +811,7 @@ fn spawn_instance(
         }
         let transform = Transform::from_matrix(full);
         for part in parts {
-            commands.spawn((
+            let mut entity = commands.spawn((
                 Mesh3d(part.mesh.clone()),
                 MeshMaterial3d(part.material.clone()),
                 transform,
@@ -776,6 +819,11 @@ fn spawn_instance(
                 VisibilityRange::abrupt(0.0, view),
                 ChildOf(entry.entity),
             ));
+            if kind == Kind::Entity {
+                let prop = &data.objects.entity_props[idx];
+                entity.insert((Name::new(prop.name.clone()), StaticEntityPart { cell, guid: prop.guid }));
+                if !prop.cast_shadow { entity.insert(NotShadowCaster); }
+            }
             entry.spawned += 1;
         }
     }
@@ -815,6 +863,7 @@ fn strip_cube_textures(cry: &mut CryAssets, loaded: &LoadedModel) -> usize {
 fn bin_of(data: &CellObjectData, kind: Kind, sector: usize) -> &[u32] {
     match kind {
         Kind::Brush => &data.brush_bins[sector],
+        Kind::Entity => &data.entity_bins[sector],
         Kind::Vegetation => &data.veg_bins[sector],
         Kind::Trees => &data.tree_bins[sector],
     }

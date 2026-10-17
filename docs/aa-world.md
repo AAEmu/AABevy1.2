@@ -359,6 +359,53 @@ are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environme
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
 
+Static entity slots (`entities.rs`): `CellObjects::entity_props` reads the direct mission entities,
+separately from brush/vegetation and the already-supported particles and sounds. The source is the
+1.2 client's `BasicEntity.lua` / `AnimObject.lua` plus `CEntityLoader::LoadEntity`
+(`sub_32097000` in `D:/aa-re/zone/out/cryentitysystem_dedicate.c`): `GeomEntity.Geometry`,
+or `Properties.object_Model` for `BasicEntity` / `AnimObject`, top-level `Material`,
+cell-local `Pos`, `Rotate="w,x,y,z"`, three-axis `Scale`, `ParentGUID`, `CastShadow` (default true),
+and `HiddenInGame` (default false). Parent transforms are composed before the cell origin is added;
+unresolved parents, cycles and non-finite/singular transforms are skipped. Hidden static slots remain
+plain placement data and never enter the draw bins. This preserves the hidden training targets and
+does not spawn the CDF/CHR cinematic characters handled by aa-client's login stage.
+
+Visible CGF slots and stopped CGA slots (`Animation.bPlaying=0`, native `ResetAnimation(0,-1)`)
+use `Kind::Entity` bins in the existing 64 m sector streamer. They share model/material assets,
+worker limits, spawn/finish budgets, brush LOD distances and `brush_distance` visibility cap.
+An identical brush model/material/transform suppresses its duplicate entity slot once on the
+placement worker. Authored names and GUIDs remain on the drawn parts (`StaticEntityPart`),
+`CastShadow=0` adds `NotShadowCaster`, and `ObjectStats::entity_props` counts these parts (also
+included in the existing `entities` total). Both the active and retired LOD roots are removed
+when their cell unloads. There is no new per-frame geometry or XML parsing.
+
+Real fixtures cover the `ncom_city_streetlamp01.cgf` BasicEntity in main_world cell (18,7),
+and login2 cell (1,0): five map CGFs, one miniature boat CGF and ten stopped miniature CGAs are
+authored visible; twelve training-target CGFs remain hidden. Fifteen of those visible slots refer
+to obsolete `objects/env/loginstage/` paths absent from this pak; they are retained as placement data
+and ordinary missing model loads, with no substitutes. The boat model exists. Tests load original
+streetlamp, miniature boat and CGA rest geometry,
+check parent/nonuniform scale/material semantics, reject cycles/actors/playing CGAs, and verify
+hidden/duplicate bin filtering. The `entity_props` aa-dev example inspects the streetlamp;
+`--elevator` visits the airport lift at its authored initial position, and `--stream-check`
+asserts the actual `StaticEntityPart` mesh entities disappear on unload.
+
+Validation: `cargo test -p aa-world --lib entity` (three tests), example build/check, and aa-dev
+captures inspected at 1920x1080. `shots/aa-world/entities/streetlamp.png` clearly shows the
+original lamp on the dock: two entity parts / 976 total parts, 173–190 FPS after loading.
+The unload smoke starts with two parts and asserts zero actual mesh entities after leaving the
+cell. The elevator run loads four parts / 589 total parts, 123–128 FPS late in the run; its
+platform is occluded by the tower shell from the exterior QA camera, so this is a load/lifetime
+check, not a clear elevator visual comparison. No exact real-client captures of these two sites
+are available in `reference/`; no pixel-match claim. All own example windows exit automatically.
+
+Remaining entity limits: playing CGAs, skinned actors, FlowGraph movement/events, rigid-body
+simulation and local `Light`/`SimpleLight` render slots are not implemented by this static path.
+The elevator is visible at its initial position and does not execute its move/wait graph.
+Visibility uses the configured brush cap; the XML `ViewDistRatio` has no recovered native bound
+conversion here. As with existing brush parts, compound matrix shear is not represented by Bevy's
+decomposed `Transform`.
+
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data
 (`water_distance` 1400 m) with the style's `WaterMaterial` (`water_material.rs`, see Water below). The terrain pokes through where the banks
@@ -1048,8 +1095,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: deferred object.dat decals (type 9), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
-  the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
+* Not rendered: deferred object.dat decals (type 9), types 6 and 14, animated/skinned `entities.xml` render slots and local lights.
+  Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
@@ -1073,8 +1120,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
-* login2: cinema cameras and the real cameras are supported, but the race training fields of create step 3 are not part of the cell
-  brush data (entities / cinemas); the scene shows terrain and the stage props of `object.dat`.
+* login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
+  authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
 
 ## 7. Requests to other crates

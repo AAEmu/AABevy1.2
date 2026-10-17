@@ -246,6 +246,8 @@ pub struct CellObjects {
     pub decals: Vec<Decal>,
     pub roads: Vec<Road>,
     pub water: Vec<Water>,
+    /// Static render slots from `entities.xml`, including hidden cinematic props as data.
+    pub entity_props: Vec<crate::entities::PlacedProp>,
     /// The active `ParticleEffect` entities of `entities.xml`.
     pub effects: Vec<PlacedEffect>,
     /// The sound entities of `entities.xml` (ambient, random, spots, reverb) and their areas.
@@ -528,6 +530,7 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
     if let Some(xml) = read("entities.xml") {
         let xml = String::from_utf8_lossy(&xml);
         objects.effects = parse_effect_entities(&xml);
+        objects.entity_props = crate::entities::parse_static_entities(&xml);
         objects.sounds = crate::objects::sounds::parse(&xml);
     }
     objects

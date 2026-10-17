@@ -9,6 +9,7 @@ pub mod coords;
 mod decals;
 pub mod cover;
 pub mod env;
+pub mod entities;
 pub mod heightmap;
 pub mod objects;
 pub mod pipelines;
