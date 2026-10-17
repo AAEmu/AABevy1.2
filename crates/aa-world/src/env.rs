@@ -140,12 +140,16 @@ pub struct Lighting {
     /// `PlanetRotationAxis` (default 0): offsets the circle along its axis by `sin(PlanetRotationAxis)`, a small circle
     /// instead of a great one.
     pub planet_axis: f32,
+    /// `DawnTime / 60` (hours; default 355 / 60): where the world's real dawn is, which the engine's time of day manager moves
+    /// onto the splines' authored 6:00 (and, mirrored as `24 - dawn_hour`, the dusk onto 18:00); see [`spline_hour`].
+    /// 6.0 (login worlds, most instances) leaves the hour as it is.
+    pub dawn_hour: f32,
 }
 
 impl Default for Lighting {
     /// The main world's.
     fn default() -> Self {
-        Lighting { sun_rotation: 188.0, latitude: 154.0, planet_axis: 25.0 }
+        Lighting { sun_rotation: 188.0, latitude: 154.0, planet_axis: 25.0, dawn_hour: 119.0 / 60.0 }
     }
 }
 
@@ -154,7 +158,12 @@ impl Lighting {
         let doc = roxmltree::Document::parse(xml).ok()?;
         let l = doc.descendants().find(|n| n.has_tag_name("Lighting"))?;
         let number = |name: &str, default: f32| l.attribute(name).and_then(|v| v.parse().ok()).unwrap_or(default);
-        Some(Lighting { sun_rotation: number("SunRotation", 240.0), latitude: number("Latitude", 90.0), planet_axis: number("PlanetRotationAxis", 0.0) })
+        Some(Lighting {
+            sun_rotation: number("SunRotation", 240.0),
+            latitude: number("Latitude", 90.0),
+            planet_axis: number("PlanetRotationAxis", 0.0),
+            dawn_hour: number("DawnTime", 355.0) / 60.0,
+        })
     }
 }
 
@@ -289,9 +298,10 @@ pub(crate) fn srgb_to_linear(c: Vec3) -> Vec3 {
 }
 
 impl TimeOfDay {
-    /// Evaluates the environment at `hour` (0..24).
+    /// Evaluates the environment at the game hour `hour` (0..24): the splines are read at [`spline_hour`] of it, the sun path
+    /// and everything else take the raw hour.
     pub fn sample(&self, hour: f32, lighting: Lighting) -> EnvSample {
-        let t = hour / 24.0;
+        let t = spline_hour(hour, lighting.dawn_hour) / 24.0;
         let col = |name: &str, mul: &str| {
             let c = self.color(name, t);
             let m = if mul.is_empty() { 1.0 } else { self.scalar(mul, t) };
@@ -373,6 +383,36 @@ impl TimeOfDay {
             char_back_shadow: self.scalar("InShadowIntensity", t),
             ocean_under: self.scalar("Ocean fog density under water", t),
         }
+    }
+}
+
+/// The hour the zone's time of day splines are read at for the game hour `hour`: the engine's time of day manager (`SetTime`
+/// -> vtable slot 14, `cry3dengine.dll` 0x300A49D0) hands every zone layer a warped hour, a quadratic per half day that moves
+/// the world's real dawn and dusk (`lighting.xml` `DawnTime`, `dawn` = `DawnTime / 60`; main world 119 -> 1.9833, so 2:00 and
+/// 22:00) onto the 6:00 and 18:00 the splines were authored for. The second half's quadratic is clamped at 0, so on the main
+/// world every hour from 12:00 to 19:05 reads the splines at 12.0 (a long afternoon of noon light; 19.17 h reads 12.17), and
+/// 2.7 h reads 6.7 (morning). `dawn` = 6 (login worlds and most instances) is the identity. The sun path (`sun_direction`),
+/// `e_time_of_day`, the HUD clock all keep the raw hour. `docs/research/time-of-day.md`.
+pub fn spline_hour(hour: f32, dawn: f32) -> f32 {
+    // bend `k` of the half day quadratic `y = k u^2 + (1 - k) u`; `anchor` in hours
+    fn bend(anchor: f32) -> f32 {
+        let v = anchor / 12.0;
+        if v >= 1.0 {
+            let w = v - 1.0;
+            (2.0 - 4.0 * w) / (4.0 * w * w - 4.0 * w)
+        } else {
+            (v - 0.5) * -4.0
+        }
+    }
+    let h = hour.rem_euclid(24.0);
+    if h < 12.0 {
+        let (u, k) = (h / 12.0, bend(dawn));
+        let y = if k.abs() < 1e-6 { u } else { (((1.0 - k).powi(2) + 4.0 * k * u).sqrt() + k - 1.0) * 0.5 / k };
+        y.max(0.0) * 12.0
+    } else {
+        let (u, k) = ((h - 12.0) / 12.0, bend(24.0 - dawn));
+        let y = if k.abs() < 1e-6 { u } else { u * u * k + (1.0 - k) * u };
+        (y.max(0.0) + 1.0) * 12.0
     }
 }
 
@@ -485,10 +525,54 @@ mod tests {
         assert!(sun_direction(0.0, l).z < 0.0 && sun_direction(23.0, l).z < 0.0);
         assert!(sun_direction(6.0, l).x > 0.5 && sun_direction(18.0, l).x < -0.5);
         // the login stage's file (260 / 40 / 0): a great circle, the sun at 40 degrees in the west at noon
-        let login = Lighting { sun_rotation: 260.0, latitude: 40.0, planet_axis: 0.0 };
+        let login = Lighting { sun_rotation: 260.0, latitude: 40.0, planet_axis: 0.0, dawn_hour: 6.0 };
         let (az, el) = degrees(sun_direction(12.0, login));
         assert!((az - 280.0).abs() < 0.3 && (el - 40.0).abs() < 0.3, "{az} {el}");
         assert!(sun_direction(6.0, login).z.abs() < 1e-3 && sun_direction(18.0, login).z.abs() < 1e-3);
+    }
+
+    #[test]
+    fn spline_hour_is_the_engines_warp() {
+        // main world, DawnTime 119: the test vectors of docs/research/time-of-day.md
+        let dawn = 119.0 / 60.0;
+        for (hour, spline) in [(0.0, 3.04), (2.0, 6.02), (2.7, 6.67), (3.8, 7.55), (9.56, 10.90), (12.0, 12.0), (16.68, 12.0), (19.0, 12.0), (19.17, 12.17), (20.0, 13.53), (22.0, 17.96), (23.0, 20.78)] {
+            let got = spline_hour(hour, dawn);
+            assert!((got - spline).abs() < 0.03, "{hour}: {got} != {spline}");
+        }
+        // the real dawn and dusk land on the authored 6:00 and 18:00, and the half days join at noon
+        assert!((spline_hour(dawn, dawn) - 6.0).abs() < 0.05 && (spline_hour(24.0 - dawn, dawn) - 18.0).abs() < 0.05);
+        assert!((spline_hour(11.999, dawn) - 12.0).abs() < 0.01);
+        // login worlds and most instances (DawnTime 360) are the identity, at every hour
+        for i in 0..240 {
+            let h = i as f32 * 0.1;
+            assert!((spline_hour(h, 6.0) - h).abs() < 1e-3, "{h}");
+        }
+        // an hour outside 0..24 wraps like the clock
+        assert!((spline_hour(25.0, dawn) - spline_hour(1.0, dawn)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn splines_are_read_at_the_warped_hour_but_the_sun_at_the_raw_one() {
+        // a ramp over the day: the scalar at spline hour `h` is `h`
+        let xml = r#"<TimeOfDayList><TimeOfDay>
+            <Variable Name="Sun color multiplier" Value="1"><Spline Keys="0:0:0,1:24:0,"/></Variable>
+            </TimeOfDay></TimeOfDayList>"#;
+        let t = TimeOfDay::parse(xml).unwrap();
+        let main = Lighting::default();
+        let tt = |h: f32, l: Lighting| t.scalar("Sun color multiplier", spline_hour(h, l.dawn_hour) / 24.0);
+        assert!((tt(19.17, main) - 12.17).abs() < 0.03 && (tt(2.7, main) - 6.67).abs() < 0.03);
+        let login = Lighting { dawn_hour: 6.0, ..main };
+        assert!((tt(19.17, login) - 19.17).abs() < 1e-3);
+        // the sun path does not see the warp
+        assert_eq!(t.sample(19.17, main).sun_dir, sun_direction(19.17, main));
+    }
+
+    #[test]
+    fn lighting_reads_the_dawn_time() {
+        let main = Lighting::parse(r#"<sun><Lighting SunRotation="188" Latitude="154" PlanetRotationAxis="25" DawnTime="119" DawnDuration="15"/></sun>"#).unwrap();
+        assert!((main.dawn_hour - 119.0 / 60.0).abs() < 1e-6);
+        let login = Lighting::parse(r#"<sun><Lighting SunRotation="260" Latitude="40" DawnTime="360"/></sun>"#).unwrap();
+        assert!((login.dawn_hour - 6.0).abs() < 1e-6);
     }
 
     #[test]
