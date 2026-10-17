@@ -13,6 +13,20 @@
 //! message; no hook = one "All" tab). `X2Chat:DispatchChatMessage(filter, text)` (toolkit) adds
 //! a line to every tab that takes `filter`, coloured by `AAUI.ChatColor(filter)` (`{r, g, b}`)
 //! or a default per filter.
+//!
+//! # Scrolling
+//!
+//! The chat scripts hook no wheel or scroll handler: the message frame scrolls natively. The
+//! mouse wheel over a frame (`input::update` -> `wheel`, 3 messages per notch; scripts' own
+//! `OnWheelUp` / `OnWheelDown` handlers on the widgets under the cursor win) scrolls back through
+//! its messages (`MessageData::scroll` counts messages from the bottom, not wrapped lines, and is
+//! clamped so the oldest message can reach the top of the frame); while scrolled back the time limit
+//! (`SetTimeVisible`) does not hide old messages. A message arriving while scrolled back moves
+//! `scroll` along, so the view does not jump (the down-to-bottom button's flicker, started by
+//! `OnContentUpdated("unread_chat_message")`, tells there is more below; scrolling to the bottom
+//! raises `"read_chat_message"`). While the cursor is over the selected tab's frame its native
+//! controls show: the up / down buttons (one message), the slider (thumb at the top = the oldest
+//! messages; dragging it scrolls) and, scrolled back, the down-to-bottom button.
 
 use mlua::{Function, Lua, Table, Value};
 
@@ -100,10 +114,15 @@ pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
     if let Some(w) = u.tree.widget_mut(id) {
         let m = w.message.get_or_insert_with(MessageData::default);
         m.lines.push((text.to_string(), now));
+        // Scrolled back: the view stays on the same messages.
+        if m.scroll > 0 {
+            m.scroll += 1;
+        }
         let max = m.max_lines.max(1);
         if m.lines.len() > max {
             let n = m.lines.len() - max;
             m.lines.drain(..n);
+            m.scroll = m.scroll.min(m.lines.len().saturating_sub(1));
         }
     }
     u.tree.touch();
@@ -121,10 +140,11 @@ pub(crate) fn compose(u: &mut super::Ui, id: Id, rect: Rect) -> Option<TextBlock
     let live: Vec<&str> = m
         .lines
         .iter()
-        .filter(|(_, t)| m.time_visible.is_none_or(|s| now - t < s as f64 * 1000.0))
+        // Scrolled back, the whole history is there (the time limit only fades the live view).
+        .filter(|(_, t)| m.scroll > 0 || m.time_visible.is_none_or(|s| now - t < s as f64 * 1000.0))
         .map(|(s, _)| s.as_str())
         .collect();
-    let end = live.len().saturating_sub(m.scroll);
+    let end = live.len().saturating_sub(m.scroll).max(live.len().min(1));
     let mut shown: Vec<&str> = Vec::new();
     let size = base.style.size * scale;
     for line in live[..end].iter().rev() {
@@ -153,6 +173,241 @@ pub(crate) fn compose(u: &mut super::Ui, id: Id, rect: Rect) -> Option<TextBlock
         _ => Align::Bottom,
     };
     Some(t)
+}
+
+/// Messages one wheel notch scrolls.
+const WHEEL_LINES: i64 = 3;
+
+/// How many of a message frame's messages, from the oldest, fit its height: the oldest one is in
+/// view once the frame is scrolled back to `lines - fit`.
+fn fit_top(u: &mut super::Ui, id: Id) -> usize {
+    let rect = u.tree.rect(id);
+    let Some(w) = u.tree.widget(id) else { return 0 };
+    let Some(m) = w.message.as_ref() else { return 0 };
+    let base = w.text.clone().unwrap_or_default();
+    let scale = u.ui_scale;
+    let inner_w = (rect.w - base.inset[0] - base.inset[2]).max(1.0);
+    let inner_h = (rect.h - base.inset[1] - base.inset[3]).max(0.0);
+    let size = base.style.size * scale;
+    let (mut n, mut text) = (0usize, String::new());
+    for (line, _) in &m.lines {
+        let test = if n == 0 { line.clone() } else { format!("{text}\n{line}") };
+        let lo = u.fonts.layout(
+            &base.style.font,
+            size,
+            &test,
+            Some(inner_w * scale),
+            base.line_space * scale,
+            false,
+        );
+        if lo.height > inner_h * scale + 0.5 && n > 0 {
+            break;
+        }
+        text = test;
+        n += 1;
+    }
+    n
+}
+
+/// The most a message frame can be scrolled back.
+fn max_scroll(u: &mut super::Ui, id: Id) -> usize {
+    let fit = fit_top(u, id);
+    let len = u
+        .tree
+        .widget(id)
+        .and_then(|w| w.message.as_ref())
+        .map_or(0, |m| m.lines.len());
+    len.saturating_sub(fit)
+}
+
+/// The native slider of a message frame (`GetSlider()`), if it has one.
+fn frame_slider(lua: &Lua, msg: Id) -> Option<Id> {
+    let t = parts(lua, msg).ok()?.raw_get::<Option<Table>>("slider").ok()??;
+    value_id(lua, &Value::Table(t))
+}
+
+/// Move the slider to where the scroll is: the thumb at the top is the oldest messages.
+fn sync_slider(lua: &Lua, msg: Id) {
+    let Some(slider) = frame_slider(lua, msg) else { return };
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let max = max_scroll(u, msg);
+    let scroll = u
+        .tree
+        .widget(msg)
+        .and_then(|w| w.message.as_ref())
+        .map_or(0, |m| m.scroll.min(max));
+    let want = (0.0, max as f32, (max - scroll) as f32);
+    let cur = u
+        .tree
+        .widget(slider)
+        .and_then(|w| w.slider.as_ref())
+        .map(|s| (s.min, s.max, s.value));
+    if cur != Some(want) {
+        if let Some(s) = u.tree.widget_mut(slider).and_then(|w| w.slider.as_mut()) {
+            (s.min, s.max, s.value) = want;
+            s.step = 1.0;
+        }
+    }
+}
+
+/// Scroll a message frame back to `to` messages from the bottom (clamped): the slider follows,
+/// and reaching the bottom marks the frame read (`OnContentUpdated(self, "read_chat_message")`).
+pub(crate) fn set_scroll(lua: &Lua, id: Id, to: i64) {
+    let (changed, now) = {
+        let mut g = ui(lua);
+        let u = &mut *g;
+        let max = max_scroll(u, id) as i64;
+        let to = to.clamp(0, max) as usize;
+        let cur = u
+            .tree
+            .widget(id)
+            .and_then(|w| w.message.as_ref())
+            .map_or(0, |m| m.scroll);
+        if to != cur {
+            if let Some(m) = u.tree.widget_mut(id).and_then(|w| w.message.as_mut()) {
+                m.scroll = to;
+            }
+        }
+        (to != cur, to)
+    };
+    if !changed {
+        return;
+    }
+    sync_slider(lua, id);
+    if now == 0 {
+        if let Ok(s) = lua.create_string("read_chat_message") {
+            call_handler(lua, id, "OnContentUpdated", vec![Value::String(s)]);
+        }
+    }
+}
+
+/// Scroll a message frame back (`delta` > 0) or forward by `delta` messages.
+pub(crate) fn scroll_by(lua: &Lua, id: Id, delta: i64) {
+    let cur = with_msg(lua, id, |m| m.scroll).unwrap_or(0) as i64;
+    set_scroll(lua, id, cur + delta);
+}
+
+/// The mouse wheel at `cursor` (UI units), no script handler took it: scroll the topmost message
+/// frame under the cursor, unless another window is in the way. `wheel` > 0 scrolls back.
+pub(crate) fn wheel(lua: &Lua, (x, y): (f32, f32), hover: Option<Id>, wheel: f32) -> bool {
+    let target = {
+        let u = ui(lua);
+        let hover_top = hover.map(|h| u.tree.top_of(h));
+        u.tree.paint_order().into_iter().rev().find(|&id| {
+            u.tree.widget(id).is_some_and(|w| w.message.is_some())
+                && u.tree.rect(id).contains(x, y)
+                && hover_top.is_none_or(|t| t == u.tree.top_of(id))
+        })
+    };
+    let Some(msg) = target else { return false };
+    let notches = wheel.abs().round().clamp(1.0, 5.0) as i64;
+    let sign = if wheel > 0.0 { 1 } else { -1 };
+    scroll_by(lua, msg, sign * notches * WHEEL_LINES);
+    true
+}
+
+/// A drag on a slider moved it: when it is a message frame's native slider, scroll to it.
+pub(crate) fn slider_changed(lua: &Lua, slider: Id) {
+    let msg = {
+        let u = ui(lua);
+        match u.tree.get(slider).parent {
+            Some(p) if u.tree.widget(p).is_some_and(|w| w.message.is_some()) => p,
+            _ => return,
+        }
+    };
+    if frame_slider(lua, msg) != Some(slider) {
+        return;
+    }
+    let Some((max, value)) = ui(lua)
+        .tree
+        .widget(slider)
+        .and_then(|w| w.slider.as_ref())
+        .map(|s| (s.max, s.value))
+    else {
+        return;
+    };
+    set_scroll(lua, msg, (max - value).round() as i64);
+}
+
+/// A click on one of a message frame's native scroll buttons. Returns whether `target` was one.
+fn scroll_button_clicked(lua: &Lua, target: Id) -> bool {
+    let msg = {
+        let u = ui(lua);
+        match u.tree.get(target).parent {
+            Some(p) if u.tree.widget(p).is_some_and(|w| w.message.is_some()) => p,
+            _ => return false,
+        }
+    };
+    let Ok(p) = parts(lua, msg) else { return false };
+    let is = |field: &str| {
+        p.raw_get::<Option<Table>>(field)
+            .ok()
+            .flatten()
+            .and_then(|t| value_id(lua, &Value::Table(t)))
+            == Some(target)
+    };
+    if is("upButton") {
+        scroll_by(lua, msg, 1);
+    } else if is("downButton") {
+        scroll_by(lua, msg, -1);
+    } else if is("downToBottomButton") {
+        set_scroll(lua, msg, 0);
+    } else {
+        return false;
+    }
+    true
+}
+
+/// Per frame: the selected tab's native scroll controls show while the cursor is over its frame
+/// (and there is something to scroll), and the slider keeps up with the scroll range.
+fn scroll_controls(lua: &Lua, wins: &[Id]) {
+    for &win in wins {
+        let Some(c) = chat(lua, win) else { continue };
+        for (i, tab) in c.tabs.iter().enumerate() {
+            let msg = tab.message;
+            let Ok(p) = parts(lua, msg) else { continue };
+            let id_of = |field: &str| {
+                p.raw_get::<Option<Table>>(field)
+                    .ok()
+                    .flatten()
+                    .and_then(|t| value_id(lua, &Value::Table(t)))
+            };
+            let controls = [id_of("upButton"), id_of("downButton"), id_of("slider"), id_of("downToBottomButton")];
+            let mut g = ui(lua);
+            let u = &mut *g;
+            let (cx, cy) = u.cursor;
+            let inside = i == c.selected
+                && u.tree.visible(msg)
+                && u.tree.rect(msg).contains(cx, cy)
+                && u.hover.is_none_or(|h| u.tree.top_of(h) == u.tree.top_of(msg));
+            let (max, scroll) = if inside {
+                (
+                    max_scroll(u, msg),
+                    u.tree.widget(msg).and_then(|w| w.message.as_ref()).map_or(0, |m| m.scroll),
+                )
+            } else {
+                (0, 0)
+            };
+            let want = [max > 0, max > 0, max > 0, scroll > 0];
+            for (ctl, show) in controls.into_iter().zip(want) {
+                if let Some(ctl) = ctl {
+                    if u.tree.get(ctl).shown != show {
+                        u.tree.get_mut(ctl).shown = show;
+                    }
+                }
+            }
+            drop(g);
+            if inside {
+                // A message dropped off the top while scrolled back, or the frame was resized.
+                if scroll > max {
+                    set_scroll(lua, msg, max as i64);
+                } else {
+                    sync_slider(lua, msg);
+                }
+            }
+        }
+    }
 }
 
 /// Parts a native composite made (field -> object table), by owner id. Kept outside the object
@@ -369,6 +624,9 @@ fn select(lua: &Lua, id: Id, idx: usize) {
 
 /// A click on a chat tab button selects its tab. Returns whether `target` was one.
 pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
+    if scroll_button_clicked(lua, target) {
+        return true;
+    }
     let Some(parent) = ui(lua).tree.get(target).parent else {
         return false;
     };
@@ -483,7 +741,7 @@ pub(crate) fn update(lua: &Lua) {
         .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.chat.is_some()))
         .map(|(i, _)| i as Id)
         .collect();
-    for id in wins {
+    for &id in &wins {
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
         let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else { continue };
         if c.hovered == Some(inside) {
@@ -505,6 +763,8 @@ pub(crate) fn update(lua: &Lua) {
             ch.hovered = Some(inside);
         }
     }
+    drop(g);
+    scroll_controls(lua, &wins);
 }
 
 /// Default line colours by chat filter (`CMF_*`), when the app gives none.
@@ -553,7 +813,10 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
     };
     for m in frames {
         add_line(lua, m, &line);
-        call_handler(lua, m, "OnContentUpdated", vec![Value::String(lua.create_string("unread_chat_message")?)]);
+        // Scrolled back, the new line is below the view: the down-to-bottom button flickers.
+        if with_msg(lua, m, |x| x.scroll).unwrap_or(0) > 0 {
+            call_handler(lua, m, "OnContentUpdated", vec![Value::String(lua.create_string("unread_chat_message")?)]);
+        }
     }
     Ok(())
 }
@@ -635,11 +898,7 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         def(
             name,
             method(lua, move |lua, id, _| {
-                with_msg(lua, id, |m| {
-                    let max = m.lines.len().saturating_sub(1) as i64;
-                    m.scroll = (m.scroll as i64 + delta).clamp(0, max) as usize;
-                });
-                ui(lua).tree.touch();
+                scroll_by(lua, id, delta);
                 none()
             })?,
         )?;
@@ -647,15 +906,25 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "ScrollToBottom",
         method(lua, |lua, id, _| {
-            with_msg(lua, id, |m| m.scroll = 0);
+            set_scroll(lua, id, 0);
             none()
         })?,
     )?;
     def(
         "ScrollToTop",
         method(lua, |lua, id, _| {
-            with_msg(lua, id, |m| m.scroll = m.lines.len().saturating_sub(1));
+            set_scroll(lua, id, i64::MAX);
             none()
+        })?,
+    )?;
+    // The chat scripts' OnClick / OnMouseDown ask what link the cursor is on: lines carry no item
+    // or character links here.
+    def(
+        "GetLinkInfoOnCursor",
+        method(lua, |lua, _, _| {
+            let t = lua.create_table()?;
+            t.raw_set("linkType", "none")?;
+            ret(lua, t)
         })?,
     )?;
     for name in ["SetFadeDuration", "EnableItemLink", "ChangeDefaultStyle", "ChangeTextStyle"] {

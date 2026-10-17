@@ -81,6 +81,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             continue;
         }
         let state = button_state(u, id, pressed);
+        let quads_start = out.len();
         let mut ds: Vec<Id> = w
             .drawables
             .iter()
@@ -108,6 +109,9 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         }
         if let Some(dg) = w.diagram.as_ref() {
             diagram_quads(u, id, dg, alpha, scale, &mut out);
+        }
+        if w.cooldown.is_some() {
+            crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, &mut out);
         }
         if let Some(p) = w.picker.as_ref() {
             picker_quads(u, p, alpha, scale, &mut out);
@@ -167,9 +171,41 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         for d in above {
             drawable_quads(u, d, alpha, state, scale, &mut out);
         }
+        // Inside a scroll window (`EnableScroll`): only what is in its rectangle.
+        if let Some(c) = u.tree.clip_rect(id) {
+            clip_quads(&mut out[quads_start..], px(c, scale));
+        }
     }
     let n = background_end.unwrap_or(out.len());
     (out, n)
+}
+
+/// Cut quads to the pixel rectangle `c` (x0, y0, x1, y1), moving the texture coordinates with
+/// the cut edges; quads fully outside collapse to a point (zero area, draws nothing).
+fn clip_quads(quads: &mut [Quad], c: [f32; 4]) {
+    for q in quads {
+        if q.corners.is_some() {
+            continue;
+        }
+        let [x0, y0, x1, y1] = q.pos;
+        let (nx0, ny0, nx1, ny1) = (x0.max(c[0]), y0.max(c[1]), x1.min(c[2]), y1.min(c[3]));
+        if nx0 >= nx1 || ny0 >= ny1 {
+            q.pos = [x0, y0, x0, y0];
+            continue;
+        }
+        let (w, h) = (x1 - x0, y1 - y0);
+        if w > 0.0 && h > 0.0 {
+            let [u0, v0, u1, v1] = q.uv;
+            let (du, dv) = (u1 - u0, v1 - v0);
+            q.uv = [
+                u0 + du * (nx0 - x0) / w,
+                v0 + dv * (ny0 - y0) / h,
+                u0 + du * (nx1 - x0) / w,
+                v0 + dv * (ny1 - y0) / h,
+            ];
+        }
+        q.pos = [nx0, ny0, nx1, ny1];
+    }
 }
 
 fn state_index(s: ButtonState) -> usize {
@@ -366,7 +402,7 @@ fn drawable_quads(
                         pos: px(rect, scale),
                         uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                         color,
-                        corners: None,
+                        corners: rotated_corners(px(rect, scale), dr.rotation),
                         vcolors: None,
                     });
                     // Icon image overlays (`AddTexture`), whole texture over the same rect.
@@ -388,9 +424,21 @@ fn drawable_quads(
     }
 }
 
-fn white_uv() -> [f32; 4] {
+pub(crate) fn white_uv() -> [f32; 4] {
     let t = 0.5 / ATLAS_SIZE as f32;
     [t, t, t, t]
+}
+
+/// The corners (top left, top right, bottom right, bottom left) of a pixel rect turned
+/// `angle` radians clockwise about its centre; `None` without rotation.
+fn rotated_corners(p: [f32; 4], angle: f32) -> Option<[[f32; 2]; 4]> {
+    if angle == 0.0 {
+        return None;
+    }
+    let (cx, cy) = ((p[0] + p[2]) / 2.0, (p[1] + p[3]) / 2.0);
+    let (hw, hh) = ((p[2] - p[0]) / 2.0, (p[3] - p[1]) / 2.0);
+    let (s, c) = angle.sin_cos();
+    Some([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| [cx + x * c - y * s, cy + x * s + y * c]))
 }
 
 /// UI rect -> pixel rect, snapped to whole pixels.
@@ -403,7 +451,7 @@ fn px(r: Rect, s: f32) -> [f32; 4] {
     ]
 }
 
-fn text_quads(
+pub(crate) fn text_quads(
     u: &mut Ui,
     t: &TextBlock,
     rect: Rect,

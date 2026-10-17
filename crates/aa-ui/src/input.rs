@@ -3,6 +3,10 @@
 //! behaviour of buttons (state art), check buttons (toggle + `OnCheckChanged`), edit boxes
 //! (keyboard focus, see [`crate::lua::edit`]), list controls (hover / selection) and sliders
 //! (press on the track or thumb and drag: the value follows the cursor, `OnSliderChanged`).
+//! The wheel (`update`'s `wheel`, > 0 = up; `UiVirtualPointer::wheel` adds to the OS wheel) goes to
+//! the `OnWheelUp` / `OnWheelDown` handler of the widget under the cursor or its nearest ancestor
+//! with one; when no script takes it, the message frame under the cursor (the chat) scrolls
+//! (`crate::lua::chat::wheel`).
 
 use mlua::{Lua, Value};
 
@@ -59,6 +63,10 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             }
             let r = u.tree.rect(id);
             if !r.contains(x, y) {
+                continue;
+            }
+            // Scrolled out of its scroll window (`EnableScroll`): not there.
+            if u.tree.clip_rect(id).is_some_and(|c| !c.contains(x, y)) {
                 continue;
             }
             let in_list = u
@@ -143,6 +151,7 @@ pub fn update(
         }
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
+            lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
         mouse.slider = hover.and_then(|h| slider_of(lua, h));
         if let (Some(s), Some(c)) = (mouse.slider, cursor) {
@@ -162,6 +171,7 @@ pub fn update(
         ui(lua).tree.touch();
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
+            lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
         }
         if let (Some(p), Some(h)) = (pressed, hover) {
             if ui(lua).tree.is_descendant(h, p) || h == p {
@@ -181,12 +191,18 @@ pub fn update(
             "OnWheelDown"
         };
         let mut t = hover;
+        let mut handled = false;
         while let Some(id) = t {
             if has_handler(lua, id, name) {
                 call_handler(lua, id, name, vec![]);
+                handled = true;
                 break;
             }
             t = ui(lua).tree.get(id).parent;
+        }
+        // No script took the wheel: message frames (the chat) scroll natively.
+        if let (false, Some(c)) = (handled, cursor) {
+            lua::chat::wheel(lua, c, hover, wheel);
         }
     }
 }
@@ -227,6 +243,8 @@ fn drag_slider(lua: &Lua, slider: Id, (cx, cy): (f32, f32)) {
         v.clamp(s.min, s.max)
     };
     lua::widget::set_slider(lua, slider, v, true);
+    // A message frame's native slider scrolls the frame.
+    lua::chat::slider_changed(lua, slider);
     lua::flush(lua);
 }
 
@@ -236,29 +254,25 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         .last_click
         .is_some_and(|(id, t)| id == target && now - t < 350.0);
     mouse.last_click = Some((target, now));
-    // Check buttons toggle before their OnClick runs (scripts read the new state there).
-    if button == "LeftButton" {
-        let check = {
-            let u = ui(lua);
-            let mut t = Some(target);
-            let mut found = None;
-            while let Some(id) = t {
-                if let Some(w) = u.tree.widget(id).filter(|w| w.button.is_some()) {
-                    if w.ty == WidgetType::CheckButton && w.enabled {
-                        let checked = w.button.as_ref().is_some_and(|b| b.checked);
-                        found = Some((id, checked));
-                    }
-                    break;
+    // The check button this click lands on; it toggles after its OnClick ran (the scripts read the old
+    // state there: the quest list's `show = not self:GetChecked()`, the radio buttons' OnClick).
+    let check = if button == "LeftButton" {
+        let u = ui(lua);
+        let mut t = Some(target);
+        let mut found = None;
+        while let Some(id) = t {
+            if let Some(w) = u.tree.widget(id).filter(|w| w.button.is_some()) {
+                if w.ty == WidgetType::CheckButton && w.enabled {
+                    found = Some(id);
                 }
-                t = u.tree.get(id).parent;
+                break;
             }
-            found
-        };
-        if let Some((id, checked)) = check {
-            lua::widget::set_checked(lua, id, !checked, true);
-            lua::flush(lua);
+            t = u.tree.get(id).parent;
         }
-    }
+        found
+    } else {
+        None
+    };
     // Script OnClick on the target or the nearest ancestor that has one (enabled only).
     let mut t = Some(target);
     while let Some(id) = t {
@@ -275,12 +289,31 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         }
         t = ui(lua).tree.get(id).parent;
     }
+    if let Some(id) = check {
+        let checked = ui(lua)
+            .tree
+            .widget(id)
+            .and_then(|w| w.button.as_ref())
+            .is_some_and(|b| b.checked);
+        lua::widget::set_checked(lua, id, !checked, true);
+        lua::flush(lua);
+    }
+    // A row of a grid (quest list) that was clicked becomes its selected row.
+    if button == "LeftButton" {
+        lua::grid::clicked(lua, target);
+        lua::flush(lua);
+    }
     // Native tab buttons.
     if button == "LeftButton" && lua::tab::button_clicked(lua, target) {
         lua::flush(lua);
         return;
     }
     if button == "LeftButton" && lua::chat::button_clicked(lua, target) {
+        lua::flush(lua);
+        return;
+    }
+    // The world map: left shows the zone under the cursor, right the map above.
+    if lua::worldmap::clicked(lua, target, button) {
         lua::flush(lua);
         return;
     }

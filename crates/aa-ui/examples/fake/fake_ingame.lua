@@ -412,14 +412,19 @@ local BUFFS = {
 }
 
 -- Hooks of the toolkit's native widgets ------------------------------------------------------------
--- AAUI.SlotContent(slotType, slotIdx) -> nil | { type, id, icon, stack, grade [, canUse] }.
+-- Skills cooling down (ms), for `cooldown = { remain, total }` of the slot hooks. The spawn capture has
+-- none; with the example's --cooldown flag Dash was just used (12 s cooldown, 8 s left when the slot is
+-- bound; the native counts it down from there).
+local COOLDOWNS = FAKE_COOLDOWN_DEMO and { [16287] = { remain = 8000, total = 12000 } } or {}
+
+-- AAUI.SlotContent(slotType, slotIdx) -> nil | { type, id, icon, stack, grade [, canUse, cooldown] }.
 AAUI.SlotContent = function(slotType, slotIdx)
   if slotType == ISLOT_ACTION then
     local a = ACTION[slotIdx]
     if a == nil then return nil end
     if a[1] == "skill" then
       local s = SKILLS[a[2]]
-      return { type = "skill", id = a[2], icon = icon(s.icon), canUse = s.usable }
+      return { type = "skill", id = a[2], icon = icon(s.icon), canUse = s.usable, cooldown = COOLDOWNS[a[2]] }
     end
     local it = ITEMS[a[2]]
     return { type = "item", id = a[2], icon = icon(it.icon), stack = (it.maxStack > 1) and it.stack or nil,
@@ -449,7 +454,7 @@ end
 AAUI.SkillContent = function(skillType)
   local s = SKILLS[skillType]
   if s == nil then return nil end
-  return { type = "skill", id = skillType, icon = icon(s.icon), canUse = s.usable }
+  return { type = "skill", id = skillType, icon = icon(s.icon), canUse = s.usable, cooldown = COOLDOWNS[skillType] }
 end
 AAUI.ItemContent = function(itemType, grade)
   local it = ITEMS[itemType]
@@ -478,9 +483,21 @@ end
 -- AAUI.RoadMap(): the zone map overlay (top right). level is the one the scripts register their maps
 -- with (`roadmap:SaveMapData(RMS_ZONE + 1, ...)`: 2 = zone maps, 3 = city maps; the anchor handler
 -- subtracts 1 again), zone = the id of the "<zone>_<size>" keys of map/road_map_list.lua (5 =
--- Solzreed Peninsula), player = position on the map image (0..1).
+-- Solzreed Peninsula), player = position on the map image (0..1) and heading (radians clockwise from north:
+-- the capture's entity yaw is 2.7705 rad counter-clockwise, so -2.7705; camera.json), markers = quest / NPC
+-- icons on the map image (kind: a symbol of map/common.lua, see aa_ui::lua::roadmap).
+local ROADMAP_W, ROADMAP_H = 780, 516   -- the "5_100" map image (map/form.lua W_SOLZREED_100)
 AAUI.RoadMap = function()
-  return { level = 2, zone = 5, player = { u = 0.846, v = 0.265 } }
+  local pu, pv = 0.846, 0.265
+  return {
+    level = 2, zone = 5,
+    player = { u = pu, v = pv, angle = -2.77053833 },
+    markers = {
+      -- Maude, the quest giver below the player in the capture (a yellow "!" 20 px south, 10 px west of the
+      -- cursor; pixel-exact with real.png).
+      { u = pu - 10 / ROADMAP_W, v = pv + 20 / ROADMAP_H, kind = "quest_zone_gives", tooltip = "Maude" },
+    },
+  }
 end
 
 -- X2 (global functions of the client) ----------------------------------------------------------------
