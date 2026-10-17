@@ -4,6 +4,7 @@
 //! Layouts follow the 1.2 server's `Character.Write`, `UnitCustomModelParams`, `Item.Write` and
 //! `SCUnitStatePacket`. Nothing here depends on Bevy.
 
+use crate::buff::Buff;
 use crate::wire::{Pos, Reader, Result, WireError, Writer};
 
 /// Race ids as the server stores them (`characters.race`).
@@ -40,6 +41,44 @@ pub mod gender {
 
 /// Character archetype ids (`ability1` of a new character): 1..=10; [`NO_ABILITY`] is "none".
 pub const NO_ABILITY: u8 = 11;
+
+/// The experience table (`levels.total_exp` of the game database).
+pub mod exp {
+    /// Highest level of the 1.2 client.
+    pub const MAX_LEVEL: u8 = 55;
+
+    /// Total experience needed to reach level `n` at index `n - 1` (levels 1..=55).
+    const TOTAL: [i64; 55] = [
+        0, 400, 1400, 3200, 6000, 10000, 15400, 22400, 31200, 42000, 55000, 70400, 88400, 109200,
+        133000, 160000, 190400, 224400, 262200, 304000, 350000, 400400, 455400, 515200, 580000,
+        650000, 725400, 806400, 893200, 986000, 1085000, 1190400, 1302400, 1421200, 1547000,
+        1680000, 1820400, 1968400, 2124200, 2288000, 2460000, 2640400, 2829400, 3027200, 3234000,
+        3450000, 3675400, 3910400, 4155200, 4410000, 8082000, 16698960, 36282960, 80346960,
+        179307360,
+    ];
+
+    /// Total experience at which `level` starts (0 for level 1 and below; the last entry for
+    /// anything above [`MAX_LEVEL`]).
+    pub fn total_for_level(level: u8) -> i64 {
+        TOTAL[usize::from(level.clamp(1, MAX_LEVEL)) - 1]
+    }
+
+    /// The level a total experience value corresponds to (abilities use the same table).
+    pub fn level_for_total(total: i64) -> u8 {
+        TOTAL.iter().rposition(|&t| t <= total).map_or(1, |i| i as u8 + 1)
+    }
+
+    /// `(earned, needed)` experience inside `level` for a character with `total` experience:
+    /// the bar shows `earned / needed`. At the maximum level `needed` is 0.
+    pub fn progress(level: u8, total: i64) -> (i64, i64) {
+        let level = level.clamp(1, MAX_LEVEL);
+        if level == MAX_LEVEL {
+            return ((total - total_for_level(level)).max(0), 0);
+        }
+        let start = total_for_level(level);
+        ((total - start).clamp(0, i64::MAX), total_for_level(level + 1) - start)
+    }
+}
 
 // ---- equipment ------------------------------------------------------------------------------------
 
@@ -145,9 +184,31 @@ impl Item {
         let flags = r.u8()?;
         let count = r.i32()?;
         let detail_type = r.u8()?;
-        let detail = match detail_type {
-            0 => ItemDetail::None,
-            1 => ItemDetail::Equip(EquipDetail {
+        let detail = ItemDetail::read(r, detail_type)
+            .map_err(|e| WireError::Invalid(format!("item {template_id}: {e}")))?;
+        Ok(Some(Self {
+            template_id,
+            id,
+            grade,
+            flags,
+            count,
+            detail,
+            create_time: r.i64()?,
+            lifespan_mins: r.i32()?,
+            made_unit_id: r.u32()?,
+            world_id: r.u8()?,
+            unsecure_time: r.i64()?,
+            unpack_time: r.i64()?,
+        }))
+    }
+}
+
+impl ItemDetail {
+    /// The detail block that follows the detail type byte of an item.
+    pub fn read(r: &mut Reader, detail_type: u8) -> Result<Self> {
+        Ok(match detail_type {
+            0 => Self::None,
+            1 => Self::Equip(EquipDetail {
                 image_item_template_id: r.u32()?,
                 durability: r.u8()?,
                 rune_id: {
@@ -166,7 +227,19 @@ impl Item {
                 temper_physical: r.u16()?,
                 temper_magical: r.u16()?,
             }),
-            3 => ItemDetail::Mate {
+            // Summoned slave: type, bc db id, destroyed flag, repair start (an `i32` 0 when
+            // unset, else an `i64`), then five `i32`.
+            2 => {
+                r.skip(1 + 3 + 1)?;
+                if r.clone().i32()? == 0 {
+                    r.skip(4)?;
+                } else {
+                    r.skip(8)?;
+                }
+                r.skip(20)?;
+                Self::Other(detail_type)
+            }
+            3 => Self::Mate {
                 exp: r.i32()?,
                 dead: r.u8()?,
                 level: r.u8()?,
@@ -176,26 +249,8 @@ impl Item {
             5 => skip_detail(r, 24, detail_type)?,
             6 => skip_detail(r, 16, detail_type)?,
             8 => skip_detail(r, 8, detail_type)?,
-            other => {
-                return Err(WireError::Invalid(format!(
-                    "item {template_id}: unsupported detail type {other}"
-                )))
-            }
-        };
-        Ok(Some(Self {
-            template_id,
-            id,
-            grade,
-            flags,
-            count,
-            detail,
-            create_time: r.i64()?,
-            lifespan_mins: r.i32()?,
-            made_unit_id: r.u32()?,
-            world_id: r.u8()?,
-            unsecure_time: r.i64()?,
-            unpack_time: r.i64()?,
-        }))
+            other => return Err(WireError::Invalid(format!("unsupported item detail type {other}"))),
+        })
     }
 }
 
@@ -548,6 +603,13 @@ pub struct CharacterState {
     pub num_inventory_slots: u8,
     pub num_bank_slots: i16,
     pub created: i64,
+    /// Experience of each ability, general first (`0` = general, then the ten archetypes).
+    pub ability_exp: [i32; 11],
+    /// Unread mail: received, mia received, commercial.
+    pub unread_mail: [i32; 3],
+    pub jury_point: i32,
+    /// Seconds played in total.
+    pub play_time: i32,
 }
 
 impl CharacterState {
@@ -563,13 +625,19 @@ impl CharacterState {
         let return_district_id = r.i32()?;
         r.skip(4)?; // return district
         let resurrection_district_id = r.u32()?;
-        r.skip(11 * 4)?; // ability exp
-        r.skip(3 * 4)?; // unread mail
+        let mut ability_exp = [0i32; 11];
+        for v in &mut ability_exp {
+            *v = r.i32()?;
+        }
+        let unread_mail = [r.i32()?, r.i32()?, r.i32()?];
         let num_inventory_slots = r.u8()?;
         let num_bank_slots = r.i16()?;
-        // money x2, two reserved i64, auto-use flag, jury point, jail seconds, bounty money and
-        // time, bot report counters, play time.
-        r.skip(8 * 4 + 1 + 4 + 4 + 8 + 8 + 4 + 4 + 4)?;
+        // money x2 (the character's own), two reserved i64, auto-use flag, ...
+        r.skip(8 * 4 + 1)?;
+        let jury_point = r.i32()?;
+        // ... jail seconds, bounty money and time, bot report counters ...
+        r.skip(4 + 8 + 8 + 4 + 4)?;
+        let play_time = r.i32()?;
         let created = r.i64()?;
         r.skip(1)?; // expanded expert
         Ok(Self {
@@ -584,6 +652,10 @@ impl CharacterState {
             num_inventory_slots,
             num_bank_slots,
             created,
+            ability_exp,
+            unread_mail,
+            jury_point,
+            play_time,
         })
     }
 }
@@ -683,10 +755,33 @@ pub struct Unit {
     /// Current health and mana.
     pub hp: i32,
     pub mp: i32,
+    /// The highest health and mana seen for this unit (the server sends no maximum; NPCs are
+    /// announced at full health, so this is exact for them until they are healed above it).
+    pub max_hp: i32,
+    pub max_mp: i32,
     /// `16 * gender + race`.
     pub race_gender: u8,
     /// Last movement received for this unit.
     pub movement: Option<Movement>,
+    /// Faction id (`factions` table; 0 when the packet did not carry it). Hostile and friendly
+    /// factions come from the faction relation packets, not from this value.
+    pub faction_id: u32,
+    pub expedition_id: u32,
+    /// Id of the active appellation (title), 0 for none.
+    pub appellation: u32,
+    /// Unit flag bits as sent (`0x2000` on NPCs).
+    pub flags: u16,
+    /// Characters: learned skills as `(skill id, level)`.
+    pub skills: Vec<(u32, u8)>,
+    /// Characters: ids of the passive buffs.
+    pub passive_buffs: Vec<u32>,
+    /// Characters: experience and order of each ability, in ability id order starting at 1
+    /// (order 255 = not active).
+    pub ability_exp: Vec<(i32, u8)>,
+    /// Characters: the active ability (archetype) ids.
+    pub active_abilities: Vec<u8>,
+    /// Buffs on the unit when it was announced (later changes arrive as buff events).
+    pub buffs: Vec<Buff>,
 }
 
 impl Unit {
@@ -798,13 +893,25 @@ impl Unit {
             model_params,
             hp: 0,
             mp: 0,
+            max_hp: 0,
+            max_mp: 0,
             race_gender: 0,
             movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
         };
         if tail_ok {
             // Ignore failures: a short or unexpected tail only costs the optional fields.
             let _ = unit.read_tail(r, kind_byte);
         }
+        (unit.max_hp, unit.max_mp) = (unit.hp, unit.mp);
         Ok(unit)
     }
 
@@ -837,9 +944,13 @@ impl Unit {
         r.skip(1)?; // active weapon
         if kind_byte == 0 {
             let skills = r.u8()? as usize;
-            r.skip(skills * 5)?;
+            for _ in 0..skills {
+                self.skills.push((r.u32()?, r.u8()?));
+            }
             let passives = r.i32()?.max(0) as usize;
-            r.skip(passives * 4)?;
+            for _ in 0..passives {
+                self.passive_buffs.push(r.u32()?);
+            }
         } else {
             r.skip(1 + 4)?; // learned skill and buff counts (always 0)
         }
@@ -849,7 +960,68 @@ impl Unit {
             f32::from(r.i8()?) * STATE_ROTATION_STEP,
         ];
         self.race_gender = r.u8()?;
-        Ok(())
+        self.read_extras(r, kind_byte)
+    }
+
+    /// After the race: appellation, faction, honor, flags, (characters: abilities and visual
+    /// options) and the three buff lists.
+    fn read_extras(&mut self, r: &mut Reader, kind_byte: u8) -> Result<()> {
+        self.appellation = r.pisc(4)?[2] as u32;
+        let [faction, expedition, ..] = r.pisc(4)?;
+        (self.faction_id, self.expedition_id) = (faction as u32, expedition as u32);
+        r.pisc(2)?; // honor gained in combat, hostile faction kills
+        self.flags = r.u16()?;
+        if kind_byte != 0 {
+            self.buffs = Buff::read_lists(r)?;
+            return Ok(());
+        }
+        // Characters: one `exp (i32), order (u8)` per ability, the active ability ids, a bc, the
+        // visual options (6 byte stp + 4 flags), premium and 6 stat values, then the buffs. The
+        // number of abilities is not on the wire (10 for the server's character model, 11 when
+        // the general ability is listed): take the count that makes the packet end exactly.
+        let start = r.clone();
+        let mut first_ok = None;
+        for n in [10usize, 11, 9, 12] {
+            let mut t = start.clone();
+            match Self::read_character_extras(&mut t, n) {
+                Ok(x) if t.is_empty() => {
+                    *r = t;
+                    (self.ability_exp, self.active_abilities, self.buffs) = x;
+                    return Ok(());
+                }
+                Ok(x) => {
+                    first_ok.get_or_insert((t, x));
+                }
+                Err(_) => {}
+            }
+        }
+        // Nothing fits exactly: keep the first parse that worked (trailing bytes are ignored).
+        match first_ok {
+            Some((t, x)) => {
+                *r = t;
+                (self.ability_exp, self.active_abilities, self.buffs) = x;
+                Ok(())
+            }
+            None => Err(WireError::Invalid("character unit state tail".into())),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn read_character_extras(r: &mut Reader, abilities: usize) -> Result<(Vec<(i32, u8)>, Vec<u8>, Vec<Buff>)> {
+        let mut exp = Vec::with_capacity(abilities);
+        for _ in 0..abilities {
+            exp.push((r.i32()?, r.u8()?));
+        }
+        let n = r.u8()? as usize;
+        let mut active = Vec::with_capacity(n);
+        for _ in 0..n {
+            active.push(r.u8()?);
+        }
+        r.skip(3)?; // bc 0
+        r.skip(6 + 4)?; // stp, helmet / back holdable / cosplay / cosplay backpack
+        r.skip(4 + 6 * 4)?; // premium, six stat values
+        let buffs = Buff::read_lists(r)?;
+        Ok((exp, active, buffs))
     }
 }
 
@@ -1136,12 +1308,49 @@ pub mod chat_type {
     pub const RAID: i16 = 5;
     pub const REGION: i16 = 6;
     pub const CLAN: i16 = 7;
+    pub const SYSTEM2: i16 = 8;
+    pub const FAMILY: i16 = 9;
+    pub const RAID_LEADER: i16 = 10;
+    pub const JUDGE: i16 = 11;
+    pub const ALLY: i16 = 14;
+    /// A player created channel.
+    pub const USER: i16 = 15;
+
+    /// The channel's name, for logs and fallbacks (the UI has localized names).
+    pub fn name(chat_type: i16) -> &'static str {
+        match chat_type {
+            WHISPERED => "Whispered",
+            WHISPER => "Whisper",
+            SYSTEM => "System",
+            NOTICE => "Notice",
+            SAY => "Say",
+            SHOUT => "Shout",
+            TRADE => "Trade",
+            GROUP_FIND => "Looking for group",
+            PARTY => "Party",
+            RAID => "Raid",
+            REGION => "Nation",
+            CLAN => "Guild",
+            SYSTEM2 => "System",
+            FAMILY => "Family",
+            RAID_LEADER => "Raid leader",
+            JUDGE => "Judge",
+            ALLY => "Ally",
+            USER => "User channel",
+            _ => "?",
+        }
+    }
 }
 
 /// `SCChatMessagePacket`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChatMessage {
     pub chat_type: i16,
+    /// The channel's sub type (the zone group id for shout / trade / group-find channels, 0 for
+    /// say, whispers and system text) and faction: with `chat_type` they name the channel the
+    /// message came through (see `SCJoinedChatChannel`).
+    pub sub_type: i16,
+    pub channel_faction: u32,
     /// Sender's object id and character id (0 for system messages).
     pub sender_obj_id: u32,
     pub sender_id: u32,
@@ -1155,7 +1364,8 @@ pub struct ChatMessage {
 impl ChatMessage {
     pub fn read(r: &mut Reader) -> Result<Self> {
         let chat_type = r.i16()?;
-        r.skip(2 + 4)?; // sub type, faction channel
+        let sub_type = r.i16()?;
+        let channel_faction = r.u32()?;
         let sender_obj_id = r.bc()?;
         let sender_id = r.u32()?;
         r.skip(1)?; // language
@@ -1166,6 +1376,8 @@ impl ChatMessage {
         let ability = r.i32()?;
         Ok(Self {
             chat_type,
+            sub_type,
+            channel_faction,
             sender_obj_id,
             sender_id,
             sender_race,
@@ -1398,6 +1610,85 @@ mod tests {
         assert!((u.pos.x - 10.0).abs() < 0.01 && (u.pos.y - 20.0).abs() < 0.01);
     }
 
+    /// The part of `SCUnitStatePacket` the character branch writes after the race byte: pisc
+    /// groups, flags, abilities, visual options, premium, stats and the three buff lists.
+    fn character_extras(w: &mut Writer, abilities: usize) {
+        w.pisc(&[0, 0, 321, 0]); // appellation
+        w.pisc(&[101, 7, 0, 0]); // faction, expedition
+        w.pisc(&[300, 2]); // honor, hostile kills
+        w.u16(0);
+        for i in 0..abilities {
+            w.i32(1000 * i as i32).u8(if i == 0 { 0 } else { 255 });
+        }
+        w.u8(1).u8(1); // one active ability: 1
+        w.bc(0);
+        w.raw(&[0; 6]).raw(&[1, 1, 1, 1]); // stp, visual options
+        w.i32(1);
+        for _ in 0..6 {
+            w.i32(0);
+        }
+        w.u8(2); // good
+        crate::buff::tests::net_buff(w, 2, 8_000_011);
+        crate::buff::tests::net_buff(w, 3, 2423);
+        w.u8(0); // bad
+        w.u8(0); // hidden
+    }
+
+    #[test]
+    fn character_unit_state_carries_faction_skills_abilities_and_buffs() {
+        for abilities in [10usize, 11] {
+            let mut w = Writer::new();
+            w.bc(0x112233).string("Bob").u8(0).u32(77).i64(0).string("");
+            w.position(Pos::new(10.0, 20.0, 5.0)).f32(1.0).u8(5).u32(1234);
+            for _ in 0..slot::COUNT {
+                w.u32(0);
+            }
+            ModelParams::default_face().write(&mut w);
+            w.bc(0).i32(100_000).i32(50_000).u8(255).i8(-1);
+            w.u8(0).bool(false).u8(0); // posture, looted, weapon
+            w.u8(2).u32(5).u8(3).u32(9).u8(1); // two skills
+            w.i32(1).u32(99); // one passive buff
+            w.i8(0).i8(0).i8(32).u8(0x12);
+            character_extras(&mut w, abilities);
+            let bytes = w.finish();
+            let u = Unit::read(&mut Reader::new(&bytes)).unwrap();
+            assert_eq!((u.hp, u.mp, u.max_hp), (1000, 500, 1000));
+            assert_eq!(u.skills, vec![(5, 3), (9, 1)], "{abilities} abilities");
+            assert_eq!(u.passive_buffs, vec![99]);
+            assert_eq!((u.faction_id, u.expedition_id, u.appellation), (101, 7, 321));
+            assert_eq!(u.ability_exp.len(), abilities);
+            assert_eq!(u.ability_exp[2], (2000, 255));
+            assert_eq!(u.active_abilities, vec![1]);
+            assert_eq!(u.buffs.len(), 2);
+            assert_eq!(u.buffs[0].buff_id, 8_000_011);
+            assert_eq!(u.buffs[1].index, 3);
+        }
+    }
+
+    #[test]
+    fn npc_unit_state_carries_faction_and_buffs() {
+        let mut w = Writer::new();
+        w.bc(0x000101).string("").u8(1);
+        w.bc(0x000101).u32(5001).u32(0).u8(0);
+        w.string("");
+        w.position(Pos::new(1.0, 2.0, 3.0)).f32(1.0).u8(10).u32(321);
+        for _ in 0..slot::COUNT {
+            w.u32(0);
+        }
+        ModelParams { kind: 2, ..ModelParams::default() }.write(&mut w);
+        w.bc(0).i32(20_000).i32(0).u8(255).i8(-1).u8(0).bool(false).u8(0);
+        w.u8(0).i32(0).i8(0).i8(0).i8(-10).u8(0x21);
+        w.pisc(&[0, 0, 0, 0]).pisc(&[161, 0, 0, 0]).pisc(&[0, 0]).u16(0x2000);
+        w.u8(1);
+        crate::buff::tests::net_buff(&mut w, 2, 4);
+        w.u8(0).u8(0);
+        let u = Unit::read(&mut Reader::new(&w.finish())).unwrap();
+        assert_eq!((u.name.as_str(), u.hp, u.max_hp, u.faction_id, u.flags), ("", 200, 200, 161, 0x2000));
+        assert_eq!(u.kind.template_id(), 5001);
+        assert_eq!(u.buffs.len(), 1);
+        assert_eq!(u.buffs[0].buff_id, 4);
+    }
+
     #[test]
     fn npc_unit_state_decodes_and_survives_a_truncated_tail() {
         let mut w = Writer::new();
@@ -1508,11 +1799,12 @@ mod tests {
     #[test]
     fn chat_decodes() {
         let mut w = Writer::new();
-        w.i16(0).i16(0).u32(0).bc(0x000102).u32(77).u8(0).u8(1).u32(101);
+        w.i16(1).i16(7).u32(0).bc(0x000102).u32(77).u8(0).u8(1).u32(101);
         w.string("Bob").string("hello").i32(0).i32(0);
         let bytes = w.finish();
         let c = ChatMessage::read(&mut Reader::new(&bytes)).unwrap();
-        assert_eq!((c.chat_type, c.sender.as_str(), c.message.as_str()), (0, "Bob", "hello"));
+        assert_eq!((c.chat_type, c.sender.as_str(), c.message.as_str()), (1, "Bob", "hello"));
+        assert_eq!((c.sub_type, c.channel_faction), (7, 0));
         assert_eq!((c.sender_obj_id, c.sender_id, c.sender_race), (0x102, 77, 1));
     }
 }

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
+use crate::buff::Buff;
 use crate::game::{self, LeaveTarget, VisualOptions};
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
@@ -292,6 +293,44 @@ pub enum Event {
     UnitsRemoved(Vec<u32>),
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     UnitDeath { obj_id: u32 },
+    /// The details of a death (follows [`Event::UnitDeath`] for the same packet).
+    DeathDetails {
+        obj_id: u32,
+        /// `KillReason`.
+        kill_reason: u8,
+        /// How long until the unit can resurrect, ms.
+        resurrect_wait_ms: i32,
+        lost_exp: i32,
+        /// Object id and name of the killer, when a unit did it.
+        killer: Option<(u32, String)>,
+    },
+    /// A character stands up again at `pos`, facing `yaw`.
+    Resurrected { obj_id: u32, pos: Pos, yaw: f32 },
+    /// `delta` experience gained (negative: lost) by the unit; the total is in
+    /// `state::PlayerStats::exp`.
+    ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
+    /// An ability's experience is now `exp` (a total).
+    AbilityExpChanged { obj_id: u32, ability: u8, exp: i32 },
+    RecoverableExp { obj_id: u32, recoverable: i32, penaltied: i32, reason: i32 },
+    LevelChanged { obj_id: u32, level: u8 },
+    AbilitySwapped { obj_id: u32, old_ability: u8, ability: u8 },
+    /// Labor points added (`amount` > 0: "Gained N Labor Point(s)") or spent (`amount` < 0) for
+    /// `action` (an actability id, 0 for none), which gained `point` actability points.
+    LaborChanged { amount: i32, action: i32, point: i32, step: u8 },
+    /// Honor and vocation (living) points, sent when the character is selected.
+    GamePoints { honor: i32, vocation: i32, other: [i32; 8] },
+    /// `kind` 0 honor, 1 vocation: `amount` was added.
+    GamePointChanged { kind: u8, amount: i32 },
+    /// The loyalty token balance.
+    LoyaltyChanged { bm_point: i64 },
+    /// A unit entered or left combat.
+    CombatChanged { obj_id: u32, engaged: bool },
+    UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    /// A buff or debuff started on a unit (or was refreshed: same `index`).
+    BuffCreated { obj_id: u32, buff: Buff },
+    BuffRemoved { obj_id: u32, index: u32 },
+    /// A passive buff was learned.
+    PassiveBuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsSpawned(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32 },
@@ -869,7 +908,38 @@ impl Session {
             M::UnitsRemoved(ids) => self.emit(Event::UnitsRemoved(ids)),
             M::UnitMoved { obj_id, movement } => self.emit(Event::UnitMoved { obj_id, movement }),
             M::UnitPoints { obj_id, hp, mp } => self.emit(Event::UnitPoints { obj_id, hp, mp }),
-            M::UnitDeath { obj_id } => self.emit(Event::UnitDeath { obj_id }),
+            M::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer, .. } => {
+                self.emit(Event::UnitDeath { obj_id });
+                self.emit(Event::DeathDetails { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer });
+            }
+            M::CharacterResurrected { obj_id, pos, yaw } => self.emit(Event::Resurrected { obj_id, pos, yaw }),
+            M::ExpChanged { obj_id, delta, add_ability_exp } => {
+                self.emit(Event::ExpChanged { obj_id, delta, add_ability_exp });
+            }
+            M::AbilityExpChanged { obj_id, ability, exp } => {
+                self.emit(Event::AbilityExpChanged { obj_id, ability, exp });
+            }
+            M::RecoverableExp { obj_id, recoverable, penaltied, reason } => {
+                self.emit(Event::RecoverableExp { obj_id, recoverable, penaltied, reason });
+            }
+            M::LevelChanged { obj_id, level } => self.emit(Event::LevelChanged { obj_id, level }),
+            M::AbilitySwapped { obj_id, old_ability, ability } => {
+                self.emit(Event::AbilitySwapped { obj_id, old_ability, ability });
+            }
+            M::LaborPowerChanged { amount, action, point, step } => {
+                self.emit(Event::LaborChanged { amount, action, point, step });
+            }
+            M::GamePoints { honor, vocation, other } => self.emit(Event::GamePoints { honor, vocation, other }),
+            M::GamePointChanged { kind, amount } => self.emit(Event::GamePointChanged { kind, amount }),
+            M::BmPoint(bm_point) => self.emit(Event::LoyaltyChanged { bm_point }),
+            M::CombatEngaged { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: true }),
+            M::CombatCleared { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: false }),
+            M::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary } => {
+                self.emit(Event::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary });
+            }
+            M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
+            M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
+            M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
             M::Teleport { pos, .. } => {
                 self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
                 self.emit(Event::Teleported { pos });

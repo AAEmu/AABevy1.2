@@ -186,6 +186,56 @@ events, applies them to the resources (change detection only fires for resources
 and republishes them as `NetEvent` messages. Everything happens before `Update`.
 `cargo run -p aa-net --features bevy --example bevy_walkthrough` is a complete example.
 
+## In-game HUD data (packet to event to state)
+
+Every server packet below is decoded in `game::ServerMsg`, forwarded by the session as an
+`Event` and folded into a `state` resource. All of them are Bevy resources under `NetPlugin`
+(and fields of `WorldState` without Bevy). Resources clear themselves on `LeftWorld` /
+`Disconnected`; the per-character ones restart at `CharacterSelected`.
+
+**Local player: `PlayerStats`** (`aa_net::state::PlayerStats`)
+
+| packet | event | state |
+|---|---|---|
+| `SCCharacterState` (select) | `CharacterSelected` | `character_id`, `name`, `level`, `hp`, `mp`, `exp`, `recoverable_exp`, `labor` (+ `labor_updated`), `money`, `bank_money`, `loyalty`, `active_abilities`, `ability_exp` |
+| `SCUnitState` (own, spawn) | `PlayerSpawn` | `obj_id`, `level`, `hp` / `mp` and `max_hp` / `max_mp` |
+| `SCUnitPoints` | `UnitPoints { obj_id, hp, mp }` | `hp`, `mp`, raises `max_hp` / `max_mp` |
+| `SCExpChanged` | `ExpChanged { obj_id, delta, add_ability_exp }` | `exp += delta` |
+| `SCRecoverableExp` | `RecoverableExp` | `recoverable_exp` |
+| `SCLevelChanged` | `LevelChanged { obj_id, level }` | `level` (and the unit's level in `Units`) |
+| `SCAbilityExpChanged` | `AbilityExpChanged { obj_id, ability, exp }` | `ability_exp[ability]` |
+| `SCAbilitySwapped` | `AbilitySwapped` | `active_abilities` |
+| `SCCharacterLaborPowerChanged` | `LaborChanged { amount, action, point, step }` | `labor += amount`. "Gained 10 Labor Point(s)" is the client's text for `amount = 10` |
+| `SCCharacterGamePoints`, `SCGamePointChanged` | `GamePoints`, `GamePointChanged { kind, amount }` | `honor`, `vocation` |
+| `SCBmPoint` | `LoyaltyChanged { bm_point }` | `loyalty` (loyalty tokens) |
+| `SCCombatEngaged` / `SCCombatCleared` | `CombatChanged { obj_id, engaged }` | `in_combat` |
+| `SCUnitDeath` | `UnitDeath { obj_id }` then `DeathDetails { kill_reason, resurrect_wait_ms, lost_exp, killer }` | `dead`, `hp = 0` |
+| `SCCharacterResurrected` | `Resurrected { obj_id, pos, yaw }` | `dead = false` |
+
+Helpers: `exp_progress() -> (earned, needed)` (bar text `earned / needed`, `needed` is 0 at level 55;
+the table is `model::exp`), `ability_level(id)`, `money_parts() -> (gold, silver, copper)`,
+`hp_fraction()`, `mp_fraction()`, `LABOR_MAX` (2000; 5000 for premium). The title in the unit frame
+("Battlerage Novice") comes from `active_abilities` and `ability_level`.
+
+The server never sends maximum HP / MP: the real client computes them from its formula tables.
+`max_hp` / `max_mp` are the highest value seen since the spawn (exact for a player who spawns at
+full health), `Unit::max_hp` the same for other units (NPCs are announced at full health).
+
+**Buffs: `Buffs`** (`aa_net::state::Buffs`, `Buffs::of(obj_id) -> &[BuffEntry]`)
+
+| packet | event | state |
+|---|---|---|
+| `SCUnitState` (any unit, its buff lists) | `PlayerSpawn`, `UnitSpawned` | the unit's list is replaced (`Unit::buffs` keeps the snapshot) |
+| `SCBuffCreated` | `BuffCreated { obj_id, buff }` | pushed, or replaces the entry with the same `index` |
+| `SCBuffRemoved` | `BuffRemoved { obj_id, index }` | removed |
+| `SCBuffLearned` | `PassiveBuffLearned` | event only |
+
+`BuffEntry { buff, received }`: `buff.buff_id` (`buffs.id`; `icon_id` and `kind_id` in the game
+database), `buff.index`, `buff.stacks`, `buff.duration_ms` (0 = permanent), `buff.elapsed_ms` at
+arrival, `buff.kind` (`Good` / `Bad` / `Hidden` from the unit-state list, `Unknown` for later
+`BuffCreated`: use `buffs.kind_id`), caster; `remaining_ms()` counts down from `received`. The
+unit frame shows the first four `Good` and `Bad` ones.
+
 ## What the UI scripts need
 
 The login-stage scripts (`x2ui/loginstage/world_select`, `character_select`, `character_create`) call:

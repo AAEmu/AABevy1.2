@@ -1,0 +1,369 @@
+//! The local player's numbers (level, HP / MP, experience, labor, money ...) and the buffs on every
+//! unit in view.
+
+use std::collections::HashMap;
+use std::time::Instant;
+
+use crate::buff::Buff;
+use crate::model::exp;
+use crate::session::Event;
+
+/// The labor cap of a normal account (premium accounts get [`LABOR_MAX_PREMIUM`]).
+pub const LABOR_MAX: i32 = 2000;
+pub const LABOR_MAX_PREMIUM: i32 = 5000;
+
+resource! {
+    /// The numbers the HUD shows for the local player. Filled when the character is selected,
+    /// refreshed when it spawns and then kept current from the server's change packets.
+    ///
+    /// The server never sends maximum HP / MP (the real client computes them from its formula
+    /// tables), so `max_hp` / `max_mp` are the highest values seen since the spawn: right after a
+    /// spawn at full health they are exact.
+    pub struct PlayerStats {
+        /// The player's object id (0 until the character spawned).
+        pub obj_id: u32,
+        pub character_id: u32,
+        pub name: String,
+        pub level: u8,
+        pub hp: i32,
+        pub mp: i32,
+        pub max_hp: i32,
+        pub max_mp: i32,
+        /// Total experience (`levels.total_exp` scale, see [`PlayerStats::exp_progress`]).
+        pub exp: i64,
+        /// Experience that a resurrection at a shrine can win back.
+        pub recoverable_exp: i32,
+        /// Labor points as of `labor_updated` (unix seconds); the server adds 5 every 5 minutes
+        /// online, up to [`LABOR_MAX`].
+        pub labor: i32,
+        pub labor_updated: i64,
+        /// Copper in the bag (1 gold = 10000 copper) and in the bank.
+        pub money: i64,
+        pub bank_money: i64,
+        /// Loyalty tokens.
+        pub loyalty: i64,
+        pub honor: i32,
+        /// Vocation (living) points.
+        pub vocation: i32,
+        /// The three active ability (archetype) ids; `model::NO_ABILITY` (11) for an empty one.
+        /// The title ("Battlerage Novice") comes from these and `ability_exp`.
+        pub active_abilities: [u8; 3],
+        /// Experience per ability, index = ability id (0 is the general ability).
+        pub ability_exp: [i32; 11],
+        pub in_combat: bool,
+        pub dead: bool,
+    }
+}
+
+impl PlayerStats {
+    /// `(earned, needed)` experience in the current level; `needed` is 0 at the maximum level.
+    pub fn exp_progress(&self) -> (i64, i64) {
+        exp::progress(self.level, self.exp)
+    }
+
+    /// The level of an ability from its experience (same table as characters).
+    pub fn ability_level(&self, ability: u8) -> u8 {
+        self.ability_exp
+            .get(usize::from(ability))
+            .map_or(1, |&e| exp::level_for_total(i64::from(e)))
+    }
+
+    /// `(gold, silver, copper)` of `money`.
+    pub fn money_parts(&self) -> (i64, i64, i64) {
+        (self.money / 10_000, self.money / 100 % 100, self.money % 100)
+    }
+
+    pub fn hp_fraction(&self) -> f32 {
+        if self.max_hp <= 0 { 0.0 } else { (self.hp as f32 / self.max_hp as f32).clamp(0.0, 1.0) }
+    }
+
+    pub fn mp_fraction(&self) -> f32 {
+        if self.max_mp <= 0 { 0.0 } else { (self.mp as f32 / self.max_mp as f32).clamp(0.0, 1.0) }
+    }
+
+    fn is_self(&self, obj_id: u32) -> bool {
+        self.obj_id != 0 && self.obj_id == obj_id
+    }
+
+    fn set_points(&mut self, hp: i32, mp: i32) {
+        (self.hp, self.mp) = (hp, mp);
+        self.max_hp = self.max_hp.max(hp);
+        self.max_mp = self.max_mp.max(mp);
+    }
+
+    /// Returns true when the data changed.
+    pub fn apply(&mut self, e: &Event) -> bool {
+        match e {
+            Event::CharacterSelected(cs) => {
+                let c = &cs.character;
+                *self = Self {
+                    character_id: c.id,
+                    name: c.name.clone(),
+                    level: c.level,
+                    hp: c.hp,
+                    mp: c.mp,
+                    max_hp: c.hp,
+                    max_mp: c.mp,
+                    exp: i64::from(cs.experience),
+                    recoverable_exp: cs.recoverable_exp,
+                    labor: i32::from(c.labor_power),
+                    labor_updated: c.labor_power_modified,
+                    money: c.money,
+                    bank_money: c.money2,
+                    loyalty: c.bm_point,
+                    active_abilities: c.abilities,
+                    ability_exp: cs.ability_exp,
+                    ..Self::default()
+                };
+            }
+            Event::PlayerSpawn(s) => {
+                self.obj_id = s.obj_id;
+                self.level = s.unit.level;
+                self.max_hp = 0;
+                self.max_mp = 0;
+                self.set_points(s.unit.hp, s.unit.mp);
+                self.dead = s.unit.hp <= 0;
+            }
+            Event::UnitPoints { obj_id, hp, mp } if self.is_self(*obj_id) => {
+                self.set_points(*hp, *mp);
+                if *hp > 0 {
+                    self.dead = false;
+                }
+            }
+            Event::ExpChanged { obj_id, delta, .. } if self.is_self(*obj_id) => {
+                self.exp += i64::from(*delta);
+            }
+            Event::RecoverableExp { obj_id, recoverable, .. } if self.is_self(*obj_id) => {
+                self.recoverable_exp = *recoverable;
+            }
+            Event::LevelChanged { obj_id, level } if self.is_self(*obj_id) => self.level = *level,
+            Event::AbilityExpChanged { obj_id, ability, exp } if self.is_self(*obj_id) => {
+                let Some(slot) = self.ability_exp.get_mut(usize::from(*ability)) else { return false };
+                *slot = *exp;
+            }
+            Event::AbilitySwapped { obj_id, old_ability, ability } if self.is_self(*obj_id) => {
+                for a in &mut self.active_abilities {
+                    if a == old_ability {
+                        *a = *ability;
+                    }
+                }
+            }
+            Event::LaborChanged { amount, .. } => {
+                self.labor = (self.labor + amount).max(0);
+                self.labor_updated = unix_now();
+            }
+            Event::GamePoints { honor, vocation, .. } => (self.honor, self.vocation) = (*honor, *vocation),
+            Event::GamePointChanged { kind, amount } => match kind {
+                0 => self.honor += amount,
+                1 => self.vocation += amount,
+                _ => return false,
+            },
+            Event::LoyaltyChanged { bm_point } => self.loyalty = *bm_point,
+            Event::CombatChanged { obj_id, engaged } if self.is_self(*obj_id) => self.in_combat = *engaged,
+            Event::UnitDeath { obj_id } if self.is_self(*obj_id) => {
+                self.dead = true;
+                self.hp = 0;
+                self.in_combat = false;
+            }
+            Event::Resurrected { obj_id, .. } if self.is_self(*obj_id) => self.dead = false,
+            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+                if self.character_id == 0 && self.obj_id == 0 {
+                    return false;
+                }
+                *self = Self::default();
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// A buff and the moment it arrived, for countdowns.
+#[derive(Clone, Debug)]
+pub struct BuffEntry {
+    pub buff: Buff,
+    pub received: Instant,
+}
+
+impl BuffEntry {
+    /// Milliseconds left, `None` for a permanent buff.
+    pub fn remaining_ms(&self) -> Option<u64> {
+        self.buff.remaining_ms(self.received.elapsed().as_millis() as u64)
+    }
+}
+
+resource! {
+    /// Buffs and debuffs by unit object id, for the player's own buff bar and the target frame.
+    /// A unit's list starts from its unit-state packet and follows the buff packets.
+    pub struct Buffs {
+        pub by_unit: HashMap<u32, Vec<BuffEntry>>,
+    }
+}
+
+impl Buffs {
+    /// The buffs on a unit (empty when none are known).
+    pub fn of(&self, obj_id: u32) -> &[BuffEntry] {
+        self.by_unit.get(&obj_id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The buffs a unit packet carried, in the server's order (good, bad, hidden).
+    fn seed(&mut self, obj_id: u32, buffs: &[Buff]) {
+        let now = Instant::now();
+        let list = buffs.iter().cloned().map(|buff| BuffEntry { buff, received: now }).collect();
+        self.by_unit.insert(obj_id, list);
+    }
+
+    pub fn apply(&mut self, e: &Event) -> bool {
+        match e {
+            Event::PlayerSpawn(s) => self.seed(s.obj_id, &s.unit.buffs),
+            Event::UnitSpawned(u) => self.seed(u.obj_id, &u.buffs),
+            Event::UnitsRemoved(ids) => {
+                let mut changed = false;
+                for id in ids {
+                    changed |= self.by_unit.remove(id).is_some();
+                }
+                return changed;
+            }
+            Event::BuffCreated { obj_id, buff } => {
+                let list = self.by_unit.entry(*obj_id).or_default();
+                let entry = BuffEntry { buff: buff.clone(), received: Instant::now() };
+                match list.iter_mut().find(|b| b.buff.index == buff.index) {
+                    Some(old) => *old = entry,
+                    None => list.push(entry),
+                }
+            }
+            Event::BuffRemoved { obj_id, index } => {
+                let Some(list) = self.by_unit.get_mut(obj_id) else { return false };
+                let before = list.len();
+                list.retain(|b| b.buff.index != *index);
+                return list.len() != before;
+            }
+            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+                if self.by_unit.is_empty() {
+                    return false;
+                }
+                self.by_unit.clear();
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buff::{BuffCaster, BuffKind};
+    use crate::model::{Character, CharacterState};
+
+    fn buff(index: u32, buff_id: u32) -> Buff {
+        Buff {
+            index,
+            buff_id,
+            caster: BuffCaster::default(),
+            duration_ms: 10_000,
+            stacks: 1,
+            kind: BuffKind::Good,
+            ..Buff::default()
+        }
+    }
+
+    fn selected() -> Event {
+        let character = Character {
+            id: 5,
+            name: "Aa".into(),
+            level: 3,
+            hp: 700,
+            mp: 300,
+            labor_power: 1900,
+            money: 123_456,
+            money2: 9_000_000,
+            bm_point: 12,
+            abilities: [1, 11, 11],
+            ..Character::default()
+        };
+        Event::CharacterSelected(Box::new(CharacterState {
+            character,
+            experience: 1_000,
+            recoverable_exp: 50,
+            ability_exp: [0, 2_000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ..CharacterState::default()
+        }))
+    }
+
+    #[test]
+    fn stats_follow_the_select_and_change_packets() {
+        let mut s = PlayerStats::default();
+        assert!(s.apply(&selected()));
+        assert_eq!((s.level, s.hp, s.mp, s.exp, s.labor, s.money, s.bank_money, s.loyalty), (3, 700, 300, 1_000, 1900, 123_456, 9_000_000, 12));
+        // Level 3 starts at 1400? no: 1000 exp is level 2 territory but the server says level 3;
+        // the bar clamps instead of going negative.
+        assert_eq!(s.exp_progress().0, 0);
+        assert_eq!(s.money_parts(), (12, 34, 56));
+        assert_eq!(s.ability_level(1), 3); // 2000 exp: level 3 (1400..3200)
+
+        // Events about other units do not touch the player.
+        s.obj_id = 0x77;
+        assert!(!s.apply(&Event::UnitPoints { obj_id: 0x99, hp: 1, mp: 1 }));
+        assert!(s.apply(&Event::UnitPoints { obj_id: 0x77, hp: 650, mp: 320 }));
+        assert_eq!((s.hp, s.mp, s.max_hp, s.max_mp), (650, 320, 700, 320));
+        assert!(s.apply(&Event::ExpChanged { obj_id: 0x77, delta: 500, add_ability_exp: true }));
+        assert_eq!(s.exp, 1_500);
+        assert!(s.apply(&Event::LevelChanged { obj_id: 0x77, level: 4 }));
+        assert_eq!(s.level, 4);
+        assert!(s.apply(&Event::LaborChanged { amount: -50, action: 3, point: 5, step: 0 }));
+        assert_eq!(s.labor, 1850);
+        assert!(s.apply(&Event::LaborChanged { amount: 10, action: 0, point: 0, step: 0 }));
+        assert_eq!(s.labor, 1860);
+        assert!(s.apply(&Event::GamePoints { honor: 5, vocation: 6, other: [0; 8] }));
+        assert!(s.apply(&Event::GamePointChanged { kind: 1, amount: 4 }));
+        assert_eq!((s.honor, s.vocation), (5, 10));
+        assert!(s.apply(&Event::AbilitySwapped { obj_id: 0x77, old_ability: 1, ability: 7 }));
+        assert_eq!(s.active_abilities, [7, 11, 11]);
+        assert!(s.apply(&Event::CombatChanged { obj_id: 0x77, engaged: true }));
+        assert!(s.in_combat);
+        assert!(s.apply(&Event::UnitDeath { obj_id: 0x77 }));
+        assert!(s.dead && s.hp == 0 && !s.in_combat);
+        assert!(s.apply(&Event::Resurrected { obj_id: 0x77, pos: Default::default(), yaw: 0.0 }));
+        assert!(!s.dead);
+        assert!(s.apply(&Event::LeftWorld { target: 1 }));
+        assert_eq!(s.character_id, 0);
+    }
+
+    #[test]
+    fn exp_bar_uses_the_level_table() {
+        let s = PlayerStats { level: 2, exp: 900, ..PlayerStats::default() };
+        // Level 2 starts at 400 and level 3 at 1400.
+        assert_eq!(s.exp_progress(), (500, 1000));
+        let max = PlayerStats { level: 55, exp: 179_307_360 + 5, ..PlayerStats::default() };
+        assert_eq!(max.exp_progress(), (5, 0));
+    }
+
+    #[test]
+    fn buffs_start_from_the_unit_and_follow_the_packets() {
+        let mut b = Buffs::default();
+        let mut unit = crate::state::tests::unit(5);
+        unit.buffs = vec![buff(2, 8_000_011), buff(3, 2423)];
+        assert!(b.apply(&Event::UnitSpawned(Box::new(unit))));
+        assert_eq!(b.of(5).len(), 2);
+        assert_eq!(b.of(5)[0].buff.buff_id, 8_000_011);
+        assert!(b.of(5)[0].remaining_ms().unwrap() <= 10_000);
+        // A new buff, and a refresh of an existing index replaces it.
+        assert!(b.apply(&Event::BuffCreated { obj_id: 5, buff: buff(9, 100) }));
+        assert!(b.apply(&Event::BuffCreated { obj_id: 5, buff: Buff { stacks: 3, ..buff(9, 100) } }));
+        assert_eq!(b.of(5).len(), 3);
+        assert_eq!(b.of(5)[2].buff.stacks, 3);
+        assert!(b.apply(&Event::BuffRemoved { obj_id: 5, index: 2 }));
+        assert!(!b.apply(&Event::BuffRemoved { obj_id: 5, index: 2 }));
+        assert_eq!(b.of(5).iter().map(|e| e.buff.index).collect::<Vec<_>>(), vec![3, 9]);
+        assert!(b.of(404).is_empty());
+        assert!(b.apply(&Event::UnitsRemoved(vec![5])));
+        assert!(b.of(5).is_empty());
+    }
+}

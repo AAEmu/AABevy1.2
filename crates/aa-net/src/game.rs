@@ -5,6 +5,7 @@
 //! level 4 is a compressed batch of server packets. The 1.2 protocol is neither encrypted nor
 //! compressed otherwise, and the server verifies neither `hash` nor `count`.
 
+use crate::buff::Buff;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Movement, Unit,
 };
@@ -232,8 +233,43 @@ pub enum ServerMsg {
     UnitsRemoved(Vec<u32>),
     UnitMoved { obj_id: u32, movement: Movement },
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
-    UnitDeath { obj_id: u32 },
+    UnitDeath {
+        obj_id: u32,
+        /// `KillReason`.
+        kill_reason: u8,
+        /// How long until the unit can resurrect, ms.
+        resurrect_wait_ms: i32,
+        lost_exp: i32,
+        durability_loss_rate: u8,
+        /// Object id and name of the killer, when a unit did it.
+        killer: Option<(u32, String)>,
+    },
+    CharacterResurrected { obj_id: u32, pos: Pos, yaw: f32 },
     Teleport { reason: u8, error: i16, pos: Pos },
+    // -- progression and combat state
+    /// `delta` experience gained (negative: lost) by the unit.
+    ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
+    /// The ability's experience is now `exp` (a total, not a delta).
+    AbilityExpChanged { obj_id: u32, ability: u8, exp: i32 },
+    RecoverableExp { obj_id: u32, recoverable: i32, penaltied: i32, reason: i32 },
+    LevelChanged { obj_id: u32, level: u8 },
+    AbilitySwapped { obj_id: u32, old_ability: u8, ability: u8 },
+    /// Labor points added (`amount` > 0) or spent for `action` (an actability id, 0 for none).
+    LaborPowerChanged { amount: i32, action: i32, point: i32, step: u8 },
+    /// Honor and vocation (living) points, sent when the character is selected.
+    GamePoints { honor: i32, vocation: i32, other: [i32; 8] },
+    /// `kind` 0 honor, 1 vocation: `amount` was added.
+    GamePointChanged { kind: u8, amount: i32 },
+    /// Loyalty tokens.
+    BmPoint(i64),
+    CombatEngaged { obj_id: u32 },
+    CombatCleared { obj_id: u32 },
+    UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    // -- buffs
+    BuffCreated { obj_id: u32, buff: Buff },
+    BuffRemoved { obj_id: u32, index: u32 },
+    /// A passive buff was learned (characters).
+    BuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsCreated(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32 },
@@ -273,6 +309,22 @@ impl ServerMsg {
             Self::UnitMoved { .. } => "SCOneUnitMovement",
             Self::UnitPoints { .. } => "SCUnitPoints",
             Self::UnitDeath { .. } => "SCUnitDeath",
+            Self::CharacterResurrected { .. } => "SCCharacterResurrected",
+            Self::ExpChanged { .. } => "SCExpChanged",
+            Self::AbilityExpChanged { .. } => "SCAbilityExpChanged",
+            Self::RecoverableExp { .. } => "SCRecoverableExp",
+            Self::LevelChanged { .. } => "SCLevelChanged",
+            Self::AbilitySwapped { .. } => "SCAbilitySwapped",
+            Self::LaborPowerChanged { .. } => "SCCharacterLaborPowerChanged",
+            Self::GamePoints { .. } => "SCCharacterGamePoints",
+            Self::GamePointChanged { .. } => "SCGamePointChanged",
+            Self::BmPoint(_) => "SCBmPoint",
+            Self::CombatEngaged { .. } => "SCCombatEngaged",
+            Self::CombatCleared { .. } => "SCCombatCleared",
+            Self::UnitFactionChanged { .. } => "SCUnitFactionChanged",
+            Self::BuffCreated { .. } => "SCBuffCreated",
+            Self::BuffRemoved { .. } => "SCBuffRemoved",
+            Self::BuffLearned { .. } => "SCBuffLearned",
             Self::Teleport { .. } => "SCTeleportUnit",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
@@ -402,7 +454,81 @@ impl ServerMsg {
                 hp: r.i32()? / 100,
                 mp: r.i32()? / 100,
             },
-            sc::SCUnitDeathPacket => Self::UnitDeath { obj_id: r.bc()? },
+            sc::SCUnitDeathPacket => {
+                let obj_id = r.bc()?;
+                let kill_reason = r.u8()?;
+                let resurrect_wait_ms = r.i32()?;
+                let lost_exp = r.i32()?;
+                let durability_loss_rate = r.u8()?;
+                let killer_id = r.bc()?;
+                let killer = if killer_id != 0 {
+                    // game type, kill streak, three flags, then the killer's name.
+                    r.skip(1 + 2 + 3)?;
+                    Some((killer_id, r.string()?))
+                } else {
+                    None
+                };
+                Self::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, durability_loss_rate, killer }
+            }
+            sc::SCCharacterResurrectedPacket => Self::CharacterResurrected {
+                obj_id: r.bc()?,
+                pos: r.position()?,
+                yaw: r.f32()?,
+            },
+            sc::SCExpChangedPacket => Self::ExpChanged {
+                obj_id: r.bc()?,
+                delta: r.i32()?,
+                add_ability_exp: r.bool()?,
+            },
+            sc::SCAbilityExpChangedPacket => Self::AbilityExpChanged {
+                obj_id: r.bc()?,
+                ability: r.u8()?,
+                exp: r.i32()?,
+            },
+            sc::SCRecoverableExpPacket => Self::RecoverableExp {
+                obj_id: r.bc()?,
+                recoverable: r.i32()?,
+                penaltied: r.i32()?,
+                reason: r.i32()?,
+            },
+            sc::SCLevelChangedPacket => Self::LevelChanged { obj_id: r.bc()?, level: r.u8()? },
+            sc::SCAbilitySwappedPacket => Self::AbilitySwapped {
+                obj_id: r.bc()?,
+                old_ability: r.u8()?,
+                ability: r.u8()?,
+            },
+            sc::SCCharacterLaborPowerChangedPacket => Self::LaborPowerChanged {
+                amount: r.i32()?,
+                action: r.i32()?,
+                point: r.i32()?,
+                step: r.u8()?,
+            },
+            sc::SCCharacterGamePointsPacket => {
+                let honor = r.i32()?;
+                let vocation = r.i32()?;
+                let mut other = [0i32; 8];
+                for v in &mut other {
+                    *v = r.i32()?;
+                }
+                Self::GamePoints { honor, vocation, other }
+            }
+            sc::SCGamePointChangedPacket => Self::GamePointChanged { kind: r.u8()?, amount: r.i32()? },
+            sc::SCBmPointPacket => Self::BmPoint(r.i64()?),
+            sc::SCCombatEngagedPacket => Self::CombatEngaged { obj_id: r.bc()? },
+            sc::SCCombatClearedPacket => Self::CombatCleared { obj_id: r.bc()? },
+            sc::SCUnitFactionChangedPacket => Self::UnitFactionChanged {
+                obj_id: r.bc()?,
+                name: r.string()?,
+                faction_id: r.u32()?,
+                faction_id2: r.u32()?,
+                temporary: r.bool()?,
+            },
+            sc::SCBuffCreatedPacket => {
+                let (obj_id, buff) = Buff::read_created(r)?;
+                Self::BuffCreated { obj_id, buff }
+            }
+            sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
+            sc::SCBuffLearnedPacket => Self::BuffLearned { obj_id: r.bc()?, buff_id: r.u32()? },
             sc::SCTeleportUnitPacket => Self::Teleport {
                 reason: r.u8()?,
                 error: r.i16()?,
@@ -587,6 +713,142 @@ mod tests {
         assert_eq!(m, ServerMsg::Unhandled { level: LEVEL_GAME, opcode: 0x1ff, len: 3 });
         assert!(ServerMsg::decode(&[0x00, 0x01]).is_err());
         assert!(ServerMsg::decode(&game_frame(sc::SCUnitPointsPacket, &[1])).is_err());
+    }
+
+    fn decode(op: u16, body: &[u8]) -> ServerMsg {
+        ServerMsg::decode(&game_frame(op, body)).unwrap()
+    }
+
+    #[test]
+    fn progression_packets_golden_bytes() {
+        // SCExpChanged(objId, exp, shouldAddAbilityExp): bc, i32, bool.
+        let mut w = Writer::new();
+        w.bc(0x112233).i32(-250).bool(true);
+        assert_eq!(
+            decode(sc::SCExpChangedPacket, &w.finish()),
+            ServerMsg::ExpChanged { obj_id: 0x112233, delta: -250, add_ability_exp: true }
+        );
+        // SCAbilityExpChanged(objId, ability, exp)
+        let mut w = Writer::new();
+        w.bc(7).u8(3).i32(12_345);
+        assert_eq!(
+            decode(sc::SCAbilityExpChangedPacket, &w.finish()),
+            ServerMsg::AbilityExpChanged { obj_id: 7, ability: 3, exp: 12_345 }
+        );
+        // SCRecoverableExp(objId, recoverable, penaltied, reason)
+        let mut w = Writer::new();
+        w.bc(7).i32(100).i32(20).i32(1);
+        assert_eq!(
+            decode(sc::SCRecoverableExpPacket, &w.finish()),
+            ServerMsg::RecoverableExp { obj_id: 7, recoverable: 100, penaltied: 20, reason: 1 }
+        );
+        // SCLevelChanged(objId, level): bc, u8
+        assert_eq!(
+            decode(sc::SCLevelChangedPacket, &[7, 0, 0, 12]),
+            ServerMsg::LevelChanged { obj_id: 7, level: 12 }
+        );
+        // SCAbilitySwapped(objId, old, new)
+        assert_eq!(
+            decode(sc::SCAbilitySwappedPacket, &[7, 0, 0, 1, 4]),
+            ServerMsg::AbilitySwapped { obj_id: 7, old_ability: 1, ability: 4 }
+        );
+        // SCCharacterLaborPowerChanged(amount, action, point, step): i32, i32, i32, u8
+        let mut w = Writer::new();
+        w.i32(10).i32(0).i32(0).u8(0);
+        assert_eq!(
+            decode(sc::SCCharacterLaborPowerChangedPacket, &w.finish()),
+            ServerMsg::LaborPowerChanged { amount: 10, action: 0, point: 0, step: 0 }
+        );
+        let mut w = Writer::new();
+        w.i32(-30).i32(5).i32(2).u8(1);
+        assert_eq!(
+            decode(sc::SCCharacterLaborPowerChangedPacket, &w.finish()),
+            ServerMsg::LaborPowerChanged { amount: -30, action: 5, point: 2, step: 1 }
+        );
+        // SCCharacterGamePoints: honor, vocation, eight more i32.
+        let mut w = Writer::new();
+        w.i32(11).i32(22);
+        for i in 0..8 {
+            w.i32(i);
+        }
+        let ServerMsg::GamePoints { honor, vocation, other } = decode(sc::SCCharacterGamePointsPacket, &w.finish())
+        else {
+            panic!("not game points")
+        };
+        assert_eq!((honor, vocation, other[7]), (11, 22, 7));
+        // SCGamePointChanged(kind, amount): u8, i32
+        let mut w = Writer::new();
+        w.u8(1).i32(-4);
+        assert_eq!(
+            decode(sc::SCGamePointChangedPacket, &w.finish()),
+            ServerMsg::GamePointChanged { kind: 1, amount: -4 }
+        );
+        // SCBmPoint(bmPoint): i64
+        assert_eq!(decode(sc::SCBmPointPacket, &9_000_000_000i64.to_le_bytes()), ServerMsg::BmPoint(9_000_000_000));
+        assert_eq!(decode(sc::SCCombatEngagedPacket, &[5, 0, 0]), ServerMsg::CombatEngaged { obj_id: 5 });
+        assert_eq!(decode(sc::SCCombatClearedPacket, &[5, 0, 0]), ServerMsg::CombatCleared { obj_id: 5 });
+    }
+
+    #[test]
+    fn unit_death_with_and_without_a_killer() {
+        // SCUnitDeath: bc obj, kill reason, resurrect wait, lost exp, durability loss, bc killer
+        // (0 = none) and for a killer game type, kill streak, three flags and the name.
+        let mut w = Writer::new();
+        w.bc(0x10).u8(1).i32(10_000).i32(-77).u8(5).bc(0);
+        assert_eq!(
+            decode(sc::SCUnitDeathPacket, &w.finish()),
+            ServerMsg::UnitDeath {
+                obj_id: 0x10,
+                kill_reason: 1,
+                resurrect_wait_ms: 10_000,
+                lost_exp: -77,
+                durability_loss_rate: 5,
+                killer: None
+            }
+        );
+        let mut w = Writer::new();
+        w.bc(0x10).u8(0).i32(0).i32(0).u8(0).bc(0x20);
+        w.u8(0).u16(0).u8(0).u8(0).u8(0).string("Slayer");
+        let ServerMsg::UnitDeath { killer, .. } = decode(sc::SCUnitDeathPacket, &w.finish()) else { panic!() };
+        assert_eq!(killer, Some((0x20, "Slayer".to_string())));
+        // SCCharacterResurrected(unitId, x, y, z, zRot)
+        let mut w = Writer::new();
+        w.bc(0x10).position(Pos::new(100.0, 200.0, 30.0)).f32(1.5);
+        let ServerMsg::CharacterResurrected { obj_id, pos, yaw } = decode(sc::SCCharacterResurrectedPacket, &w.finish())
+        else {
+            panic!()
+        };
+        assert_eq!(obj_id, 0x10);
+        assert!((pos.x - 100.0).abs() < 0.01 && (pos.y - 200.0).abs() < 0.01 && (yaw - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn buff_and_faction_packets_golden_bytes() {
+        // SCBuffRemoved(objId, index): bc, u32; SCBuffLearned(objId, buffId): bc, u32.
+        let mut w = Writer::new();
+        w.bc(0x0A0B0C).u32(7);
+        let body = w.finish();
+        assert_eq!(decode(sc::SCBuffRemovedPacket, &body), ServerMsg::BuffRemoved { obj_id: 0x0A0B0C, index: 7 });
+        assert_eq!(decode(sc::SCBuffLearnedPacket, &body), ServerMsg::BuffLearned { obj_id: 0x0A0B0C, buff_id: 7 });
+        // SCBuffCreated: see `buff::tests::buff_created_golden_bytes` for the field walk.
+        let mut w = Writer::new();
+        w.u8(0).bc(0x10); // caster
+        w.u32(0).bc(0x20).u32(4).u32(2423).u8(1).i16(1).u32(0);
+        w.pisc(&[0, 100, 0, 0]);
+        let ServerMsg::BuffCreated { obj_id, buff } = decode(sc::SCBuffCreatedPacket, &w.finish()) else { panic!() };
+        assert_eq!((obj_id, buff.index, buff.buff_id, buff.duration_ms), (0x20, 4, 2423, 1000));
+        // SCUnitFactionChanged(unitId, unitName, id, id2, temp), as in the server's tests.
+        let body = [0x10, 0, 0, 1, 0, b'A', 101, 0, 0, 0, 161, 0, 0, 0, 0];
+        assert_eq!(
+            decode(sc::SCUnitFactionChangedPacket, &body),
+            ServerMsg::UnitFactionChanged {
+                obj_id: 0x10,
+                name: "A".into(),
+                faction_id: 101,
+                faction_id2: 161,
+                temporary: false
+            }
+        );
     }
 
     #[test]

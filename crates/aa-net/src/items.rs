@@ -1,0 +1,498 @@
+//! Item containers, item change tasks and the action bar, as the server sends them.
+//!
+//! * `SCCharacterInvenContents`: the bag / bank in chunks of 10 slots (`Item.Write` each).
+//! * `SCItemTaskSuccess`: every later change (loot, use, move, money ...) as a list of tasks.
+//! * `SCActionSlots`: the 85 hotbar slots.
+//!
+//! Layouts follow the server's `ItemTask::write`, `SCCharacterInvenContentsPacket` and
+//! `write_action_slots`.
+
+use crate::model::{Item, ItemDetail};
+use crate::wire::{Reader, Result, WireError};
+
+/// `SlotType`: which container an item is in.
+pub mod container {
+    pub const NONE: u8 = 0;
+    pub const EQUIPMENT: u8 = 1;
+    pub const INVENTORY: u8 = 2;
+    pub const BANK: u8 = 3;
+    pub const TRADE: u8 = 4;
+    pub const MAIL: u8 = 5;
+    pub const AUCTION: u8 = 6;
+    pub const EQUIPMENT_MATE: u8 = 252;
+    pub const SYSTEM: u8 = 255;
+}
+
+/// Slots on the hotbar (`Character.MaxActionSlots`).
+pub const ACTION_SLOTS: usize = 85;
+
+/// What a hotbar slot holds (`ActionSlotType`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ActionKind {
+    #[default]
+    None,
+    /// Any item of a template (`id` = `items.id`): the slot shows the count in the bag.
+    ItemType,
+    /// A skill (`id` = `skills.id`).
+    Spell,
+    Macro,
+    /// One specific item (`id` = the item's database id).
+    ItemId,
+    RidePetSpell,
+    Unknown(u8),
+}
+
+impl ActionKind {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::None,
+            1 => Self::ItemType,
+            2 => Self::Spell,
+            3 => Self::Macro,
+            4 => Self::ItemId,
+            5 => Self::RidePetSpell,
+            o => Self::Unknown(o),
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::ItemType => 1,
+            Self::Spell => 2,
+            Self::Macro => 3,
+            Self::ItemId => 4,
+            Self::RidePetSpell => 5,
+            Self::Unknown(o) => o,
+        }
+    }
+}
+
+/// One hotbar slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ActionSlot {
+    pub kind: ActionKind,
+    pub id: u64,
+}
+
+impl ActionSlot {
+    pub fn is_empty(&self) -> bool {
+        self.kind == ActionKind::None
+    }
+
+    /// The skill id of a `Spell` / `RidePetSpell` slot.
+    pub fn skill_id(&self) -> Option<u32> {
+        matches!(self.kind, ActionKind::Spell | ActionKind::RidePetSpell).then_some(self.id as u32)
+    }
+
+    /// The item template id of an `ItemType` slot.
+    pub fn item_template_id(&self) -> Option<u32> {
+        (self.kind == ActionKind::ItemType).then_some(self.id as u32)
+    }
+
+    /// The database id of an `ItemId` slot.
+    pub fn item_id(&self) -> Option<u64> {
+        (self.kind == ActionKind::ItemId).then_some(self.id)
+    }
+
+    /// Body of `SCActionSlots` / `CSUpdateActionSlot` without the slot index: kind byte and id.
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let kind = ActionKind::from_u8(r.u8()?);
+        let id = match kind {
+            ActionKind::ItemType | ActionKind::Spell | ActionKind::RidePetSpell => u64::from(r.u32()?),
+            ActionKind::ItemId => r.u64()?,
+            // The server writes no id for these (and logs an error).
+            ActionKind::None | ActionKind::Macro | ActionKind::Unknown(_) => 0,
+        };
+        Ok(Self { kind, id })
+    }
+
+    pub fn write(&self, w: &mut crate::wire::Writer) {
+        w.u8(self.kind.as_u8());
+        match self.kind {
+            ActionKind::ItemType | ActionKind::Spell | ActionKind::RidePetSpell => {
+                w.u32(self.id as u32);
+            }
+            ActionKind::ItemId => {
+                w.u64(self.id);
+            }
+            ActionKind::None | ActionKind::Macro | ActionKind::Unknown(_) => {}
+        }
+    }
+}
+
+/// Body of `SCActionSlots`: the slots back to back until the packet ends.
+pub fn read_action_slots(r: &mut Reader) -> Result<Vec<ActionSlot>> {
+    let mut slots = Vec::with_capacity(ACTION_SLOTS);
+    while !r.is_empty() {
+        slots.push(ActionSlot::read(r)?);
+    }
+    Ok(slots)
+}
+
+/// One chunk of `SCCharacterInvenContents`: up to 10 consecutive slots of a container.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InvenChunk {
+    pub container: u8,
+    pub chunks: u8,
+    /// Index of the first chunk this packet carries: slot = `(start_chunk + n) * 10 + i`.
+    pub start_chunk: u8,
+    pub items: Vec<Option<Item>>,
+    /// An item in the chunk could not be decoded; `items` holds the ones before it.
+    pub truncated: bool,
+}
+
+impl InvenChunk {
+    pub const SLOTS_PER_CHUNK: usize = 10;
+
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let container = r.u8()?;
+        let chunks = r.u8()?;
+        let start_chunk = r.u8()?;
+        let mut items = Vec::new();
+        let mut truncated = false;
+        while !r.is_empty() {
+            match Item::read(r) {
+                Ok(item) => items.push(item),
+                Err(e) => {
+                    tracing::warn!("inventory chunk of container {container}: {e}");
+                    truncated = true;
+                    break;
+                }
+            }
+        }
+        Ok(Self { container, chunks, start_chunk, items, truncated })
+    }
+
+    /// Slot index of the first item of this chunk.
+    pub fn first_slot(&self) -> usize {
+        usize::from(self.start_chunk) * Self::SLOTS_PER_CHUNK
+    }
+}
+
+/// `ItemAction`: the first byte of a task.
+pub mod action {
+    pub const CHANGE_MONEY_AMOUNT: u8 = 1;
+    pub const CHANGE_BANK_MONEY_AMOUNT: u8 = 2;
+    pub const CHANGE_GAME_POINT: u8 = 3;
+    pub const ADD_STACK: u8 = 4;
+    pub const CREATE: u8 = 5;
+    pub const TAKE: u8 = 6;
+    pub const REMOVE: u8 = 7;
+    pub const SWAP_SLOT: u8 = 8;
+    pub const UPDATE_DETAIL: u8 = 9;
+    pub const SET_FLAGS_BITS: u8 = 10;
+    pub const UPDATE_FLAGS: u8 = 11;
+    pub const REMOVE_CRAFTING: u8 = 12;
+    pub const SEIZE: u8 = 13;
+    pub const CHANGE_GRADE: u8 = 14;
+    pub const CHANGE_OWNER: u8 = 15;
+    pub const CHANGE_AA_POINT: u8 = 16;
+    pub const CHANGE_BANK_AA_POINT: u8 = 17;
+    pub const CHANGE_AUTO_USE_AA_POINT: u8 = 18;
+}
+
+/// One change of the item containers or the purse (`ItemTask`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ItemTask {
+    /// Copper added (negative: spent) in the bag.
+    Money(i32),
+    BankMoney(i32),
+    /// Honor (kind 0) or vocation (kind 1) points added.
+    GamePoint { kind: u8, amount: i32 },
+    /// AA cash points.
+    AaPoint(i32),
+    BankAaPoint(i32),
+    AutoUseAaPoint(u8),
+    /// An item entered `container` at `slot` (`action` = create / change owner / take).
+    Add { action: u8, container: u8, slot: u8, item: Item },
+    /// `delta` more (or fewer) in a stack.
+    Count { container: u8, slot: u8, item_id: u64, delta: i32, template_id: u32 },
+    Grade { container: u8, slot: u8, item_id: u64, grade: u8 },
+    /// Two slots swapped (`to_item_id` 0 when the target was empty); the containers may differ.
+    Move {
+        from_container: u8,
+        from_slot: u8,
+        from_item_id: u64,
+        to_container: u8,
+        to_slot: u8,
+        to_item_id: u64,
+    },
+    Remove { container: u8, slot: u8, item_id: u64, template_id: u32 },
+    /// `ItemRemoveCrafting`: an item removed by id only.
+    RemoveCrafting { item_id: u64 },
+    /// `ItemRemoveSlot` (seized).
+    RemoveSlot { container: u8, slot: u8, item_id: u64 },
+    /// New details (durability, gems ...) of an item.
+    Update { container: u8, slot: u8, item_id: u64, detail: ItemDetail },
+    /// New flag bits (`ItemFlag`: secure, soulbound ...).
+    Flags { container: u8, slot: u8, item_id: u64, bits: u8 },
+}
+
+/// Body of `SCItemTaskSuccess`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ItemTasks {
+    /// `ItemTaskType`: why the items changed (loot, quest reward, buy ...).
+    pub reason: u8,
+    pub tasks: Vec<ItemTask>,
+    /// Item ids the server removed from the client's cache without a slot.
+    pub force_remove: Vec<u64>,
+    /// A task of an unknown kind ended the list early.
+    pub truncated: bool,
+}
+
+impl ItemTasks {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let reason = r.u8()?;
+        let n = r.u8()?;
+        let mut out = Self { reason, ..Self::default() };
+        for _ in 0..n {
+            match ItemTask::read(r) {
+                Ok(t) => out.tasks.push(t),
+                Err(e) => {
+                    tracing::warn!("item task (reason {reason}): {e}");
+                    out.truncated = true;
+                    return Ok(out);
+                }
+            }
+        }
+        let n = r.u8()?;
+        for _ in 0..n {
+            out.force_remove.push(r.u64()?);
+        }
+        Ok(out)
+    }
+}
+
+impl ItemTask {
+    fn read(r: &mut Reader) -> Result<Self> {
+        let act = r.u8()?;
+        Ok(match act {
+            action::CHANGE_MONEY_AMOUNT => Self::Money(r.i32()?),
+            action::CHANGE_BANK_MONEY_AMOUNT => Self::BankMoney(r.i32()?),
+            action::CHANGE_GAME_POINT => Self::GamePoint { kind: r.u8()?, amount: r.i32()? },
+            action::CHANGE_AA_POINT => Self::AaPoint(r.i32()?),
+            action::CHANGE_BANK_AA_POINT => Self::BankAaPoint(r.i32()?),
+            action::CHANGE_AUTO_USE_AA_POINT => Self::AutoUseAaPoint(r.u8()?),
+            action::CREATE | action::CHANGE_OWNER | action::TAKE => {
+                let container = r.u8()?;
+                let slot = r.u8()?;
+                Self::Add { action: act, container, slot, item: read_task_item(r)? }
+            }
+            action::ADD_STACK => Self::Count {
+                container: r.u8()?,
+                slot: r.u8()?,
+                item_id: r.u64()?,
+                delta: r.i32()?,
+                template_id: r.u32()?,
+            },
+            action::CHANGE_GRADE => Self::Grade {
+                container: r.u8()?,
+                slot: r.u8()?,
+                item_id: r.u64()?,
+                grade: r.u8()?,
+            },
+            action::SWAP_SLOT => {
+                let from_container = r.u8()?;
+                let from_slot = r.u8()?;
+                let to_container = r.u8()?;
+                let to_slot = r.u8()?;
+                let from_item_id = r.u64()?;
+                let to_item_id = r.u64()?;
+                r.skip(4)?; // flags
+                Self::Move { from_container, from_slot, from_item_id, to_container, to_slot, to_item_id }
+            }
+            action::REMOVE => Self::Remove {
+                container: r.u8()?,
+                slot: r.u8()?,
+                item_id: r.u64()?,
+                template_id: r.u32()?,
+            },
+            action::REMOVE_CRAFTING => Self::RemoveCrafting { item_id: r.u64()? },
+            action::SEIZE => Self::RemoveSlot { container: r.u8()?, slot: r.u8()?, item_id: r.u64()? },
+            action::UPDATE_DETAIL => {
+                let container = r.u8()?;
+                let slot = r.u8()?;
+                let item_id = r.u64()?;
+                let detail = read_padded_detail(r)?;
+                Self::Update { container, slot, item_id, detail }
+            }
+            action::SET_FLAGS_BITS => {
+                let t = Self::Flags { container: r.u8()?, slot: r.u8()?, item_id: r.u64()?, bits: r.u8()? };
+                r.skip(8)?;
+                t
+            }
+            action::UPDATE_FLAGS => {
+                let t = Self::Flags { container: r.u8()?, slot: r.u8()?, item_id: r.u64()?, bits: r.u8()? };
+                r.skip(3 + 8 + 8)?; // three flags, unsecure time, unpack time
+                t
+            }
+            other => return Err(WireError::Invalid(format!("item task action {other}"))),
+        })
+    }
+}
+
+/// `i16` length (128) followed by the detail type, the details and zero padding.
+fn read_padded_detail(r: &mut Reader) -> Result<ItemDetail> {
+    let len = r.i16()?.max(0) as usize;
+    let block = r.bytes(len)?;
+    if block.is_empty() {
+        return Ok(ItemDetail::None);
+    }
+    let mut d = Reader::new(block);
+    let detail_type = d.u8()?;
+    ItemDetail::read(&mut d, detail_type).or(Ok(ItemDetail::Other(detail_type)))
+}
+
+/// An item as `write_task_item_details` writes it: like `Item.Write`, but the detail block is
+/// padded to a fixed length.
+fn read_task_item(r: &mut Reader) -> Result<Item> {
+    let template_id = r.u32()?;
+    let id = r.u64()?;
+    let grade = r.u8()?;
+    let flags = r.u8()?;
+    let count = r.i32()?;
+    let detail = read_padded_detail(r)?;
+    Ok(Item {
+        template_id,
+        id,
+        grade,
+        flags,
+        count,
+        detail,
+        create_time: r.i64()?,
+        lifespan_mins: r.i32()?,
+        made_unit_id: r.u32()?,
+        world_id: r.u8()?,
+        unsecure_time: r.i64()?,
+        unpack_time: r.i64()?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::Writer;
+
+    fn plain_item(w: &mut Writer, template: u32, id: u64, count: i32) {
+        w.u32(template).u64(id).u8(1).u8(0).i32(count).u8(0); // detail type 0
+        w.i64(10).i32(0).u32(0).u8(1).i64(0).i64(0);
+    }
+
+    #[test]
+    fn action_slots_golden_bytes() {
+        // Spell 1234, nothing, an item type, one specific item, a macro (no id), then nothing.
+        let mut w = Writer::new();
+        w.u8(2).u32(1234);
+        w.u8(0);
+        w.u8(1).u32(8001);
+        w.u8(4).u64(0x0102_0304_0506);
+        w.u8(3);
+        w.u8(0);
+        let bytes = w.finish();
+        let slots = read_action_slots(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(slots.len(), 6);
+        assert_eq!(slots[0].skill_id(), Some(1234));
+        assert!(slots[1].is_empty());
+        assert_eq!(slots[2].item_template_id(), Some(8001));
+        assert_eq!(slots[3].item_id(), Some(0x0102_0304_0506));
+        assert_eq!(slots[4].kind, ActionKind::Macro);
+        // Writing them again gives the same bytes (what CSUpdateActionSlot sends per slot).
+        let mut again = Writer::new();
+        for s in &slots {
+            s.write(&mut again);
+        }
+        assert_eq!(again.finish(), bytes);
+    }
+
+    #[test]
+    fn inventory_chunk_with_items() {
+        // `SCCharacterInvenContents`: type 2 (bag), 1 chunk, starts at chunk 3, ten slots with
+        // a potion stack in the third and a bare 0 in the others.
+        let mut w = Writer::new();
+        w.u8(container::INVENTORY).u8(1).u8(3);
+        for i in 0..10 {
+            if i == 2 {
+                plain_item(&mut w, 8001, 555, 20);
+            } else {
+                w.i32(0);
+            }
+        }
+        let bytes = w.finish();
+        let c = InvenChunk::read(&mut Reader::new(&bytes)).unwrap();
+        assert!(!c.truncated);
+        assert_eq!((c.container, c.chunks, c.start_chunk, c.first_slot()), (2, 1, 3, 30));
+        assert_eq!(c.items.len(), 10);
+        let it = c.items[2].as_ref().unwrap();
+        assert_eq!((it.template_id, it.id, it.count), (8001, 555, 20));
+        assert!(c.items[0].is_none());
+        // A chunk cut inside an item keeps the slots before it.
+        let cut = &bytes[..bytes.len() - 30];
+        let c = InvenChunk::read(&mut Reader::new(cut)).unwrap();
+        assert!(c.truncated);
+    }
+
+    /// A task item as `write_task_item_details` does: details padded to 128 bytes.
+    fn task_item(w: &mut Writer, template: u32, id: u64, count: i32) {
+        w.u32(template).u64(id).u8(0).u8(0).i32(count);
+        w.i16(128).raw(&[0u8; 128]); // detail type 0 + padding
+        w.i64(10).i32(0).u32(0).u8(1).i64(0).i64(0);
+    }
+
+    #[test]
+    fn item_task_success_golden_bytes() {
+        // Reason 9 (loot): +50 copper, a new item in bag slot 4, a stack grows by 3, force remove 7.
+        let mut w = Writer::new();
+        w.u8(9).u8(3);
+        w.u8(action::CHANGE_MONEY_AMOUNT).i32(50);
+        w.u8(action::CREATE).u8(container::INVENTORY).u8(4);
+        task_item(&mut w, 8001, 600, 5);
+        w.u8(action::ADD_STACK).u8(container::INVENTORY).u8(1).u64(555).i32(3).u32(8001);
+        w.u8(1).u64(7);
+        w.u32(0); // type(id), trailing
+        let bytes = w.finish();
+        let t = ItemTasks::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(t.reason, 9);
+        assert!(!t.truncated);
+        assert_eq!(t.tasks.len(), 3);
+        assert_eq!(t.tasks[0], ItemTask::Money(50));
+        let ItemTask::Add { container: c, slot, item, .. } = &t.tasks[1] else { panic!("{:?}", t.tasks[1]) };
+        assert_eq!((*c, *slot, item.template_id, item.id, item.count), (2, 4, 8001, 600, 5));
+        assert_eq!(
+            t.tasks[2],
+            ItemTask::Count { container: 2, slot: 1, item_id: 555, delta: 3, template_id: 8001 }
+        );
+        assert_eq!(t.force_remove, vec![7]);
+    }
+
+    #[test]
+    fn item_task_move_remove_and_unknown() {
+        let mut w = Writer::new();
+        w.u8(5).u8(2);
+        w.u8(action::SWAP_SLOT).u8(2).u8(1).u8(2).u8(6).u64(555).u64(0).i32(0);
+        w.u8(action::REMOVE).u8(2).u8(6).u64(555).u32(8001);
+        w.u8(0);
+        let t = ItemTasks::read(&mut Reader::new(&w.finish())).unwrap();
+        assert_eq!(
+            t.tasks[0],
+            ItemTask::Move {
+                from_container: 2,
+                from_slot: 1,
+                from_item_id: 555,
+                to_container: 2,
+                to_slot: 6,
+                to_item_id: 0
+            }
+        );
+        assert_eq!(t.tasks[1], ItemTask::Remove { container: 2, slot: 6, item_id: 555, template_id: 8001 });
+
+        // An action this client does not know ends the list but keeps what came before.
+        let mut w = Writer::new();
+        w.u8(5).u8(2);
+        w.u8(action::CHANGE_MONEY_AMOUNT).i32(-1);
+        w.u8(99);
+        let t = ItemTasks::read(&mut Reader::new(&w.finish())).unwrap();
+        assert!(t.truncated);
+        assert_eq!(t.tasks, vec![ItemTask::Money(-1)]);
+    }
+}
