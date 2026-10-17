@@ -54,8 +54,8 @@ fn feet_pixels(race: Race, gender: Gender) -> (f32, f32, f32) {
         (Race::Elf, _) => (1007.0, 147.0, 1.89),
         (Race::Hariharan, Gender::Male) => (947.0, 164.0, 1.80),
         (Race::Hariharan, _) => (960.0, 217.0, 1.68),
-        (Race::Ferre, Gender::Male) => (1020.0, 87.0, 2.06),
-        (Race::Ferre, _) => (1033.0, 217.0, 1.97),
+        (Race::Ferre, Gender::Male) => (1020.0, 87.0, 2.07),
+        (Race::Ferre, _) => (1033.0, 217.0, 1.833),
     }
 }
 
@@ -80,8 +80,8 @@ fn step2_correction(race: Race, gender: Gender) -> (f32, f32, f32) {
         (Race::Elf, _) => (1.0, -16.0, 8.0),
         (Race::Hariharan, Gender::Male) => (1.188, 0.0, 28.0),
         (Race::Hariharan, _) => (1.125, 0.0, 4.0),
-        (Race::Ferre, Gender::Male) => (1.0, 4.0, -20.0),
-        (Race::Ferre, _) => (1.0, 0.0, 0.0),
+        (Race::Ferre, Gender::Male) => (1.0, 4.0, -32.0),
+        (Race::Ferre, _) => (1.038, 0.0, 0.0),
     }
 }
 
@@ -115,8 +115,8 @@ fn feet_pixels_3(race: Race, gender: Gender) -> (Vec2, f32, f32, f32) {
         (Race::Elf, _) => (Vec2::new(450.0, 843.0), 417.0, 1.793, yaw),
         (Race::Hariharan, Gender::Male) => (Vec2::new(488.0, 915.0), 527.0, 1.305, yaw),
         (Race::Hariharan, _) => (Vec2::new(435.0, 935.0), 555.0, 1.230, yaw),
-        (Race::Ferre, Gender::Male) => (Vec2::new(392.0, 871.0), 471.0, 1.583, yaw),
-        (Race::Ferre, _) => (Vec2::new(426.0, 858.0), 514.0, 1.483, yaw),
+        (Race::Ferre, Gender::Male) => (Vec2::new(462.0, 871.0), 471.0, 1.576, yaw),
+        (Race::Ferre, _) => (Vec2::new(466.0, 890.0), 514.0, 1.50, yaw),
     }
 }
 
@@ -165,6 +165,161 @@ feet {:?} dist {:.2} face {:?} px {:?}", cam, slot.feet, (slot.feet - cam.pos).l
                 let t = slot.transform();
                 assert!(t.translation.is_finite(), "{race:?} {gender:?}: {t:?}");
                 println!("{race:?} {gender:?}: feet {:?} stage {:?}", slot.feet, t.translation);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod scene_probe {
+    use super::*;
+
+    #[test]
+    #[ignore = "scene probe, needs the game data"]
+    fn login2_heights() {
+        for (cx, cy) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let dir = aa_world::world::cell_dir("login2", cx, cy);
+            let Ok(bytes) = aa_pak::Pak::global().read(&format!("{dir}/client/terrain/heightmap.dat")) else { println!("cell {cx},{cy}: no heightmap"); continue };
+            let h = aa_world::heightmap::CellHeights::parse(&bytes).unwrap();
+            println!("cell {cx},{cy}: z {:.1}..{:.1}", h.min_z, h.max_z);
+            for race in [Race::Nuian, Race::Elf, Race::Hariharan, Race::Ferre] {
+                let slot = slot_step_3(race, Gender::Male);
+                let (lx, ly) = (slot.feet.x - 1024.0 * cx as f32, slot.feet.y - 1024.0 * cy as f32);
+                if (0.0..1024.0).contains(&lx) && (0.0..1024.0).contains(&ly) {
+                    println!("  {race:?} feet {:?} terrain {:.2}", slot.feet, h.sample(lx, ly));
+                }
+            }
+            let c = (727.19, 620.7);
+            if cx == 0 && cy == 0 { println!("  step1 nuian spot terrain {:.2}", h.sample(c.0, c.1)); }
+        }
+    }
+
+    #[test]
+    #[ignore = "scene probe, needs the game data"]
+    fn login2_vegetation_groups() {
+        let o = aa_world::placement::load_cell_objects("login2", 0, 1);
+        let groups = aa_world::vegetation::VegGroups::load("login2").unwrap();
+        for race in [Race::Nuian, Race::Elf, Race::Hariharan, Race::Ferre] {
+            let cam = pose(3, race, Gender::Male);
+            let mut count = std::collections::BTreeMap::<u16, (usize, f32)>::new();
+            for v in &o.vegetation {
+                let d = (v.pos - cam.pos).length();
+                if d < 150.0 {
+                    let e = count.entry(v.group).or_insert((0, 0.0));
+                    e.0 += 1;
+                    e.1 += v.scale;
+                }
+            }
+            println!("== {race:?}");
+            for (g, (n, sc)) in count {
+                let gr = groups.groups.get(&g);
+                println!("  group {g}: {n} x scale {:.2} {} sprites {} view {} -> {}", sc / n as f32, gr.map(|g| g.name.as_str()).unwrap_or("?"), gr.is_some_and(|g| g.use_sprites), gr.map_or(0.0, |g| g.max_view_dist_ratio), gr.map(|g| g.model.as_str()).unwrap_or("?"));
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "scene probe, needs the game data"]
+    fn dummy_nodes() {
+        for f in aa_pak::Pak::global().list("game/objects/env/01_nuia/001_ndeco/old/learning") {
+            println!("file {f}");
+        }
+        println!("{}", aa_pak::Pak::global().read_string("game/objects/env/01_nuia/001_ndeco/old/learning_ob01_c.cal").unwrap_or_default());
+        let chr = aa_cry::Model::load("game/objects/env/01_nuia/001_ndeco/old/learning_ob01_c.chr");
+        println!("chr: {:?}", chr.as_ref().map(|m| (m.nodes.len(), m.meshes.len())).map_err(|e| e.to_string()));
+        {
+            let m = aa_cry::Model::load("game/Objects/Env/01_nuia/001_ndeco/old/learning_ob01_c.cgf").unwrap();
+            let mesh = &m.meshes[0];
+            let mut hist = std::collections::BTreeMap::<(i32, i32), usize>::new();
+            for p in &mesh.positions {
+                *hist.entry(((p.x.abs() * 10.0) as i32, (p.z * 5.0).floor() as i32)).or_default() += 1;
+            }
+            for ((x, z), n) in hist { if x >= 2 { println!("hist |x| {:.1} z {:.1}: {n}", x as f32 / 10.0, z as f32 / 5.0); } }
+        }
+        for name in ["c"] {
+            for ext in ["cgf", "chr"] {
+                if let Ok(m) = aa_cry::Model::load(&format!("game/objects/env/01_nuia/001_ndeco/old/learning_ob01_{name}.{ext}")) {
+                    for mesh in &m.meshes {
+                        let (mut lo, mut hi) = (bevy::math::Vec3::splat(1e9), bevy::math::Vec3::splat(-1e9));
+                        for p in &mesh.positions { lo = lo.min(*p); hi = hi.max(*p); }
+                        println!("variant {name}.{ext}: verts {} tris {} bounds {lo:?} {hi:?} skin {}", mesh.positions.len(), mesh.indices.len() / 3, mesh.skin.is_some());
+                    }
+                }
+            }
+        }
+        let m = aa_cry::Model::load("game/Objects/Env/01_nuia/001_ndeco/old/learning_ob01_c.cgf").unwrap();
+        for (i, n) in m.nodes.iter().enumerate() {
+            println!("node {i} {:?} kind {:?} mesh {:?} mtl {:?} parent {:?} props {:?} pos {:?}", n.name, n.kind, n.mesh, n.material_name, n.parent, n.properties, n.local.translation);
+        }
+        for (i, mesh) in m.meshes.iter().enumerate() {
+            println!("mesh {i}: {} subsets", mesh.subsets.len());
+            for s in &mesh.subsets {
+                println!("  subset mat {} first {} count {} center {:?} radius {}", s.material_id, s.first_index, s.index_count, s.center, s.radius);
+            }
+            println!("  verts {} colors {} indices {}", mesh.positions.len(), mesh.colors.len(), mesh.indices.len());
+            let (mut lo, mut hi) = (bevy::math::Vec3::splat(1e9), bevy::math::Vec3::splat(-1e9));
+            for p in &mesh.positions { lo = lo.min(*p); hi = hi.max(*p); }
+            println!("  bounds {lo:?} {hi:?}");
+        }
+        let mtl = aa_cry::material::Material::load("game/Objects/Env/01_nuia/001_ndeco/old/learning_ob01.mtl").or_else(|_| aa_cry::material::Material::load("Objects/Env/01_nuia/001_ndeco/old/learning_ob01.mtl")).unwrap();
+        println!("mtl {} shader {} subs {}", mtl.name, mtl.shader, mtl.sub_materials.len());
+        for (i, sub) in mtl.sub_materials.iter().enumerate().take(2) {
+            println!("  sub {i} gen {:?} vert_modif {} public {:?} surface {:?} glow {} spec {:?} diffuse {:?}", sub.string_gen_mask, sub.vert_modif_type, sub.public_params, sub.surface_type, sub.glow_amount, sub.specular, sub.diffuse);
+        }
+        for (i, sub) in mtl.sub_materials.iter().enumerate() {
+            println!("  sub {i} {} shader {} opacity {} alpha_test {} flags {:#x} nodraw {} textures {:?}", sub.name, sub.shader, sub.opacity, sub.alpha_test, sub.flags, sub.no_draw(), sub.textures.iter().map(|t| t.file.clone()).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    #[ignore = "scene probe, needs the game data"]
+    fn login2_find_field() {
+        let mut cells = Vec::new();
+        for (cx, cy) in [(0, 0), (0, 1), (1, 0)] {
+            let dir = aa_world::world::cell_dir("login2", cx, cy);
+            let bytes = aa_pak::Pak::global().read(&format!("{dir}/client/terrain/heightmap.dat")).unwrap();
+            cells.push(((cx, cy), aa_world::heightmap::CellHeights::parse(&bytes).unwrap()));
+        }
+        for race in [Race::Nuian, Race::Elf, Race::Hariharan, Race::Ferre] {
+            let slot = slot_step_3(race, Gender::Male);
+            let (fx, fy, fz) = (slot.feet.x, slot.feet.y, slot.feet.z);
+            for ((cx, cy), h) in &cells {
+                // all local (x, y) within 8 m of the capture's local position whose height is within 0.6 m of the feet
+                for ox in [-1024.0f32, 0.0, 1024.0] {
+                    for oy in [-1024.0f32, 0.0, 1024.0] {
+                        let (lx, ly) = (fx + ox, fy + oy);
+                        if !(0.0..1024.0).contains(&lx) || !(0.0..1024.0).contains(&ly) { continue; }
+                        let z = h.sample(lx, ly);
+                        println!("{race:?} cell {cx},{cy} local ({lx:.0},{ly:.0}) terrain {z:.1} feet z {fz:.1} delta {:.1}", z - fz);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "scene probe, needs the game data"]
+    fn login2_objects_near_step3() {
+        for (cx, cy) in [(0, 1), (1, 0)] {
+            let o = aa_world::placement::load_cell_objects("login2", cx, cy);
+            println!("cell {cx},{cy}: brushes {} vegetation {} decals {} water {} models {}", o.brushes.len(), o.vegetation.len(), o.decals.len(), o.water.len(), o.models.len());
+            for race in [Race::Nuian, Race::Elf, Race::Hariharan, Race::Ferre] {
+                let cam = pose(3, race, Gender::Male);
+                let mut models = std::collections::BTreeMap::<String, usize>::new();
+                let mut near = 0;
+                for b in &o.brushes {
+                    let t = b.translation();
+                    let d = (t - cam.pos).length();
+                    if d < 120.0 {
+                        near += 1;
+                        *models.entry(o.models.get(b.model as usize).cloned().unwrap_or_default()).or_default() += 1;
+                        if d < 70.0 {
+                            println!("  {race:?} brush {:6.1} m at {:?} {}", d, t, o.models.get(b.model as usize).map(|s| s.as_str()).unwrap_or("?"));
+                        }
+                    }
+                }
+                let veg = o.vegetation.iter().filter(|v| (v.pos - cam.pos).length() < 120.0).count();
+                println!("  {race:?}: {near} brushes, {veg} vegetation within 120 m; models {models:?}");
             }
         }
     }

@@ -16,6 +16,8 @@
 //! * `--clua CODE T`, `--hover X Y T`, `--click X Y T`, `--drag X1 Y1 X2 Y2 T` (physical pixels), `--wheel D T`, `--type TEXT T` (+1 = one notch
 //!   up), `--cshot FILE T`: scripted input and screenshots `T` seconds after the screen is up
 //!   (repeatable; one run can take several shots, e.g. one per tab).
+//! * `--create-offline`: with `--account NAME`, open the screen as soon as the login is through, without
+//!   entering a world (dev: screenshots and tuning while the account is busy in the world).
 //! * `--exit-after-create`: quit once the server answered the create request.
 //!
 //! ## Hand-off
@@ -41,6 +43,7 @@ mod look;
 mod poses;
 mod preview;
 mod saved;
+mod scenery;
 
 use aa_anim::cal::Cal;
 use aa_anim::{Animator, ClipLibrary, Gender, Race, SampleOptions};
@@ -69,6 +72,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(Screen::CharacterCreate), enter)
         .add_systems(OnExit(Screen::CharacterCreate), exit)
         .add_systems(Update, auto_drive.run_if(ui_is(Screen::WorldSelect)))
+        .add_systems(Update, go_offline.run_if(in_state(Screen::WorldSelect)))
         .add_systems(Update, build_ui.run_if(in_state(Screen::CharacterCreate)))
         .add_systems(
             Update,
@@ -76,6 +80,7 @@ pub fn plugin(app: &mut App) {
                 sync_net,
                 handle_requests,
                 update_preview,
+                scenery::update,
                 set_animation,
                 drive_camera,
                 run_script,
@@ -98,6 +103,9 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 pub struct Options {
     /// `--goto create`
     pub goto: bool,
+    /// `--create-offline`: open the screen as soon as the login is through, without entering a world
+    /// (dev: screenshots and tuning; the create request cannot be answered).
+    pub offline: bool,
     pub race: Race,
     pub gender: Gender,
     /// The step the scripted replay ends on.
@@ -159,6 +167,7 @@ impl Options {
         }
         Options {
             goto: flag(&args, "--goto").as_deref() == Some("create"),
+            offline: args.iter().any(|a| a == "--create-offline"),
             race: api::race_from(&flag(&args, "--race").unwrap_or_default()),
             gender: api::gender_from(&flag(&args, "--gender").unwrap_or_default()),
             step: flag(&args, "--step").and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 3),
@@ -203,6 +212,15 @@ fn auto_drive(
     let code = format!("backgroundWindow.mainWindow:SelectByDataKey({id}) backgroundWindow.enterWorldBtn:OnClick()", id = world.id);
     if let Err(e) = rt.exec("goto", &code) {
         warn!("character create: --goto: {e}");
+    }
+}
+
+/// `--create-offline`: to the create screen once the login answered with the server list (once).
+fn go_offline(opts: Res<Options>, worlds: Res<Worlds>, mut next: ResMut<NextState<Screen>>, mut done: Local<bool>) {
+    // after the login: the server list arriving later would send the screen back to the list
+    if opts.offline && !*done && !worlds.list.worlds.is_empty() {
+        *done = true;
+        next.set(Screen::CharacterCreate);
     }
 }
 
@@ -272,6 +290,7 @@ fn enter(mut commands: Commands, mut cry: CryAssets, opts: Res<Options>) {
     }));
     let pose = poses::pose(1, race, gender);
     let stage = stage3d::spawn_stage(&mut commands, &mut cry, &pose, &StageLighting::login());
+    commands.insert_resource(scenery::Scenery::start());
     commands.insert_resource(CreateScreen {
         shared,
         stage,
@@ -289,10 +308,13 @@ fn enter(mut commands: Commands, mut cry: CryAssets, opts: Res<Options>) {
     });
 }
 
-fn exit(mut commands: Commands, screen: Option<Res<CreateScreen>>) {
+fn exit(mut commands: Commands, screen: Option<Res<CreateScreen>>, mut grade: ResMut<stage3d::BackgroundGrade>) {
+    // the painted sky of step 3 is graded (see `scenery`)
+    grade.0 = None;
     if let Some(screen) = screen {
         commands.entity(screen.stage.root).despawn();
         commands.remove_resource::<CreateScreen>();
+        commands.remove_resource::<scenery::Scenery>();
     }
 }
 
@@ -377,12 +399,16 @@ fn handle_requests(
                 };
                 info!("character create: step {from} -> {to}");
                 screen.step = to;
-                if let Ok((t, p)) = cams.single() {
-                    let fov = match p {
-                        Projection::Perspective(p) => p.fov,
-                        _ => 0.5,
-                    };
-                    screen.tween = Some(Tween { from: (t.translation, t.rotation, fov), t: 0.0 });
+                // step 3 is another place of the login level: the real client cuts there
+                screen.tween = None;
+                if from.max(to) < 3 {
+                    if let Ok((t, p)) = cams.single() {
+                        let fov = match p {
+                            Projection::Perspective(p) => p.fov,
+                            _ => 0.5,
+                        };
+                        screen.tween = Some(Tween { from: (t.translation, t.rotation, fov), t: 0.0 });
+                    }
                 }
                 if let Some(ui) = ui.as_deref() {
                     let (hide, show) = match (from, to) {
@@ -579,7 +605,7 @@ fn run_script(
         }
         due
     };
-    if opts.goto {
+    if opts.goto || opts.offline {
         let race = match opts.race {
             Race::Nuian => "RACE_NUIAN",
             Race::Elf => "RACE_ELF",
@@ -587,7 +613,7 @@ fn run_script(
             Race::Hariharan => "RACE_HARIHARAN",
         };
         let gender = if opts.gender == Gender::Female { 2 } else { 1 };
-        let mut exec = |code: &str| {
+        let exec = |code: &str| {
             if let Err(e) = ui.exec("create script", code) {
                 warn!("character create: script: {e}");
             }

@@ -16,7 +16,7 @@ cargo run -p aa-client -- --goto create --race elf --gender female --step 2 --ac
 |---|---|---|
 | 1 race / gender | 4 races x 2 genders, race text, advantages (race buffs from the DB), race congestion from the server | full body in the login costume, idle animation, camera of `reference/character_create/step1_*` |
 | 2 appearance | hair style + colour, eyes (colour), style (eyebrow, makeup, deco + colours), skin, paint (tattoo, scar with location / size / angle), premade faces, premade eyes / nose / mouth / head, detail sliders per part, Blend Looks, Keep Appearance, Save / Load Appearance | head close-up (camera of `step2_*`), every change rebuilds the preview, mouse wheel zooms |
-| 3 skillset + name | six skillsets with descriptions, skill icons and the pentagon diagram, name field with the client's own rules, "Finalize this character?" dialog, "Failed to create character." dialogs | combat stance in front of the camera of `step3_*` (no training field, see gaps) |
+| 3 skillset + name | six skillsets with descriptions, skill icons and the pentagon diagram, name field with the client's own rules, "Finalize this character?" dialog, "Failed to create character." dialogs | combat stance in the training field (terrain, grass, rocks, straw dummies, sky; see below) seen by the camera of `step3_*` |
 
 Create sends `Command::CreateCharacter` (race, gender, face + hair items, the full `ModelParams`
 customization: slider bytes, decals, normal map, colours, hair and skin colour ids, skillset) and,
@@ -27,7 +27,10 @@ client's own message boxes (`error_char_name_*`).
 ## Flags
 
 `--goto create`, `--race nuian|elf|ferre|hariharan`, `--gender male|female`, `--step 1|2|3`,
-`--exit-after-create` and the scripted input below. The account is the login module's
+`--exit-after-create` and the scripted input below. `--create-offline` (with `--account`) opens the
+screen as soon as the login is through and never enters a world: screenshots and tuning while the
+account is busy in the game (the create request cannot be answered then). The login module accepts
+`--goto create` silently (this screen drives itself there) and `--lua create:CODE`. The account is the login module's
 (`--account NAME`, alias `--user`, `--login HOST:PORT`, `--password-file PATH`, see
 `ingame::enter::Credentials`); this screen's runs use **`bevycreate`** (the server lets one
 connection per account in).
@@ -45,7 +48,9 @@ physical pixels of the 1920x1080 window):
 | `--cshot FILE T` | screenshot (several per run; the first one freezes the idle pose) |
 
 `AA_LOOKS_DIR` moves the Save Appearance folder (default `Documents/AABevy/looks`),
-`AA_CREATE_NO_SUBJECT=1` leaves the stage empty (background shots for silhouette measuring).
+`AA_CREATE_NO_SUBJECT=1` leaves the stage empty (background shots for silhouette measuring),
+`AA_CREATE_NO_FIELD=1` leaves the step 3 field out. Fitting knobs of the field: `AA_FIELD`,
+`AA_BG_GRADE`, `AA_DUMMY_YAW` (see `scenery.rs`).
 
 ## How it fits together
 
@@ -65,7 +70,37 @@ physical pixels of the 1920x1080 window):
 * `poses.rs`: the 24 `camera.json` of the captures (embedded) and where the figure stands per model
   and step (step 1 solved from feet / head pixels, step 2 and 3 corrected by registering our render
   onto the captures: `login/create/tools/{align3,bbox}.py`).
+* `scenery.rs`: the step 3 training field (below).
 * `preview.rs`: the preview cache (below). `saved.rs`: Save / Load Appearance files.
+
+## The step 3 training field
+
+It is not in the `game/create_<race>.lyr` layer files (those only hold lights and cameras): it is a
+corner of the **login2** world, cell `000_001`. The capture cameras (`05_skill_<race>` of the cell's
+`entities.xml`, `camera.json`) are in that cell's local coordinates and the terrain heights of the
+cell match the solved feet z of all eight models. `scenery.rs` builds it from public pieces of
+aa-world and aa-cry on the stage render layer, asking aa-world for nothing:
+
+* terrain: `heightmap.dat` patches (`terrain::build_patch_mesh`, LOD by distance), the baked
+  `cover.ctc` and the surface type layers through aa-world's `TerrainMaterial` shader, with a
+  `LayerLibrary` built for login2 on a task (the in-game world's own library knows only main_world);
+* grass, flowers and rocks: `vegetation.dat` + `vegetation.xml` and the cell's brushes
+  (`load_cell_objects`) within 170 m of the camera, placed like aa-world places them;
+* the `target_<race>_N` AnimObjects of `entities.xml` (quaternion `Rotate="w,x,y,z"`): three straw
+  dummies per race. The model is a static bind pose with two arm logs and a painted shield that the
+  game poses away: those parts are left out and the model is turned a quarter;
+* the painted `step3_<race>` background is the sky: drawn with +0.92 EV and no tone curve (the
+  captured sky is that much brighter than the texture, fitted to 3 / 255 on all four races), the
+  field covers its lower half. Per race (`mood`): a fog colour for the far ground and linear factors
+  on the terrain and on the grass / rocks (the stage lights are tuned for the figure and about eight
+  times too bright for the captured ground). The values come from the mean colours of regions of the
+  captures (sky, haze, ridge, near / mid grass), within about 10 % on most regions.
+
+The files are read on a task when the screen opens, the models of the race are loaded ahead while
+steps 1 and 2 are shown and the field is spawned (terrain at once, props within a 6 ms frame budget)
+when step 3 starts; steps 2 <-> 3 cut instead of flying the camera (the real client changes place
+there). Not drawn: the ground mist (`flow_fog_01`, `elf_fog_01`, ... particle effects), birds, wind
+sway, the dummies' idle animation.
 
 ## Responsiveness
 
@@ -84,16 +119,22 @@ full `resolve`.
   client log `the server created Bevylook1 (id 5, race 1, gender 1)`. `--enter-world --account
   bevycreate --character Bevylook1` showed the same face, hair, tattoo and scar in game; a second create
   with the same name gives the "name already in use" dialog (reason 4).
-* All 24 step captures compared in `shots/create/cmp/` (ours) against `reference/character_create`.
+* All 24 step captures compared in `shots/create/cmp/` (ours) against `reference/character_create`;
+  `shots/create/sheet{1,2,3}.png` put reference and ours side by side (`tools/sheet.py`). Step 3 now
+  has the field: the sky, the dummies, the rocks and the ridge are where the captures have them.
+* The Firran head fix (aa-anim `08ae0d4`) was re-measured: step 1 and 2 of both ferre models register
+  onto the captures (scale 1.00, shift 0 with `tools/align3.py`), step 3 top / bottom rows of the
+  silhouette are within 12 px of the captures (`tools/bbox.py` against a `AA_CREATE_NO_SUBJECT=1` run).
 
 ## Gaps and notes
 
-* Step 3 has no training field (grass, dummies, sky): the login level 3D is not in aa-world, only the
-  painted UI background is behind the figure.
+* Step 3 field: no ground mist, no wind, no dummy animation; the grass is the vegetation of the cell
+  within 170 m (the captures' near blades are bigger and brighter in the Elf scene); the Hariharan
+  skeleton prop glows white where the capture has it dark; flowers come out orange instead of yellow.
+* The ferre step 3 stance is more upright than the captures (their legs are bent more); the
+  silhouette height and position match.
 * Lighting / materials differ from the captures (flatter skin, hair specular: dark hair renders grey,
   no ambient occlusion); that is aa-cry / aa-anim.
-* Firran (ferre) heads: the head placement bug is being fixed in aa-anim; the step 2 / 3 placement of
-  the two ferre models was measured with it present and needs a re-measure (`login/create/tools/`).
 * Name validation is the client's (2-18 letters and digits in this build, server reasons 3, 4, 5 for
   the rest); the protocol has no separate name check.
 * Race / gender stay Nuian male on entering the screen (the real client does too), not the last pick.
