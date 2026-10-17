@@ -33,7 +33,7 @@ use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::cut::{Hull, cut_hulls, cut_mesh};
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
-use crate::face::{EyeTint, FaceLayer, abgr, compose_face_eyes};
+use crate::face::{EyeTint, FaceKey, FaceLayer, abgr, take_face};
 use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, Rig, SampleOptions};
 use crate::{Error, Result};
@@ -473,12 +473,12 @@ struct FaceLook {
 /// spans the whole strip. The eyeballs are the two separate meshes of the shader that are square
 /// and of the same size: both eyes use one rectangle (elf, nuian: returned once) or one each
 /// (ferre). If there is no such pair the union box is used.
-fn eye_uv_boxes(loaded: &LoadedModel, mtl: &CryMaterial) -> Vec<[f32; 4]> {
+fn eye_uv_boxes(model: &aa_cry::Model, mtl: &CryMaterial) -> Vec<[f32; 4]> {
     let union = |a: [f32; 4], b: [f32; 4]| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
     let mut all: Option<[f32; 4]> = None;
     // uv box of every connected piece of eye geometry
     let mut pieces: Vec<[f32; 4]> = Vec::new();
-    for mesh in &loaded.model.meshes {
+    for mesh in &model.meshes {
         // union-find over vertices touched by eye triangles
         let mut parent: Vec<u32> = (0..mesh.positions.len() as u32).collect();
         fn find(p: &mut [u32], mut i: u32) -> u32 {
@@ -547,33 +547,85 @@ fn uses_texture(sub: &CryMaterial, path: &str) -> bool {
     !path.is_empty() && sub.texture(&TextureMap::Diffuse).is_some_and(|t| texture_pak_path(&t.file).to_ascii_lowercase() == path)
 }
 
-/// Builds the face texture and normal map of the character for a face material.
-fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>, loaded: &LoadedModel) -> FaceLook {
+/// What the face texture of a character is made of: the texture the material names (replaced by
+/// the composed one), and the [`FaceKey`] of the composition, `None` when the customisation changes
+/// nothing (the base texture is used as is).
+struct FaceInputs {
+    named: String,
+    base: String,
+    key: Option<FaceKey>,
+}
+
+fn face_inputs(assets: &CharacterAssets, mtl: Option<&CryMaterial>, model: &aa_cry::Model) -> Option<FaceInputs> {
     use aa_cry::material::{TextureMap, texture_pak_path};
-    let mut look = FaceLook::default();
-    let Some(skin) = mtl.and_then(|m| m.sub_materials.iter().find(|s| s.shader.eq_ignore_ascii_case("humanskin"))) else { return look };
-    let Some(diffuse) = skin.texture(&TextureMap::Diffuse) else { return look };
+    let skin = mtl?.sub_materials.iter().find(|s| s.shader.eq_ignore_ascii_case("humanskin"))?;
+    let diffuse = skin.texture(&TextureMap::Diffuse)?;
     // `face00_df` (named by the material; `... copy.dds` does not exist) is a placeholder: the
     // customisable base is the `face01` texture of the same race
     let named = texture_pak_path(&diffuse.file);
     let pak = aa_pak::Pak::global();
-    let base = [named.replace("face00", "face01"), named.replace(" copy", "")].into_iter().find(|p| pak.exists(p));
-    let Some(base) = base else { return look };
-    look.replaces = named.to_ascii_lowercase();
+    let base = [named.replace("face00", "face01"), named.replace(" copy", "")].into_iter().find(|p| pak.exists(p))?;
+    let eyes: Vec<EyeTint> = match (assets.pupil_color, mtl) {
+        (Some(color), Some(mtl)) => eye_uv_boxes(model, mtl).into_iter().map(|uv| EyeTint { uv, color }).collect(),
+        _ => Vec::new(),
+    };
+    let changed = !(assets.face_layers.is_empty() && assets.face_lips.is_none() && eyes.is_empty() && base == named);
+    let key = changed.then(|| FaceKey { base: base.clone(), layers: assets.face_layers.clone(), lips: assets.face_lips.clone(), eyes });
+    Some(FaceInputs { named, base, key })
+}
+
+/// The key of the composed face texture of `assets` for its face part's model and material, to
+/// [`prewarm_face`](crate::face::prewarm_face) it on a worker thread. `None` without a customisable
+/// face. Pure CPU: callable from any thread.
+pub fn face_key(assets: &CharacterAssets, mtl: Option<&CryMaterial>, model: &aa_cry::Model) -> Option<FaceKey> {
+    face_inputs(assets, mtl, model)?.key
+}
+
+/// Composes the face texture of `assets` ahead of [`spawn_character`] (20-30 ms of CPU: BC decode,
+/// decals, lips, eyes, mips) so that the spawn on the main thread finds it ready: loads the face
+/// model and material itself and calls [`prewarm_face`](crate::face::prewarm_face). Callable from
+/// any thread; returns whether it composed something (false: nothing to compose, or already done).
+pub fn prewarm_character_face(assets: &CharacterAssets) -> Result<bool> {
+    let Some(part) = assets.parts.iter().find(|p| p.kind == PartKind::Face) else { return Ok(false) };
+    let model = aa_cry::Model::load(&part.path)?;
+    let mtl_path = part.material.clone().or_else(|| aa_cry::scene::find_mtl(&part.path, &model));
+    let mtl = mtl_path.and_then(|p| aa_cry::material::Material::load(&p).ok());
+    match face_key(assets, mtl.as_ref(), &model) {
+        Some(key) => crate::face::prewarm_face(&key),
+        None => Ok(false),
+    }
+}
+
+/// Ids of the composed face assets (`FaceKey::id` -> asset): identical faces share one texture
+/// while some character still uses it (the map holds ids, not handles: a face nobody shows any
+/// more, e.g. one of the create screen's slider steps, is freed).
+static FACE_ASSETS: std::sync::Mutex<Option<HashMap<String, AssetId<Image>>>> = std::sync::Mutex::new(None);
+
+/// Builds the face texture and normal map of the character for a face material. The composed
+/// texture is shared by every character with the same face inputs and may have been composed on a
+/// worker thread ([`prewarm_character_face`]).
+fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>, loaded: &LoadedModel) -> FaceLook {
+    let mut look = FaceLook::default();
+    let Some(inputs) = face_inputs(assets, mtl, &loaded.model) else { return look };
+    look.replaces = inputs.named.to_ascii_lowercase();
     if let Some((path, _)) = &assets.face_normal {
         look.normal = cry.texture(path, false);
     }
-    let eyes: Vec<EyeTint> = match (assets.pupil_color, mtl) {
-        (Some(color), Some(mtl)) => eye_uv_boxes(loaded, mtl).into_iter().map(|uv| EyeTint { uv, color }).collect(),
-        _ => Vec::new(),
-    };
-    if assets.face_layers.is_empty() && assets.face_lips.is_none() && eyes.is_empty() && base == named {
+    let Some(key) = inputs.key else { return look };
+    let id = key.id();
+    let known = FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&id).copied());
+    if let Some(handle) = known.and_then(|asset| cry.images.get_strong_handle(asset)) {
+        crate::face::discard_face(&key);
+        look.texture = Some(handle);
         return look;
     }
-    let lips = assets.face_lips.as_ref().map(|(p, c)| (p.as_str(), *c));
-    match compose_face_eyes(&base, &assets.face_layers, lips, &eyes) {
-        Ok(img) => look.texture = Some(cry.images.add(img)),
-        Err(e) => warn!("aa-anim: face texture {base}: {e}"),
+    match take_face(&key) {
+        Ok(img) => {
+            let handle = cry.images.add(img);
+            FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(id, handle.id());
+            look.texture = Some(handle);
+        }
+        Err(e) => warn!("aa-anim: face texture {}: {e}", inputs.base),
     }
     look
 }

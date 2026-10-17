@@ -52,6 +52,71 @@ pub fn abgr(c: u32) -> [u8; 3] {
     [(c & 0xFF) as u8, ((c >> 8) & 0xFF) as u8, ((c >> 16) & 0xFF) as u8]
 }
 
+/// Everything the composed face texture of a character depends on (the files are named by path, so
+/// two keys that compare equal compose the same image). Build it with
+/// [`crate::character::face_key`]; [`take_face`] / [`prewarm_face`] memoize by it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceKey {
+    /// Pak path of the base skin texture.
+    pub base: String,
+    pub layers: Vec<FaceLayer>,
+    /// Pak path of the lip mask and the lip colour.
+    pub lips: Option<(String, [u8; 3])>,
+    /// Eyeball rectangles with the iris colour.
+    pub eyes: Vec<EyeTint>,
+}
+
+impl FaceKey {
+    /// A string that is the same for equal keys (floats are printed exactly).
+    pub fn id(&self) -> String {
+        format!("{self:?}")
+    }
+
+    /// The composition itself, not memoized: [`compose_face_eyes`].
+    pub fn compose(&self) -> Result<Image> {
+        compose_face_eyes(&self.base, &self.layers, self.lips.as_ref().map(|(p, c)| (p.as_str(), *c)), &self.eyes)
+    }
+}
+
+type ComposedFaces = std::collections::HashMap<String, Image>;
+
+/// Composed faces waiting for the main thread to turn them into an asset (`id` -> image). Composing
+/// is 20-30 ms (BC decode, decals, lips, eyes, mip chain): worker threads fill this ahead of the
+/// unit that needs it ([`prewarm_face`]).
+static COMPOSED: std::sync::Mutex<Option<ComposedFaces>> = std::sync::Mutex::new(None);
+
+fn composed() -> std::sync::MutexGuard<'static, Option<ComposedFaces>> {
+    COMPOSED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Composes the face of `key` and keeps it for [`take_face`]; a no-op when it is already there.
+/// Callable from any thread (CPU only, no Bevy resources). Returns whether it composed.
+pub fn prewarm_face(key: &FaceKey) -> Result<bool> {
+    let id = key.id();
+    if composed().get_or_insert_with(Default::default).contains_key(&id) {
+        return Ok(false);
+    }
+    let image = key.compose()?;
+    composed().get_or_insert_with(Default::default).entry(id).or_insert(image);
+    Ok(true)
+}
+
+/// The composed face of `key`: the one [`prewarm_face`] made (moved out of the store), else composed
+/// now. The caller owns it and makes the asset (`images.add`); share the handle between equal keys.
+pub fn take_face(key: &FaceKey) -> Result<Image> {
+    if let Some(image) = composed().as_mut().and_then(|m| m.remove(&key.id())) {
+        return Ok(image);
+    }
+    key.compose()
+}
+
+/// Drops a prewarmed face nobody needs any more (an equal one is already an asset).
+pub fn discard_face(key: &FaceKey) {
+    if let Some(m) = composed().as_mut() {
+        m.remove(&key.id());
+    }
+}
+
 /// Composites `layers` (and the optional lip tint with its mask) on the base texture; the result
 /// is an sRGB image with a full mip chain.
 pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3])>, eye: Option<EyeTint>) -> Result<Image> {
@@ -279,6 +344,28 @@ mod tests {
         assert_eq!(r, 200, "opaque texel unchanged: {r}");
         let edge = dst[(1 * 4 + 2) * 4..][..3].to_vec();
         assert!(edge == vec![0, 0, 0], "fully transparent texel draws nothing: {edge:?}");
+    }
+
+    #[test]
+    fn prewarmed_faces_are_made_once_and_taken_once() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let key = FaceKey {
+            base: "game/objects/characters/nuian/male/face/face01/nu_m_face01_df.dds".into(),
+            layers: Vec::new(),
+            lips: None,
+            eyes: vec![EyeTint { uv: [0.0, 0.0, 0.1, 0.1], color: [0, 93, 188] }],
+        };
+        assert_eq!(key.id(), key.clone().id());
+        assert!(prewarm_face(&key).unwrap(), "first call composes");
+        assert!(!prewarm_face(&key).unwrap(), "second call finds it");
+        let image = take_face(&key).unwrap();
+        assert_eq!(image.texture_descriptor.mip_level_count, 10);
+        assert!(prewarm_face(&key).unwrap(), "taken: composed again");
+        discard_face(&key);
+        assert!(prewarm_face(&key).unwrap(), "discarded: composed again");
+        discard_face(&key);
     }
 
     #[test]
