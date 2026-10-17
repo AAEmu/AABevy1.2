@@ -126,8 +126,6 @@ pub struct AtmosphereTuning {
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
-    /// Experiments: the hour at which the sun is highest (NaN = the fitted [`crate::env::HIGHEST_HOUR`]).
-    pub sun_noon: f32,
 }
 
 impl Default for AtmosphereTuning {
@@ -169,7 +167,6 @@ impl Default for AtmosphereTuning {
             sea_body: 2.5,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
-            sun_noon: f32::NAN,
         }
     }
 }
@@ -217,7 +214,6 @@ impl AtmosphereTuning {
                 "sea_body" => t.sea_body = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
-                "sun_noon" => t.sun_noon = v,
                 _ => {}
             }
         }
@@ -429,10 +425,7 @@ pub fn update_environment(
         .and_then(|z| cache.zones.entry((z, layer)).or_insert_with(|| load_tod(&cfg.world, Some(z), layer)).clone())
         .or_else(|| cache.world_default.entry(layer).or_insert_with(|| load_tod(&cfg.world, None, layer)).clone());
     let Some(tod) = tod else { return };
-    let mut lighting = cache.lighting.unwrap_or_default();
-    if tuning.sun_noon.is_finite() {
-        lighting.highest_hour = tuning.sun_noon;
-    }
+    let lighting = cache.lighting.unwrap_or_default();
     let mut target = tod.sample(clock.hour, lighting);
     // the clouds are shaded by the sky colour, which some zones keep green (see `update_ambient`): same hue as the ambient light
     target.cloud_sky = ambient_hue(&target, &tuning, target.cloud_sky);
