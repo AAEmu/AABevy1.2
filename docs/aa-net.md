@@ -95,7 +95,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (houses, guilds, trading, looting windows ...) is decoded as
+Everything else the server sends (houses, guilds, loot dice ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
 
@@ -907,7 +907,13 @@ trailing type ID, two booleans and i64 leave time. It is not a packed9-byte posi
 `BlockedUser` contains `id` and `name`. Lists have separate i32 total/count fields; negative,
 inconsistent, truncated or duplicate-ID lists are rejected without consuming a following
 DD04 packet. Helpers are `friend(id)`, `is_blocked(name)` and
-`page(show_offline,start_zero_based,count)` (preserves server order).
+`page(show_offline,start_zero_based,count)` (preserves server order). Native UI sorts
+level descending with stable ties:39304770?39302f90 compares FriendInfo byte+0x8c,
+confirmed as the level formatted into Lua row2 at393040ba. GetFriendsPerPage wrapper
+39475710?39300c70 reads global39ac72d0; its exact runtime initialization is unresolved.
+Do not infer its page constant from the ten visible rows. Offline row4 uses elapsed Unix
+time clamped at0, then394245f0?39429b20 locale formatting; exact localized strings remain
+an app/native-formatting concern.
 
 Original `X2Friend` calls: `AddFriend(name)`, `DeleteFriend(name)`, `BlockUser(name)`,
 `UnblockUser(name)`, `GetBlockList()` returning row tables plus total,
@@ -1110,20 +1116,107 @@ but exact symbols are unproven.392ac150 then transforms through world-service vt
 Worldmap uses own current instance only when the displayed map level/id matches own map
 context, otherwise0; roadmap always uses own instance. Native does not use player Z.
 
+## Player trade protocol and state
+
+`Command::Trade(TradeCommand)` / `Event::Trade(TradeEvent)` expose all nine lane requests
+and thirteen responses. `Trade` is `WorldState.trade` and a Bevy resource. Commands are
+`Invite { obj_id }`, `Accept { obj_id }`, `Decline { obj_id, reason }`, `Cancel { reason }`,
+`OfferItem { slot }`, `RemoveItem { slot }`, `OfferMoney { amount }`, `Lock { locked }`,
+and `Confirm`. IDs here are24-bit **character object IDs**, not stored character IDs.
+Offers use zero-based physical bag slots and copper. OfferItem always writes container2,
+physical slot, amount0 (native full-stack sentinel). **The current lane transfers whole
+stacks even if a positive smaller amount was requested.** There is no partial-stack API;
+use existing SplitItem first and offer the resulting whole stack. Zero money withdraws
+an offer; negative money and invalid object IDs are locally rejected without sending.
+
+`Trade` holds active/partner_obj_id, incoming_invite/outgoing_invite, mine:Vec<TradeOffer>,
+other:Vec<Item>, both money/lock/OK flags, pending, last_error, last_canceled(reason,by_me),
+and last_settlement:Option<ItemTasks>. Own ACKs contain container/slot/amount but no item;
+WorldState/NetPlugin seed each `TradeOffer.item:Option<Item>` from authoritative inventory
+at the ACK, preserving exact item ID/count/grade/details. Missing inventory stays None,
+not invented. `plan_offer(&Inventory,physical_slot)` rejects inactive/locked or previously confirmed trade, missing
+or bound items, duplicates and the native ten-item cart limit; it yields a whole-stack
+OfferItem. The raw wire server has fewer guards; use the helper for normal UI requests.
+`can_confirm()` requires active, both locks, and own OK false, matching original UI.
+
+No offer or balance changes optimistically. Requested identifies successful packet send;
+only server offer ACKs update cart values. Changes to an offer while either side is locked
+cause lane unlock_trade to clear both locks and both OK flags. The lane only sends
+LockUpdate(false,false), so the reducer remembers the preceding authoritative edit and
+uses that source-backed sequence to invalidate both confirmations. Explicit Lock(false)
+is a narrower lane quirk: it clears both locks but leaves server OK flags unchanged; an
+edit after both locks were explicitly cleared also skips unlock_trade's early-return reset.
+The resource retains the last observed confirmation flags in that case. Do not pretend a
+new confirmation round exists; cancel/reopen if the UI needs fresh consent after that path.
+The lane's Confirm guard permits one locked side; the UI helper deliberately requires both,
+as the original Lua does. Cancel, Started and Made reset the current cart/locks/pending;
+last_canceled/last_settlement preserve the corresponding authoritative terminal report.
+Character selection, leave and disconnect clear all trade state. Late offer/lock packets
+outside an active trade are ignored. Invitation lifetime is60s server-side; silent refusal
+or expiry requires UI timeout, not fabricated success. Decline has no ACK to the declining
+client; local Requested closes its invitation and is not retained as an awaiting request.
+
+SCTradeMade16a has the same reason/tasks/forced-removals/trailing-u32 shape as item tasks;
+reason48 is TRADE. It is decoded strictly and the session emits `Event::ItemsChanged(tasks)`
+**before** `Event::Trade(TradeEvent::Made(tasks))`, so inventory and balances are settled when
+the UI receives completion. Made itself does not apply tasks twice. Full Item.Write is used
+for remote offer/add/remove; settlement Add uses existing padded item task details. Unit
+coverage checks all thirteen responses in one DD04 batch followed by another opcode,
+malformed/truncated counts, command golden bytes, exact own/other item IDs and full counts,
+edit/explicit-unlock behavior, lifecycle, and session settlement-notification order.
+
+Original `trade/trade.lua` and `logic/trade.lua` contracts:
+
+* `TRADE_CAN_START(unitIdStr)` calls `X2Trade:StartTrade(unitIdStr)` unless an exclusive
+  window blocks it, then `CannotStartTrade(unitIdStr,TCR_OPEND_MONEY_WINDOW)`.
+* `TRADE_STARTED(targetName)`, `TRADE_CANCELED()`, `TRADE_LOCKED()`,
+  `TRADE_OTHER_LOCKED()`, `TRADE_UNLOCKED()`, `TRADE_OK()`, `TRADE_OTHER_OK()`, `TRADE_MADE()`.
+* `TRADE_ITEM_PUTUP(inventoryIdx_one_based,amount)` and
+  `TRADE_ITEM_TOOKDOWN(inventoryIdx_one_based)`; amount0 displays the bag's whole count.
+* `TRADE_OTHER_ITEM_PUTUP(otherIdx_zero_based,template_id,stackCount,tooltip)`;
+  `TRADE_OTHER_ITEM_TOOKDOWN(otherIdx_zero_based)` then compacts later indices.
+  Native394ff4f0 emits the zero-based pre-insertion vector count returned by394ff490;
+  type comes from Item+8(template), count from Item+0x10. The full tooltip is built there.
+* Money events carry a decimal-string amount: TRADE_MONEY_PUTUP(money),
+  TRADE_OTHER_MONEY_PUTUP(money). `PutupTradeMoneyByStr(gold,silver,copper)` converts to copper.
+
+`X2Trade:PutupTradeItem(bagIndex_one_based,amount)` wrapper394b41b0 subtracts1 before
+394febc0, which checks lock, ten entries, count and bound flag then writes0f0.
+`TakeDownTradeItemByInventoryIdx` is called with inventoryIdx-1 (zero-based) in original Lua.
+Other calls: CanStartTrade/StartTrade/CannotStartTrade, CancelTrade(reason), IsTradeLocked/IsOtherTradeLocked, LockTrade(),
+OkTrade(), GetCurrencyForUserTrade(). The lane uses copper only, no AA-point trade currency.
+All original item lookup/tooltip addresses must respect bag sorting's virtual-to-physical map.
+
+Lane limitations are explicit: faction/distance eligibility is TODO; several silent refusals
+have only generic cancel reason0; bound/duplicate/cart/template tradeability guards are mostly
+native-side; amount is not a split; offer/settlement failures are not an atomic rollback of
+previous moves. Completion is only the actual task list, never a promise every offered item
+was transferred. No server fixes, grants or alternate settlement behavior are hidden here.
+
+`cargo test -p aa-net --test live_trade -- --ignored --nocapture` passed20.29s with fresh
+chars53/54 only. Each sold its own starter shirt+pants for59c, bought two25c unbound supplies
+and retained9c. Verified invite/decline/start, exact full stacks2/2, remove/reoffer,
+edit-driven lock invalidation, cancel retaining all balances/items, both locks, first OK
+without settlement, second OK moving exact IDs16777949/16777950 and A-2/B+2 net copper.
+Partner logout canceled an active trade; reconnect preserved recipient item ID/count/money
+and cleared the trade. Both clients logged out cleanly. Unit tests cover larger stacks,
+force-remove/truncation, and explicit-unlock/OK quirk; full-bag/partial-failure settlement
+remains source-audited, without grant fixtures.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  trading, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
+  loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
   (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
   layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
   that is not decoded ends that batch.
 * Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
-  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy). Trade,
-  coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
+  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy), player trade.
+  Coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).

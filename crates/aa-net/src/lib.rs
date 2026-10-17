@@ -32,6 +32,7 @@ pub mod skill;
 pub mod shop;
 pub mod state;
 pub mod stream;
+pub mod trade;
 pub mod unit_msg;
 pub mod wire;
 
@@ -47,6 +48,7 @@ pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState,
 pub use state::WorldState;
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
+pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
 pub use wire::Pos;
 
 #[cfg(feature = "bevy")]
