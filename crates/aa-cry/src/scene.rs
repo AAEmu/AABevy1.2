@@ -302,6 +302,7 @@ impl CryAssets<'_> {
     /// cheap: moves values) and returns the model. The model's handles were valid since the
     /// preparation; the assets behind them exist from now on.
     pub fn finish_model(&mut self, prepared: PreparedModel) -> Arc<LoadedModel> {
+        let _t = crate::prof::scope("cry.finish_model");
         let loader = self.loader();
         loader.register(&prepared);
         let loaded = prepared.loaded.clone();
