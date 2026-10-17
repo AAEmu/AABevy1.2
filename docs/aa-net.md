@@ -856,6 +856,64 @@ copper with a confirmed +1 item / -25 copper. Both bank and normal inventory sta
 Expansion success was not live-tested because this fresh character has no expansion certificate;
 capacity decoding/reduction is already covered by the inventory tests.
 
+## Friends and blocked users (2026-10-17)
+
+`Command::Friend(FriendCommand)` sends `Add { name }` (0x104), `Remove { name }` (0x105),
+`Block { name }` (0x107), or `Unblock { name }` (0x108). Each body is one length-prefixed
+string. Empty/whitespace-only, over128-byte or NUL-containing names are rejected locally.
+`Event::Friend(FriendEvent)` retains all acknowledged IDs, canonical names, success flags
+and signed16-bit server error codes: `Added`, `Removed`, `Blocked`, `Unblocked`,
+`StatusChanged`, `List` and `BlockedList`. Local `Requested(command)` follows a successful
+send; `RequestRejected { command, message }` means no packet was sent.
+
+The `Friends` Bevy resource and `WorldState::friends` contain `friends: Vec<FriendInfo>`,
+`blocked: Vec<BlockedUser>`, `total` / `blocked_total`, `loaded` / `blocked_loaded`,
+`pending: Vec<FriendCommand>` and `last_error: Option<FriendFailure>`. Only successful server
+acknowledgements change membership; failed replies retain lists and record the original
+error code. Status changes update existing friends only. Matching acknowledgements remove
+pending requests by operation/name (ASCII case-insensitive). Logout/disconnect/character
+selection resets all state. Login lists arrive **before** PlayerSpawn and must survive it.
+The lane omits empty list packets; EnteredWorld confirms that both initial lists are loaded.
+
+`FriendInfo` includes character `id`, `name`, `race`, `level`, `hp`, three `abilities`,
+`pos`, `zone_id`, `type_id`, `in_party`, `online` and raw `last_world_leave_time`.
+Its position is two long fixed-point coordinates plus float height, followed by the zone,
+trailing type ID, two booleans and i64 leave time. It is not a packed9-byte position.
+`BlockedUser` contains `id` and `name`. Lists have separate i32 total/count fields; negative,
+inconsistent, truncated or duplicate-ID lists are rejected without consuming a following
+DD04 packet. Helpers are `friend(id)`, `is_blocked(name)` and
+`page(show_offline,start_zero_based,count)` (preserves server order).
+
+Original `X2Friend` calls: `AddFriend(name)`, `DeleteFriend(name)`, `BlockUser(name)`,
+`UnblockUser(name)`, `GetBlockList()` returning row tables plus total,
+`GetFriendCount()` returning online then total, and
+`RequestFriendList(showOffline,start_one_based)`. The last is local cache filtering,
+sorting and pagination (native wrapper39475330 calls393049e0); it has no lane packet.
+Lua `FRIENDLIST_INFO(totalFiltered,start_zero_based,rows)` rows use columns
+1name,2level,3abilities-table,4position/last-online display,5race,6online,7inParty;
+column8 is the Lua selection checkbox. `FRIENDLIST_UPDATE("insert"|"update",row)`
+uses the same row formatter39303f30 via39304400; deletion instead sends
+`FRIENDLIST_UPDATE("delete",friendNameString)` (native393038e0). `BLOCKED_USER_UPDATE`
+takes no arguments.
+`FRIENDLIST(message)` and `BLOCKED_USER_LIST(message)` carry localized chat notices.
+
+Lane limits: add/remove friend supports offline stored characters. Block/unblock requires
+the target to be online. Duplicate friend/block additions, absent names and removals of
+missing entries silently return with no acknowledgement; pending requests remain unresolved
+until the application times out or resets its session. No success or server rejection is
+invented for those cases. The lane currently permits self-add/self-block; the original
+native client provides its own local self/duplicate-name checks. Status broadcasts cover
+online/offline and in-party transitions, not a continuous position/level feed.
+The lane does not suppress chat from blocked users; the application can filter displayed
+sender names through `Friends::is_blocked`. Raw `Event::Chat` remains available for inspection.
+
+`cargo test -p aa-net --test live_friends -- --ignored --nocapture` passed in40.67s with
+fresh characters36/37. It verified mutual adds, party join/disband presence, block/unblock,
+logout/offline status, saved offline friend/blocked lists after reconnect, login/online
+broadcast, removals on both peers and persisted empty lists after a second reconnect.
+Both peers logged out cleanly. Six unit tests cover every incoming packet in DD04 batches,
+long coordinates/time, malformed list counts/duplicates, failures/pending and spawn ordering.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.

@@ -107,6 +107,10 @@ opcodes! {
         CSCompleteQuestContextPacket = 0x0d6,
         CSDropQuestContextPacket = 0x0d7,
         CSQuestTalkMadePacket = 0x0da,
+        CSAddFriendPacket = 0x104,
+        CSDeleteFriendPacket = 0x105,
+        CSAddBlockedUserPacket = 0x107,
+        CSDeleteBlockedUserPacket = 0x108,
     }
 }
 
@@ -139,6 +143,13 @@ opcodes! {
         SCCharacterInvenInitPacket = 0x04b,
         SCCharacterInvenContentsPacket = 0x04c,
         SCInvenExpandedPacket = 0x04d,
+        SCFriendsPacket = 0x04e,
+        SCAddFriendPacket = 0x050,
+        SCDeleteFriendPacket = 0x051,
+        SCFriendStatusChangedPacket = 0x052,
+        SCBlockedUsersPacket = 0x054,
+        SCAddBlockedUserPacket = 0x055,
+        SCDeleteBlockedUserPacket = 0x056,
         SCUnitStatePacket = 0x069,
         SCUnitsRemovedPacket = 0x06a,
         SCUnitMovementsPacket = 0x06b,

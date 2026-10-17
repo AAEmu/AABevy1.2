@@ -254,6 +254,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
+    Friend(crate::friend::FriendCommand),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
     /// shrine). Answered by `Resurrected` and `UnitPoints`.
     Resurrect { in_place: bool },
@@ -474,6 +475,7 @@ pub enum Event {
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
+    Friend(crate::friend::FriendEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -910,6 +912,16 @@ impl Session {
                     }
                 }
             }
+            Command::Friend(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Friend(crate::friend::FriendEvent::RequestRejected {
+                        command,
+                        message: message.into(),
+                    }));
+                } else if self.send_game(game::ClientMsg::Friend(command.clone())).await {
+                    self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
+                }
+            }
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
@@ -1263,6 +1275,7 @@ impl Session {
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
+            M::Friend(e) => self.emit(Event::Friend(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
             M::SkillsReset { obj_id, ability } => self.emit(Event::SkillsReset { obj_id, ability }),
