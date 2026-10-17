@@ -21,6 +21,7 @@ pub mod login;
 pub mod model;
 pub mod net;
 pub mod opcodes;
+pub mod party;
 pub mod quest;
 pub mod session;
 pub mod skill;
@@ -37,6 +38,7 @@ pub use login::Secret;
 pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;
+pub use party::{Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use wire::Pos;
 
 #[cfg(feature = "bevy")]

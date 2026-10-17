@@ -117,6 +117,7 @@ pub enum ClientMsg {
     SwapAbility { obj_id: u32, old: u8, ability: u8 },
     /// Talking to NPCs and the quest requests (`CSInteractNPC`, `CSStartQuestContext` ...), see [`crate::interaction`].
     Interact(crate::interaction::Interact),
+    Party(crate::party::PartyCommand),
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -162,6 +163,7 @@ impl ClientMsg {
             Self::ResetSkills { .. } => cs::CSResetSkillsPacket,
             Self::SwapAbility { .. } => cs::CSSwapAbilityPacket,
             Self::Interact(m) => m.opcode(),
+            Self::Party(m) => m.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -248,6 +250,7 @@ impl ClientMsg {
                 w.bc(*obj_id).u8(*old).u8(*ability).bool(false); // auap
             }
             Self::Interact(m) => m.write(&mut w),
+            Self::Party(m) => m.write(&mut w),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
             }
@@ -459,6 +462,7 @@ pub enum ServerMsg {
     Compressed { count: u16 },
     /// NPC function lists, doodad quest offers, NPC chat ... (see [`crate::interaction`]).
     Interaction(crate::interaction::InteractEvent),
+    Party(crate::party::PartyEvent),
     Unhandled { level: u8, opcode: u16, len: usize },
 }
 
@@ -559,6 +563,7 @@ impl ServerMsg {
             Self::LeaveWorldCanceled => "SCLeaveWorldCanceled",
             Self::Batch(_) | Self::Compressed { .. } => "CompressedGamePackets",
             Self::Interaction(e) => e.name(),
+            Self::Party(e) => e.name(),
             Self::Unhandled { .. } => "unhandled",
         }
     }
@@ -955,6 +960,7 @@ impl ServerMsg {
             sc::SCLeaveWorldGrantedPacket => Self::LeaveWorldGranted { target: r.u8()? },
             sc::SCLeaveWorldCanceledPacket => Self::LeaveWorldCanceled,
             opcode if crate::interaction::InteractEvent::handles(opcode) => Self::Interaction(crate::interaction::InteractEvent::read(opcode, r)?),
+            opcode if crate::party::PartyEvent::handles(opcode) => Self::Party(crate::party::PartyEvent::read(opcode, r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_GAME,
                 opcode,
