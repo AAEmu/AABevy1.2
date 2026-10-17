@@ -191,6 +191,7 @@ impl Plugin for AaWorldPlugin {
             );
         crate::pipelines::build(app);
         crate::sky::build(app);
+        crate::objects::effects::build(app);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
     }

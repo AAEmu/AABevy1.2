@@ -13,6 +13,7 @@ aa-dev = { path = "crates/aa-dev" }
 aa-lua = { path = "crates/aa-lua" }
 aa-ui = { path = "crates/aa-ui" }
 aa-cry = { path = "crates/aa-cry" }
+aa-fx = { path = "crates/aa-fx" }
 aa-anim = { path = "crates/aa-anim" }
 aa-world = { path = "crates/aa-world" }
 aa-net = { path = "crates/aa-net" }

@@ -8,6 +8,7 @@ description = "World rendering: terrain, cell objects, vegetation, water, sky"
 [dependencies]
 aa-pak.workspace = true
 aa-cry.workspace = true
+aa-fx.workspace = true
 bevy.workspace = true
 roxmltree.workspace = true
 thiserror.workspace = true
