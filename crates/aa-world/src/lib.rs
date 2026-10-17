@@ -24,12 +24,14 @@ pub mod terrain_query;
 pub mod vegetation;
 pub mod water;
 pub mod water_material;
+pub mod water_query;
 pub mod world;
 
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
 pub use sky::{AmbientCubes, WorldClock};
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
 pub use terrain_query::{Ground, TerrainQuery};
+pub use water_query::{WaterKind, WaterQuery};
 pub use world::World;
 
 /// Whether the real client pak can be opened (tests that need it skip otherwise).

@@ -117,10 +117,14 @@ impl WaterStyle {
     }
 }
 
+/// The outline of a volume (cell-local game coordinates) in drawing order, see [`ring_order`].
+pub(crate) fn ring(points: &[Vec3]) -> Vec<Vec2> {
+    let pts: Vec<Vec2> = points.iter().map(|p| Vec2::new(p.x, p.y)).collect();
+    ring_order(&pts).into_iter().map(|i| pts[i]).collect()
+}
+
 fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>, indices: &mut Vec<u32>) {
-    let pts: Vec<Vec2> = w.points.iter().map(|p| Vec2::new(p.x, p.y)).collect();
-    let order = ring_order(&pts);
-    let ring: Vec<Vec2> = order.iter().map(|&i| pts[i]).collect();
+    let ring = ring(&w.points);
     let base = positions.len() as u32;
     let scale = if w.uv_scale[0].abs() > 1e-3 { w.uv_scale[0].abs() } else { 0.2 };
     for q in &ring {
