@@ -490,6 +490,12 @@ pub struct UiPlugin {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiInput;
 
+/// Pointer input, Lua/native animation sampling, mesh refresh and held-cursor refresh.
+/// Applications can update projected unit positions after gameplay/camera movement and
+/// `.before(UiFrame)` so combat text uses this frame's camera. Runs after [`UiInput`].
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiFrame;
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config.clone().unwrap_or_default())
@@ -497,7 +503,7 @@ impl Plugin for UiPlugin {
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame, ui_cursor).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame)).chain());
     }
 }
 
