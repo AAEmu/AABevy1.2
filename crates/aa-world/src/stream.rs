@@ -197,6 +197,7 @@ impl Plugin for AaWorldPlugin {
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
         crate::water_query::build(app, &self.config.world);
+        crate::collide::build(app, &self.config);
     }
 }
 
