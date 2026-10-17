@@ -8,7 +8,8 @@
 //! * `--size <WxH>`       window size (default 1920x1080, the real client's resolution)
 //!
 //! FPS and frame time are logged every 2 s (`aa-dev: fps=… frame_ms=…`) so performance can be
-//! compared from the console. Typical check:
+//! compared from the console. With `--shot` or `--exit-after` the app also runs uncapped when the
+//! window is unfocused. Typical check:
 //!
 //! ```text
 //! cargo run -p aa-ui --example login -- --shot shots/aa-ui/login.png
@@ -18,6 +19,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{PresentMode, WindowResolution};
+use bevy::winit::WinitSettings;
 
 /// Parsed command line options.
 #[derive(Resource, Clone, Debug)]
@@ -74,7 +76,13 @@ impl Plugin for DevPlugin {
         if !app.is_plugin_added::<FrameTimeDiagnosticsPlugin>() {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
-        app.insert_resource(DevArgs::from_env())
+        let args = DevArgs::from_env();
+        if args.shot.is_some() || args.exit_after.is_some() {
+            // Unattended runs usually have no focus; don't let Bevy cap them at 60 Hz, or the
+            // logged FPS is meaningless.
+            app.insert_resource(WinitSettings::continuous());
+        }
+        app.insert_resource(args)
             .init_resource::<DevState>()
             .add_systems(Update, (log_fps, shot_and_exit));
     }
