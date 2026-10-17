@@ -17,6 +17,11 @@
 //! * **Projectiles.** A skill with a projectile (Shoot Arrow's arrow, a fireball) sends it from the caster's hand to the target's
 //!   hit point as an effect that flies for the time the server says the effects take to land (`delay_ms` of `SCSkillFired`),
 //!   which is when the damage arrives and the hit effect plays.
+//! * **Loops.** A clip with `anims.loop` (the cast and channel poses of the mage and healer skills) loops until the next clip of
+//!   the skill, a plot step that only stops (`all_co_sk_stop`) or the end of the skill; a skill that only has a controller (a dash,
+//!   a leap) plays the controller's clip; songs play the clips of the instrument the caster holds; the one handed, two handed or
+//!   dual wield clip of a skill follows the weapon the caster holds ([`Wield`]); skills that change their effects with the skill
+//!   level use the group of the caster's level; blows shake the camera of the player (`fx_shake_cameras`).
 //! * **Reactions.** A unit that takes damage plays its hit clip; a unit that dies plays `dead_01` and stays down ([`Dead`]) until
 //!   the server removes it. Units that are announced dead (a corpse in view) lie down at once.
 //!
@@ -31,8 +36,9 @@ use std::sync::Arc;
 use aa_anim::{Animator, ClipLibrary};
 use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, spawn_loaded};
 use aa_fx::{Effect, FxLibraries, LibStatus};
-use aa_net::skill::{hit_type, target_kind};
-use aa_net::state::Units;
+use aa_net::buff::BuffCaster;
+use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, hit_type, target_kind};
+use aa_net::state::{Skills, Units};
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
 use aa_world::cry_to_bevy;
 use bevy::ecs::system::SystemParam;
@@ -41,9 +47,10 @@ use bevy::prelude::*;
 use super::anim::{Locomotion, Motion, bind_clip};
 use super::player::{LocalPlayer, Mover, approach_angle};
 use super::units::RemoteUnit;
-use super::weapons::{Drawn, hold_weapons};
+use super::camera::CameraShake;
+use super::weapons::{Drawn, Wield, hold_weapons, weapon_for_clip};
 use crate::Screen;
-use skills::{FxItem, Projectile, SkillBook, bone_names, ev};
+use skills::{FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
 
 /// What a unit is busy with, so locomotion does not take its clip away.
 #[derive(Component, Clone, Copy, Debug)]
@@ -115,6 +122,8 @@ struct Combat {
     retry: Option<Retry>,
     /// The meshes of effects that emit geometry (the arrow of a bow shot), by effect name; `None` when there is none.
     geometry: HashMap<String, Option<Arc<LoadedModel>>>,
+    /// The cast (timeline id) whose clip a unit (object id) is playing: only that cast may end it.
+    owner: HashMap<u32, u16>,
 }
 
 struct Retry {
@@ -125,6 +134,7 @@ struct Retry {
 
 #[derive(Default)]
 struct Cast {
+    skill: u32,
     caster: u32,
     target: u32,
     target_pos: Option<Vec3>,
@@ -138,8 +148,12 @@ struct Cast {
     held: Vec<(Entity, u8)>,
     /// The effects that play on the target when the damage lands (the plot step's group, else the skill's).
     hit_fx: Arc<Vec<FxItem>>,
-    /// The cast clip loops.
+    /// The camera shakes that start when the damage lands.
+    hit_shakes: Arc<Vec<ShakeItem>>,
+    /// A looping clip (the cast, a channel pose) plays for this cast and has not ended yet.
     casting: bool,
+    /// A clip of this cast has played on the caster.
+    played: bool,
 }
 
 struct Timer {
@@ -153,9 +167,11 @@ enum Later {
     /// A projectile leaves.
     Launch { projectile: Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32 },
     /// Damage lands.
-    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, hurt: Option<&'static str> },
+    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str> },
     /// A unit dies.
     Die { obj: u32 },
+    /// The camera shakes.
+    Shake(skills::Shake),
 }
 
 /// `AA_COMBAT_LOG=1`: one line per combat event.
@@ -176,6 +192,87 @@ fn full_body_only() -> bool {
 fn slowmo() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("AA_COMBAT_SLOWMO").ok().and_then(|v| v.parse().ok()))
+}
+
+/// Dev: `AA_COMBAT_FAKE="T:op:tl:args;..."` plays server events for the local player `T` seconds after the first frame, for the
+/// skills the test character does not have (the lane's server only sends what a cast of its own skills does):
+///
+/// * `T:start:TL:SKILL:CAST_MS`, `T:fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `T:plot:TL:EVENT:SKILL[:CASTING_MS]`
+/// * `T:hit:TL:SKILL:DAMAGE` (a blow of the player lands on the player), `T:end:TL`, `T:stop:TL` (casting stopped),
+///   `T:plotend:TL`, `T:plotstop:TL` (channeling stopped)
+///
+/// The target is the player itself.
+#[derive(Resource)]
+struct Fake {
+    steps: Vec<(f64, Vec<u32>, &'static str)>,
+    started: Option<f64>,
+}
+
+impl Fake {
+    fn from_env() -> Option<Fake> {
+        let text = std::env::var("AA_COMBAT_FAKE").ok()?;
+        let mut steps: Vec<(f64, Vec<u32>, &'static str)> = Vec::new();
+        for step in text.split(';').filter(|s| !s.trim().is_empty()) {
+            let mut parts = step.split(':');
+            let at: f64 = parts.next()?.trim().parse().ok()?;
+            let op = match parts.next()?.trim() {
+                "start" => "start",
+                "fire" => "fire",
+                "plot" => "plot",
+                "hit" => "hit",
+                "end" => "end",
+                "stop" => "stop",
+                "plotend" => "plotend",
+                "plotstop" => "plotstop",
+                other => {
+                    warn!("combat: AA_COMBAT_FAKE: unknown step {other}");
+                    continue;
+                }
+            };
+            steps.push((at, parts.filter_map(|p| p.trim().parse().ok()).collect(), op));
+        }
+        steps.sort_by(|a, b| b.0.total_cmp(&a.0));
+        Some(Fake { steps, started: None })
+    }
+
+    fn event(op: &str, a: &[u32], me: u32) -> Option<Event> {
+        let arg = |i: usize| a.get(i).copied().unwrap_or(0);
+        let caster = BuffCaster { kind: 0, obj_id: me };
+        let target = SkillTarget { kind: 0, obj_id: me, pos: None };
+        let tl = arg(0) as u16;
+        Some(match op {
+            "start" => Event::SkillStarted(SkillStarted { skill_id: arg(1), tl, caster, target, cast_ms: arg(2), base_cast_ms: arg(2), synergy: 0, result: 0, result_value: 0 }),
+            "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4) }),
+            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: me, caster_pos: None, target_pos: None, casting_ms: arg(3) }),
+            "hit" => Event::UnitDamaged(UnitDamage {
+                action: CastAction { kind: 0, skill_id: arg(1), tl, buff_id: 0 },
+                caster,
+                caster_obj_id: me,
+                target_obj_id: me,
+                damage: arg(2) as i32,
+                absorbed: 0,
+                mana_burn: 0,
+                hit_type: 0,
+            }),
+            "end" => Event::SkillEnded { tl },
+            "stop" => Event::CastingStopped { tl, duration_ms: 0 },
+            "plotend" => Event::PlotEnded { tl },
+            "plotstop" => Event::PlotStopped { tl, duration_ms: 0, last_event: 0, channeling: true },
+            _ => return None,
+        })
+    }
+}
+
+fn fake_events(time: Res<Time>, mut fake: ResMut<Fake>, local: Query<&LocalPlayer>, mut out: MessageWriter<NetEvent>) {
+    let Ok(me) = local.single() else { return };
+    let now = time.elapsed_secs_f64();
+    let started = *fake.started.get_or_insert(now);
+    while fake.steps.last().is_some_and(|s| now - started >= s.0) {
+        let (_, args, op) = fake.steps.pop().unwrap();
+        if let Some(event) = Fake::event(op, &args, me.obj_id) {
+            out.write(NetEvent(event));
+        }
+    }
 }
 
 /// `AA_COMBAT_SHOT=<png>@<start|fire|fire2|plot|hit|death>+<seconds>`: a screenshot that many game seconds after the first such event (the local
@@ -236,6 +333,9 @@ pub fn plugin(app: &mut App) {
     if let Some(shot) = DevShot::from_env() {
         app.insert_resource(shot).add_systems(Update, dev_shot);
     }
+    if let Some(fake) = Fake::from_env() {
+        app.insert_resource(fake).add_systems(Update, fake_events.before(handle_events));
+    }
     match SkillBook::open() {
         Some(book) => {
             app.insert_resource(book);
@@ -243,6 +343,7 @@ pub fn plugin(app: &mut App) {
         None => warn!("combat: the game database is missing: no combat visuals"),
     }
     app.init_resource::<Combat>()
+        .init_resource::<CameraShake>()
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(
             Update,
@@ -274,6 +375,8 @@ struct Stage<'w, 's> {
     clips: Res<'w, ClipLibrary>,
     book: Res<'w, SkillBook>,
     net_units: Res<'w, Units>,
+    skills: Res<'w, Skills>,
+    wield: Query<'w, 's, &'static Wield>,
     remote: Query<'w, 's, (Entity, &'static RemoteUnit)>,
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
@@ -291,6 +394,19 @@ impl Stage<'_, '_> {
 
     fn is_local(&self, e: Entity) -> bool {
         self.local.contains(e)
+    }
+
+    /// The class of weapon a unit holds.
+    fn wield(&self, unit: Entity) -> Wield {
+        self.wield.get(unit).copied().unwrap_or_default()
+    }
+
+    /// The level a unit has a skill at: the player's from its skill list, the other units' from the server's, else 1.
+    fn skill_level(&self, obj: u32, skill: u32) -> u8 {
+        if self.local.iter().any(|(_, l)| l.obj_id == obj) {
+            return self.skills.level_of(skill).unwrap_or(1);
+        }
+        self.net_units.get(obj).and_then(|u| u.skills.iter().find(|(id, _)| *id == skill).map(|(_, level)| *level)).unwrap_or(1)
     }
 
     /// Where a unit is (Bevy world), from its entity or, when it has none (too far to be drawn), from the server's position.
@@ -373,9 +489,11 @@ impl Stage<'_, '_> {
         // a hit reaction is a flinch: the start of its clip, then locomotion fades back in
         let until = now + if looping { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
         self.commands.entity(unit).insert(Acting { until, layered });
-        if kind != Act::Hurt && !name.starts_with("fist_") && !name.starts_with("all_") {
+        if kind != Act::Hurt
+            && let Some(out) = weapon_for_clip(name)
+        {
             // the weapon the clip is for comes out of its sheath and stays out for a while
-            self.commands.entity(unit).insert(Drawn { until: until + 4.0, bow: name.starts_with("bow_") });
+            self.commands.entity(unit).insert(Drawn { until: until + 4.0, out });
         }
         if verbose() {
             info!("combat: {name} on {unit:?} ({kind:?}, {duration:.2} s{})", if layered { ", upper body" } else { "" });
@@ -462,11 +580,11 @@ impl Combat {
         });
     }
 
-    fn cast_for(&mut self, tl: u16, caster: u32, target: u32, now: f64) -> &mut Cast {
+    fn cast_for(&mut self, tl: u16, skill: u32, caster: u32, target: u32, now: f64) -> &mut Cast {
         if self.casts.len() > 256 {
             self.casts.retain(|_, c| now - c.started < 20.0);
         }
-        self.casts.entry(tl).or_insert_with(|| Cast { caster, target, started: now, ..Cast::default() })
+        self.casts.entry(tl).or_insert_with(|| Cast { skill, caster, target, started: now, ..Cast::default() })
     }
 }
 
@@ -487,6 +605,49 @@ fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], m
         let (on, toward) = if item.on_target { (target, toward_caster) } else { (Some(caster), toward_target) };
         let Some(on) = on else { continue };
         combat.after(now + delay, Later::Fx { item: item.clone(), tl, on, toward });
+    }
+}
+
+/// Starts the camera shakes of `moments` now, or `delay` seconds from now: on the camera of the player when it is the caster (or
+/// the target, for a shake that says so).
+#[allow(clippy::too_many_arguments)]
+fn start_shakes(st: &Stage, combat: &mut Combat, shakes: &[ShakeItem], moments: &[u8], caster: Entity, target: Option<Entity>, now: f64, delay: f64) {
+    for item in shakes.iter().filter(|i| moments.contains(&i.start)) {
+        let who = if item.on_target { target } else { Some(caster) };
+        if who.is_some_and(|e| st.is_local(e)) {
+            combat.after(now + delay, Later::Shake(item.shake));
+        }
+    }
+}
+
+/// Plays `name` as an action of the cast `tl`. A clip with `anims.loop` loops until the next clip of the cast, a stop step or the
+/// end of the skill; `hold` is only the safety net for an end that never comes.
+#[allow(clippy::too_many_arguments)]
+fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name: &str, kind: Act, hold: f64, now: f64) -> Option<f32> {
+    let looping = kind == Act::Cast || st.book.clip_loops(name);
+    let played = st.play(caster, name, kind, looping, hold, now);
+    if played.is_some()
+        && let Some(cast) = combat.casts.get_mut(&tl)
+    {
+        cast.casting = looping;
+        cast.played = true;
+        combat.owner.insert(cast.caster, tl);
+    }
+    played
+}
+
+/// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
+/// locomotion.
+fn end_loop(st: &mut Stage, combat: &mut Combat, tl: u16) {
+    let Some(cast) = combat.casts.get_mut(&tl) else { return };
+    if !std::mem::take(&mut cast.casting) || combat.owner.get(&cast.caster) != Some(&tl) {
+        return;
+    }
+    if let Some(e) = st.entity(cast.caster) {
+        st.commands.entity(e).remove::<Acting>();
+        if verbose() {
+            info!("combat: loop of timeline {tl} ended on {e:?}");
+        }
     }
 }
 
@@ -533,19 +694,24 @@ fn handle_events(
                 let target_obj = s.target.obj_id;
                 let target_pos = s.target.pos.map(|p| cry_to_bevy(Vec3::new(p.x, p.y, p.z)));
                 let (target, target_pos) = target_of(&st, target_obj, target_pos);
-                let cast = combat.cast_for(s.tl, s.caster.obj_id, target_obj, now);
-                cast.target_pos = target_pos;
-                cast.hit_fx = visual.fx.clone();
+                let look = visual.look(st.skill_level(s.caster.obj_id, s.skill_id));
+                let wield = st.wield(caster);
+                {
+                    let cast = combat.cast_for(s.tl, s.skill_id, s.caster.obj_id, target_obj, now);
+                    cast.target_pos = target_pos;
+                    cast.hit_fx = look.fx.clone();
+                    cast.hit_shakes = look.shakes.clone();
+                }
                 if s.cast_ms > 0 {
                     // the cast: its clip loops until the skill fires; the charge-up effects play meanwhile
-                    cast.casting = true;
                     let hold = f64::from(s.cast_ms) / 1000.0 + 1.0;
-                    if let Some(name) = &visual.start_anim {
-                        st.play(caster, name, Act::Cast, true, hold, now);
+                    if let Some(name) = visual.instrument_start_clip(wield.instrument).or(visual.start_anim.as_ref()) {
+                        play_clip(&mut st, &mut combat, s.tl, caster, name, Act::Cast, hold, now);
                     }
                     face(&mut st, caster, target, target_pos, now);
                     if !visual.plot {
-                        start_items(&mut st, &mut combat, s.tl, &visual.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, false);
+                        start_items(&mut st, &mut combat, s.tl, &look.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, false);
+                        start_shakes(&st, &mut combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
                     }
                 }
             }
@@ -565,29 +731,46 @@ fn handle_events(
                 let target_pos = f.target.pos.map(|p| cry_to_bevy(Vec3::new(p.x, p.y, p.z)));
                 let target_obj = if f.target.kind == target_kind::UNIT || f.target.kind == target_kind::DOODAD { f.target.obj_id } else { 0 };
                 let (target, target_pos) = target_of(&st, target_obj, target_pos);
+                let look = visual.look(st.skill_level(f.caster.obj_id, f.skill_id));
+                let wield = st.wield(caster);
                 let fresh = !combat.casts.contains_key(&f.tl);
-                let was_casting = combat.casts.get(&f.tl).is_some_and(|c| c.casting);
-                let cast = combat.cast_for(f.tl, f.caster.obj_id, target_obj, now);
-                cast.target_pos = target_pos;
-                cast.fired = Some(now);
-                cast.delay = f64::from(f.delay_ms.max(0)) / 1000.0;
-                cast.casting = false;
-                if cast.hit_fx.is_empty() {
-                    cast.hit_fx = visual.fx.clone();
+                let idle = !combat.casts.get(&f.tl).is_some_and(|c| c.played);
+                {
+                    let cast = combat.cast_for(f.tl, f.skill_id, f.caster.obj_id, target_obj, now);
+                    cast.target_pos = target_pos;
+                    cast.fired = Some(now);
+                    cast.delay = f64::from(f.delay_ms.max(0)) / 1000.0;
+                    if cast.hit_fx.is_empty() {
+                        cast.hit_fx = look.fx.clone();
+                        cast.hit_shakes = look.shakes.clone();
+                    }
                 }
-                // the clip: the server's choice, else the skill's (the two handed one for a two handed weapon is a plot detail)
-                let name = (f.fire_anim_id != 0).then(|| st.book.anim(f.fire_anim_id)).flatten().or_else(|| visual.fire_clip(false, false).cloned());
+                // the clip: a song's for the instrument held; else the server's choice, which is the skill's one handed clip: the
+                // two handed or dual wield one for the weapon held replaces it (the attacks the server picks per weapon stay)
+                let server = (f.fire_anim_id != 0).then(|| st.book.anim(f.fire_anim_id)).flatten();
+                let own = visual.fire_clip(wield.two_handed, wield.dual).cloned();
+                let name = visual
+                    .instrument_fire_clip(wield.instrument)
+                    .cloned()
+                    .or_else(|| match server {
+                        Some(n) if visual.fire_anim.as_deref() != Some(&*n) => Some(n),
+                        _ => own,
+                    })
+                    // a dash or a leap has nothing but its controller's clip
+                    .or_else(|| if idle { visual.controller_anim.clone() } else { None });
                 let mut release = 0.0;
+                let mut played = false;
                 if let Some(name) = &name {
                     let events = st.events(caster, name);
                     release = f64::from(events.release().unwrap_or(0.0));
                     combat.casts.get_mut(&f.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
-                    st.play(caster, name, Act::Attack, false, 0.0, now);
-                } else if let Some(Some(a)) = (was_casting).then(|| st.actors.get(caster).ok().map(|(_, _, a, ..)| a)) {
+                    // a channel pose loops for the channeling time
+                    let hold = if f.channeling_ms > 0 { f64::from(f.channeling_ms) / 1000.0 + 2.0 } else { 20.0 };
+                    played = play_clip(&mut st, &mut combat, f.tl, caster, name, Act::Attack, hold, now).is_some();
+                }
+                if !played {
                     // casting ends with nothing to play: let locomotion resume
-                    if a.is_some() {
-                        st.commands.entity(caster).remove::<Acting>();
-                    }
+                    end_loop(&mut st, &mut combat, f.tl);
                 }
                 if release == 0.0 {
                     release = f64::from(visual.effect_delay_ms) / 1000.0;
@@ -597,11 +780,15 @@ fn handle_events(
                 if !visual.plot {
                     // an instant skill has not shown its start and form effects yet
                     if fresh {
-                        start_items(&mut st, &mut combat, f.tl, &visual.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, true);
+                        start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, true);
+                        start_shakes(&st, &mut combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
                     }
-                    start_items(&mut st, &mut combat, f.tl, &visual.fx, &[ev::THROW], caster, target, now, 0.0, false);
-                    start_items(&mut st, &mut combat, f.tl, &visual.fx, &[ev::LAUNCH], caster, target, now, release, false);
-                    if let Some(projectile) = &visual.projectile {
+                    start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::THROW], caster, target, now, 0.0, false);
+                    start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, now, release, false);
+                    start_shakes(&st, &mut combat, &look.shakes, &[ev::THROW], caster, target, now, 0.0);
+                    start_shakes(&st, &mut combat, &look.shakes, &[ev::LAUNCH], caster, target, now, release);
+                    if let Some(projectile) = &look.projectile {
+                        start_shakes(&st, &mut combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
                         let flight = (f64::from(f.delay_ms.max(0)) / 1000.0 - release).max(0.06);
                         combat.after(now + release, Later::Launch { projectile: projectile.clone(), caster, target, target_pos, duration: flight as f32 });
                     }
@@ -617,34 +804,48 @@ fn handle_events(
                 let target_pos = p.target_pos.map(|p| cry_to_bevy(Vec3::new(p.x, p.y, p.z)));
                 let (target, target_pos) = target_of(&st, p.target_obj_id, target_pos);
                 let visual = st.book.skill(p.skill_id);
-                let cast = combat.cast_for(p.tl, p.caster_obj_id, p.target_obj_id, now);
-                cast.target_pos = target_pos;
-                if p.target_obj_id != 0 {
-                    cast.target = p.target_obj_id;
+                let wield = st.wield(caster);
+                {
+                    let cast = combat.cast_for(p.tl, p.skill_id, p.caster_obj_id, p.target_obj_id, now);
+                    cast.target_pos = target_pos;
+                    if p.target_obj_id != 0 {
+                        cast.target = p.target_obj_id;
+                    }
                 }
                 if p.casting_ms > 0
-                    && let Some(name) = visual.as_ref().and_then(|v| v.start_anim.clone())
+                    && let Some(name) = visual.as_ref().and_then(|v| v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned())
                 {
-                    cast.casting = true;
-                    st.play(caster, &name, Act::Cast, true, f64::from(p.casting_ms) / 1000.0 + 1.0, now);
+                    play_clip(&mut st, &mut combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now);
                 }
-                let Some(step) = st.book.plot_event(p.event_id) else { continue };
+                let step = st.book.plot_event(p.event_id);
+                // `all_co_sk_stop`: ends the clip that loops before this step (alone, it is the whole step)
+                if step.as_ref().is_some_and(|s| s.stops()) {
+                    end_loop(&mut st, &mut combat, p.tl);
+                }
+                // the clip of the step; a skill that moves its caster (a dash) has only its controller's clip until a step has one
+                let idle = !combat.casts.get(&p.tl).is_some_and(|c| c.played);
+                let clip = step.as_ref().and_then(|s| s.clip().cloned()).or_else(|| if idle { visual.as_ref().and_then(|v| v.controller_anim.clone()) } else { None });
                 let mut release = 0.0;
-                if let Some(name) = &step.anim {
+                if let Some(name) = &clip {
                     let events = st.events(caster, name);
                     release = f64::from(events.release().unwrap_or(0.0));
-                    if st.play(caster, name, Act::Attack, false, 0.0, now).is_some() {
-                        combat.casts.get_mut(&p.tl).unwrap().casting = false;
-                    }
+                    let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
+                    play_clip(&mut st, &mut combat, p.tl, caster, name, Act::Attack, hold, now);
                     combat.casts.get_mut(&p.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
                 }
+                let Some(step) = step else { continue };
                 face(&mut st, caster, target, target_pos, now);
                 if !step.fx.is_empty() {
-                    combat.casts.get_mut(&p.tl).unwrap().hit_fx = step.fx.clone();
+                    let cast = combat.casts.get_mut(&p.tl).unwrap();
+                    cast.hit_fx = step.fx.clone();
+                    cast.hit_shakes = step.shakes.clone();
                 }
                 start_items(&mut st, &mut combat, p.tl, &step.fx, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0, true);
                 start_items(&mut st, &mut combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, now, release, false);
+                start_shakes(&st, &mut combat, &step.shakes, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0);
+                start_shakes(&st, &mut combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
                 if let Some(projectile) = &step.projectile {
+                    start_shakes(&st, &mut combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
                     combat.after(now + release, Later::Launch { projectile: projectile.clone(), caster, target, target_pos, duration: 0.25 });
                 }
             }
@@ -660,7 +861,15 @@ fn handle_events(
                     shot.event("hit", now);
                 }
                 let cast = combat.casts.get(&d.action.tl);
-                let items = cast.map(|c| c.hit_fx.clone()).or_else(|| st.book.skill(d.action.skill_id).map(|v| v.fx.clone())).unwrap_or_default();
+                let (items, shakes) = match cast {
+                    Some(c) => (c.hit_fx.clone(), c.hit_shakes.clone()),
+                    None => st
+                        .book
+                        .skill(d.action.skill_id)
+                        .map(|v| v.look(st.skill_level(d.caster_obj_id, d.action.skill_id)))
+                        .map(|look| (look.fx, look.shakes))
+                        .unwrap_or_default(),
+                };
                 // when the blow lands: a flying shot after its flight, a swing at the clip's sync point, a plot step as it comes
                 let at = match cast {
                     Some(c) if c.delay > 0.0 => c.fired.unwrap_or(now) + c.delay,
@@ -673,7 +882,7 @@ fn handle_events(
                 let caster = st.entity(d.caster_obj_id);
                 let last = combat.last_hit.entry(d.target_obj_id).or_default();
                 *last = last.max(at);
-                combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, hurt });
+                combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt });
             }
             Event::UnitDeath { obj_id } => {
                 if let Some(shot) = shot.as_mut() {
@@ -697,19 +906,20 @@ fn handle_events(
                 combat.last_hit.remove(obj_id);
             }
             Event::SkillEnded { tl } | Event::CastingStopped { tl, .. } | Event::PlotEnded { tl } | Event::PlotStopped { tl, .. } => {
-                let (tl, stopped) = (*tl, !matches!(event, Event::SkillEnded { .. } | Event::PlotEnded { .. }));
+                let tl = *tl;
                 combat.release(&mut st.commands, tl, ev::END);
-                if let Some(c) = combat.casts.get(&tl)
-                    && c.casting
-                    && stopped
-                    && let Some(e) = st.entity(c.caster)
-                {
-                    // an interrupted cast: back to locomotion
-                    st.commands.entity(e).remove::<Acting>();
-                }
+                // a looping clip ends with the skill, or with the cast that was interrupted
+                end_loop(&mut st, &mut combat, tl);
                 // the damage of this timeline may still be on its way: keep the cast until the timers ran out
                 if let Some(c) = combat.casts.get_mut(&tl) {
                     c.started = now - 15.0;
+                }
+            }
+            Event::SkillStopped { obj_id, skill_id } => {
+                let tls: Vec<u16> = combat.casts.iter().filter(|(_, c)| c.caster == *obj_id && c.skill == *skill_id).map(|(tl, _)| *tl).collect();
+                for tl in tls {
+                    combat.release(&mut st.commands, tl, ev::END);
+                    end_loop(&mut st, &mut combat, tl);
                 }
             }
             _ => {}
@@ -725,7 +935,7 @@ fn face(st: &mut Stage, caster: Entity, target: Option<Entity>, pos: Option<Vec3
 }
 
 /// Starts what is due: effects, projectiles, hits and deaths.
-fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut models: Models) {
+fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut models: Models, mut camera: ResMut<CameraShake>) {
     let now = time.elapsed_secs_f64();
     if combat.timers.is_empty() {
         return;
@@ -744,7 +954,7 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut mo
                 }
             }
             Later::Launch { projectile, caster, target, target_pos, duration } => launch(&mut st, &mut combat, &mut models, &projectile, caster, target, target_pos, duration),
-            Later::Hit { caster, target, items, hurt } => {
+            Later::Hit { caster, target, items, shakes, hurt } => {
                 let toward = caster.and_then(|c| st.xforms.get(c).ok()).map(|g| g.translation());
                 for item in items.iter().filter(|i| i.start == ev::HIT && !i.effect.to_ascii_lowercase().contains("_dot")) {
                     let on = if item.on_target { Some(target) } else { caster };
@@ -756,7 +966,15 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut mo
                 if let Some(clip) = hurt {
                     st.play(target, clip, Act::Hurt, false, 0.0, now);
                 }
+                // the camera of the player kicks when its blow lands, or when it is the one that was hit by a heavy one
+                for item in shakes.iter().filter(|i| i.start == ev::HIT) {
+                    let who = if item.on_target { Some(target) } else { caster };
+                    if who.is_some_and(|e| st.is_local(e)) {
+                        add_shake(&mut camera, &item.shake);
+                    }
+                }
             }
+            Later::Shake(shake) => add_shake(&mut camera, &shake),
             Later::Die { obj } => {
                 if let Some(e) = st.entity(obj) {
                     st.commands.entity(e).remove::<(Acting, FaceTarget)>().insert(Dead { at: now });
@@ -768,6 +986,13 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut mo
             }
         }
     }
+}
+
+fn add_shake(camera: &mut CameraShake, shake: &skills::Shake) {
+    if verbose() {
+        info!("combat: camera shake ang {:?} shift {:?} every {} s for {} s", shake.ang, shake.shift, shake.frequency, shake.duration);
+    }
+    camera.add(shake.ang, shake.shift, shake.frequency, shake.randomness, shake.duration);
 }
 
 /// Sends a projectile from the caster's launch bone to the target's hit point.
@@ -940,16 +1165,18 @@ fn ensure_corpses(
     }
 }
 
-/// A unit whose action ended lets go of the upper body layer that played it (a one-shot ends by itself; a cast loop does not).
-fn release_layers(mut ended: RemovedComponents<Acting>, mut units: Query<&mut Animator, Without<Acting>>) {
+/// A unit whose action ended lets go of the upper body layer that played it (a one-shot ends by itself; a cast loop does not), or,
+/// when the action had the whole body, starts its locomotion clip again (it may have ended by a stop, not by running out).
+fn release_layers(mut ended: RemovedComponents<Acting>, mut units: Query<(&mut Animator, Option<&mut Locomotion>), Without<Acting>>) {
     for entity in ended.read() {
-        if units.get(entity).is_ok_and(|a| a.has_layer())
-            && let Ok(mut animator) = units.get_mut(entity)
-        {
+        let Ok((mut animator, loco)) = units.get_mut(entity) else { continue };
+        if animator.has_layer() {
             animator.stop_layer(0.12);
             if verbose() {
                 info!("combat: upper body layer of {entity:?} released");
             }
+        } else if let Some(mut loco) = loco {
+            loco.invalidate();
         }
     }
 }
