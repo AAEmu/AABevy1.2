@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
+use aa_net::model::exp;
 use aa_net::state::{LABOR_MAX, Player, PlayerStats};
 use aa_net::{Command, NetCommand};
 use aa_ui::UiRuntime;
@@ -306,6 +307,23 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
     Ok(())
 }
 
+/// One row of `X2Ability:GetActiveAbility()`: the ability, its level and where its experience stands in the level
+/// (`levelPercent` 0..100, `prev` / `nextLevelTotalExp` the totals the level starts and ends at).
+fn ability_row(lua: &Lua, id: u8, total: i32) -> mlua::Result<Table> {
+    let total = i64::from(total);
+    let level = exp::level_for_total(total);
+    let (earned, needed) = exp::progress(level, total);
+    let start = exp::total_for_level(level);
+    let t = lua.create_table()?;
+    t.raw_set("type", i64::from(id))?;
+    t.raw_set("level", i64::from(level))?;
+    t.raw_set("exp", total)?;
+    t.raw_set("levelPercent", if needed > 0 { 100.0 * earned as f64 / needed as f64 } else { 100.0 })?;
+    t.raw_set("prevLevelTotalExp", start)?;
+    t.raw_set("nextLevelTotalExp", start + needed)?;
+    Ok(t)
+}
+
 /// The snapshot as the Lua table `HUD.state`.
 fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     let t = lua.create_table()?;
@@ -340,6 +358,16 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("sub_map", s.sub_map as i64)?;
     t.raw_set("sub_map_rect", lua.create_sequence_from(s.sub_map_rect.iter().map(|v| *v as f64))?)?;
     t.raw_set("faction", s.faction.as_str())?;
+    // X2Ability: the active abilities as the rows `GetActiveAbility` lists, and every ability's level (0 = none yet)
+    let rows = lua.create_table()?;
+    for &id in &s.abilities {
+        rows.raw_push(ability_row(lua, id, s.ability_exp[usize::from(id)])?)?;
+    }
+    t.raw_set("abilities", rows)?;
+    let levels = s.ability_exp.iter().enumerate().skip(1).map(|(id, &total)| {
+        i64::from(if total > 0 || s.abilities.contains(&(id as u8)) { exp::level_for_total(i64::from(total)) } else { 0 })
+    });
+    t.raw_set("ability_levels", lua.create_sequence_from(levels)?)?;
     t.raw_set("hour", s.hour as i64)?;
     t.raw_set("minute", s.minute as f64)?;
     hud.raw_set("state", t)
@@ -448,6 +476,13 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         sub_map,
         sub_map_rect,
         faction,
+        // the server's set for the character (the same ids the character list shows), kept current by swaps
+        abilities: stats
+            .map_or(character.abilities, |s| s.active_abilities)
+            .into_iter()
+            .filter(|a| (1..aa_net::model::NO_ABILITY).contains(a))
+            .collect(),
+        ability_exp: stats.map_or([0; 11], |s| s.ability_exp),
         hour: hour.floor() as u8 % 24,
         minute: (hour.fract() * 60.0).floor(),
     };
@@ -460,6 +495,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
             s.set_max(max_hp, max_mp);
         }
         data = bridge.borrow_mut();
+    }
+    if data.snapshot.abilities != snapshot.abilities {
+        info!("hud: abilities {:?} (exp {:?})", snapshot.abilities, snapshot.ability_exp);
     }
     data.snapshot = snapshot;
     let own_obj_id = spawn.obj_id;
@@ -629,5 +667,33 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     }
     if old.money != new.money {
         rt.fire_event("PLAYER_MONEY", (new.money.to_string(), (new.money - old.money).to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An Archery character (ability 6) with 2000 ability exp: what the scripts read in `HUD.state`.
+    #[test]
+    fn abilities_reach_the_scripts() {
+        let lua = Lua::new();
+        let hud = lua.create_table().unwrap();
+        let mut ability_exp = [0; 11];
+        ability_exp[6] = 2_000;
+        ability_exp[1] = 50; // Battlerage was played a little before: its level shows, it is not active
+        let s = Snapshot { abilities: vec![6], ability_exp, ..Snapshot::default() };
+        push_snapshot(&lua, &hud, &s).unwrap();
+        let state: Table = hud.get("state").unwrap();
+        let rows: Table = state.get("abilities").unwrap();
+        assert_eq!(rows.raw_len(), 1);
+        let row: Table = rows.get(1).unwrap();
+        assert_eq!(row.get::<i64>("type").unwrap(), 6);
+        // 2000 exp: level 3 (1400..3200), 600 of 1800 into it
+        assert_eq!(row.get::<i64>("level").unwrap(), 3);
+        assert_eq!((row.get::<i64>("prevLevelTotalExp").unwrap(), row.get::<i64>("nextLevelTotalExp").unwrap()), (1400, 3200));
+        assert!((row.get::<f64>("levelPercent").unwrap() - 100.0 / 3.0).abs() < 1e-9);
+        let levels: Vec<i64> = state.get::<Table>("ability_levels").unwrap().sequence_values().collect::<mlua::Result<_>>().unwrap();
+        assert_eq!(levels, [1, 0, 0, 0, 0, 3, 0, 0, 0, 0]);
     }
 }

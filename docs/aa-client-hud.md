@@ -71,10 +71,28 @@ Anything the game side does not provide yet keeps the fake data of `aa-ui/exampl
 
 ### Character window and its model
 
-The real client shows the in-world character between the slot columns: there is no render to do.
-`reference/ingame/character_info/camera.json` equals the spawn camera, so the default orbit camera
+The real client shows the in-world character between the slot columns: there is no render to do. The back view of
+the player with the slots floating over the live world is what the capture itself shows
+(`reference/ingame/character_info/real.png`), and the capture's own note says so (`player_screen.json`: "The 3D
+model is the in-world player itself; the equipment slot columns are widgets around it"). The widget dump
+(`ui.json`, 761 widgets) has no model-view or render-target widget either: `equippedItem` is a plain window at
+(960, 290) with `leftSlots` (760, 290) and `rightSlots` (1118, 290), 42 x 485 each, next to the 430 px wide
+`characterInfo.mainWindow` at (28, 60). `camera.json` equals the spawn camera, so the default orbit camera
 already frames the player between the columns (`shots/hud/charwin.png`). No camera override is needed.
 The equipment slots take their items from `Inventory` (`ES_*` constant = `aa_net::model::slot` index + 1).
+
+The title under the level ("Archery Novice") is the script's `GetCombinedAbilityName` over the names
+`X2Unit:GetTargetAbilityTemplates("player")` answers; with fewer than three abilities it is the "newbie job" of the first
+one (`locale.newbieJobName`: fight Battlerage, wild Archery, magic Sorcery, love Vitalism, death Occultism, vocation
+Shadowplay). The answers come from the character's own set (`PlayerStats::active_abilities` and `ability_exp`, the ids of
+the character list's `abilities`, kept current by `SCAbilitySwapped`): `Snapshot.abilities` / `ability_exp` ->
+`HUD.state.abilities` (the rows of `X2Ability:GetActiveAbility`: `type`, `level`, `levelPercent` 0..100, `exp`,
+`prevLevelTotalExp`, `nextLevelTotalExp`) and `ability_levels`, which `ingame.lua` serves through
+`GetTargetAbilityTemplates`, `GetActiveAbility`, `NumActiveAbility`, `IndexFromAbility`, `GetAbilityLevel` and
+`GetAllAbility` (the player frame's ability icon and the skill window read the same). The log has one
+`hud: abilities [6] (exp [...])` line per change. Not done: `ABILITY_CHANGED` is not raised after a swap (its
+handlers print the old and new ability), so a window open during a swap keeps the old title until it is reopened;
+the target frame's job text for other players (`GetTargetAbilityTemplates` answers nil for them).
 
 ### Name plates
 
