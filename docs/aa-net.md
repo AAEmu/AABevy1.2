@@ -706,14 +706,39 @@ accept; compare both rosters and leader; move the second player and receive posi
 auto-disband; reform, leave voluntarily and receive auto-disband; cleanly log out both clients.
 The shared user account was not touched. Library tests: 120 pass; the Bevy/examples check passes.
 Offline/reconnect and raid transitions have protocol/state coverage but were not exercised live
-in this two-person test. The API does not yet send raid conversion, slot/role/loot-rule edits,
-markers, or pings; those incoming changes are exposed for the HUD.
+in this two-person test. The later raid milestone below adds conversion, slot/role/loot-rule edits, markers and pings
+with separate fresh paired live verification.
 
 For an integrated HUD check, `cargo run -p aa-net --example party_peer -- --invite CharacterName
---seconds 90` creates a fresh letter-only character and prints `READY account=... character=...`.
-It invites the supplied character once, accepts invitations received by its own throw-away
-character, sends a stationary movement every two seconds to refresh party vitals, then leaves
-the party and logs out. Coordinate with the visual client before starting its lifetime.
+--seconds 90` remains compatible: a fresh letter-only character prints READY, invites the
+supplied character once, automatically replies to direct invitations, reports authoritative
+party events, sends stationary movement every2s, then leaves and logs out. No area invitation
+is sent; incoming area invitations are declined. Default lifetime90s, configurable10..3600s.
+`--account FreshAccount --name LettersOnly` selects an unused test account/name (ASCII name
+2..18 letters); password is the disposable account name. Caller must provide an unused account,
+never an existing user's login. Setup refuses a nonempty character list after authenticating.
+`--accept-from Character` restricts automatic acceptance to that name. `--position x,y,z`
+places/stationary-refreshes the peer, and `--role 0..3` selects its own role after joining.
+
+`--ping-after 5 --clear-after 8` schedules one ping relative to confirmed membership, waiting
+for exact lane owner/marked authority. Optional `--ping-position x,y,z` and `--ping-instance ID`
+override its actual stationary position/current instance. It starts the clear timer only after
+a matching server Ping ACK, clears only if membership/authority/current ping still match, and
+reports a10s missing-ACK timeout without fabricating success. A replacement root ping is not
+cleared. REQUEST logs are outgoing; ACK/STATE log server-confirmed roles, slots, owner, loot,
+markers and pings; LOCAL identifies local reply/validation events. READY names the peer for the
+root client to invite. Coordinate the lifetime with the visual client before launch.
+
+Paired executable verification used fresh chars45/46, team8: filtered autoaccept, both self
+roles, owner ping and clear echoed identically on both peers; unmarked nonowner waited for
+permission and sent no unauthorized ping. Both logged DONE after clean logout. Rebuilt helper
+copy is `data/extract/aa-net/party-peer-qa.exe` (ignored); the version controlled source is
+`examples/party_peer.rs`. Existing raid live test additionally covers convert, sparse move,
+loot rules, marker-permitted member ping and clear. Native permission source is
+`systems/social/team.rs::set_ping_pos`/`Team::is_marked`; the latter compares stored marker IDs
+without a marker-type check. New joins can receive the lane's initial true ping at(0,0,0), even
+when nobody placed one; the client retains the authoritative packet rather than inventing a
+presence bit the lane does not store.
 
 The original native invitation handler creates `DLG_TASK_JOIN_TEAM` (2), rather than firing a
 Lua invitation event. The task's fill function (`x2game_unpacked.dll` VA `393096c0`) sets
