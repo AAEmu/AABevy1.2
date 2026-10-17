@@ -165,6 +165,19 @@ pub struct PlacedImage {
     pub src: [f32; 4],
 }
 
+/// Inputs of a cached layout (sizes as `f32` bits).
+#[derive(Debug)]
+struct LayoutKey {
+    font: String,
+    text: String,
+    size: u32,
+    max_width: Option<u32>,
+    line_space: u32,
+    outline: bool,
+}
+
+const LAYOUT_CACHE_MAX: usize = 8192;
+
 /// A bitmap font of `ui/image_text.g`.
 #[derive(Clone, Debug)]
 struct ImageFont {
@@ -202,6 +215,11 @@ pub struct FontLib {
     shelf_y: u32,
     shelf_h: u32,
     advances: HashMap<(u16, u16, u16), f32>,
+    /// Finished layouts by their inputs: the HUD lays out the same texts every frame (each tree
+    /// change rebuilds every text block, natives measure). Glyphs never leave the atlas, so a
+    /// layout stays valid; the cache is emptied when it grows past `LAYOUT_CACHE_MAX`.
+    layouts: HashMap<u64, Vec<(LayoutKey, LaidOutText)>>,
+    layouts_len: usize,
     /// Image fonts by lower-case name.
     image_fonts: HashMap<String, ImageFont>,
 }
@@ -221,6 +239,8 @@ impl FontLib {
             shelf_y: 1,
             shelf_h: 0,
             advances: HashMap::new(),
+            layouts: HashMap::new(),
+            layouts_len: 0,
             image_fonts: HashMap::new(),
         };
         // A white texel at (0,0) for solid quads.
@@ -460,13 +480,80 @@ impl FontLib {
 
     /// Width of the longest line of `text` (colour codes stripped).
     pub fn measure(&mut self, font: &str, size: f32, text: &str) -> f32 {
-        self.layout(font, size, text, None, 0.0, false).width
+        self.layout_size(font, size, text, None, 0.0).0
     }
 
     /// Lay out `text` from the top-left of its block: lines break at `\n` and, with
     /// `max_width`, at spaces (or anywhere for words longer than a line). Glyphs are rasterised
     /// into the atlas as needed.
     pub fn layout(
+        &mut self,
+        font: &str,
+        size: f32,
+        text: &str,
+        max_width: Option<f32>,
+        line_space: f32,
+        outline: bool,
+    ) -> LaidOutText {
+        self.layout_ref(font, size, text, max_width, line_space, outline).clone()
+    }
+
+    /// Width and height of the laid out text, without copying the layout.
+    pub fn layout_size(
+        &mut self,
+        font: &str,
+        size: f32,
+        text: &str,
+        max_width: Option<f32>,
+        line_space: f32,
+    ) -> (f32, f32) {
+        let lo = self.layout_ref(font, size, text, max_width, line_space, false);
+        (lo.width, lo.height)
+    }
+
+    fn layout_ref(
+        &mut self,
+        font: &str,
+        size: f32,
+        text: &str,
+        max_width: Option<f32>,
+        line_space: f32,
+        outline: bool,
+    ) -> &LaidOutText {
+        use std::hash::{Hash, Hasher};
+        let mw = max_width.map(f32::to_bits);
+        let (sz, ls) = (size.to_bits(), line_space.to_bits());
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (font, sz, text, mw, ls, outline).hash(&mut h);
+        let hash = h.finish();
+        let same = |k: &LayoutKey| {
+            k.font == font
+                && k.text == text
+                && (k.size, k.max_width, k.line_space, k.outline) == (sz, mw, ls, outline)
+        };
+        if let Some(i) = self.layouts.get(&hash).and_then(|v| v.iter().position(|(k, _)| same(k))) {
+            return &self.layouts[&hash][i].1;
+        }
+        let lo = self.layout_uncached(font, size, text, max_width, line_space, outline);
+        if self.layouts_len >= LAYOUT_CACHE_MAX {
+            self.layouts.clear();
+            self.layouts_len = 0;
+        }
+        let key = LayoutKey {
+            font: font.to_string(),
+            text: text.to_string(),
+            size: sz,
+            max_width: mw,
+            line_space: ls,
+            outline,
+        };
+        let v = self.layouts.entry(hash).or_default();
+        v.push((key, lo));
+        self.layouts_len += 1;
+        &v[v.len() - 1].1
+    }
+
+    fn layout_uncached(
         &mut self,
         font: &str,
         size: f32,

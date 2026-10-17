@@ -92,6 +92,8 @@ struct Grids {
     map: HashMap<Id, Grid>,
     /// Tree generation of the last layout pass that changed nothing.
     settled: u64,
+    /// Content version at the last pass ([`crate::tree::Tree::content`]).
+    content: u64,
 }
 
 /// Where the rows and columns of a grid are (relative to the grid's top left).
@@ -315,12 +317,22 @@ pub(crate) fn update(lua: &Lua) {
     if lua.app_data_ref::<Grids>().is_none() {
         return;
     }
+    {
+        // Only writes of the same values since the last pass: the grids are where they were.
+        let gs = lua.app_data_ref::<Grids>().expect("aa-ui: grid state");
+        let u = ui(lua);
+        if gs.settled != 0 && gs.content == u.tree.content() && !u.tree.changed() {
+            return;
+        }
+    }
     for _ in 0..4 {
         let mut gs = lua.app_data_mut::<Grids>().expect("aa-ui: grid state");
         let mut u = ui(lua);
         if gs.settled == u.tree.generation {
             return;
         }
+        u.tree.checkpoint();
+        gs.content = u.tree.content();
         let mut ids: Vec<Id> = gs.map.keys().copied().collect();
         ids.sort_unstable();
         let mut changed = false;

@@ -52,7 +52,7 @@ use super::{method, new_object_table, none, ret, ui, Ui};
 use crate::render::{Quad, Tex};
 use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock, TextStyle, Widget};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SlotData {
     /// How the slot was bound, to ask again on refresh.
     pub source: Option<Source>,
@@ -61,7 +61,7 @@ pub struct SlotData {
     pub icon: Option<Id>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Source {
     Slot(i64, i64),
     Skill(i64),

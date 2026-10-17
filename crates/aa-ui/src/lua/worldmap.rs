@@ -168,7 +168,7 @@ fn mask_image(resolved: &str) -> Option<Arc<Mask>> {
 }
 
 /// One registered map (`SaveMapData`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MapEntry {
     pub level: i64,
     pub id: i64,
@@ -202,7 +202,7 @@ pub struct Place {
     pub above: [Option<(i64, i64, f32, f32)>; 4],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WorldMapData {
     pub entries: Arc<Vec<MapEntry>>,
     pub player: Option<Id>,
@@ -511,11 +511,8 @@ pub(crate) fn update(lua: &Lua) {
     let maps: Vec<Id> = {
         let u = ui(lua);
         u.tree
-            .objects
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.class == "worldmap"))
-            .map(|(i, _)| i as Id)
+            .of_class("worldmap")
+            .into_iter()
             .filter(|&i| u.tree.visible(i))
             .collect()
     };

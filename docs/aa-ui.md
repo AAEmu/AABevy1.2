@@ -148,6 +148,7 @@ cargo build lock. `cmp_tree.py` drops the runtime ids that tables are keyed by f
 | `texture.rs` | texture path resolution (locale copies), sizes, `.g` texture info (`GetTextureData`) |
 | `render.rs` | tree to quads, batching, atlas upload, state backgrounds, caret, diagram polygons |
 | `input.rs` | hit testing, mouse handlers, native button / check button / list / tab / focus behaviour |
+| `prof.rs` | opt-in frame profiler (`AA_UI_PROFILE=1`: ms per part of the UI frame, what changed the content, the costly per-frame handlers; `=2`: per native method, and which ones wrote) |
 | `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues, walked in Lua 10 steps deep like `reference/tools/lib.lua`) |
 
 ### Objects
@@ -185,8 +186,13 @@ widget the drawable layers background, artwork, then the widget's own text, then
 
 `render::build_quads` walks the paint order and emits textured, vertex-coloured quads in
 physical pixels; consecutive quads with the same texture share one mesh. Everything is rebuilt
-only when the tree generation changes (any mutation bumps it) or the window is resized, so a
-static screen costs no CPU per frame. Glyphs live in one 2048x2048 atlas (which also holds the
+only when the content changed or the window is resized, so a static screen costs no CPU per
+frame. Content: the first mutable access to an object in a frame keeps a copy of it, and
+`Tree::settle` (once per frame, before the rebuild) compares; writing the same values again is no
+change (the HUD scripts re-anchor, re-texture, re-text and re-show their unit frames and buffs
+every frame). `Tree::touch` marks changes outside the objects (hover, pressed button, focus,
+caret, grid rows, screen size). The layout cache follows `generation`, which every mutable
+access bumps; the `OnBoundChanged` and grid passes skip frames without a net change. Glyphs live in one 2048x2048 atlas (which also holds the
 white texel for solid quads). Textures are the pak's DDS files, decoded by Bevy (DXT1, DXT5,
 A8R8G8B8 so far).
 

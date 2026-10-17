@@ -501,3 +501,68 @@ fn chat_input_slash_commands() {
     ui.type_text("/dance ");
     assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "/dance ");
 }
+
+fn settle(ui: &UiRuntime) -> u64 {
+    aa_ui::lua::ui(&ui.lua).tree.settle()
+}
+
+#[test]
+fn rewriting_the_same_state_is_no_change() {
+    // The HUD scripts re-anchor, re-text and re-show their widgets every frame; the meshes are
+    // rebuilt only when something really changed.
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        w = UIParent:CreateWidget("label", "w", "UIParent")
+        w:SetExtent(40, 20)
+        w:AddAnchor("TOPLEFT", "UIParent", 5, 5)
+        w:Show(true)
+        w:SetText("a")
+        d = w:CreateIconImageDrawable("ui/common/money_window.dds", "artwork")
+        d:SetColor(1, 0, 0, 1)
+        "#,
+    )
+    .unwrap();
+    let c0 = settle(&ui);
+    ui.exec(
+        "@same",
+        r#"
+        w:RemoveAllAnchors() w:AddAnchor("TOPLEFT", "UIParent", 5, 5)
+        w:SetText("a") w:Show(true) w:SetAlpha(1)
+        d:SetColor(1, 0, 0, 1) d:ClearAllTextures() d:AddTexture("ui/common/money_window.dds")
+        "#,
+    )
+    .unwrap();
+    assert_eq!(settle(&ui), c0);
+    ui.exec("@move", r#"w:AddAnchor("TOPLEFT", "UIParent", 6, 5)"#).unwrap();
+    let c1 = settle(&ui);
+    assert!(c1 > c0);
+    ui.exec("@text", r#"w:SetText("b")"#).unwrap();
+    assert!(settle(&ui) > c1);
+}
+
+#[test]
+fn timed_out_chat_lines_redraw() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        m = UIParent:CreateWidget("message", "m", "UIParent")
+        m:SetExtent(300, 100)
+        m:AddAnchor("TOPLEFT", "UIParent", 0, 0)
+        m:Show(true)
+        m:SetTimeVisible(1)
+        m:AddMessage("hello")
+        "#,
+    )
+    .unwrap();
+    aa_ui::lua::tick(&ui.lua, 16.0);
+    let c0 = settle(&ui);
+    aa_ui::lua::tick(&ui.lua, 16.0);
+    assert_eq!(settle(&ui), c0);
+    // Past the visible time the line leaves the live view: a change to draw.
+    aa_ui::lua::tick(&ui.lua, 1200.0);
+    aa_ui::lua::tick(&ui.lua, 16.0);
+    assert!(settle(&ui) > c0);
+}

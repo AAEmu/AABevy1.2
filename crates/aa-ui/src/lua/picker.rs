@@ -10,7 +10,7 @@ use super::widget::create_child;
 use super::{method, none, object_table, ret, ui, value_id};
 use crate::tree::Id;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PickerData {
     pub rgb: [f32; 3],
     pub spectrum_bg: Option<Id>,

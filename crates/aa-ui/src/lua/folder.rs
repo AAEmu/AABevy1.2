@@ -8,7 +8,7 @@ use super::widget::show;
 use super::{method, none, queue_ui_event, ret, ui, value_id};
 use crate::tree::{Anchor, Id, Point};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FolderData {
     pub open: bool,
     pub title_height: f32,

@@ -23,6 +23,8 @@ use crate::tree::Id;
 struct Seen {
     /// Tree generation of the last scan.
     generation: u64,
+    /// Content version of the last scan ([`crate::tree::Tree::content`]).
+    content: u64,
     /// Rectangle (x, y, w, h) per widget with the handler.
     rects: HashMap<Id, [f32; 4]>,
 }
@@ -35,14 +37,25 @@ pub(crate) fn update(lua: &Lua) {
     if lua.app_data_ref::<Seen>().is_none() {
         lua.set_app_data(Seen::default());
     }
+    {
+        // Only writes of the same values since the last scan (the HUD's per-frame updates): no
+        // bound moved.
+        let u = ui(lua);
+        let seen = lua.app_data_ref::<Seen>().expect("aa-ui: bounds state");
+        if seen.generation != 0 && seen.content == u.tree.content() && !u.tree.changed() {
+            return;
+        }
+    }
     for _ in 0..MAX_PASSES {
         let changed: Vec<Id> = {
-            let u = ui(lua);
+            let mut u = ui(lua);
             let mut seen = lua.app_data_mut::<Seen>().expect("aa-ui: bounds state");
             if seen.generation == u.tree.generation {
                 return;
             }
+            u.tree.checkpoint();
             seen.generation = u.tree.generation;
+            seen.content = u.tree.content();
             let mut ids: Vec<Id> = u
                 .handlers
                 .iter()

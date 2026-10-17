@@ -16,7 +16,7 @@ use super::widget::{create_child, show};
 use super::{call_handler, method, none, ret, ui, value_id};
 use crate::tree::{Anchor, Id, Point};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TabData {
     /// (window, selected button, unselected button) per tab.
     pub tabs: Vec<(Id, Id, Id)>,
@@ -92,11 +92,9 @@ pub(crate) fn relayout_all(lua: &Lua) {
     let tabs: Vec<(Id, TabData)> = {
         let u = ui(lua);
         u.tree
-            .objects
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| o.alive)
-            .filter_map(|(i, o)| o.widget().and_then(|w| w.tab.clone()).map(|t| (i as Id, t)))
+            .of_class("tab")
+            .into_iter()
+            .filter_map(|i| u.tree.widget(i).and_then(|w| w.tab.clone()).map(|t| (i, t)))
             .collect()
     };
     for (id, td) in tabs {

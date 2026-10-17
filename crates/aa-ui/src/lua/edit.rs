@@ -17,7 +17,7 @@ use crate::tree::{Id, WidgetType};
 /// Caret blink half period.
 const BLINK_MS: f64 = 530.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditData {
     /// Caret position in characters.
     pub cursor: usize,

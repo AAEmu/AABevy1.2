@@ -8,7 +8,7 @@ use mlua::{Lua, Table};
 use super::{method, none, ret, ui};
 use crate::tree::Id;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct DiagramData {
     pub color: [f32; 4],
     pub max: f32,
