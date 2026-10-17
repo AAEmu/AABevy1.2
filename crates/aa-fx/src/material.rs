@@ -16,7 +16,8 @@ pub struct FxParams {
     pub gain: Vec4,
     /// Weights of the opacity map's channels (all 0 = no opacity map).
     pub mask: Vec4,
-    /// x: refraction strength (fraction of the viewport height a unit normal shifts the scene), y: 1 for a refraction material.
+    /// x: refraction strength (fraction of the viewport height a unit normal shifts the scene), y: 1 for a refraction material,
+    /// z: 1 when the first component of the second texture coordinates is a per-vertex alpha test threshold (dissolving sprites).
     pub refr: Vec4,
 }
 

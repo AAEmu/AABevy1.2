@@ -209,6 +209,27 @@ pub enum Facing {
     Flat,
 }
 
+/// What an emitter emits from (`AttachType`): the effect's origin by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Attach {
+    #[default]
+    None,
+    /// The bounding box of the entity the effect is on.
+    BoundingBox,
+    /// Its render mesh or physics proxy: a human sized capsule is used.
+    Body,
+}
+
+/// Where on that shape the particles start (`AttachForm`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AttachForm {
+    #[default]
+    Surface,
+    Edges,
+    Vertices,
+    Volume,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Spawn {
     /// Starts with its parent emitter.
@@ -269,6 +290,8 @@ pub struct EmitterDef {
     pub stretch: Var,
     pub stretch_offset: f32,
     pub alpha: Var,
+    /// `AlphaTest`: the texture's alpha has to be above this to show (a curve over the age makes the particle dissolve).
+    pub alpha_test: Var,
     pub color: ColorVar,
     pub diffuse: f32,
     pub backlight: f32,
@@ -307,6 +330,10 @@ pub struct EmitterDef {
     /// `RotateWorldSpace`: the axis is a world axis, not the emitter's.
     pub rotate_world: bool,
     pub bind_to_emitter: bool,
+    /// `InheritVelocity`: how much of the emitter's own velocity a new particle gets.
+    pub inherit_velocity: f32,
+    pub attach: Attach,
+    pub attach_form: AttachForm,
     pub spawn: Spawn,
     pub soft: bool,
     pub draw_last: i32,
@@ -352,6 +379,7 @@ impl Default for EmitterDef {
             stretch: Var::constant(0.0),
             stretch_offset: 0.0,
             alpha: Var::constant(1.0),
+            alpha_test: Var::constant(0.0),
             color: ColorVar::default(),
             diffuse: 1.0,
             backlight: 0.0,
@@ -383,6 +411,9 @@ impl Default for EmitterDef {
             rotate_init: Var::constant(0.0),
             rotate_world: false,
             bind_to_emitter: false,
+            inherit_velocity: 0.0,
+            attach: Attach::None,
+            attach_form: AttachForm::Surface,
             spawn: Spawn::Direct,
             soft: false,
             draw_last: 0,
@@ -493,6 +524,7 @@ impl EmitterDef {
                 "Stretch" => d.stretch = Var::parse(v, 0.0),
                 "StretchOffsetRatio" => d.stretch_offset = num(v).unwrap_or(0.0),
                 "Alpha" => d.alpha = Var::parse(v, 1.0),
+                "AlphaTest" => d.alpha_test = Var::parse(v, 0.0),
                 "Color" => d.color = ColorVar::parse(v),
                 "DiffuseLighting" => d.diffuse = Var::parse(v, 1.0).base,
                 "DiffuseBacklighting" => d.backlight = Var::parse(v, 0.0).base,
@@ -524,6 +556,22 @@ impl EmitterDef {
                 "RotateInitAngle" => d.rotate_init = Var::parse(v, 0.0),
                 "RotateWorldSpace" => d.rotate_world = truth(v),
                 "BindToEmitter" | "MoveRelEmitter" => d.bind_to_emitter |= truth(v),
+                "InheritVelocity" => d.inherit_velocity = Var::parse(v, 0.0).base,
+                "AttachType" => {
+                    d.attach = match v {
+                        "BoundingBox" => Attach::BoundingBox,
+                        "Physics" | "Render" => Attach::Body,
+                        _ => Attach::None,
+                    }
+                }
+                "AttachForm" => {
+                    d.attach_form = match v {
+                        "Edges" => AttachForm::Edges,
+                        "Vertices" => AttachForm::Vertices,
+                        "Volume" => AttachForm::Volume,
+                        _ => AttachForm::Surface,
+                    }
+                }
                 "SpawnIndirection" => {
                     d.spawn = match v {
                         "ParentStart" => Spawn::ParentStart,
@@ -551,6 +599,11 @@ impl EmitterDef {
     /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
         self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())
+    }
+
+    /// Sprites that dissolve: they carry a per-vertex alpha test threshold.
+    pub fn has_alpha_test(&self) -> bool {
+        self.alpha_test.base > 0.0 && !self.has_geometry
     }
 
     /// Whether the particles draw a ribbon of their past path (`TailLength`).
@@ -631,6 +684,7 @@ pub struct Luts {
     pub rot_speed: Lut,
     pub rot_len: Lut,
     pub alpha: Lut,
+    pub alpha_test: Lut,
     pub color: Lut3,
     pub air: Lut,
     pub gravity: Lut,
@@ -653,6 +707,7 @@ impl Luts {
             rot_speed: Lut::bake(d.rotate_speed.age.as_ref()),
             rot_len: Lut::bake(d.rotate_length.age.as_ref()),
             alpha: Lut::bake(d.alpha.age.as_ref()),
+            alpha_test: Lut::bake(d.alpha_test.age.as_ref()),
             color: Lut3(color),
             air: Lut::bake(d.air_resistance.age.as_ref()),
             gravity: Lut::bake(d.gravity.age.as_ref()),

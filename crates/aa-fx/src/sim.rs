@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use bevy::math::{Affine3A, Mat3, Quat, Vec3};
 
 use crate::geom::{Geom, GeomKey};
-use crate::params::{Blend, EmitterDef, Facing, Spawn};
+use crate::params::{Attach, AttachForm, Blend, EmitterDef, Facing, Spawn};
 
 /// CryEngine (Z up) to Bevy (Y up).
 #[inline]
@@ -84,6 +84,8 @@ pub struct StepCtx<'a> {
     pub tint: Vec3,
     /// Direction to the sun in world space (shades opaque mesh particles).
     pub sun: Vec3,
+    /// How the effect entity moves (m/s, world space), for `InheritVelocity`.
+    pub emitter_vel: Vec3,
     pub wind: Vec3,
     pub budget: &'a AtomicI32,
     /// Alpha factor of the effect (distance fade).
@@ -143,6 +145,7 @@ pub struct Particle {
     spin_rate: f32,
     rlen: f32,
     /// Tail: the particle's slot in the emitter's history, the next write position, the samples held, time since the last one.
+    atest: f32,
     slot: u32,
     t_head: u16,
     t_len: u16,
@@ -428,6 +431,13 @@ impl EmitterState {
             }
             local += d * def.pos_random_offset * scale;
         }
+        // emission from the shape of the entity the effect is on
+        let mut surface_normal = None;
+        if def.attach != Attach::None && at.is_none() {
+            let (p, n) = attach_point(&def, r);
+            local += c2b(p) * scale;
+            surface_normal = Some(n);
+        }
         let world_pos = at.unwrap_or(frame.origin) + ctx.rot * local;
         let pos = frame.point_from_world(world_pos);
 
@@ -454,8 +464,17 @@ impl EmitterState {
             let (t, b) = perpendicular(dir);
             dir = dir * c + (t * az.cos() + b * az.sin()) * s;
         }
+        if let Some(n) = surface_normal
+            && def.speed.base != 0.0
+        {
+            // particles leave the surface
+            dir = ctx.rot * c2b(n);
+        }
         let speed = def.speed.spawn(r.next(), strength) * ctx.speed_scale * scale;
-        let vel = frame.dir_from_world(dir * speed);
+        let mut vel = frame.dir_from_world(dir * speed);
+        if def.inherit_velocity != 0.0 && !def.bind_to_emitter {
+            vel += frame.dir_from_world(ctx.emitter_vel * def.inherit_velocity);
+        }
 
         let life = def.particle_life.spawn(r.next(), strength);
         let (life, inv_life) = if def.particle_life.base > 0.0 && life > 1e-3 { (life, 1.0 / life) } else { (f32::INFINITY, 0.0) };
@@ -501,6 +520,7 @@ impl EmitterState {
             spin,
             spin_rate,
             rlen,
+            atest: def.alpha_test.spawn(r.next(), strength),
             slot: u32::MAX,
             t_head: 0,
             t_len: 0,
@@ -644,12 +664,14 @@ impl EmitterState {
         let n = self.particles.len();
         self.pos.clear();
         self.uv.clear();
+        self.uv1.clear();
         self.col.clear();
         self.dirty = true;
         if n == 0 {
             self.units = 0;
             return;
         }
+        let with_test = def.has_alpha_test();
         self.pos.reserve(n * 4);
         self.uv.reserve(n * 4);
         self.col.reserve(n * 4);
@@ -693,8 +715,9 @@ impl EmitterState {
             // frame in the texture atlas
             if p.slot != u32::MAX {
                 let colour = [colour.x, colour.y, colour.z];
-                let strip = Strip { trail: &self.trail, steps: self.tail_steps, pos: &mut self.pos, uv: &mut self.uv, col: &mut self.col };
-                ribbon(strip, p, center, hx, alpha, colour, &inv, view, &mut min, &mut max);
+                let strip = Strip { trail: &self.trail, steps: self.tail_steps, pos: &mut self.pos, uv: &mut self.uv, col: &mut self.col, uv1: &mut self.uv1 };
+                let test = if with_test { Some(p.atest * luts.alpha_test.at(a)) } else { None };
+                ribbon(strip, p, center, hx, alpha, colour, test, &inv, view, &mut min, &mut max);
                 continue;
             }
 
@@ -775,6 +798,9 @@ impl EmitterState {
             }
             self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
             self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
+            if with_test {
+                self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
+            }
             let colour = [colour.x, colour.y, colour.z, alpha.min(1.0)];
             self.col.extend_from_slice(&[colour, colour, colour, colour]);
         }
@@ -888,12 +914,13 @@ struct Strip<'a> {
     pos: &'a mut Vec<[f32; 3]>,
     uv: &'a mut Vec<[f32; 2]>,
     col: &'a mut Vec<[f32; 4]>,
+    uv1: &'a mut Vec<[f32; 2]>,
 }
 
 /// A particle's tail as a strip of camera facing quads from its head (the current position) back along its history; it
 /// tapers and fades towards the end. The texture runs along the ribbon.
 #[allow(clippy::too_many_arguments)]
-fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [f32; 3], inv: &Affine3A, view: View, min: &mut Vec3, max: &mut Vec3) {
+fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [f32; 3], test: Option<f32>, inv: &Affine3A, view: View, min: &mut Vec3, max: &mut Vec3) {
     // points: the head, then the samples that are not on top of it
     let mut pts: [Vec3; MAX_TAIL_STEPS + 1] = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
     let mut n = 1;
@@ -934,6 +961,47 @@ fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [
         out.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
         out.uv.extend_from_slice(&[[1.0 - t0, 0.0], [1.0 - t0, 1.0], [1.0 - t1, 1.0], [1.0 - t1, 0.0]]);
         out.col.extend_from_slice(&[c(t0), c(t0), c(t1), c(t1)]);
+        if let Some(t) = test {
+            out.uv1.extend_from_slice(&[[t, 0.0]; 4]);
+        }
+    }
+}
+
+/// A point on (or in) the shape an attached emitter emits from, in CryEngine axes (Z up, the entity's feet at the origin), and
+/// the outward normal there. The shapes are generic: a human sized capsule for meshes and physics proxies, a box for bounds.
+fn attach_point(def: &EmitterDef, r: &mut Rng) -> (Vec3, Vec3) {
+    let volume = def.attach_form == AttachForm::Volume;
+    match def.attach {
+        Attach::BoundingBox => {
+            let half = Vec3::new(0.4, 0.3, 0.9);
+            let centre = Vec3::new(0.0, 0.0, 0.9);
+            if volume {
+                return (centre + Vec3::new(r.signed(), r.signed(), r.signed()) * half, Vec3::Z);
+            }
+            // a random face, weighted by its area
+            let area = [half.y * half.z, half.x * half.z, half.x * half.y];
+            let total = area[0] + area[1] + area[2];
+            let pick = r.next() * total;
+            let axis = if pick < area[0] { 0 } else if pick < area[0] + area[1] { 1 } else { 2 };
+            let sign = if r.next() < 0.5 { -1.0 } else { 1.0 };
+            let mut p = Vec3::new(r.signed(), r.signed(), r.signed()) * half;
+            let mut n = Vec3::ZERO;
+            p[axis] = sign * half[axis];
+            n[axis] = sign;
+            (centre + p, n)
+        }
+        _ => {
+            // a capsule: radius 0.3, from the ankles to above the head
+            let radius = 0.3;
+            let z = 0.15 + r.next() * 1.55;
+            let a = r.next() * std::f32::consts::TAU;
+            let dir = Vec3::new(a.cos(), a.sin(), 0.0);
+            if volume {
+                (dir * (radius * r.next().sqrt()) + Vec3::Z * z, dir)
+            } else {
+                (dir * radius + Vec3::Z * z, dir)
+            }
+        }
     }
 }
 
@@ -1070,6 +1138,7 @@ mod tests {
             count_over_life: true,
             tint: Vec3::ONE,
             sun: Vec3::Y,
+            emitter_vel: Vec3::ZERO,
             wind: Vec3::ZERO,
             budget,
             fade: 1.0,

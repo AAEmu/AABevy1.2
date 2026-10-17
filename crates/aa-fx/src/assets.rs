@@ -142,6 +142,8 @@ pub struct MatKey {
     pub draw_last: i32,
     pub mesh: Option<MeshMat>,
     pub refract: Option<RefrKey>,
+    /// Sprites with an `AlphaTest` that changes per particle.
+    pub atest: bool,
 }
 
 impl MatKey {
@@ -154,9 +156,13 @@ impl MatKey {
                 p.mask = Vec4::from_array(m.mask_chan.map(|c| c as f32 / 255.0));
             }
         }
+        if self.atest {
+            p.refr.z = 1.0;
+        }
         if let Some(r) = &self.refract {
             // a unit normal moves the scene by `bump` times this fraction of the viewport height
-            p.refr = Vec4::new(r.bump as f32 / 1000.0 * REFRACTION_SCALE, 1.0, 0.0, 0.0);
+            p.refr.x = r.bump as f32 / 1000.0 * REFRACTION_SCALE;
+            p.refr.y = 1.0;
         }
         p
     }

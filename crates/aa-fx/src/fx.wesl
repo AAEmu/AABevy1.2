@@ -75,13 +75,30 @@ fn refract_scene(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(0.0);
 }
 
+// A dissolving sprite: its texture alpha has to get above the particle's threshold (vertex attribute `uv_b.x`).
+@if(VERTEX_UVS_B)
+fn dissolve(in: VertexOutput, ta: f32) -> f32 {
+    if fx.refr.z < 0.5 {
+        return 1.0;
+    }
+    let thr = in.uv_b.x;
+    if thr <= 0.0 {
+        return 1.0;
+    }
+    return smoothstep(thr, thr + 0.08, ta);
+}
+@else
+fn dissolve(in: VertexOutput, ta: f32) -> f32 {
+    return 1.0;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(fx_texture, fx_sampler, in.uv);
     if fx.refr.y > 0.5 {
         return refract_scene(in, t);
     }
-    let a = t.a * mask_opacity(in) * in.color.a * soft_fade(in.position);
+    let a = t.a * dissolve(in, t.a) * mask_opacity(in) * in.color.a * soft_fade(in.position);
     if a < fx.gain.w {
         discard;
     }
