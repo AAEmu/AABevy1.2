@@ -242,6 +242,29 @@ for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colo
 (`water_distance` 1400 m) with the style's `WaterMaterial` (`water_material.rs`, see Water below). The terrain pokes through where the banks
 are higher, which is the shore line.
 
+### Placed sounds (`objects/sounds.rs`)
+
+The `AmbientVolume`, `RandomSoundVolume`, `SoundEventSpot` and `ReverbVolume` entities of a cell's `entities.xml` (`CellObjects::sounds`,
+parsed by `placement::load_cell_objects` next to the effects) with the `AreaShape` outlines that own them (an area lists its entities by GUID
+in `<Entities>`; the outline is a polygon prism: the entity's `Pos` / `Rotate` / `Scale` applied to the points, from the lowest point to the highest plus
+`Height`). They become entities in `ObjectState::sounds` (spawned with the cell, despawned when it unloads, as the effects are) and
+`update_sounds` evaluates them every 0.1 s against the listener (`aa_audio::SpatialListener`, else the `WorldFocus`); nothing happens without an
+`aa_audio::Engine` resource (no audio plugin in the app) and `AA_NO_SOUND_ENTITIES=1` leaves them out.
+
+* Ambient: plays (an `aa_audio::Sound` component on the entity, 2D loops with the `daylight` parameter from `Environment`) while the listener
+  is in the area or within `OuterRadius` of it; volume 1 inside, linear to 0 at `OuterRadius`; the day and night events are placed in the same
+  area and the parameter cross fades them. An area's `<TimeOfDay>` window switches it off outside it. A volume no area lists plays as a point
+  of radius `OuterRadius` (a guess; 2 of the 50 around the Nuian spawn).
+* Random: only inside its area; `MinWaitTime` after entering, then every `MinWaitTime` to `MaxWaitTime` s, a one-shot child entity at a random
+  place on a `DiscRadius` circle around the listener (`bRandomPosition`) or at the entity; leaving stops it.
+* Spot: a 3D point sound within 100 m of the listener, when `bPlay=1`.
+* Reverb: only the strongest `ReverbVolume` around the listener, as the `ListenerReverb` resource (preset name and weight, 1 inside, `1 - d / OuterRadius`
+  outside); nothing applies it.
+
+`placed sounds` counts are in the `PlacedSoundStats` resource; `AA_AUDIO_LOG=1` logs every start with the event and position. At the Nuian spawn
+(see `docs/aa-client-sound.md`): 3 ambient playing, 7 random volumes inside, 0 spots, reverb `x2_outdoor_1`. The evaluation costs 40 to 60 us per
+tick. `objects::sounds::spawn_cell(commands, cell, &CellObjects::sounds)` is public for scenes that load cells themselves (the create screens' `login2`).
+
 ### Environment (`env.rs`, `sky.rs`, `sky_material.rs`)
 
 `WorldClock { hour, speed, zone, layer }` (default hour 10, layer 0) selects the sample of the zone under the camera (`zone_at`), smoothed over
