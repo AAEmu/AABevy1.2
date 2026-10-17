@@ -6,25 +6,24 @@ use mlua::{Function, IntoLuaMulti, Lua, Table, Value};
 use super::{object_table, queue_ui_event, ui};
 use crate::tree::{Anchor, Id, Point};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ping {
     pub level: i64,
     pub id: i64,
     pub u: f32,
     pub v: f32,
-    pub maps: [Option<(i64, i64, f32, f32)>; 4],
+    pub maps: Vec<(i64, i64, f32, f32)>,
     /// Optional server sequence: a repeated ping at the same point can restart its pulse.
     pub version: Option<i64>,
 }
 
 impl Ping {
-    pub(super) fn on_map(self, level: i64, id: i64) -> Option<(f32, f32)> {
+    pub(super) fn on_map(&self, level: i64, id: i64) -> Option<(f32, f32)> {
         if (self.level, self.id) == (level, id) {
             Some((self.u, self.v))
         } else {
             self.maps
                 .iter()
-                .flatten()
                 .find_map(|&(l, i, u, v)| ((l, i) == (level, id)).then_some((u, v)))
         }
     }
@@ -45,20 +44,22 @@ pub(super) fn read(table: Option<&Table>) -> mlua::Result<Option<Option<Ping>>> 
         id: ping.raw_get("id")?,
         u: ping.raw_get("u")?,
         v: ping.raw_get("v")?,
-        maps: [None; 4],
+        maps: Vec::new(),
         version: ping.raw_get("version")?,
     };
     if !point.u.is_finite() || !point.v.is_finite() {
         return Err(mlua::Error::runtime("ping coordinates must be finite"));
     }
     if let Some(maps) = ping.raw_get::<Option<Table>>("maps")? {
-        for (slot, map) in point.maps.iter_mut().zip(maps.sequence_values::<Table>()) {
+        for map in maps.sequence_values::<Table>().take(256) {
             let map = map?;
             let (u, v): (f32, f32) = (map.raw_get("u")?, map.raw_get("v")?);
             if !u.is_finite() || !v.is_finite() {
                 return Err(mlua::Error::runtime("ping map coordinates must be finite"));
             }
-            *slot = Some((map.raw_get("level")?, map.raw_get("id")?, u, v));
+            point
+                .maps
+                .push((map.raw_get("level")?, map.raw_get("id")?, u, v));
         }
     }
     Ok(Some(Some(point)))
