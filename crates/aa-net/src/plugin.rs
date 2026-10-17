@@ -16,7 +16,9 @@ use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::ecs::prelude::*;
 
 use crate::session::{Client, Command, Event};
-use crate::state::{Buffs, Characters, Doodads, Player, PlayerStats, Status, Units, Worlds};
+use crate::state::{
+    ActionBar, Buffs, Characters, Doodads, Inventory, Player, PlayerStats, Status, Units, Worlds,
+};
 
 /// Ask the session to do something.
 #[derive(Message, Clone, Debug)]
@@ -52,6 +54,8 @@ impl Plugin for NetPlugin {
             .init_resource::<Status>()
             .init_resource::<PlayerStats>()
             .init_resource::<Buffs>()
+            .init_resource::<ActionBar>()
+            .init_resource::<Inventory>()
             .add_systems(PreUpdate, (send_commands, receive_events).chain());
         match Client::spawn_thread() {
             Ok(client) => {
@@ -87,6 +91,8 @@ fn receive_events(
     mut status: ResMut<Status>,
     mut stats: ResMut<PlayerStats>,
     mut buffs: ResMut<Buffs>,
+    mut actions: ResMut<ActionBar>,
+    mut inventory: ResMut<Inventory>,
 ) {
     let Some(client) = client else { return };
     let mut client = client.0.lock().expect("net client poisoned");
@@ -116,6 +122,12 @@ fn receive_events(
         if buffs.apply_if_changed(&event) {
             buffs.set_changed();
         }
+        if actions.apply_if_changed(&event) {
+            actions.set_changed();
+        }
+        if inventory.apply_if_changed(&event) {
+            inventory.set_changed();
+        }
         out.write(NetEvent(event));
     }
 }
@@ -135,4 +147,4 @@ macro_rules! apply_if_changed {
         }
     )*};
 }
-apply_if_changed!(Worlds, Characters, Player, Units, Doodads, Status, PlayerStats, Buffs);
+apply_if_changed!(Worlds, Characters, Player, Units, Doodads, Status, PlayerStats, Buffs, ActionBar, Inventory);

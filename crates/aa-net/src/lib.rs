@@ -15,6 +15,7 @@
 
 pub mod buff;
 pub mod game;
+pub mod items;
 pub mod login;
 pub mod model;
 pub mod net;

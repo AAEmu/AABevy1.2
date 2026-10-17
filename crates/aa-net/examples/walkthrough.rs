@@ -483,6 +483,37 @@ fn print_player_state(state: &WorldState) {
             u.faction_id, u.expedition_id, u.appellation, u.skills, u.passive_buffs
         );
     }
+    let bar: Vec<String> = state
+        .actions
+        .slots
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !s.is_empty())
+        .map(|(i, s)| match state.actions.item_count(i, &state.inventory) {
+            Some(n) => format!("{}:{:?}({})x{n}", i + 1, s.kind, s.id),
+            None => format!("{}:{:?}({})", i + 1, s.kind, s.id),
+        })
+        .collect();
+    println!("  action bar ({} slots): {}", state.actions.slots.len(), bar.join(" "));
+    let inv = &state.inventory;
+    println!(
+        "  bag {} slots ({} free), bank {} slots; items:",
+        inv.bag_slots,
+        inv.free_bag_slots(),
+        inv.bank_slots
+    );
+    for (i, it) in inv.bag_items() {
+        println!("    bag[{i}] template {} id {} x{} grade {} {:?}", it.template_id, it.id, it.count, it.grade, it.detail);
+    }
+    let worn: Vec<String> = inv
+        .equipment
+        .slots
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| s.is_some() && !slot::is_body_part(*i))
+        .map(|(i, s)| format!("{i}:{}", s.as_ref().map_or(0, |s| s.template_id)))
+        .collect();
+    println!("  worn: {}", worn.join(" "));
     let with_buffs = state.units.iter().filter(|u| !state.buffs.of(u.obj_id).is_empty()).count();
     let with_faction = state.units.iter().filter(|u| u.faction_id != 0).count();
     println!("  units with buffs {with_buffs}, with a faction {with_faction} of {}", state.units.by_id.len());

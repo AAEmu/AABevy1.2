@@ -6,8 +6,9 @@
 //! compressed otherwise, and the server verifies neither `hash` nor `count`.
 
 use crate::buff::Buff;
+use crate::items::{ActionSlot, InvenChunk, ItemTasks};
 use crate::model::{
-    ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Movement, Unit,
+    ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit,
 };
 use crate::opcodes::{cs, pp, sc};
 use crate::wire::{Pos, Reader, Result, WireError, Writer};
@@ -79,6 +80,8 @@ pub enum ClientMsg {
     Move { obj_id: u32, movement: Movement },
     Chat { chat_type: i16, target: String, message: String },
     ChangeTarget { obj_id: u32 },
+    /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
+    UpdateActionSlot { slot: u8, action: ActionSlot },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -109,6 +112,7 @@ impl ClientMsg {
             Self::Move { .. } => cs::CSMoveUnitPacket,
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
+            Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -150,6 +154,10 @@ impl ClientMsg {
             }
             Self::ChangeTarget { obj_id } => {
                 w.bc(*obj_id);
+            }
+            Self::UpdateActionSlot { slot, action } => {
+                w.u8(*slot);
+                action.write(&mut w);
             }
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -265,6 +273,19 @@ pub enum ServerMsg {
     CombatEngaged { obj_id: u32 },
     CombatCleared { obj_id: u32 },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    // -- action bar, bag and equipment
+    /// All hotbar slots (`SCActionSlots`).
+    ActionSlots(Vec<ActionSlot>),
+    /// Bag and bank sizes, ahead of their contents.
+    InvenInit { bag_slots: u32, bank_slots: u32 },
+    /// Ten slots of the bag or bank.
+    InvenContents(InvenChunk),
+    /// Item changes: loot, use, move, money ...
+    ItemTasks(ItemTasks),
+    /// Items of a unit's equipment slots changed (`None` = unequipped).
+    EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
+    /// A container grew to `slots`.
+    InvenExpanded { container: u8, slots: u8 },
     // -- buffs
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
@@ -322,6 +343,12 @@ impl ServerMsg {
             Self::CombatEngaged { .. } => "SCCombatEngaged",
             Self::CombatCleared { .. } => "SCCombatCleared",
             Self::UnitFactionChanged { .. } => "SCUnitFactionChanged",
+            Self::ActionSlots(_) => "SCActionSlots",
+            Self::InvenInit { .. } => "SCCharacterInvenInit",
+            Self::InvenContents(_) => "SCCharacterInvenContents",
+            Self::ItemTasks(_) => "SCItemTaskSuccess",
+            Self::EquipmentChanged { .. } => "SCUnitEquipmentsChanged",
+            Self::InvenExpanded { .. } => "SCInvenExpanded",
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffLearned { .. } => "SCBuffLearned",
@@ -523,6 +550,20 @@ impl ServerMsg {
                 faction_id2: r.u32()?,
                 temporary: r.bool()?,
             },
+            sc::SCActionSlotsPacket => Self::ActionSlots(crate::items::read_action_slots(r)?),
+            sc::SCCharacterInvenInitPacket => Self::InvenInit { bag_slots: r.u32()?, bank_slots: r.u32()? },
+            sc::SCCharacterInvenContentsPacket => Self::InvenContents(InvenChunk::read(r)?),
+            sc::SCItemTaskSuccessPacket => Self::ItemTasks(ItemTasks::read(r)?),
+            sc::SCUnitEquipmentsChangedPacket => {
+                let obj_id = r.bc()?;
+                let n = r.u8()?;
+                let mut items = Vec::with_capacity(usize::from(n));
+                for _ in 0..n {
+                    items.push((r.u8()?, Item::read(r)?));
+                }
+                Self::EquipmentChanged { obj_id, items }
+            }
+            sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
             sc::SCBuffCreatedPacket => {
                 let (obj_id, buff) = Buff::read_created(r)?;
                 Self::BuffCreated { obj_id, buff }
@@ -787,6 +828,71 @@ mod tests {
         assert_eq!(decode(sc::SCBmPointPacket, &9_000_000_000i64.to_le_bytes()), ServerMsg::BmPoint(9_000_000_000));
         assert_eq!(decode(sc::SCCombatEngagedPacket, &[5, 0, 0]), ServerMsg::CombatEngaged { obj_id: 5 });
         assert_eq!(decode(sc::SCCombatClearedPacket, &[5, 0, 0]), ServerMsg::CombatCleared { obj_id: 5 });
+    }
+
+    #[test]
+    fn action_bar_and_bag_frames() {
+        use crate::items::{container, ActionKind};
+        // SCActionSlots: a skill, an empty slot, an item type.
+        let mut w = Writer::new();
+        w.u8(2).u32(18132).u8(0).u8(1).u32(8001);
+        let ServerMsg::ActionSlots(slots) = decode(sc::SCActionSlotsPacket, &w.finish()) else { panic!() };
+        assert_eq!(slots.len(), 3);
+        assert_eq!((slots[0].kind, slots[0].id), (ActionKind::Spell, 18132));
+        assert_eq!(slots[2].item_template_id(), Some(8001));
+        // SCCharacterInvenInit(numInvenSlots, numBankSlots): two u32.
+        let mut w = Writer::new();
+        w.u32(50).u32(200);
+        assert_eq!(
+            decode(sc::SCCharacterInvenInitPacket, &w.finish()),
+            ServerMsg::InvenInit { bag_slots: 50, bank_slots: 200 }
+        );
+        // SCCharacterInvenContents: an empty chunk is the type, 1 chunk, index and ten zero ids.
+        let mut w = Writer::new();
+        w.u8(container::INVENTORY).u8(1).u8(4);
+        for _ in 0..10 {
+            w.i32(0);
+        }
+        let body = w.finish();
+        assert_eq!(body.len(), 43);
+        let ServerMsg::InvenContents(c) = decode(sc::SCCharacterInvenContentsPacket, &body) else { panic!() };
+        assert_eq!((c.container, c.start_chunk, c.items.len(), c.first_slot()), (2, 4, 10, 40));
+        // SCInvenExpanded(slotType, numSlots)
+        assert_eq!(
+            decode(sc::SCInvenExpandedPacket, &[2, 60]),
+            ServerMsg::InvenExpanded { container: 2, slots: 60 }
+        );
+        // SCUnitEquipmentsChanged(objId, count, (slot, item)...): one worn item, one emptied slot.
+        let mut w = Writer::new();
+        w.bc(0x112233).u8(2);
+        w.u8(15).u32(5569).u64(900).u8(1).u8(0).i32(1).u8(0).i64(0).i32(0).u32(0).u8(1).i64(0).i64(0);
+        w.u8(16).i32(0);
+        let ServerMsg::EquipmentChanged { obj_id, items } = decode(sc::SCUnitEquipmentsChangedPacket, &w.finish())
+        else {
+            panic!()
+        };
+        assert_eq!(obj_id, 0x112233);
+        assert_eq!(items[0].0, 15);
+        assert_eq!(items[0].1.as_ref().unwrap().template_id, 5569);
+        assert_eq!(items[1], (16, None));
+        // SCItemTaskSuccess with a money task, as the server's own test builds it
+        // (`[73, 1, 1, i32, 0, 0 force remove, u32 type]`).
+        let body = [73, 1, 1, 0xF0, 0xD8, 0xFF, 0xFF, 0, 0, 0, 0, 0];
+        let ServerMsg::ItemTasks(t) = decode(sc::SCItemTaskSuccessPacket, &body) else { panic!() };
+        assert_eq!(t.reason, 73);
+        assert_eq!(t.tasks, vec![crate::items::ItemTask::Money(-10_000)]);
+    }
+
+    #[test]
+    fn client_action_slot_update_bytes() {
+        use crate::items::{ActionKind, ActionSlot};
+        // CSUpdateActionSlot: slot, kind, id (u32 for spells and item types, u64 for item ids).
+        let spell = ClientMsg::UpdateActionSlot { slot: 4, action: ActionSlot { kind: ActionKind::Spell, id: 18132 } };
+        assert_eq!(spell.encode_body(), [4, 2, 0xD4, 0x46, 0, 0]);
+        let item = ClientMsg::UpdateActionSlot { slot: 0, action: ActionSlot { kind: ActionKind::ItemId, id: 258 } };
+        assert_eq!(item.encode_body(), [0, 4, 2, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(ClientMsg::UpdateActionSlot { slot: 7, action: ActionSlot::default() }.encode_body(), [7, 0]);
+        assert_eq!(spell.opcode(), 0x0b6);
     }
 
     #[test]
