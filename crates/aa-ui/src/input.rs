@@ -218,6 +218,9 @@ pub fn update(
     if cursor.is_some() {
         mouse.last_cursor = cursor;
     }
+    if !down && mouse.pressed.is_some() && cursor.is_some() {
+        lua::edit::pointer_move(lua);
+    }
     // The pointer left the press by a few units: a drag begins (`OnDragStart`, or the slot picks its content up).
     if let (Some(p), Some(c)) = (mouse.drag.as_mut(), cursor)
         && !p.started
@@ -228,6 +231,7 @@ pub fn update(
         lua::drag::start(lua, src);
     }
     if up {
+        lua::edit::pointer_up(lua);
         mouse.slider = None;
         let dragged = mouse.drag.take().filter(|p| p.started);
         let pressed = mouse.pressed.take();
@@ -277,7 +281,9 @@ pub fn update(
         }
         // No script took the wheel: message frames (the chat) scroll natively.
         if let (false, Some(c)) = (handled, cursor) {
-            lua::chat::wheel(lua, c, hover, wheel);
+            if !hover.is_some_and(|id| lua::edit::wheel(lua, id, wheel)) {
+                lua::chat::wheel(lua, c, hover, wheel);
+            }
         }
     }
 }

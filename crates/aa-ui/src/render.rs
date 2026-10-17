@@ -18,7 +18,7 @@ use crate::lua::Ui;
 use crate::text::ATLAS_SIZE;
 use crate::tree::{ButtonState, DrawKind, Id, Kind, Rect, TextBlock, Tree, WidgetType};
 
-mod clip;
+pub(crate) mod clip;
 
 /// Texture of a quad.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -169,10 +169,13 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                     .as_ref()
                     .and_then(|b| b.text_color[state_index(state)].or(b.text_color[0]))
                     .unwrap_or(t.style.color);
-                text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+                if !edit {
+                    text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+                }
             }
-            if edit && u.focus == Some(id) && u.caret_visible {
-                caret_quad(u, &shown, w.edit.as_ref(), rect, alpha, scale, &mut out);
+            if edit {
+                let caret = u.focus == Some(id) && u.caret_visible;
+                crate::lua::edit::render(u, id, &shown, w.edit.as_ref(), rect, alpha, scale, caret, &mut out);
             }
         }
         if let Some(t) = w.title.as_ref()
@@ -521,6 +524,20 @@ pub(crate) fn text_quads(
     scale: f32,
     out: &mut Vec<Quad>,
 ) {
+    text_quads_mode(u, t, rect, color, alpha, scale, out, false);
+}
+
+pub(crate) fn edit_text_quads(
+    u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4],
+    alpha: f32, scale: f32, out: &mut Vec<Quad>,
+) {
+    text_quads_mode(u, t, rect, color, alpha, scale, out, true);
+}
+
+fn text_quads_mode(
+    u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4],
+    alpha: f32, scale: f32, out: &mut Vec<Quad>, edit: bool,
+) {
     let inner = Rect {
         x: rect.x + t.inset[0],
         y: rect.y + t.inset[1],
@@ -530,27 +547,27 @@ pub(crate) fn text_quads(
     let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w);
     let size = t.style.size * scale;
     let mut text = t.text.clone();
-    let mut lo = u.fonts.layout(
-        &t.style.font,
-        size,
-        &text,
-        maxw.map(|w| w * scale),
-        t.line_space * scale,
-        false,
-    );
-    if t.style.ellipsis && !t.wrap && inner.w > 0.0 && lo.width > inner.w * scale {
+    let mut lo = if edit {
+        u.fonts.layout_edit(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale)
+    } else {
+        u.fonts.layout(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale, false)
+    };
+    if !edit && t.style.ellipsis && !t.wrap && lo.width > inner.w * scale {
         // Trim characters until "text..." fits.
         let mut chars: Vec<char> = text.chars().collect();
+        let mut shortened = None;
         while !chars.is_empty() {
             chars.pop();
             let s: String = chars.iter().collect::<String>() + "...";
             let l = u.fonts.layout(&t.style.font, size, &s, None, 0.0, false);
             if l.width <= inner.w * scale {
-                text = s;
-                lo = l;
+                shortened = Some((s, l));
                 break;
             }
         }
+        (text, lo) = shortened.unwrap_or_else(|| (
+            String::new(), u.fonts.layout(&t.style.font, size, "", None, 0.0, false),
+        ));
     }
     let (fx, fy) = (t.style.align.fx(), t.style.align.fy());
     let ox = (inner.x * scale + (inner.w * scale - lo.width) * fx).round();
@@ -771,59 +788,6 @@ fn diagram_quads(
 /// The caret of the focused edit box: a 1 px bar after the character at the cursor, as tall as
 /// a text line plus `SetCursorHeight`, moved by `SetCursorOffset`, in the text colour (or
 /// `SetCursorColor`).
-fn caret_quad(
-    u: &mut Ui,
-    t: &TextBlock,
-    edit: Option<&crate::lua::edit::EditData>,
-    rect: Rect,
-    alpha: f32,
-    scale: f32,
-    out: &mut Vec<Quad>,
-) {
-    let inner = Rect {
-        x: rect.x + t.inset[0],
-        y: rect.y + t.inset[1],
-        w: (rect.w - t.inset[0] - t.inset[2]).max(0.0),
-        h: (rect.h - t.inset[1] - t.inset[3]).max(0.0),
-    };
-    let size = t.style.size * scale;
-    let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w * scale);
-    let ls = t.line_space * scale;
-    let full = u
-        .fonts
-        .layout(&t.style.font, size, &t.text, maxw, ls, false);
-    let cursor = edit.map_or(usize::MAX, |e| e.cursor);
-    let head: String = t.text.chars().take(cursor).collect();
-    let lo = u.fonts.layout(&t.style.font, size, &head, maxw, ls, false);
-    let (_, lh) = u.fonts.metrics(&t.style.font, size);
-    let mut line = lo.line_widths.len().max(1) - 1;
-    let mut line_w = lo.line_widths.last().copied().unwrap_or(0.0);
-    if head.ends_with('\n') {
-        // Layout drops a trailing line break; the caret sits at the start of the next line.
-        line += 1;
-        line_w = 0.0;
-    }
-    let (fx, fy) = (t.style.align.fx(), t.style.align.fy());
-    let total_h = full.height.max(lh);
-    let ox = inner.x * scale + (inner.w * scale - full.width) * fx;
-    let oy = inner.y * scale + (inner.h * scale - total_h) * fy;
-    let full_line_w = full.line_widths.get(line).copied().unwrap_or(full.width);
-    let offset = edit.map_or(0.0, |e| e.cursor_offset) * scale;
-    let x = (ox + (full.width - full_line_w) * fx + line_w + offset).round();
-    let h = lh + edit.and_then(|e| e.cursor_height).unwrap_or(0.0) * scale;
-    let y = (oy + line as f32 * (lh + ls) + (lh - h) / 2.0).round();
-    let c = edit.and_then(|e| e.cursor_color).unwrap_or(t.style.color);
-    out.push(Quad {
-        tex: Tex::Atlas,
-        pos: [x, y, x + scale.max(1.0), y + h],
-        uv: white_uv(),
-        color: [c[0], c[1], c[2], c[3] * alpha],
-        corners: None,
-        uvs: None,
-        vcolors: None,
-    });
-}
-
 /// Render-side state: textures, materials and the batch entities.
 #[derive(Resource, Default)]
 pub struct UiRenderState {

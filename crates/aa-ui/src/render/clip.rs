@@ -22,7 +22,7 @@ impl Vertex {
     }
 }
 
-pub(super) fn quads(out: &mut Vec<Quad>, first: usize, bounds: [f32; 4]) {
+pub(crate) fn quads(out: &mut Vec<Quad>, first: usize, bounds: [f32; 4]) {
     if out[first..]
         .iter()
         .all(|q| q.corners.is_none() && q.uvs.is_none() && q.vcolors.is_none())

@@ -339,7 +339,7 @@ its layout, and a held item with grade frame and count 37 followed the pointer. 
 bag to `reference/ingame/bag/real.png`; the harness logged 213–234 FPS during the final run.
 
 Keyboard: one widget has the focus (`SetFocus`, or a press on an edit box; `ClearFocus`, Escape
-or a press elsewhere drops it; `OnAcceptFocus` on gain). Keys go to it: edit boxes insert typed
+or a press elsewhere drops it; `OnAcceptFocus` on gain and `OnReleaseFocus` on loss). Keys go to it: edit boxes insert typed
 text at the caret (with `SetMaxTextLength`, `SetDigit`, `SetDigitMax`, `SetReadOnly`;
 `SetPassword` shows `*`) and fire `OnTextChanged(self)`; Backspace, Delete, Left, Right, Home,
 End edit and move the caret; Enter fires `OnEnterPressed` (multi-line boxes insert a line
@@ -348,6 +348,36 @@ key also fires `OnKeyDown` / `OnKeyUp(self, name)` with lower-case names (`"ente
 does not fire `OnTextChanged` (the money edits call `SetText` from that handler). The caret
 blinks every 530 ms. `SetPrefixText` draws a prefix in `prefixStyle` before the text
 (`SetPrefixInset` around it).
+
+Edit selection uses character indices, replaces the selected range on typing/deletion, and
+counts the replaced text when applying maximum length. `UseSelectAllWhenFocused(true)` is
+honored before `OnAcceptFocus`, as original `InitEdit` expects. Pointer clicks place the caret;
+dragging and Shift-click extend selection through inherited widget scales. Shift navigation
+and Ctrl+A select, while other Ctrl-letter shortcuts do not insert their letters. Multiline
+Up/Down retain a preferred horizontal column; Home/End use the wrapped visual line and
+Ctrl+Home/End use the document. Soft-wrap boundary affinity preserves the correct visual line.
+The same cached literal layout drives text, selection, picking, and navigation, retaining
+markup characters and final empty lines. Text, backing and caret clip to the authored inset;
+typing/navigation scroll the caret into view, and wheel input scrolls multiline text.
+The native multiline Lua class has no `SetFocus`; pointer input and the application focus API
+can focus it. OS clipboard, IME composition and Ctrl-word navigation remain unimplemented.
+
+Native evidence: select-all flag `39239c40` / focus path `39292230`; single/multiline rendering
+`392935b0` / `39295060`; selected backing in `39220fd0` uses the game's
+`Textures/Defaults/grey.dds` (loaded at `3921ddba`). `SetLimitWidth` (`39242dc0` -> `3929ee80`)
+and style `SetEllipsis` (`3925b190`) both reach `39274900`, so the label method is now a real
+alias. Labels narrower than the ellipsis marker no longer retain the overflowing full text.
+
+`tests/edit_selection.rs` covers selection, Unicode replacement/limits, focus release, real
+modifier edges, read-only input, scaled pointer drag, literal layout, soft-wrap navigation,
+scroll clipping, and the original relationship/mail `.alb` views. `examples/native_edits.rs`
+shows those original forms using `aa_dev`; `shots/aa-ui/native-edits.png` shows grey selection,
+literal markup and a vertically scrolled letter. There is no dedicated social/mail real-client
+capture in `reference`; panel textures and fonts were checked against the shared real HUD/bag
+assets and original authored dimensions. The final capture logged 478-524 FPS, zero script errors,
+and exited. The full suite passed 110 runtime tests plus both doc tests (one ignored);
+the final pointer-focus regression brings runtime coverage to 111, with all nine edit tests
+passing on the final implementation. No application hook is required for editing.
 
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's

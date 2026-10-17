@@ -186,7 +186,12 @@ pub fn event(lua: &Lua, code: KeyCode, down: bool, text: Option<&str>) -> bool {
         }
     };
     if let Some(id) = target {
-        let key = edit_key(code, text);
+        let control = ui(lua).keyboard.modifiers().control;
+        let key = if control && code == KeyCode::KeyA {
+            Some(edit::UiKey::SelectAll)
+        } else {
+            edit_key(code, text).filter(|k| !control || !matches!(k, edit::UiKey::Text(_)))
+        };
         if let Some(name) = native_key_name(code) {
             dispatch(lua, id, name, down, key.as_ref());
         } else if down && let Some(key) = key {
