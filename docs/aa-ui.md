@@ -6,9 +6,10 @@ unchanged in Lua 5.1 (through `aa-lua`) and build the screens the way the client
 lays the widgets out, draws them with Bevy and feeds mouse and keyboard input back to the
 scripts.
 
-Status: world select, character select and the 2D layer of character create (all three steps,
-every race and gender) run from the original scripts with no script errors. The layout tree matches the real client's capture
-(`reference/*/ui.json`) by object path (class, offset, extent, visibility):
+Status: world select, character select, the 2D layer of character create (all three steps,
+every race and gender) and the in-game HUD after spawning run from the original scripts with no
+script errors. The layout tree matches the real client's capture (`reference/*/ui.json`) by
+object path (class, offset, extent, visibility):
 
 | screen | reference | match |
 |---|---|---|
@@ -19,9 +20,16 @@ every race and gender) run from the original scripts with no script errors. The 
 | character create step 2, 8 race/gender combinations | `reference/character_create/step2_*` | 139 of 139 each |
 | character create step 3, 8 race/gender combinations | `reference/character_create/step3_*` | 44 of 44 each |
 | character create step 3, skillset picked and a name entered | `step3_nuian_male/ui_ability_name.json` | 52 of 52 |
+| in-game HUD after spawning (fake game data like the capture) | `reference/ingame/spawn/ui.json` | 271 of 277 (**) |
 
 (*) The one left is `step1.content.congestionTip_bg`, a drawable of a hidden tooltip that the
 capture reports by its own visible flag; not drawn by either.
+
+(**) Of the 6 left, 2 are the same objects under a path through a table keyed by the widget's
+runtime id (`exp_bar_set.1105.exp_bar...`; ours has `6075`), and 4 are within 1 px: two text
+widths, the roadmap cursor's sub-pixel offset and `notifyWindow`'s height (the client had run
+`systemLayerParent`'s `OnScale` handler, which sets it to the line height + 1; aa-ui fires
+`OnScale` only when the screen size changes).
 
 Pixels: the world select screenshot matches `reference/world_select/real.png` to 0 px in
 geometry and text placement; the remaining difference (mean absolute error about 10 of 255) is
@@ -39,9 +47,10 @@ cargo run -p aa-ui --example character_create -- --race elf --gender female --st
 cargo run -p aa-ui --example ingame_hud -- --shot shots/aa-ui/ingame_hud.png
 ```
 
-All three run the screen's scripts with a fake game API (`examples/fake/`: 3 servers, one
-character) and are interactive: hover and click the server list, the character list and the
-buttons, type into edit boxes. FPS, quads and draw calls are logged every few seconds.
+They run the screen's scripts with a fake game API (`examples/fake/`: 3 servers, one
+character; `fake_ingame.lua`: the spawn capture's character, bars, buffs, zone and chat) and
+are interactive: hover and click the server list, the character list and the buttons, type into
+edit boxes. FPS, quads and draw calls are logged every few seconds.
 
 | flag | meaning |
 |---|---|
@@ -85,7 +94,7 @@ visibility); `imgdiff.py` and `crops.py` compare screenshots.
 | `lua/folder.rs`, `lua/tab.rs`, `lua/edit.rs`, `lua/diagram.rs` | `folder`, `tab`, edit box and `circlediagram` behaviour |
 | `lua/slot.rs`, `lua/statusbar.rs` | `slot` (action bar icons bound to game slots) and `statusbar` (HP / MP / exp / labor bars) |
 | `lua/chat.rs` | `message` frames and the tabbed `chatwindow`, `X2Chat:DispatchChatMessage` |
-| `lua/roadmap.rs` | the `roadmap` zone map overlay, `listbox` tree images |
+| `lua/roadmap.rs` | the `roadmap` zone map overlay; small natives of `worldmap` (no-ops), `listbox` (tree images), `grid` (row heights) |
 | `lua/globals.rs` | `UIParent` / `UI`, constants, `Script`, the toolkit side of `X2Locale`, `ADDON`, `X2DialogManager`, game API stubs |
 | `lua/classes.rs` | the exact method list of every native class (from `reference/api/widget_methods.json`) |
 | `lua/constants.rs` | the client's real constant values (`x2_globals`) |
@@ -94,7 +103,7 @@ visibility); `imgdiff.py` and `crops.py` compare screenshots.
 | `texture.rs` | texture path resolution (locale copies), sizes, `.g` texture info (`GetTextureData`) |
 | `render.rs` | tree to quads, batching, atlas upload, state backgrounds, caret, diagram polygons |
 | `input.rs` | hit testing, mouse handlers, native button / check button / list / tab / focus behaviour |
-| `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues) |
+| `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues, walked in Lua) |
 
 ### Objects
 
@@ -145,6 +154,10 @@ ascent + descent rounded (yd_ygo540: 13 px -> 16, 15 -> 18, 18 -> 22), a text's 
 `n * lineHeight + (n - 1) * lineSpace`, and a trailing line break does not add a line, as in the
 client. Inline codes: `|cAARRGGBB ... |r` colour; value codes `|,N;` (thousands separators),
 `|mN;` (money with gold / silver / copper coin icons), `|bN;` (loyalty token icon).
+Alignment without `SetAlign`: centred for buttons, labels and `textbox` (world select's
+warning line, which never sets one, is centred in `real.png`), top left for game tooltips,
+left for the rest.
+`GetLineCount()` is the wrapped line count of the widget's text.
 
 ### Handlers and events
 
@@ -259,7 +272,7 @@ App::new()
   | `AAUI.SlotHotKey(slotType, slotIdx)` | `slot:GetHotKey` (keybinding labels) | `"1"`, `"SHIFT-1"`, `"MINUS"`, ... or nil |
   | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
   | `AAUI.ChatColor(filter)` | `X2Chat:DispatchChatMessage` | `{ r, g, b }` or nil (a default per filter) |
-  | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 1, zone = 5, player = { u, v } }` |
+  | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 2, zone = 5, player = { u, v } }` (level as the scripts register maps: 2 zone, 3 city; `u, v` on the map image, 0..1) |
 
   `ui.refresh_slots()` asks the slot hooks again (bars changed); the roadmap and chat colours
   are read when needed. `X2Chat:DispatchChatMessage(filter, text)` is the toolkit's (it routes
@@ -321,65 +334,74 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   the scripts). The login background sits 1 px higher than in the capture.
 * 3D is not drawn: the character model view, the login stage scene behind the UI.
 * Fades and animations are simplified: `Show(visible, ms)` alpha fades work; `SetStartAnimation`,
-  `SetAlphaAnimation`, `SetScaleAnimation` and effect drawables are no-ops.
+  `SetAlphaAnimation` and `SetScaleAnimation` are no-ops; effect drawables show while started
+  (`SetStartEffect(true)`) without their animation phases.
+* In-game HUD: what the 3D engine draws is not here (name plates over units, the world).
+  Slot cooldown sweeps, the roadmap's quest / NPC markers and the cursor's rotation, the
+  world map window, grid cells and chat scrolling are not drawn or are stubs. The idle chat
+  window fades its tab backgrounds out and its unselected tabs to 60 % (measured by eye on
+  the capture). Named fonts the scripts ask for (`actionBar`, `characterInfo`) are not in
+  `fonts.g` and fall back to the default font (logged once).
 * Edit boxes: no text selection, clipboard, IME composition, or horizontal scrolling of long
   text; history lines are stubs. No capture shows a focused edit box, so the caret (a 1 px bar,
   `SetCursorHeight` read as extra height, `SetCursorOffset` as an x offset) is a guess.
 * Game tooltips (item / skill tooltips on hover) run without script errors but their section
   natives (`AttachUpperSpaceLine`, icon sections, ...) are stubs, so they lay out roughly and
   without a background.
-* Many natives are stubs (table below): mostly in-game widgets (grid, slot, model view, chat
-  window, road map) and rarely used setters.
+* Many natives are stubs (table below): mostly in-game widgets (grid, model view, the chat
+  window's options, road map markers) and rarely used setters.
 
 ## API coverage
 
 Per native class: methods implemented natively (including deliberate no-ops such as sounds and
 animations), methods present as logging stubs, and the client's total. Generated with
-`--coverage`.
+`cargo run -p aa-ui --example ingame_hud -- --coverage`.
 
 | class | native | stub | listed |
 |---|---|---|---|
-| `button` | 84 | 44 | 128 |
-| `chatwindow` | 63 | 62 | 125 |
-| `checkbutton` | 88 | 44 | 132 |
-| `circlediagram` | 71 | 31 | 102 |
-| `cooldownactionbutton` | 84 | 48 | 132 |
-| `cooldownbutton` | 84 | 47 | 131 |
-| `cooldownconstantbutton` | 84 | 49 | 133 |
-| `cooldowninventorybutton` | 84 | 50 | 134 |
-| `damagedisplay` | 65 | 35 | 100 |
+| `button` | 85 | 43 | 128 |
+| `chatwindow` | 93 | 32 | 125 |
+| `checkbutton` | 89 | 43 | 132 |
+| `circlediagram` | 72 | 30 | 102 |
+| `cooldownactionbutton` | 85 | 47 | 132 |
+| `cooldownbutton` | 85 | 46 | 131 |
+| `cooldownconstantbutton` | 85 | 48 | 133 |
+| `cooldowninventorybutton` | 85 | 49 | 134 |
+| `damagedisplay` | 66 | 34 | 100 |
 | `drawable:color` | 15 | 9 | 24 |
-| `drawable:effect` | 17 | 31 | 48 |
+| `drawable:effect` | 19 | 29 | 48 |
 | `drawable:iconimage` | 20 | 9 | 29 |
 | `drawable:image` | 23 | 14 | 37 |
 | `drawable:ninepart` | 18 | 10 | 28 |
 | `drawable:text` | 16 | 13 | 29 |
 | `drawable:threepart` | 18 | 9 | 27 |
-| `editbox` | 83 | 36 | 119 |
-| `editboxmultiline` | 73 | 34 | 107 |
-| `emptywidget` | 63 | 30 | 93 |
-| `folder` | 79 | 35 | 114 |
-| `gametooltip` | 70 | 37 | 107 |
-| `grid` | 63 | 85 | 148 |
-| `label` | 68 | 30 | 98 |
-| `listbox` | 66 | 72 | 138 |
-| `listctrl` | 76 | 33 | 109 |
-| `message` | 65 | 54 | 119 |
-| `modelview` | 63 | 96 | 159 |
-| `paintcolorpicker` | 103 | 1938 | 2041 |
-| `roadmap` | 63 | 77 | 140 |
+| `editbox` | 84 | 35 | 119 |
+| `editboxmultiline` | 75 | 32 | 107 |
+| `emptywidget` | 64 | 29 | 93 |
+| `folder` | 80 | 34 | 114 |
+| `gametooltip` | 72 | 35 | 107 |
+| `grid` | 70 | 78 | 148 |
+| `label` | 69 | 29 | 98 |
+| `listbox` | 70 | 68 | 138 |
+| `listctrl` | 77 | 32 | 109 |
+| `listctrlitem` | 97 | 1945 | 2042 |
+| `message` | 86 | 33 | 119 |
+| `modelview` | 64 | 95 | 159 |
+| `paintcolorpicker` | 105 | 1937 | 2042 |
+| `roadmap` | 71 | 69 | 140 |
 | `slider` | 78 | 31 | 109 |
-| `slot` | 64 | 42 | 106 |
-| `statusbar` | 63 | 39 | 102 |
-| `tab` | 76 | 30 | 106 |
-| `textbox` | 70 | 34 | 104 |
+| `slot` | 76 | 30 | 106 |
+| `statusbar` | 71 | 31 | 102 |
+| `tab` | 77 | 29 | 106 |
+| `textbox` | 72 | 32 | 104 |
 | `uiparent` | 20 | 15 | 35 |
-| `webbrowser` | 67 | 58 | 125 |
-| `window` | 71 | 44 | 115 |
+| `webbrowser` | 68 | 57 | 125 |
+| `window` | 72 | 43 | 115 |
+| `worldmap` | 152 | 1893 | 2045 |
 
-`paintcolorpicker` is not in the capture's class list, so it gets our natives plus a stub for
-every method name any class has. Toolkit stubs the login screens still call (with the fake game
-API): `listbox` item colours (`SetDefaultItemTextColor`, `SetOveredItemColor`, ...),
-`message:SetMaxLines` / `SetTimeVisible`, `emptywidget:EnableScroll` /
-`ChangeChildAnchorByScrollValue`, `drawable:image:SetAnimFrameInfo` (frame animations),
-`button:IgnoreInputOnFading`, and the `gametooltip` section natives when a tooltip shows.
+`paintcolorpicker`, `worldmap` and `listctrlitem` are not in the capture's class list, so they
+get our natives plus a stub for every method name any class has. Toolkit stubs the login
+screens still call (with the fake game API): `listbox` item colours (`SetDefaultItemTextColor`,
+`SetOveredItemColor`, ...), `emptywidget:EnableScroll` / `ChangeChildAnchorByScrollValue`,
+`drawable:image:SetAnimFrameInfo` (frame animations), `button:IgnoreInputOnFading`, and the
+`gametooltip` section natives when a tooltip shows.
