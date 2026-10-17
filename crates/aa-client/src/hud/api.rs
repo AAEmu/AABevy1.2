@@ -177,12 +177,14 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::combat::install(lua, &hud, bridge)?;
     super::cast::install(lua, &hud, bridge)?;
     super::loot::install(lua, &hud, bridge)?;
+    super::markers::install(lua, &hud)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
-    lua.load(INGAME_LUA).set_name("@ingame.lua").exec()
+    lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
+    super::markers::load_script(lua)
 }
 
 /// The Rust functions of the `HUD` table.

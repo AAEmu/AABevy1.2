@@ -321,6 +321,37 @@ NPCs within 45 m. The white beams over Maude in the capture are a particle effec
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
 
+### Map icons (roadmap and big map)
+
+`hud/markers.rs` + `hud/markers.lua`. The original's scripts only prod natives (`X2Map:SetNpcFilter`,
+`SetNpcShowFilter` / `SetDoodadShowFilter` / `SetHouseShowFilter`, `roadmap:SetRoadMapNpc`, the roadmap option
+data); the icons are drawn natively from `ui/map/icon/npc_icon.dds` (24 px cells, the symbol names of
+`map/common.lua`) and the player is `player_cursor.dds`, turned by the heading.
+
+* **Where things are.** The client's own `worlds/main_world/map_data/npc_map/<zone>.dat` and `doodad_map/<zone>.dat`
+  (16 byte records: template id, x, y, z, game metres) list every NPC and map-worthy doodad of a zone group. The
+  database says what they are: NPC service flags -> bank, auction house, stabler, expedition, trade, ability
+  changer; the doodad's `group_id` -> mailbox, workbenches, portals, memory tomes (the blue book, `doodad_inn`,
+  mostly hidden behind the bank chest), housing province signs (`doodad_icon`). Weapon / armor / general
+  merchants and priests get no icon: `reference/ingame/worldmap_zone` shows none (only the bank, mailbox,
+  memory tome and stables of Desireen, the farm sign west of it).
+* **Quests** come from the units the client has, like the 3D marks (`game.quests.mark`: "!" yellow, "?" for ready,
+  grey "?" in progress, the main / livelihood / repeat variants of the sheet). The capture's big map shows no "!" at
+  Desireen, 170 m from where it stands, and its roadmap the two givers within 120 m (Maude and an NPC south west).
+* **Gravesite** (`corpse_pos`) while the exp lost can still be won back; **dots** (`hostile` / `friendly`) of the
+  units in view within 250 m when the roadmap's "NPC" check is on.
+* **Filters.** The "Show Icons" window of the big map works: `markers.lua` keeps each check (`SetNpcFilter`) and the
+  three folders (Merchants, Infrastructure, Housing Province) and leaves the filtered icons out of both maps; the
+  roadmap's NPC check hides every npc-like icon until it is on, as the toolkit's `roadmap` widget does.
+* **Placement.** Rust hands `HUD.map_icons` (game x, y, symbol, name, city) to Lua; `markers.lua` turns them into
+  the fraction of the zone rectangle (the big map's zone level, the whole image) or of the road map image (the
+  roadmap, through `HUD_ROAD_FRAMES` / the form frames) and of the city's rectangle (level 3) and hands them over as
+  `AAUI.RoadMap().markers` / `AAUI.WorldMap().markers` with a `markers_version` (an unchanged version costs no
+  re-read). aa-ui draws them (`Marker` in `roadmap.rs`, `place_markers` in `worldmap.rs`) and shows the tooltip of
+  the icon under the mouse through `SHOW_WORLDMAP_TOOLTIP`.
+* The list is rebuilt every 30 frames and only pushed to Lua when it changed; the database tables are read once on a
+  background thread (own connection).
+
 ### Bag tabs
 
 The tabs are `default_inventory_tabs` / `default_inventory_tab_groups` (served by the fake bag data); an
@@ -381,14 +412,16 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
   is unit tested in aa-net, but no other character was in view on the lane server to see it.
 * Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
   met range, mana, casting, target and combat. The unit requirement kinds that need quests, doodads, zones or factions count as met.
-* Roadmap markers (quest and NPC icons on the minimap, `AAUI.RoadMap().markers`).
+* Map icons: party members (aa-net has no party data), quest objective areas and the numbered notifier icons
+  (`X2Map:AddNotifyQuestInfo`), icons for other zones than the one the player is in, the real client's `npc_station`,
+  `npc_graveyard`, public farm and live housing icons (no data source), ship markers.
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
 * Bag tabs the player creates are not saved; dragging bag items is not routed (aa-ui does not route a left click).
 * Tooltips: the `#{...}` placeholders of skill, item and buff descriptions are filled in only for
   `damage_multiplier` (the damage effect's DPS multiplier: Shoot Arrow's 120%); damage ranges and buff
   durations (`#{avg_damage}`, `#{buff_duration}`, `#{duration}` ...) show `?`. Weapons and armour have no stat
   sections (attack, defence, durability repair, set bonuses): they show the name, category, durability and price.
-* Quest, NPC and ship markers on the world map; `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
+* `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
 * Quest marks ignore requirements the client cannot check (they hold), so an NPC may show a "!" for a quest
   the server then refuses.
 
@@ -396,5 +429,5 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 * ingame: skip key bindings while `HudKeyboardFocus.0` and camera orbit / click-to-move while
   `HudPointerOverUi.0` (done in round 2).
-* aa-ui: left click routing of bag items (picking up), the roadmap markers in `AAUI.RoadMap` could take the window
-  fraction instead of the image fraction so the app need not know the image frames.
+* aa-ui: left click routing of bag items (picking up). The roadmap markers in `AAUI.RoadMap` still take the image
+  fraction (`markers.lua` knows the image frames); a window fraction would save that.

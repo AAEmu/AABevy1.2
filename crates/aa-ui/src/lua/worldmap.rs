@@ -60,16 +60,30 @@
 //!
 //! Without `AAUI.WorldMap` the hook `AAUI.RoadMap()` of the zone overlay is used (same `level`,
 //! `zone`, `player`). The map opens on the player's map, and follows it when the player changes
-//! maps. The NPC, doodad, quest, telescope and ship markers are not drawn (their game data is
-//! not available): those natives are no-ops.
+//! maps.
+//!
+//! The icons of the map (quest "!" and "?", merchants, the warehouse, mailboxes, stables, portals,
+//! the gravesite ...) come from the app too, as `markers` of the hook's result, in the form of
+//! `AAUI.RoadMap().markers` (see `roadmap.rs`: `kind` of the client's map icon sheet, `tooltip`)
+//! with the map each is on: `level`, `id` as for `maps`, and `u`, `v` the place on that map's
+//! image. Only the markers of the shown map are drawn (the real client shows none on the continent
+//! and the world), 24 x 24 icons centred on the place, under the player's cursor, whatever the
+//! zoom. The app does the filtering of the window's "Show Icons" checks (it hears them as
+//! `X2Map:SetNpcFilter(iconType, on)` and `SetNpcShowFilter` / `SetDoodadShowFilter` /
+//! `SetHouseShowFilter`, natives of the app's game API). While the cursor is over a marker that
+//! has a `tooltip`, the tooltip controller (`worldmap:GetTooltipController()`) is put on it and
+//! `SHOW_WORLDMAP_TOOLTIP({ { tooltipType = "normal", text = tooltip } }, 1)` is raised;
+//! `HIDE_WORLDMAP_TOOLTIP` when it leaves. `markers_version` works as on the roadmap. The
+//! telescope, ship and fish school natives are no-ops (their game data is not available).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Function, Lua, Table, Value};
 
+use super::roadmap::{Marker, marker_cell, parse_markers};
 use super::{method, none, queue_ui_event, ret, ui, value_id};
-use crate::tree::{Anchor, Id, Point};
+use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
 /// The widget size at expansion ratio 1 (`WORLDMAP_VISIBLE_WIDTH` / `HEIGHT`).
 const BASE: (f32, f32) = (928.0, 556.0);
@@ -207,6 +221,9 @@ pub struct Place {
     pub above: [Option<(i64, i64, f32, f32)>; 4],
 }
 
+/// What the marker drawables were placed for: (map, scale in 1/1000, `marker_gen`).
+type MarkerKey = (Option<(i64, i64)>, i32, u32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldMapData {
     pub entries: Arc<Vec<MapEntry>>,
@@ -221,6 +238,18 @@ pub struct WorldMapData {
     /// The shown map `(level, id)`.
     pub current: Option<(i64, i64)>,
     pub place: Option<Place>,
+    /// `AAUI.WorldMap().markers`, with the `markers_version` they were read from and a counter of
+    /// the lists read (the key of what the drawables were placed for).
+    pub markers: Arc<Vec<Marker>>,
+    pub markers_version: Option<i64>,
+    pub marker_gen: u32,
+    /// One image drawable per marker on the shown map (reused), the markers they stand for, and
+    /// the one whose tooltip is up.
+    pub marker_drawables: Vec<Id>,
+    pub marker_shown: Vec<usize>,
+    pub marker_hover: Option<usize>,
+    /// What the marker drawables were last placed for: (map, scale in 1/1000, `marker_gen`).
+    marker_applied: Option<MarkerKey>,
     /// Index of the hovered child map (its `over` is shown).
     pub hover: Option<usize>,
     /// Cursor at the last press on the map: a click only counts when it did not move (a drag pans).
@@ -244,6 +273,13 @@ impl Default for WorldMapData {
             ratio: 1.0,
             current: None,
             place: None,
+            markers: Arc::default(),
+            markers_version: None,
+            marker_gen: 0,
+            marker_drawables: Vec::new(),
+            marker_shown: Vec::new(),
+            marker_hover: None,
+            marker_applied: None,
             hover: None,
             press: None,
             applied: None,
@@ -433,6 +469,11 @@ fn snapshot(lua: &Lua, id: Id) -> Option<WorldMapData> {
 
 /// The place from `AAUI.WorldMap` (or, without it, `AAUI.RoadMap`).
 fn read_place(lua: &Lua) -> Option<Place> {
+    read_hook(lua).map(|h| h.0)
+}
+
+/// The hook's result: the place and the table it came from (the markers are in it).
+fn read_hook(lua: &Lua) -> Option<(Place, Table)> {
     let aaui: Table = lua.globals().raw_get("AAUI").ok()?;
     let mut hook = None;
     for name in ["WorldMap", "RoadMap"] {
@@ -475,14 +516,15 @@ fn read_place(lua: &Lua) -> Option<Place> {
             }
         }
     }
-    Some(Place {
+    let place = Place {
         level,
         zone,
         u,
         v,
         angle,
         above,
-    })
+    };
+    Some((place, t))
 }
 
 /// Ask an optional `AAUI` map hook (`MapClimate`, `ConflictZones`, `ConflictState`); nothing
@@ -554,16 +596,29 @@ pub(crate) fn update(lua: &Lua) {
             .filter(|&i| u.tree.visible(i))
             .collect()
     };
+    // a closed window takes its tooltip down
+    let hidden: Vec<Id> = {
+        let u = ui(lua);
+        u.tree
+            .of_class("worldmap")
+            .into_iter()
+            .filter(|&i| !u.tree.visible(i) && u.tree.widget(i).is_some_and(|w| w.worldmap.as_ref().is_some_and(|d| d.marker_hover.is_some())))
+            .collect()
+    };
+    for id in hidden {
+        hide_marker_tooltip(lua, id);
+    }
     if maps.is_empty() {
         return;
     }
-    let place = read_place(lua);
+    let hook = read_hook(lua);
+    let place = hook.as_ref().map(|h| h.0);
     for id in maps {
-        sync(lua, id, place);
+        sync(lua, id, place, hook.as_ref().map(|h| &h.1));
     }
 }
 
-fn sync(lua: &Lua, id: Id, place: Option<Place>) {
+fn sync(lua: &Lua, id: Id, place: Option<Place>, table: Option<&Table>) {
     let Some(mut d) = snapshot(lua, id) else {
         return;
     };
@@ -605,6 +660,193 @@ fn sync(lua: &Lua, id: Id, place: Option<Place>) {
         }
         with(lua, id, |x| x.hover = hover);
     }
+    sync_markers(lua, id, table);
+}
+
+/// Read the markers when the hook has a new list, and keep the drawables on the shown map's ones.
+fn sync_markers(lua: &Lua, wm: Id, table: Option<&Table>) {
+    let Some(mut d) = snapshot(lua, wm) else {
+        return;
+    };
+    match table {
+        Some(t) => {
+            let version = t.raw_get::<Option<i64>>("markers_version").ok().flatten();
+            if version.is_none() || version != d.markers_version {
+                match parse_markers(t) {
+                    Ok(list) => {
+                        if *list != *d.markers {
+                            d.marker_gen += 1;
+                            d.markers = Arc::new(list);
+                        }
+                    }
+                    Err(e) => bevy::log::warn!("aa-ui: AAUI.WorldMap markers: {e}"),
+                }
+                d.markers_version = version;
+                let (markers, gen_) = (d.markers.clone(), d.marker_gen);
+                with(lua, wm, |x| {
+                    x.markers = markers;
+                    x.marker_gen = gen_;
+                    x.markers_version = version;
+                });
+            }
+        }
+        None if !d.markers.is_empty() => {
+            d.marker_gen += 1;
+            d.markers = Arc::default();
+            d.markers_version = None;
+            let gen_ = d.marker_gen;
+            with(lua, wm, |x| {
+                x.markers = Arc::default();
+                x.marker_gen = gen_;
+                x.markers_version = None;
+            });
+        }
+        None => {}
+    }
+    let scale = ui(lua).tree.size(wm).0 / BASE.0;
+    let key = (d.current, (scale * 1000.0).round() as i32, d.marker_gen);
+    if d.marker_applied != Some(key) {
+        place_markers(lua, wm, &d);
+        with(lua, wm, |x| x.marker_applied = Some(key));
+        d = snapshot(lua, wm).unwrap_or(d);
+    }
+    update_marker_tooltip(lua, wm, &d);
+}
+
+/// Put the shown map's markers on their places over the widget (`u`, `v` of the map image, which
+/// covers the widget); the rest of the pool is hidden.
+fn place_markers(lua: &Lua, wm: Id, d: &WorldMapData) {
+    let shown: Vec<usize> = d
+        .markers
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.map.is_none() || m.map == d.current)
+        .map(|(i, _)| i)
+        .collect();
+    let mut pool = d.marker_drawables.clone();
+    let mut kept = Vec::with_capacity(shown.len());
+    {
+        let mut g = ui(lua);
+        let u = &mut *g;
+        while pool.len() < shown.len() {
+            let dr = u.tree.create_drawable(wm, DrawKind::Image, "drawable:image", DrawLayer::Artwork);
+            u.tree.get_mut(dr).shown = false;
+            pool.push(dr);
+        }
+        let (ww, wh) = u.tree.size(wm);
+        let mut next = 0;
+        for &i in &shown {
+            let m = &d.markers[i];
+            let Some((path, c)) = marker_cell(u, m) else { continue };
+            let dr = pool[next];
+            next += 1;
+            let (w, h) = (c[2].abs(), c[3].abs());
+            let o = u.tree.get_mut(dr);
+            o.width = w;
+            o.height = h;
+            o.anchors = vec![Anchor {
+                point: Point::TopLeft,
+                target: wm,
+                rel: Point::TopLeft,
+                x: (m.u * ww - w / 2.0).round(),
+                y: (m.v * wh - h / 2.0).round(),
+            }];
+            o.shown = true;
+            if let Some(dd) = o.drawable_mut() {
+                dd.texture = Some(path);
+                dd.coords = Some(c);
+            }
+            kept.push(i);
+        }
+        for &dr in &pool[next..] {
+            if u.tree.get(dr).shown {
+                u.tree.get_mut(dr).shown = false;
+            }
+        }
+    }
+    with(lua, wm, |x| {
+        x.marker_drawables = pool;
+        x.marker_shown = kept;
+        x.marker_hover = None;
+    });
+}
+
+/// The tooltip controller of the widget (made by `GetTooltipController`, the scripts' anchor).
+fn tooltip_controller(lua: &Lua, wm: Id) -> Option<Id> {
+    super::chat::parts(lua, wm)
+        .ok()
+        .and_then(|p| p.raw_get::<Option<Table>>("tooltipController").ok().flatten())
+        .and_then(|t| value_id(lua, &Value::Table(t)))
+}
+
+/// The map tooltip of the marker under the cursor, as the roadmap's: the controller goes onto the
+/// marker and the map scripts get `SHOW_WORLDMAP_TOOLTIP` / `HIDE_WORLDMAP_TOOLTIP`.
+fn update_marker_tooltip(lua: &Lua, wm: Id, d: &WorldMapData) {
+    let hover = {
+        let u = ui(lua);
+        let over_map = u.hover.is_some_and(|h| h == wm || u.tree.is_descendant(h, wm));
+        let (cx, cy) = u.cursor;
+        if !over_map {
+            None
+        } else {
+            d.marker_shown
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|&(slot, &i)| {
+                    d.markers[i].tooltip.is_some()
+                        && d.marker_drawables.get(slot).is_some_and(|&dr| u.tree.visible(dr) && u.tree.rect(dr).contains(cx, cy))
+                })
+                .map(|(slot, _)| slot)
+        }
+    };
+    if hover == d.marker_hover {
+        return;
+    }
+    with(lua, wm, |x| x.marker_hover = hover);
+    let Some(slot) = hover else {
+        hide_marker_tooltip(lua, wm);
+        return;
+    };
+    let (Some(&i), Some(&dr)) = (d.marker_shown.get(slot), d.marker_drawables.get(slot)) else {
+        return;
+    };
+    let Some(text) = d.markers[i].tooltip.clone() else { return };
+    if let Some(c) = tooltip_controller(lua, wm) {
+        let mut u = ui(lua);
+        let r = u.tree.rect(dr);
+        let o = u.tree.get_mut(c);
+        o.anchors = vec![Anchor {
+            point: Point::TopLeft,
+            target: crate::tree::ROOT,
+            rel: Point::TopLeft,
+            x: r.x,
+            y: r.y,
+        }];
+        o.width = r.w;
+        o.height = r.h;
+        o.shown = true;
+    }
+    let build = || -> mlua::Result<Vec<Value>> {
+        let entry = lua.create_table()?;
+        entry.raw_set("tooltipType", "normal")?;
+        entry.raw_set("text", text)?;
+        let list = lua.create_table()?;
+        list.raw_set(1, entry)?;
+        Ok(vec![Value::Table(list), Value::Integer(1)])
+    };
+    if let Ok(args) = build() {
+        super::fire_ui_event(lua, "SHOW_WORLDMAP_TOOLTIP", args);
+    }
+}
+
+/// Take a marker's tooltip down (the cursor left it, or the window closed).
+fn hide_marker_tooltip(lua: &Lua, wm: Id) {
+    with(lua, wm, |x| x.marker_hover = None);
+    if let Some(c) = tooltip_controller(lua, wm) {
+        ui(lua).tree.get_mut(c).shown = false;
+    }
+    super::fire_ui_event(lua, "HIDE_WORLDMAP_TOOLTIP", vec![Value::Nil]);
 }
 
 fn place_player(lua: &Lua, wm: Id, d: &WorldMapData, scale: f32) {
@@ -807,6 +1049,22 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     ] {
         m.raw_set(name, method(lua, |_, _, _| none())?)?;
     }
+    // The anchor of the map tooltip: an empty widget the app puts on the marker under the cursor.
+    m.raw_set(
+        "GetTooltipController",
+        method(lua, |lua, id, _| {
+            let parts = super::chat::parts(lua, id)?;
+            if let Some(t) = parts.raw_get::<Option<Table>>("tooltipController")? {
+                return ret(lua, t);
+            }
+            let t = super::widget::create_child(lua, Some(id), "emptywidget", "tooltipController", 0, false)?;
+            if let Some(c) = value_id(lua, &Value::Table(t.clone())) {
+                ui(lua).tree.get_mut(c).shown = false;
+            }
+            parts.raw_set("tooltipController", &t)?;
+            ret(lua, t)
+        })?,
+    )?;
     m.raw_set(
         "GetClimateInfo",
         method(lua, |lua, _, a| {
