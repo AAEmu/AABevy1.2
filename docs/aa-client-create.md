@@ -128,9 +128,11 @@ full `resolve`.
 
 ## Gaps and notes
 
-* Step 3 field: no ground mist, no wind, no dummy animation; the grass is the vegetation of the cell
-  within 170 m (the captures' near blades are bigger and brighter in the Elf scene); the Hariharan
-  skeleton prop glows white where the capture has it dark; flowers come out orange instead of yellow.
+* Step 3 field: no wind, no dummy animation; the grass is the vegetation of the cell within 170 m
+  (the captures' near blades are bigger and brighter in the Elf scene). The ground mist is aa-fx
+  (`flow_fog_01`, `fog_01`, `leaf_01`; `elf_fog_01` is in no particle library of the pak). The
+  Hariharan carcass is dark now and the flowers close to yellow (aa-cry `b538dc7`, `ef0bda6`: additive
+  flag only for translucent materials, terrain colour blend of vegetation baked in).
 * The ferre step 3 stance is more upright than the captures (their legs are bent more); the
   silhouette height and position match.
 * Lighting / materials differ from the captures (flatter skin, hair specular: dark hair renders grey,
