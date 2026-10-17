@@ -182,6 +182,8 @@ pub struct CellObjects {
     pub water: Vec<Water>,
     /// The active `ParticleEffect` entities of `entities.xml`.
     pub effects: Vec<PlacedEffect>,
+    /// The sound entities of `entities.xml` (ambient, random, spots, reverb) and their areas.
+    pub sounds: crate::objects::sounds::SoundEntities,
 }
 
 /// A `ParticleEffect` entity of a cell's `entities.xml` (only the active ones, `bActive="1"`).
@@ -446,7 +448,9 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.water = o.water;
     }
     if let Some(xml) = read("entities.xml") {
-        objects.effects = parse_effect_entities(&String::from_utf8_lossy(&xml));
+        let xml = String::from_utf8_lossy(&xml);
+        objects.effects = parse_effect_entities(&xml);
+        objects.sounds = crate::objects::sounds::parse(&xml);
     }
     objects
 }

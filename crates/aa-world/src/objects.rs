@@ -39,6 +39,7 @@ use crate::water::{WaterStyle, water_meshes};
 use crate::water_material::{WaterMaterial, WaterStyles};
 
 pub mod effects;
+pub mod sounds;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -185,6 +186,8 @@ pub struct ObjectState {
     water: HashMap<(i32, i32), Vec<Entity>>,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
+    /// The placed sounds of each cell ([`sounds`]).
+    sounds: HashMap<(i32, i32), Vec<Entity>>,
     groups_tx: Sender<Option<VegGroups>>,
     /// Counter for [`ObjectStats::entities`] while models are still being prepared.
     busy_ticks: usize,
@@ -229,6 +232,7 @@ impl ObjectState {
             rx: Mutex::new(rx),
             water: HashMap::new(),
             effects: HashMap::new(),
+            sounds: HashMap::new(),
             groups_tx,
             busy_ticks: 0,
             stats: ObjectStats::default(),
@@ -338,6 +342,12 @@ pub fn stream_objects(
             commands.entity(e).despawn();
         }
     }
+    let gone: Vec<_> = state.sounds.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    for c in gone {
+        for e in state.sounds.remove(&c).unwrap_or_default() {
+            commands.entity(e).despawn();
+        }
+    }
     let dead: Vec<_> = state.sectors.keys().filter(|k| !loaded.contains(&(k.0, k.1))).copied().collect();
     for k in dead {
         if let Some(s) = state.sectors.remove(&k) {
@@ -395,6 +405,10 @@ pub fn stream_objects(
         let placed = effects::spawn_cell(&mut commands, c, &data.objects.effects);
         if !placed.is_empty() {
             state.effects.insert(c, placed);
+        }
+        let placed = sounds::spawn_cell(&mut commands, c, &data.objects.sounds);
+        if !placed.is_empty() {
+            state.sounds.insert(c, placed);
         }
         state.cells.insert(c, Arc::new(data));
     }
