@@ -394,6 +394,27 @@ ancestor/nested close, cyclic/dead links, and original `popup_menu.alb` owner-sp
 and reopen. The fixture retains `CreateEmptyWindow`'s return because the original popup
 handle is a local upvalue. Generic widget removal/ClearChildren remains a separate gap.
 
+Chat character links (`|kName,0;` friendly / `|kName,1;` hostile) now show only the name.
+Cached font layouts retain a link rectangle per wrapped segment and its original name/flag.
+`message:GetLinkInfoOnCursor()` returns the native fields
+`{linkType='character', characterName=..., isHostile=...}` on those rectangles, and
+`{linkType='none'}` elsewhere. Picking uses the visible composed message and the renderer's
+inset, alignment, scale and wrapping, so scrolled/expired/cleared lines do not leave old targets.
+Literal edit text does not interpret links. Item and quest link parsing remains unimplemented.
+
+Original `chat_msg_event.alb` authors the two `|k` forms; `chat/common.alb` reads these fields
+for its right-click `ActivatePopupMenu` call. Native binding `3924b360` confirms character
+link type 2 and those exact keys (`characterName` at payload +4, `isHostile` at +0x85).
+Four `tests/chat_links.rs` cases pass for name-only metrics, colored/wrapped links, transformed
+pointer bounds, stale-target cleanup, and the original CHAT_MESSAGE/right-click path with both
+flags. The original formatter fixture loads the game's UI texts, since untranslated fallback
+keys omit the name placeholder. The `native_edits` example also injects an original whisper
+event to show the corrected friendly name.
+`shots/aa-ui/native-links.png` was inspected with the original social/mail forms and the
+pink whisper line: `Socialpeerone` has no literal metadata suffix. The `aa_dev` run logged
+312-353 FPS, zero script errors, and exited. The final full aa-ui suite passes 120 runtime
+tests and both doc tests, with one existing font metrics test ignored.
+
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's
 channel (`/s`, `/local` say, `/shout` `/y` zone, `/p` `/party`, `/raid`, `/guild` `/g`, `/n`

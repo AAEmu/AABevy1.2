@@ -1030,13 +1030,17 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    // The chat scripts' OnClick / OnMouseDown ask what link the cursor is on: lines carry no item
-    // or character links here.
     def(
         "GetLinkInfoOnCursor",
-        method(lua, |lua, _, _| {
+        method(lua, |lua, id, _| {
             let t = lua.create_table()?;
             t.raw_set("linkType", "none")?;
+            if let Some((name, hostile)) = character_on_cursor(&mut ui(lua), id) {
+                // Native 3924b360 returns precisely these fields for character link type 2.
+                t.raw_set("linkType", "character")?;
+                t.raw_set("characterName", name)?;
+                t.raw_set("isHostile", hostile)?;
+            }
             ret(lua, t)
         })?,
     )?;
@@ -1049,6 +1053,52 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     Ok(())
+}
+
+/// Match the cached visible message layout used by rendering, including wrapping, timeout,
+/// scroll, inset, per-line alignment, UI scale and inherited widget transforms.
+fn character_on_cursor(u: &mut super::Ui, id: Id) -> Option<(String, bool)> {
+    if !u.tree.visible(id) {
+        return None;
+    }
+    let rect = u.tree.rect(id);
+    let view = u.animations.widget_rect(&u.tree, id);
+    let point = [
+        rect.x + (u.cursor.0 - view.x) * rect.w / view.w.max(0.001),
+        rect.y + (u.cursor.1 - view.y) * rect.h / view.h.max(0.001),
+    ];
+    let text = compose(u, id, rect)?;
+    let scale = u.ui_scale;
+    let inner = Rect {
+        x: rect.x + text.inset[0],
+        y: rect.y + text.inset[1],
+        w: (rect.w - text.inset[0] - text.inset[2]).max(0.0),
+        h: (rect.h - text.inset[1] - text.inset[3]).max(0.0),
+    };
+    if !inner.contains(point[0], point[1]) {
+        return None;
+    }
+    let layout = u.fonts.layout(
+        &text.style.font,
+        text.style.size * scale,
+        &text.text,
+        (inner.w > 0.0).then_some(inner.w * scale),
+        text.line_space * scale,
+        false,
+    );
+    let fx = text.style.align.fx();
+    let ox = (inner.x * scale + (inner.w * scale - layout.width) * fx).round();
+    let oy = (inner.y * scale + (inner.h * scale - layout.height) * text.style.align.fy()).round();
+    for link in layout.character_links {
+        let dx = ((layout.width - layout.line_widths[link.line]) * fx).round();
+        let [x0, y0, x1, y1] = link.rect;
+        let x = point[0] * scale - ox - dx;
+        let y = point[1] * scale - oy;
+        if x >= x0 && x < x1 && y >= y0 && y < y1 {
+            return Some((link.name, link.is_hostile));
+        }
+    }
+    None
 }
 
 pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {

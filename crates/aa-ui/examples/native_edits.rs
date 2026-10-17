@@ -39,6 +39,9 @@ fn main() {
             ui.key_event(KeyCode::ShiftLeft, true, None);
             for _ in 0..4 { ui.key(&UiKey::Up); }
             ui.key_event(KeyCode::ShiftLeft, false, None);
+            let whispered: i64 = ui.lua.load("return CHAT_WHISPERED").eval().unwrap();
+            ui.fire_event("CHAT_MESSAGE", (whispered, "peer", false, "Socialpeerone",
+                "The original chat name link keeps its click payload.", true, ""));
             fake::report(ui, "native_edits");
         }))
         .add_systems(Startup, fake::physical_pixels)
