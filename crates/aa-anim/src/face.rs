@@ -13,8 +13,8 @@
 //!   rotation about their centre for the movable scar. Eyebrow and deco decals carry a constant
 //!   grey; their colour is the character's `eyebrow_color` / `deco_color`, other decals use their
 //!   own colours. Weight scales the alpha.
-//! * lips: the green channel of `face/<pfx>_face_mask_new.dds` marks the lips; `lip_color`
-//!   (`0xAABBGGRR`) tints them.
+//! * lips: the orange part (red and green set) of `face/<pfx>_face_mask_new.dds` (Nuian male) or
+//!   `face/<pfx>_face_mask.dds` marks the lips; `lip_color` (`0xAABBGGRR`) tints them.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{Image, ImageSampler};
@@ -66,8 +66,9 @@ pub fn compose_face(base: &str, layers: &[FaceLayer], lips: Option<(&str, [u8; 3
                 if mask.width as usize == w && mask.height as usize == h {
                     let m = mask.decode_rgba8(0, 0);
                     for (p, m) in px.chunks_exact_mut(4).zip(m.chunks_exact(4)) {
-                        // lips are the yellow-orange part of the mask (red and green both set)
-                        let a = (m[1] as f32 / 255.0) * 0.55;
+                        // lips are the yellow-orange part of the mask (red and green both set); the
+                        // red disc around them and the green patches of some masks are not lips
+                        let a = (m[0].min(m[1]) as f32 / 255.0) * 0.55;
                         if a > 0.0 {
                             let luma = (p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11) / 255.0;
                             for i in 0..3 {

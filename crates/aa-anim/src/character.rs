@@ -124,7 +124,11 @@ impl CharacterDesc {
             _ => 4,
         };
         layers.sort_by_key(|(cat, _)| rank(*cat));
-        let lips = (c.lip_color != 0).then(|| (format!("{face_dir}/{prefix}_face_mask_new.dds"), abgr(c.lip_color)));
+        // `<pfx>_face_mask_new.dds` exists for the Nuian male only, the other models have `<pfx>_face_mask.dds`
+        let mask = [format!("{face_dir}/{prefix}_face_mask_new.dds"), format!("{face_dir}/{prefix}_face_mask.dds")]
+            .into_iter()
+            .find(|p| aa_pak::Pak::global().exists(p));
+        let lips = mask.filter(|_| c.lip_color != 0).map(|p| (p, abgr(c.lip_color)));
         let normal = (c.normal_map != 0)
             .then(|| db.face_normal_map(c.normal_map).ok())
             .flatten()
@@ -412,7 +416,12 @@ fn load_part(
     let cut = (part.kind == PartKind::Body && !hulls.is_empty()).then(|| hulls.clone());
 
     let skin = part.kind != PartKind::Costume || mtl.as_deref().is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin")));
-    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), face, dyes });
+    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune: skin_tune(assets.desc.race, assets.desc.gender)
+            * if part.kind == PartKind::Face { Vec3::ONE } else { body_skin_tune(assets.desc.race, assets.desc.gender) },
+        fur: assets.desc.race == Race::Ferre,
+        face,
+        dyes,
+    });
     let needs_materials = skin || !look.dyes.is_empty();
     if !needs_materials && morph.is_none() && cut.is_none() {
         return Ok(plain);
@@ -458,25 +467,69 @@ struct FaceLook {
     normal: Option<Handle<Image>>,
 }
 
-/// UV bounding box `[u0, v0, u1, v1]` of the geometry drawn with the `Eye` shader.
+/// UV bounding box `[u0, v0, u1, v1]` of the eyeballs: the geometry drawn with the `Eye` shader.
+///
+/// The ferre `Eye` sub-material also draws teeth and tongue of the same atlas, so the union box
+/// spans the whole strip. The eyeballs are the two separate meshes of the shader that share one UV
+/// rectangle (both eyes use the same texels); if there is no such pair the union box is used.
 fn eye_uv_box(loaded: &LoadedModel, mtl: &CryMaterial) -> Option<[f32; 4]> {
-    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-    let mut found = false;
+    let union = |a: [f32; 4], b: [f32; 4]| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
+    let mut all: Option<[f32; 4]> = None;
+    // (uv box) of every connected piece of eye geometry
+    let mut pieces: Vec<[f32; 4]> = Vec::new();
     for mesh in &loaded.model.meshes {
+        // union-find over vertices touched by eye triangles
+        let mut parent: Vec<u32> = (0..mesh.positions.len() as u32).collect();
+        fn find(p: &mut [u32], mut i: u32) -> u32 {
+            while p[i as usize] != i {
+                p[i as usize] = p[p[i as usize] as usize];
+                i = p[i as usize];
+            }
+            i
+        }
+        let mut used: Vec<u32> = Vec::new();
         for subset in &mesh.subsets {
             if !mtl.sub(subset.material_id as usize).is_some_and(|s| s.shader.eq_ignore_ascii_case("eye")) {
                 continue;
             }
             let first = subset.first_index as usize;
-            for &i in mesh.indices.get(first..first + subset.index_count as usize)? {
-                if let Some(uv) = mesh.uvs.get(i as usize) {
-                    bounds = [bounds[0].min(uv.x), bounds[1].min(uv.y), bounds[2].max(uv.x), bounds[3].max(uv.y)];
-                    found = true;
+            let Some(idx) = mesh.indices.get(first..first + subset.index_count as usize) else { continue };
+            for tri in idx.chunks_exact(3) {
+                let r = find(&mut parent, tri[0]);
+                for &v in &tri[1..] {
+                    let o = find(&mut parent, v);
+                    parent[o as usize] = r;
                 }
+                used.extend_from_slice(tri);
+            }
+        }
+        let mut boxes: HashMap<u32, [f32; 4]> = HashMap::new();
+        for v in used {
+            let Some(uv) = mesh.uvs.get(v as usize) else { continue };
+            let root = find(&mut parent, v);
+            let b = [uv.x, uv.y, uv.x, uv.y];
+            all = Some(all.map_or(b, |a| union(a, b)));
+            boxes.entry(root).and_modify(|e| *e = union(*e, b)).or_insert(b);
+        }
+        pieces.extend(boxes.into_values());
+    }
+    let iou = |a: [f32; 4], b: [f32; 4]| {
+        let w = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+        let h = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+        let inter = w * h;
+        let uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+        if uni > 0.0 { inter / uni } else { 0.0 }
+    };
+    let mut best: Option<(f32, [f32; 4])> = None;
+    for (i, a) in pieces.iter().enumerate() {
+        for b in &pieces[i + 1..] {
+            let score = iou(*a, *b);
+            if score > 0.7 && best.is_none_or(|(s, _)| score > s) {
+                best = Some((score, union(*a, *b)));
             }
         }
     }
-    found.then_some(bounds)
+    best.map(|(_, b)| b).or(all)
 }
 
 /// Does the sub-material's diffuse texture match `path` (lower-case pak path)?
@@ -530,6 +583,10 @@ struct Look {
     kind: PartKind,
     /// The chosen `skin_colors` row: it feeds the `HumanSkin` shader parameters.
     skin: SkinColor,
+    /// Per model colour calibration of the skin, see [`skin_tune`].
+    skin_tune: Vec3,
+    /// Fur instead of skin (ferre): no skin sheen, the dark fur would only mirror the sky.
+    fur: bool,
     face: FaceLook,
     /// Dyed copies of dyeable diffuse textures, by pak path of the original.
     dyes: HashMap<String, Handle<Image>>,
@@ -555,7 +612,13 @@ fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
             let row = &look.skin;
             let bright = Vec3::new(row.bright[2] as f32, row.bright[1] as f32, row.bright[0] as f32) / 255.0;
             let diffuse = Vec3::new(row.diffuse[0] as f32, row.diffuse[1] as f32, row.diffuse[2] as f32) / 255.0;
-            m.base_color = skin_base_color(diffuse, bright);
+            let c = skin_base_color(diffuse, bright).to_linear();
+            let t = look.skin_tune;
+            m.base_color = Color::linear_rgb(c.red * t.x, c.green * t.y, c.blue * t.z);
+            if look.fur {
+                m.reflectance = 0.12;
+                m.perceptual_roughness = m.perceptual_roughness.max(0.75);
+            }
         }
         "eye" => {
             if let Some(t) = look.face.texture.as_ref().filter(|_| uses_texture(sub, &look.face.replaces)) {
@@ -572,6 +635,38 @@ fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
             }
         }
         _ => {}
+    }
+}
+
+/// Per model colour multiplier of the skin (linear rgb) on top of `aa_cry::shade::skin_base_color`.
+///
+/// The generic conversion has one pink pull for all skins; the models differ (the elf's pale face
+/// texture needs the pink, nuian male skin is already pink and turned red). Each entry was fitted
+/// to the face of the model's `reference/character_create/step1_*` capture (mean linear colour
+/// of the eye-to-chin region, `compare --costume none --no-hair`), see `docs/aa-anim.md`.
+pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
+    // BEGIN SKIN TUNE
+    let t = match (race, gender) {
+        (Race::Nuian, Gender::Male) => [0.932, 1.199, 0.794],
+        (Race::Nuian, Gender::Female) => [1.445, 1.817, 1.870],
+        (Race::Elf, Gender::Male) => [0.966, 1.069, 0.953],
+        (Race::Elf, Gender::Female) => [1.577, 1.486, 1.599],
+        (Race::Hariharan, Gender::Male) => [0.765, 0.670, 0.663],
+        (Race::Hariharan, Gender::Female) => [0.677, 0.616, 0.597],
+        (Race::Ferre, Gender::Male) => [0.300, 0.330, 0.300],
+        (Race::Ferre, Gender::Female) => [0.765, 0.669, 0.570],
+    };
+    // END SKIN TUNE
+    Vec3::from(t)
+}
+
+/// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts):
+/// the face tune is fitted to the face region of the captures; the ferre male's body fur texture is
+/// greyer than his face texture, while the capture is a dark brown all over.
+pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
+    match (race, gender) {
+        (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),
+        _ => Vec3::ONE,
     }
 }
 

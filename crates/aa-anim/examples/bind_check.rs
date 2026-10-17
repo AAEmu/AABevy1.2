@@ -27,6 +27,16 @@ fn main() {
     let db = GameDb::open().expect("database");
     let desc = CharacterDesc::from_preset(&db, race, gender, 0).expect("preset");
     let assets = desc.resolve(&db).expect("resolve");
+    println!(
+        "customization: pupil {:06x}/{:06x} lip {:06x} eyebrow {:06x} deco {:06x}, face assets: pupil {:?} lips {:?}",
+        desc.customization.left_pupil_color,
+        desc.customization.right_pupil_color,
+        desc.customization.lip_color,
+        desc.customization.eyebrow_color,
+        desc.customization.deco_color,
+        assets.pupil_color,
+        assets.face_lips.as_ref().map(|l| l.1),
+    );
     let base = Skeleton::load(&assets.skeleton).expect("base skeleton");
     println!("base skeleton {} ({} bones)", assets.skeleton, base.len());
     for (name, i) in ["Head", "Neck", "Neck1", "Spine3", "Bip01 Head", "Bip01 Neck"].iter().filter_map(|n| base.find_ignore_case(n).map(|i| (n, i))) {
