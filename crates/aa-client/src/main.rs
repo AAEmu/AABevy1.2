@@ -7,10 +7,12 @@
 //! * [`ingame`]: world, player, units, camera, movement (`--enter-world` skips the login stage)
 //! * [`hud`]: the in-game Lua UI on real data, name plates
 //! * [`sound`]: `aa-audio` wired to the screens (music, UI sounds, zone music, volumes)
+//! * [`priority`]: the process runs above normal priority (`AA_PRIORITY=normal` keeps the default)
 
 mod hud;
 mod ingame;
 mod login;
+mod priority;
 mod sound;
 
 use bevy::prelude::*;
@@ -35,5 +37,7 @@ fn main() {
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .init_state::<Screen>()
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
+        // the game's threads before builds and other programs when the CPU is full (`priority`)
+        .add_systems(Startup, priority::raise)
         .run();
 }

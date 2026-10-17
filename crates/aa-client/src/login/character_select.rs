@@ -22,6 +22,7 @@ use super::{Goto, LoginArgs, LoginBridge, UiRequest, gameapi, host, ui_is};
 use crate::Screen;
 use crate::ingame::appearance;
 use crate::ingame::data::Db;
+use crate::ingame::weapons;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<SelectStage>()
@@ -29,7 +30,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(Screen::CharacterSelect), exit_stage)
         .add_systems(
             Update,
-            (net_events, show_character, auto_drive).run_if(ui_is(Screen::CharacterSelect)),
+            // the weapons of the shown character hang on its bones like in game (the sword on the hip, the bow on the back)
+            (net_events, show_character, auto_drive, weapons::attach_carried).run_if(ui_is(Screen::CharacterSelect)),
         );
 }
 
@@ -112,6 +114,17 @@ fn show_character(
         drop(game);
         let slot = StageSlot::select(race, gender);
         sel.subject = stage3d::spawn_subject(&mut commands, &mut cry, &clips, assets, &slot, stage.root);
+        let carried = weapons::select_weapons(weapons::carried(db, &c.equipment));
+        info!(
+            "character select: weapons main {:?} off {:?} ranged {:?}: showing {:?}",
+            c.equipment.get(aa_net::model::slot::MAINHAND).map(|i| i.template_id),
+            c.equipment.get(aa_net::model::slot::OFFHAND).map(|i| i.template_id),
+            c.equipment.get(aa_net::model::slot::RANGED).map(|i| i.template_id),
+            carried.iter().map(|i| i.path.rsplit('/').next().unwrap_or("")).collect::<Vec<_>>()
+        );
+        if let Some(subject) = sel.subject.filter(|_| !carried.is_empty()) {
+            commands.entity(subject).insert(weapons::Carried(carried));
+        }
         info!("character select: showing {} ({race:?} {gender:?}) zone {} faction {} {:?} pos {:?} leave {} delete {}/{}", c.name, c.zone_id, c.faction_id, c.faction_name, c.pos, c.leave_time, c.delete_request_time, c.delete_time);
     }
 }
