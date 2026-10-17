@@ -22,7 +22,8 @@ fn unit_centre(pos: aa_net::Pos, scale: f32) -> Vec3 {
     aa_world::cry_to_bevy(Vec3::new(pos.x, pos.y, pos.z + 0.9 * scale.max(0.5)))
 }
 
-/// `Tab`: the nearest unit that is not the one targeted; the next one after it when pressed again.
+/// `Tab`: the nearest enemy that is alive and not the one targeted, the next one after it when pressed again (the
+/// client's "target nearest enemy"; with no enemy in range, any unit).
 #[allow(clippy::too_many_arguments)]
 pub fn tab_target(
     keys: Res<ButtonInput<KeyCode>>,
@@ -38,18 +39,25 @@ pub fn tab_target(
         return;
     }
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
-    let me = bridge.0.borrow().pos;
-    let mut near: Vec<(f32, u32)> = units
+    let (me, shared) = {
+        let d = bridge.0.borrow();
+        (d.pos, d.game.clone())
+    };
+    let own_faction = player.spawn.as_ref().map_or(0, |s| s.character().faction_id);
+    let mut near: Vec<(f32, u32, bool)> = units
         .iter()
         .filter(|u| u.obj_id != own)
-        .map(|u| (me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)), u.obj_id))
-        .filter(|(d, _)| *d <= TAB_RANGE)
+        .map(|u| (me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)), u.obj_id, !u.dead && super::plates::relation_of(shared.get(), own_faction, u) == "hostile"))
+        .filter(|(d, _, _)| *d <= TAB_RANGE)
         .collect();
+    if near.iter().any(|n| n.2) {
+        near.retain(|n| n.2);
+    }
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
     if near.is_empty() {
         return;
     }
-    let next = match target.obj_id.and_then(|t| near.iter().position(|(_, id)| *id == t)) {
+    let next = match target.obj_id.and_then(|t| near.iter().position(|(_, id, _)| *id == t)) {
         Some(i) => near[(i + 1) % near.len()].1,
         None => near[0].1,
     };
