@@ -526,7 +526,9 @@ pub fn stream_objects(
                 let key = models.keys[id as usize].clone();
                 workers.spawn(d, move || {
                     let options = ModelOptions { lod: key.lod as u32, material: key.material.clone(), cry_space: true, ..default() };
-                    let result = loader.prepare_model(&key.path, &options);
+                    // a panic must not leave the model "loading" for ever
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loader.prepare_model(&key.path, &options)))
+                        .unwrap_or_else(|_| Err(aa_cry::Error::Invalid(format!("panic while preparing {}", key.path))));
                     let _ = tx.send((id, result));
                 });
             }

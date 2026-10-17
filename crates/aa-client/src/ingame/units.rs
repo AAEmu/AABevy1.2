@@ -239,7 +239,8 @@ pub fn sync_views(
         views.jobs += 1;
         let (unit, db, loader, clips, tx) = (unit.clone(), db.clone(), loader.clone(), clips.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
-            let build = prepare_unit(&db, &loader, &clips, &unit);
+            // a panic must not leave the unit "preparing" for ever
+            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_unit(&db, &loader, &clips, &unit))).unwrap_or(UnitBuild::None);
             let _ = tx.send(Built::Unit(unit.obj_id, build));
         });
     }
@@ -269,7 +270,8 @@ pub fn sync_views(
         views.jobs += 1;
         let (template, db, loader, tx) = (doodad.template_id, db.clone(), loader.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
-            let build = prepare_doodad(&db, &loader, template);
+            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template)))
+                .unwrap_or(DoodadBuild { path: String::new(), model: None });
             let _ = tx.send(Built::Doodad(id, build));
         });
     }
