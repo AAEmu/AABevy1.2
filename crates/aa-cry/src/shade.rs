@@ -490,7 +490,7 @@ pub fn to_standard_material(
         }
     }
     if matches!(out.alpha_mode, AlphaMode::Opaque) {
-        if m.flags & crate::material::flags::ADDITIVE != 0 {
+        if m.flags & crate::material::flags::ADDITIVE != 0 && additive_applies(m) {
             out.alpha_mode = AlphaMode::Add;
         } else if m.opacity < 0.999 {
             out.alpha_mode = AlphaMode::Blend;
@@ -500,6 +500,24 @@ pub fn to_standard_material(
         }
     }
     Some(out)
+}
+
+/// Whether a material's `ADDITIVE` flag blends it additively. Hundreds of ordinary opaque `Illum`
+/// materials carry the flag (costume skins, the Hariharan rail sets and detect machines, Nuian
+/// tents, ...) and the real client draws them opaque: additive blending turned the Hariharan field's
+/// carcass into a white ghost. The flag counts for materials that are not fully opaque and for
+/// effect textures (`p_effects`, `sprites`, or no texture at all: pointers and the like).
+fn additive_applies(m: &CryMaterial) -> bool {
+    if m.opacity < 0.999 {
+        return true;
+    }
+    match m.texture(&TextureMap::Diffuse) {
+        None => true,
+        Some(t) => {
+            let f = t.file.to_ascii_lowercase();
+            f.contains("p_effects") || f.contains("sprites")
+        }
+    }
 }
 
 /// The old flat skin multiplier (kept for source compatibility; skin colour now comes from the
@@ -554,6 +572,24 @@ mod tests {
         assert_eq!(chain.len(), 2);
         assert_eq!(&chain[1][..3], &[30, 20, 10]);
         assert_eq!(chain[1][3], 128);
+    }
+
+    #[test]
+    fn the_additive_flag_does_not_make_opaque_props_glow() {
+        // ti_detectmachine_rust: an opaque rusty prop with MtlFlags 0x80086 (two sided + additive)
+        let prop = convert(
+            r#"<Material MtlFlags="524422" Shader="Illum" Diffuse="0.22,0.22,0.22" Specular="3.4,3.4,3.4" Opacity="1" AlphaTest="0.495">
+ <Textures><Texture Map="Diffuse" File="game/objects/characters/monster/detectmachine_rust/detectmachine_rust_df.dds"/></Textures></Material>"#,
+        );
+        assert!(!matches!(prop.alpha_mode, AlphaMode::Add | AlphaMode::Blend), "{:?}", prop.alpha_mode);
+        // an effect texture with the same flag is still additive, and so is a translucent one
+        let glow = convert(
+            r#"<Material MtlFlags="4" Shader="Illum" Opacity="1">
+ <Textures><Texture Map="Diffuse" File="game/textures/p_effects/o_effect/glow_com_01a.dds"/></Textures></Material>"#,
+        );
+        assert!(matches!(glow.alpha_mode, AlphaMode::Add));
+        let decal = convert(r#"<Material MtlFlags="4" Shader="Illum" Opacity="0.5"><Textures><Texture Map="Diffuse" File="a/b.dds"/></Textures></Material>"#);
+        assert!(matches!(decal.alpha_mode, AlphaMode::Add));
     }
 
     #[test]
