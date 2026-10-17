@@ -10,6 +10,7 @@ pub mod heightmap;
 pub mod objects;
 pub mod placement;
 pub mod post;
+pub mod profile;
 pub mod reader;
 pub mod sky;
 pub mod sky_clouds;
