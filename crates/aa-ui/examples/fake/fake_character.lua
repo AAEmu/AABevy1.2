@@ -1,0 +1,1 @@
+-- Fake game data for the character window (see fake_ingame.lua for the pattern).

@@ -458,6 +458,8 @@ pub struct Widget {
     /// `damagedisplay.extraStyle`, `editbox.prefixStyle`).
     pub aux_style: Option<TextBlock>,
     pub modal: bool,
+    /// `SetCloseOnEscape(true)`: [`crate::UiRuntime::escape`] hides it (topmost first).
+    pub close_on_escape: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
 }
@@ -1008,6 +1010,7 @@ impl Widget {
             roadmap: None,
             aux_style: None,
             modal: false,
+            close_on_escape: false,
             raise: 0,
         }
     }

@@ -26,6 +26,7 @@
 //!     .run();
 //! ```
 
+pub mod content;
 pub mod dump;
 pub mod input;
 pub mod lua;
@@ -238,6 +239,42 @@ impl UiRuntime {
     /// it when action bars, bags or skills change) and tell the scripts (`OnContentUpdated`).
     pub fn refresh_slots(&self) -> mlua::Result<()> {
         lua::slot::refresh_slots(&self.lua)
+    }
+
+    /// Toggle an in-game window by its `ADDON` content id (`UIC_BAG`, ... see
+    /// [`Self::content_id`]), like the main menu buttons: `ADDON:ToggleContent(content)`.
+    pub fn toggle_content(&self, content: i64) -> mlua::Result<()> {
+        content::toggle(&self.lua, content)
+    }
+
+    /// Show or hide an in-game window by content id: `ADDON:ShowContent(content, show)`.
+    pub fn show_content(&self, content: i64, show: bool) -> mlua::Result<()> {
+        content::show(&self.lua, content, show)
+    }
+
+    /// Whether a content's registered widget is shown (contents registered only with a trigger
+    /// function, such as `UIC_SKILL`, report false).
+    pub fn content_visible(&self, content: i64) -> bool {
+        content::visible(&self.lua, content)
+    }
+
+    /// The value of a content constant by name (`"UIC_BAG"` -> 19).
+    pub fn content_id(&self, name: &str) -> Option<i64> {
+        content::content_id(&self.lua, name)
+    }
+
+    /// Run a key binding action of the client (`toggle_bag`, `toggle_character`,
+    /// `toggle_spellbook`, `toggle_quest`, `toggle_worldmap`, `open_config`, ...): toggles the
+    /// content the main menu table binds to it. Returns false for actions that are not UI
+    /// windows (movement, targeting: the app's).
+    pub fn hotkey(&self, action: &str) -> mlua::Result<bool> {
+        content::hotkey(&self.lua, action)
+    }
+
+    /// Escape outside an edit box: close the topmost window that closes on Escape, or open the
+    /// system menu. Call it when [`Self::key`] did not take the Escape key.
+    pub fn escape(&self) -> mlua::Result<content::Escaped> {
+        content::escape(&self.lua)
     }
 
     /// Give the keyboard focus to a widget (`None` clears it), like `widget:SetFocus()`.

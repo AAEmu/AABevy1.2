@@ -273,3 +273,37 @@ fn tab_select_out_of_range_keeps_selection() {
     assert_eq!(eval::<i64>(&ui, "changed[1]"), 2);
     assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 2);
 }
+
+#[test]
+fn content_toggle_and_escape() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        UIC_TEST_BAG = 19
+        bag = UIParent:CreateWidget("window", "testBag", "UIParent")
+        bag:SetExtent(100, 100)
+        bag:SetCloseOnEscape(true)
+        bag:Show(false)
+        ADDON:RegisterContentWidget(UIC_TEST_BAG, bag)
+        hidden, menus = 0, 0
+        bag:SetHandler("OnHide", function() hidden = hidden + 1 end)
+        menu = UIParent:CreateWidget("emptywidget", "testMenu", "UIParent")
+        menu:RegisterEvent("OPEN_CONFIG")
+        menu:SetHandler("OnEvent", function() menus = menus + 1 end)
+        "#,
+    )
+    .unwrap();
+    let bag = ui.content_id("UIC_TEST_BAG").unwrap();
+    assert!(!ui.content_visible(bag));
+    ui.toggle_content(bag).unwrap();
+    assert!(ui.content_visible(bag));
+    assert!(matches!(ui.escape().unwrap(), aa_ui::content::Escaped::Closed(_)));
+    assert!(!ui.content_visible(bag));
+    assert_eq!(eval::<i64>(&ui, "hidden"), 1);
+    assert_eq!(ui.escape().unwrap(), aa_ui::content::Escaped::OpenedMenu);
+    assert_eq!(eval::<i64>(&ui, "menus"), 1);
+    assert!(ui.hotkey("open_config").unwrap());
+    assert_eq!(eval::<i64>(&ui, "menus"), 2);
+    assert!(!ui.hotkey("toggle_walk").unwrap());
+}

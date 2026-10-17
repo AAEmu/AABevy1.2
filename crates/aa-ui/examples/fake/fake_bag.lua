@@ -1,0 +1,1 @@
+-- Fake game data for the bag window (see fake_ingame.lua for the pattern).

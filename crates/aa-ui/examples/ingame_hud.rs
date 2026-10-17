@@ -4,7 +4,11 @@
 //! ```text
 //! cargo run -p aa-ui --example ingame_hud -- --shot shots/aa-ui/ingame_hud.png
 //! cargo run -p aa-ui --example ingame_hud -- --dump data/extract/aa-ui/check/ingame.json --dump-after 4 --exit-after 5
+//! cargo run -p aa-ui --example ingame_hud -- --open toggle_bag 2 --shot shots/aa-ui/bag.png
 //! ```
+//!
+//! Keys: I / B bag, C character, K skills, L quests, M world map, Escape (closes the topmost
+//! window, else the system menu). `--open ACTION T` runs a key binding action at T seconds.
 //!
 //! The scenario is `reference/ingame/spawn`: a level 1 Nuian (`Refone`) just spawned in
 //! Solzreed Peninsula. `examples/fake/fake_ingame.lua` is the game API the HUD reads; the app
@@ -30,6 +34,6 @@ fn main() {
             fake::report(ui, "ingame_hud");
         }))
         .add_systems(Startup, fake::physical_pixels)
-        .add_systems(Update, (fake::dump_tree, fake::scripted_input))
+        .add_systems(Update, (fake::dump_tree, fake::scripted_input, fake::hotkeys))
         .run();
 }

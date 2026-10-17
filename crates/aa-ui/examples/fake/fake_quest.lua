@@ -1,0 +1,1 @@
+-- Fake game data for the quest window (see fake_ingame.lua for the pattern).
