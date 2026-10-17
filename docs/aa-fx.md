@@ -69,7 +69,7 @@ radius (the quad runs from -Size to +Size, see "Round 4"), a mesh's scales the m
 the quad faces the camera and spins with `RotationRate`.
 
 Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (tiles, first tile, variants, frame animation),
-`BlendType`, `Facing` (camera, free, bottom, flat), `OrientToVelocity`, `Size`/`SizeX`/`SizeY`/`SizeZ` with age curves, `Stretch`,
+`BlendType`, `Facing` (camera, free, flat for Bottom / Water / Decal / Horizontal / Terrain), `OrientToVelocity`, `Size`/`SizeX`/`SizeY`/`SizeZ` with age curves, `Stretch`,
 `StretchOffsetRatio`, `Alpha`, `AlphaTest`, `Color` (with curves), `DiffuseLighting`, `DiffuseBacklighting`, `EmissiveLighting`,
 `Count`, `Continuous`, `EmitterLifeTime`, `SpawnDelay`, `PulsePeriod`, `ParticleLifeTime`, `PositionOffset`, `RandomOffset`,
 `PosRandomOffset`, `Speed`, `AirResistance`, `GravityScale`, `Acceleration`, `WindInfluence`, `InheritVelocity`, `EmitAngle`,
@@ -171,14 +171,83 @@ strips, `--sweep` for moving effects, `--backdrop` for refraction, `--ground` fo
   `sword_line_13` with the material `sword_line_critical`, `TailLength 100`, life 0.5 s, alpha 1 only between 7 and 13 % of the
   life, 0.067 at half of it). They are drawn (the ribbon follows
   the entity), but faint: the texture is an edge lit line, so the ribbon is a thin pale blue arc (`shots/aa-fx/r3/trail6_sheet.png`); the real client adds its bloom to it, and at the 0.3 s spacing of the
-  capture the real trail is not clearly visible either (only the blade itself glows white-blue, `real_09.png`). What would still help: the ribbon is
-  camera facing (it has the head positions only); the engine's `Facing = Free` ribbon would take its width axis from the
-  bone's orientation. The client must move the effect entity with the weapon bone every frame (`prime: false`).
+  capture the real trail is not clearly visible either (only the blade itself glows white-blue, `real_09.png`). Round 5 made the
+  `Facing = Free` ribbon take its width from the emitter's axis (below). The client must move the effect entity with the weapon
+  bone every frame (`prime: false`).
 * **Debugging.** `AA_FX_ONLY` / `AA_FX_SKIP` (above), `AA_FX_LOG=2`. They showed that the pale green sheets and white blocks of the
   Memoria screenshot (`shots/gallery/29_memoria.png`) are not particles: the screenshot is identical with `AA_NO_FX=1`, with
   `AA_FX_SKIP=waterfall` and with `AA_FX_ONLY` of the only geometry waterfall near it (`X2_EFFECTS_K.waterfall.waterfall_sm_new01`,
   80 m away, its material has Opacity 0.08 and is invisible in the example). The cell's object table
   (`010_014`) places `game/materials/ocean/water_volume_gw01` (a water volume), which is aa-world's.
+
+## Round 5: blade ribbons, flat Bottom, refraction, the first 10 minutes
+
+* **`Facing = Free` ribbons (the Triple Slash trail).** A tailed particle with `Facing = Free` keeps, next to its position history,
+  a width axis per sample (`EmitterState::trail_axis`): the emitter's rotation applied to the particle's cry +Y. Sword models run
+  along +Y and the hand bone (`item_hand_r`, fx bone 9) holds them unrotated, so that axis is the blade: the ribbon is a sheet
+  spanned by the blade and the tip's path, which is what a blade sweep looks like, from any camera. Its edge `v = 0` is the
+  tip side (the `sword_line_*` textures are lit there), it does not taper (a blade keeps its length), and it falls back to the
+  camera facing strip when the axis is degenerate. The camera facing ribbons (`Facing` Camera) are unchanged. `u` now runs from the head
+  (`u = 0`) to the tail: the sword line textures are bright at `u = 0`, and with the old direction the whole trail was very dim.
+  Test `a_free_ribbon_takes_its_width_from_the_emitter_axis`; `effects --swing <s>` swings the entity like a hand with a blade
+  (0.3 s is a fast cut) and shows it. What the combat code has to do: the entity's rotation is the weapon bone's world rotation
+  (so that the model's +Y, the blade, is the effect's cry +Y, Bevy `-Z`), it moves every frame, and the effect is not primed.
+* **`Facing = Bottom` is a flat ground quad**, like Water, Decal, Horizontal and Terrain (`Facing::Flat`, 2 cm above the surface
+  against z fighting). It used to be a camera facing sprite with a vertical offset. The evidence: the click marker stacks a Decal
+  ring and a Bottom ring of the same `ui_target_ring` texture, and the Bottom textures are rings, ripples, cracks and ground fire,
+  with `Size` 10 bases of the area skills.
+* **`TextureTiling` field 6 is `AnimCycle`** (the animation loops), field 7 `AnimBlend` (blending between frames: not done). Torches,
+  campfires and the other flipbooks were compared before and after (`shots/aa-fx/r5/th/default_cmp.png`): unchanged.
+* **Refraction no longer paints a rectangle.** A refraction particle replaced the scene behind it by the shifted copy of the scene
+  (alpha blended). The copy the camera keeps for it is about 1.4 times brighter than the target (a 72 grey checker square came out as
+  101 or 121, and as 255 where quads overlapped), so every `skill_refraction_*` quad was a pale trapezoid (the resurrection and
+  Thwart effects). It now adds the difference between the shifted and the unshifted copy (`AlphaMode::Add`, colour `moved - here`,
+  alpha 0, `refract_scene` in `fx.wesl`): a flat normal map changes nothing, brightness does not matter, and what was drawn after
+  the copy stays. Checked on `shots/aa-fx/r5/th/rl6_n.png` (the checker is exact outside the wobble at the wall's foot).
+* **Debugging.** `AA_FX_EMITTER=a,b` draws only the emitters whose name contains a word (next to `AA_FX_ONLY` / `AA_FX_SKIP`, which
+  select whole effects): it isolates one emitter of a skill effect.
+* **Memoria (`waterfall_splash_smooth01/02/03`).** With the material table fixed in aa-world the cell shows no fog wall: the 40-50 m
+  haze sprites are a faint pale veil at the foot of the falls (`shots/aa-fx/r5/mem_a_fx.png` against `mem_a_nofx.png`, the
+  world's `fly` example at the cell, 2 s). The standalone effect (`wf_waterfall_splash_smooth01.png`) is the same: a soft haze
+  of low alpha, no sheet edges. The check through `aa-client` was blocked by another agent's compile error in `hud/api.rs`.
+
+### First 10 minutes audit
+
+`skill_coverage` now lists the effect names of every skill (`fx_names` column, `data/extract/aa-fx/r5/skill_coverage.tsv`). Film strips
+(5 copies, 0.2 s apart, `effects --grid 5 --stagger 0.2 --no-prime --loop`) of the effects below are in `shots/aa-fx/r5/audit/`;
+this is what they show and what was changed.
+
+| what the player sees | effect | result |
+|---|---|---|
+| quest NPC beam | `quest_mark_addon_yellow_loop` | compared with `reference/ingame/spawn/real.png`: the same tall pale column; `CameraMinDistance 270` does not hide it at 36 m in the capture, so it stays ignored |
+| level up | `X2_EFFECT_O.com.level_up_new` | good once the main emitters start: they have `SpawnDelay 2.5`, so the first 2.5 s show only the small sparks (a strip needs a longer `--shot-after`) |
+| Return / Recall | `return_skill_form`, `return_skill_launch`, `return_hit_launch` | the orb is right (round 4); `love_book_skill1` has bit 0x10 and is drawn as a sprite |
+| resurrection | `resurrection_form`, `resurrection_launch` | green light pillars, rune circle and honeycomb disc are right; the pale trapezoid from `skill_refraction_01` was the refraction bug above (fixed) |
+| portal | `portal_main`, `portal_idle` | green arcs and lightning veins, no problem found |
+| water splash | `water_splash`, `doodad_water_splash` | foam flecks as in the combat captures' pond |
+| critical hit | `fight.critical_damage_hit`, `_level2`, `_level3` | particle effects (flare, sparks, blood); they look right (the HUD `critical.dds` burst is not touched) |
+| starter skills of the classes | the `skill_coverage` list (about 50 effects) | no systematic fault left after the Bottom and ribbon fixes |
+
+Things that look odd and are, as far as the data goes, authored (not changed):
+
+* Thwart (`p_skill_will.sprit_charge_launch`): `dissonance_hit1` shoots ten `glow_big_velocity3` beams, `SizeY 5`, `Speed 25`; they overlap into bright white
+  bars when five copies are stacked in a strip (one copy is a starburst), and `dissonance_hit2/3` are 20 m wide rings (`Size` 11 and 10).
+* `hill_attack_form` is made of tall box-like light pillars; `ground_restriction_hit` is a large crack burst with rocks.
+* `p_skill_love.resurrection_launch/p_skill_line03` (`Facing = Free` with `OrientToVelocity`): the sheets have random angles here
+  and are cut by the ground plane (diagonal edges at their feet). The engine probably aligns them with the velocity; only 38
+  emitters combine the two without a tail (provoke, hurbal_remedy, line03, ...), so it is not done.
+* `shock_form2` is a mesh particle that lives 0.03 s and is continuous with the default count, so it flickers (3 % of the time).
+  `st1000b` / `st1000c`, the Shoot Arrow and Bow Attack effect, draw the mesh `fx_arrowhead_tehgin.cgf` with `fx_arrow_a1`
+  (Illum, `Diffuse` black, fresnel only, texture `refract_tile_09`), so it shows nothing here; with a black diffuse the real
+  engine may show only a rim of fresnel light. A capture of Shoot Arrow in the real client would settle it.
+* No data defines a loot sparkle: no effect in the libraries or the database (`fx_items`, `doodad_*`, `skills`) is named for it
+  (`x2_sounds.particles` has pickup sounds only), so it is the client's or the doodad's.
+
+Open question, not changed: the direction of `OrientToVelocity` sprites. This crate puts the texture's top (`v = 0`) in front, along
+the velocity. Cloud, flame and dome textures (`cloud_type_f_velocity`, `fire_animated_06a_velocity`, `glow_big_velocity`, `sand_flowup`)
+have their content in the upper half of the sprite and fit that, while `ef_glowline01_r` (a comet with its bright head at the bottom)
+and the beam textures `glow_big_velocity2/3` would fit the opposite. A client capture of a velocity beam (Thwart) would decide
+(`data/extract/aa-fx/r5/velside.py` lists the textures).
 
 ## Coordinates
 
