@@ -167,6 +167,12 @@ impl Inventory {
                 item.detail = detail.clone();
             }
             ItemTask::Remove { container, slot, item_id, .. } | ItemTask::RemoveSlot { container, slot, item_id } => {
+                // Mail finalization has already moved the server item into escrow before
+                // constructing its Remove task, so its address is MAIL, not the old bag slot.
+                // The unique ID authoritatively removes that item from the visible inventory.
+                if *container == container::MAIL && *item_id != 0 {
+                    return self.remove_by_id(*item_id);
+                }
                 let Some(s) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
                 *s = None;
             }

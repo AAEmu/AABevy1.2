@@ -119,6 +119,7 @@ pub enum ClientMsg {
     Interact(crate::interaction::Interact),
     Shop(crate::shop::ShopCommand),
     Bank(crate::bank::BankCommand),
+    Mail(crate::mail::MailCommand),
     Friend(crate::friend::FriendCommand),
     Repair(crate::repair::RepairCommand),
     /// Party command plus the local character name used by `CSReplyToJoinTeam`.
@@ -170,6 +171,7 @@ impl ClientMsg {
             Self::Interact(m) => m.opcode(),
             Self::Shop(m) => m.opcode(),
             Self::Bank(m) => m.opcode(),
+            Self::Mail(m) => m.opcode(),
             Self::Friend(m) => m.opcode(),
             Self::Repair(m) => m.opcode(),
             Self::Party { command, .. } => command.opcode(),
@@ -261,6 +263,7 @@ impl ClientMsg {
             Self::Interact(m) => m.write(&mut w),
             Self::Shop(m) => m.write(&mut w),
             Self::Bank(m) => m.write(&mut w),
+            Self::Mail(m) => m.write(&mut w),
             Self::Friend(m) => m.write(&mut w),
             Self::Repair(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
@@ -477,6 +480,7 @@ pub enum ServerMsg {
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
+    Mail(crate::mail::MailEvent),
     Friend(crate::friend::FriendEvent),
     Unhandled { level: u8, opcode: u16, len: usize },
 }
@@ -580,6 +584,7 @@ impl ServerMsg {
             Self::Interaction(e) => e.name(),
             Self::Shop(e) => e.name(),
             Self::Party(e) => e.name(),
+            Self::Mail(e) => e.name(),
             Self::Friend(e) => e.name(),
             Self::Unhandled { .. } => "unhandled",
         }
@@ -988,6 +993,7 @@ impl ServerMsg {
             opcode if crate::interaction::InteractEvent::handles(opcode) => Self::Interaction(crate::interaction::InteractEvent::read(opcode, r)?),
             opcode if crate::shop::ShopEvent::handles(opcode) => Self::Shop(crate::shop::ShopEvent::read(r)?),
             opcode if crate::party::PartyEvent::handles(opcode) => Self::Party(crate::party::PartyEvent::read(opcode, r)?),
+            opcode if crate::mail::MailEvent::handles(opcode) => Self::Mail(crate::mail::MailEvent::read(opcode, r)?),
             opcode if crate::friend::FriendEvent::handles(opcode) => Self::Friend(crate::friend::FriendEvent::read(opcode, r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_GAME,
