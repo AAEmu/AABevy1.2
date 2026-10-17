@@ -68,6 +68,8 @@ pub struct HudData {
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
+    /// The casts the cast bars show (`cast.rs`).
+    pub casts: super::cast::Casts,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
 }
@@ -96,6 +98,7 @@ impl Default for HudData {
             skill_levels: Default::default(),
             texts: Default::default(),
             local_combat: false,
+            casts: Default::default(),
             afk: false,
         }
     }
@@ -162,6 +165,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
     super::combat::install(lua, &hud, bridge)?;
+    super::cast::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
