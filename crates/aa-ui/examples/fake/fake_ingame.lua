@@ -756,7 +756,7 @@ end
 X2Bag.CountEmptyBagSlots = function(self) return BAG_CAPACITY - #BAG_ORDER end
 X2Bag.GetCurrency = function(self) return CURRENCY_GOLD end
 X2Bag.TabInfos = function(self) return {}, {} end
-X2Bag.TabCount = function(self) return 0 end
+X2Bag.TabCount = function(self) return 1 end -- the "All" tab
 X2Bag.FindBagItemByEquipSlot = function(self, a, slot) return {} end
 X2Bag.CountItems = function(self) return #BAG_ORDER end
 X2Bag.Capacity = function(self) return BAG_CAPACITY end

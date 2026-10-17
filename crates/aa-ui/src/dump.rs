@@ -4,104 +4,95 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, Table};
 
 use crate::lua::{reg, ui};
 use crate::tree::{Id, Kind};
 
 /// Paths of every object table reachable from `_G` (`a.b[2].c`), breadth first, at most
-/// `max_depth` fields deep. Like the reference capture, the shortest paths come first.
+/// `max_depth` fields deep. Like the reference capture, the shortest paths come first. Pass 0
+/// walks `_G`; pass 1 the tables held in global functions' upvalues (`Func^upvalue`, the
+/// reference's notation), so plain global paths win. The walk runs in Lua: holding tens of
+/// thousands of table handles from Rust overflows Lua 5.1's C stack (`out of Lua stack`).
 fn object_paths(lua: &Lua, max_depth: usize) -> mlua::Result<HashMap<Id, Vec<String>>> {
     let r = reg(lua);
+    let f: mlua::Function = lua.load(OBJECT_PATHS_LUA).set_name("@aa-ui/dump").eval()?;
+    let found: Table = f.call((r.ids.clone(), max_depth))?;
     let mut out: HashMap<Id, Vec<String>> = HashMap::new();
-    let mut seen: HashMap<usize, ()> = HashMap::new();
-    let mut queue: Vec<(Table, String)> = vec![(lua.globals(), String::new())];
-    let getupvalue: Option<mlua::Function> = lua
-        .globals()
-        .get::<Option<Table>>("debug")
-        .ok()
-        .flatten()
-        .and_then(|d| d.get("getupvalue").ok());
-    let mut upvalue_tables: Vec<(Table, String)> = Vec::new();
-    // Pass 0 walks `_G`; pass 1 the tables held in global functions' upvalues, so plain global
-    // paths win over `Func^upvalue` ones like in the reference capture.
-    for pass in 0..2 {
-        if pass == 1 {
-            // Fresh visit set: objects reached from `_G` also get their upvalue paths.
-            seen.clear();
-            queue = Vec::new();
-            for (ut, p) in std::mem::take(&mut upvalue_tables) {
-                if let Some(id) = r.ids.raw_get::<Option<i64>>(&ut)? {
-                    let paths = out.entry(id as Id).or_default();
-                    if paths.len() < 4 {
-                        paths.push(p.clone());
-                    }
-                }
-                if seen.insert(ut.to_pointer() as usize, ()).is_none() {
-                    queue.push((ut, p));
-                }
-            }
-        }
-        for _depth in 0..max_depth {
-            let mut next = Vec::new();
-            for (t, path) in queue {
-                for pair in t.pairs::<Value, Value>() {
-                    let Ok((k, v)) = pair else { continue };
-                    // Global functions: tables held in their upvalues (`UpdateList^chInfoWindow`, the
-                    // reference capture's notation).
-                    if let (true, Value::Function(f), Value::String(name)) =
-                        (path.is_empty() && pass == 0, &v, &k)
-                    {
-                        if let Some(getup) = getupvalue.as_ref() {
-                            let fname = name.to_string_lossy().to_string();
-                            for i in 1..=255 {
-                                let Ok((uname, uv)) =
-                                    getup.call::<(Option<String>, Value)>((f.clone(), i))
-                                else {
-                                    break;
-                                };
-                                let Some(uname) = uname else { break };
-                                if let Value::Table(ut) = uv {
-                                    upvalue_tables.push((ut, format!("{fname}^{uname}")));
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    let Value::Table(child) = v else { continue };
-                    let key = match &k {
-                        Value::String(s) => {
-                            let s = s.to_string_lossy();
-                            if path.is_empty() {
-                                s.to_string()
-                            } else {
-                                format!("{path}.{s}")
-                            }
-                        }
-                        Value::Integer(i) => format!("{path}[{i}]"),
-                        Value::Number(n) => format!("{path}[{n}]"),
-                        _ => continue,
-                    };
-                    if path.is_empty() && matches!(key.as_str(), "_G" | "package" | "FAKE") {
-                        continue;
-                    }
-                    if let Some(id) = r.ids.raw_get::<Option<i64>>(&child)? {
-                        let paths = out.entry(id as Id).or_default();
-                        if paths.len() < 4 {
-                            paths.push(key.clone());
-                        }
-                    }
-                    let addr = child.to_pointer() as usize;
-                    if seen.insert(addr, ()).is_none() {
-                        next.push((child, key));
-                    }
-                }
-            }
-            queue = next;
-        }
+    for pair in found.pairs::<i64, Table>() {
+        let (id, paths) = pair?;
+        let ps: Vec<String> = paths.sequence_values::<String>().filter_map(Result::ok).collect();
+        out.insert(id as Id, ps);
     }
     Ok(out)
 }
+
+const OBJECT_PATHS_LUA: &str = r#"
+return function(ids, maxDepth)
+  local out = {}
+  local function add(id, p)
+    local t = out[id]
+    if not t then t = {}; out[id] = t end
+    if #t < 4 then t[#t + 1] = p end
+  end
+  local getup = debug and debug.getupvalue
+  local upv = {}
+  local function keyOf(path, k)
+    local tk = type(k)
+    if tk == "string" then
+      if path == "" then return k end
+      return path .. "." .. k
+    elseif tk == "number" then
+      if k == math.floor(k) then return string.format("%s[%d]", path, k) end
+      return path .. "[" .. tostring(k) .. "]"
+    end
+    return nil
+  end
+  local function walk(queue, seen, scanUpvalues)
+    for _ = 1, maxDepth do
+      local nextQ = {}
+      for qi = 1, #queue do
+        local t, path = queue[qi][1], queue[qi][2]
+        for k, v in next, t do
+          if scanUpvalues and path == "" and type(v) == "function" and type(k) == "string" then
+            if getup then
+              for i = 1, 255 do
+                local name, uv = getup(v, i)
+                if name == nil then break end
+                if type(uv) == "table" then upv[#upv + 1] = { uv, k .. "^" .. name } end
+              end
+            end
+          elseif type(v) == "table" then
+            local key = keyOf(path, k)
+            if key and not (path == "" and (key == "_G" or key == "package" or key == "FAKE")) then
+              local id = ids[v]
+              if id then add(id, key) end
+              if not seen[v] then
+                seen[v] = true
+                nextQ[#nextQ + 1] = { v, key }
+              end
+            end
+          end
+        end
+      end
+      queue = nextQ
+    end
+  end
+  walk({ { _G, "" } }, {}, true)
+  local seen, queue = {}, {}
+  for i = 1, #upv do
+    local ut, p = upv[i][1], upv[i][2]
+    local id = ids[ut]
+    if id then add(id, p) end
+    if not seen[ut] then
+      seen[ut] = true
+      queue[#queue + 1] = { ut, p }
+    end
+  end
+  walk(queue, seen, false)
+  return out
+end
+"#;
 
 fn esc(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")

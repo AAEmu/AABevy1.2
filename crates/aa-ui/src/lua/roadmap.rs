@@ -1,5 +1,5 @@
 //! `roadmap` widgets (the zone map overlay at the top right of the HUD) and a few small natives
-//! of other classes (`listbox` tree images).
+//! of other classes (`listbox` tree images, `grid` row heights).
 //!
 //! The scripts make one hidden image drawable per zone map and size
 //! (`map/road_map_list.lua`: `ui/map/road/<zone>_road_<50|70|100>.dds`, placed at its offset in
@@ -11,7 +11,7 @@
 //!
 //! ```lua
 //! AAUI.RoadMap() -> nil (no map) or {
-//!   level = 1,                       -- 1 zone maps, 2 city maps (RMS_ZONE / RMS_CITY + 1)
+//!   level = 2,                       -- as registered: RMS_ZONE + 1 = 2 zone maps, 3 city maps
 //!   zone = 5,                        -- the map key's zone part ("5_100": Solzreed Peninsula)
 //!   player = { u = 0.85, v = 0.27 }, -- optional: position on the map image, 0..1
 //! }
@@ -231,6 +231,37 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
+/// `worldmap` (the big map window, not drawn yet): its natives as no-ops so the map scripts
+/// load; `GetPlayerViewPos` is the map origin, the conflict zone list is empty.
+pub(crate) fn worldmap_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    for name in [
+        "SetTempNotifyCoord", "ResetCursor", "UpdateZoneInfo", "UpdateTransferTelescopeInfo",
+        "UpdateTransferTelescopeArea", "UpdateTelescopeInfo", "UpdateTelescopeArea",
+        "UpdatePingInfo", "UpdateNpcInfo", "UpdateMySlaveInfo", "UpdateHousingInfo",
+        "UpdateFishSchoolInfo", "UpdateFishSchoolArea", "UpdateDoodadInfo", "UpdateDominionInfo",
+        "UpdateCorpseInfo", "UpdateCompletedQuestInfo", "UpdateCarryingBackpackSlaveInfo",
+        "StartNotifyQuestEffect", "ShowQuest", "ShowPortal", "ShowCommonFarm", "SetTempNotifyColor",
+        "SetPortalDrawable", "SetPingWidget", "SetPingBtn", "SetExpandRatio",
+        "SetCommonFarmDrawable", "SaveConflictZoneImg", "RemoveTransferTelescopeInfo",
+        "RemoveTelescopeInfo", "RemovePing", "RemoveNotifyQuestInfo", "RemoveGivenQuestInfo",
+        "RemoveFishSchoolInfo", "RemoveCarryingBackpackSlaveInfo", "OnLeftClick",
+        "ExploredRegionUpdated", "ClearTransferTelescopeInfo", "ClearTelescopeInfo",
+        "ClearNpcInfo", "ClearNotifyQuestInfo", "ClearMySlaveInfo", "ClearHousingInfo",
+        "GetClimateInfo", "GetConflictStateByZoneId",
+    ] {
+        m.raw_set(name, method(lua, |_, _, _| none())?)?;
+    }
+    m.raw_set(
+        "GetPlayerViewPos",
+        method(lua, |lua, _, _| ret(lua, (0.0, 0.0)))?,
+    )?;
+    m.raw_set(
+        "GetConflictZoneListByWorldId",
+        method(lua, |lua, _, _| ret(lua, lua.create_table()?))?,
+    )?;
+    Ok(())
+}
+
 /// `listbox` tree images (`CreateOpenedImageDrawable(path)`, closed, separator): image drawables
 /// the native list places on tree items; kept hidden (tree lists are not drawn yet).
 pub(crate) fn listbox_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
@@ -260,5 +291,70 @@ pub(crate) fn listbox_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             })?,
         )?;
     }
+    Ok(())
+}
+
+/// `grid` rows (`SetRowCount`, `SetDefaultRowHeight`, `SetRowHeight(row, h)`): kept so
+/// `GetAdjustRowHeight` (the summed row heights, which `folder.alb` sizes the grid and its
+/// scroll range by) and `GetRowCount` / `GetRowHeight` answer. Cells are not drawn yet.
+pub(crate) fn grid_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    fn rows(lua: &Lua, id: Id) -> mlua::Result<Table> {
+        let parts = super::chat::parts(lua, id)?;
+        match parts.raw_get::<Option<Table>>("gridRows")? {
+            Some(t) => Ok(t),
+            None => {
+                let t = lua.create_table()?;
+                parts.raw_set("gridRows", &t)?;
+                Ok(t)
+            }
+        }
+    }
+    fn count(t: &Table) -> mlua::Result<i64> {
+        Ok(t.raw_get::<Option<i64>>("count")?.unwrap_or(0))
+    }
+    fn height(t: &Table, row: i64) -> mlua::Result<f64> {
+        let h: Option<f64> = t.raw_get(row)?;
+        Ok(h.unwrap_or(t.raw_get::<Option<f64>>("default")?.unwrap_or(0.0)))
+    }
+    m.raw_set(
+        "SetRowCount",
+        method(lua, |lua, id, a| {
+            rows(lua, id)?.raw_set("count", a.f(1).max(0.0) as i64)?;
+            none()
+        })?,
+    )?;
+    m.raw_set(
+        "SetDefaultRowHeight",
+        method(lua, |lua, id, a| {
+            rows(lua, id)?.raw_set("default", a.f(1))?;
+            none()
+        })?,
+    )?;
+    m.raw_set(
+        "SetRowHeight",
+        method(lua, |lua, id, a| {
+            rows(lua, id)?.raw_set(a.f(1) as i64, a.f(2))?;
+            none()
+        })?,
+    )?;
+    m.raw_set(
+        "GetRowCount",
+        method(lua, |lua, id, _| ret(lua, count(&rows(lua, id)?)?))?,
+    )?;
+    m.raw_set(
+        "GetRowHeight",
+        method(lua, |lua, id, a| ret(lua, height(&rows(lua, id)?, a.f(1) as i64)?))?,
+    )?;
+    m.raw_set(
+        "GetAdjustRowHeight",
+        method(lua, |lua, id, _| {
+            let t = rows(lua, id)?;
+            let mut sum = 0.0;
+            for r in 1..=count(&t)? {
+                sum += height(&t, r)?;
+            }
+            ret(lua, sum)
+        })?,
+    )?;
     Ok(())
 }

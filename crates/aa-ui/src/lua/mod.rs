@@ -394,12 +394,19 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
                 u.fades.insert(id, f);
             }
         }
-        let updates: Vec<Id> = u
+        let updates: Vec<(Id, &'static str)> = u
             .handlers
             .iter()
-            .filter(|(_, hs)| hs.iter().any(|h| h == "OnUpdate"))
-            .map(|(id, _)| *id)
-            .filter(|&id| u.tree.visible(id))
+            .flat_map(|(id, hs)| {
+                hs.iter().filter_map(move |h| match h.as_str() {
+                    "OnUpdate" => Some((*id, "OnUpdate")),
+                    // `OnEffect(self, dt)`: the per-frame effect tick (the clock bar refreshes
+                    // the zone name and the sun there).
+                    "OnEffect" => Some((*id, "OnEffect")),
+                    _ => None,
+                })
+            })
+            .filter(|&(id, _)| u.tree.visible(id))
             .collect();
         (updates, ended)
     };
@@ -408,8 +415,8 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
     }
     let mut updates = updates;
     updates.sort_unstable();
-    for id in updates {
-        call_handler(lua, id, "OnUpdate", vec![Value::Number(dt_ms as f64)]);
+    for (id, h) in updates {
+        call_handler(lua, id, h, vec![Value::Number(dt_ms as f64)]);
     }
 }
 
@@ -445,11 +452,14 @@ impl Args {
             _ => None,
         }
     }
-    /// Lua truthiness; missing = `default`.
+    /// A boolean argument; missing = `default`. Numbers convert like the client's natives do
+    /// (0 is false: the action bar options call `ShowActionBar(n, 0)` -> `Show(0)` hides).
     pub fn b(&self, i: usize, default: bool) -> bool {
         match self.0.get(i) {
             None | Some(Value::Nil) => default,
             Some(Value::Boolean(b)) => *b,
+            Some(Value::Integer(n)) => *n != 0,
+            Some(Value::Number(n)) => *n != 0.0,
             Some(_) => true,
         }
     }

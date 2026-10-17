@@ -132,8 +132,9 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     def(
         "GetColor",
         method(lua, |lua, id, _| {
+            // A table `{ r, g, b, a }` (`colorTable[4] == 0` in item_icon_button).
             let c = with(lua, id, |d| d.color).unwrap_or([1.0; 4]);
-            ret(lua, (c[0], c[1], c[2], c[3]))
+            ret(lua, lua.create_sequence_from(c)?)
         })?,
     )?;
     def(

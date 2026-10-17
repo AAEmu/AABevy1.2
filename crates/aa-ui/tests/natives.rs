@@ -225,3 +225,51 @@ fn chat_window_tabs() {
     assert_eq!(eval::<i64>(&ui, "msgs[1]:GetMessageLines()"), 2);
     assert_eq!(eval::<i64>(&ui, "msgs[2]:GetMessageLines()"), 1);
 }
+
+#[test]
+fn textbox_line_count_and_grid_rows() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        box = UIParent:CreateWidget("textbox", "testBox", "UIParent")
+        box:SetExtent(60, 13)
+        box:SetText("one")
+        short = box:GetLineCount()
+        box:SetText("a much longer line of text that has to wrap in sixty pixels")
+        long = box:GetLineCount()
+        grid = UIParent:CreateWidget("grid", "testGrid", "UIParent")
+        grid:SetRowCount(3)
+        grid:SetDefaultRowHeight(20)
+        grid:SetRowHeight(2, 35)
+        "#,
+    )
+    .unwrap();
+    assert_eq!(eval::<i64>(&ui, "short"), 1);
+    assert!(eval::<i64>(&ui, "long") > 1);
+    assert_eq!(eval::<f64>(&ui, "grid:GetAdjustRowHeight()"), 75.0);
+    assert_eq!(eval::<i64>(&ui, "grid:GetRowCount()"), 3);
+}
+
+#[test]
+fn tab_select_out_of_range_keeps_selection() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        tab = UIParent:CreateWidget("tab", "testTab", "UIParent")
+        tab:SetExtent(200, 100)
+        tab:AddSimpleTab("a")
+        tab:AddSimpleTab("b")
+        changed = {}
+        tab:SetHandler("OnTabChanged", function(self, i) changed[#changed + 1] = i end)
+        tab:SelectTab(2)
+        tab:SelectTab(0)
+        tab:SelectTab(5)
+        "#,
+    )
+    .unwrap();
+    assert_eq!(eval::<i64>(&ui, "#changed"), 1);
+    assert_eq!(eval::<i64>(&ui, "changed[1]"), 2);
+    assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 2);
+}

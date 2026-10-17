@@ -882,6 +882,17 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "GetTextHeight",
         method(lua, |lua, id, _| ret(lua, text_height(lua, id)))?,
     )?;
+    // Widgets without a value (scroll windows: `scrollWnd:GetValue("vert")`) report 0; sliders
+    // and status bars override it.
+    def("GetValue", method(lua, |lua, _, _| ret(lua, 0.0))?)?;
+    // Lines of the (wrapped) text; tooltips: their `AddLine` lines too.
+    def(
+        "GetLineCount",
+        method(lua, |lua, id, _| {
+            let extra = ui(lua).tree.get(id).text().map_or(0, |t| t.lines.len());
+            ret(lua, text_lines(lua, id).0 + extra)
+        })?,
+    )?;
     def(
         "GetLongestLineWidth",
         method(lua, |lua, id, _| ret(lua, longest_line(lua, id)))?,
@@ -993,8 +1004,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if matches!(ty, "roadmap" | "worldmap") {
         super::roadmap::methods(lua, &m)?;
     }
+    if ty == "worldmap" {
+        super::roadmap::worldmap_methods(lua, &m)?;
+    }
     if ty == "listbox" {
         super::roadmap::listbox_methods(lua, &m)?;
+    }
+    if ty == "grid" {
+        super::roadmap::grid_methods(lua, &m)?;
     }
 
     // --- buttons -----------------------------------------------------------------------------

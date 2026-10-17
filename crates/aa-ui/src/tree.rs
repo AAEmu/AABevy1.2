@@ -945,9 +945,14 @@ impl Widget {
                 WidgetType::TextBox | WidgetType::GameTooltip | WidgetType::EditBoxMultiline
             ),
             style: TextStyle {
-                align: if matches!(ty, WidgetType::Button | WidgetType::CheckButton | WidgetType::Label) {
+                // Text boxes centre too: world select's `warningLabel` (no `SetAlign`) is centred
+                // in reference/world_select/real.png; every other script textbox sets its align.
+                align: if matches!(
+                    ty,
+                    WidgetType::Button | WidgetType::CheckButton | WidgetType::Label | WidgetType::TextBox
+                ) {
                     Align::Center
-                } else if matches!(ty, WidgetType::TextBox | WidgetType::GameTooltip) {
+                } else if matches!(ty, WidgetType::GameTooltip) {
                     Align::TopLeft
                 } else {
                     Align::Left
