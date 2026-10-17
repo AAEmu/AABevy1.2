@@ -13,3 +13,13 @@ lewton = { version = "0.10", default-features = false }
 # MPEG audio decoder (the voice banks are MPEG layer II, some maybe layer III), pure Rust.
 symphonia-bundle-mp3 = { version = "0.6", default-features = false, features = ["mp1", "mp2", "mp3"] }
 symphonia-core = "0.6"
+# The mixer: pure Rust, cpal output, spatial tracks (panning) and streaming sounds. bevy_audio (rodio)
+# has no distance model beyond a linear fall off and cannot stream a custom decoder; see docs/aa-audio.md.
+kira = { version = "0.12", default-features = false, features = ["cpal"] }
+aa-cry.workspace = true
+bevy.workspace = true
+tracing.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+aa-dev.workspace = true

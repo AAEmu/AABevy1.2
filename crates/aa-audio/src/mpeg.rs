@@ -108,7 +108,7 @@ pub fn decode(sub: &Subsound, data: &[u8]) -> Result<Vec<i16>> {
             out.extend(tmp.iter().flat_map(|&s| [s, s]));
         } else {
             // stereo frames in a mono subsound: average
-            out.extend(tmp.chunks_exact(2).map(|p| ((p[0] as i32 + p[1] as i32) / 2) as i16));
+            out.extend(tmp.as_chunks::<2>().0.iter().map(|p| ((p[0] as i32 + p[1] as i32) / 2) as i16));
         }
         at += h.size;
         ts += h.samples as i64;

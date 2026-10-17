@@ -278,9 +278,9 @@ mod tests {
     pub(crate) fn tiny_bank() -> Vec<u8> {
         let mut headers = Vec::new();
         // sample 0: more chunks, freq index 8 (44100), mono, offset 0, 1000 samples; loop chunk
-        let raw0: u64 = 1 | (8 << 1) | (0 << 6) | (1000u64 << 34);
+        let raw0: u64 = 1 | (8 << 1) | (1000u64 << 34);
         headers.extend_from_slice(&raw0.to_le_bytes());
-        let loop_chunk: u32 = 0 | (8 << 1) | (3 << 25);
+        let loop_chunk: u32 = (8 << 1) | (3 << 25);
         headers.extend_from_slice(&loop_chunk.to_le_bytes());
         headers.extend_from_slice(&10u32.to_le_bytes());
         headers.extend_from_slice(&900u32.to_le_bytes());

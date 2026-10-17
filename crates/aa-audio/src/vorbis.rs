@@ -68,7 +68,8 @@ struct Headers {
 /// Parsing a setup header builds its Huffman tables (milliseconds), and a handful of them serve
 /// thousands of sounds: keep the parsed headers.
 fn headers(crc: u32, channels: u8, rate: u32) -> Result<Arc<Headers>> {
-    static CACHE: OnceLock<Mutex<HashMap<(u32, u8, u32), Arc<Headers>>>> = OnceLock::new();
+    type Key = (u32, u8, u32);
+    static CACHE: OnceLock<Mutex<HashMap<Key, Arc<Headers>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(h) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&(crc, channels, rate)) {
         return Ok(h.clone());
@@ -109,6 +110,60 @@ pub fn decode(sub: &Subsound, data: &[u8]) -> Result<Vec<i16>> {
     }
     out.truncate(sub.samples as usize * channels);
     Ok(out)
+}
+
+/// A subsound decoded packet by packet, for tracks too long to hold as PCM (music).
+pub struct Stream {
+    headers: Arc<Headers>,
+    data: Vec<u8>,
+    at: usize,
+    pwr: PreviousWindowRight,
+    channels: u8,
+    rate: u32,
+    frames: usize,
+}
+
+impl Stream {
+    /// `data` is the subsound's encoded bytes (what [`crate::Fsb5::data`] returns).
+    pub fn new(sub: &Subsound, data: Vec<u8>) -> Result<Stream> {
+        let crc = sub.vorbis_crc.ok_or_else(|| Error::Other("Vorbis subsound without a Vorbis chunk".into()))?;
+        let headers = headers(crc, sub.channels, sub.frequency)?;
+        Ok(Stream { headers, data, at: 0, pwr: PreviousWindowRight::new(), channels: sub.channels, rate: sub.frequency, frames: sub.samples as usize })
+    }
+
+    pub fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    pub fn channels(&self) -> u8 {
+        self.channels
+    }
+
+    /// Length in frames, as the bank header promises.
+    pub fn frames(&self) -> usize {
+        self.frames
+    }
+
+    /// The next block of interleaved samples (possibly empty: the first packet only primes the
+    /// overlap), or `None` after the last packet.
+    pub fn next_block(&mut self) -> Result<Option<Vec<i16>>> {
+        let Some(len) = self.data.get(self.at..self.at + 2).map(|d| u16::from_le_bytes([d[0], d[1]]) as usize) else {
+            return Ok(None);
+        };
+        let Some(packet) = (len != 0).then(|| self.data.get(self.at + 2..self.at + 2 + len)).flatten() else {
+            return Ok(None);
+        };
+        self.at += 2 + len;
+        let block: InterleavedSamples<i16> = read_audio_packet_generic(&self.headers.ident, &self.headers.setup, packet, &mut self.pwr)
+            .map_err(|e| Error::Vorbis(format!("packet at {}: {e:?}", self.at)))?;
+        Ok(Some(block.samples))
+    }
+
+    /// Back to the start of the stream.
+    pub fn rewind(&mut self) {
+        self.at = 0;
+        self.pwr = PreviousWindowRight::new();
+    }
 }
 
 #[cfg(test)]
