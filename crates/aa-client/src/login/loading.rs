@@ -127,6 +127,7 @@ fn progress(
     time: Res<Time>,
     args: Res<LoginArgs>,
     player: Res<Player>,
+    dev: Res<crate::ingame::DevOptions>,
     terrain: Res<TerrainQuery>,
     streamer: Option<Res<Streamer>>,
     objects: Option<Res<ObjectState>>,
@@ -150,7 +151,10 @@ fn progress(
             let since = loading.since_spawn.get_or_insert(0.0);
             *since += dt;
             let since = *since;
-            let p = spawn.position();
+            let saved = spawn.position();
+            let p = dev.pos.map_or(Vec3::new(saved.x, saved.y, saved.z), |p| {
+                Vec3::new(p.x, p.y, if p.z.is_finite() { p.z } else { terrain.height_at(p.x, p.y).unwrap_or(saved.z) })
+            });
             if first {
                 info!("loading: spawned at ({:.1}, {:.1}, {:.1}); streaming the world around it", p.x, p.y, p.z);
                 terrain.prefetch(p.x, p.y, NEAR + 100.0);

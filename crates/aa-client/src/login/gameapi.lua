@@ -23,15 +23,35 @@ X2.GetFeatureset = function(self) return true end
 X2.GetAddonInfos = function(self) return {} end
 X2.IsEnteredWorld = function(self) return false end
 
--- Options: the screen resolution is the window's; script options are unset (nil), so the
--- scripts use their defaults like on a fresh install.
+-- Options are registered by the original scripts. Retain their defaults and edits for this stage;
+-- the screen resolution is always the actual window's. Persistent settings are still separate work.
+local optionValues = {}
+local function defaultOption(self, id, value)
+  if optionValues[id] == nil then optionValues[id] = value end
+end
+local function setOption(self, id, value) optionValues[id] = value end
+X2Option.CreateOptionItemFloat, X2Option.CreateOptionItemString = defaultOption, defaultOption
+X2Option.SetItemDefaultFloatValue, X2Option.SetItemDefaultStringValue = defaultOption, defaultOption
+X2Option.SetItemDefaultFloatValueByName, X2Option.SetItemDefaultStringValueByName = defaultOption, defaultOption
+X2Option.SetItemFloatValue, X2Option.SetItemStringValue = setOption, setOption
+X2Option.SetItemFloatValueByName, X2Option.SetItemStringValueByName = setOption, setOption
 X2Option.GetOptionItemValue = function(self, id)
   if id == OPTION_ITEM_SCREEN_RESOLUTION_WIDTH then return UIParent:GetScreenWidth() * UIParent:GetUIScale() end
   if id == OPTION_ITEM_SCREEN_RESOLUTION_HEIGHT then return UIParent:GetScreenHeight() * UIParent:GetUIScale() end
-  return nil
+  return optionValues[id]
 end
-X2Option.GetOptionItemValueByName = function(self, name) return nil end
+X2Option.GetOptionItemValueByName = function(self, name) return optionValues[name] end
 X2Option.IsRestartOption = function(self) return false end
+-- The options window is also initialized lazily when Start saves the login-stage settings.
+-- Keep the same graphics defaults as the HUD until renderer settings are exposed here.
+X2Option.GetNextSysSpecFullValue = function(self) return 4 end
+X2Option.GetResolutionCount = function(self) return 1 end
+X2Option.GetResolution = function(self, index) return UIParent:GetWidth(), UIParent:GetHeight(), 32 end
+X2Option.EnumAAFormats = function(self)
+  return { { samples = 2, quality = 0, txaa = false }, { samples = 4, quality = 0, txaa = false } }
+end
+X2Option.GetModifiedRestartOption = function(self) return false end
+X2Option.GetMinxMaxOfMouseSensitivity = function(self) return 0.1, 3 end
 
 Console.GetAttribute = function(self, name) return nil end
 Console.ExecuteString = function(self, cmd)

@@ -121,6 +121,9 @@ requirements, passive spending and same-frame reset/relearn ordering.
 Live validation (`shots/hud/sol61/learn_02.png`, `learned-tooltip.png`): reset Battlerage, recover one point,
 show Triple Slash as learnable, confirm learning, receive the server acknowledgement, restore the learned icon
 and show Charge's level/point requirements. Zero script errors; 82-99 FPS in these shared-machine debug runs.
+The final complete login flow (`verified-flow-final.png` / `.log`) enters after 7.5 s of loading, with zero script
+errors or runtime warnings and 92-102 FPS once settled. The crate's normal test run passes 94 tests; 13 data surveys
+and timing probes remain intentionally ignored. Clippy completes with existing style/dead-code warnings.
 
 ### Death and resurrection
 
