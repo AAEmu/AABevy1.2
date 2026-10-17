@@ -89,6 +89,9 @@ pub enum ClientMsg {
     Resurrect { in_place: bool },
     /// `CSStartSkill`: the player's unit (`self_obj_id`) or one of its items casts `skill_id`.
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
+    /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
+    /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
+    StopCasting { tl: u16, plot_tl: u16, obj_id: u32 },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -122,6 +125,7 @@ impl ClientMsg {
             Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
+            Self::StopCasting { .. } => cs::CSStopCastingPacket,
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -173,6 +177,9 @@ impl ClientMsg {
             }
             Self::StartSkill { skill_id, self_obj_id, caster, target } => {
                 crate::skill::write_start_skill(&mut w, *skill_id, *self_obj_id, *caster, target);
+            }
+            Self::StopCasting { tl, plot_tl, obj_id } => {
+                w.u16(*tl).u16(*plot_tl).bc(*obj_id);
             }
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -1285,6 +1292,11 @@ mod tests {
         };
         assert_eq!(m.encode_body(), [0xD4, 0x46, 0, 0, 0, 0x02, 0x01, 0, 0, 0x0C, 0x0B, 0x0A, 0]);
         assert_eq!(m.encode(1)[..6], [0xDD, 0x01, 0, 1, 0x52, 0x00]);
+        // CSStopCasting: timeline, plot timeline, the unit.
+        let stop = ClientMsg::StopCasting { tl: 7, plot_tl: 0, obj_id: 0x0102 };
+        assert_eq!(stop.encode_body(), [7, 0, 0, 0, 0x02, 0x01, 0]);
+        assert_eq!(stop.encode(3)[..6], [0xDD, 0x01, 0, 3, 0x54, 0x00]);
+        assert_eq!(ClientMsg::StopCasting { tl: 0, plot_tl: 0x0A0B, obj_id: 1 }.encode_body(), [0, 0, 0x0B, 0x0A, 1, 0, 0]);
         // CSResurrectCharacter: one bool, in place or at the return point.
         assert_eq!(ClientMsg::Resurrect { in_place: true }.encode(2), [0xDD, 0x01, 0, 2, 0x4E, 0x00, 1]);
         assert_eq!(ClientMsg::Resurrect { in_place: false }.encode_body(), [0]);

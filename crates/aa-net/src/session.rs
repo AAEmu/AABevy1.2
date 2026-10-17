@@ -213,6 +213,10 @@ pub enum Command {
     UseSkill { skill_id: u32, target_obj_id: u32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
     UseSkillAt { skill_id: u32, pos: Pos },
+    /// Cancel the cast or channel of the player: `tl` is the timeline of a plain skill (`SkillStarted::tl`), `plot_tl` the one
+    /// of a plot skill (`PlotEvent::tl`), the other 0. The server answers `CastingStopped` (or `PlotStopped`) if the skill was
+    /// still running.
+    StopCasting { tl: u16, plot_tl: u16 },
     /// Use a bag item: `item_id` is `Item::id`, `template_id` its template and `skill_id` the
     /// template's `use_skill_id` (`items.use_skill_id` in the game database). `target_obj_id` as
     /// in [`Command::UseSkill`]. The effect arrives as `ItemsChanged` (the stack shrinks), buffs
@@ -785,6 +789,10 @@ impl Session {
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
+            }
+            Command::StopCasting { tl, plot_tl } => {
+                let obj_id = self.self_obj;
+                self.send_game(game::ClientMsg::StopCasting { tl, plot_tl, obj_id }).await;
             }
             Command::UseSkillAt { skill_id, pos } => {
                 self.start_skill(skill_id, StartCaster::Unit, SkillTarget::position(pos)).await;

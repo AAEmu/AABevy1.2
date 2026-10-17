@@ -41,6 +41,17 @@ pub struct Mover {
     pub velocity: Vec3,
 }
 
+/// What the player's input did in the last step: moving, jumping and turning cancel some casts ([`super::combat`]).
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerInput {
+    /// The character walked or ran (a movement key was held and it went somewhere).
+    pub moving: bool,
+    /// The jump started in this step.
+    pub jumped: bool,
+    /// The facing changed (Q / E, the right mouse button, the swing to the camera heading).
+    pub turned: bool,
+}
+
 /// Gravity and jump speed (the actor model has `physics_living_gravity` 25, `game_jump_height` 1.3).
 const GRAVITY: f32 = 25.0;
 const JUMP_SPEED: f32 = 8.06;
@@ -219,6 +230,7 @@ pub fn control_player(
     terrain: Res<TerrainQuery>,
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
+    mut input_state: ResMut<PlayerInput>,
     dev: Res<DevOptions>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
@@ -275,9 +287,11 @@ pub fn control_player(
 
     // vertical: terrain following and jumping
     let ground = height_or(&terrain, pos.x, pos.y, mover.pos.z);
+    let mut jumped = false;
     if mover.grounded && ((!typing && keys.just_pressed(KeyCode::Space)) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) {
         mover.vz = JUMP_SPEED;
         mover.grounded = false;
+        jumped = true;
     }
     if mover.grounded {
         // follow the slope; walking off a ledge turns into a fall
@@ -307,11 +321,16 @@ pub fn control_player(
     *transform = placement(pos, mover.facing, 1.0);
     let moving = local_dir != Vec2::ZERO && step.length() > 0.0;
     *motion = Motion { speed: if moving { step.length() } else { 0.0 }, local_dir, airborne: !mover.grounded };
+    let turned = (mover.facing - before_facing).abs() > 1e-4;
+    let input = PlayerInput { moving, jumped, turned };
+    if *input_state != input {
+        *input_state = input;
+    }
 
     // movement packets: every SEND_INTERVAL while moving, facing or airborne; one more when it stops,
     // and one at once when the character lands
     state.since_sent += dt;
-    let active = moving || !mover.grounded || (mover.facing - before_facing).abs() > 1e-4;
+    let active = moving || !mover.grounded || turned;
     let due = state.since_sent >= SEND_INTERVAL;
     let first = !state.sent_first && state.since_spawn > 0.5;
     if (active && due) || (!active && state.was_active) || first || landed.is_some() {
