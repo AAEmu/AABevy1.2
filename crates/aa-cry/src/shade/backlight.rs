@@ -95,7 +95,7 @@ impl CharBackLight {
     }
 }
 
-/// The uniform of the shader (binding 100).
+/// What the shader reads per material (an element of the bindless data array, binding 101, or the uniform at binding 50).
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType, Reflect)]
 pub struct BackLightParams {
     /// `xyz`: direction towards the light in the character's space, `w`: fall-off (1).
@@ -104,20 +104,40 @@ pub struct BackLightParams {
     pub lights: [Vec4; 2],
 }
 
-/// The material extension.
-#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
-pub struct CharBackExt {
-    #[uniform(100)]
-    pub params: BackLightParams,
+/// The GPU form of a [`CharBackExt`].
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
+pub struct BackData {
+    params: BackLightParams,
     /// `rgb`: factor on the material's base colour to get the albedo the back lights are multiplied with (1 for
     /// everything but skin, see [`skin_tag`]).
-    #[uniform(101)]
+    albedo: Vec4,
+}
+
+/// The material extension.
+///
+/// It is *bindless*, like `StandardMaterial`: an `ExtendedMaterial` is only bindless if both halves are, and without
+/// it every character material gets its own bind group and uniform buffer, the draws stop batching and the render
+/// world spends milliseconds on bind groups and buffer writes per frame. The data lives in one array (binding 101)
+/// that the shader indexes by the material slot; the extension's index table sits at binding 100 and uses the
+/// bindless indices 50.. so that it does not clash with the 0..31 of `StandardMaterial`.
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+#[data(50, BackData, binding_array(101))]
+#[bindless(index_table(range(50..51), binding(100)))]
+pub struct CharBackExt {
+    pub params: BackLightParams,
+    /// See [`BackData::albedo`].
     pub albedo: Vec4,
 }
 
 impl Default for CharBackExt {
     fn default() -> Self {
         CharBackExt { params: BackLightParams::default(), albedo: Vec4::ONE }
+    }
+}
+
+impl From<&CharBackExt> for BackData {
+    fn from(e: &CharBackExt) -> Self {
+        BackData { params: e.params, albedo: e.albedo }
     }
 }
 
@@ -189,28 +209,68 @@ fn swap_materials(
     }
 }
 
-/// Pushes the lights to every [`CharMaterial`] when they changed (the time of day moves slowly).
+/// The least time between two uploads of the lights, in seconds.
+const UPLOAD_INTERVAL: f32 = 0.5;
+
+/// How many materials an upload rewrites per frame. Every changed material asset is re-extracted and re-prepared by the
+/// render world (about 10 us each), so rewriting the ~1000 materials of a town at once costs one 10 ms frame; spread over
+/// 16 frames it is not noticeable (and a 0.4 % step in the lights, a few frames late, is not either).
+const UPLOAD_CHUNK: usize = 64;
+
+/// What [`upload_lights`] remembers.
+#[derive(Default)]
+struct Upload {
+    /// The lights of the last upload that was started, and when.
+    sent: Option<(CharBackLight, f32)>,
+    /// The materials that still have to get `params`.
+    queue: Vec<AssetId<CharMaterial>>,
+    params: BackLightParams,
+}
+
+/// Pushes the lights to every [`CharMaterial`] when they changed (the time of day moves slowly): by more than a
+/// fraction of a percent and not more often than [`UPLOAD_INTERVAL`], a few materials per frame.
 fn upload_lights(
     light: Res<CharBackLight>,
+    time: Res<Time<Real>>,
     mut extended: ResMut<Assets<CharMaterial>>,
     mut mirrors: ResMut<Mirrors>,
-    mut sent: Local<Option<CharBackLight>>,
+    mut up: Local<Upload>,
 ) {
-    if !light.active() || sent.as_ref().is_some_and(|s| !s.differs(&light)) {
+    if !light.active() {
+        up.queue.clear();
         return;
     }
-    *sent = Some(*light);
-    let params = light.params();
-    for (_, m) in extended.iter_mut() {
-        m.extension.params = params;
+    let now = time.elapsed_secs();
+    if up.queue.is_empty() {
+        if up.sent.as_ref().is_some_and(|(s, at)| !s.differs(&light) || now - at < UPLOAD_INTERVAL) {
+            return;
+        }
+        up.sent = Some((*light, now));
+        up.params = light.params();
+        // forget the materials nobody uses any more
+        mirrors.0.retain(|_, m| extended.contains(*m));
+        up.queue.extend(extended.ids());
     }
-    // forget the materials nobody uses any more
-    mirrors.0.retain(|_, m| extended.contains(*m));
+    let params = up.params;
+    for _ in 0..UPLOAD_CHUNK {
+        let Some(id) = up.queue.pop() else { break };
+        if let Some(mut m) = extended.get_mut(id) {
+            m.extension.params = params;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_character_material_is_bindless_like_the_standard_material() {
+        assert!(<StandardMaterial as AsBindGroup>::bindless_slot_count().is_some());
+        assert!(<CharMaterial as AsBindGroup>::bindless_slot_count().is_some());
+        let d = <CharMaterial as AsBindGroup>::bindless_descriptor().expect("a bindless descriptor");
+        assert_eq!(d.index_tables.len(), 2);
+    }
 
     #[test]
     fn tags_round_trip_and_the_default_is_not_a_tag() {
