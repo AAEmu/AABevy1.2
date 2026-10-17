@@ -92,6 +92,13 @@ pub enum ClientMsg {
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
     StopCasting { tl: u16, plot_tl: u16, obj_id: u32 },
+    /// `CSLootOpenBag`: open the loot of the corpse `obj_id` (`loot_all`: take everything at once; the server sends
+    /// what is left as a `LootBag`).
+    LootOpenBag { obj_id: u32, loot_all: bool },
+    /// `CSLootItem`: take the item `item_index` out of the loot of `owner_obj_id` (`owner_type`: [`crate::state::owner_type`]).
+    LootItem { item_index: u16, owner_type: u16, owner_obj_id: u32 },
+    /// `CSLootCloseBag`: the loot window of `owner_obj_id` was closed.
+    LootCloseBag { owner_type: u16, owner_obj_id: u32 },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -126,6 +133,9 @@ impl ClientMsg {
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
+            Self::LootOpenBag { .. } => cs::CSLootOpenBagPacket,
+            Self::LootItem { .. } => cs::CSLootItemPacket,
+            Self::LootCloseBag { .. } => cs::CSLootCloseBagPacket,
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -180,6 +190,16 @@ impl ClientMsg {
             }
             Self::StopCasting { tl, plot_tl, obj_id } => {
                 w.u16(*tl).u16(*plot_tl).bc(*obj_id);
+            }
+            Self::LootOpenBag { obj_id, loot_all } => {
+                // the object, the second object (none) and whether to take everything
+                w.bc(*obj_id).bc(0).bool(*loot_all);
+            }
+            Self::LootItem { item_index, owner_type, owner_obj_id } => {
+                w.u16(*item_index).u16(*owner_type).bc(*owner_obj_id).u16(0).u16(0);
+            }
+            Self::LootCloseBag { owner_type, owner_obj_id } => {
+                w.u16(0).u16(*owner_type).bc(*owner_obj_id).u8(0);
             }
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -275,6 +295,16 @@ pub enum ServerMsg {
         killer: Option<(u32, String)>,
     },
     CharacterResurrected { obj_id: u32, pos: Pos, yaw: f32 },
+    /// `SCLootableState`: the unit or doodad has loot for the player (`has_loot`) or no longer has.
+    Lootable { owner_type: u16, obj_id: u32, has_loot: bool },
+    /// `SCUnitLootingState`: a unit started (`looting` 1) or stopped looting.
+    UnitLooting { obj_id: u32, looting: u8 },
+    /// `SCLootBagData`: the items left in the loot the player opened (the owner is in each item id).
+    LootBag { items: Vec<Item>, loot_all: bool },
+    /// `SCLootItemTook`: the player took an item out of the loot of `owner_obj_id`.
+    LootItemTook { template_id: u32, item_index: u16, owner_type: u16, owner_obj_id: u32, count: i32 },
+    /// `SCLootItemFailed`: the server did not hand the item over (`error`: an `ErrorMessageType`).
+    LootItemFailed { error: i32, item_index: u16, owner_type: u16, owner_obj_id: u32, template_id: u32 },
     Teleport { reason: u8, error: i16, pos: Pos },
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
@@ -393,6 +423,11 @@ impl ServerMsg {
             Self::UnitPoints { .. } => "SCUnitPoints",
             Self::UnitDeath { .. } => "SCUnitDeath",
             Self::CharacterResurrected { .. } => "SCCharacterResurrected",
+            Self::Lootable { .. } => "SCLootableState",
+            Self::UnitLooting { .. } => "SCUnitLootingState",
+            Self::LootBag { .. } => "SCLootBagData",
+            Self::LootItemTook { .. } => "SCLootItemTook",
+            Self::LootItemFailed { .. } => "SCLootItemFailed",
             Self::ExpChanged { .. } => "SCExpChanged",
             Self::AbilityExpChanged { .. } => "SCAbilityExpChanged",
             Self::RecoverableExp { .. } => "SCRecoverableExp",
@@ -624,6 +659,38 @@ impl ServerMsg {
                 pos: r.position()?,
                 yaw: r.f32()?,
             },
+            sc::SCLootableStatePacket => {
+                r.skip(2)?; // an item index, unused
+                let owner_type = r.u16()?;
+                let obj_id = r.bc()?;
+                r.skip(1)?;
+                Self::Lootable { owner_type, obj_id, has_loot: r.bool()? }
+            }
+            sc::SCUnitLootingStatePacket => Self::UnitLooting { obj_id: r.bc()?, looting: r.u8()? },
+            sc::SCLootBagDataPacket => {
+                let n = r.u8()?;
+                let mut items = Vec::with_capacity(usize::from(n));
+                for _ in 0..n {
+                    items.extend(Item::read(r)?);
+                }
+                Self::LootBag { items, loot_all: r.bool()? }
+            }
+            sc::SCLootItemTookPacket => {
+                let template_id = r.u32()?;
+                let item_index = r.u16()?;
+                let owner_type = r.u16()?;
+                let owner_obj_id = r.bc()?;
+                r.skip(1)?;
+                Self::LootItemTook { template_id, item_index, owner_type, owner_obj_id, count: r.i32()? }
+            }
+            sc::SCLootItemFailedPacket => {
+                let error = r.i32()?;
+                let item_index = r.u16()?;
+                let owner_type = r.u16()?;
+                let owner_obj_id = r.bc()?;
+                r.skip(1)?;
+                Self::LootItemFailed { error, item_index, owner_type, owner_obj_id, template_id: r.u32()? }
+            }
             sc::SCExpChangedPacket => Self::ExpChanged {
                 obj_id: r.bc()?,
                 delta: r.i32()?,
@@ -1297,6 +1364,28 @@ mod tests {
         assert_eq!(stop.encode_body(), [7, 0, 0, 0, 0x02, 0x01, 0]);
         assert_eq!(stop.encode(3)[..6], [0xDD, 0x01, 0, 3, 0x54, 0x00]);
         assert_eq!(ClientMsg::StopCasting { tl: 0, plot_tl: 0x0A0B, obj_id: 1 }.encode_body(), [0, 0, 0x0B, 0x0A, 1, 0, 0]);
+        // The loot packets, byte for byte as the server's own tests build them (bc = 3 bytes, then a pad byte).
+        assert_eq!(ClientMsg::LootOpenBag { obj_id: 0x0102, loot_all: true }.encode_body(), [2, 1, 0, 0, 0, 0, 1]);
+        assert_eq!(ClientMsg::LootItem { item_index: 2, owner_type: 1, owner_obj_id: 0x10 }.encode_body(), [2, 0, 1, 0, 0x10, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(ClientMsg::LootCloseBag { owner_type: 1, owner_obj_id: 0x10 }.encode_body(), [0, 0, 1, 0, 0x10, 0, 0, 0]);
+        assert_eq!(ClientMsg::LootOpenBag { obj_id: 1, loot_all: false }.opcode(), 0x08e);
+        assert_eq!(decode(sc::SCLootableStatePacket, &[0, 0, 1, 0, 4, 3, 2, 0, 1]), ServerMsg::Lootable { owner_type: 1, obj_id: 0x020304, has_loot: true });
+        assert_eq!(decode(sc::SCUnitLootingStatePacket, &[0x20, 0, 0, 1]), ServerMsg::UnitLooting { obj_id: 0x20, looting: 1 });
+        assert_eq!(
+            decode(sc::SCLootItemTookPacket, &[4, 3, 2, 1, 2, 0, 1, 0, 0xef, 0xcd, 0xab, 0, 5, 0, 0, 0]),
+            ServerMsg::LootItemTook { template_id: 0x0102_0304, item_index: 2, owner_type: 1, owner_obj_id: 0x00ab_cdef, count: 5 }
+        );
+        assert_eq!(
+            decode(sc::SCLootItemFailedPacket, &[25, 0, 0, 0, 3, 0, 1, 0, 0x10, 0, 0, 0, 9, 0, 0, 0]),
+            ServerMsg::LootItemFailed { error: 25, item_index: 3, owner_type: 1, owner_obj_id: 0x10, template_id: 9 }
+        );
+        // SCLootBagData: a count, the items as the bag lists them, "loot all"
+        let mut w = Writer::new();
+        w.u8(1).u32(77).u64((0x20u64 << 32) + (1 << 16) + 2).u8(1).u8(0).i32(10).u8(0).i64(0).i32(0).u32(0).u8(0).i64(0).i64(0).bool(true);
+        let ServerMsg::LootBag { items, loot_all } = decode(sc::SCLootBagDataPacket, &w.finish()) else { panic!() };
+        assert!(loot_all && items.len() == 1);
+        assert_eq!((items[0].template_id, items[0].count, items[0].grade), (77, 10, 1));
+        assert_eq!(crate::state::item_index(&items[0]), 2);
         // CSResurrectCharacter: one bool, in place or at the return point.
         assert_eq!(ClientMsg::Resurrect { in_place: true }.encode(2), [0xDD, 0x01, 0, 2, 0x4E, 0x00, 1]);
         assert_eq!(ClientMsg::Resurrect { in_place: false }.encode_body(), [0]);

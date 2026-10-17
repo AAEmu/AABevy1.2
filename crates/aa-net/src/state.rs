@@ -20,11 +20,13 @@ macro_rules! resource {
 }
 
 mod gear;
+mod loot;
 mod quests;
 mod skills;
 mod stats;
 mod world;
 pub use gear::{ActionBar, Inventory};
+pub use loot::{Loot, LootFailure, item_index, item_owner, owner_type};
 pub use quests::Quests;
 pub use skills::{Casting, KnownSkill, SkillFailure, Skills};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
@@ -274,6 +276,7 @@ pub struct WorldState {
     pub target: Target,
     pub skills: Skills,
     pub quests: Quests,
+    pub loot: Loot,
 }
 
 impl WorldState {
@@ -293,6 +296,7 @@ impl WorldState {
         self.target.apply(e);
         self.skills.apply(e);
         self.quests.apply(e);
+        self.loot.apply(e);
     }
 }
 
