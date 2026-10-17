@@ -10,7 +10,9 @@
 #   fly-elf     fly --spawn elf --bench 20 --bench-speed 0         dense forest
 #   game-spawn  aa-client --enter-world at the Nuian spawn, standing
 #   game-run    aa-client --enter-world at the Nuian spawn, running forward (W held)
-#   game-town   aa-client --enter-world in the 130 NPC town (13650, 10450), standing
+#   game-town   aa-client --enter-world in the 130 NPC town (13650, 10450), standing, looking away from the crowd
+#   game-crowd  the same spot looking at the crowd (yaw 90): ~90 animated characters in view
+#   game-fill   the crowd view measured from the first frame in game: the town filling in (hitches, not the steady state)
 # Env: ACCOUNT (default perfbench), EXTRA (extra flags), AA_PROFILE=1 adds the aa-profile blocks to the log.
 # Logs go to shots/perf/<scenario>-<label>-<round>.log; one summary line per run is printed.
 set -u
@@ -32,6 +34,8 @@ for round in $(seq 1 "$rounds"); do
       game-spawn) cmd=("$dir/aa-client.exe" --enter-world --account "$account" --pos 15578.042,15382.122 --yaw 158.74 --bench 20) ;;
       game-run) cmd=("$dir/aa-client.exe" --enter-world --account "$account" --pos 15578.042,15382.122 --yaw 158.74 --walk 6:200:W --bench 20 --bench-after 8) ;;
       game-town) cmd=("$dir/aa-client.exe" --enter-world --account "$account" --pos 13650,10450 --yaw 0 --bench 20 --bench-after 14) ;;
+      game-crowd) cmd=("$dir/aa-client.exe" --enter-world --account "$account" --pos 13650,10450 --yaw 90 --bench 20 --bench-after 14) ;;
+      game-fill) cmd=("$dir/aa-client.exe" --enter-world --account "$account" --pos 13650,10450 --yaw 90 --bench 25 --bench-after 0) ;;
       *) echo "unknown scenario $scenario"; exit 1 ;;
     esac
     # shellcheck disable=SC2086
