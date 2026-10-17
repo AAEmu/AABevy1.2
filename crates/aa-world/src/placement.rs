@@ -418,7 +418,14 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         (Some(brushes), Some(statobjs)) => {
             objects.brushes = brushes;
             objects.models = parse_statobjs(&statobjs);
-            objects.materials = read("material_list.dat").map(|d| parse_material_list(&d)).unwrap_or_default();
+            // `materialId` of `brush.dat` is an index into the material table of the cell's own `object.dat` (the same
+            // index as the octree's copy of the brush: the model gw_memo_gate_watch01 gets gw_memo_gate there). The
+            // separate `material_list.dat` (a longer list, in another order in 1808 of 2110 brushes of cell 10 / 14) is only
+            // the fallback when the cell has no `object.dat`.
+            objects.materials = match &from_octree {
+                Some(o) => o.materials.clone(),
+                None => read("material_list.dat").map(|d| parse_material_list(&d)).unwrap_or_default(),
+            };
         }
         _ => {
             if let Some(o) = &from_octree {
@@ -511,6 +518,32 @@ mod tests {
         assert_eq!(models.len(), 11);
         assert!(models.iter().all(|m| m.ends_with(".cgf")), "{models:?}");
         assert!(brush.iter().all(|b| (b.model as usize) < models.len()));
+    }
+
+    #[test]
+    fn brush_materials_come_from_the_object_dat_table() {
+        if !crate::pak_available() {
+            return;
+        }
+        // Memoria (cell 10 / 14): `material_list.dat` is another table, with it the vines (gw_memo_etc_f02) got the road material whose
+        // physics `proxy` sub-material is a pale green sheet, the canal tiles the stair material's white proxy slab, and gate
+        // watch towers an elf tent
+        let o = load_cell_objects("main_world", 10, 14);
+        let material_of = |model: &str| {
+            o.brushes
+                .iter()
+                .find(|b| o.models[b.model as usize].ends_with(model))
+                .and_then(|b| usize::try_from(b.material).ok())
+                .and_then(|i| o.materials.get(i))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(material_of("gw_memo_gate_watch01.cgf").ends_with("gw_memo_gate"), "{}", material_of("gw_memo_gate_watch01.cgf"));
+        assert!(material_of("campfire_set_royster.cgf").ends_with("campfire_set_royster"));
+        assert!(!material_of("gw_memo_etc_f02.cgf").contains("remain_divided_road"), "{}", material_of("gw_memo_etc_f02.cgf"));
+        // every brush index is inside the table it is read from
+        let table = o.materials.len() as i32;
+        assert!(o.brushes.iter().all(|b| b.material < table), "table {table}");
     }
 
     #[test]
