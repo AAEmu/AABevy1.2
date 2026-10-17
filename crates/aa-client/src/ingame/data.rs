@@ -37,6 +37,8 @@ pub struct Weapon {
     pub rotation: [f32; 3],
     /// Scale while it hangs on the body.
     pub worn_scale: f32,
+    /// Scale while it is in the hand.
+    pub drawn_scale: f32,
 }
 
 /// Columns the in-game lookups filter or join on. The server's database has no indexes beyond the
@@ -181,7 +183,7 @@ impl Db {
         let weapon = l
             .conn
             .query_row(
-                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
+                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale, w.drawn_scale                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
                 params![item_id],
                 |r| {
                     let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
@@ -191,6 +193,7 @@ impl Db {
                         offset: [f(2)?, f(3)?, f(4)?],
                         rotation: [f(5)?, f(6)?, f(7)?],
                         worn_scale: f(8)?,
+                        drawn_scale: f(9)?,
                     })
                 },
             )

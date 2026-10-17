@@ -5,6 +5,7 @@
 //! * [`camera`]: ArcheAge's third person orbit camera
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
+//! * [`combat`]: attack and cast clips, skill effects, projectiles, hit reactions and death, from what the server reports
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 //! * [`flow`], [`warm`]: the way in and out timed (`flow:` log lines), and what the world behind the loading screen has
 //!   got done
@@ -28,6 +29,7 @@ mod anim;
 mod bench;
 pub(crate) mod appearance;
 mod camera;
+mod combat;
 mod creature;
 pub(crate) mod data;
 mod dev;
@@ -90,6 +92,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<player::PlayerBuilt>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
+            .add_plugins(combat::plugin)
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(bench::plugin)
