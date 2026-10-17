@@ -92,8 +92,18 @@ impl Default for HudBridge {
     }
 }
 
-/// Fake in-game game API of the aa-ui example (**FALLBACK** data).
-const FAKE_INGAME: &str = include_str!("../../../aa-ui/examples/fake/fake_ingame.lua");
+/// Fake in-game game API of the aa-ui example (**FALLBACK** data): the HUD, then the data of the
+/// windows players open, one file each (in the order the example installs them).
+const FAKE_INGAME: [(&str, &str); 8] = [
+    ("fake_ingame.lua", include_str!("../../../aa-ui/examples/fake/fake_ingame.lua")),
+    ("fake_bag.lua", include_str!("../../../aa-ui/examples/fake/fake_bag.lua")),
+    ("fake_character.lua", include_str!("../../../aa-ui/examples/fake/fake_character.lua")),
+    ("fake_skill.lua", include_str!("../../../aa-ui/examples/fake/fake_skill.lua")),
+    ("fake_quest.lua", include_str!("../../../aa-ui/examples/fake/fake_quest.lua")),
+    ("fake_worldmap.lua", include_str!("../../../aa-ui/examples/fake/fake_worldmap.lua")),
+    ("fake_options.lua", include_str!("../../../aa-ui/examples/fake/fake_options.lua")),
+    ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
+];
 const INGAME_LUA: &str = include_str!("ingame.lua");
 
 /// Install the game API into a fresh runtime, before the stage's scripts run.
@@ -122,7 +132,11 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     )?;
     lua.globals().raw_set("FAKE", fake)?;
     // 2. FALLBACK: the fake in-game data
-    lua.load(FAKE_INGAME).set_name("@fake_ingame.lua").exec()?;
+    for (name, code) in FAKE_INGAME {
+        if let Err(e) = lua.load(code).set_name(format!("@{name}")).exec() {
+            warn!("hud: {name}: {e}");
+        }
+    }
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
@@ -202,7 +216,13 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |_, id: u32| {
             let d = b.borrow();
             let info = d.game.get().and_then(|g| g.items.get(&id));
-            Ok((info.map(|i| i.named.name.clone()), info.map(|i| i.named.icon.clone()), info.map(|i| i.max_stack), info.map(|i| i.fixed_grade)))
+            Ok((
+                info.map(|i| i.named.name.clone()),
+                info.map(|i| i.named.icon.clone()),
+                info.map(|i| i.max_stack),
+                info.map(|i| i.fixed_grade),
+                info.map(|i| i.level),
+            ))
         })?,
     )?;
     // the chat window widget (the scripts create it; `GetEntityByName` is a stub)
