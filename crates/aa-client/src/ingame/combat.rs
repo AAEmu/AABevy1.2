@@ -7,7 +7,9 @@
 //! * **Clips.** A cast loops the skill's `start_anim` clip until it fires; firing plays the one-shot `fire_anim` clip (the id
 //!   the server sends in `SCSkillFired`, else the skill's, the two-handed one for a two-handed weapon); every step of a plot
 //!   plays the clip of its plot effect. The unit is [`Acting`] meanwhile ([`super::anim::drive_locomotion`] leaves it alone) and
-//!   returns to its locomotion clip afterwards. The local player turns to the target.
+//!   returns to its locomotion clip afterwards. A unit that moves plays the clip on its upper body instead (the `move_ub`
+//!   variant of the `anims` row, else the clip itself, on aa-anim's upper body layer) and keeps running or walking below it.
+//!   The local player turns to the target.
 //! * **Effects.** The skill's effect group starts its particle effects (aa-fx) at the moments the data names ([`skills::ev`]):
 //!   `form` while casting, `throw` / `launch` when it fires (at the release moment of the clip, from the model's anim events,
 //!   [`clips`]), `hit` on the target when the damage lands, at the bones the effect items name. Effects that last are held until
@@ -48,6 +50,8 @@ use skills::{FxItem, Projectile, SkillBook, bone_names, ev};
 pub struct Acting {
     /// When it is over (seconds on the app clock).
     pub until: f64,
+    /// The clip plays on the upper body (an animator layer) while locomotion keeps the legs: the unit was moving.
+    pub layered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,6 +164,13 @@ fn verbose() -> bool {
     *V.get_or_init(|| std::env::var_os("AA_COMBAT_LOG").is_some())
 }
 
+/// `AA_COMBAT_FULLBODY=1`: units on the move play their action clips on the whole body, as before the upper body layer
+/// (to compare shots).
+fn full_body_only() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("AA_COMBAT_FULLBODY").is_some())
+}
+
 /// `AA_COMBAT_SLOWMO=<speed>`: the game clock slows to that speed (0.2 = five times slower) from the first skill the local player
 /// fires, so a shot can be caught mid-flight (`--shot-after` counts real seconds).
 fn slowmo() -> Option<f32> {
@@ -236,7 +247,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (handle_events, retry_cast, run_timers, mark_corpses, ensure_corpses, end_actions, fly_projectiles, hold_weapons)
+                (handle_events, retry_cast, run_timers, mark_corpses, ensure_corpses, end_actions, release_layers, fly_projectiles, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
@@ -315,6 +326,14 @@ impl Stage<'_, '_> {
         Some((clip, cal))
     }
 
+    /// The upper body variant of clip `name` for the unit's model: the `move_ub` clip of its `anims` row (`bow_co_sk_launch_ub`),
+    /// which the `.cal` of most models names `..._mub`, else as given. `None` when the row or the model has none.
+    fn upper_clip(&self, unit: Entity, name: &str) -> Option<aa_anim::BoundClip> {
+        let upper = self.book.upper_clip(name)?;
+        let moving = upper.strip_suffix("_ub").map(|stem| format!("{stem}_mub"));
+        [moving.as_deref(), Some(&*upper)].into_iter().flatten().find_map(|n| self.clip(unit, n).map(|(clip, _)| clip))
+    }
+
     /// The anim events of clip `name` of the unit's model.
     fn events(&self, unit: Entity, name: &str) -> clips::ClipEvents {
         let Some(cal) = self.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return clips::ClipEvents::default() };
@@ -325,14 +344,19 @@ impl Stage<'_, '_> {
     /// Plays a clip on a unit as an action. `hold` is how long a looping clip may last. Returns the clip's length, `None` when the
     /// unit cannot (no such clip, dead, busy with something a hit reaction must not interrupt).
     fn play(&mut self, unit: Entity, name: &str, kind: Act, looping: bool, hold: f64, now: f64) -> Option<f32> {
-        {
+        // a unit on the move plays the clip on its upper body and keeps running below it
+        let mask = {
             let (_, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
             // a hit reaction never interrupts an action or a run
             if dead || loco.is_none() || (kind == Act::Hurt && (acting.is_some() || motion.is_some_and(|m| m.speed > 0.3))) {
                 return None;
             }
-        }
-        let Some((clip, _)) = self.clip(unit, name) else {
+            let moving = kind != Act::Hurt && !full_body_only() && motion.is_some_and(|m| m.speed > 0.3);
+            loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone())
+        };
+        let layered = mask.is_some();
+        let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
+        let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
             if verbose() {
                 info!("combat: unit has no clip {name}");
             }
@@ -340,18 +364,23 @@ impl Stage<'_, '_> {
         };
         let duration = clip.clip.duration;
         let (mut animator, ..) = self.actors.get_mut(unit).ok()?;
-        animator.play(clip, looping, 0.08);
-        animator.speed = 1.0;
-        animator.random_idle = None;
+        if let Some(mask) = mask {
+            animator.play_layer(mask, clip, looping, 0.1);
+        } else {
+            animator.stop_layer(0.0);
+            animator.play(clip, looping, 0.08);
+            animator.speed = 1.0;
+            animator.random_idle = None;
+        }
         // a hit reaction is a flinch: the start of its clip, then locomotion fades back in
         let until = now + if looping { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
-        self.commands.entity(unit).insert(Acting { until });
+        self.commands.entity(unit).insert(Acting { until, layered });
         if kind != Act::Hurt && !name.starts_with("fist_") && !name.starts_with("all_") {
             // the weapon the clip is for comes out of its sheath and stays out for a while
             self.commands.entity(unit).insert(Drawn { until: until + 4.0, bow: name.starts_with("bow_") });
         }
         if verbose() {
-            info!("combat: {name} on {unit:?} ({kind:?}, {duration:.2} s)");
+            info!("combat: {name} on {unit:?} ({kind:?}, {duration:.2} s{})", if layered { ", upper body" } else { "" });
         }
         Some(duration)
     }
@@ -900,6 +929,7 @@ fn ensure_corpses(
         let Some(loco) = loco else { continue };
         let Some(clip) = ["dead_01", "dead_02"].iter().find_map(|n| bind_clip(&animator.rig, &loco.clips.cal, &clips, n)) else { continue };
         let duration = clip.clip.duration;
+        animator.stop_layer(0.0);
         animator.play(clip, false, 0.1);
         animator.speed = 1.0;
         animator.random_idle = None;
@@ -912,13 +942,30 @@ fn ensure_corpses(
     }
 }
 
+/// A unit whose action ended lets go of the upper body layer that played it (a one-shot ends by itself; a cast loop does not).
+fn release_layers(mut ended: RemovedComponents<Acting>, mut units: Query<&mut Animator, Without<Acting>>) {
+    for entity in ended.read() {
+        if units.get(entity).is_ok_and(|a| a.has_layer())
+            && let Ok(mut animator) = units.get_mut(entity)
+        {
+            animator.stop_layer(0.12);
+            if verbose() {
+                info!("combat: upper body layer of {entity:?} released");
+            }
+        }
+    }
+}
+
 /// Ends the actions that ran their course; locomotion picks its clip again.
 fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entity, &Acting, Option<&mut Locomotion>)>) {
     let now = time.elapsed_secs_f64();
     for (entity, a, loco) in &mut acting {
         if now >= a.until {
             commands.entity(entity).remove::<Acting>();
-            if let Some(mut loco) = loco {
+            // the legs never stopped running under an upper body action
+            if !a.layered
+                && let Some(mut loco) = loco
+            {
                 loco.invalidate();
             }
         }

@@ -114,6 +114,8 @@ struct Inner {
     skills: HashMap<u32, Option<Arc<SkillVisual>>>,
     plots: HashMap<u32, Option<Arc<PlotVisual>>>,
     anims: HashMap<u32, Option<Arc<str>>>,
+    /// Clip name -> the `move_ub` clip of its `anims` row.
+    upper: HashMap<String, Option<Arc<str>>>,
     groups: HashMap<u32, Arc<Vec<FxItem>>>,
     projectiles: HashMap<u32, Option<Projectile>>,
 }
@@ -128,6 +130,7 @@ impl SkillBook {
             skills: HashMap::new(),
             plots: HashMap::new(),
             anims: HashMap::new(),
+            upper: HashMap::new(),
             groups: HashMap::new(),
             projectiles: HashMap::new(),
         })))
@@ -150,6 +153,11 @@ impl SkillBook {
     /// The clip name of an `anims` row (`fire_anim_id` of `SCSkillFired`).
     pub fn anim(&self, id: u32) -> Option<Arc<str>> {
         self.inner().anim(id)
+    }
+
+    /// The upper body variant of clip `name` for a unit that moves (`move_ub` of its `anims` row), when it has one.
+    pub fn upper_clip(&self, name: &str) -> Option<Arc<str>> {
+        self.inner().upper_clip(name)
     }
 }
 
@@ -178,6 +186,21 @@ impl Inner {
             .map(Arc::from);
         self.anims.insert(id, name.clone());
         name
+    }
+
+    fn upper_clip(&mut self, name: &str) -> Option<Arc<str>> {
+        if let Some(u) = self.upper.get(name) {
+            return u.clone();
+        }
+        let upper: Option<Arc<str>> = self
+            .conn
+            .query_row("SELECT move_ub FROM anims WHERE name = ?1", params![name], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+            .filter(|n| !n.is_empty() && n != "none")
+            .map(Arc::from);
+        self.upper.insert(name.to_string(), upper.clone());
+        upper
     }
 
     /// The particle effects of an effect group (sounds, voices, camera shakes, materials and models are left out).

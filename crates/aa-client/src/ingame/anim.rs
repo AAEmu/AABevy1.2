@@ -6,11 +6,13 @@
 //! ground speed.
 //!
 //! [`super::combat`] plays attack, cast, hit and death clips on top of it: a unit that is [`Acting`] or [`Dead`] is left alone by
-//! [`drive_locomotion`], and [`Locomotion::invalidate`] makes it pick its clip again when the action is over.
+//! [`drive_locomotion`], and [`Locomotion::invalidate`] makes it pick its clip again when the action is over. A unit that acts
+//! while it moves plays the clip on its upper body (an [`aa_anim::Animator`] layer, [`Acting::layered`]); locomotion keeps driving
+//! the legs underneath.
 
 use std::sync::Arc;
 
-use aa_anim::{Animator, Cal, ClipLibrary, pose::{BoundClip, Rig, SampleOptions}};
+use aa_anim::{Animator, BoneMask, Cal, ClipLibrary, pose::{BoundClip, Rig, SampleOptions}};
 use bevy::prelude::*;
 
 use super::combat::{Acting, Dead};
@@ -35,6 +37,8 @@ pub struct ClipSet {
     /// The model's animation name table: every clip of the model by name (combat plays attack and hit clips from it).
     pub cal: Arc<Cal>,
     pub idle: BoundClip,
+    /// The bones an action plays on while the unit moves: the upper body (`None` for a rig without a `Bip01 Spine`).
+    pub upper: Option<BoneMask>,
     run: [Option<BoundClip>; 8],
     walk: [Option<BoundClip>; 8],
     jump: Option<BoundClip>,
@@ -54,7 +58,7 @@ impl ClipSet {
         let jump = bind("fist_mo_relaxed_jump_s_loop");
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
-        Some(ClipSet { cal, idle, run, walk, jump, run_clip_speed, walk_clip_speed })
+        Some(ClipSet { cal, idle, upper: BoneMask::upper_body(rig), run, walk, jump, run_clip_speed, walk_clip_speed })
     }
 
     pub fn can_move(&self) -> bool {
@@ -148,8 +152,12 @@ pub fn direction_index(local_dir: Vec2) -> usize {
 }
 
 /// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed.
-pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motion), (Without<Acting>, Without<Dead>)>) {
-    for (mut animator, mut loco, motion) in &mut units {
+pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>), Without<Dead>>) {
+    for (mut animator, mut loco, motion, acting) in &mut units {
+        // an action on the whole body owns the clip; one on the upper body leaves the legs to locomotion
+        if acting.is_some_and(|a| !a.layered) {
+            continue;
+        }
         let moving = motion.speed > 0.3 && loco.clips.can_move();
         let walk = moving && motion.speed < (WALK_SPEED + RUN_SPEED) * 0.5;
         let wanted = if motion.airborne && loco.clips.jump.is_some() {
