@@ -194,8 +194,8 @@ pub fn spawn_with_locomotion(
     let set = Skeleton::load(&skeleton)
         .ok()
         .map(|s| std::sync::Arc::new(Rig::new(s)))
-        .zip(Cal::load(&cal).ok())
-        .and_then(|(rig, cal)| ClipSet::load(&rig, &cal, clips));
+        .zip(Cal::load(&cal).ok().map(std::sync::Arc::new))
+        .and_then(|(rig, cal)| ClipSet::load(&rig, cal, clips));
     debug!("spawn_character {t_character:.0} ms, locomotion clips {:.0} ms", t.elapsed().as_secs_f32() * 1000.0 - t_character);
     let mut entity = commands.entity(root);
     entity.insert(Motion::default());

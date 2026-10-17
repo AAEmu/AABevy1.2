@@ -4,11 +4,16 @@
 //! the clips by name here (`fist_ba_relaxed_idle`, `fist_mo_normal_run_f`, ... straight from the
 //! model's `.cal`), cross-fades between them and scales the playback speed so the feet follow the
 //! ground speed.
+//!
+//! [`super::combat`] plays attack, cast, hit and death clips on top of it: a unit that is [`Acting`] or [`Dead`] is left alone by
+//! [`drive_locomotion`], and [`Locomotion::invalidate`] makes it pick its clip again when the action is over.
 
 use std::sync::Arc;
 
 use aa_anim::{Animator, Cal, ClipLibrary, pose::{BoundClip, Rig, SampleOptions}};
 use bevy::prelude::*;
+
+use super::combat::{Acting, Dead};
 
 /// Direction suffixes of the 8-way locomotion clips; index = [`direction_index`].
 const DIRS: [&str; 8] = ["f", "fl", "fr", "l", "r", "b", "bl", "br"];
@@ -17,9 +22,18 @@ const DIRS: [&str; 8] = ["f", "fl", "fr", "l", "r", "b", "bl", "br"];
 pub const RUN_SPEED: f32 = 5.4;
 pub const WALK_SPEED: f32 = 2.4;
 
+/// Binds the clip called `name` in `cal` (a `.cal` entry, e.g. `fist_mo_normal_run_f`) to `rig`.
+pub fn bind_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Option<BoundClip> {
+    let entry = cal.animation(name)?;
+    let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: true };
+    clips.bound(rig, &entry.path, options).ok()
+}
+
 /// The clips a model can play while moving.
 #[derive(Clone)]
 pub struct ClipSet {
+    /// The model's animation name table: every clip of the model by name (combat plays attack and hit clips from it).
+    pub cal: Arc<Cal>,
     pub idle: BoundClip,
     run: [Option<BoundClip>; 8],
     walk: [Option<BoundClip>; 8],
@@ -31,12 +45,8 @@ pub struct ClipSet {
 
 impl ClipSet {
     /// Binds the clips of `cal` to `rig`. `None` when the model has no idle at all.
-    pub fn load(rig: &Arc<Rig>, cal: &Cal, clips: &ClipLibrary) -> Option<ClipSet> {
-        let bind = |name: &str| -> Option<BoundClip> {
-            let entry = cal.animation(name)?;
-            let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: true };
-            clips.bound(rig, &entry.path, options).ok()
-        };
+    pub fn load(rig: &Arc<Rig>, cal: Arc<Cal>, clips: &ClipLibrary) -> Option<ClipSet> {
+        let bind = |name: &str| bind_clip(rig, &cal, clips, name);
         let idle = bind("fist_ba_relaxed_idle").or_else(|| bind("fist_ba_idle")).or_else(|| bind("fist_ac_stage_idle"))?;
         let dirs = |prefix: &str| -> [Option<BoundClip>; 8] { std::array::from_fn(|i| bind(&format!("{prefix}_{}", DIRS[i]))) };
         let run = dirs("fist_mo_normal_run");
@@ -44,7 +54,7 @@ impl ClipSet {
         let jump = bind("fist_mo_relaxed_jump_s_loop");
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
-        Some(ClipSet { idle, run, walk, jump, run_clip_speed, walk_clip_speed })
+        Some(ClipSet { cal, idle, run, walk, jump, run_clip_speed, walk_clip_speed })
     }
 
     pub fn can_move(&self) -> bool {
@@ -67,7 +77,7 @@ pub fn shared_clip_set(skeleton: &str, cal: &str, clips: &ClipLibrary) -> Option
     let set = aa_anim::pose::shared_rig(skeleton)
         .ok()
         .zip(Cal::shared(cal).ok())
-        .and_then(|(rig, cal)| ClipSet::load(&rig, &cal, clips))
+        .and_then(|(rig, cal)| ClipSet::load(&rig, cal, clips))
         .map(Arc::new);
     sets.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(set).clone()
 }
@@ -103,10 +113,18 @@ impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
         Locomotion { clips, state: State::Idle }
     }
+
+    /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
+    /// hit reaction, played on the animator).
+    pub fn invalidate(&mut self) {
+        self.state = State::Unknown;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
+    /// Something else played last: the clip has to be started whatever the unit does.
+    Unknown,
     Idle,
     /// Direction index and whether it is the walk set.
     Moving(usize, bool),
@@ -130,7 +148,7 @@ pub fn direction_index(local_dir: Vec2) -> usize {
 }
 
 /// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed.
-pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motion)>) {
+pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motion), (Without<Acting>, Without<Dead>)>) {
     for (mut animator, mut loco, motion) in &mut units {
         let moving = motion.speed > 0.3 && loco.clips.can_move();
         let walk = moving && motion.speed < (WALK_SPEED + RUN_SPEED) * 0.5;
@@ -144,7 +162,7 @@ pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motio
         if wanted != loco.state {
             // fall back to the other speed set / forward clip when a direction has no clip
             let clip = match wanted {
-                State::Idle => Some(loco.clips.idle.clone()),
+                State::Unknown | State::Idle => Some(loco.clips.idle.clone()),
                 State::Air => loco.clips.jump.clone(),
                 State::Moving(d, walk) => {
                     let (primary, secondary) = if walk { (&loco.clips.walk, &loco.clips.run) } else { (&loco.clips.run, &loco.clips.walk) };
