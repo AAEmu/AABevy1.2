@@ -42,6 +42,18 @@ impl EffectDef {
     pub fn drawn(&self) -> usize {
         self.emitters.iter().filter(|e| e.def.draws()).count()
     }
+
+    /// The first emitter that emits a mesh (`Geometry`): the model path and the `.mtl` it is drawn with (empty: the model's own).
+    /// The particle simulation does not draw these; an application that wants the mesh (an arrow in flight) spawns it itself.
+    pub fn geometry(&self) -> Option<(&str, &str)> {
+        fn find(node: &Node) -> Option<(&str, &str)> {
+            if node.def.enabled && !node.def.geometry.is_empty() {
+                return Some((node.def.geometry.as_str(), node.def.material.as_str()));
+            }
+            node.children.iter().find_map(find)
+        }
+        find(&self.root)
+    }
 }
 
 fn flatten(node: &Node, parent: Option<usize>, out: &mut Vec<FlatEmitter>) {
@@ -146,6 +158,17 @@ mod tests {
         assert_eq!(e.emitters[0].parent, None);
         assert_eq!(e.emitters[1].parent, Some(0));
         assert_eq!(e.drawn(), 2);
+    }
+
+    #[test]
+    fn finds_the_geometry_of_an_effect() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="arrow">
+            <Params Geometry="objects/effects/arrow.cgf" Material="materials/effects/arrow_a1"/>
+            <Childs><Particles Name="glow"><Params Texture="textures/g.dds"/></Particles></Childs></Particles>
+            <Particles Name="plain"><Params Texture="textures/g.dds"/></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        assert_eq!(lib.get("arrow").unwrap().geometry(), Some(("objects/effects/arrow.cgf", "materials/effects/arrow_a1.mtl")));
+        assert_eq!(lib.get("plain").unwrap().geometry(), None);
     }
 
     #[test]

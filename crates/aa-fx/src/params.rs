@@ -299,6 +299,8 @@ pub struct EmitterDef {
     pub config_min: u8,
     pub config_max: u8,
     pub has_geometry: bool,
+    /// The `Geometry` model of an emitter that emits meshes (not drawn here; see [`crate::EffectDef::geometry`]).
+    pub geometry: String,
     luts: OnceLock<Luts>,
 }
 
@@ -357,6 +359,7 @@ impl Default for EmitterDef {
             config_min: 0,
             config_max: 3,
             has_geometry: false,
+            geometry: String::new(),
             luts: OnceLock::new(),
         }
     }
@@ -487,7 +490,10 @@ impl EmitterDef {
                 "CameraMaxDistance" => d.camera_max_distance = num(v).unwrap_or(1.0e6),
                 "ConfigMin" => d.config_min = quality(v),
                 "ConfigMax" => d.config_max = quality(v),
-                "Geometry" => d.has_geometry = !v.trim().is_empty(),
+                "Geometry" => {
+                    d.has_geometry = !v.trim().is_empty();
+                    d.geometry = v.trim().to_string();
+                }
                 _ => {}
             }
         }
