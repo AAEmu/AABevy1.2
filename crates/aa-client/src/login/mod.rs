@@ -33,7 +33,9 @@
 //! `--goto world-select|character-select|loading` drives the screens through the original UI
 //! scripts up to that screen (for `--shot`); `--hold-loading PCT` keeps the loading screen at that
 //! progress instead of entering the game; `--lua SCREEN:CODE` (repeatable) runs Lua in the UI of a
-//! screen (`world-select`, `character-select`, `loading`) once it has been up for a moment.
+//! screen (`world-select`, `character-select`, `loading`) once it has been up for a moment;
+//! `--stage-clear R,G,B` shows what the stage camera draws on its own, `AA_BG_GRADE=tonemap,ev,sat`
+//! overrides the background grading of [`stage3d::Grade`].
 
 pub mod character_select;
 #[cfg(not(feature = "no-create"))]
