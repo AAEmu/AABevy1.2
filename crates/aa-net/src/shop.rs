@@ -179,7 +179,7 @@ impl Shop {
                 self.last_error = None;
             }
             Event::Shop(ShopEvent::RequestRejected(message)) => self.last_error = Some(message.clone()),
-            Event::ItemsChanged(tasks) if matches!(tasks.reason, 52 | 53) => {
+            Event::ItemsChanged(tasks) if matches!(tasks.reason, 53 | 54) => {
                 if self.dirty {
                     return false;
                 }
@@ -329,6 +329,17 @@ mod tests {
         let mut shop = Shop::default();
         shop.apply(&Event::Shop(ShopEvent::SoldItems(vec![Item { id: 555, template_id: 8001, ..Item::default() }])));
         assert!(shop.loaded && !shop.dirty && shop.sold[0].id == 555);
+        // STORE_BUY (54) covers both catalog purchases and removing a bought-back item.
+        shop.apply(&Event::ItemsChanged(ItemTasks { reason: 54, ..ItemTasks::default() }));
+        assert!(shop.dirty && shop.sold[0].id == 555);
+        shop.apply(&Event::Shop(ShopEvent::SoldItems(vec![])));
+        assert!(!shop.dirty && shop.sold.is_empty());
+        shop.apply(&Event::ItemsChanged(ItemTasks { reason: 54, ..ItemTasks::default() }));
+        assert!(shop.dirty && shop.sold.is_empty());
+        shop.apply(&Event::Shop(ShopEvent::SoldItems(vec![Item { id: 555, ..Item::default() }])));
+        // GET_ITEM_BY_COIN (52) is not a transaction against this NPC's buyback list.
+        shop.apply(&Event::ItemsChanged(ItemTasks { reason: 52, ..ItemTasks::default() }));
+        assert!(!shop.dirty);
         shop.apply(&Event::ItemsChanged(ItemTasks { reason: 53, ..ItemTasks::default() }));
         assert!(shop.dirty && shop.sold.len() == 1);
         shop.apply(&Event::Shop(ShopEvent::SoldItems(vec![])));
