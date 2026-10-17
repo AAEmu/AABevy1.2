@@ -6,13 +6,12 @@
 //! `time:(r:g:b):flags`. Colours are sRGB encoded; `* multiplier` variables carry the HDR scale
 //! (sun ~ 6..8, sky ~ 2..6 at the engine's exposure).
 //!
-//! `lighting.xml` gives the sun path (see [`sun_direction`]): `SunRotation` is the compass bearing of the sun at its highest
-//! (the editor's `SunVector` points there), `SunHeight` that elevation in percent (`asin(SunHeight / 100)`: 80 is 53 degrees,
-//! the `SunVector`'s z of 0.8), `PlanetRotationAxis` the tilt of the axis the sun turns about (degrees from the vertical).
+//! `lighting.xml` gives the sun path (see [`sun_direction`], the engine's own formula): `SunRotation`, `Latitude` and
+//! `PlanetRotationAxis`; the editor's `SunHeight` and `SunVector` are not used by the engine.
 
 use std::collections::HashMap;
 
-use bevy::math::{Quat, Vec2, Vec3, Vec4};
+use bevy::math::{Mat3, Vec2, Vec3, Vec4};
 
 /// A time of day spline (scalar or colour).
 #[derive(Clone, Debug, Default)]
@@ -131,38 +130,31 @@ impl TimeOfDay {
     }
 }
 
-/// `lighting.xml` sun path settings.
+/// `lighting.xml` sun path settings, as the engine's `CTimeOfDay` reads them (with its defaults for missing attributes).
 #[derive(Clone, Copy, Debug)]
 pub struct Lighting {
+    /// `SunRotation` (default 240): turns the whole path about the vertical.
     pub sun_rotation: f32,
-    pub sun_height: f32,
-    /// `PlanetRotationAxis`: the tilt (degrees from the vertical) of the axis the sun turns about.
+    /// `Latitude` (default 90): tilts the plane of the path about the east-west axis (`90 - Latitude`).
+    pub latitude: f32,
+    /// `PlanetRotationAxis` (default 0): offsets the circle along its axis by `sin(PlanetRotationAxis)`, a small circle
+    /// instead of a great one.
     pub planet_axis: f32,
-    /// The hour at which the sun is highest (see [`HIGHEST_HOUR`]; `AA_TUNE=sun_noon`).
-    pub highest_hour: f32,
 }
 
 impl Default for Lighting {
+    /// The main world's.
     fn default() -> Self {
-        Lighting { sun_rotation: 188.0, sun_height: 80.0, planet_axis: 25.0, highest_hour: HIGHEST_HOUR }
+        Lighting { sun_rotation: 188.0, latitude: 154.0, planet_axis: 25.0 }
     }
 }
-
-/// The hour of the day at which the sun is highest, fitted so that the sun patch on the floor of the Royal Palace court yard
-/// falls where the real client's does at game time 9.56 and 10.0 (`reference/ingame/royal_palace/`).
-pub const HIGHEST_HOUR: f32 = 12.85;
 
 impl Lighting {
     pub fn parse(xml: &str) -> Option<Lighting> {
         let doc = roxmltree::Document::parse(xml).ok()?;
         let l = doc.descendants().find(|n| n.has_tag_name("Lighting"))?;
         let number = |name: &str, default: f32| l.attribute(name).and_then(|v| v.parse().ok()).unwrap_or(default);
-        Some(Lighting {
-            sun_rotation: l.attribute("SunRotation")?.parse().ok()?,
-            sun_height: number("SunHeight", 80.0),
-            planet_axis: number("PlanetRotationAxis", 0.0),
-            highest_hour: HIGHEST_HOUR,
-        })
+        Some(Lighting { sun_rotation: number("SunRotation", 240.0), latitude: number("Latitude", 90.0), planet_axis: number("PlanetRotationAxis", 0.0) })
     }
 }
 
@@ -356,32 +348,28 @@ impl TimeOfDay {
     }
 }
 
-/// Direction towards the sun (cry space) at `hour`.
+/// Direction towards the sun (cry space) at `hour`: `CTimeOfDay::Update` of `cry3dengine.dll`, in closed form.
 ///
-/// The sun turns at 15 degrees an hour about an axis that is tilted `PlanetRotationAxis` degrees from the vertical, away from
-/// the bearing `SunRotation`; at its highest ([`HIGHEST_HOUR`]) it stands at that bearing and at the elevation
-/// `asin(SunHeight / 100)`, in the morning it is east of that. With the main world's 188 / 80 / 25 the sun never sets: at
-/// midnight it skims the northern horizon at 3 degrees (the time of day colours make the night). The time of day data's own
-/// dawn and dusk (6:00 and 17:30) do not move it.
+/// The engine multiplies four matrices, `T(0, 0, -sin axis) x Rz(angle) x Rx(latitude - 90) x Ry(-rotation)`, inverts the product
+/// and transforms the point (0, 1, 0) by it; the result, taken as (x, y up, z south), is the sun vector. `angle` is
+/// `(hour + 12) / 24` of a turn, so the sun is highest at 12:00 and turns 15 degrees an hour. With the main world's 188 / 154 / 25
+/// the sun rises at 2:00 in the north-east, is at its highest at 12:00 (azimuth 172, elevation 49), and sets at 22:00 in the
+/// north-west (`DawnTime` 119 and `DuskTime` 599 of the file say the same). The time of day data's own colours make the dawn
+/// and dusk; below the horizon the light is the moon (the opposite direction here).
 ///
-/// Measured: in the real client at game time 9.56 to 10.0 the court yard of the Royal Palace (zone 186) has one patch of sun on
-/// its floor; it is where the sun, at an azimuth of 123 degrees (9.56 h) to 132 degrees (10.0 h) and an elevation of 42 to 44
-/// degrees, shines through a gap of the buildings (found by rendering the court yard with the sun at every direction and
-/// comparing the patch, `docs/aa-world.md`). The path above, with the highest point at 12.85 h, passes through both
-/// (123 / 42 and 131 / 45); the two data points leave the culmination hour and the 15 degrees an hour
-/// uncertain by about half an hour. The older path (a 11 hour arc with the sun in the north at noon) lit none of the court yard.
+/// Cross-checked against the real client: at game time 9.56 h and 10.0 h the court yard of the Royal Palace (zone 186) has one
+/// patch of sun on its floor, which is where the sun shines through a gap of the buildings from azimuth 123 / elevation 42 and
+/// 132 / 44 (rendering the yard with the sun at every direction and comparing the patch, `docs/aa-world.md`); this gives
+/// 124.0 / 42.4 and 131.8 / 44.4.
 pub fn sun_direction(hour: f32, l: Lighting) -> Vec3 {
-    let direction = |bearing: f32, elevation: f32| {
-        let (b, e) = (bearing.to_radians(), elevation.to_radians());
-        // bearing -> cry axes: north = +Y, east = +X
-        Vec3::new(b.sin() * e.cos(), b.cos() * e.cos(), e.sin())
-    };
-    let highest = direction(l.sun_rotation, (l.sun_height / 100.0).clamp(0.05, 1.0).asin().to_degrees());
-    // the axis points up and towards the north (away from the sun at its highest)
-    let axis = direction(l.sun_rotation + 180.0, 90.0 - l.planet_axis);
-    // clockwise seen from above: the bearing grows with the hour
-    let angle = -(hour - l.highest_hour) * 15f32.to_radians();
-    Quat::from_axis_angle(axis, angle).mul_vec3(highest).normalize()
+    let (rotation, latitude, axis) = (l.sun_rotation.to_radians(), l.latitude.to_radians(), l.planet_axis.to_radians());
+    let angle = (hour + 12.0) / 24.0 * std::f32::consts::TAU;
+    // M^-1 (0, 1, 0) = Ry(rotation) Rx(90 - latitude) Rz(-angle) (0, 1, sin axis)
+    let p = Mat3::from_rotation_y(rotation)
+        * Mat3::from_rotation_x(std::f32::consts::FRAC_PI_2 - latitude)
+        * Mat3::from_rotation_z(-angle)
+        * Vec3::new(0.0, 1.0, axis.sin());
+    Vec3::new(p.x, -p.z, p.y).normalize()
 }
 
 #[cfg(test)]
@@ -433,24 +421,26 @@ mod tests {
 
     #[test]
     fn sun_path() {
-        let l = Lighting { sun_rotation: 188.0, sun_height: 80.0, planet_axis: 25.0, highest_hour: HIGHEST_HOUR };
+        let l = Lighting::default();
         let degrees = |v: Vec3| ((v.x.atan2(v.y).to_degrees() + 360.0) % 360.0, v.z.asin().to_degrees());
-        // at its highest: the bearing SunRotation, asin(0.8) up
-        let (az, el) = degrees(sun_direction(HIGHEST_HOUR, l));
-        assert!((az - 188.0).abs() < 0.1 && (el - 53.13).abs() < 0.1, "{az} {el}");
-        // the real client at the Royal Palace: 123 / 42 at 9.56 h, 132 / 44 at 10.0 h
+        // the real client at the Royal Palace: the sun patch of the court yard is where 123 / 42 (9.56 h) and 132 / 44 (10.0 h) put it
         let (az, el) = degrees(sun_direction(9.563, l));
-        assert!((az - 123.0).abs() < 4.0 && (el - 42.0).abs() < 3.0, "{az} {el}");
+        assert!((az - 124.0).abs() < 0.3 && (el - 42.4).abs() < 0.3, "{az} {el}");
         let (az, el) = degrees(sun_direction(9.998, l));
-        assert!((az - 132.0).abs() < 4.0 && (el - 44.0).abs() < 3.0, "{az} {el}");
-        // east in the morning, west in the evening, never far below the horizon
+        assert!((az - 131.8).abs() < 0.3 && (el - 44.4).abs() < 0.3, "{az} {el}");
+        // highest at noon, south-south-west and 49 degrees up
+        let (az, el) = degrees(sun_direction(12.0, l));
+        assert!((az - 172.0).abs() < 0.3 && (el - 48.9).abs() < 0.3, "{az} {el}");
+        // up from 2:00 (DawnTime 119) to 22:00 (DuskTime 599), east in the morning, west in the evening
+        assert!(sun_direction(1.9, l).z < 0.01 && sun_direction(2.1, l).z > -0.01);
+        assert!(sun_direction(21.9, l).z > -0.01 && sun_direction(22.1, l).z < 0.01);
+        assert!(sun_direction(0.0, l).z < 0.0 && sun_direction(23.0, l).z < 0.0);
         assert!(sun_direction(6.0, l).x > 0.5 && sun_direction(18.0, l).x < -0.5);
-        for h in 0..24 {
-            assert!(sun_direction(h as f32, l).z > 0.0, "hour {h}");
-        }
-        // no axis tilt: the sun circles at the same height
-        let flat = Lighting { planet_axis: 0.0, ..l };
-        assert!((sun_direction(0.0, flat).z - 0.8).abs() < 1e-4 && (sun_direction(15.0, flat).z - 0.8).abs() < 1e-4);
+        // the login stage's file (260 / 40 / 0): a great circle, the sun at 40 degrees in the west at noon
+        let login = Lighting { sun_rotation: 260.0, latitude: 40.0, planet_axis: 0.0 };
+        let (az, el) = degrees(sun_direction(12.0, login));
+        assert!((az - 280.0).abs() < 0.3 && (el - 40.0).abs() < 0.3, "{az} {el}");
+        assert!(sun_direction(6.0, login).z.abs() < 1e-3 && sun_direction(18.0, login).z.abs() < 1e-3);
     }
 
     #[test]
