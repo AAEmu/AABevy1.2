@@ -47,6 +47,10 @@ need something from it, say so in your final report. The orchestrator wires crat
   "Blocking waiting for file lock", wait; never `cargo clean`, never point at another target dir.
 * Build/test only your crate: `cargo test -p aa-lua`, `cargo run -p aa-ui --example login`. No
   `--workspace` runs.
+* The dev build lock is shared by everyone: prefer `cargo check -p <crate>` while iterating, run
+  `cargo clippy` at most once at the end of a task (it holds the same lock), and for repeated runs
+  copy the built exe aside and run the copy, so cargo can keep building for others meanwhile.
+  Release builds (`--release`) use their own directory and don't block dev builds.
 * Your `Cargo.toml` must always parse: a broken manifest (e.g. an `[[example]]` whose file does
   not exist yet) stops cargo for **every** agent. Create the file before declaring it.
 * Every visual deliverable is an example (or test) that uses `aa_dev::default_plugins` +
