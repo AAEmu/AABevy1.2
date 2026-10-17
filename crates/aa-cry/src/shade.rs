@@ -44,11 +44,75 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         }
     }
     bake_hair_colour(prep, m, &mut out);
+    bake_terrain_blend(prep, m, &mut out);
     if prep.shading == Shading::Full {
         bake_specular(prep, m, &mut out);
         bake_hair_specular(prep, m, &mut out);
     }
     Some(out)
+}
+
+/// `GenMask` bit of the `Vegetation` shader's terrain colour blend (`%BLEND_WITH_TERRAIN_COLOR`): set
+/// on 276 of the 277 vegetation materials that have a `blendWithTerrainAmount` parameter (default
+/// 0.5), and on no other.
+const GEN_TERRAIN_BLEND: u64 = 0x2000;
+
+/// The hue (linear, only its direction counts: the blend keeps the texel's brightness) that blended
+/// vegetation turns towards: the terrain colour map under it. In the captures the ground is a
+/// yellow-green with no blue (the cover texture carries the evening light); the engine reads it per
+/// pixel from the cell's cover, here one field hue stands for it.
+const TERRAIN_BLEND_HUE: Vec3 = Vec3::new(0.2, 0.2, 0.0);
+
+/// Vegetation with the terrain blend (`blendWithTerrainAmount`, grass, flowers, bushes) takes on the
+/// hue of the ground it grows on: `lerp(diffuse, terrain, amount)`. Without it the orange marigolds
+/// of the login fields stay orange where the captures have them yellow (their G / R ratio is 0.73,
+/// the map's 0.62). The blend keeps the brightness of every texel (the grass is dimmed per field to
+/// match the captures; blending towards a bright ground lit it up): the colour map is baked again with
+/// the hue moved `amount` of the way, in linear light, alpha and mips kept.
+fn bake_terrain_blend(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut StandardMaterial) {
+    if !m.shader.eq_ignore_ascii_case("vegetation") || m.gen_mask & GEN_TERRAIN_BLEND == 0 || out.base_color_texture.is_none() {
+        return;
+    }
+    let amount = param_f32(m, "blendWithTerrainAmount").unwrap_or(0.0).clamp(0.0, 1.0);
+    let Some(df) = m.texture(&TextureMap::Diffuse).map(|t| t.pak_path()) else { return };
+    if amount <= 0.0 {
+        return;
+    }
+    let to = TERRAIN_BLEND_HUE;
+    let key = format!("terrainblend:{df}:{amount:.3}:{:.3},{:.3},{:.3}", to.x, to.y, to.z);
+    let image = prep.baked_image(&key, |loader| {
+        let (w, h, mut mips) = loader.decode_mips_rgba8(&df)?;
+        blend_towards(&mut mips, amount, to);
+        Some(crate::texture::rgba8_image(w, h, &mips, true))
+    });
+    if let Some(image) = image {
+        out.base_color_texture = Some(image);
+    }
+}
+
+/// Moves the colour of every texel of the RGBA8 `mips` (sRGB) `amount` of the way to the hue `to`
+/// (linear) at the same brightness, computed in linear light; the alpha stays.
+fn blend_towards(mips: &mut [Vec<u8>], amount: f32, to: Vec3) {
+    let decode: Vec<f32> = (0..256).map(|i| srgb_to_linear(i as f32 / 255.0)).collect();
+    let hue = to / luma(to).max(1e-4);
+    for level in mips {
+        for px in level.as_chunks_mut::<4>().0.iter_mut() {
+            let lin = Vec3::new(decode[px[0] as usize], decode[px[1] as usize], decode[px[2] as usize]);
+            let out = lin.lerp(hue * luma(lin), amount);
+            for c in 0..3 {
+                px[c] = (linear_to_srgb(out[c]) * 255.0 + 0.5) as u8;
+            }
+        }
+    }
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
 
 /// Hair textures have white (or any) colour in the fully transparent texels: with the mask at the
@@ -218,7 +282,7 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
     // overall strength: the file's own specular colour and modifier scale the map, but are not a
     // measure of how metallic the object is (bows: 7.6 x 1.7 on a map that is dark for the wood),
     // so only a modest boost is taken from them
-    let gain = (luma(m.specular) * param_f32(m, "SpecularModifierInHDR").unwrap_or(1.0)).clamp(0.0, 1.5);
+    let gain = (luma(m.specular) * param_f32(m, "SpecularModifierInHDR").unwrap_or(1.0)).clamp(0.0, METAL_GAIN_MAX);
     // `ReflectAmount` scales the environment reflection: 15 on costumes, 0.25 on props and weapons
     let reflect = 0.35 + 0.65 * (param_f32(m, "ReflectAmount").unwrap_or(1.0) / 2.0).clamp(0.0, 1.0);
     let matte = shininess_to_roughness(m.shininess);
@@ -250,6 +314,45 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
         Some(crate::texture::rgba8_image(w, h, &mips, false))
     });
     let Some(image) = image else { return };
+    // Metal reflects the environment in the colour of its albedo (F0), which is dark in the diffuse
+    // maps (the engine multiplies the reflection by `Specular` x `ReflectAmount` x Fresnel, far above
+    // 1 on armour): the albedo of the metal texels is raised so that plate armour shines.
+    if let Some(df) = m.texture(&TextureMap::Diffuse).map(|t| t.pak_path()) {
+        let albedo_key = format!("metalalbedo:{df}:{spec}:{key}:{METAL_ALBEDO_GAIN}");
+        let baked = prep.baked_image(&albedo_key, |loader| {
+            let (w, h, dmips) = loader.decode_mips_rgba8(&df)?;
+            let (sw, sh, smips) = loader.decode_mips_rgba8(&spec)?;
+            let lut: Vec<f32> = (0..256).map(|i| srgb_to_linear(i as f32 / 255.0)).collect();
+            let mips: Vec<Vec<u8>> = dmips
+                .iter()
+                .enumerate()
+                .map(|(level, d)| {
+                    // the maps may differ in size and mips: nearest texel of the specular map
+                    let sl = level.min(smips.len() - 1);
+                    let sp = &smips[sl];
+                    let (dw, dh) = ((w as usize >> level).max(1), (h as usize >> level).max(1));
+                    let (sw, sh) = ((sw as usize >> sl).max(1), (sh as usize >> sl).max(1));
+                    let mut data = d.clone();
+                    for (i, px) in data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                        let (x, y) = (i % dw, i / dw);
+                        let o = ((y * sh / dh) * sw + x * sw / dw) * 4;
+                        let (_, _, metal, _) = texel(&sp[o..o + 4]);
+                        if metal > 0.0 {
+                            let k = 1.0 + (METAL_ALBEDO_GAIN - 1.0) * metal;
+                            for c in 0..3 {
+                                px[c] = (linear_to_srgb(lut[px[c] as usize] * k) * 255.0 + 0.5) as u8;
+                            }
+                        }
+                    }
+                    data
+                })
+                .collect();
+            Some(crate::texture::rgba8_image(w, h, &mips, true))
+        });
+        if let Some(b) = baked {
+            out.base_color_texture = Some(b);
+        }
+    }
     out.metallic_roughness_texture = Some(image);
     out.metallic = 1.0;
     out.perceptual_roughness = 1.0;
@@ -293,6 +396,12 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
     }
 }
 
+/// Upper limit of the specular gain (`Specular` x `SpecularModifierInHDR`) that scales the map into
+/// "how metallic": saint armour has 7.4 x 4.9 on a map that never exceeds 0.19, the bows 7.6 x 1.7 on
+/// a dark one (they stay wood, the sword blades gain a little).
+const METAL_GAIN_MAX: f32 = 5.0;
+/// Factor on the albedo of fully metallic texels (see [`bake_specular`]).
+const METAL_ALBEDO_GAIN: f32 = 8.0;
 /// Roughness of the sharpest dielectric highlights (glossy map texels).
 const SHARP_ROUGHNESS: f32 = 0.42;
 /// Dielectric specular strength per unit of map glossiness: `F0 = 0.16 * strength * tint^2`
@@ -383,8 +492,11 @@ pub fn to_standard_material(
         normal_map_texture: normal_tex.as_deref().and_then(|f| texture(f, false)),
         perceptual_roughness: shininess_to_roughness(m.shininess),
         metallic: 0.0,
-        // a big multiplier (bows 13) scales a map that is dark for wood: less sheen
-        reflectance: if spec_gain > 3.0 { 0.35 } else { (spec_gain * 0.5).clamp(0.0, 0.5) },
+        // a big multiplier (bows 13) scales a map that is dark for wood: less sheen; `ReflectAmount`
+        // (0.25 on props, 10-15 on costumes) scales what the surface reflects of the environment: at
+        // a grazing view a smooth prop (the Hariharan detect machine, Specular 3.4) mirrored the
+        // whole bright sky and turned pale grey where the captures have dark rust
+        reflectance: (if spec_gain > 3.0 { 0.35 } else { (spec_gain * 0.5).clamp(0.0, 0.5) }) * reflect_scale(m),
         double_sided: m.two_sided(),
         cull_mode: if m.two_sided() { None } else { Some(Face::Back) },
         ..default()
@@ -520,6 +632,11 @@ fn additive_applies(m: &CryMaterial) -> bool {
     }
 }
 
+/// Factor on the environment reflection of a material from its `ReflectAmount` (absent or 2 and more: 1).
+fn reflect_scale(m: &CryMaterial) -> f32 {
+    param_f32(m, "ReflectAmount").map_or(1.0, |r| 0.35 + 0.65 * (r / 2.0).clamp(0.0, 1.0))
+}
+
 /// The old flat skin multiplier (kept for source compatibility; skin colour now comes from the
 /// material, see [`skin_base_color`]).
 pub const SKIN_ALBEDO: f32 = 0.22;
@@ -590,6 +707,22 @@ mod tests {
         assert!(matches!(glow.alpha_mode, AlphaMode::Add));
         let decal = convert(r#"<Material MtlFlags="4" Shader="Illum" Opacity="0.5"><Textures><Texture Map="Diffuse" File="a/b.dds"/></Textures></Material>"#);
         assert!(matches!(decal.alpha_mode, AlphaMode::Add));
+    }
+
+    #[test]
+    fn props_with_a_low_reflect_amount_do_not_mirror_the_sky() {
+        // ti_detectmachine_rust: Specular 3.4, ReflectAmount 0.25
+        let prop = convert(
+            r#"<Material Shader="Illum" Diffuse="0.22,0.22,0.22" Specular="3.4,3.4,3.4" Shininess="7">
+ <PublicParams ReflectAmount="0.25"/></Material>"#,
+        );
+        // costumes (ReflectAmount 10) keep their sheen
+        let costume = convert(
+            r#"<Material Shader="Illum" Diffuse="0.22,0.22,0.22" Specular="3.4,3.4,3.4" Shininess="7">
+ <PublicParams ReflectAmount="10"/></Material>"#,
+        );
+        assert!(prop.reflectance < 0.2, "{}", prop.reflectance);
+        assert!(costume.reflectance >= 0.34, "{}", costume.reflectance);
     }
 
     #[test]
