@@ -19,9 +19,11 @@
 //!
 //! The scripts take about 1.5 s to load, so with the loading screen in front ([`Screen::Loading`])
 //! the stage is built ahead ([`prebuild_hud`]): a second Lua state next to the loading UI's, started
-//! once the server has spawned the character. When the game starts [`build_hud`] only swaps it in
-//! and raises the entering events; what changed in the meantime reaches the scripts as the usual
-//! snapshot differences.
+//! once the server has spawned the character and built a few milliseconds per frame
+//! ([`BuildingStage`]: the scripts one by one, until the frame's budget is spent), so the loading
+//! bar keeps moving. When the game starts [`build_hud`] only swaps it in and raises the entering
+//! events (a stage still unfinished is finished there in one go); what changed in the meantime
+//! reaches the scripts as the usual snapshot differences.
 //!
 //! ## Keyboard
 //!
@@ -78,15 +80,162 @@ struct HudBuilt {
 /// (a non-send resource: it holds a Lua state).
 struct PrebuiltStage(UiRuntime);
 
-/// Progress of the prebuild: frames the loading screen had to itself, and whether it was made.
+/// Progress of the prebuild: frames the loading screen had to itself, and whether it was started.
 #[derive(Resource, Default)]
 struct PrebuildState {
     waited: u32,
     tried: bool,
 }
 
-/// Frames of the loading screen drawn (with the spawn known) before the HUD build holds the app up.
+/// Frames of the loading screen drawn (with the spawn known) before the HUD build starts.
 const PREBUILD_AFTER_FRAMES: u32 = 6;
+
+/// The most the stage build takes of one loading frame (milliseconds); a single script that is longer
+/// than what is left of it still runs whole.
+const BUILD_BUDGET_MS: u64 = 8;
+
+/// `BUILD_BUDGET_MS`, or `AA_HUD_BUDGET_MS` (a huge value builds the stage in one frame, to compare).
+fn build_budget_ms() -> u64 {
+    static MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MS.get_or_init(|| std::env::var("AA_HUD_BUDGET_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(BUILD_BUDGET_MS))
+}
+
+/// What a [`BuildingStage`] does next.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BuildStep {
+    /// The database's UI texts (cached by path, so cheap once the login screens loaded them).
+    Texts,
+    /// The game API and the data layer of `ingame.lua`.
+    Api,
+    /// The list of the stage's scripts, made on another thread (listing the pak for the stage's
+    /// contents and reading the table of contents files take 20-90 ms and touch no Lua state).
+    List,
+    /// One script per step.
+    Scripts,
+    /// Flush what the scripts queued, then the stage is ready.
+    Finish,
+}
+
+/// A world stage built a little at a time (a non-send resource: it holds a Lua state). This is
+/// `UiRuntime::run_stage` taken apart, with the same scripts in the same order, so that the loading
+/// screen is not held up for the 0.5-1.5 s the whole takes.
+struct BuildingStage {
+    rt: UiRuntime,
+    step: BuildStep,
+    texts_db: Option<std::path::PathBuf>,
+    /// The scripts of the stage, as the other thread lists them.
+    list: Option<std::sync::mpsc::Receiver<anyhow::Result<Vec<String>>>>,
+    /// What is left to run.
+    queue: std::collections::VecDeque<String>,
+    started: std::time::Instant,
+    frames: u32,
+    /// Time spent in steps, the longest chunk of one frame and the longest single step (and what it was).
+    spent: std::time::Duration,
+    worst_frame: std::time::Duration,
+    worst_step: (std::time::Duration, String),
+}
+
+impl BuildingStage {
+    /// Runs steps until `budget` is used up (`None`: until done). True when the stage is ready.
+    fn advance(&mut self, bridge: &api::Shared, budget: Option<std::time::Duration>) -> bool {
+        use std::time::Instant;
+        let frame = Instant::now();
+        loop {
+            let t = Instant::now();
+            let what = match self.step {
+                BuildStep::Texts => {
+                    if let Some(db) = &self.texts_db
+                        && let Err(e) = self.rt.load_ui_texts(db)
+                    {
+                        warn!("hud: UI texts from {}: {e:#}; LocalizeUiText returns keys", db.display());
+                    }
+                    self.step = BuildStep::Api;
+                    "ui texts".to_string()
+                }
+                BuildStep::Api => {
+                    if let Err(e) = api::install(&mut self.rt, bridge) {
+                        error!("hud: game API: {e}");
+                    }
+                    self.step = BuildStep::List;
+                    "game api".to_string()
+                }
+                BuildStep::List => {
+                    let list = match (&self.list, budget) {
+                        (Some(rx), Some(_)) => match rx.try_recv() {
+                            Ok(l) => l,
+                            // not ready: the next frame asks again
+                            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                            Err(e) => Err(anyhow::anyhow!("{e}")),
+                        },
+                        (Some(rx), None) => rx.recv().unwrap_or_else(|e| Err(anyhow::anyhow!("{e}"))),
+                        (None, _) => Err(anyhow::anyhow!("no script list")),
+                    };
+                    self.list = None;
+                    self.queue.push_back(aa_lua::stage::INIT_SCRIPT.to_string());
+                    match list {
+                        Ok(files) => self.queue.extend(files),
+                        Err(e) => {
+                            warn!("hud: stage {}: {e:#}", aa_ui::Stage::World.name());
+                            self.rt.errors.push((aa_ui::Stage::World.name().to_string(), format!("{e:#}")));
+                        }
+                    }
+                    self.step = BuildStep::Scripts;
+                    "script list".to_string()
+                }
+                BuildStep::Scripts => {
+                    let path = self.queue.pop_front().unwrap_or_default();
+                    if let Err(e) = aa_lua::run_alb(&self.rt.lua, &path) {
+                        warn!("aa-ui: script {path}: {e:#}");
+                        self.rt.errors.push((path.clone(), format!("{e:#}")));
+                    }
+                    if self.queue.is_empty() {
+                        self.step = BuildStep::Finish;
+                    }
+                    path
+                }
+                BuildStep::Finish => {
+                    aa_ui::lua::flush(&self.rt.lua);
+                    self.step = BuildStep::Finish;
+                    "flush".to_string()
+                }
+            };
+            let took = t.elapsed();
+            if took.as_millis() >= 5 {
+                debug!("hud: stage step {what}: {:.1} ms", took.as_secs_f32() * 1000.0);
+            }
+            self.spent += took;
+            if took > self.worst_step.0 {
+                self.worst_step = (took, what.clone());
+            }
+            if what == "flush" {
+                self.worst_frame = self.worst_frame.max(frame.elapsed());
+                return true;
+            }
+            if budget.is_some_and(|b| frame.elapsed() >= b) {
+                self.worst_frame = self.worst_frame.max(frame.elapsed());
+                return false;
+            }
+        }
+    }
+
+    /// The finished runtime, with the numbers logged.
+    fn finish(self) -> UiRuntime {
+        info!(
+            "hud: UI stage ready: {} frames over {:.0} ms, {:.0} ms of work, worst frame {:.1} ms, longest step {:.1} ms ({}), {} script errors",
+            self.frames,
+            self.started.elapsed().as_secs_f32() * 1000.0,
+            self.spent.as_secs_f32() * 1000.0,
+            self.worst_frame.as_secs_f32() * 1000.0,
+            self.worst_step.0.as_secs_f32() * 1000.0,
+            self.worst_step.1,
+            self.rt.errors.len()
+        );
+        for (path, e) in self.rt.errors.iter().take(10) {
+            warn!("hud: script {path}: {e}");
+        }
+        self.rt
+    }
+}
 
 pub struct HudPlugin;
 
@@ -145,9 +294,9 @@ fn hud_up(built: Res<HudBuilt>) -> bool {
     built.up
 }
 
-/// A fresh UI runtime with the game API and the world stage's scripts loaded (not yet the runtime
-/// the renderer draws), built from the current snapshot. `None` while the window has no size yet.
-fn make_stage(world: &mut World, bridge: &api::Shared) -> Option<UiRuntime> {
+/// A fresh UI runtime (not yet the one the renderer draws), ready to be built a step at a time from
+/// the current snapshot. `None` while the window has no size yet.
+fn start_stage(world: &mut World) -> Option<BuildingStage> {
     let (w, h) = {
         let mut q = world.query_filtered::<&Window, With<PrimaryWindow>>();
         let window = q.single(world).ok()?;
@@ -157,36 +306,53 @@ fn make_stage(world: &mut World, bridge: &api::Shared) -> Option<UiRuntime> {
         return None;
     }
     let cfg = world.resource::<UiConfig>().clone();
-    let t0 = std::time::Instant::now();
-    let mut rt = match UiRuntime::new(&cfg.locale, w, h) {
+    let started = std::time::Instant::now();
+    let rt = match UiRuntime::new(&cfg.locale, w, h) {
         Ok(rt) => rt,
         Err(e) => {
             error!("hud: cannot create the UI runtime: {e:#}");
             return None;
         }
     };
-    if let Some(db) = &cfg.ui_texts_db
-        && let Err(e) = rt.load_ui_texts(db)
-    {
-        warn!("hud: UI texts from {}: {e:#}; LocalizeUiText returns keys", db.display());
-    }
-    if let Err(e) = api::install(&mut rt, bridge) {
-        error!("hud: game API: {e}");
-    }
-    rt.run_stage(aa_ui::Stage::World);
-    info!("hud: UI stage ready in {:.0} ms, {} script errors", t0.elapsed().as_secs_f32() * 1000.0, rt.errors.len());
-    for (path, e) in rt.errors.iter().take(10) {
-        warn!("hud: script {path}: {e}");
-    }
-    Some(rt)
+    let spent = started.elapsed();
+    debug!("hud: stage step new runtime: {:.1} ms", spent.as_secs_f32() * 1000.0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(aa_ui::Stage::World.scripts());
+    });
+    Some(BuildingStage {
+        rt,
+        list: Some(rx),
+        step: BuildStep::Texts,
+        texts_db: cfg.ui_texts_db.clone(),
+        queue: Default::default(),
+        started,
+        frames: 1,
+        spent,
+        worst_frame: spent,
+        worst_step: (spent, "new runtime".to_string()),
+    })
 }
 
-/// Builds the HUD stage ahead while the loading screen is up, once the server has spawned the player.
+/// Builds the HUD stage ahead while the loading screen is up, once the server has spawned the
+/// player: a few milliseconds of it per frame.
 fn prebuild_hud(world: &mut World) {
     if !world.resource::<HudOptions>().enabled || world.resource::<HudBuilt>().up || world.get_non_send::<PrebuiltStage>().is_some() {
         return;
     }
     if world.resource::<Player>().spawn.is_none() {
+        return;
+    }
+    let bridge = world.non_send::<api::HudBridge>().0.clone();
+    if let Some(mut building) = world.remove_non_send::<BuildingStage>() {
+        building.frames += 1;
+        if building.advance(&bridge, Some(std::time::Duration::from_millis(build_budget_ms()))) {
+            // the stage was built from the snapshot of its first frame
+            api::mark_pushed(&bridge);
+            world.insert_non_send(PrebuiltStage(building.finish()));
+        } else {
+            world.insert_non_send(building);
+        }
         return;
     }
     {
@@ -199,15 +365,13 @@ fn prebuild_hud(world: &mut World) {
             return;
         }
     }
-    let bridge = world.non_send::<api::HudBridge>().0.clone();
-    // the scripts read the data while they load: bring the snapshot up to date first
+    // the scripts read the data while they load: bring the snapshot up to date first (it is not
+    // touched again until the stage is done, so every script sees the same one)
     api::refresh_snapshot(world, &bridge);
-    match make_stage(world, &bridge) {
-        Some(rt) => {
+    match start_stage(world) {
+        Some(building) => {
             world.resource_mut::<PrebuildState>().tried = true;
-            // the stage was just built from this snapshot
-            api::mark_pushed(&bridge);
-            world.insert_non_send(PrebuiltStage(rt));
+            world.insert_non_send(building);
         }
         // no window size yet (or the runtime failed): try again next frame
         None => world.resource_mut::<PrebuildState>().waited = PREBUILD_AFTER_FRAMES - 1,
@@ -215,7 +379,9 @@ fn prebuild_hud(world: &mut World) {
 }
 
 fn drop_prebuilt(world: &mut World) {
-    if world.remove_non_send::<PrebuiltStage>().is_some() {
+    let built = world.remove_non_send::<PrebuiltStage>().is_some();
+    let building = world.remove_non_send::<BuildingStage>().is_some();
+    if built || building {
         debug!("hud: dropped the stage built ahead");
     }
 }
@@ -231,6 +397,12 @@ fn build_hud(world: &mut World) {
     }
     let chat_state = world.resource::<aa_net::state::Chat>().clone();
     let t0 = std::time::Instant::now();
+    // the loading screen ended before the stage was done: do the rest now
+    if let Some(mut building) = world.remove_non_send::<BuildingStage>() {
+        building.advance(&bridge, None);
+        api::mark_pushed(&bridge);
+        world.insert_non_send(PrebuiltStage(building.finish()));
+    }
     if let Some(PrebuiltStage(rt)) = world.remove_non_send::<PrebuiltStage>() {
         // what changed since it was built (position, zone, bars ...) reaches the scripts through `sync_hud`
         api::refresh_snapshot(world, &bridge);
