@@ -73,8 +73,11 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 | `SkillFired` | the fire clip: a song's for the instrument held, else the server's id (replaced by the skill's own `twohand_*` / `dual_wield_*` clip when the character holds such a weapon and the server sent the skill's one hand clip), else the skill's (a dash or a leap: its controller's clip); a clip with `anims.loop` loops until the skill ends; the player turns to the target; THROW effects at once, LAUNCH effects and the projectile at the clip's release moment (anim events, else `effect_delay`); an instant skill also plays the START / FORM effects that were skipped (effects that die at LAUNCH are not shown); camera shakes start with their effect moment |
 | `PlotEvent` | the step's clip / effect group / projectile / camera shakes; a step that plays `all_co_sk_stop` ends the looping clip before it (alone it only ends it), a looping clip loops until the next step or the end |
 | `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
-| `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it |
+| `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it; a unit other than the player is also thrown away from its last attacker (`Thrown`, see Death) |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
+| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once, the unit takes its combat stance (`<weapon>_ba_combat_idle`) and turns to the target, and the server's events of that skill wait until `DRAW_LEAD` (0.6 s) after the key (`Combat::held`): the first swing starts as late as in the real client (see Weapon draw). A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
+| the player presses another skill during a cast time (`preempt_cast`) | the cast is cancelled (`CSStopCasting`, clip and held effects end) and the skill is asked for again 0.25 s later (the server answers `ON_CASTING` to it while the cast runs); the same skill again waits for its cast |
+| the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | every cast of the player is cancelled the same way |
 | the local player moves or jumps during a cast time (or turns, for `stop_casting_by_turn`), or moves during a `channeling_cancelable` channel (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
 | `SkillEnded` / `CastingStopped` / `PlotEnded` / `PlotStopped` / `SkillStopped` | the effects held until END are released; the looping clip of that cast (cast pose, channel pose) ends and the unit returns to locomotion (an interrupted cast too); a one-shot clip runs its course |
 | a unit that spawns dead (`Unit::dead`) | lies on its last death frame at once |
@@ -113,7 +116,7 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
   weapon comes out for the clip's prefix (`weapon_for_clip`: `bow_` the bow, `onehand_` / `twohand_` the main hand weapon (a two
   handed one hangs on `item_back_c` and goes to the right hand), `twoswords_` both swords, `music_` the instrument, which is hidden
-  while it is not played), and goes back 4 s after the last action.
+  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw).
 * **Controller and instrument clips**: a skill that has no clip of its own plays its `skill_controllers.start_anim_id` when its first
   step or fire comes (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...); a song plays `*_instrument_start_anim_id` (the cast loop) and
   `*_instrument_fire_anim_id` of the instrument held, else the skill's own clips.
@@ -146,7 +149,7 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
-  clips), and all go back to their sheath bones 4 s after the last action (`Drawn { out }`). The shield is on the arm only while
+  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). The shield is on the arm only while
   the sword is out (the real client shows none on a character at peace: it comes onto the arm with the sword, `Grip::Shield` in
   `weapons.rs`; with the bow or an instrument out it is away too). The `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
@@ -163,6 +166,45 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   client does: the kick steps about a metre towards its target and comes back while the unit's own position, the camera and the
   server's idea of the position stay where they are (`reference/ingame/combat_kick`). A clip whose root travels more than 2.5 m
   from where it starts (a dash, a charge: the server moves the unit then) stays locked, and so do the locomotion clips.
+* **Weapon draw and combat stance** (`weapons.rs` `Drawn`, `combat.rs` `request_skill` / `sheathe`, `anim.rs` `Stance`). The real
+  client (`reference/ingame/combat_melee`, `combat_triple_slash`): from the key the shield is on the arm and the sword in the hand
+  within 0.12 s (frame 3), the body turns to the target and stands in the combat idle, the swing's clip starts at about 0.6 s (the
+  first damage number is at 0.85 s; `onehand_co_attack_r_slash_2` meets the server's timeline 0.25 s into the clip, the first
+  Triple Slash step 0.19 s), then the unit keeps the stance: in `combat_death_2` the shield is still up 7 s after the kill. The data
+  has no draw clip (only `*_ac_holster_*`), so the draw is the weapon swap plus the stance idle:
+  * `request_skill` reads the player's `UseSkill` (the key), finds the weapon the skill is played with (`skill_weapon`: the clips of
+    its `SkillVisual`, the first plot step, the carried blade for the basic attack, which has no clip in the data) and, when it is not
+    out in that stance already, inserts `Drawn` and starts a `Lead` of `DRAW_LEAD` = 0.6 s. The server answers after 0.12 s: its
+    events of that skill (`SkillStarted`, `SkillFired`, `PlotEvent`, the `UnitDamaged` and end events of its timelines) wait in
+    `Combat::held` until the lead is over (`hold_until`, `apply` runs them in order), so the clip, the effects and the damage all
+    shift by the same time. A refused skill (`cancel_draw`) lets them go and the weapon goes back; events of other units go on.
+    A swing while the weapon is out (the second melee swing, the next Triple Slash) is not delayed.
+  * The stance (`Drawn::stance`: weapon out and not holstering) changes the locomotion clips (`drive_locomotion`): standing is
+    `<prefix>_ba_combat_idle` (the one handed idle for the bow and the staff), running is `<prefix>_mo_combat_run_<dir>` (the
+    model's `fist_mo_combat_run_*` where it has none: `music_`, `bow_`), walking stays the peaceful walk. The prefix is `onehand`
+    (also dual wield), `twohand`, `music`, else `fist`. The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
+    shared by the characters of a skeleton).
+  * The weapon stays out 10 s after the last action with it (`Drawn::after_action`; 4 s for an instrument): a lower bound from
+    `combat_death_2`, where the shield is up at the last frame 7 s after the kill; `CombatChanged` is not read, the server only
+    reports "cleared" and the kill is also when the real client says "Battle End". Then `sheathe` plays the holster clip
+    (`onehand_ac_holster_side_l`, `twohand_ac_holster_back_r`) on a standing unit, ends the stance and moves the weapon into its
+    sheath at the clip's `aw_none` event (0.43 s into the one handed clip); a unit that is running has no holster clip (the real
+    `_ub` variant is 1 s long) and puts the weapon away at once; a unit that starts to run during the clip leaves it; the bow and
+    the instruments have none. An action in progress keeps the weapon out.
+* **Death** (`Thrown`, `throw_corpses`). In `combat_death_2` the rat is thrown up and back when the killing blow lands (frame at
+  1.6 s: in the air about 0.9 m behind where it stood), lies on the water surface 0.3 s later, is gone from the surface
+  0.3 s after that and is seen faintly on the pond floor for the rest of the capture. A unit other than the player that dies is
+  moved on top of its synced transform (the sync rewrites it every frame, so the offset is added after `units::move_units`): away
+  from its last attacker by `THROW_DISTANCE` 0.7 m in `THROW_TIME` 0.35 s on an arc of `THROW_HEIGHT` 0.35 m; where
+  `WaterQuery::water_at` says the water is deeper than 0.1 m over the terrain it lands on the surface (`surface - 0.03`), floats
+  `FLOAT_TIME` 0.2 s and sinks to the ground in `SINK_TIME` 0.45 s. Corpses that were there before the player looked are not moved.
+* **Cancelling a cast** (`cancel_cast`): moving, jumping and turning (above), pressing another skill (`preempt_cast`: cancel,
+  then ask for it again 0.25 s later, because the server refuses a skill while another casts, `skill_on_casting`, and a channel
+  that is not `stop_channeling_on_start_skill` the same) and entering the water (`cancel_in_water`, the transition of `Mover::swim`).
+  Only a cast with a cancel rule can be replaced (`Cast::cancel` with `on_move`: every cast time, the channels the data lets
+  moving end); a channel without one is left to the server.
+* **Sword trail**: the trail effects of the skills (`sword_trail_test1`, bone 9) are children of the weapon hand bone and
+  `prime: false`, which is what aa-fx asks for (the ribbon follows the entity: nothing is copied per frame).
 * **Cost.** Skills are read from the database once and cached by id (`SkillBook`, plus the effect group, anim and plot step
   tables); a frame touches no database. Per frame: `follow_fx` / `fly_projectiles` iterate the live effect entities (a handful),
   `hold_weapons` the carried weapons (3 per character), `end_actions` the `Acting` units. Measured with `AA_FX_LOG=1` during a
@@ -419,22 +461,16 @@ the client runs; "shown" = the shown tree skills):
 ## Not done
 
 * Channel poses of the skills that have none in the skill data (Play Dead, `/bow`, `/kneel`: 3 of the 12 channeling skills).
-* Cancelling by other player actions: pressing another skill, jumping off a mount, entering the water; only moving, jumping and
-  turning cancel a cast here. The rule comes from the live game's behaviour and the skills' `channeling_cancelable` /
-  `stop_casting_by_turn`, with no 1.2 client capture or disassembly to check it against.
+* Cancelling a cast by jumping off a mount; moving, jumping, turning, another skill and the water cancel here. The rules come from
+  the live game's behaviour and the skills' `channeling_cancelable` / `stop_casting_by_turn`, with no 1.2 client capture or
+  disassembly to check them against.
 * The two handed sword is tied to the right hand bone (the clip's pose holds it with both hands only because the grip is
   close); a dual wielder's second sword sits on `item_hand_l`. The instruments are placed by their `attachment_offset` of the
   right hand only (no frame of a real capture to compare).
 * Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
   starts at HIT plays when the damage lands (a miss does not shake).
 * Mounted, swimming and flying casters, doodad and ship cannon projectiles.
-* Decals of the effect groups, `FxMaterial` flashes on the hit; the sounds of songs (bard instruments) and the object material under the
-  foot for footsteps (see Sounds).
-* The weapon draw and the combat stance of the real client: the first swing from peace starts about 0.5 s after the key there, with
-  the shield coming up and a stance change first, and between swings the real unit idles in `<weapon>_ba_combat_idle` (and runs
-  `<weapon>_mo_combat_run_*` while it fights); mine plays the swing at once and idles in the relaxed pose.
-* The real rat is thrown back when it dies and lies on the surface before it sinks; mine is submerged and not thrown back.
-* A dead rat in a pond lies below the water surface (the corpse is not lifted).
+* Decals of the effect groups, `FxMaterial` flashes on the hit; the sounds of songs (bard instruments).
 * The player's own movement while a cast clip plays is not blocked (the cast is cancelled instead); the upper body layer is for
   one-shot clips of the player while it runs (Shoot Arrow, slashes), for other units that move while they act, and for casts the
   cancel does not end (channels that are not `channeling_cancelable`).
@@ -445,6 +481,6 @@ the client runs; "shown" = the shown tree skills):
   0.19 m in aa-fx; `AA_FX_SCALE=2` matches it), so check the `Size` convention against a second effect; a continuous emitter's first
   particle comes one pulse period after the start and after its assets loaded, so an arrow in a short flight is faint on its first
   frames (an option to start at once, or to emit at time 0, would do).
-* aa-world: the water is too opaque for things standing in a pond (a rat on the bed is invisible); a surface query under the foot
-  (object materials: floors, bridges) and a water body height / type query for footsteps in ponds.
-* hud: `hud::combat::tests::moves_add_up` fails (not part of this work).
+* Footsteps now read the supporting object's or terrain's physical material with `WorldCollision::surface_below`;
+  `WaterQuery::water_at` supplies pond, lake and sea footsteps when the foot is submerged. The original terrain lookup
+  remains the fallback while collision materials load.

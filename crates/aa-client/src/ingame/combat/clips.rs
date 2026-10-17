@@ -19,6 +19,8 @@ pub struct ClipEvents {
     pub combat_sync: Option<f32>,
     /// `voice_launch`: where the character calls out (the `FxVoice` items of the skill).
     pub voice: Option<f32>,
+    /// `aw_none`: where the weapon leaves the hand (the holster clips).
+    pub aw_none: Option<f32>,
 }
 
 impl ClipEvents {
@@ -77,6 +79,7 @@ fn parse(xml: &str) -> Table {
                 (Some("skill_effect" | "!skill_effect"), Some("launch")) => &mut events.launch,
                 (Some("skill_effect" | "!skill_effect"), Some("voice_launch")) => &mut events.voice,
                 (Some("combat_sync"), _) => &mut events.combat_sync,
+                (Some("aw_none"), _) => &mut events.aw_none,
                 _ => continue,
             };
             if slot.is_none() {
@@ -126,6 +129,9 @@ mod tests {
         // the rat's database names the folder `rat`, its clips live in `rat_black`
         let rat = clip_events("animations/animals/rat_black/event_database.animevents", "animations/animals/rat_black/fist/fist_co_attack_r_01.caf");
         assert!((rat.combat_sync.unwrap() - 0.487).abs() < 0.01, "{rat:?}");
+        // the sword leaves the hand 0.43 s into the holster clip
+        let holster = clip_events("animations/nuian/male/event_database.animevents", "animations/nuian/male/onehand/onehand_ac_holster_side_l.caf");
+        assert!((holster.aw_none.unwrap() - 0.428).abs() < 0.01, "{holster:?}");
         assert_eq!(clip_events("animations/nope.animevents", "x.caf"), ClipEvents::default());
     }
 }

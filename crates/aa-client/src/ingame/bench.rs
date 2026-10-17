@@ -16,6 +16,18 @@ struct Bench {
     warmup: f32,
     in_game: f32,
     frames: Vec<f32>,
+    /// Asset changes (added or modified) seen while measuring: every one is extracted and prepared again by the render world.
+    churn: Churn,
+}
+
+/// Changed assets while measuring: events and distinct ids per kind, and the vertices of the changed meshes.
+#[derive(Default)]
+struct Churn {
+    meshes: (u64, std::collections::HashSet<AssetId<Mesh>>),
+    mesh_vertices: u64,
+    images: (u64, std::collections::HashSet<AssetId<Image>>),
+    standard: (u64, std::collections::HashSet<AssetId<StandardMaterial>>),
+    color: (u64, std::collections::HashSet<AssetId<ColorMaterial>>),
 }
 
 pub fn plugin(app: &mut App) {
@@ -25,8 +37,9 @@ pub fn plugin(app: &mut App) {
     aa_world::profile::uncapped(app);
     // the benchmark window may have the focus while someone else drives the machine: only the scripted keys count
     app.add_systems(PreUpdate, clear_input.after(bevy::input::InputSystems));
-    app.insert_resource(Bench { seconds, warmup: value("--bench-after").unwrap_or(12.0), in_game: 0.0, frames: Vec::new() })
-        .add_systems(Update, bench.run_if(in_state(crate::Screen::InGame)));
+    app.insert_resource(Bench { seconds, warmup: value("--bench-after").unwrap_or(12.0), in_game: 0.0, frames: Vec::new(), churn: Churn::default() })
+        .add_systems(Update, bench.run_if(in_state(crate::Screen::InGame)))
+        .add_systems(Last, count_churn.run_if(in_state(crate::Screen::InGame)));
 }
 
 fn clear_input(mut keys: ResMut<ButtonInput<KeyCode>>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
@@ -34,7 +47,46 @@ fn clear_input(mut keys: ResMut<ButtonInput<KeyCode>>, mut mouse: ResMut<ButtonI
     mouse.reset_all();
 }
 
-fn bench(time: Res<Time<Real>>, mut state: ResMut<Bench>, views: Res<Views>, entities: &Entities, mut exit: MessageWriter<AppExit>) {
+/// Counts the asset changes of the measured frames (`Last`: after everything that writes assets this frame).
+#[allow(clippy::too_many_arguments)]
+fn count_churn(
+    mut state: ResMut<Bench>,
+    meshes: Res<Assets<Mesh>>,
+    mut mesh_events: MessageReader<AssetEvent<Mesh>>,
+    mut image_events: MessageReader<AssetEvent<Image>>,
+    mut standard_events: MessageReader<AssetEvent<StandardMaterial>>,
+    mut color_events: MessageReader<AssetEvent<ColorMaterial>>,
+) {
+    let measuring = state.in_game >= state.warmup;
+    let churn = &mut state.churn;
+    for e in mesh_events.read() {
+        if let (true, AssetEvent::Added { id } | AssetEvent::Modified { id }) = (measuring, e) {
+            churn.meshes.0 += 1;
+            churn.meshes.1.insert(*id);
+            churn.mesh_vertices += meshes.get(*id).map_or(0, |m| m.count_vertices() as u64);
+        }
+    }
+    fn count<A: Asset>(measuring: bool, events: &mut MessageReader<AssetEvent<A>>, into: &mut (u64, std::collections::HashSet<AssetId<A>>)) {
+        for e in events.read() {
+            if let (true, AssetEvent::Added { id } | AssetEvent::Modified { id }) = (measuring, e) {
+                into.0 += 1;
+                into.1.insert(*id);
+            }
+        }
+    }
+    count(measuring, &mut image_events, &mut churn.images);
+    count(measuring, &mut standard_events, &mut churn.standard);
+    count(measuring, &mut color_events, &mut churn.color);
+}
+
+fn bench(
+    time: Res<Time<Real>>,
+    mut state: ResMut<Bench>,
+    views: Res<Views>,
+    entities: &Entities,
+    fx: Option<Res<aa_fx::FxStats>>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let dt = time.delta_secs();
     state.in_game += dt;
     if state.in_game < state.warmup {
@@ -67,5 +119,25 @@ fn bench(time: Res<Time<Real>>, mut state: ResMut<Bench>, views: Res<Views>, ent
         views.doodad_entities(),
         views.pending()
     );
+    let c = &state.churn;
+    let per = |v: u64| v as f32 / n as f32;
+    info!(
+        "BENCH asset changes per frame (distinct): meshes {:.1} ({}, {:.0} vertices per frame), images {:.2} ({}), standard materials {:.2} ({}), color materials {:.2} ({})",
+        per(c.meshes.0),
+        c.meshes.1.len(),
+        per(c.mesh_vertices),
+        per(c.images.0),
+        c.images.1.len(),
+        per(c.standard.0),
+        c.standard.1.len(),
+        per(c.color.0),
+        c.color.1.len()
+    );
+    if let Some(fx) = fx {
+        info!(
+            "BENCH fx: effects {} (active {}), emitters {}, particles {}, quads {}, main thread ms: sim {:.2} upload {:.2} manage {:.2}",
+            fx.effects, fx.active, fx.emitters, fx.particles, fx.quads, fx.sim_ms, fx.upload_ms, fx.manage_ms
+        );
+    }
     exit.write(AppExit::Success);
 }

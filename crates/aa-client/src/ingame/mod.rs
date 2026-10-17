@@ -36,14 +36,17 @@ pub(crate) mod data;
 mod dev;
 pub(crate) mod enter;
 mod flow;
+mod idle;
+mod mount;
 mod player;
 mod prepare;
 mod prewarm;
+mod remote;
 mod sounds;
 mod swim;
 mod units;
 pub(crate) mod warm;
-mod weapons;
+pub(crate) mod weapons;
 
 use aa_anim::AnimPlugin;
 use aa_net::NetPlugin;
@@ -51,6 +54,7 @@ use aa_world::AaWorldPlugin;
 use bevy::prelude::*;
 
 use crate::Screen;
+pub(crate) use dev::DevOptions;
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
@@ -99,6 +103,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(sounds::plugin)
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
+            .add_plugins(units::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
@@ -227,8 +232,9 @@ fn report(
     }
     *since = 0.0;
     let Ok(p) = player.single() else { return };
+    let (far, failed, pending, _) = views.census(&net_units, p.pos);
     info!(
-        "in game: player ({:.1}, {:.1}, {:.1}) | server units {} (drawn {}, built {}, failed {}) doodads {} (drawn {}, built {})",
+        "in game: player ({:.1}, {:.1}, {:.1}) | server units {} (drawn {}, built {}, failed {}; not drawn: {far} beyond {} m, {failed} without a model, {pending} waiting) doodads {} (drawn {}, built {})",
         p.pos.x,
         p.pos.y,
         p.pos.z,
@@ -236,6 +242,7 @@ fn report(
         views.unit_entities(),
         views.spawned_units,
         views.failed,
+        units::UNIT_RADIUS,
         net_doodads.by_id.len(),
         views.doodad_entities(),
         views.spawned_doodads

@@ -111,6 +111,10 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
     let mut entity = commands.entity(root);
     if let Some(set) = super::anim::shared_clip_set(&main, &cal_path, clips) {
         animator.play(set.idle.clone(), true, 0.0);
+        // monsters stand in a fighting stance while they fight (`fist_ba_combat_idle`)
+        if let Some(combat) = super::idle::combat_idle(&rig, &set.cal, clips) {
+            entity.insert(super::idle::IdleClips::new(None, Some(combat)));
+        }
         entity.insert(Locomotion::new((*set).clone()));
     }
     entity.insert((animator, Motion::default()));
