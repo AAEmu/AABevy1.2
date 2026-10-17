@@ -22,10 +22,11 @@
 //!
 //! * [`LayerLibrary`] (built once per world on a task, 0.3 s): reads the 16 entry `SurfaceTypes` table of every
 //!   cell's `leveldata.xml`, the `.mtl` of each `DetailMaterial` and every referenced texture and packs
-//!   them into three texture arrays, copying the DDS blocks (BC1 diffuse and BC5 normal maps at 512 px,
-//!   BC5 detail normal maps at 256 px, which also take the normal maps that are only 256 px), each with its
-//!   mip chain down to 4 px and at most 255 layers (the limit of a wgpu texture array is 256). The BC1
-//!   (`NORMAL_DXT1`) normal maps are transcoded to BC5.
+//!   them into three texture arrays, copying the DDS blocks (BC1 diffuse maps at 512 px, those that are
+//!   1024 px or more in a second array at 1024 px, BC5 normal and detail normal maps at 512 px, where
+//!   the 256 px ones are stored as 2 x 2 copies), each with its mip chain down to 4 px and at most 255
+//!   layers (the limit of a wgpu texture array is 256). The BC1 (`NORMAL_DXT1`) normal maps are transcoded
+//!   to BC5.
 //! * per cell: an `R8Uint` image of the 4 bit surface type of every 2 m sample (`heightmap.dat`) and a
 //!   uniform table (`TerrainParams`) with, for each of the 16 surface types and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
@@ -64,8 +65,9 @@ pub const SURFACE_TYPES: usize = 16;
 const PROJECTIONS: usize = 3;
 /// Vectors of the uniform table per surface type and projection.
 const ENTRY: usize = 4;
-/// Added to the normal slot of a layer whose normal map lives in the 256 px (detail) array.
-const SMALL_NORMAL: f32 = 1000.0;
+/// Added to the slot of a texture that is stored the other way: a diffuse map in the large (1024 px) array, a
+/// normal map of half the size as 2 x 2 copies (which the shader samples at half the uv).
+const ALT: f32 = 1000.0;
 /// Detail layers fade out like `1 - (d / DETAIL_DISTANCE)^4` (`e_detail_materials_view_dist_xy`, quality 4).
 pub const DETAIL_DISTANCE: f32 = 1024.0;
 
@@ -77,10 +79,11 @@ pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 pub struct TerrainParams {
     /// Linear colour factor (`WorldConfig::terrain_tint`), `w` = detail fade distance.
     pub tint: Vec4,
-    /// Four vectors per `(surface type * 3 + projection)`: `(diffuse slot, normal slot (+ 1000: in the detail
-    /// array), uv scale u, v)`,
+    /// Four vectors per `(surface type * 3 + projection)`: `(diffuse slot (+ 1000: in the large array),
+    /// normal slot (+ 1000: copies at half the uv), uv scale u, v)`,
     /// `(uv offset u, v, DetailTextureStrength, DetailBumpScale)`,
-    /// `(detail normal slot, detail uv scale u, v, 0)` and `(detail uv offset u, v, 0, 0)`;
+    /// `(detail normal slot (+ 1000), detail uv scale u, v, material colour r)` and
+    /// `(detail uv offset u, v, material colour g, b)`;
     /// a slot `< 0` means none.
     pub layers: [Vec4; SURFACE_TYPES * PROJECTIONS * ENTRY],
 }
@@ -109,12 +112,16 @@ impl Default for TerrainParams {
 pub struct TerrainExt {
     #[uniform(100)]
     pub params: TerrainParams,
+    /// Diffuse maps, BC1 512 px.
     #[texture(101, dimension = "2d_array")]
     #[sampler(102)]
     pub diffuse: Handle<Image>,
+    /// Normal and detail normal maps, BC5 512 px.
     #[texture(103, dimension = "2d_array")]
     #[sampler(104)]
     pub normals: Handle<Image>,
+    /// The large diffuse maps, BC1 1024 px (the field kept its name when it changed from the 256 px
+    /// detail normal maps, which now live in `normals`).
     #[texture(105, dimension = "2d_array")]
     #[sampler(106)]
     pub details: Handle<Image>,
@@ -133,18 +140,18 @@ impl MaterialExtension for TerrainExt {
 enum Kind {
     /// BC1, 512 px.
     Diffuse,
-    /// BC5 (x, y), 512 px.
+    /// BC5 (x, y), 512 px: normal maps and detail normal maps.
     Normal,
-    /// BC5 detail normal map, 256 px.
-    Detail,
+    /// BC1, 1024 px: the diffuse maps that are 1024 px or more.
+    Large,
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Diffuse, Kind::Normal, Kind::Detail];
+    const ALL: [Kind; 3] = [Kind::Diffuse, Kind::Normal, Kind::Large];
 
     /// Edge of a layer (px). Larger sources use their lower mips.
     fn px(self) -> u32 {
-        if self == Kind::Detail { 256 } else { 512 }
+        if self == Kind::Large { 1024 } else { 512 }
     }
 
     /// Mip levels of a layer: down to 4 px, where the DDS files of the pak stop.
@@ -153,11 +160,11 @@ impl Kind {
     }
 
     fn format(self) -> TextureFormat {
-        if self == Kind::Diffuse { TextureFormat::Bc1RgbaUnorm } else { TextureFormat::Bc5RgUnorm }
+        if self == Kind::Normal { TextureFormat::Bc5RgUnorm } else { TextureFormat::Bc1RgbaUnorm }
     }
 
     fn block_bytes(self) -> usize {
-        if self == Kind::Diffuse { 8 } else { 16 }
+        if self == Kind::Normal { 16 } else { 8 }
     }
 
     /// Bytes of one layer with its whole mip chain.
@@ -169,10 +176,8 @@ impl Kind {
 /// One projection of a surface material (x, y or z sub-material).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Projection {
-    diffuse: Option<u16>,
-    /// Slot of the normal map in the normal array, or in the 256 px detail array when `normal_small`.
-    normal: Option<u16>,
-    normal_small: bool,
+    diffuse: Option<Tex>,
+    normal: Option<Tex>,
     /// `TexMod` tiling of the diffuse map.
     tile: [f32; 2],
     /// `DetailTextureStrength`.
@@ -181,9 +186,23 @@ struct Projection {
     color: [f32; 3],
     /// The detail normal map (`Detail` texture, `DETAIL_BUMP_MAPPING`), its tiling relative to the layer
     /// uv (`DetailBumpTillingU / V`) and `DetailBumpScale`.
-    detail: Option<u16>,
+    detail: Option<Tex>,
     detail_tile: [f32; 2],
     detail_scale: f32,
+}
+
+/// A layer of an array and whether it is stored the other way (see [`ALT`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Tex {
+    slot: u16,
+    alt: bool,
+}
+
+impl Tex {
+    /// The value in the uniform table.
+    fn code(self) -> f32 {
+        self.slot as f32 + if self.alt { ALT } else { 0.0 }
+    }
 }
 
 /// A `.mtl` reduced to what the terrain shader needs.
@@ -224,14 +243,14 @@ type CellTable = [(u32, [f32; 2]); SURFACE_TYPES];
 pub struct LayerLibrary {
     mats: Vec<SurfaceMaterial>,
     cells: HashMap<(i32, i32), CellTable>,
-    /// Layers in the diffuse / normal / detail array.
+    /// Layers in the diffuse / normal / large diffuse array.
     pub layers: [usize; 3],
 }
 
 /// What the loading task returns: the library and the three array images.
 pub struct BuiltLayers {
     pub library: LayerLibrary,
-    /// Diffuse, normal and detail normal arrays.
+    /// Diffuse, normal (and detail normal) and large diffuse arrays.
     pub images: [Image; 3],
 }
 
@@ -274,45 +293,46 @@ impl LayerLibrary {
 
         // 2. the materials and the texture files they use (weighted by the cells that use the material)
         let loaded: Vec<Option<[Option<RawProjection>; PROJECTIONS]>> = parallel(&mat_paths, |p| load_material(p));
-        let mut wants: [HashMap<String, usize>; 3] = Default::default();
+        // diffuse maps, and normal maps with detail normal maps (they share an array)
+        let mut wants: [HashMap<String, usize>; 2] = Default::default();
         for (mat, raw) in loaded.iter().enumerate() {
             let Some(raw) = raw else { continue };
             for pr in raw.iter().flatten() {
-                for (kind, path) in [(0, &pr.diffuse), (1, &pr.normal), (2, &pr.detail)] {
+                for (set, path) in [(0, &pr.diffuse), (1, &pr.normal), (1, &pr.detail)] {
                     if let Some(path) = path {
-                        let seen = wants[kind].entry(path.clone()).or_default();
+                        let seen = wants[set].entry(path.clone()).or_default();
                         *seen = (*seen).max(mat_cells[mat]);
                     }
                 }
             }
         }
 
-        // 3. read the textures (the most used first), keep what fits the arrays; normal maps that are not
-        // 512 px go to the 256 px array
-        let mut slots: [HashMap<String, u16>; 3] = Default::default();
+        // 3. read the textures (the most used first) into the arrays, as many as fit
+        let mut slots: [HashMap<String, Tex>; 2] = Default::default();
         let mut data: [Vec<u8>; 3] = Default::default();
-        for (k, kind) in Kind::ALL.into_iter().enumerate() {
-            let mut paths: Vec<(&String, &usize)> = wants[k].iter().collect();
+        let mut layers = [0usize; 3];
+        for (set, normal) in [(0, false), (1, true)] {
+            let mut paths: Vec<(&String, &usize)> = wants[set].iter().collect();
             paths.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
             let paths: Vec<String> = paths.into_iter().map(|(p, _)| p.clone()).collect();
-            let layers = parallel(&paths, |p| load_layer(p, kind));
+            let loaded = parallel(&paths, |p| load_layer(p, normal));
             let mut dropped = 0;
-            for (path, layer) in paths.into_iter().zip(layers) {
-                match layer {
-                    Some(bytes) if slots[k].len() < MAX_LAYERS => {
-                        slots[k].insert(path, slots[k].len() as u16);
-                        data[k].extend_from_slice(&bytes);
-                    }
-                    _ if kind == Kind::Normal => {
-                        let uses = wants[1][&path];
-                        let seen = wants[2].entry(path).or_default();
-                        *seen = (*seen).max(uses);
-                    }
-                    _ => dropped += 1,
+            for (path, layer) in paths.into_iter().zip(loaded) {
+                let Some(layer) = layer else {
+                    dropped += 1;
+                    continue;
+                };
+                let k = layer.kind as usize;
+                if layers[k] >= MAX_LAYERS {
+                    dropped += 1;
+                    continue;
                 }
+                slots[set].insert(path, Tex { slot: layers[k] as u16, alt: layer.alt });
+                layers[k] += 1;
+                data[k].extend_from_slice(&layer.data);
             }
             if dropped > 0 {
-                debug!("aa-world: terrain layers: {dropped} unusable {kind:?} textures");
+                debug!("aa-world: terrain layers: {dropped} unusable {} textures", ["diffuse", "normal"][set]);
             }
         }
 
@@ -324,19 +344,16 @@ impl LayerLibrary {
                 if let Some(raw) = raw {
                     for (p, pr) in raw.iter().enumerate() {
                         let Some(pr) = pr else { continue };
-                        let slot = |k: usize, path: &Option<String>| path.as_ref().and_then(|t| slots[k].get(t).copied());
+                        let slot = |set: usize, path: &Option<String>| path.as_ref().and_then(|t| slots[set].get(t).copied());
                         let diffuse = slot(0, &pr.diffuse);
                         if diffuse.is_some() {
-                            let small = pr.normal.as_ref().and_then(|t| slots[2].get(t).copied());
-                            let big = slot(1, &pr.normal);
                             m.proj[p] = Some(Projection {
                                 diffuse,
-                                normal: big.or(small),
-                                normal_small: big.is_none() && small.is_some(),
+                                normal: slot(1, &pr.normal),
                                 tile: pr.tile,
                                 strength: pr.strength,
                                 color: pr.color,
-                                detail: slot(2, &pr.detail),
+                                detail: slot(1, &pr.detail),
                                 detail_tile: pr.detail_tile,
                                 detail_scale: pr.detail_scale,
                             });
@@ -346,14 +363,13 @@ impl LayerLibrary {
                 m
             })
             .collect();
-        let layers = [slots[0].len(), slots[1].len(), slots[2].len()];
         info!(
-            "aa-world: terrain layers of {world}: {} cells, {} materials, {} diffuse + {} normal + {} detail maps ({:.0} MB), {:.1} s",
+            "aa-world: terrain layers of {world}: {} cells, {} materials, {} diffuse + {} large diffuse + {} normal maps ({:.0} MB), {:.1} s",
             tables.len(),
             mats.len(),
             layers[0],
-            layers[1],
             layers[2],
+            layers[1],
             data.iter().map(Vec::len).sum::<usize>() as f32 / 1e6,
             started.elapsed().as_secs_f32()
         );
@@ -363,7 +379,7 @@ impl LayerLibrary {
             images: [
                 layer_array(d0, layers[0], Kind::Diffuse),
                 layer_array(d1, layers[1], Kind::Normal),
-                layer_array(d2, layers[2], Kind::Detail),
+                layer_array(d2, layers[2], Kind::Large),
             ],
         })
     }
@@ -390,18 +406,13 @@ impl LayerLibrary {
                 let (su, sv) = (scale[0] * proj.tile[0], scale[1] * proj.tile[1]);
                 let off = offset(p, su, sv);
                 let i = (s * PROJECTIONS + p) * ENTRY;
-                params.layers[i] = Vec4::new(
-                    proj.diffuse.map_or(-1.0, |v| v as f32),
-                    proj.normal.map_or(-1.0, |v| v as f32 + if proj.normal_small { SMALL_NORMAL } else { 0.0 }),
-                    su,
-                    sv,
-                );
+                params.layers[i] = Vec4::new(proj.diffuse.map_or(-1.0, Tex::code), proj.normal.map_or(-1.0, Tex::code), su, sv);
                 params.layers[i + 1] = Vec4::new(off[0], off[1], proj.strength, proj.detail_scale);
                 if let Some(detail) = proj.detail {
                     // the detail map is tiled over the layer uv: `uv * tiling`
                     let (du, dv) = (su * proj.detail_tile[0], sv * proj.detail_tile[1]);
                     let doff = offset(p, du, dv);
-                    params.layers[i + 2] = Vec4::new(detail as f32, du, dv, 0.0);
+                    params.layers[i + 2] = Vec4::new(detail.code(), du, dv, 0.0);
                     params.layers[i + 3] = Vec4::new(doff[0], doff[1], 0.0, 0.0);
                 }
                 params.layers[i + 2].w = proj.color[0];
@@ -521,44 +532,88 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
     })
 }
 
-/// One layer of an array from a DDS: `kind.px()` square, its mip chain, BC1 (diffuse) or BC5 with X in red
-/// (normal maps); `None` for any other size or format. Bigger sources use their lower mips.
-fn load_layer(path: &str, kind: Kind) -> Option<Vec<u8>> {
+/// A texture ready for an array.
+struct Layer {
+    kind: Kind,
+    /// A diffuse map in the large array, or a normal map stored as 2 x 2 copies (see [`ALT`]).
+    alt: bool,
+    /// `kind.layer_bytes()` of blocks.
+    data: Vec<u8>,
+}
+
+/// One layer of an array from a DDS, BC1 (diffuse) or BC5 with X in red (normal maps), with its mip chain.
+/// A diffuse map goes to the 1024 px array when it is that big, else to the 512 px one; a normal map to the
+/// 512 px array, where a 256 px one is stored as 2 x 2 copies (the shader samples those at half the uv, which
+/// gives the original back). `None` for any other size or format. Bigger sources use their lower mips.
+fn load_layer(path: &str, normal: bool) -> Option<Layer> {
     let bytes = aa_cry::read(path).ok()?;
     let dds = Dds::parse(&bytes).ok()?;
-    let px = kind.px();
-    if dds.faces != 1 || dds.depth != 1 || dds.width != dds.height || !dds.width.is_power_of_two() || dds.width < px {
+    if dds.faces != 1 || dds.depth != 1 || dds.width != dds.height || !dds.width.is_power_of_two() {
         return None;
     }
-    let skip = (dds.width / px).trailing_zeros();
-    if dds.mips < skip + kind.mips() {
+    let kind = match (normal, dds.width >= Kind::Large.px()) {
+        (true, _) => Kind::Normal,
+        (false, true) => Kind::Large,
+        (false, false) => Kind::Diffuse,
+    };
+    let copies = normal && dds.width * 2 == kind.px();
+    if dds.width < kind.px() && !copies {
         return None;
     }
-    let mut out = Vec::with_capacity(kind.layer_bytes());
-    for mip in skip..skip + kind.mips() {
-        let src = &dds.data[dds.surface_range(0, mip)];
-        match (kind, dds.format) {
-            (Kind::Diffuse, DdsFormat::Bc1) => out.extend_from_slice(src),
-            // the colour half of a BC3 block is a BC1 block
-            (Kind::Diffuse, DdsFormat::Bc3) => src.as_chunks::<16>().0.iter().for_each(|b| out.extend_from_slice(&b[8..])),
-            // x in red, y in green of a BC1 normal map
-            (Kind::Normal | Kind::Detail, DdsFormat::Bc1) => src.as_chunks::<8>().0.iter().for_each(|b| {
-                let texels = bc1_block(b);
-                out.extend_from_slice(&bc4_block(&texels.map(|t| t[0])));
-                out.extend_from_slice(&bc4_block(&texels.map(|t| t[1])));
-            }),
-            (Kind::Normal | Kind::Detail, DdsFormat::Bc5) => {
-                if dds.swapped_rg {
-                    src.as_chunks::<16>().0.iter().for_each(|b| {
-                        out.extend_from_slice(&b[8..]);
-                        out.extend_from_slice(&b[..8]);
-                    });
-                } else {
-                    out.extend_from_slice(src);
+    let skip = if copies { 0 } else { (dds.width / kind.px()).trailing_zeros() };
+    // copies have one mip less to read: their last one (4 px) repeats the 4 px level of the source
+    let mips = kind.mips() - copies as u32;
+    if dds.mips < skip + mips {
+        return None;
+    }
+    let mut data = Vec::with_capacity(kind.layer_bytes());
+    let mut level = Vec::new();
+    for mip in skip..skip + mips {
+        level = convert(&dds.data[dds.surface_range(0, mip)], &dds, kind)?;
+        if copies {
+            let blocks = ((dds.width >> mip).max(4) / 4) as usize;
+            let row = blocks * kind.block_bytes();
+            for _ in 0..2 {
+                for r in level.chunks(row) {
+                    data.extend_from_slice(r);
+                    data.extend_from_slice(r);
                 }
             }
-            _ => return None,
+        } else {
+            data.extend_from_slice(&level);
         }
+    }
+    if copies {
+        data.extend_from_slice(&level);
+    }
+    debug_assert_eq!(data.len(), kind.layer_bytes());
+    Some(Layer { kind, alt: copies || kind == Kind::Large, data })
+}
+
+/// The blocks of one mip level as the array of `kind` wants them: BC1, or BC5 with x in red.
+fn convert(src: &[u8], dds: &Dds, kind: Kind) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(src.len());
+    match (kind == Kind::Normal, dds.format) {
+        (false, DdsFormat::Bc1) => out.extend_from_slice(src),
+        // the colour half of a BC3 block is a BC1 block
+        (false, DdsFormat::Bc3) => src.as_chunks::<16>().0.iter().for_each(|b| out.extend_from_slice(&b[8..])),
+        // x in red, y in green of a BC1 normal map
+        (true, DdsFormat::Bc1) => src.as_chunks::<8>().0.iter().for_each(|b| {
+            let texels = bc1_block(b);
+            out.extend_from_slice(&bc4_block(&texels.map(|t| t[0])));
+            out.extend_from_slice(&bc4_block(&texels.map(|t| t[1])));
+        }),
+        (true, DdsFormat::Bc5) => {
+            if dds.swapped_rg {
+                src.as_chunks::<16>().0.iter().for_each(|b| {
+                    out.extend_from_slice(&b[8..]);
+                    out.extend_from_slice(&b[..8]);
+                });
+            } else {
+                out.extend_from_slice(src);
+            }
+        }
+        _ => return None,
     }
     Some(out)
 }
@@ -628,7 +683,7 @@ enum LayersState {
     /// the terrain then shows the decoded cover colour only.
     Ready {
         library: Option<Arc<LayerLibrary>>,
-        /// Diffuse, normal and detail normal arrays.
+        /// Diffuse, normal and large diffuse arrays.
         arrays: [Handle<Image>; 3],
     },
 }
@@ -742,7 +797,7 @@ mod tests {
         // 512 px BC1 down to 4 px: 128 x 128 blocks of 8 bytes and the chain below
         assert_eq!(Kind::Diffuse.layer_bytes(), 174_760);
         assert_eq!(Kind::Normal.layer_bytes(), 349_520);
-        assert_eq!(Kind::Detail.layer_bytes(), 87_376);
+        assert_eq!(Kind::Large.layer_bytes(), 699_048);
     }
 
     #[test]
@@ -778,13 +833,34 @@ mod tests {
         }
         // a DXT1 normal map is transcoded to BC5, a 1024 px one is read from its 512 px mip
         for path in ["wasteland/w_forest_white_sand_a_ddn", "field/tr_field_dirt_241a_ddn"] {
-            let n = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), Kind::Normal).unwrap();
-            assert_eq!(n.len(), Kind::Normal.layer_bytes(), "{path}");
+            let n = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), true).unwrap();
+            assert_eq!((n.kind, n.alt, n.data.len()), (Kind::Normal, false, Kind::Normal.layer_bytes()), "{path}");
         }
-        // a 256 px normal map only fits the detail array
+        // a 256 px normal map is stored as 2 x 2 copies: the first row of blocks is the source's row twice
         let small = "game/textures/aa_terrain/canyon/cliff_rock_b_ddn.dds";
-        assert!(load_layer(small, Kind::Normal).is_none());
-        assert_eq!(load_layer(small, Kind::Detail).unwrap().len(), Kind::Detail.layer_bytes());
+        let n = load_layer(small, true).unwrap();
+        assert_eq!((n.kind, n.alt, n.data.len()), (Kind::Normal, true, Kind::Normal.layer_bytes()));
+        let row = 64 * Kind::Normal.block_bytes();
+        assert_eq!(n.data[..row], n.data[row..2 * row]);
+        // a 256 px map is no diffuse map
+        assert!(load_layer(small, false).is_none());
+    }
+
+    /// Diffuse maps of 1024 px and more go to the large array (the 2048 px ground of Austera from its 1024 px
+    /// mip), 512 px ones to the normal diffuse array.
+    #[test]
+    fn large_diffuse_maps() {
+        if !crate::pak_available() {
+            return;
+        }
+        for (path, kind) in [
+            ("canyon/cliff_grey_with_dry_bushes", Kind::Large),
+            ("canyon/cliff_is7", Kind::Large),
+            ("canyon/w_cliff_rock_02", Kind::Diffuse),
+        ] {
+            let d = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), false).unwrap();
+            assert_eq!((d.kind, d.alt, d.data.len()), (kind, kind == Kind::Large, kind.layer_bytes()), "{path}");
+        }
     }
 
     /// The material's `Diffuse` colour reaches the table (the Royal Palace court yard is `tr_af_pavingstone_001b`,
@@ -812,7 +888,7 @@ mod tests {
         // the Nuian spawn cell and its southern neighbour (rock cliff + grass)
         let built = LayerLibrary::build("main_world", [(15, 15), (15, 14)].into_iter()).unwrap();
         let lib = &built.library;
-        assert!(lib.layers[0] > 5 && lib.layers[1] > 5 && lib.layers[2] > 0, "{:?}", lib.layers);
+        assert!(lib.layers[0] > 5 && lib.layers[1] > 5, "{:?}", lib.layers);
         let params = lib.params((15, 14), Vec3::ONE).unwrap();
         let entry = |s: usize, p: usize| &params.layers[(s * PROJECTIONS + p) * ENTRY..(s * PROJECTIONS + p + 1) * ENTRY];
         // nibble 3 of cell 015_014 is a rock with three projections
@@ -822,8 +898,10 @@ mod tests {
         assert!(entry(1, 2)[2].x >= 0.0 && (entry(1, 2)[2].y - 0.2 * 0.75).abs() < 1e-5, "{:?}", entry(1, 2));
         for (k, kind) in Kind::ALL.into_iter().enumerate() {
             let image = &built.images[k];
-            assert_eq!(image.texture_descriptor.size.depth_or_array_layers as usize, lib.layers[k]);
-            assert_eq!(image.data.as_ref().unwrap().len(), lib.layers[k] * kind.layer_bytes());
+            // an array without layers holds one placeholder
+            let layers = lib.layers[k].max(1);
+            assert_eq!(image.texture_descriptor.size.depth_or_array_layers as usize, layers);
+            assert_eq!(image.data.as_ref().unwrap().len(), layers * kind.layer_bytes());
         }
     }
 
