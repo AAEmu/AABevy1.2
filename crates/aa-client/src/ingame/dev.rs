@@ -8,7 +8,8 @@
 //! * `--hour H`, `--zone ID`  time of day (aa-world's `WorldClock`); without `--hour` the hour follows the server's game clock.
 //! * `--hair-color ID`  `hair_colors.id` to use instead of the one the server saved.
 //! * `--hide-part N`  hide the N-th part of the player character (0 = body, 1 = face, ...)
-//! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit.
+//! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit; `--cam-fov DEG` its vertical field of view
+//!   (the game's default is 42.75; the real client's `cl_fov 75` is 71.25).
 //! * `--leave-after S`  go back to the character list S seconds after the player appeared (client side only).
 //! * `--no-prewarm`  do not compile the world's pipelines on the character list (`prewarm`).
 //! * `--start-after S`  press Start S seconds after the character list came up (every visit; `--goto` presses it itself
@@ -28,6 +29,7 @@ pub struct DevOptions {
     pub cam_yaw: Option<f32>,
     pub cam_pitch: Option<f32>,
     pub cam_dist: Option<f32>,
+    pub cam_fov: Option<f32>,
     pub hide_part: Option<usize>,
     pub hair_color: Option<u32>,
     pub leave_after: Option<f32>,
@@ -82,6 +84,7 @@ impl DevOptions {
             cam_yaw: num("--cam-yaw").map(f32::to_radians),
             cam_pitch: num("--cam-pitch").map(f32::to_radians),
             cam_dist: num("--cam-dist"),
+            cam_fov: num("--cam-fov"),
             hide_part: num("--hide-part").map(|n| n as usize),
             hair_color: one("--hair-color").and_then(|v| v.parse().ok()),
             leave_after: num("--leave-after"),
