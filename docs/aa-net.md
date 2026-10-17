@@ -734,6 +734,55 @@ Native party event contracts (all indices are global one-based slots, 1..50):
 * `TEAM_MEMBER_UNIT_ID_CHANGED(memberIndex, oldObjectIdString, newObjectIdString)`.
 * `TEAM_ROLE_CHANGED(memberIndex, role)`.
 
+Raid commands use the same `Command::Party` path:
+
+* `ConvertToRaid { team_id }` (0x080).
+* `SetRole { team_id, member_id, role }` (0x085): 0 undecided, 1 tank, 2 healer, 3 attacker.
+  The lane accepts only the sending member's own role. Original Lua calls `X2Team:SetRole(role)`.
+* `MoveMember { team_id, id_from, id_to, from, to }` (0x081): **zero-based** slots 0..49;
+  `id_to: 0` means an empty destination. `Party::plan_move(from,to)` resolves both IDs from
+  the latest slots. Moves swap slots, preserving sparse groups and member vitals/roles.
+* `ChangeLootingRule { team_id, rule: LootingRule, flags }` (0x083): flags 1 method, 2 grade,
+  4 master character ID, 8 roll for bind-on-pickup. Methods are 0 free, 1 rotate, 2 master,
+  255 public; switching away from master clears the master ID in the server response.
+* `SetMarker { team_id, index, kind, id }` (0x086): index0..11, kind0 clear / 1 character ID /
+  2 object ID. Reset all uses index-2, kind0, id0. Object IDs use three bytes; character IDs
+  use four. The server echoes clears as kind1/id0; the reducer normalizes them to `(0,0)`.
+* `SetPing { team_id, has_ping, pos, instance_id }` (0x087): plain f32 world coordinates.
+  `has_ping:false` clears the current ping. Marker/ping requests with team0 are solo echoes.
+* `InviteArea { team_id, is_party }` (0x07b): exact request only; see the server gap below.
+
+Role, conversion, move, loot, marker and ping acknowledgements are existing `PartyEvent`
+variants and fold into `Party`; commands never modify confirmed state. Invalid roles, IDs,
+slots, flags, grades, marker types/indices or non-finite ping coordinates emit local
+`PartyEvent::RequestRejected(message)` without sending. This validates the wire domain;
+the application still checks current membership and authority. The lane silently ignores
+unauthorized commands. Conversion, member moves and looting rules require the owner;
+raid markers require the owner, while party markers allow members. Pings require the
+owner or a character ID present in the marks. Reset/leave/disconnect clears these resources.
+
+Original Lua uses `MoveTeamMember(fromIndex,toIndex)` and
+`MoveTeamMemberToParty(memberIndex,partyIndex)` with **one-based** member and group indices.
+Native wrappers `394b07a0`/`394b07d0` subtract one; the latter picks the destination group's
+first free slot. `X2Unit:SetOverHeadMarker(unitToken,index)` likewise converts Lua1..12 to
+wire0..11 (`394bb9b0`). Lua consumes `SET_OVERHEAD_MARK(unitIdString,index,visible)` and
+`TEAM_MEMBERS_CHANGED("moved",isParty,fromIndex,toIndex)`. Loot UI calls
+`ChangeLootingRule(method,masterName,minimumGrade,rollForBop)`; notices are
+`LOOTING_RULE_METHOD_CHANGED(method)`, `LOOTING_RULE_MASTER_CHANGED(name)`,
+`LOOTING_RULE_GRADE_CHANGED(grade)` and `LOOTING_RULE_BOP_CHANGED(0|1)`.
+
+Server limits: officer assignment has no 1.2 opcode (`CSSetTeamOfficer=0xfff`), conversion
+back to party has no supported request, and dungeon raid conversion remains a server TODO.
+Area invitations select friendly/neutral players within100m, but the lane's accepted
+`is_area` branch removes the invitation without joining (TODO); no successful area join is
+fabricated. Area broadcasts were not live-tested. Loot dice packets remain a separate gap.
+
+`cargo test -p aa-net --test live_party raid_roles_sparse_moves_loot_markers_and_pings --
+--ignored --nocapture` passed in10.40s using two fresh characters (IDs33/34, team6):
+self roles1/2, conversion, slot1->9 then0<->9, all loot fields, automatic master clearing,
+character/object markers, a marked-member ping, single/all clear, ping removal and raid
+dismissal. Both clients observed matching acknowledged state and logged out cleanly.
+
 The packet handlers and `393077xx` onward in the native client confirm the membership arguments;
 the original `x2ui/unitframe/party.lua` and `raidteammanager/manager.lua` consume them. A generic
 roster refresh alone loses the original localized notices and specific offline/unit-ID handling.
@@ -767,8 +816,9 @@ grade is parsed but currently ignored by the server's item acquisition; show the
 
 Both wire `Item.grade` and `merchant_goods.grade_id` are raw `item_grades.id` values.
 Lua display order is a separate `grade_order` (raw ID0 = order1 Basic; raw ID1 = order0 Crude).
-The refund lookup uses raw ID: per-unit refund is `items.refund * refund_multiplier / 100f32`,
-truncated to an integer, then multiplied by stack count. A zero refund remains zero; there is
+The refund lookup uses raw ID: per-unit refund multiplies `items.refund * refund_multiplier`
+in i64, converts that product to f32 and divides by100, truncates, then multiplies by stack count.
+A zero refund remains zero; there is
 no fallback to the purchase price. Buyback charges this same refund. Native
 `GetSellItemsMaxCount` returns 16 (method `394ae840`, float constant `3999f964`), making the
 original cart ten cells (`16 - 6`) and sell list sixteen.

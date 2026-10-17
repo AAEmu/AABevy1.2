@@ -4,7 +4,10 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aa_net::model::{chat_type, gender, race};
-use aa_net::{Client, Command, CreateCharacter, Event, LeaveTarget, MoveCommand, PartyCommand, PartyEvent, WorldState};
+use aa_net::{
+    Client, Command, CreateCharacter, Event, LeaveTarget, LootingRule, MoveCommand, PartyCommand, PartyEvent,
+    WorldState,
+};
 use anyhow::{Context, Result, bail, ensure};
 
 struct Peer {
@@ -28,6 +31,7 @@ impl Peer {
                     Event::ServerError { code } => bail!("{what}: server error {code}"),
                     Event::CharacterCreateFailed { reason } => bail!("{what}: character creation failed {reason}"),
                     Event::EnterWorldDenied { reason } => bail!("{what}: world denied {reason}"),
+                    Event::Party(PartyEvent::RequestRejected(message)) => bail!("{what}: {message}"),
                     _ => {}
                 }
                 if pick(&event, &self.state) {
@@ -70,6 +74,108 @@ impl Peer {
         self.client.send(Command::LeaveWorld(LeaveTarget::Quit));
         self.until("logout", |e, _| matches!(e, Event::LeftWorld { .. })).await
     }
+}
+
+async fn raid_exercise(a: &mut Peer, b: &mut Peer) -> Result<()> {
+    let (a_id, b_id) = (a.state.stats.character_id, b.state.stats.character_id);
+    let team_id = form(a, b).await?;
+    a.send(PartyCommand::SetRole { team_id, member_id: a_id, role: 1 });
+    b.send(PartyCommand::SetRole { team_id, member_id: b_id, role: 2 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("self-selected roles", |_, s| {
+            s.party.member(a_id).is_some_and(|m| m.role == 1) && s.party.member(b_id).is_some_and(|m| m.role == 2)
+        })
+        .await?;
+    }
+    a.send(PartyCommand::ConvertToRaid { team_id });
+    a.until("owner raid conversion", |_, s| s.party.id == team_id && !s.party.is_party).await?;
+    b.until("member raid conversion", |_, s| s.party.id == team_id && !s.party.is_party).await?;
+    println!("raid: converted and both self-selected roles agree");
+
+    a.send(a.state.party.plan_move(1, 9).context("missing source for sparse move")?);
+    for peer in [&mut *a, &mut *b] {
+        peer.until("move to empty slot", |_, s| s.party.member(b_id).is_some_and(|m| m.slot == 9)).await?;
+    }
+    a.send(a.state.party.plan_move(0, 9).context("missing source for swap")?);
+    for peer in [&mut *a, &mut *b] {
+        peer.until("swap occupied slots", |_, s| {
+            s.party.member(a_id).is_some_and(|m| m.slot == 9 && m.role == 1)
+                && s.party.member(b_id).is_some_and(|m| m.slot == 0 && m.role == 2)
+        })
+        .await?;
+    }
+    println!("raid slots: moved into another group's empty slot then swapped, preserving roles");
+
+    let rule = LootingRule { method: 2, minimum_grade: 4, loot_master: b_id, roll_for_bind_on_pickup: false };
+    a.send(PartyCommand::ChangeLootingRule { team_id, rule, flags: 15 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("master loot rules", |_, s| s.party.looting_rule == rule).await?;
+    }
+    a.send(PartyCommand::ChangeLootingRule { team_id, rule: LootingRule { method: 1, ..rule }, flags: 1 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("rotate clears master", |_, s| {
+            s.party.looting_rule == LootingRule { method: 1, loot_master: 0, ..rule }
+        })
+        .await?;
+    }
+    println!("loot: all four settings confirmed; rotate clears loot master on the server");
+
+    a.send(PartyCommand::SetMarker { team_id, index: 0, kind: 1, id: b_id });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("character marker", |_, s| s.party.marks[0] == (1, b_id)).await?;
+    }
+    let pos = b.state.player.spawn.as_ref().context("missing ping position")?.unit.pos;
+    b.send(PartyCommand::SetPing { team_id, has_ping: true, pos, instance_id: 0 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("marked member ping", |_, s| s.party.ping == Some((pos, 0))).await?;
+    }
+    let obj_id = b.state.stats.obj_id;
+    a.send(PartyCommand::SetMarker { team_id, index: 1, kind: 2, id: obj_id });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("object marker", |_, s| s.party.marks[1] == (2, obj_id)).await?;
+    }
+    a.send(PartyCommand::SetMarker { team_id, index: 1, kind: 0, id: 0 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("clear one marker", |_, s| s.party.marks[1] == (0, 0) && s.party.marks[0] == (1, b_id)).await?;
+    }
+    a.send(PartyCommand::SetMarker { team_id, index: -2, kind: 0, id: 0 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("reset all markers", |_, s| s.party.marks == [(0, 0); 12]).await?;
+    }
+    a.send(PartyCommand::SetPing { team_id, has_ping: false, pos, instance_id: 0 });
+    for peer in [&mut *a, &mut *b] {
+        peer.until("clear ping", |_, s| s.party.ping.is_none()).await?;
+    }
+    println!("marks/ping: character and object markers, marked-member ping, one/all clear confirmed");
+
+    a.send(PartyCommand::Dismiss { team_id });
+    for peer in [a, b] {
+        peer.until("dismiss raid", |e, s| matches!(e, Event::Party(PartyEvent::Dismissed { .. })) && s.party.id == 0)
+            .await?;
+        ensure!(peer.state.party.members.is_empty() && peer.state.party.marks == [(0, 0); 12]);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires the bevy lane; creates two throw-away accounts/characters"]
+async fn raid_roles_sparse_moves_loot_markers_and_pings() -> Result<()> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let mut a = Peer::login(stamp, "ra").await?;
+    let mut b = match Peer::login(stamp, "rb").await {
+        Ok(peer) => peer,
+        Err(error) => {
+            let _ = a.logout().await;
+            return Err(error);
+        }
+    };
+    let result = raid_exercise(&mut a, &mut b).await;
+    let (out_a, out_b) = tokio::join!(a.logout(), b.logout());
+    result?;
+    out_a?;
+    out_b?;
+    println!("both raid test clients logged out cleanly");
+    Ok(())
 }
 
 async fn form(a: &mut Peer, b: &mut Peer) -> Result<u32> {
