@@ -25,6 +25,10 @@ X2Team.IsTeamOwner = function(self, index) local m=member(index); return m ~= ni
 X2Team.IsTeamOfficer = function() return false end
 X2Team.GetRole = function(self, index) local m=member(index); return m and m.role or 0 end
 X2Team.IsTargetMyTeam = function() return unit("target") ~= nil end
+X2Team.IsTargetMe = function() return HUD.target ~= nil and HUD.target.unit_id == HUD.state.unit_id end
+X2Team.GetMemberIndexByName = function(self,name)
+  for i,m in pairs(T().members) do if m.name==name then return i end end
+end
 X2Team.GetTeamDistributorName = function()
   for _, m in pairs(T().members) do if m.id == T().loot_master then return m.name end end
 end

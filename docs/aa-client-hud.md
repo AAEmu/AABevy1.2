@@ -655,3 +655,42 @@ broadcast. `shots/hud/sol61-raid/raid_04.png`, `_05.png` and `_06.png` were insp
 ping pulse and original raid roster/role colors. There were zero Lua errors. Representative
 1920x1080 FPS was 68-95 on the shared machine. Geometry/icon positions are not claimed as an
 exact reference match without a corresponding real raid capture.
+
+## Friends and blocked users (2026-10-17)
+
+`friends.rs` binds the original relationship tabs and character/chat popup predicates to
+`aa_net::Friends`. Add/remove/block/unblock queue real commands; list membership changes only
+on acknowledged state. Self/duplicate/missing-entry checks are local preflight notices. Silent
+lane refusals time out after20seconds with a localized failure notice, without inventing a
+server reply or changing membership. Online status updates refresh rows and online counts;
+returning friends use the original localized online-acquaintance notice.
+
+Native list rows retain columns1name/2level/3abilities/4location/5race/6online/7in-party.
+Deletion sends the name string instead of a row. Pagination filters offline entries before
+stable level-descending sorting (native merge39302f90); `RequestFriendList` is a local cache
+query. The app uses ten rows per page. Native's runtime page-size global is still unresolved,
+so ten is an explicit app choice. Unused English column4 shows localized Offline; the native
+offline elapsed-duration formatter remains unrecovered. Block-list rows retain their one-name
+shape. `GetFriendList`, `IsMyFriend` and `IsBlockedUser` support the original popup/gift callers.
+
+Live/replayed displayed chat filters blocked character names case-insensitively; raw network
+events/logs remain intact, and system lines are retained. Login list snapshots survive stage
+construction and feed the first UI queries. Both HUD entry paths wait for background game
+tables before loading native scripts; an empty-table original-stage fixture stalled, while
+the same fixture with actual game data loaded completed its stage in about2seconds.
+
+Validation: 110 default client tests pass, with 14 intentional probes ignored. The separate
+original-stage fixture passes with actual game tables: the original blocked-user popup queues
+Unblock, a simulated acknowledgement removes its row, the original offline checkbox refreshes
+the friend row and count, and its original delete popup queues Remove. Focused tests cover native rows/name deletion, commands without
+optimistic mutation, filtering/sorting/pagination and blocked live/replayed chat with the raw
+log unchanged. A fresh headless peer55 whispered only our client47 every5seconds. The original
+friend Add button confirmed its online row; the original Block button confirmed membership,
+and12seconds of incoming whispers were absent from displayed chat. The inspected original
+block-tab capture is `shots/hud/sol61-social/social_02.png`, about78-88FPS at1920x1080.
+The first popup fixture mistakenly read a global where original Lua has a local upvalue;
+the corrected fixture retains the original constructor result. Subsequent live follow-up is
+blocked by the lane-server connection timeout after the separate auction/refund test. Native
+unblock/offline/delete script checks pass in the isolated original-stage fixture. Full
+live unblock/offline/restart coverage is explicitly pending. The headless peer logged out;
+all root test windows exited.
