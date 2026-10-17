@@ -198,10 +198,20 @@ quadtree, anisotropy 8, **non-sRGB**: see the cover texel encoding), `uv = (y / 
 **Detail layers** (`terrain_layers.rs`, `terrain_layers.wesl`): one `TerrainMaterial` per cell = `StandardMaterial` (cover texel as its base colour
 texture, lighting, shadows, fog) extended with a fragment shader that decodes the cover colour and blends the surface type layers in gamma
 space like the engine (see "client/leveldata.xml"). `LayerLibrary::build` runs once per world on a task (0.3 s for main_world, cells wait for it):
-it reads all 1205 `leveldata.xml`, the 315 `.mtl` and copies the DDS blocks of 240 diffuse (BC1, 512 px), 234 normal (BC5, 512 px) and 71 detail
-normal (BC5, 256 px) maps, mip chains down to 4 px, into three texture arrays (130 MB of VRAM; DXT1 normal maps are transcoded to BC5 (two
-BC4 blocks from the decoded red and green), normal maps that are only 256 px go to the detail array (slot + 1000 in the table), other sizes
-or formats are skipped, and a texture array may have 256 layers, so 255 per array at most; larger sources use their lower mips). Per cell, the background load adds
+it reads all 1205 `leveldata.xml`, the 315 `.mtl` and copies the DDS blocks of 186 diffuse (BC1, 512 px), 54 large diffuse (BC1, 1024 px) and
+255 normal (BC5, 512 px; the normal maps and the `Detail` normal maps share the array) maps, mip chains down to 4 px, into three texture arrays
+(159 MB of VRAM). DXT1 normal maps are transcoded to BC5 (two BC4 blocks from the decoded red and green). A diffuse map of 1024 px or more
+goes to the large array (the diffuse array holds the 512 px ones, `TerrainExt::details` is the large array), its slot is + 1000 in the table;
+a 256 px normal map is stored as 2 x 2 copies in the 512 px array (slot + 1000, the shader samples it at half the uv, which gives the original back
+with its own texel density and mips, and keeps the tiles continuous across cell borders because the content has period 1 in the layer uv).
+Other sizes or formats are skipped (diffuse maps below 512 px, normal maps below 256 px), a texture array may have 256 layers, so 255 per array at
+most (the least used normal maps are dropped: 4 of 259 in main_world, one cell each); larger sources use their lower mips (diffuse above 1024 px,
+normal maps above 512 px). The large array exists because 59 diffuse maps of 1024 px (58) and 2048 px (1) were read from their 512 px mip: Austera's
+court yard ground (`cliff_grey_with_dry_bushes`, a 2048 px map over a 50 m period, 41 texels per metre) had 10 texels per metre and showed blocks the
+size of a hand right at the camera. At 1024 px (20 texels per metre) the mean luma gradient of the ground in front of the camera is 38 % higher in the
+lower third and 20 % in the middle (`shots/terrain/aus_gal_before.png` against `aus_gal_after.png`, `fly` at the gallery camera of `30_austera`, objects on),
+at the native 2048 px it would be 54 / 63 % (x / y) against 32 / 39 % for 1024 px in a closer view (`aus_before` / `aus_after` / `aus_2048`,
+experiment, not kept: it needs 165 MB for the array, or a fourth array that `TerrainExt` does not have). Per cell, the background load adds
 an `R8Uint` image of the 513 x 513 surface nibbles and a 3 KB uniform table: for each of the 16 surface types and 3 projections the array
 slots, the uv scale, a uv offset (`fract(cell origin * scale)`, so that tiles continue across cell borders, unit tested), the detail strength
 and the detail map's tiling. The shader reads the four surrounding nibbles (bilinear weights, equal types merged), the dominant axis of the
@@ -582,8 +592,10 @@ Terrain detail layers (`terrain_layers`), alternating A / B runs of the same mac
 --no-objects --no-shadows` (terrain, water and sky only, standing; 3 runs each): cover colour only 195 / 195 / 209 fps (5.0 ms), with the
 layers 185 / 178 / 199 fps (5.35 ms), i.e. the layer shader costs 0.35 ms per frame at 1080p (-6 %). The full scene (`--bench 30`, flying 80 m/s
 from the spawn, shadows and objects on, 4 runs each) went from 132 / 120 / 120 / 129 to 142 / 89 / 115 / 121 fps (-6 % on average; the 89 was a
-run while another session loaded the GPU). Start up: the layer library takes 0.3 s on a task (cells wait for it) and 130 MB of VRAM (240 + 234 + 71
-BC textures); each cell adds a 263 KB surface map and a 3 KB table, no per frame CPU work, and the draw count is unchanged (one material per cell).
+run while another session loaded the GPU). Start up: the layer library takes 0.3 s on a task (cells wait for it) and 159 MB of VRAM (186 + 54 + 255
+BC textures; 130 MB before the large diffuse array); each cell adds a 263 KB surface map and a 3 KB table, no per frame CPU work, and the draw count is
+unchanged (one material per cell). The large diffuse array does not cost frame time: `fly --pos 16776,8926.1,137.2 --pitch -10 --bench 8 --bench-speed 0`
+at Austera, old and new build alternating, 116 / 122 / 119 against 114 / 124 / 120 fps (the machine was shared, single runs swing from 24 to 140).
 
 Atmosphere (sky dome, post pass with depth prepass + HDR + bloom, water shader with screen space reflections), `fly --camera-json
 reference/ingame/spawn/camera.json --shift 11264,11264,0 --bench 20 --bench-speed 0` (standing at the pond, 224 sectors, 4600 part entities, 7 water
@@ -753,7 +765,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
   cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
-  has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
+  has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the 2048 px ground map of Austera is used at 1024 px (half the
+  engine's texel density, see Detail layers); the weights are bilinear
   over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
   (types 13 and 9, `aa_terrain/roads`, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure.
 * Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond

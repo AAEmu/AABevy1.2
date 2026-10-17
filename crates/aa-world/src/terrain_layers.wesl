@@ -16,9 +16,10 @@ struct TerrainParams {
     // rgb: linear tint of the result, w: distance at which the layers have faded out
     tint: vec4<f32>,
     // four vectors per (surface type * 3 + projection):
-    //   0: (diffuse slot, normal slot (+ 1000: in the detail array), uv scale u, uv scale v)
+    //   0: (diffuse slot (+ 1000: in the large array), normal slot (+ 1000: 2 x 2 copies, half the uv),
+    //       uv scale u, uv scale v)
     //   1: (uv offset u, uv offset v, detail strength, detail bump scale)
-    //   2: (detail normal slot, detail uv scale u, v, material colour r)
+    //   2: (detail normal slot (+ 1000, like the normal slot), detail uv scale u, v, material colour r)
     //   3: (detail uv offset u, v, material colour g, b)
     layers: array<vec4<f32>, 192>,
 }
@@ -28,13 +29,21 @@ struct TerrainParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(102) var diffuse_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(103) var normal_layers: texture_2d_array<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(104) var normal_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(105) var detail_layers: texture_2d_array<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(106) var detail_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var large_layers: texture_2d_array<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var large_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(107) var surface_map: texture_2d<u32>;
 
 // Bevy (Y up, north = -Z) to the game's space (Z up, north = +Y): the layers are projected in the latter.
 fn to_cry(v: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(v.x, -v.z, v.y);
+}
+
+// A normal map (or detail normal map) slot, with the 1000 flag of a map that is stored as 2 x 2 copies: sampled
+// at half the uv it gives the original map back, with the same texel density and mip levels.
+fn sample_normal(slot: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec2<f32> {
+    let copies = slot >= 1000.0;
+    let k = select(1.0, 0.5, copies);
+    return textureSampleGrad(normal_layers, normal_sampler, uv * k, i32(slot) - select(0, 1000, copies), gx * k, gy * k).rg;
 }
 
 fn surface_at(p: vec2<i32>) -> u32 {
@@ -147,20 +156,20 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 let gy = cgy * a.zw;
 
                 // the layer colour is an offset of the cover in gamma space (terrain.cfx, frag_custom_begin)
-                let d = textureSampleGrad(diffuse_layers, diffuse_sampler, uv, i32(a.x), gx, gy).rgb;
+                // (maps of 1024 px and more are in their own array, slot + 1000)
+                var d: vec3<f32>;
+                if a.x >= 1000.0 {
+                    d = textureSampleGrad(large_layers, large_sampler, uv, i32(a.x) - 1000, gx, gy).rgb;
+                } else {
+                    d = textureSampleGrad(diffuse_layers, diffuse_sampler, uv, i32(a.x), gx, gy).rgb;
+                }
                 // the material's own diffuse colour multiplies the lit layer (`MatDifColor`, frag_custom_end)
                 let mat_color = vec3<f32>(terrain.layers[entry + 2u].w, terrain.layers[entry + 3u].z, terrain.layers[entry + 3u].w);
                 let c = pow(saturate(cover_gamma + (d - 0.5) * b.z), vec3<f32>(2.2)) * mat_color;
                 albedo = mix(albedo, c, w);
 
                 if a.y >= 0.0 {
-                    // normal maps that are only 256 px live in the detail array (slot + 1000)
-                    var t: vec2<f32>;
-                    if a.y >= 1000.0 {
-                        t = textureSampleGrad(detail_layers, detail_sampler, uv, i32(a.y) - 1000, gx, gy).rg * 2.0 - 1.0;
-                    } else {
-                        t = textureSampleGrad(normal_layers, normal_sampler, uv, i32(a.y), gx, gy).rg * 2.0 - 1.0;
-                    }
+                    var t = sample_normal(a.y, uv, gx, gy) * 2.0 - 1.0;
                     let nz = sqrt(max(1.0 - dot(t, t), 0.0));
                     // a detail normal map is added to the xy of the base normal (fraglib.cfi, bDetailBumpMapping);
                     // the sum is renormalised below
@@ -168,7 +177,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                     if dt.x >= 0.0 {
                         let dc = terrain.layers[entry + 3u];
                         let duv = coord * dt.yz + dc.xy;
-                        let dn = textureSampleGrad(detail_layers, detail_sampler, duv, i32(dt.x), cgx * dt.yz, cgy * dt.yz).rg;
+                        let dn = sample_normal(dt.x, duv, cgx * dt.yz, cgy * dt.yz);
                         t += (dn * 2.0 - 1.0) * b.w;
                     }
                     let nt = vec3<f32>(t, nz);
