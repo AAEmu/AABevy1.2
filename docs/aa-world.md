@@ -163,8 +163,9 @@ no separate day sky, the engine adds scattering), `Cloud shading: Sun / Sky ligh
 has two `<TimeOfDay relic_layer="0|1">` blocks (`TimeOfDay::parse_layer`; layer 0 is the one used); layer 1 has a bluer, darker ambient.
 `zone/<id>/env.xml`: `<Zone SkyBoxMaterial="Materials/sky/sky_solzreed_cbt1" Angle="130"> <Ocean FogColor="21,74,155" FogDensity="0.025"/>`
 (`sky_material::ZoneSky`).
-`lighting.xml`: `SunRotation` is the compass bearing the light travels towards at midday (188 = the sun stands north-ish), `SunHeight` the
-peak elevation (70, capped at 75 here).
+`lighting.xml`: `SunRotation` is the compass bearing of the sun at its highest (188: it stands south-south-west of the player; the editor's
+`SunVector` points there), `SunHeight` that elevation in percent of the radius (`asin(SunHeight / 100)`: 80 is 53 degrees), `PlanetRotationAxis`
+(25) the tilt of the axis the sun turns about, in degrees from the vertical (`env::sun_direction`).
 
 ### cinemas/*.xml (login2)
 
@@ -235,14 +236,26 @@ are higher, which is the shore line.
 `WorldClock { hour, speed, zone, layer }` (default hour 10, layer 0) selects the sample of the zone under the camera (`zone_at`), smoothed over
 about 0.3 s. It drives: a sun / moon `DirectionalLight` (illuminance = `sun_lux_scale x luminance(sun color x multiplier)`, cascaded shadows,
 3 cascades over `shadow_distance`), the ambient light (see below), the sky dome, the cloud sprites, the post pass (fog, film curve, grading) and the
-water materials. The sun rises at 7 h and sets at 18 h on the arc of `lighting.xml` (bearing from
-`SunRotation`, elevation `min(SunHeight, 75)`), at night the light comes from the moon side.
+water materials. The sun follows `env::sun_direction` (see Sun path below); at night the light comes from the moon side.
 
 All HDR colours are `data value x AtmosphereTuning::radiance (540) x the view's exposure` (the material shaders output pre-exposed colours, the post
 pass does the film curve). `AtmosphereTuning` is the calibration against the capture; every field can be overridden for experiments with
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
 exposure water_body water_absorb water_refl water_sun ssr refraction water_rough sea_body ssao cloud_gain ambient_env ambient_gain ambient_sat
-ambient_dome ambient_spec`).
+ambient_dome ambient_spec ambient_height sky_tau sky_phase sky_hue sky_mie sky_green sun_az sun_el sun_noon`; `sun_az` / `sun_el` (degrees,
+bearing and elevation) pin the sun direction, `sun_noon` moves the hour of its highest point).
+
+**Sun path** (`env::sun_direction`, `Lighting { sun_rotation, sun_height, planet_axis, highest_hour }`): the sun turns at 15 degrees an hour
+(clockwise seen from above, so it is in the east in the morning) about an axis tilted `PlanetRotationAxis` from the vertical, away from the bearing
+`SunRotation`; at `HIGHEST_HOUR` (12.85) it stands at bearing `SunRotation`, elevation `asin(SunHeight / 100)`. With 188 / 80 / 25 this is a small
+circle that never touches the horizon (lowest point 3 degrees at midnight, in the north); the day and night come from the time of day colours. The
+old path (an arc from 7 to 18 h with the sun in the north at noon) was wrong. **How it was found**: the real client's capture of the Royal Palace
+(`reference/ingame/royal_palace/real*.png`, zone 186, game time 9.56 to 10.0) shows one patch of sunlight on the floor of the court yard. The yard
+was rendered with the sun at every azimuth / elevation (5 degree steps, `sun_az` / `sun_el`) and the lit area compared with the capture's (floor
+pixels brighter than luma 55 in a box, intersection over union): the best matches are azimuth 123 / elevation 42 at 9.56 h (IoU 0.45), 132 / 44
+at 9.998 h (0.46) and the wide view (0.38). The tilted axis (the data's own `PlanetRotationAxis`) is the simple model that goes through all
+three (a flat arc fitted the patch only with a rate that was too slow); the hour of the culmination and the 15 degrees per hour are uncertain by
+about half an hour with only two moments. Test `env::tests::sun_path`.
 
 **The time of day of the capture is not recoverable**: `e_time_of_day` says 19.17 for the spawn and 6.17 for create step 3, 13 h apart, while both
 pictures show full daylight, and the data is night blue at 19.17. So `hour 10, layer 0` is a calibration choice: sun 57 degrees up, pale blue
@@ -250,7 +263,7 @@ horizon, grey blue fog; `AtmosphereTuning` was fitted so that region means of `s
 (sky 170 / 190 / 203 against 171 / 184 / 203, hills 81 / 102 / 120 against 91 / 109 / 120, water 54 / 77 / 79 against 45 / 64 / 47 ..).
 
 **Sky** (`sky_material.rs`, `sky.wesl`): a dome of radius `sky_radius` following the camera, a `Material` without prepass. Gradient from
-`Night sky: Horizon color` to `Zenith color` (x multipliers x `sky_gain`), sun glow and disc, covered by the zone's sky box the way the engine's
+`Night sky: Horizon color` to `Zenith color` (x multipliers x `sky_gain`, 2.4), sun glow and disc, covered by the zone's sky box the way the engine's
 `Sky` shader (`sky.cfx`) blends it: colour = `tex.rgb x lerp(SkyColorMultiplier x ShadeColorFromSky, SunColorMultiplier x ShadeColorFromSun,
 exp2(-Attenuation x 8 r))`, alpha = `tex.a x Opacity x r ^ AlphaSaturation` with `r` the red channel. The box is `box_12.dds`, `box_34.dds` and
 `box_5.dds` next to the material's diffuse map (`Materials/sky/sky_solzreed_cbt1.mtl`, `Shader=Sky`); layout found by matching the face edges:
@@ -258,17 +271,34 @@ four side faces are the upper halves of cube faces (1024 x 512), clockwise north
 (bottom, flipped vertically), `box_34` south and west, `box_5` is the top face with north at its bottom edge. `Angle` of `env.xml` rotates
 it. The stormy photo is only faintly visible (`box_gain`), as the real picture shows a pale overcast sky with a few bright patches.
 
+The sky hue (`update_sky`): the gradient colours keep the data's luminance, their hue comes from the scattering variables, as the engine's sky
+light model does: `Sky light: Wavelength (R / G / B)` give the Rayleigh hue `(1, (R/G)^4, (R/B)^4)` x `Rayleigh scattering` x `Sky light: Sun
+intensity`, plus the `Mie scattering` term (`sky_mie` 0.5, green boosted by `sky_green` 1.2), mixed in by `sky_hue` (1 = fully). Without it the
+data's `Night sky` colours give a nearly white sky (blue over red 1.14 at the palace, the capture has 1.3 to 1.75). The shader blends horizon to
+zenith by `exp(-elevation / sky_tau)` (16.5 degrees; the old blend was an exponent of the cosine) and brightens towards the sun by the Rayleigh
+phase, `1 + sky_phase x ((1 + cos^2 g) / 1.03 - 1)` (`sky_phase` 2); the sun disc fades out below the horizon with the time of day's `day`.
+
 **Ambient light** (`update_ambient` in `sky.rs`): the data's flat ambient (a constant `GlobalAmbientLight`) left the shade too dark and too
 saturated, so the camera carries a hemispherical `EnvironmentMapLight` instead (`GlobalAmbientLight.brightness` is 0; `AA_TUNE=ambient_env=0`
 brings the old flat ambient back). The top is the zone's `Sky color`, the bottom `Ambient ground color`, the middle their mean; the hue of each is
 pulled towards the sky dome (`ambient_dome`, the mix of the horizon and zenith colours: this is the "sky brightening" of the engine) and
-desaturated (`ambient_sat`, 0.3 keeps 30 % of the saturation), the level is `ambient_scale x ambient_gain (0.9) x luminance`. The cube map has
+desaturated (`ambient_sat`, 0.75 keeps 75 % of the saturation), the level is `ambient_scale x ambient_gain (1.3) x luminance`. The bottom colour
+(the ground bounce) rises towards the sky colour with the camera height between `Ambient min height` and `Ambient max height` of the time of day
+(`ambient_height`, 1 = fully: high above the ground the shade sees more sky). The cube map has
 1 x 1 faces, so it costs nothing per pixel beyond the normal lighting; it is rebuilt only when the colours move by more than 1.5 % of the peak
 (a time of day change), the diffuse map is the lit one and the specular map is `ambient_spec` (0.2) times it: the full strength made the aa-cry hair
 and the water speckle. `sun_lux_scale` went from 1700 to 1000 with this change (the sun and the ambient share the brightness of the lit
 ground; the terrain tint is unchanged). Shade means of `spawn.png` against the capture: trees 28 / 45 / 24 against 28 / 40 / 30, grass in shadow
 28 / 43 / 11 against 29 / 41 / 18 (it was 19 / 35 / 17 and 19 / 33 / 6), sunlit trees 41 / 60 / 28 against 48 / 61 / 38, rock 84 / 83 / 77 against
-75 / 78 / 67.
+75 / 78 / 67. With the sun path, sky hue and ambient of the Royal Palace fit (below): trees 31 / 54 / 33, grass 24 / 41 / 10, sunlit trees
+38 / 64 / 33, rock 59 / 69 / 72 (the sun now stands south-east at 10 h, the capture's rock is lit from the north-north-east), spawn mean
+63 / 84 / 79 against the capture's 68 / 80 / 70.
+
+Royal Palace (zone 186, `reference/ingame/royal_palace/real*.png`, region means of the `fly` example at the capture's game time, ours before
+-> after (capture)), turned view: sky 193 / 206 / 218 -> 151 / 180 / 222 (173 / 203 / 232; blue over red 1.13 -> 1.47, capture 1.34), stair roof
+65 / 65 / 69 -> 38 / 46 / 62 (34 / 47 / 59), tower 48 / 48 / 48 -> 44 / 48 / 54 (42 / 53 / 53), shaded cobbles 21 / 21 / 20 -> 25 / 29 / 33
+(26 / 34 / 33), sunlit patch 18 -> 72 / 65 / 57 (87 / 83 / 72). Wide view sky 143 / 152 / 161 -> 93 / 114 / 152 (81 / 110 / 142). First view sky
+196 / 211 / 223 -> 188 / 208 / 237 (162 / 212 / 242).
 
 **Clouds** (`sky_clouds.rs`, `clouds.wesl`): `clouds.xml` of the zone lists the distant cloud billboards (`bearing`, `distance`, `height`,
 `size`, `speed`, `material`). Each becomes a camera facing quad (4 per zone in the spawn zone) placed at `camera + compass direction x distance +
@@ -628,10 +658,19 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   real picture has more, brighter clouds), sun shafts, the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
-  the water shows some reflection speckle where the screen space march hits foliage.
+  the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
+  spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
+* Royal Palace lighting differences left: the near big wall of the turned views is 77 against the capture's 37 and stays so with the sun off
+  (`--sun-scale 0`), so it is the ambient on a vertical surface or the object's own darkening (the capture's wall is darker towards the floor and
+  mossy: baked occlusion / vertex colour of the building meshes is not applied, an aa-cry / objects question); the west-facing walls far from the
+  camera are lit warm in the capture (luma 60 to 80) and dark in ours (35 to 48), cause unknown; the court yard floor of the first view is
+  black (3 to 8 against 28): the terrain shader decodes the baked cover colour, which is near black along the walls (terrain owner); the sunlit
+  patch is about 20 % too dark (terrain tint).
 * The real client's time of day: `e_time_of_day` in the capture says 19.17 (the spawn) and 6.17 (create step 3) while both pictures show
   full daylight, yet zone 179's `Sun color` spline is night blue at 19.17 in both of its layers. The clock here is a free parameter (default
-  hour 10, layer 0, see Environment); matching the capture exactly needs the engine's own time mapping.
+  hour 10, layer 0, see Environment); matching the capture exactly needs the engine's own time mapping. The spawn capture is also lit from the
+  north-north-east while the sun fitted at the palace stands south-east at 10 h; the palace times (the game clock of the capture) are reliable,
+  the spawn one is not.
 * login2: cinema cameras and the real cameras are supported, but the race training fields of create step 3 are not part of the cell
   brush data (entities / cinemas); the scene shows terrain and the stage props of `object.dat`.
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
