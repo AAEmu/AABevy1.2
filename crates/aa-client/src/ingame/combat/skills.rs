@@ -9,7 +9,10 @@
 //! * `fx_groups` / `fx_group_fx_items` / `fx_items`: the particle effects of a group, each with the moment of the skill it
 //!   starts and ends at ([`ev`]), where it plays (caster or target, which bone) and the library name of the effect;
 //! * `plot_effects` -> `special_effects`: most player skills are plots, and every step of a plot plays its own clip
-//!   (special effect 34 `Anim`), effect group (35 / 36) and projectile (37 / 38).
+//!   (special effect 34 `Anim`), effect group (35 / 36) and projectile (37 / 38);
+//! * `skill_visual_groups`: the effect group and projectile a skill has from a skill level on; `skill_controllers`: the clip of
+//!   a dash or leap; the `*_instrument_*_anim_id` columns: the clips of a song by instrument; `anims.loop`: a clip that
+//!   loops until the skill ends or the next step plays; `fx_shake_cameras`: what the camera does when the effect lands.
 //!
 //! Everything is read on first use and cached by id, so the frame never touches the database after a skill was seen once.
 
@@ -74,6 +77,26 @@ impl Extras {
     }
 }
 
+/// What the camera does (`fx_shake_cameras`): angles in degrees (Cry order: x pitch, y roll, z yaw), shifts in metres in the camera's
+/// own axes (x right, y forward, z up), a new random pose every `frequency` seconds, `randomness` 0 (one smooth swing) to 1
+/// (noise), for `duration` seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shake {
+    pub ang: Vec3,
+    pub shift: Vec3,
+    pub frequency: f32,
+    pub randomness: f32,
+    pub duration: f32,
+}
+
+/// A camera shake of an effect group (`FxShakeCamera` items): it starts at an [`ev`] moment.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShakeItem {
+    pub start: u8,
+    pub on_target: bool,
+    pub shake: Shake,
+}
+
 /// One particle effect of an effect group.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FxItem {
@@ -100,10 +123,20 @@ pub struct Projectile {
     pub id: u32,
     /// What it looks like in flight (an effect group: the items start at [`ev::START`] and ride the projectile).
     pub items: Arc<Vec<FxItem>>,
+    /// The camera shakes of its group.
+    pub shakes: Arc<Vec<ShakeItem>>,
     pub extras: Extras,
     /// Where it starts and ends (`fx_items.bone_id` numbering; 0 = the caster's launch bone from the effect item).
     pub src_bone: u8,
     pub dest_bone: u8,
+}
+
+/// What a skill shows besides its clips: the effects, the camera shakes and the projectile of one of its visual groups.
+#[derive(Clone, Debug, Default)]
+pub struct Look {
+    pub fx: Arc<Vec<FxItem>>,
+    pub shakes: Arc<Vec<ShakeItem>>,
+    pub projectile: Option<Projectile>,
 }
 
 /// The looks of one skill.
@@ -114,7 +147,16 @@ pub struct SkillVisual {
     pub fire_anim: Option<Arc<str>>,
     pub twohand_fire_anim: Option<Arc<str>>,
     pub dual_fire_anim: Option<Arc<str>>,
+    /// The clip of the skill's controller (a dash, a leap, a back step): all the skill has when it has no clips of its own.
+    pub controller_anim: Option<Arc<str>>,
+    /// The clips of a song by the instrument the caster holds (string, percussion, tube): the cast loop and the fire clip.
+    pub instrument_start: [Option<Arc<str>>; 3],
+    pub instrument_fire: [Option<Arc<str>>; 3],
     pub fx: Arc<Vec<FxItem>>,
+    /// The camera shakes of the skill's effect group (the base look).
+    pub shakes: Arc<Vec<ShakeItem>>,
+    /// The groups a skill has from a skill level on (`skill_visual_groups`), ascending by level.
+    pub levels: Vec<(u8, Look)>,
     /// Not drawn by the client; counted by `examples/skill_coverage.rs`.
     #[allow(dead_code)]
     pub extras: Extras,
@@ -129,6 +171,24 @@ pub struct SkillVisual {
 }
 
 impl SkillVisual {
+    /// The effects, shakes and projectile at skill `level`: the last visual group at or below it, else the skill's own.
+    pub fn look(&self, level: u8) -> Look {
+        match self.levels.iter().rev().find(|(from, _)| *from <= level) {
+            Some((_, look)) => look.clone(),
+            None => Look { fx: self.fx.clone(), shakes: self.shakes.clone(), projectile: self.projectile.clone() },
+        }
+    }
+
+    /// The cast clip of a song for the instrument kind the caster holds (0 string, 1 percussion, 2 tube).
+    pub fn instrument_start_clip(&self, kind: Option<usize>) -> Option<&Arc<str>> {
+        self.instrument_start.get(kind?)?.as_ref()
+    }
+
+    /// The fire clip of a song for the instrument kind the caster holds.
+    pub fn instrument_fire_clip(&self, kind: Option<usize>) -> Option<&Arc<str>> {
+        self.instrument_fire.get(kind?)?.as_ref()
+    }
+
     /// The fire clip for a caster with (`two_handed`) or without a two handed weapon, `dual` wielding or neither.
     pub fn fire_clip(&self, two_handed: bool, dual: bool) -> Option<&Arc<str>> {
         let pick = if dual {
@@ -150,8 +210,22 @@ pub struct PlotVisual {
     /// Every anim of the step, in order (most steps with two start with a stop).
     pub anims: Vec<Arc<str>>,
     pub fx: Arc<Vec<FxItem>>,
+    /// The camera shakes of the step's effect groups.
+    pub shakes: Arc<Vec<ShakeItem>>,
     pub extras: Extras,
     pub projectile: Option<Projectile>,
+}
+
+impl PlotVisual {
+    /// The step plays a stop marker: it ends the clip that loops before it.
+    pub fn stops(&self) -> bool {
+        self.anims.iter().any(|a| is_stop_clip(a))
+    }
+
+    /// The clip the step plays (`None` for a step that only stops).
+    pub fn clip(&self) -> Option<&Arc<str>> {
+        self.anim.as_ref().filter(|a| !is_stop_clip(a))
+    }
 }
 
 /// `all_co_sk_stop` / `all_ac_stop`: the anim a plot step plays first to end the clip before it, followed by the clip it wants.
@@ -176,7 +250,10 @@ struct Inner {
     anims: HashMap<u32, Option<Arc<str>>>,
     /// Clip name -> the `move_ub` clip of its `anims` row.
     upper: HashMap<String, Option<Arc<str>>>,
+    /// Clip name -> `anims.loop`.
+    loops: HashMap<String, bool>,
     groups: HashMap<u32, Arc<Vec<FxItem>>>,
+    shakes: HashMap<u32, Arc<Vec<ShakeItem>>>,
     extras: HashMap<u32, Extras>,
     projectiles: HashMap<u32, Option<Projectile>>,
 }
@@ -192,7 +269,9 @@ impl SkillBook {
             plots: HashMap::new(),
             anims: HashMap::new(),
             upper: HashMap::new(),
+            loops: HashMap::new(),
             groups: HashMap::new(),
+            shakes: HashMap::new(),
             extras: HashMap::new(),
             projectiles: HashMap::new(),
         })))
@@ -220,6 +299,11 @@ impl SkillBook {
     /// The upper body variant of clip `name` for a unit that moves (`move_ub` of its `anims` row), when it has one.
     pub fn upper_clip(&self, name: &str) -> Option<Arc<str>> {
         self.inner().upper_clip(name)
+    }
+
+    /// The clip loops (`anims.loop`): the cast and channel poses.
+    pub fn clip_loops(&self, name: &str) -> bool {
+        self.inner().clip_loops(name)
     }
 }
 
@@ -294,6 +378,67 @@ impl Inner {
             .map(Arc::from);
         self.upper.insert(name.to_string(), upper.clone());
         upper
+    }
+
+    fn clip_loops(&mut self, name: &str) -> bool {
+        if let Some(l) = self.loops.get(name) {
+            return *l;
+        }
+        let looping = self
+            .conn
+            .query_row("SELECT loop FROM anims WHERE name = ?1", params![name], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+            .is_some_and(|v| v == "t");
+        self.loops.insert(name.to_string(), looping);
+        looping
+    }
+
+    /// The camera shakes of an effect group.
+    fn shakes_of(&mut self, id: u32) -> Arc<Vec<ShakeItem>> {
+        if id == 0 {
+            return Arc::default();
+        }
+        if let Some(s) = self.shakes.get(&id) {
+            return s.clone();
+        }
+        let items = self
+            .conn
+            .prepare(
+                "SELECT i.fx_event_start_id, i.fx_location_id, c.ang_x, c.ang_y, c.ang_z, c.shift_x, c.shift_y, c.shift_z, c.frequency, c.randomness, c.duration \
+                 FROM fx_group_fx_items g JOIN fx_items i ON i.id = g.fx_item_id JOIN fx_shake_cameras c ON c.id = i.fx_detail_id \
+                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type = 'FxShakeCamera' ORDER BY g.rowid",
+            )
+            .and_then(|mut q| {
+                q.query_map(params![id], |r| {
+                    Ok(ShakeItem {
+                        start: int(r, 0)? as u8,
+                        on_target: int(r, 1)? == 2,
+                        shake: Shake {
+                            ang: Vec3::new(num(r, 2)?, num(r, 3)?, num(r, 4)?),
+                            shift: Vec3::new(num(r, 5)?, num(r, 6)?, num(r, 7)?),
+                            frequency: num(r, 8)?,
+                            randomness: num(r, 9)?,
+                            duration: num(r, 10)?,
+                        },
+                    })
+                })
+                .map(|rows| rows.flatten().collect::<Vec<_>>())
+            })
+            .unwrap_or_default();
+        let items = Arc::new(items);
+        self.shakes.insert(id, items.clone());
+        items
+    }
+
+    /// The groups of `skill_visual_groups`, ascending by level.
+    fn levels_of(&mut self, skill: u32) -> Vec<(u8, Look)> {
+        let rows: Vec<(u8, u32, u32)> = self
+            .conn
+            .prepare("SELECT LEVEL, fx_group_id, projectile_id FROM skill_visual_groups WHERE owner_type = 'Skill' AND owner_id = ?1 ORDER BY LEVEL")
+            .and_then(|mut q| q.query_map(params![skill], |r| Ok((int(r, 0)?.clamp(0, 255) as u8, int(r, 1)? as u32, int(r, 2)? as u32))).map(|rows| rows.flatten().collect()))
+            .unwrap_or_default();
+        rows.into_iter().map(|(level, group, projectile)| (level, Look { fx: self.group(group), shakes: self.shakes_of(group), projectile: self.projectile(projectile) })).collect()
     }
 
     /// The particle effects of an effect group (sounds, voices, camera shakes, materials and models are left out).
@@ -384,7 +529,7 @@ impl Inner {
                 Ok((int(r, 0)? as u32, int(r, 1)? as u8, int(r, 2)? as u8))
             })
             .ok();
-        let projectile = row.map(|(group, src_bone, dest_bone)| Projectile { id, items: self.group(group), extras: self.extras_of(group), src_bone, dest_bone });
+        let projectile = row.map(|(group, src_bone, dest_bone)| Projectile { id, items: self.group(group), shakes: self.shakes_of(group), extras: self.extras_of(group), src_bone, dest_bone });
         self.projectiles.insert(id, projectile.clone());
         projectile
     }
@@ -396,7 +541,10 @@ impl Inner {
         let row = self
             .conn
             .query_row(
-                "SELECT start_anim_id, fire_anim_id, twohand_fire_anim_id, dual_wield_fire_anim_id, fx_group_id, projectile_id, effect_delay, plot_id, channeling_anim_id \
+                "SELECT start_anim_id, fire_anim_id, twohand_fire_anim_id, dual_wield_fire_anim_id, fx_group_id, projectile_id, effect_delay, plot_id, channeling_anim_id, \
+                        (SELECT start_anim_id FROM skill_controllers c WHERE c.id = skills.skill_controller_id), \
+                        string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
+                        string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -407,18 +555,26 @@ impl Inner {
                         int(r, 6)?.max(0) as u32,
                         int(r, 7)? != 0,
                         int(r, 8)? as u32,
+                        int(r, 9)? as u32,
+                        std::array::from_fn(|i| int(r, 10 + i).unwrap_or(0) as u32),
+                        std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire)| {
             let [start, fire, twohand, dual] = anims;
             Arc::new(SkillVisual {
                 start_anim: self.anim(start),
                 fire_anim: self.anim(fire),
                 twohand_fire_anim: self.anim(twohand),
                 dual_fire_anim: self.anim(dual),
+                controller_anim: self.anim(controller),
+                instrument_start: instrument_start.map(|id: u32| self.anim(id)),
+                instrument_fire: instrument_fire.map(|id: u32| self.anim(id)),
                 fx: self.group(group),
+                shakes: self.shakes_of(group),
+                levels: self.levels_of(id),
                 extras: self.extras_of(group),
                 projectile: self.projectile(projectile),
                 channeling_anim: self.anim(channeling),
@@ -445,11 +601,13 @@ impl Inner {
             .unwrap_or_default();
         let mut visual = PlotVisual::default();
         let mut fx: Vec<FxItem> = Vec::new();
+        let mut shakes: Vec<ShakeItem> = Vec::new();
         for (kind, value) in effects {
             match kind {
                 34 => visual.anims.extend(self.anim(value)),
                 35 | 36 => {
                     fx.extend(self.group(value).iter().cloned());
+                    shakes.extend(self.shakes_of(value).iter().copied());
                     visual.extras = visual.extras.plus(self.extras_of(value));
                 }
                 _ => {
@@ -464,7 +622,8 @@ impl Inner {
         // 450 steps play two anims: `all_co_sk_stop` (end the clip before) and then the clip itself; the step is the latter
         visual.anim = visual.anims.iter().rev().find(|a| !is_stop_clip(a)).or(visual.anims.first()).cloned();
         visual.fx = Arc::new(fx);
-        let plot = (visual.anim.is_some() || !visual.fx.is_empty() || visual.projectile.is_some()).then(|| Arc::new(visual));
+        visual.shakes = Arc::new(shakes);
+        let plot = (visual.anim.is_some() || !visual.fx.is_empty() || !visual.shakes.is_empty() || visual.projectile.is_some()).then(|| Arc::new(visual));
         self.plots.insert(event_id, plot.clone());
         plot
     }
@@ -582,5 +741,88 @@ mod tests {
         let all = s.extras.plus(s.projectile.as_ref().map(|p| p.extras).unwrap_or_default());
         assert!(!all.is_empty(), "{all:?}");
         assert_eq!(book.skill(0xFF_FFFF).map(|s| s.extras), None);
+    }
+
+    /// A step that only plays `all_co_sk_stop` ends the cast loop and has no clip of its own; one with a clip after it has both.
+    #[test]
+    fn a_stop_only_step_ends_the_loop() {
+        let Some(book) = book() else { return };
+        let stop = book.plot_event(32).expect("step 32");
+        assert!(stop.stops());
+        assert_eq!(stop.clip(), None);
+        let both = book.plot_event(73).expect("step 73");
+        assert!(both.stops());
+        assert_eq!(both.clip().map(|a| &**a), Some("all_co_sk_whirlwind_launch"));
+        let plain = book.plot_event(12130).expect("stage 1");
+        assert!(!plain.stops());
+        assert_eq!(plain.clip().map(|a| &**a), Some("onehand_co_sk_streakattack_1"));
+    }
+
+    /// The cast and channel poses (`anims.loop`) loop; the strikes do not.
+    #[test]
+    fn looping_clips_are_the_ones_the_data_says() {
+        let Some(book) = book() else { return };
+        for name in ["all_co_sk_spell_cast_d", "all_co_sk_buff_channel_force", "bow_co_sk_cast_3", "all_co_sk_spell_channel_sorb"] {
+            assert!(book.clip_loops(name), "{name}");
+        }
+        for name in ["bow_co_sk_launch", "onehand_co_sk_streakattack_1", "all_co_sk_stop", "no_such_clip"] {
+            assert!(!book.clip_loops(name), "{name}");
+        }
+        // Flame Bolt casts with a looping pose
+        assert!(book.clip_loops(book.skill(10107).unwrap().start_anim.as_deref().unwrap()));
+    }
+
+    /// A dash or a leap has nothing but its controller's clip.
+    #[test]
+    fn controller_clips() {
+        let Some(book) = book() else { return };
+        let dash = book.skill(11918).expect("dash");
+        assert_eq!((dash.start_anim.as_deref(), dash.fire_anim.as_deref()), (None, None));
+        assert_eq!(dash.controller_anim.as_deref(), Some("all_co_sk_dashattack"));
+        assert_eq!(book.skill(12049).unwrap().controller_anim.as_deref(), Some("all_co_sk_backstep"));
+        assert_eq!(book.skill(16064).unwrap().controller_anim, None);
+    }
+
+    /// A song has a clip per instrument family (string, percussion, tube); the other skills have none.
+    #[test]
+    fn instrument_clips() {
+        let Some(book) = book() else { return };
+        let song = book.skill(11377).expect("a song");
+        for kind in 0..3 {
+            assert!(song.instrument_start_clip(Some(kind)).is_some(), "start {kind}");
+            assert!(song.instrument_fire_clip(Some(kind)).is_some(), "fire {kind}");
+        }
+        assert_eq!(song.instrument_start_clip(None), None);
+        let other = book.skill(16064).unwrap();
+        assert_eq!(other.instrument_start_clip(Some(0)), None);
+        assert_eq!(other.instrument_fire_clip(Some(0)), None);
+    }
+
+    /// A skill whose effects grow with its level has a group per level range: the caster's level picks one.
+    #[test]
+    fn the_level_picks_the_visual_group() {
+        let Some(book) = book() else { return };
+        let s = book.skill(10159).expect("a tree skill");
+        assert_eq!(s.levels.iter().map(|(l, _)| *l).collect::<Vec<_>>(), [1, 6, 11]);
+        let (low, mid, high) = (s.look(1), s.look(7), s.look(30));
+        assert!(!low.fx.is_empty() && !mid.fx.is_empty() && !high.fx.is_empty());
+        assert_eq!(s.look(1).fx, s.look(5).fx, "levels 1 to 5 share the first group");
+        assert_ne!(low.fx, mid.fx);
+        assert_eq!(s.look(11).fx, s.look(60).fx);
+        // a skill without levels keeps its own group
+        let arrow = book.skill(16064).unwrap();
+        assert_eq!(arrow.look(1).fx, arrow.fx);
+    }
+
+    /// Camera shakes of an effect group: when they start and on whom, and how long.
+    #[test]
+    fn camera_shakes() {
+        let Some(book) = book() else { return };
+        let s = book.skill(18384).expect("a heavy blow");
+        let shake = s.shakes.first().expect("a shake");
+        assert_eq!(shake.start, ev::HIT);
+        assert!(!shake.on_target);
+        assert!((shake.shake.duration - 0.1).abs() < 1e-6, "{shake:?}");
+        assert!(book.skill(16064).unwrap().shakes.is_empty());
     }
 }
