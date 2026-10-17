@@ -112,8 +112,17 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         if let Some(p) = w.picker.as_ref() {
             picker_quads(u, p, alpha, scale, &mut out);
         }
+        // Message frames: their newest lines.
+        if w.message.is_some() {
+            let rect = u.tree.rect(id);
+            if let Some(t) = crate::lua::chat::compose(u, id, rect) {
+                if !t.text.is_empty() {
+                    let c = t.style.color;
+                    text_quads(u, &t, rect, c, alpha, scale, &mut out);
+                }
+            }
+        } else if let Some(t) = w.text.as_ref() {
         // Widget text above background/artwork, below overlay.
-        if let Some(t) = w.text.as_ref() {
             let edit = crate::lua::edit::is_edit(&w.ty);
             let shown = if edit {
                 let mut d = t.clone();
@@ -249,7 +258,29 @@ fn drawable_quads(
     }
     let o = u.tree.get(d).clone();
     let Kind::Drawable(dr) = &o.kind else { return };
-    let rect = u.tree.rect(d);
+    if dr.effect == Some(false) {
+        return;
+    }
+    let mut rect = u.tree.rect(d);
+    // Status bar fill: crop the rect and the texture rectangle alike.
+    let mut coords = dr.coords;
+    if let Some((f, vertical)) = dr.fill {
+        if vertical {
+            let h = rect.h * f;
+            rect.y += rect.h - h;
+            rect.h = h;
+            if let Some(c) = coords.as_mut() {
+                let ch = c[3] * f;
+                c[1] += c[3] - ch;
+                c[3] = ch;
+            }
+        } else {
+            rect.w *= f;
+            if let Some(c) = coords.as_mut() {
+                c[2] *= f;
+            }
+        }
+    }
     let a = alpha * o.alpha;
     let color = [dr.color[0], dr.color[1], dr.color[2], dr.color[3] * a];
     if color[3] <= 0.0 || rect.w == 0.0 || rect.h == 0.0 {
@@ -282,7 +313,13 @@ fn drawable_quads(
                 return;
             };
             let (tw, th) = (tw as f32, th as f32);
-            let c = dr.coords.unwrap_or([0.0, 0.0, tw, th]);
+            let c = match (coords, dr.fill) {
+                (Some(c), _) => c,
+                // Whole texture, cropped like the rect.
+                (None, Some((f, false))) => [0.0, 0.0, tw * f, th],
+                (None, Some((f, true))) => [0.0, th * (1.0 - f), tw, th * f],
+                (None, None) => [0.0, 0.0, tw, th],
+            };
             let tex = Tex::Image(resolved);
             match dr.kind {
                 DrawKind::NinePart | DrawKind::ThreePart => {

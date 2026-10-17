@@ -10,6 +10,7 @@
 //! (see [`stubs`]), so a script calling them keeps running; field lookups of unknown names still
 //! return `nil`, as scripts test fields like `if self.bgs == nil`.
 
+pub mod chat;
 pub mod classes;
 pub mod constants;
 pub mod diagram;
@@ -17,6 +18,9 @@ mod drawable;
 pub mod edit;
 pub mod folder;
 pub mod picker;
+pub mod roadmap;
+pub mod slot;
+pub mod statusbar;
 mod globals;
 mod stubs;
 pub mod tab;
@@ -99,7 +103,9 @@ pub fn reg(lua: &Lua) -> Reg {
 }
 
 /// Widget classes the scripts create that `reference/api/widget_methods.json` does not list.
-const EXTRA_CLASSES: &[&str] = &["paintcolorpicker"];
+/// `worldmap` (the big map) and `listctrlitem` (list control sub items: text, `SetInset`) have
+/// no capture name.
+const EXTRA_CLASSES: &[&str] = &["paintcolorpicker", "worldmap", "listctrlitem"];
 
 /// Install the toolkit into a Lua state: `UIParent`, widget/drawable classes, constants,
 /// `Script.ReloadScript`, and stubs for the not yet implemented natives.
@@ -208,6 +214,18 @@ pub fn new_object_table(lua: &Lua, id: Id) -> mlua::Result<Table> {
     if has_title {
         t.raw_set("titleStyle", style_table(lua, id, 1)?)?;
     }
+    let aux = match class.as_str() {
+        "listbox" => Some("childStyle"),
+        "damagedisplay" => Some("extraStyle"),
+        "editbox" | "x2editbox" => Some("prefixStyle"),
+        _ => None,
+    };
+    if let Some(field) = aux {
+        if let Some(w) = ui(lua).tree.widget_mut(id) {
+            w.aux_style = Some(Default::default());
+        }
+        t.raw_set(field, style_table(lua, id, 2)?)?;
+    }
     if ty == WidgetType::ListCtrl {
         t.raw_set("column", lua.create_table()?)?;
         t.raw_set("items", lua.create_table()?)?;
@@ -217,11 +235,13 @@ pub fn new_object_table(lua: &Lua, id: Id) -> mlua::Result<Table> {
     Ok(t)
 }
 
-fn style_table(lua: &Lua, owner: Id, which: u32) -> mlua::Result<Table> {
+/// A text style table of an object: `which` 0 = its text (`style`), 1 = a window title
+/// (`titleStyle`), 2 = its auxiliary style ([`crate::tree::Widget::aux_style`]).
+pub(crate) fn style_table(lua: &Lua, owner: Id, which: u32) -> mlua::Result<Table> {
     let r = reg(lua);
     let s = lua.create_table()?;
     s.set_metatable(Some(r.style_mt.clone()))?;
-    r.styles.raw_set(&s, owner as i64 * 2 + which as i64)?;
+    r.styles.raw_set(&s, owner as i64 * 4 + which as i64)?;
     Ok(s)
 }
 
@@ -338,6 +358,8 @@ pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
 
 pub fn tick(lua: &Lua, dt_ms: f32) {
     tab::relayout_all(lua);
+    roadmap::update(lua);
+    chat::update(lua);
     edit::tick(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
     for (name, args) in queued {

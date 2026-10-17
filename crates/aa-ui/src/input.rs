@@ -1,7 +1,8 @@
 //! Mouse input: hit testing by layer and paint order, then `OnEnter` / `OnLeave` / `OnClick` /
 //! `OnMouseDown` / `OnMouseUp` / `OnWheelUp` / `OnWheelDown` into Lua, plus the native
 //! behaviour of buttons (state art), check buttons (toggle + `OnCheckChanged`), edit boxes
-//! (keyboard focus, see [`crate::lua::edit`]) and list controls (hover / selection).
+//! (keyboard focus, see [`crate::lua::edit`]), list controls (hover / selection) and sliders
+//! (press on the track or thumb and drag: the value follows the cursor, `OnSliderChanged`).
 
 use mlua::{Lua, Value};
 
@@ -26,6 +27,9 @@ const MOUSE_HANDLERS: &[&str] = &[
 pub struct MouseState {
     pub pressed: Option<Id>,
     last_click: Option<(Id, f64)>,
+    /// The slider being dragged (captured until the button is released).
+    slider: Option<Id>,
+    last_cursor: Option<(f32, f32)>,
 }
 
 /// Topmost widget under `(x, y)` (UI units) that takes the mouse.
@@ -140,8 +144,20 @@ pub fn update(
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
         }
+        mouse.slider = hover.and_then(|h| slider_of(lua, h));
+        if let (Some(s), Some(c)) = (mouse.slider, cursor) {
+            drag_slider(lua, s, c);
+        }
+    } else if let (Some(s), Some(c)) = (mouse.slider, cursor) {
+        if mouse.last_cursor != Some(c) {
+            drag_slider(lua, s, c);
+        }
+    }
+    if cursor.is_some() {
+        mouse.last_cursor = cursor;
     }
     if up {
+        mouse.slider = None;
         let pressed = mouse.pressed.take();
         ui(lua).tree.touch();
         if let Some(h) = hover {
@@ -173,6 +189,45 @@ pub fn update(
             t = ui(lua).tree.get(id).parent;
         }
     }
+}
+
+/// The enabled slider a press on `id` drags: the slider itself or the slider of its thumb.
+fn slider_of(lua: &Lua, id: Id) -> Option<Id> {
+    let u = ui(lua);
+    let enabled = |i: Id| u.tree.widget(i).is_some_and(|w| w.enabled);
+    if u.tree.widget(id)?.slider.is_some() {
+        return enabled(id).then_some(id);
+    }
+    let p = u.tree.get(id).parent?;
+    let s = u.tree.widget(p)?.slider.as_ref()?;
+    (s.thumb == Some(id) && enabled(p) && enabled(id)).then_some(p)
+}
+
+/// Set a dragged slider's value from the cursor: the thumb centre follows the cursor along the
+/// track, snapped to the value step.
+fn drag_slider(lua: &Lua, slider: Id, (cx, cy): (f32, f32)) {
+    let v = {
+        let u = ui(lua);
+        let Some(s) = u.tree.widget(slider).and_then(|w| w.slider.clone()) else {
+            return;
+        };
+        let r = u.tree.rect(slider);
+        let thumb = s.thumb.map(|t| u.tree.rect(t));
+        let (start, len, pos, tlen) = if s.vertical {
+            (r.y, r.h, cy, thumb.map_or(0.0, |t| t.h))
+        } else {
+            (r.x, r.w, cx, thumb.map_or(0.0, |t| t.w))
+        };
+        let travel = (len - tlen).max(1.0);
+        let f = ((pos - start - tlen / 2.0) / travel).clamp(0.0, 1.0);
+        let mut v = s.min + f * (s.max - s.min);
+        if s.step > 0.0 && s.step < s.max - s.min {
+            v = s.min + ((v - s.min) / s.step).round() * s.step;
+        }
+        v.clamp(s.min, s.max)
+    };
+    lua::widget::set_slider(lua, slider, v, true);
+    lua::flush(lua);
 }
 
 fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
@@ -222,6 +277,10 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
     }
     // Native tab buttons.
     if button == "LeftButton" && lua::tab::button_clicked(lua, target) {
+        lua::flush(lua);
+        return;
+    }
+    if button == "LeftButton" && lua::chat::button_clicked(lua, target) {
         lua::flush(lua);
         return;
     }

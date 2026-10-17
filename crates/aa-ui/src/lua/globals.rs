@@ -215,6 +215,29 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         g.raw_set("X2", &addon)?;
     }
     install_game_stub(lua, "X2DialogManager")?;
+    // `X2Chat:DispatchChatMessage(filter, text)` routes a line to the chat tabs (see
+    // [`super::chat`]); the rest of `X2Chat` is the app's.
+    let x2chat = install_game_stub(lua, "X2Chat")?;
+    x2chat.raw_set(
+        "DispatchChatMessage",
+        lua.create_function(|lua, (_this, filter, text): (Value, Option<i64>, Option<String>)| {
+            super::chat::dispatch(lua, filter.unwrap_or(0), &text.unwrap_or_default())
+        })?,
+    )?;
+    // `X2Input:GetMousePos()`: the cursor in screen pixels (the colour pad of character create
+    // drags with it from `OnUpdate`).
+    let x2input = install_game_stub(lua, "X2Input")?;
+    x2input.raw_set(
+        "GetMousePos",
+        lua.create_function(|lua, _: MultiValue| {
+            let u = ui(lua);
+            Ok((u.cursor.0 * u.ui_scale, u.cursor.1 * u.ui_scale))
+        })?,
+    )?;
+    // Hooks the app (or the example fakes) fills in: `AAUI.SlotContent`, `AAUI.ChatTabs`, ...
+    if g.raw_get::<Value>("AAUI")?.is_nil() {
+        g.raw_set("AAUI", lua.create_table()?)?;
+    }
     lua.load(TOOLKIT_LUA).set_name("@aa-ui/toolkit").exec()?;
     Ok(())
 }

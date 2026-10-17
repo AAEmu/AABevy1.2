@@ -129,6 +129,16 @@ pub(crate) fn create_child(
     let full = name.replace("$parent", &pname);
     let id = ui(lua).tree.create_widget(ty, &full, parent);
     let t = new_object_table(lua, id)?;
+    match ty.to_ascii_lowercase().as_str() {
+        "slot" => super::slot::init(lua, id, &t)?,
+        "message" => {
+            if let Some(w) = ui(lua).tree.widget_mut(id) {
+                w.message = Some(Default::default());
+            }
+        }
+        "chatwindow" => super::chat::init_window(lua, id, &t)?,
+        _ => {}
+    }
     if reflect {
         if let Some(p) = parent {
             if let Some(pt) = super::object_table(lua, p)? {
@@ -195,6 +205,9 @@ fn create_drawable_class(
             .create_drawable(owner, kind, class, DrawLayer::parse(layer));
         let d = u.tree.drawable_mut(id).unwrap();
         d.texture = texture;
+        if class == "drawable:effect" {
+            d.effect = Some(false);
+        }
         id
     };
     new_object_table(lua, id)
@@ -965,6 +978,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if matches!(ty, "editbox" | "editboxmultiline") {
         super::edit::methods(lua, &m)?;
     }
+    if ty == "statusbar" {
+        super::statusbar::methods(lua, &m)?;
+    }
+    if ty == "slot" {
+        super::slot::methods(lua, &m)?;
+    }
+    if ty == "message" {
+        super::chat::message_methods(lua, &m)?;
+    }
+    if ty == "chatwindow" {
+        super::chat::window_methods(lua, &m)?;
+    }
+    if matches!(ty, "roadmap" | "worldmap") {
+        super::roadmap::methods(lua, &m)?;
+    }
+    if ty == "listbox" {
+        super::roadmap::listbox_methods(lua, &m)?;
+    }
 
     // --- buttons -----------------------------------------------------------------------------
     if is_button_class(ty) {
@@ -1316,6 +1347,7 @@ fn is_button_class(class: &str) -> bool {
         class,
         "button"
             | "checkbutton"
+            | "slot"
             | "cooldownbutton"
             | "cooldownactionbutton"
             | "cooldownconstantbutton"
@@ -1340,7 +1372,7 @@ pub(crate) fn set_checked(lua: &Lua, id: Id, checked: bool, fire: bool) {
     }
 }
 
-fn set_slider(lua: &Lua, id: Id, v: f32, trigger: bool) {
+pub(crate) fn set_slider(lua: &Lua, id: Id, v: f32, trigger: bool) {
     let mut g = ui(lua);
     let u = &mut *g;
     let Some(s) = u.tree.widget_mut(id).and_then(|w| w.slider.as_mut()) else {
@@ -1414,11 +1446,12 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         let Some(code) = reg(lua).styles.raw_get::<Option<i64>>(t)? else {
             return Ok(());
         };
-        let (owner, which) = ((code / 2) as Id, code % 2);
+        let (owner, which) = ((code / 4) as Id, code % 4);
         let mut u = ui(lua);
         let o = u.tree.get_mut(owner);
         let tb = match (&mut o.kind, which) {
             (Kind::Widget(w), 1) => w.title.as_mut(),
+            (Kind::Widget(w), 2) => w.aux_style.as_mut(),
             (Kind::Widget(w), _) => w.text.as_mut(),
             (Kind::Drawable(d), _) => d.text.as_mut(),
         };
@@ -1522,6 +1555,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 let l = u.tree.widget_mut(id).unwrap().list.as_mut().unwrap();
                 l.columns.push(cid);
                 l.column_widths.push(width);
+                l.column_types.push(a.opt_f(2).map_or(2, |t| t as i64));
                 let ch = l.column_height;
                 let n = l.columns.len();
                 let prev = if n >= 2 { Some(l.columns[n - 2]) } else { None };
@@ -1591,19 +1625,27 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             for _ in 0..count {
                 let row = create_child(lua, Some(id), "window", "item", 0, false)?;
                 let rid = value_id(lua, &Value::Table(row.clone())).unwrap();
-                let ncols = ui(lua)
+                let types = ui(lua)
                     .tree
                     .widget(id)
                     .unwrap()
                     .list
                     .as_ref()
                     .unwrap()
-                    .columns
-                    .len();
+                    .column_types
+                    .clone();
+                let ncols = types.len();
                 let subs = lua.create_table()?;
                 let mut sub_ids = Vec::new();
                 for j in 0..ncols {
-                    let sub = create_child(lua, Some(rid), "window", "subItem", 0, false)?;
+                    // The sub item class follows the column's `LCCIT_*` type: a text item
+                    // (`SetInset`, `style`), a button, or a window (the reference's world list).
+                    let class = match types.get(j).copied().unwrap_or(2) {
+                        0 => "listctrlitem",
+                        1 => "button",
+                        _ => "window",
+                    };
+                    let sub = create_child(lua, Some(rid), class, "subItem", 0, false)?;
                     let sid = value_id(lua, &Value::Table(sub.clone())).unwrap();
                     // Sub-items show once their row gets data.
                     ui(lua).tree.get_mut(sid).shown = false;
