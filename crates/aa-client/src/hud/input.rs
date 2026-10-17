@@ -86,10 +86,11 @@ pub fn hotkeys(keys: Res<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt
         (KeyCode::KeyL, "toggle_quest"),
         (KeyCode::KeyM, "toggle_worldmap"),
     ] {
-        if keys.just_pressed(key)
-            && let Err(e) = rt.hotkey(action)
-        {
-            warn!("hud: {action}: {e}");
+        if keys.just_pressed(key) {
+            info!("hud: key {key:?} -> {action}");
+            if let Err(e) = rt.hotkey(action) {
+                warn!("hud: {action}: {e}");
+            }
         }
     }
 }

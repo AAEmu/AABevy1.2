@@ -215,6 +215,7 @@ pub fn scripted_session(
     }
     while script.opens.last().is_some_and(|o| t >= o.0) {
         let (_, action) = script.opens.pop().unwrap();
+        info!("hud: --hud-open {action} at {t:.1} s");
         if let Err(e) = rt.hotkey(&action) {
             warn!("hud: --hud-open {action}: {e}");
         }
