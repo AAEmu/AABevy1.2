@@ -19,7 +19,9 @@ macro_rules! resource {
     };
 }
 
+mod gear;
 mod stats;
+pub use gear::{ActionBar, Inventory};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
 
 resource! {
@@ -138,6 +140,14 @@ impl Units {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.level = *level;
             }
+            Event::EquipmentChanged { obj_id, items } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                for (slot, item) in items {
+                    if let Some(s) = u.equipment.slots.get_mut(usize::from(*slot)) {
+                        *s = item.clone();
+                    }
+                }
+            }
             Event::UnitFactionChanged { obj_id, faction_id, .. } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.faction_id = *faction_id;
@@ -240,6 +250,8 @@ pub struct WorldState {
     pub status: Status,
     pub stats: PlayerStats,
     pub buffs: Buffs,
+    pub actions: ActionBar,
+    pub inventory: Inventory,
 }
 
 impl WorldState {
@@ -252,6 +264,8 @@ impl WorldState {
         self.status.apply(e);
         self.stats.apply(e);
         self.buffs.apply(e);
+        self.actions.apply(e);
+        self.inventory.apply(e);
     }
 }
 

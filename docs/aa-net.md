@@ -236,6 +236,34 @@ arrival, `buff.kind` (`Good` / `Bad` / `Hidden` from the unit-state list, `Unkno
 `BuffCreated`: use `buffs.kind_id`), caster; `remaining_ms()` counts down from `received`. The
 unit frame shows the first four `Good` and `Bad` ones.
 
+**Action bar: `ActionBar`** (`ActionBar::slots[i]`, i = slot number - 1, 85 slots)
+
+| packet | event | state |
+|---|---|---|
+| `SCActionSlots` (select) | `ActionSlots(Vec<ActionSlot>)` | `slots` |
+| `CSUpdateActionSlot` (`Command::SetActionSlot { slot, action }`) | `ActionSlotChanged { slot, action }` (raised by the session, the server does not echo) | `slots[slot]` |
+
+`ActionSlot { kind: ActionKind, id }`: `Spell` = skill id (`skills.id`), `ItemType` = item template
+(`items.id`, shows the bag total), `ItemId` = one item's database id, `Macro`, `RidePetSpell`,
+`None`. `skill_id()`, `item_template_id()`, `item_id()` pick the right one;
+`ActionBar::item_count(slot, &Inventory)` is the number on a potion slot.
+
+**Items: `Inventory`**
+
+| packet | event | state |
+|---|---|---|
+| `SCCharacterState` | `CharacterSelected` | `equipment` (28 slots, `model::slot`), sizes; bag and bank start empty |
+| `SCCharacterInvenInit` | `InventoryInit { bag_slots, bank_slots }` | `bag_slots`, `bank_slots` |
+| `SCCharacterInvenContents` (chunks of 10) | `InventoryChunk(InvenChunk)` | `bag[n]` / `bank[n]` = `Option<Item>` |
+| `SCItemTaskSuccess` | `ItemsChanged(ItemTasks { reason, tasks, force_remove })` | `bag`, `bank`, `equipment` follow `ItemTask::{Add, Count, Remove, Move, Grade, Flags, Update ...}`; `Money` / `BankMoney` / `GamePoint` tasks update `PlayerStats::money` / `bank_money` / `honor` / `vocation` |
+| `SCInvenExpanded` | `InventoryExpanded` | sizes |
+| `SCUnitEquipmentsChanged` | `EquipmentChanged { obj_id, items }` | `Inventory::equipment` for the player, `Unit::equipment` for other units |
+
+`Item { template_id, id, count, grade, flags, detail, .. }`. Helpers: `bag_items()`, `count_of(template)`,
+`find_template(template)`, `find_by_id(id)`, `free_bag_slots()`, `worn(model::slot::MAINHAND)`.
+`ItemTasks::reason` is the server's `ItemTaskType` (9 loot, 13 skill source consumed, 53 sold ...)
+for chat lines such as "You acquired ...". Containers: `items::container::{EQUIPMENT 1, INVENTORY 2, BANK 3}`.
+
 ## What the UI scripts need
 
 The login-stage scripts (`x2ui/loginstage/world_select`, `character_select`, `character_create`) call:

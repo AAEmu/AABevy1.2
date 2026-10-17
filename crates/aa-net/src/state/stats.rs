@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::buff::Buff;
+use crate::items::ItemTask;
 use crate::model::exp;
 use crate::session::Event;
 
@@ -159,6 +160,20 @@ impl PlayerStats {
                 _ => return false,
             },
             Event::LoyaltyChanged { bm_point } => self.loyalty = *bm_point,
+            Event::ItemsChanged(changes) => {
+                let mut changed = false;
+                for task in &changes.tasks {
+                    match task {
+                        ItemTask::Money(a) => self.money += i64::from(*a),
+                        ItemTask::BankMoney(a) => self.bank_money += i64::from(*a),
+                        ItemTask::GamePoint { kind: 0, amount } => self.honor += amount,
+                        ItemTask::GamePoint { kind: 1, amount } => self.vocation += amount,
+                        _ => continue,
+                    }
+                    changed = true;
+                }
+                return changed;
+            }
             Event::CombatChanged { obj_id, engaged } if self.is_self(*obj_id) => self.in_combat = *engaged,
             Event::UnitDeath { obj_id } if self.is_self(*obj_id) => {
                 self.dead = true;

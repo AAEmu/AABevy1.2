@@ -16,9 +16,10 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::buff::Buff;
 use crate::game::{self, LeaveTarget, VisualOptions};
+use crate::items::{ActionSlot, InvenChunk, ItemTasks};
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
-    ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Movement, Unit, UnitKind,
+    ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
 };
 use crate::net::{self, GameConn, LoginConn, NetError, StreamConn};
@@ -188,6 +189,9 @@ pub enum Command {
     EnterGame { character_id: u32 },
     Move(MoveCommand),
     Chat { chat_type: i16, target: String, message: String },
+    /// Put `action` into hotbar slot `slot` (0 based). The server does not echo it: the session
+    /// reports `ActionSlotChanged` itself.
+    SetActionSlot { slot: u8, action: ActionSlot },
     /// Leave the game: `Quit` logs out, `CharacterSelect` returns to the character list.
     LeaveWorld(LeaveTarget),
     CancelLeave,
@@ -326,6 +330,20 @@ pub enum Event {
     /// A unit entered or left combat.
     CombatChanged { obj_id: u32, engaged: bool },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    /// The whole hotbar, 85 slots, sent when the character is selected.
+    ActionSlots(Vec<ActionSlot>),
+    /// One hotbar slot changed by [`Command::SetActionSlot`].
+    ActionSlotChanged { slot: u8, action: ActionSlot },
+    /// Bag and bank sizes; their contents follow as [`Event::InventoryChunk`]s.
+    InventoryInit { bag_slots: u32, bank_slots: u32 },
+    /// Ten consecutive slots of the bag or bank (see `items::container`).
+    InventoryChunk(InvenChunk),
+    /// Items were added, removed, moved or changed (loot, shop, use ...), or money changed.
+    ItemsChanged(ItemTasks),
+    /// Equipment slots of a unit changed; `None` = emptied.
+    EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
+    /// A container grew to `slots` slots.
+    InventoryExpanded { container: u8, slots: u8 },
     /// A buff or debuff started on a unit (or was refreshed: same `index`).
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
@@ -675,6 +693,11 @@ impl Session {
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
+            Command::SetActionSlot { slot, action } => {
+                if self.send_game(game::ClientMsg::UpdateActionSlot { slot, action }).await {
+                    self.emit(Event::ActionSlotChanged { slot, action });
+                }
+            }
             Command::LeaveWorld(target) => {
                 self.send_game(game::ClientMsg::LeaveWorld(target)).await;
             }
@@ -937,6 +960,12 @@ impl Session {
             M::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary } => {
                 self.emit(Event::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary });
             }
+            M::ActionSlots(slots) => self.emit(Event::ActionSlots(slots)),
+            M::InvenInit { bag_slots, bank_slots } => self.emit(Event::InventoryInit { bag_slots, bank_slots }),
+            M::InvenContents(chunk) => self.emit(Event::InventoryChunk(chunk)),
+            M::ItemTasks(tasks) => self.emit(Event::ItemsChanged(tasks)),
+            M::EquipmentChanged { obj_id, items } => self.emit(Event::EquipmentChanged { obj_id, items }),
+            M::InvenExpanded { container, slots } => self.emit(Event::InventoryExpanded { container, slots }),
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
