@@ -28,6 +28,8 @@ use bevy::render::render_resource::Face;
 use crate::material::{Material as CryMaterial, TextureMap};
 use crate::scene::Shading;
 
+pub mod backlight;
+
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
 pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial) -> Option<StandardMaterial> {
     let mut out = to_standard_material(m, |path, srgb| prep.texture(path, srgb))?;
@@ -46,10 +48,17 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
     bake_hair_colour(prep, m, &mut out);
     bake_terrain_blend(prep, m, &mut out);
     if prep.shading == Shading::Full {
+        // characters get the `Char BackLight` term when `backlight::CharLightPlugin` is on
+        out.lightmap_exposure =
+            if shader_is_skin(m) { backlight::skin_tag(luma(m.diffuse)) } else { backlight::TAG };
         bake_specular(prep, m, &mut out);
         bake_hair_specular(prep, m, &mut out);
     }
     Some(out)
+}
+
+fn shader_is_skin(m: &CryMaterial) -> bool {
+    m.shader.eq_ignore_ascii_case("humanskin")
 }
 
 /// `GenMask` bit of the `Vegetation` shader's terrain colour blend (`%BLEND_WITH_TERRAIN_COLOR`): set
