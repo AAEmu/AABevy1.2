@@ -11,6 +11,7 @@
 //! return `nil`, as scripts test fields like `if self.bgs == nil`.
 
 pub mod animation;
+mod attachment;
 mod bounds;
 pub mod chat;
 pub mod chat_input;
@@ -88,6 +89,8 @@ pub struct Ui {
     pub widget_sounds: HashMap<Id, String>,
     /// Drag sources and what the pointer holds ([`drag`]).
     pub drag: drag::DragState,
+    /// Native AttachWidget lifetime links, independent of ordinary parentage/anchors.
+    pub attachments: HashMap<Id, Id>,
 }
 
 /// `Show(visible, ms)` fade.
@@ -330,6 +333,7 @@ pub fn flush(lua: &Lua) {
         }
         for (id, name, args) in pending {
             call_handler(lua, id, &name, args);
+            if name == "OnHide" { attachment::hidden(lua, id); }
         }
     }
 }

@@ -88,6 +88,7 @@ impl UiRuntime {
             queued_events: Vec::new(),
             widget_sounds: Default::default(),
             drag: Default::default(),
+            attachments: Default::default(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
         prof::wrap_natives(&lua).map_err(|e| anyhow::anyhow!("{e}"))?;

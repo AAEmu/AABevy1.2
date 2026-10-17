@@ -379,6 +379,21 @@ and exited. The full suite passed 110 runtime tests plus both doc tests (one ign
 the final pointer-focus regression brings runtime coverage to 111, with all nine edit tests
 passing on the final implementation. No application hook is required for editing.
 
+`AttachWidget(widget)` is a separate lifetime link: it preserves parentage and anchors.
+Replacing the link hides the old shown widget and dispatches its `OnHide` before assigning
+the new one; attaching the same widget again does nothing. `DetachWidget()` clears the
+link without hiding it. `GetAttachedWidget()` returns the linked live widget or nil.
+After the owner's `OnHide`, attachments owned by it and its ordinary descendants close
+and clear, including links on hidden descendants. This runs only on hide/replacement;
+metadata-only attach/detach does not dirty the visual tree or add per-frame work.
+
+Native evidence: binding `39266b00` -> replacement `3927fd00`, getter `39266c70`
+(field +0xc4), detach `39265380` -> `392774a0`, hide `3927ff20` -> recursive cleanup
+`3927f9b0`. Five `tests/attachment.rs` cases pass: unchanged metadata, reentrant replacement,
+ancestor/nested close, cyclic/dead links, and original `popup_menu.alb` owner-specific close
+and reopen. The fixture retains `CreateEmptyWindow`'s return because the original popup
+handle is a local upvalue. Generic widget removal/ClearChildren remains a separate gap.
+
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's
 channel (`/s`, `/local` say, `/shout` `/y` zone, `/p` `/party`, `/raid`, `/guild` `/g`, `/n`
