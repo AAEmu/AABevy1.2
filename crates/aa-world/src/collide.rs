@@ -281,9 +281,9 @@ impl WorldCollision {
     // ---------------------------------------------------------------- loading
 
     /// Starts building the brush collision of cell `(cx, cy)` on the worker threads unless it is built or
-    /// building. `priority` as in [`aa_cry::workers::Workers::spawn`] (smaller runs first).
+    /// building (just after the terrain cells in the queue of the workers; [`request_around`](Self::request_around) orders by distance).
     pub fn request(&self, cx: i32, cy: i32) {
-        self.request_with_priority(cx, cy, -70_000.0);
+        self.request_with_priority(cx, cy, -45_000.0);
     }
 
     fn request_with_priority(&self, cx: i32, cy: i32, priority: f32) {
@@ -307,7 +307,7 @@ impl WorldCollision {
     /// [`request`](Self::request) for every cell within `radius` metres of `(x, y)`, nearest first.
     pub fn request_around(&self, x: f32, y: f32, radius: f32) {
         for (d, (cx, cy)) in cells_within(x, y, radius) {
-            self.request_with_priority(cx, cy, -70_000.0 + d);
+            self.request_with_priority(cx, cy, -45_000.0 + d);
         }
     }
 
@@ -939,7 +939,7 @@ mod tests {
     #[ignore]
     fn survey_cell() {
         let Some(w) = world() else { return };
-        for (cx, cy) in [(20, 10), (10, 11)] {
+        for (cx, cy) in [(20, 10), (10, 11), (14, 11)] {
             let dir = cell_dir("main_world", cx, cy);
             let pak = aa_pak::Pak::global();
             let brushes = parse_brush_dat(&pak.read(&format!("{dir}/client/brush.dat")).unwrap()).unwrap();
