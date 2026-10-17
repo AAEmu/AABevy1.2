@@ -36,6 +36,7 @@ cargo run -p aa-ui --example world_select -- --shot shots/aa-ui/world_select.png
 cargo run -p aa-ui --example character_select -- --shot shots/aa-ui/character_select.png
 cargo run -p aa-ui --example character_create -- --shot shots/aa-ui/character_create.png
 cargo run -p aa-ui --example character_create -- --race elf --gender female --step 2
+cargo run -p aa-ui --example ingame_hud -- --shot shots/aa-ui/ingame_hud.png
 ```
 
 All three run the screen's scripts with a fake game API (`examples/fake/`: 3 servers, one
@@ -82,6 +83,9 @@ visibility); `imgdiff.py` and `crops.py` compare screenshots.
 | `lua/widget.rs` | the widget natives: bounds, anchors, visibility, text, drawables, buttons, lists, sliders |
 | `lua/drawable.rs` | drawable natives (`SetTexture`, `SetCoords`, `SetColor`, ...) |
 | `lua/folder.rs`, `lua/tab.rs`, `lua/edit.rs`, `lua/diagram.rs` | `folder`, `tab`, edit box and `circlediagram` behaviour |
+| `lua/slot.rs`, `lua/statusbar.rs` | `slot` (action bar icons bound to game slots) and `statusbar` (HP / MP / exp / labor bars) |
+| `lua/chat.rs` | `message` frames and the tabbed `chatwindow`, `X2Chat:DispatchChatMessage` |
+| `lua/roadmap.rs` | the `roadmap` zone map overlay, `listbox` tree images |
 | `lua/globals.rs` | `UIParent` / `UI`, constants, `Script`, the toolkit side of `X2Locale`, `ADDON`, `X2DialogManager`, game API stubs |
 | `lua/classes.rs` | the exact method list of every native class (from `reference/api/widget_methods.json`) |
 | `lua/constants.rs` | the client's real constant values (`x2_globals`) |
@@ -161,7 +165,11 @@ visible modal window (`SetWindowModal`) blocks everything outside it. It gets `O
 nearest ancestor with a handler, if enabled), `OnWheelUp` / `OnWheelDown`. Native behaviour:
 button state art (normal / highlight / pushed / disabled), check buttons toggle before their
 `OnClick` and fire `OnCheckChanged`, list rows with data highlight and select (`OnSelChanged`,
-double clicks), tab buttons select their tab (`OnTabChanged`).
+double clicks), tab buttons select their tab (`OnTabChanged`), chat tab buttons select their
+chat tab. Sliders: a press on the track or the thumb sets the value so the thumb centre is
+under the cursor, dragging keeps updating it (captured until release, also outside the widget),
+clamped and snapped to `SetValueStep`; each change fires `OnSliderChanged(self, value)`. The
+thumb (`SetThumbButtonWidget`) is placed natively along the track by the value.
 
 Keyboard: one widget has the focus (`SetFocus`, or a press on an edit box; `ClearFocus`, Escape
 or a press elsewhere drops it; `OnAcceptFocus` on gain). Keys go to it: edit boxes insert typed
@@ -237,6 +245,27 @@ App::new()
   set (below).
   `examples/fake/fake_game.lua` is a complete fake of what the login stages call, a good map of
   what the app has to provide; `docs/ui-api.md` (aa-lua) lists every call site.
+* In-game HUD (`Stage::World`): the stage runs every content script (about 900 files) and the
+  root scripts; then the app raises what the client raises on entering the world
+  (`ENTERED_WORLD`, `LEFT_LOADING`, chat channel joins, ...; `examples/fake/fake_ingame.lua`
+  `FAKE.enter_world` is the list the example uses). Native widgets that show game data ask the
+  app through Lua hooks on the global table `AAUI` (aa-ui creates it empty; define the
+  functions before or after the scripts load):
+
+  | hook | used by | returns |
+  |---|---|---|
+  | `AAUI.SlotContent(slotType, slotIdx)` | `slot:EstablishSlot` (action bars: `ISLOT_ACTION`, 1..) | nil, or `{ type = "skill"\|"item"\|..., id, icon = "ui/icon/x.dds", stack, grade, canUse, tooltip, extraInfo }` |
+  | `AAUI.SkillContent(skillType)`, `AAUI.ItemContent(itemType, grade)` | `slot:EstablishSkill` / `EstablishItem` | the same (optional) |
+  | `AAUI.SlotHotKey(slotType, slotIdx)` | `slot:GetHotKey` (keybinding labels) | `"1"`, `"SHIFT-1"`, `"MINUS"`, ... or nil |
+  | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
+  | `AAUI.ChatColor(filter)` | `X2Chat:DispatchChatMessage` | `{ r, g, b }` or nil (a default per filter) |
+  | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 1, zone = 5, player = { u, v } }` |
+
+  `ui.refresh_slots()` asks the slot hooks again (bars changed); the roadmap and chat colours
+  are read when needed. `X2Chat:DispatchChatMessage(filter, text)` is the toolkit's (it routes
+  the line to the chat tabs whose filters take it); chat messages from the server arrive as
+  UI events the chat scripts turn into `DispatchChatMessage` calls. Example:
+  `cargo run -p aa-ui --example ingame_hud`.
 * `fire_event(name, args)` / `queue_event(name, args)` raise UI events (`args` is anything
   `IntoLuaMulti`: `()`, `true`, `("a", 1)`).
 * `key(&UiKey)` / `type_text(&str)` / `focus()` / `set_focus(id)`: keyboard (the plugin already

@@ -234,6 +234,12 @@ impl UiRuntime {
         x2locale.raw_set("LocalizeUiText", f)
     }
 
+    /// Ask `AAUI.SlotContent` / `SkillContent` / `ItemContent` again for every bound slot (call
+    /// it when action bars, bags or skills change) and tell the scripts (`OnContentUpdated`).
+    pub fn refresh_slots(&self) -> mlua::Result<()> {
+        lua::slot::refresh_slots(&self.lua)
+    }
+
     /// Give the keyboard focus to a widget (`None` clears it), like `widget:SetFocus()`.
     pub fn set_focus(&self, id: Option<tree::Id>) {
         lua::edit::set_focus(&self.lua, id);

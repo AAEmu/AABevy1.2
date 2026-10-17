@@ -149,3 +149,79 @@ fn caret_is_drawn() {
     let p = caret[0].pos;
     assert!(p[0] > 100.0 && p[0] < 140.0 && p[1] >= 100.0 && p[3] <= 130.0, "{p:?}");
 }
+
+#[test]
+fn slider_drag() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        slider = UIParent:CreateWidget("slider", "testSlider", "UIParent")
+        slider:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        slider:SetExtent(220, 26)
+        slider:SetOrientation(1)
+        slider:SetMinMaxValues(0, 100)
+        thumb = slider:CreateChildWidget("button", "thumb", 0, true)
+        thumb:SetExtent(20, 26)
+        slider:SetThumbButtonWidget(thumb)
+        slider:Show(true)
+        changes, last = 0, nil
+        slider:SetHandler("OnSliderChanged", function(self, v) changes = changes + 1 last = v end)
+        "#,
+    )
+    .unwrap();
+    let mut mouse = aa_ui::input::MouseState::default();
+    // Press on the track at 3/4 of the travel: the thumb centre jumps there.
+    let x = 100.0 + 10.0 + 0.75 * 200.0;
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((x, 110.0)), true, false, false, 0.0);
+    assert_eq!(eval::<f64>(&ui, "slider:GetValue()"), 75.0);
+    assert_eq!(eval::<i64>(&ui, "changes"), 1);
+    let tx = eval::<f64>(&ui, "local x = thumb:GetOffset() return x");
+    assert_eq!(tx, 100.0 + 150.0);
+    // Drag outside the widget (captured), past the end: clamped to the maximum.
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((900.0, 400.0)), false, false, false, 0.0);
+    assert_eq!(eval::<f64>(&ui, "last"), 100.0);
+    // Release, then moving does nothing.
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((900.0, 400.0)), false, true, false, 0.0);
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((110.0, 110.0)), false, false, false, 0.0);
+    assert_eq!(eval::<f64>(&ui, "slider:GetValue()"), 100.0);
+    assert_eq!(eval::<i64>(&ui, "changes"), 2);
+}
+
+#[test]
+fn chat_window_tabs() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        created, buttons, msgs, selected = 0, 0, {}, {}
+        function OnCreateChatWindow(w) created = created + 1 end
+        function OnCreateChatTabButton(b) buttons = buttons + 1 end
+        function OnCreateChatMessage(m)
+          msgs[#msgs + 1] = m
+          up = m:GetUpButton()
+          slider = m:GetSlider()
+        end
+        function OnSelectedChatTab(b, on) selected[#selected + 1] = on end
+        AAUI.ChatTabs = function(id)
+          return { { id = 0, name = "All" }, { id = 1, name = "Party", filters = { CMF_PARTY } } }
+        end
+        win = UIParent:CreateWidget("chatwindow", "chatWindow[1]", "UIParent")
+        win:AddAnchor("BOTTOMLEFT", "UIParent", 0, -145)
+        win:SetExtent(430, 350)
+        win:SetTabAreaHeight(30)
+        win:SetChatWindowId(0)
+        win:Show(true)
+        X2Chat:DispatchChatMessage(CMF_SYSTEM, "Welcome")
+        X2Chat:DispatchChatMessage(CMF_PARTY, "hi party")
+        "#,
+    )
+    .unwrap();
+    assert_eq!(eval::<i64>(&ui, "created"), 1);
+    assert_eq!(eval::<i64>(&ui, "buttons"), 2);
+    assert!(eval::<bool>(&ui, "up ~= nil and slider ~= nil"));
+    assert!(eval::<bool>(&ui, "win:GetChatEdit() ~= nil and win:GetAddButton() ~= nil"));
+    // "All" takes both lines, "Party" only its own.
+    assert_eq!(eval::<i64>(&ui, "msgs[1]:GetMessageLines()"), 2);
+    assert_eq!(eval::<i64>(&ui, "msgs[2]:GetMessageLines()"), 1);
+}

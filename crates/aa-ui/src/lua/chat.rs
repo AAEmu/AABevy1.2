@@ -1,0 +1,779 @@
+//! Chat: `message` widgets (scrolling message frames) and `chatwindow` widgets (tabbed chat).
+//!
+//! A message frame keeps lines (`AddMessage(text)`, colour codes `|cAARRGGBB` allowed) and shows
+//! the newest ones bottom-aligned in its text style, wrapped at its width minus `SetInset`,
+//! oldest lines dropping off the top; `SetTimeVisible(s)` hides lines older than `s` seconds.
+//!
+//! A chat window builds its tabs natively after `SetChatWindowId(id)` like the client, calling
+//! the script's global callbacks: `OnCreateChatWindow(window)` when created,
+//! `OnCreateChatTabButton(button)`, `OnSetChatTabId(button, tabId)` and
+//! `OnCreateChatMessage(message)` per tab, `OnSelectedChatTab(button, selected)` on selection.
+//! The tabs come from the app: `AAUI.ChatTabs(windowId)` returns
+//! `{ { id = n, name = "All", filters = { CMF_SAY, ... } }, ... }` (no `filters` = every
+//! message; no hook = one "All" tab). `X2Chat:DispatchChatMessage(filter, text)` (toolkit) adds
+//! a line to every tab that takes `filter`, coloured by `AAUI.ChatColor(filter)` (`{r, g, b}`)
+//! or a default per filter.
+
+use mlua::{Function, Lua, Table, Value};
+
+use super::widget::create_child;
+use super::{call_handler, method, new_object_table, none, object_table, ret, ui, value_id};
+use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock};
+
+#[derive(Clone, Debug)]
+pub struct MessageData {
+    /// (text, time added in UI ms).
+    pub lines: Vec<(String, f64)>,
+    pub max_lines: usize,
+    /// Seconds a line stays visible (`SetTimeVisible`); `None` = forever.
+    pub time_visible: Option<f32>,
+    /// Lines scrolled up from the bottom.
+    pub scroll: usize,
+}
+
+impl Default for MessageData {
+    fn default() -> Self {
+        MessageData {
+            lines: Vec::new(),
+            max_lines: 100,
+            time_visible: None,
+            scroll: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChatTab {
+    pub id: i64,
+    pub button: Id,
+    pub message: Id,
+    /// `None` = every filter.
+    pub filters: Option<Vec<i64>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChatData {
+    pub window_id: i64,
+    pub tabs: Vec<ChatTab>,
+    pub selected: usize,
+    pub tab_width: f32,
+    pub min_tab_width: f32,
+    pub tab_area_height: f32,
+    /// `SetTabAreaInset(left, top, right, bottom)`.
+    pub tab_inset: [f32; 4],
+    pub add_button: Id,
+    pub use_add_button: bool,
+    pub edit: Id,
+    pub left_line: Id,
+    pub right_line: Id,
+    /// Cursor over the window at the last update.
+    pub hovered: Option<bool>,
+}
+
+fn with_msg<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut MessageData) -> R) -> Option<R> {
+    let mut u = ui(lua);
+    let w = u.tree.widget_mut(id)?;
+    Some(f(w.message.get_or_insert_with(MessageData::default)))
+}
+
+fn chat(lua: &Lua, id: Id) -> Option<ChatData> {
+    ui(lua).tree.widget(id)?.chat.clone()
+}
+
+fn global_fn(lua: &Lua, name: &str) -> Option<Function> {
+    lua.globals().raw_get::<Option<Function>>(name).ok().flatten()
+}
+
+fn call_global(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) {
+    if let Some(f) = global_fn(lua, name) {
+        if let Err(e) = f.call::<()>(args) {
+            bevy::log::warn!("aa-ui: {name}: {e}");
+        }
+        super::flush(lua);
+    }
+}
+
+/// Add a line to a message frame.
+pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
+    let mut u = ui(lua);
+    let now = u.time_ms;
+    if let Some(w) = u.tree.widget_mut(id) {
+        let m = w.message.get_or_insert_with(MessageData::default);
+        m.lines.push((text.to_string(), now));
+        let max = m.max_lines.max(1);
+        if m.lines.len() > max {
+            let n = m.lines.len() - max;
+            m.lines.drain(..n);
+        }
+    }
+    u.tree.touch();
+}
+
+/// The text block a message frame shows now: its newest lines that fit, bottom-aligned.
+pub(crate) fn compose(u: &mut super::Ui, id: Id, rect: Rect) -> Option<TextBlock> {
+    let w = u.tree.widget(id)?;
+    let m = w.message.as_ref()?;
+    let base = w.text.clone().unwrap_or_default();
+    let now = u.time_ms;
+    let scale = u.ui_scale;
+    let inner_w = (rect.w - base.inset[0] - base.inset[2]).max(1.0);
+    let inner_h = (rect.h - base.inset[1] - base.inset[3]).max(0.0);
+    let live: Vec<&str> = m
+        .lines
+        .iter()
+        .filter(|(_, t)| m.time_visible.is_none_or(|s| now - t < s as f64 * 1000.0))
+        .map(|(s, _)| s.as_str())
+        .collect();
+    let end = live.len().saturating_sub(m.scroll);
+    let mut shown: Vec<&str> = Vec::new();
+    let size = base.style.size * scale;
+    for line in live[..end].iter().rev() {
+        let mut test = vec![*line];
+        test.extend(shown.iter().copied());
+        let text = test.join("\n");
+        let lo = u.fonts.layout(
+            &base.style.font,
+            size,
+            &text,
+            Some(inner_w * scale),
+            base.line_space * scale,
+            false,
+        );
+        if lo.height > inner_h * scale + 0.5 && !shown.is_empty() {
+            break;
+        }
+        shown.insert(0, line);
+    }
+    let mut t = base;
+    t.text = shown.join("\n");
+    t.wrap = true;
+    t.style.align = match t.style.align.fx() {
+        f if f == 0.0 => Align::BottomLeft,
+        f if f == 1.0 => Align::BottomRight,
+        _ => Align::Bottom,
+    };
+    Some(t)
+}
+
+/// Parts a native composite made (field -> object table), by owner id. Kept outside the object
+/// tables so `pairs(widget)` still sees only script fields.
+pub(crate) fn parts(lua: &Lua, owner: Id) -> mlua::Result<Table> {
+    const KEY: &str = "aa_ui_native_parts";
+    let all = match lua.named_registry_value::<Option<Table>>(KEY)? {
+        Some(t) => t,
+        None => {
+            let t = lua.create_table()?;
+            lua.set_named_registry_value(KEY, &t)?;
+            t
+        }
+    };
+    match all.raw_get::<Option<Table>>(owner)? {
+        Some(t) => Ok(t),
+        None => {
+            let t = lua.create_table()?;
+            all.raw_set(owner, &t)?;
+            Ok(t)
+        }
+    }
+}
+
+/// A child widget made by the native (chat edit, scroll buttons ...), made once so `Get...()`
+/// returns the same object.
+fn native_child(
+    lua: &Lua,
+    owner: Id,
+    field: &str,
+    class: &str,
+    name: &str,
+    shown: bool,
+) -> mlua::Result<(Id, Table)> {
+    let t = parts(lua, owner)?;
+    if let Some(c) = t.raw_get::<Option<Table>>(field)? {
+        let cid = value_id(lua, &Value::Table(c.clone())).unwrap();
+        return Ok((cid, c));
+    }
+    let c = create_child(lua, Some(owner), class, name, 0, false)?;
+    let cid = value_id(lua, &Value::Table(c.clone())).unwrap();
+    ui(lua).tree.get_mut(cid).shown = shown;
+    t.raw_set(field, &c)?;
+    Ok((cid, c))
+}
+
+fn native_drawable(lua: &Lua, owner: Id, field: &str) -> mlua::Result<(Id, Table)> {
+    let t = parts(lua, owner)?;
+    if let Some(c) = t.raw_get::<Option<Table>>(field)? {
+        let cid = value_id(lua, &Value::Table(c.clone())).unwrap();
+        return Ok((cid, c));
+    }
+    let d = ui(lua)
+        .tree
+        .create_drawable(owner, DrawKind::Image, "drawable:image", DrawLayer::Overlay);
+    let c = new_object_table(lua, d)?;
+    t.raw_set(field, &c)?;
+    Ok((d, c))
+}
+
+/// Instance getters a native composite gives its parts (`chatMessage:GetUpButton()`): the
+/// client's chat message class has methods the reference capture could not list, so they are
+/// set on the object itself, which scripts cannot tell apart.
+fn set_getter(lua: &Lua, t: &Table, name: &str, child: Table) -> mlua::Result<()> {
+    let f = lua.create_function(move |_, _: mlua::MultiValue| Ok(child.clone()))?;
+    t.raw_set(name, f)
+}
+
+/// The chat tab message frame: a `message` with scroll buttons and a slider.
+fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Table)> {
+    let t = create_child(lua, Some(window), "message", &format!("chatMessage{i}"), 0, false)?;
+    let id = value_id(lua, &Value::Table(t.clone())).unwrap();
+    for (getter, class, name) in [
+        ("GetUpButton", "button", "upButton"),
+        ("GetDownButton", "button", "downButton"),
+        ("GetDownToBottomButton", "button", "downToBottomButton"),
+        ("GetSlider", "slider", "slider"),
+    ] {
+        // Scroll controls show on mouse over in the client; hidden here.
+        let (cid, c) = native_child(lua, id, name, class, name, false)?;
+        if class == "slider" {
+            // A native slider comes with its thumb (`GetThumbButtonWidget`).
+            let (thumb, _) = native_child(lua, cid, "thumb", "button", "thumb", true)?;
+            if let Some(s) = ui(lua).tree.widget_mut(cid).and_then(|w| w.slider.as_mut()) {
+                s.thumb = Some(thumb);
+            }
+        }
+        set_getter(lua, &t, getter, c)?;
+    }
+    with_msg(lua, id, |m| m.max_lines = 300);
+    Ok((id, t))
+}
+
+/// Called when a chat window is created: its edit box, buttons and line drawables.
+pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
+    let (edit, _) = native_child(lua, id, "chatEdit", "editbox", "chatEdit", false)?;
+    let (add, _) = native_child(lua, id, "addButton", "button", "addButton", true)?;
+    native_child(lua, id, "imeToggle", "button", "imeToggleButton", false)?;
+    let (_, selector) = native_child(lua, edit, "chatMethodSelector", "button", "chatMethodSelector", true)?;
+    let (_, list) = native_child(lua, edit, "chatMethodList", "listbox", "chatMethodList", false)?;
+    set_getter(lua, &selector, "GetList", list)?;
+    let (left_line, _) = native_drawable(lua, id, "leftLine")?;
+    let (right_line, _) = native_drawable(lua, id, "rightLine")?;
+    for f in ["lockNotify", "caret"] {
+        let (d, _) = native_drawable(lua, id, f)?;
+        ui(lua).tree.get_mut(d).shown = false;
+    }
+    if let Some(w) = ui(lua).tree.widget_mut(id) {
+        w.chat = Some(ChatData {
+            window_id: 0,
+            tabs: Vec::new(),
+            selected: 0,
+            tab_width: 65.0,
+            min_tab_width: 42.0,
+            tab_area_height: 30.0,
+            tab_inset: [0.0; 4],
+            add_button: add,
+            use_add_button: false,
+            edit,
+            left_line,
+            right_line,
+            hovered: None,
+        });
+    }
+    call_global(lua, "OnCreateChatWindow", t.clone());
+    Ok(())
+}
+
+/// Tab buttons left to right in the tab area, the add button after them, the message frames
+/// below; only the selected tab's frame is shown.
+fn layout(lua: &Lua, id: Id) {
+    let Some(c) = chat(lua, id) else { return };
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let wr = u.tree.rect(id);
+    let avail = (wr.w - c.tab_inset[0] - c.tab_inset[2]).max(0.0);
+    let n = c.tabs.len().max(1) as f32;
+    let add_w = if c.use_add_button { u.tree.get(c.add_button).width } else { 0.0 };
+    let tw = c
+        .tab_width
+        .min(((avail - add_w) / n).max(c.min_tab_width));
+    let mut x = c.tab_inset[0];
+    let anchor = |point, x, y| Anchor {
+        point,
+        target: id,
+        rel: point,
+        x,
+        y,
+    };
+    for (i, tab) in c.tabs.iter().enumerate() {
+        let o = u.tree.get_mut(tab.button);
+        o.anchors = vec![anchor(Point::TopLeft, x, c.tab_inset[1])];
+        o.width = tw;
+        o.height = c.tab_area_height;
+        o.shown = true;
+        let m = u.tree.get_mut(tab.message);
+        m.anchors = vec![
+            anchor(Point::TopLeft, 0.0, c.tab_area_height),
+            Anchor {
+                point: Point::BottomRight,
+                target: id,
+                rel: Point::BottomRight,
+                x: -c.tab_inset[2],
+                y: 0.0,
+            },
+        ];
+        m.shown = i == c.selected;
+        if let Some(b) = u.tree.widget_mut(tab.button).and_then(|w| w.button.as_mut()) {
+            b.checked = i == c.selected;
+        }
+        x += tw;
+    }
+    let o = u.tree.get_mut(c.add_button);
+    let h = o.height;
+    o.anchors = vec![anchor(
+        Point::TopLeft,
+        x,
+        c.tab_inset[1] + ((c.tab_area_height - h) / 2.0).round(),
+    )];
+    o.shown = c.use_add_button;
+    // The lines under the tab area, left and right of the selected tab.
+    let sel_x = c.tab_inset[0] + tw * c.selected as f32;
+    for (d, x0, x1) in [
+        (c.left_line, 0.0, sel_x),
+        (c.right_line, sel_x + tw, wr.w),
+    ] {
+        let o = u.tree.get_mut(d);
+        o.anchors = vec![anchor(Point::TopLeft, x0, c.tab_area_height - 1.0)];
+        o.width = (x1 - x0).max(0.0);
+        o.height = 1.0;
+    }
+    u.tree.touch();
+}
+
+fn select(lua: &Lua, id: Id, idx: usize) {
+    let Some(c) = chat(lua, id) else { return };
+    if idx >= c.tabs.len() {
+        return;
+    }
+    if let Some(w) = ui(lua).tree.widget_mut(id) {
+        if let Some(ch) = w.chat.as_mut() {
+            ch.selected = idx;
+            // Skins change on selection: apply the hover fade again.
+            ch.hovered = None;
+        }
+    }
+    layout(lua, id);
+    for (i, tab) in c.tabs.iter().enumerate() {
+        if let Ok(Some(b)) = object_table(lua, tab.button) {
+            call_global(lua, "OnSelectedChatTab", (b, i == idx));
+        }
+    }
+}
+
+/// A click on a chat tab button selects its tab. Returns whether `target` was one.
+pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
+    let Some(parent) = ui(lua).tree.get(target).parent else {
+        return false;
+    };
+    let Some(c) = chat(lua, parent) else { return false };
+    match c.tabs.iter().position(|t| t.button == target) {
+        Some(i) => {
+            select(lua, parent, i);
+            true
+        }
+        None => false,
+    }
+}
+
+fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
+    // The tabs: the app's hook, else one "All" tab.
+    let mut specs: Vec<(i64, String, Option<Vec<i64>>)> = Vec::new();
+    let hook = lua
+        .globals()
+        .raw_get::<Option<Table>>("AAUI")?
+        .and_then(|t| t.raw_get::<Option<Function>>("ChatTabs").ok().flatten());
+    if let Some(f) = hook {
+        if let Value::Table(list) = f.call::<Value>(window_id)? {
+            for v in list.sequence_values::<Table>() {
+                let v = v?;
+                let filters = v
+                    .raw_get::<Option<Table>>("filters")?
+                    .map(|t| t.sequence_values::<i64>().filter_map(Result::ok).collect());
+                specs.push((
+                    v.raw_get::<Option<i64>>("id")?.unwrap_or(specs.len() as i64),
+                    v.raw_get::<Option<String>>("name")?.unwrap_or_default(),
+                    filters,
+                ));
+            }
+        }
+    }
+    if specs.is_empty() {
+        specs.push((0, "All".into(), None));
+    }
+    // Drop old tabs.
+    if let Some(c) = chat(lua, id) {
+        let mut u = ui(lua);
+        for t in &c.tabs {
+            u.tree.get_mut(t.button).shown = false;
+            u.tree.get_mut(t.button).alive = false;
+            u.tree.get_mut(t.message).shown = false;
+            u.tree.get_mut(t.message).alive = false;
+        }
+    }
+    let mut tabs = Vec::new();
+    for (i, (tab_id, name, filters)) in specs.into_iter().enumerate() {
+        let b = create_child(lua, Some(id), "button", &format!("chatTab{i}"), 0, false)?;
+        let bid = value_id(lua, &Value::Table(b.clone())).unwrap();
+        if let Some(tb) = ui(lua).tree.get_mut(bid).text_mut() {
+            tb.text = name;
+        }
+        call_global(lua, "OnCreateChatTabButton", b.clone());
+        call_global(lua, "OnSetChatTabId", (b.clone(), tab_id));
+        let (mid, m) = create_tab_message(lua, id, i)?;
+        call_global(lua, "OnCreateChatMessage", m);
+        apply_chat_options(lua, mid);
+        tabs.push(ChatTab {
+            id: tab_id,
+            button: bid,
+            message: mid,
+            filters,
+        });
+    }
+    if let Some(w) = ui(lua).tree.widget_mut(id) {
+        if let Some(c) = w.chat.as_mut() {
+            c.window_id = window_id;
+            c.tabs = tabs;
+            c.selected = 0;
+        }
+    }
+    if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+        c.hovered = None;
+    }
+    select(lua, id, 0);
+    Ok(())
+}
+
+/// The client's default chat options on a tab's message frame: font size 15 and a black
+/// background at 45 % (the frame's background drawables are white, tinted by the option; the
+/// darkening in reference/ingame/spawn is 0.54).
+fn apply_chat_options(lua: &Lua, msg: Id) {
+    let mut g = ui(lua);
+    let u = &mut *g;
+    if let Some(t) = u.tree.get_mut(msg).text_mut() {
+        t.style.size = 15.0;
+    }
+    let ds = u.tree.widget(msg).map(|w| w.drawables.clone()).unwrap_or_default();
+    for d in ds {
+        if let Some(dr) = u.tree.drawable_mut(d) {
+            if dr.layer == DrawLayer::Background {
+                dr.color = [0.0, 0.0, 0.0, 0.45];
+            }
+        }
+    }
+}
+
+/// Per frame: tab button backgrounds show only while the cursor is over the chat window (the
+/// tab names stay), like the client's fading chat decorations.
+pub(crate) fn update(lua: &Lua) {
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let (cx, cy) = u.cursor;
+    let wins: Vec<Id> = u
+        .tree
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.alive && o.widget().is_some_and(|w| w.chat.is_some()))
+        .map(|(i, _)| i as Id)
+        .collect();
+    for id in wins {
+        let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
+        let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else { continue };
+        if c.hovered == Some(inside) {
+            continue;
+        }
+        for t in &c.tabs {
+            let ds = u.tree.widget(t.button).map(|w| w.drawables.clone()).unwrap_or_default();
+            for d in ds {
+                u.tree.get_mut(d).alpha = if inside { 1.0 } else { 0.0 };
+            }
+        }
+        if let Some(ch) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+            ch.hovered = Some(inside);
+        }
+    }
+}
+
+/// Default line colours by chat filter (`CMF_*`), when the app gives none.
+fn default_color(filter: i64) -> [f32; 3] {
+    match filter {
+        2 => [1.0, 1.0, 1.0],              // CMF_SAY
+        3 => [1.0, 0.55, 0.85],            // CMF_WHISPER
+        4 => [0.45, 0.78, 1.0],            // CMF_PARTY
+        5 => [1.0, 0.55, 0.2],             // CMF_RAID
+        6 => [0.55, 0.9, 0.45],            // CMF_EXPEDITION
+        _ => [1.0, 246.0 / 255.0, 94.0 / 255.0],
+    }
+}
+
+/// `X2Chat:DispatchChatMessage(filter, text)`: a line on every chat tab that takes `filter`.
+pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
+    let hook = lua
+        .globals()
+        .raw_get::<Option<Table>>("AAUI")?
+        .and_then(|t| t.raw_get::<Option<Function>>("ChatColor").ok().flatten());
+    let rgb = match hook.map(|f| f.call::<Option<Table>>(filter)).transpose()?.flatten() {
+        Some(t) => [
+            t.raw_get::<f32>(1).unwrap_or(1.0),
+            t.raw_get::<f32>(2).unwrap_or(1.0),
+            t.raw_get::<f32>(3).unwrap_or(1.0),
+        ],
+        None => default_color(filter),
+    };
+    let to = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let line = if text.starts_with("|c") || text.starts_with("|C") {
+        text.to_string()
+    } else {
+        format!("|cFF{:02X}{:02X}{:02X}{text}", to(rgb[0]), to(rgb[1]), to(rgb[2]))
+    };
+    let frames: Vec<Id> = {
+        let u = ui(lua);
+        u.tree
+            .objects
+            .iter()
+            .filter(|o| o.alive)
+            .filter_map(|o| o.widget()?.chat.as_ref())
+            .flat_map(|c| c.tabs.iter())
+            .filter(|t| t.filters.as_ref().is_none_or(|f| f.contains(&filter)))
+            .map(|t| t.message)
+            .collect()
+    };
+    for m in frames {
+        add_line(lua, m, &line);
+        call_handler(lua, m, "OnContentUpdated", vec![Value::String(lua.create_string("unread_chat_message")?)]);
+    }
+    Ok(())
+}
+
+pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
+    // (text[, r, g, b, a]).
+    let add = method(lua, |lua, id, a| {
+        let text = a.s(1).unwrap_or_default();
+        let text = if a.is_num(2) {
+            let to = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            format!(
+                "|c{:02X}{:02X}{:02X}{:02X}{text}",
+                to(a.opt_f(5).unwrap_or(1.0)),
+                to(a.f(2)),
+                to(a.f(3)),
+                to(a.f(4))
+            )
+        } else {
+            text
+        };
+        add_line(lua, id, &text);
+        none()
+    })?;
+    def("AddMessage", add.clone())?;
+    def("AddMessageEx", add.clone())?;
+    let refresh = method(lua, |lua, id, a| {
+        with_msg(lua, id, |m| m.lines.clear());
+        add_line(lua, id, &a.s(1).unwrap_or_default());
+        none()
+    })?;
+    def("AddMessageRefresh", refresh.clone())?;
+    def("AddMessageExRefresh", refresh)?;
+    def(
+        "Clear",
+        method(lua, |lua, id, _| {
+            with_msg(lua, id, |m| {
+                m.lines.clear();
+                m.scroll = 0;
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "SetMaxLines",
+        method(lua, |lua, id, a| {
+            let n = a.f(1).max(1.0) as usize;
+            with_msg(lua, id, |m| m.max_lines = n);
+            none()
+        })?,
+    )?;
+    def(
+        "SetTimeVisible",
+        method(lua, |lua, id, a| {
+            let s = a.f(1);
+            with_msg(lua, id, |m| m.time_visible = (s > 0.0).then_some(s));
+            none()
+        })?,
+    )?;
+    def(
+        "ResetVisibleTime",
+        method(lua, |lua, id, _| {
+            let now = ui(lua).time_ms;
+            with_msg(lua, id, |m| m.lines.iter_mut().for_each(|l| l.1 = now));
+            none()
+        })?,
+    )?;
+    def(
+        "GetMessageLines",
+        method(lua, |lua, id, _| {
+            ret(lua, with_msg(lua, id, |m| m.lines.len()).unwrap_or(0))
+        })?,
+    )?;
+    def(
+        "GetCurrentScroll",
+        method(lua, |lua, id, _| ret(lua, with_msg(lua, id, |m| m.scroll).unwrap_or(0)))?,
+    )?;
+    for (name, delta) in [("ScrollUp", 1i64), ("ScrollDown", -1), ("PageUp", 5), ("PageDown", -5)] {
+        def(
+            name,
+            method(lua, move |lua, id, _| {
+                with_msg(lua, id, |m| {
+                    let max = m.lines.len().saturating_sub(1) as i64;
+                    m.scroll = (m.scroll as i64 + delta).clamp(0, max) as usize;
+                });
+                ui(lua).tree.touch();
+                none()
+            })?,
+        )?;
+    }
+    def(
+        "ScrollToBottom",
+        method(lua, |lua, id, _| {
+            with_msg(lua, id, |m| m.scroll = 0);
+            none()
+        })?,
+    )?;
+    def(
+        "ScrollToTop",
+        method(lua, |lua, id, _| {
+            with_msg(lua, id, |m| m.scroll = m.lines.len().saturating_sub(1));
+            none()
+        })?,
+    )?;
+    for name in ["SetFadeDuration", "EnableItemLink", "ChangeDefaultStyle", "ChangeTextStyle"] {
+        def(name, method(lua, |_, _, _| none())?)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
+    def(
+        "SetChatWindowId",
+        method(lua, |lua, id, a| {
+            set_window_id(lua, id, a.f(1) as i64)?;
+            none()
+        })?,
+    )?;
+    fn set(lua: &Lua, id: Id, f: impl FnOnce(&mut ChatData)) {
+        if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+            f(c);
+        }
+        layout(lua, id);
+    }
+    def(
+        "SetTabWidth",
+        method(lua, |lua, id, a| {
+            let v = a.f(1);
+            set(lua, id, |c| c.tab_width = v);
+            none()
+        })?,
+    )?;
+    def(
+        "SetMinTabWidth",
+        method(lua, |lua, id, a| {
+            let v = a.f(1);
+            set(lua, id, |c| c.min_tab_width = v);
+            none()
+        })?,
+    )?;
+    def(
+        "SetTabAreaHeight",
+        method(lua, |lua, id, a| {
+            let v = a.f(1);
+            set(lua, id, |c| c.tab_area_height = v);
+            none()
+        })?,
+    )?;
+    def(
+        "SetTabAreaInset",
+        method(lua, |lua, id, a| {
+            let v = [a.f(1), a.f(2), a.f(3), a.f(4)];
+            set(lua, id, |c| c.tab_inset = v);
+            none()
+        })?,
+    )?;
+    def(
+        "UseAddTabButton",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            set(lua, id, |c| c.use_add_button = on);
+            none()
+        })?,
+    )?;
+    def(
+        "SelectTab",
+        method(lua, |lua, id, a| {
+            select(lua, id, (a.f(1) as usize).saturating_sub(1));
+            none()
+        })?,
+    )?;
+    def(
+        "GetSelectedTab",
+        method(lua, |lua, id, _| {
+            ret(lua, chat(lua, id).map_or(0, |c| c.selected + 1))
+        })?,
+    )?;
+    for (getter, field) in [
+        ("GetChatEdit", "chatEdit"),
+        ("GetAddButton", "addButton"),
+        ("GetImeToggleButton", "imeToggle"),
+    ] {
+        def(
+            getter,
+            method(lua, move |lua, id, _| {
+                ret(lua, parts(lua, id)?.raw_get::<Value>(field)?)
+            })?,
+        )?;
+    }
+    def(
+        "GetChatMethodSelector",
+        method(lua, |lua, id, _| {
+            let Some(c) = chat(lua, id) else { return none() };
+            ret(lua, parts(lua, c.edit)?.raw_get::<Value>("chatMethodSelector")?)
+        })?,
+    )?;
+    for (getter, field) in [
+        ("GetLockNotifyDrawable", "lockNotify"),
+        ("GetCaretDrawable", "caret"),
+        ("GetLeftLineDrawable", "leftLine"),
+        ("GetRightLineDrawable", "rightLine"),
+    ] {
+        def(
+            getter,
+            method(lua, move |lua, id, _| {
+                ret(lua, parts(lua, id)?.raw_get::<Value>(field)?)
+            })?,
+        )?;
+    }
+    for name in [
+        "SetOffset",
+        "SetCaretOffset",
+        "SetMaxNotifyTime",
+        "SetNotifyBlinkingFreq",
+        "SetLeftLineOffset",
+        "SetRightLineOffset",
+        "SetSlideTimeInDragging",
+        "AllowTabSwitch",
+        "UseAutoResizingTabButtonMode",
+        "UseSlidingButton",
+        "SetGap",
+        "SetContentOffset",
+        "SetTabButtonAlpha",
+    ] {
+        def(name, method(lua, |_, _, _| none())?)?;
+    }
+    Ok(())
+}

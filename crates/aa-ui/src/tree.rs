@@ -183,8 +183,34 @@ impl WidgetType {
             | WidgetType::EditBoxMultiline
             | WidgetType::ListBox
             | WidgetType::GameTooltip => true,
-            // Message frames (`custom_saveload.lua`: `wnd.style:SetAlign(...)`).
-            WidgetType::Other(s) => s == "message",
+            // Message frames (`custom_saveload.lua`: `wnd.style:SetAlign(...)`), combat texts,
+            // cooldown buttons (buffs).
+            WidgetType::Other(s) => matches!(
+                s.as_str(),
+                "message"
+                    | "listctrlitem"
+                    | "damagedisplay"
+                    | "cooldownbutton"
+                    | "cooldownactionbutton"
+                    | "cooldownconstantbutton"
+                    | "cooldowninventorybutton"
+            ),
+            _ => false,
+        }
+    }
+
+    /// Types with button states (normal / highlight / pushed / disabled backgrounds).
+    pub fn is_button_like(&self) -> bool {
+        match self {
+            WidgetType::Button | WidgetType::CheckButton => true,
+            WidgetType::Other(s) => matches!(
+                s.as_str(),
+                "slot"
+                    | "cooldownbutton"
+                    | "cooldownactionbutton"
+                    | "cooldownconstantbutton"
+                    | "cooldowninventorybutton"
+            ),
             _ => false,
         }
     }
@@ -376,6 +402,8 @@ pub struct ButtonData {
 pub struct ListCtrlData {
     pub columns: Vec<Id>,
     pub column_widths: Vec<f32>,
+    /// `LCCIT_*` item type per column: 0 string, 1 button, 2 window.
+    pub column_types: Vec<i64>,
     pub column_height: f32,
     pub rows: Vec<Id>,
     /// Sub-item widgets, `[row][col]`.
@@ -421,6 +449,14 @@ pub struct Widget {
     pub edit: Option<crate::lua::edit::EditData>,
     pub diagram: Option<crate::lua::diagram::DiagramData>,
     pub picker: Option<crate::lua::picker::PickerData>,
+    pub status: Option<crate::lua::statusbar::StatusBarData>,
+    pub slot: Option<crate::lua::slot::SlotData>,
+    pub message: Option<crate::lua::chat::MessageData>,
+    pub chat: Option<crate::lua::chat::ChatData>,
+    pub roadmap: Option<crate::lua::roadmap::RoadMapData>,
+    /// A second text style without its own text (`slot.cooltime_style`, `listbox.childStyle`,
+    /// `damagedisplay.extraStyle`, `editbox.prefixStyle`).
+    pub aux_style: Option<TextBlock>,
     pub modal: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
@@ -447,6 +483,12 @@ pub struct Drawable {
     /// Extra drawables of one button state (`CreateHighlightDrawable`, `CreateStateDrawable`):
     /// shown exactly while the owner is in that state, independent of the backgrounds.
     pub state_only: Option<ButtonState>,
+    /// Status bar fill: only this fraction of the rect (and of `coords`) is drawn, from the
+    /// left (or the bottom when vertical).
+    pub fill: Option<(f32, bool)>,
+    /// Effect drawables (`CreateEffectDrawable`): drawn only while the effect runs
+    /// (`SetStartEffect(true)`), with no animation.
+    pub effect: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -761,10 +803,16 @@ impl Tree {
         let mut anchors: Vec<Anchor> = o.anchors.clone();
         let mut fill = false;
         if anchors.is_empty() {
-            if o.is_widget() || o.width > 0.0 || o.height > 0.0 {
+            // Unanchored: at the owner's top left with its extent. Only text drawables without
+            // an extent fill their owner; an image without anchors or extent is 0 x 0 like in
+            // the client (`honorPointWarWnd.bg` in reference/ingame/spawn).
+            let text = matches!(&o.kind, Kind::Drawable(d) if d.kind == DrawKind::Text);
+            if o.is_widget() || o.width > 0.0 || o.height > 0.0 || !text {
+                // (An empty image drawable reports the screen origin, like the reference.)
+                let empty = !o.is_widget() && o.width == 0.0 && o.height == 0.0;
                 anchors.push(Anchor {
                     point: Point::TopLeft,
-                    target: owner,
+                    target: if empty { ROOT } else { owner },
                     rel: Point::TopLeft,
                     x: 0.0,
                     y: 0.0,
@@ -796,6 +844,35 @@ impl Tree {
             let (x, w) = axis(l, r, cx, o.width);
             let (y, h) = axis(t, b, cy, o.height);
             Rect { x, y, w, h }
+        };
+        // A slider's thumb sits where the value is: along the track, centred across it.
+        let r = match self
+            .widget(owner)
+            .and_then(|p| p.slider.as_ref())
+            .filter(|s| s.thumb == Some(id))
+        {
+            Some(s) => {
+                let pr = self.resolve(owner, cache, visiting);
+                let f = if s.max > s.min {
+                    ((s.value - s.min) / (s.max - s.min)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                if s.vertical {
+                    Rect {
+                        x: pr.x + (pr.w - r.w) / 2.0,
+                        y: pr.y + f * (pr.h - r.h),
+                        ..r
+                    }
+                } else {
+                    Rect {
+                        x: pr.x + f * (pr.w - r.w),
+                        y: pr.y + (pr.h - r.h) / 2.0,
+                        ..r
+                    }
+                }
+            }
+            None => r,
         };
         visiting.pop();
         cache[id as usize] = Some(r);
@@ -887,8 +964,7 @@ impl Widget {
             },
             ..Default::default()
         });
-        let button =
-            matches!(ty, WidgetType::Button | WidgetType::CheckButton).then(ButtonData::default);
+        let button = ty.is_button_like().then(ButtonData::default);
         let list = matches!(ty, WidgetType::ListCtrl).then(|| ListCtrlData {
             row_height: 25.0,
             column_height: 25.0,
@@ -920,6 +996,12 @@ impl Widget {
             edit: None,
             diagram: None,
             picker: None,
+            status: None,
+            slot: None,
+            message: None,
+            chat: None,
+            roadmap: None,
+            aux_style: None,
             modal: false,
             raise: 0,
         }

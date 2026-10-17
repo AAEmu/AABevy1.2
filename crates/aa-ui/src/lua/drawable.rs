@@ -262,6 +262,35 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
+    if class == "drawable:effect" {
+        def(
+            "SetStartEffect",
+            method(lua, |lua, id, a| {
+                let on = a.b(1, true);
+                with(lua, id, |d| d.effect = Some(on));
+                none()
+            })?,
+        )?;
+        def(
+            "IsStartEffect",
+            method(lua, |lua, id, _| {
+                ret(lua, with(lua, id, |d| d.effect == Some(true)).unwrap_or(false))
+            })?,
+        )?;
+        // "ninepart" / "threepart" / "image": how the effect's texture is drawn.
+        def(
+            "SetInternalDrawType",
+            method(lua, |lua, id, a| {
+                let kind = match a.s(1).unwrap_or_default().to_ascii_lowercase().as_str() {
+                    "ninepart" => crate::tree::DrawKind::NinePart,
+                    "threepart" => crate::tree::DrawKind::ThreePart,
+                    _ => crate::tree::DrawKind::Image,
+                };
+                with(lua, id, |d| d.kind = kind);
+                none()
+            })?,
+        )?;
+    }
     let _ = Value::Nil;
     super::stubs::finalize(lua, &m, class)?;
     Ok(m)

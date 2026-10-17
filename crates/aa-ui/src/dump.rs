@@ -132,6 +132,7 @@ pub fn dump_json(lua: &Lua) -> mlua::Result<String> {
         let r = tree.rect(id);
         let visible = tree.visible(id)
             && match (o.parent, &o.kind) {
+                (_, Kind::Drawable(d)) if d.effect == Some(false) => false,
                 (Some(owner), Kind::Drawable(_)) => crate::render::state_visible(
                     &g,
                     id,

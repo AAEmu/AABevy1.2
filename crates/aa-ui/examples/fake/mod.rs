@@ -392,6 +392,24 @@ pub fn scripted_input(
     }
 }
 
+/// The in-game fakes (`fake_ingame.lua`): the player, abilities, action bars, chat, zone ...
+/// of `reference/ingame/spawn`. Run after [`install_with`], before the world stage scripts.
+#[allow(dead_code)]
+pub fn install_ingame(rt: &mut UiRuntime) {
+    if let Err(e) = rt.exec("@fake_ingame.lua", include_str!("fake_ingame.lua")) {
+        eprintln!("fake: fake_ingame.lua: {e}");
+    }
+}
+
+/// What the client raises when the player has entered the world and the loading screen
+/// closed (`FAKE.enter_world`, defined by `fake_ingame.lua`).
+#[allow(dead_code)]
+pub fn enter_world(rt: &mut UiRuntime) {
+    if let Err(e) = rt.exec("@enter_world", "if FAKE.enter_world then FAKE.enter_world() end") {
+        eprintln!("fake: enter_world: {e}");
+    }
+}
+
 /// Log script errors and the stubbed natives the screen called; `--coverage` also prints the
 /// per-class native coverage as a markdown table.
 pub fn report(ui: &UiRuntime, screen: &str) {
