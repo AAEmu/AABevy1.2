@@ -29,6 +29,7 @@ use crate::material::{Material as CryMaterial, TextureMap};
 use crate::scene::Shading;
 
 pub mod backlight;
+mod eye;
 mod ucc;
 
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
@@ -47,6 +48,7 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         }
     }
     bake_hair_colour(prep, m, &mut out);
+    eye::bake(prep, m, &mut out);
     if ucc_uv_square {
         ucc::bake(prep, m, &mut out);
     }

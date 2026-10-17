@@ -285,7 +285,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5); `GenMask` bit 0x2000 (`%BLEND_WITH_TERRAIN_COLOR`, set exactly on the 276 materials with a `blendWithTerrainAmount`, default 0.5) moves the colour map towards the ground hue at the same brightness (`bake_terrain_blend`, `TERRAIN_BLEND_HUE`): the marigolds of the login fields are yellow in the captures, orange in the map |
 | `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness from `PrimarySpecPow` (0.3-0.5), reflectance and tint from `PrimarySpecColor` (dark hair 0.13 has a dark highlight, blond 0.55), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`); with `Shading::Full` the highlight strength follows the strand pattern of the hair map, cut where the colour map is transparent (`specular_texture` baked from the `Specular` map, `bake_hair_specular`): streaks along the strands |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
-| `Eye` | roughness 0.12, reflectance 0.2 (more mirrors the sky over the iris: grey eyes; aa-anim composes the iris colour into the texture) |
+| `Eye` | roughness 0.12, reflectance 0.2; static `IrisColor` multiplies Diffuse under the sRGB-decoded Specular red mask when both IRIS/GLOSS_MAP flags are enabled (see below); aa-anim can replace the final face texture |
 | `Metal` | metallic 0.6 |
 | `Glass`, `Liquid`, `Ice` | blend, alpha min(opacity, 0.6), roughness 0.1 |
 | `Water*`, `Ocean*` | blend, dark blue-green, roughness 0.05 |
@@ -426,6 +426,55 @@ crest alongside the raw RGB control. `aa-dev` reports 356.7–379.4 FPS (2.66–
 unlit diagnostic scene. The window exits after capture. No aa-client integration is required:
 world material preparation already uses this conversion path.
 
+### Static Eye iris (`shade/eye.rs`)
+
+The original `shaders/eye.ext` defines `%IRIS=0x1` and `%GLOSS_MAP=0x4`.
+`shaders/hwscripts/cryfx/eye.cfx:134–140` applies, above `QUALITY_LOW`,
+`Diffuse.rgb *= lerp(1, IrisColor, gloss.r)`. `IrisColor` defaults to white
+(`eye.cfx:86–93`). Both texture reads use `baseTC.xy`; shared `FXSamplerDefs.cfi:4,7`
+sets `sRGBLookup=true` for Diffuse and Gloss. The mask red channel is decoded before
+bilinear filtering. Other mask channels and alpha do not affect this albedo operation.
+The installed material inventory has 117 Eye slots: 83 enable both flags, and 76 of those
+provide both authored textures. Missing inputs and identity palettes keep the existing conversion.
+
+`Prep::convert` performs this static operation in both shading modes, with a cache key containing
+both input paths and the exact palette. The composed image is `Rgba8UnormSrgb`; each original
+Diffuse mip keeps its alpha. Base colour, opacity, culling and lighting parameters remain as
+before. Any nonidentity or unhandled TexMod on either input declines the bake, including animated
+or generated mapping. Ordinary repeated UVs are supported because both inputs share periodic UVs.
+Only uniform power-of-two texture size ratios are supported; nonuniform domains are declined.
+
+Real Ferre and Elf materials have 512-square Diffuse with 256-square Gloss. For each Diffuse mip,
+the bake chooses Gloss mip `clamp(diffuseMip + log2(glossWidth / diffuseWidth))` and resamples
+at Diffuse texel centres with linear bilinear repeat sampling. The ratio supplies an integer LOD
+bias. This is a finite precomposed texture approximation: runtime screen derivatives, fractional
+LOD/trilinear filtering, and filtering a product of two independent samples cannot be exactly
+represented by these baked mips. Eye reflection/cornea and other native lighting terms are
+separate gaps; this does not claim full Eye shader parity.
+
+`cargo run -p aa-cry --example eye_iris -- --shot shots/aa-cry/eye_iris.png --shot-after 8`
+uses the actual `objects/characters/ferre/female/face/face01/fe_f_face01.chr` and matching MTL,
+Eye subset 3, with authored `IrisColor=(0.38039219,0.50196081,0.627451)`. It shows two complete
+heads with raw/composed Eye albedo and the three source/output atlases. White, unlit factors
+isolate the albedo operation. The inspected 1920x1080 capture shows the authored darker blue
+iris without changing skin or eyelash subsets. `aa-dev` reports 298.1–355.4 FPS (2.83–3.44 ms)
+and exits after capture. The real-client `reference/character_create/step1_ferre_female/real.png`
+also has blue eyes; its customized face and stage lighting differ, so this is a qualitative
+comparison, not a matching-preset pixel comparison.
+
+Custom face hooks can still replace the static composition with their own face atlas; applying
+the native static palette again would double-tint a customized iris. When an Eye hook replaces
+base albedo and leaves the inherited albedo-linked emissive texture untouched, the loader follows
+the new base for that emissive texture too: Eye emissive represents extra ambient times albedo.
+An explicitly changed emissive texture remains the hook's choice. Custom face/picker composition
+continues to belong to aa-anim.
+
+Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 66 tests, one exhaustive audit
+ignored. Five focused tests cover flags/defaults, modified/animated mapping rejection, sRGB mask
+filtering, resolution/mip selection, every Diffuse alpha mip, cache/palette separation, real
+512/256 assets, and unchanged/base-replaced/explicit-emissive hook behaviour. The fixture builds
+and its inspected window closes after capture.
+
 ## Character back lights (`shade::backlight`)
 
 The time of day has a `Char BackLight` group: `InShadowIntensity` (0.5) and, per light `i` = 1, 2, `"i Color"`,
@@ -548,8 +597,8 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
 ## Known gaps
 
 * The skin SSS map, per-material environment maps, detail and blend layers are not mapped (see above);
-  vegetation bending and wind are not applied. Eye iris colours are composed by aa-anim; a
-  generic `IrisColor` bake is missing.
+  vegetation bending and wind are not applied. Static Eye iris composition is supported above;
+  custom-face replacement and native Eye reflection/cornea lighting remain separate.
 * Silver armour is still duller than the captures (metal `F0` is `0.216 * texture`; a boost would
   fight the dye textures).
 * `Shading::Basic` cannot tell a wooden bow (`Specular 7.6` on a dark map) from a steel one: it
