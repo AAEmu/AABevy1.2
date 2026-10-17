@@ -23,6 +23,7 @@ use mlua::{Lua, MultiValue, Table, Value};
 
 use super::data::{SharedGameData, Snapshot};
 use super::panels::{self, Panels};
+use super::usable::Env;
 use crate::login::gameapi;
 
 /// What a script asked the app to do (queued by `HUD.request(kind, ...)`).
@@ -38,6 +39,8 @@ pub enum Request {
     UseAction { slot: usize },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
     UseBag { slot: usize },
+    /// `HUD.request("resurrect", inPlace)`: the death window's buttons (`X2Player:Resurrect(inPlace)`).
+    Resurrect { in_place: bool },
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -75,6 +78,8 @@ pub struct HudData {
     pub loot: super::loot::LootView,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
+    /// When the player may stand up again after dying (HUD clock, ms): `X2Player:GetResurrectionCountdown` counts down to it.
+    pub death_ends: std::cell::Cell<Option<u64>>,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -104,6 +109,7 @@ impl Default for HudData {
             casts: Default::default(),
             loot: Default::default(),
             afk: false,
+            death_ends: Default::default(),
         }
     }
 }
@@ -221,6 +227,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 "leave_cancel" => Request::CancelLeave,
                 "use_action" => Request::UseAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
+                "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 other => {
                     warn!("hud: unknown request {other:?}");
                     return Ok(());
@@ -240,6 +247,16 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |_, ()| {
             let d = b.borrow();
             Ok(d.target_pos.map(|t| t.distance(d.pos) as f64))
+        })?,
+    )?;
+    // seconds until the player may stand up again (the death window's countdown)
+    let b = bridge.clone();
+    hud.raw_set(
+        "death_wait",
+        lua.create_function(move |_, ()| {
+            let d = b.borrow();
+            let left = d.death_ends.get().map_or(0, |end| end.saturating_sub(panels::now_ms(d.start)));
+            Ok(left.div_ceil(1000) as i64)
         })?,
     )?;
     // database lookups for the content hooks: name, icon (and the rest)
@@ -497,14 +514,41 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         // slots as the server sent them: 11 (`NO_ABILITY`, the scripts' `ABILITY_MAX`) is an empty slot, not an ability
         info!("hud: abilities {:?} from the slots {ability_slots:?} (11 = empty), exp {:?}", snapshot.abilities, snapshot.ability_exp);
     }
+    let mut snapshot = snapshot;
+    dev_sim(&mut snapshot);
     data.snapshot = snapshot;
     let own_obj_id = spawn.obj_id;
     let own_faction = character.faction_id;
     let start = data.start;
     let game = data.game.clone();
-    let (new_panels, target_pos) = panels::refresh(world, game.get(), own_faction, own_obj_id, start);
+    let (new_panels, target_pos) = panels::refresh(world, game.get(), own_faction, own_obj_id, start, &data.snapshot, data.pos);
     data.panels = new_panels;
     data.target_pos = target_pos;
+}
+
+/// `--hud-sim mp=N` / `--hud-sim dead` (dev): the HUD behaves as if the player had at most N mana / were dead, for screenshots of
+/// the dark action bar states without a fight. Only the HUD's view: the server knows nothing of it.
+fn dev_sim(s: &mut Snapshot) {
+    static SIM: std::sync::OnceLock<(Option<i32>, bool)> = std::sync::OnceLock::new();
+    let (mp, dead) = *SIM.get_or_init(|| {
+        let args: Vec<String> = std::env::args().collect();
+        let mut sim = (None, false);
+        for (i, a) in args.iter().enumerate().filter(|(_, a)| *a == "--hud-sim") {
+            match args.get(i + 1).map(String::as_str) {
+                Some("dead") => sim.1 = true,
+                Some(v) if v.starts_with("mp=") => sim.0 = v[3..].parse().ok(),
+                other => warn!("hud: --hud-sim {}: use mp=N or dead (arg {a})", other.unwrap_or("")),
+            }
+        }
+        sim
+    });
+    if let Some(mp) = mp {
+        s.mp = s.mp.min(mp);
+    }
+    if dead {
+        s.dead = true;
+        s.hp = 0;
+    }
 }
 
 /// The events the client raises when the player has entered the world and the loading screen closed,
@@ -529,6 +573,7 @@ pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) 
 }
 
 /// Carry out what the scripts asked for.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_requests(
     bridge: NonSend<HudBridge>,
     mut net: MessageWriter<NetCommand>,
@@ -537,6 +582,9 @@ pub fn handle_requests(
     bar: Res<aa_net::state::ActionBar>,
     inventory: Res<aa_net::state::Inventory>,
     target: Res<aa_net::state::Target>,
+    skills: Res<aa_net::state::Skills>,
+    buffs: Res<aa_net::state::Buffs>,
+    mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     for request in requests {
@@ -558,11 +606,16 @@ pub fn handle_requests(
             }
             Request::UseAction { slot } => {
                 let data = bridge.0.borrow();
-                panels::use_slot(slot - 1, data.game.get(), &bar, &inventory, &target, &mut net);
+                let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+                panels::use_slot(slot - 1, &env, &bar, &inventory, &target, &mut net, &mut failed);
             }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
-                panels::use_bag_slot(slot - 1, data.game.get(), &inventory, &target, &mut net);
+                let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+                panels::use_bag_slot(slot - 1, &env, &inventory, &target, &mut net, &mut failed);
+            }
+            Request::Resurrect { in_place } => {
+                net.write(NetCommand(Command::Resurrect { in_place }));
             }
         }
     }
@@ -591,6 +644,14 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
         (d.panels_pushed.replace(new.clone()), new)
     };
     let Some(old) = old else { return };
+    // which action bar slots are dark and why (`usable.rs`)
+    let dark = |p: &Panels| -> Vec<(usize, &'static str)> {
+        p.actions.iter().enumerate().filter_map(|(i, s)| Some((i + 1, super::usable::result_name(s.as_ref()?.blocked?)))).collect()
+    };
+    if dark(&old) != dark(&new) {
+        let d = bridge.borrow();
+        info!("hud: dark slots {:?}; target {:?} at {:?} m", dark(&new), new.target.as_ref().map(|t| t.name.as_str()), d.target_pos.map(|t| (t.distance(d.pos) * 10.0).round() / 10.0));
+    }
     let lua = &rt.lua;
     let Ok(hud) = lua.globals().raw_get::<Table>("HUD") else { return };
     let changed = match panels::push(lua, &hud, &new, Some(&old)) {

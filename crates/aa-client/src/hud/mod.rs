@@ -32,6 +32,7 @@
 //! (`ingame::player::control_player`, camera, hotkeys) should skip their key handling while
 //! `HudKeyboardFocus.0` is true.
 
+mod alerts;
 mod api;
 mod cameras;
 mod cast;
@@ -51,6 +52,7 @@ mod session;
 mod stats;
 mod targeting;
 mod tips;
+mod usable;
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -261,6 +263,8 @@ impl Plugin for HudPlugin {
             .init_resource::<PrebuildState>()
             .init_resource::<HudPointerOverUi>()
             .insert_resource(chat::ScriptedKeys::from_args())
+            .insert_resource(alerts::ScriptedFails::from_args())
+            .add_message::<alerts::UseFailed>()
             .insert_resource(session::ScriptedSession::from_args())
             .insert_resource(cameras::DevFov::from_args())
             .insert_non_send(api::HudBridge::default())
@@ -285,7 +289,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
                     cameras::dev_fov,

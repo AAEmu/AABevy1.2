@@ -219,6 +219,8 @@ pub struct GameData {
     pub stats: StatTables,
     /// Which NPCs start and take in which quests.
     pub quests: QuestTables,
+    /// When a skill can be used (mana, range, target, requirements, buff restrictions): `usable.rs`.
+    pub rules: super::usable::Rules,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -528,6 +530,7 @@ impl GameData {
         }
         data.stats = StatTables::load(&conn)?;
         data.quests = QuestTables::load(&conn)?;
+        data.rules = super::usable::Rules::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }
