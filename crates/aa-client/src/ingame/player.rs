@@ -76,6 +76,7 @@ pub fn placement(pos: Vec3, yaw: f32, scale: f32) -> Transform {
 #[derive(Resource, Default)]
 pub struct PlayerBuilt(pub bool);
 
+#[allow(clippy::too_many_arguments)]
 /// Builds the player character from the server's spawn data, once, as soon as the spawn is known: on the loading screen
 /// (the world is drawn behind it, see `camera::spawn_camera`), or on the game screen for `--enter-world`.
 pub fn spawn_player(

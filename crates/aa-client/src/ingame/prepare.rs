@@ -116,6 +116,28 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
     }
 }
 
+/// A character of the character list (what the server saved: race, gender, equipment, looks) ready to be spawned like
+/// the player of the game screen; callable from any thread. Used by `prewarm`.
+pub fn prepare_listed(db: &Db, loader: &CryLoader, c: &aa_net::model::Character) -> Option<(Box<CharacterAssets>, Vec<PreparedModel>)> {
+    let (race, gender) = appearance::race_gender(0, c.race, c.gender)?;
+    let assets = {
+        let game = db.game.lock().unwrap_or_else(|e| e.into_inner());
+        let desc = appearance::describe(&game, race, gender, &c.equipment, &c.model_params)?;
+        desc.resolve(&game).ok()?
+    };
+    if let Err(e) = aa_anim::character::prewarm_character_face(&assets) {
+        debug!("listed character {} face: {e}", c.name);
+    }
+    let mut models = Vec::new();
+    for part in &assets.parts {
+        let options = ModelOptions { material: part.material.clone(), cry_space: true, shading: Shading::Full, ..default() };
+        if let Ok(m) = loader.prepare_model(&part.path, &options) {
+            models.push(m);
+        }
+    }
+    Some((Box::new(assets), models))
+}
+
 /// Prepares the model of the doodad template `template_id`; callable from any thread.
 pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32) -> DoodadBuild {
     let _t = aa_cry::prof::scope("doodad.prepare");

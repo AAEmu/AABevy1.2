@@ -2,12 +2,13 @@
 //!
 //! `flow:` lines in the log (normal login flow; `--enter-world` has no loading screen):
 //!
+//! * `character list: ...`: how long the list was up and its frame times (the prewarm runs there, see `prewarm`).
 //! * `loading started`: Start was pressed (`OnEnter(Screen::Loading)`).
 //! * `loading took S s`: how long the loading screen was up, with its worst frame.
 //! * `first in-game frame S s after Start`: from pressing Start to the first frame shown in game.
 //! * `in game: worst frame ... of the first 5 s`: the hitches the player sees after the loading screen.
 //!
-//! Flags (see also `dev`): `--leave-world S` asks the server to go back to the character list S seconds after the
+//! Flags (see also `dev`): `--start-after S` presses Start S seconds after the list came up, `--leave-world S` asks the server to go back to the character list S seconds after the
 //! game screen came up (the HUD's leave flow does the rest on `LeftWorld`), `--again` presses Start on the character
 //! list when it is back, so a run goes round and round (`--exit-after` ends it).
 
@@ -41,8 +42,22 @@ pub struct Flow {
     list_secs: f32,
 }
 
+/// Frame times of the character list (the first second is its own build and the stage character).
+#[derive(Resource, Default)]
+struct List {
+    secs: f32,
+    worst_build: f32,
+    worst: f32,
+    over_33: u32,
+    frames: u32,
+    pressed: bool,
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<Flow>()
+        .init_resource::<List>()
+        .add_systems(OnEnter(Screen::CharacterSelect), |mut list: ResMut<List>| *list = List::default())
+        .add_systems(OnExit(Screen::CharacterSelect), list_left)
         .add_systems(OnEnter(Screen::Loading), loading_started)
         .add_systems(OnEnter(Screen::InGame), game_started)
         .add_systems(OnExit(Screen::InGame), game_left)
@@ -52,13 +67,48 @@ pub fn plugin(app: &mut App) {
                 watch.run_if(super::world_screens),
                 leave_world.run_if(in_state(Screen::InGame)),
                 press_start_again.run_if(in_state(Screen::CharacterSelect)),
+                (watch_list, press_start_after).chain().run_if(super::list_is_up),
             ),
         );
 }
 
-fn loading_started(mut flow: ResMut<Flow>) {
+fn loading_started(mut flow: ResMut<Flow>, list: Res<List>) {
     *flow = Flow { clicked: Some(std::time::Instant::now()), left: flow.left, ..default() };
-    info!("flow: loading started");
+    info!("flow: loading started (Start pressed {:.1} s after the character list came up)", list.secs);
+}
+
+fn watch_list(time: Res<Time<Real>>, mut list: ResMut<List>) {
+    let (dt, ms) = (time.delta_secs(), time.delta_secs() * 1000.0);
+    list.secs += dt;
+    list.frames += 1;
+    if list.secs <= 1.0 {
+        list.worst_build = list.worst_build.max(ms);
+    } else {
+        list.worst = list.worst.max(ms);
+        if ms > 33.4 {
+            list.over_33 += 1;
+        }
+    }
+}
+
+fn list_left(list: Res<List>) {
+    info!(
+        "flow: character list: up {:.1} s, worst frame {:.0} ms in the first second, {:.0} ms after, {} frames over 33 ms after, {} frames",
+        list.secs, list.worst_build, list.worst, list.over_33, list.frames
+    );
+}
+
+/// `--start-after S`: press Start (the original script's button) S seconds after the character list came up.
+fn press_start_after(dev: Res<DevOptions>, mut list: ResMut<List>, rt: Option<NonSend<UiRuntime>>) {
+    let (Some(after), Some(rt)) = (dev.start_after, rt) else { return };
+    if list.pressed || list.secs < after {
+        return;
+    }
+    list.pressed = true;
+    info!("flow: pressing Start after {:.1} s", list.secs);
+    if let Err(e) = rt.exec("start", "characterSelectWindow.bottomPanel.startButton:OnClick('LeftButton')") {
+        warn!("flow: --start-after: {e}");
+    }
 }
 
 fn game_started(mut flow: ResMut<Flow>) {
@@ -133,11 +183,11 @@ fn leave_world(dev: Res<DevOptions>, mut flow: ResMut<Flow>, mut out: MessageWri
 fn press_start_again(
     time: Res<Time>,
     dev: Res<DevOptions>,
-    built: Res<UiBuilt>,
+    built: Option<Res<UiBuilt>>,
     rt: Option<NonSend<UiRuntime>>,
     mut flow: ResMut<Flow>,
 ) {
-    if !dev.again || !flow.left || built.0 != Some(Screen::CharacterSelect) {
+    if !dev.again || !flow.left || built.is_none_or(|b| b.0 != Some(Screen::CharacterSelect)) {
         return;
     }
     let Some(rt) = rt else { return };

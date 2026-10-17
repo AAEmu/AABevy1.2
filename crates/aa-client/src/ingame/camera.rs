@@ -46,6 +46,11 @@ impl Default for OrbitCamera {
     }
 }
 
+/// The in-game camera's lens (also the prewarm camera's, `prewarm`).
+pub fn projection() -> Projection {
+    Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 0.2, far: 20000.0, ..default() })
+}
+
 /// The world camera still draws into an image behind the loading screen ([`show_world`] puts it on the window).
 #[derive(Component)]
 pub struct BehindLoading;
@@ -74,7 +79,7 @@ pub fn spawn_camera(
     let mut camera = commands.spawn((
         Name::new("camera"),
         Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 0.2, far: 20000.0, ..default() }),
+        projection(),
         transform,
         orbit,
     ));
@@ -90,6 +95,7 @@ pub fn spawn_camera(
     }
 }
 
+#[allow(clippy::type_complexity)]
 /// Puts the world camera on the window once the UI cameras agree with it (HDR and MSAA, see `hud::cameras`; cameras that
 /// disagree get separate main textures and the UI would replace the world), or after a second.
 pub fn show_world(
