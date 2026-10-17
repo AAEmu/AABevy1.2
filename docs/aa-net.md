@@ -709,6 +709,35 @@ Offline/reconnect and raid transitions have protocol/state coverage but were not
 in this two-person test. The API does not yet send raid conversion, slot/role/loot-rule edits,
 markers, or pings; those incoming changes are exposed for the HUD.
 
+For an integrated HUD check, `cargo run -p aa-net --example party_peer -- --invite CharacterName
+--seconds 90` creates a fresh letter-only character and prints `READY account=... character=...`.
+It invites the supplied character once, accepts invitations received by its own throw-away
+character, sends a stationary movement every two seconds to refresh party vitals, then leaves
+the party and logs out. Coordinate with the visual client before starting its lifetime.
+
+The original native invitation handler creates `DLG_TASK_JOIN_TEAM` (2), rather than firing a
+Lua invitation event. The task's fill function (`x2game_unpacked.dll` VA `393096c0`) sets
+`title`, `content`, `btnOkText` and `btnCancelText` for the default dialog handler:
+`LocalizeUiText(MSG_BOX_TITLE_TEXT, key)`, `LocalizeUiText(MSG_BOX_BODY_TEXT, key, senderName)`,
+and button keys `invite` / `reject` in `MSG_BOX_BTN_TEXT`; `key` is `ask_party_invite` or
+`ask_raidteam_invite`. English body text is `$1 invited you to a party. Would you like to join?`
+(or `raid`); buttons are Join / Decline. The original default dialog invokes
+`X2DialogManager:OnOK(windowId)` / `OnCancel(windowId)` to reply through the native task.
+
+Native party event contracts (all indices are global one-based slots, 1..50):
+
+* `TEAM_MEMBERS_CHANGED("joined_by_self", isParty, ownerName)`.
+* `TEAM_MEMBERS_CHANGED("joined" | "leaved" | "kicked", isParty, memberName, memberIndex)`.
+* `TEAM_MEMBERS_CHANGED("owner_changed", isParty, newOwnerName, oldOwnerIndex, newOwnerIndex)`.
+* `TEAM_MEMBERS_CHANGED("leaved_by_self" | "kicked_by_self" | "dismissed", isParty)`.
+* `TEAM_MEMBER_DISCONNECTED(isParty, oldObjectIdString, memberIndex)`.
+* `TEAM_MEMBER_UNIT_ID_CHANGED(memberIndex, oldObjectIdString, newObjectIdString)`.
+* `TEAM_ROLE_CHANGED(memberIndex, role)`.
+
+The packet handlers and `393077xx` onward in the native client confirm the membership arguments;
+the original `x2ui/unitframe/party.lua` and `raidteammanager/manager.lua` consume them. A generic
+roster refresh alone loses the original localized notices and specific offline/unit-ID handling.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
