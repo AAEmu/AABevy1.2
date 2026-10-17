@@ -45,6 +45,7 @@ use crate::water_material::{WaterMaterial, WaterStyles};
 
 pub mod effects;
 pub mod sounds;
+pub mod lights;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -228,6 +229,7 @@ pub struct ObjectState {
     effects: HashMap<(i32, i32), Vec<Entity>>,
     /// The placed sounds of each cell ([`sounds`]).
     sounds: HashMap<(i32, i32), Vec<Entity>>,
+    lights: HashMap<(i32, i32), Vec<Entity>>,
     groups_tx: Sender<Option<VegGroups>>,
     /// Counter for [`ObjectStats::entities`] while models are still being prepared.
     busy_ticks: usize,
@@ -281,6 +283,7 @@ impl ObjectState {
             road_assets: RoadAssets::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
+            lights: HashMap::new(),
             groups_tx,
             busy_ticks: 0,
             stats: ObjectStats::default(),
@@ -411,6 +414,10 @@ pub fn stream_objects(
         }
     }
     let dead: Vec<_> = state.sectors.keys().filter(|k| !loaded.contains(&(k.0, k.1))).copied().collect();
+    let gone: Vec<_> = state.lights.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    for c in gone {
+        for e in state.lights.remove(&c).unwrap_or_default() { commands.entity(e).despawn(); }
+    }
     for k in dead {
         if let Some(s) = state.sectors.remove(&k) {
             commands.entity(s.entity).despawn();
@@ -512,6 +519,8 @@ pub fn stream_objects(
         if !placed.is_empty() {
             state.sounds.insert(c, placed);
         }
+        let placed = lights::spawn_cell(&mut commands, c, &data.objects.lights);
+        if !placed.is_empty() { state.lights.insert(c, placed); }
         state.cells.insert(c, Arc::new(data));
     }
     state.stats.water_cells = state.water.len();

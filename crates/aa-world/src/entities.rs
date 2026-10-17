@@ -9,6 +9,9 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::math::{Mat4, Quat, Vec3};
 
+mod lights;
+pub use lights::{PlacedLight, parse_lights};
+
 /// One static render slot, in cell-local CryEngine space.
 #[derive(Clone, Debug)]
 pub struct PlacedProp {

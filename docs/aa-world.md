@@ -400,11 +400,62 @@ check, not a clear elevator visual comparison. No exact real-client captures of 
 are available in `reference/`; no pixel-match claim. All own example windows exit automatically.
 
 Remaining entity limits: playing CGAs, skinned actors, FlowGraph movement/events, rigid-body
-simulation and local `Light`/`SimpleLight` render slots are not implemented by this static path.
+simulation are not implemented by this static-prop path. Local lights have their own path below.
 The elevator is visible at its initial position and does not execute its move/wait graph.
 Visibility uses the configured brush cap; the XML `ViewDistRatio` has no recovered native bound
 conversion here. As with existing brush parts, compound matrix shear is not represented by Bevy's
 decomposed `Transform`.
+
+### Local lights (`entities/lights.rs`, `objects/lights.rs`)
+
+`CellObjects::lights` preserves `Light` and `SimpleLight` slots from the original XML, including
+inactive/hidden records. The two scripts use different property names: Light's
+`clrDiffuse * fDiffuseMultiplier`, specular multiplier divided by the diffuse multiplier;
+SimpleLight's `clrColor * fColorMultiplier`, specular percentage divided by 100. Both retain
+radius, HDR dynamic value, ambient/style/area/projector/negative/fake flags and shadow settings.
+The native light shadow request is `Properties.Options.bCastShadow`, independent of the entity
+render proxy's top-level `CastShadow`. Positions use the native parent transform and one cell
+origin; entity scale changes a child slot's position but does not multiply the authored light radius.
+
+Every cell owns its `LocalLight` data entities, and unload removes them together with any render
+components. `LocalLightSettings` defaults to 64 nearest lights, two nearest authored shadow
+requests, and a 400 m distance to the influence sphere. Selection runs at 5 Hz; point-light
+components only change when the selected set or parameters change. Inactive/hidden records do
+not render. Projector textures, fake/negative lights and deferred clip bounds are retained as data
+and counted as unsupported, without substituting omnidirectional lights. Runtime `enabled=false`
+or `AA_NO_LOCAL_LIGHTS=1` disables rendering while retaining the cell data. `LocalLightStats`
+reports authored/rendered/shadowed/unsupported counts. No additional aa-client wiring is needed.
+
+The current renderer uses Bevy's clustered `PointLight` path, so photometry is an approximation:
+the original `ShadeLib.cfi::GetAttenuation` and `DeferredShading.cfx::GetDeferredLightAttenuation`
+give `(1-d²/r²)²`; Bevy uses `(1-(d²/r²)²)²/d²`. Luminous intensity is therefore
+`0.16 * radius² * WorldConfig.sun_lux_scale` (lumens multiply by `4*pi`), matching diffuse
+illuminance at half-radius. RGB is the authored diffuse product, without arbitrary source colors.
+The exact Cry falloff, legacy `fHDRDynamic`, per-light specular multiplier, ambient-light shader
+mode, style animation, vis-area restrictions and legacy shadow-bias units are not reproduced.
+Those fields remain typed data; shadows use Bevy's bias defaults and the bounded shadow budget.
+IndirectLight and projected/cubemap lighting remain separate renderer work.
+
+Validation: `cargo test -p aa-world --lib light` passes five tests, including the real dock
+Light_116 (radius 18, warm diffuse times two, HDR 1) and parented airport Light129; the runtime
+budget test excludes inactive/hidden/projector/fake slots and releases all render components
+when disabled. `cargo check -p aa-world --examples` passes. The aa-dev `local_lights` example
+captures at 1920x1080, hour 0: `shots/aa-world/lights/on.png` and `off.png` show the same dock
+with and without its 32 original light slots. With lights, 127–149 FPS late; disabled, 184–190 FPS.
+The lamp and nearby wood become visibly lit (a fixed dock sample rises from luma 1.86 to 9.42).
+The unload smoke asserts 32 rendered lights become zero, with no authored data entities left.
+All own windows exit automatically; no exact real-client night reference exists for this dock.
+
+Read-only material finding for aa-cry: the bright RGB sail in this dock is brush model #71,
+`galleon_deco_sail01.cgf`, with cell material #54 `galleon_mahadevi.mtl`, submaterial #3 `ucc`
+(`Shader=Cloth`, `GenMask=40300000`). Its Diffuse is `objects/env/07_ucc/ucc_pattern04.dds`;
+decoded, it exactly matches the visible red/green/blue pattern. The material carries
+`uccRedMask=(0.2156863,...)`, green/blue masks `(1,1,1)`, and SubSurface `ucc_logo32.dds`.
+Native `cloth.cfx` lines 735–753 perform conditional UCC background-mask channel remapping and
+logo compositing with the authored UV controls. `aa-cry::loader::Prep::material` calls
+`shade::convert_material` / `to_standard_material`, which currently binds Diffuse as ordinary
+sRGB and has no UCC remap/composite. This is a material-conversion gap, not bad placement;
+no aa-cry files were changed.
 
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data
@@ -1095,7 +1146,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: deferred object.dat decals (type 9), types 6 and 14, animated/skinned `entities.xml` render slots and local lights.
+* Not rendered: deferred object.dat decals (type 9), types 6 and 14, animated/skinned `entities.xml` render slots, indirect/projected local lights.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
