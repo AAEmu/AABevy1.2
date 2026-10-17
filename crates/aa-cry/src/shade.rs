@@ -45,8 +45,44 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
     }
     if prep.shading == Shading::Full {
         bake_specular(prep, m, &mut out);
+        bake_hair_specular(prep, m, &mut out);
     }
     Some(out)
+}
+
+/// Strength of the hair highlight on the brightest strands (`reflectance` of the material, scaled
+/// by the baked strand map: `F0 = 0.16 * (reflectance * 0.5 * map)^2`).
+const HAIR_SPEC_REFLECTANCE: f32 = 1.5;
+
+/// `Hair` materials: the highlight follows the strand pattern of the hair map. The shader's
+/// Kajiya-Kay term shines on the strands that face the light; a strand map (bright strands, dark
+/// gaps) as specular strength makes the same streaks with Bevy's isotropic GGX.
+fn bake_hair_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut StandardMaterial) {
+    if !m.shader.eq_ignore_ascii_case("hair") {
+        return;
+    }
+    let Some(spec) = m.texture(&TextureMap::Specular).or_else(|| m.texture(&TextureMap::Diffuse)).map(|t| t.pak_path()) else { return };
+    let key = format!("hairspec:{spec}");
+    let image = prep.baked_image(&key, |loader| {
+        let (w, h, mips) = loader.decode_mips_rgba8(&spec)?;
+        let mips: Vec<Vec<u8>> = mips
+            .iter()
+            .map(|mip| {
+                let mut data = Vec::with_capacity(mip.len());
+                for p in mip.chunks_exact(4) {
+                    let l = luma(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0);
+                    let strength = 0.15 + 0.85 * smoothstep(0.12, 0.7, l);
+                    data.extend_from_slice(&[255, 255, 255, (strength * 255.0).round() as u8]);
+                }
+                data
+            })
+            .collect();
+        Some(crate::texture::rgba8_image(w, h, &mips, false))
+    });
+    if let Some(image) = image {
+        out.specular_texture = Some(image);
+        out.reflectance = HAIR_SPEC_REFLECTANCE;
+    }
 }
 
 /// `Illum` materials: the specular (gloss) map becomes a metallic / roughness texture. In the
@@ -67,7 +103,17 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
     let reflect = 0.35 + 0.65 * (param_f32(m, "ReflectAmount").unwrap_or(1.0) / 2.0).clamp(0.0, 1.0);
     let matte = shininess_to_roughness(m.shininess);
     let shiny = (matte * 0.6).clamp(0.3, 0.55);
-    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}");
+    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}:{SPEC_STRENGTH}:{SPEC_TINT_AMOUNT}");
+    // per texel: g = how glossy the map is, metal = how much of it reflects like a metal
+    let texel = move |p: &[u8]| {
+        let s = Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0;
+        let g = (luma(s) * gain).clamp(0.0, 1.2);
+        let metal = smoothstep(0.2, 0.75, g) * reflect;
+        // glossier texels have sharper highlights (leather streaks, polished trims)
+        let rough_dielectric = matte + (matte.min(SHARP_ROUGHNESS) - matte) * smoothstep(0.1, 0.5, g);
+        let rough = rough_dielectric + (shiny - rough_dielectric) * metal;
+        (s, g, metal, rough)
+    };
     let image = prep.baked_image(&key, |loader| {
         let (w, h, mips) = loader.decode_mips_rgba8(&spec)?;
         let mips: Vec<Vec<u8>> = mips
@@ -75,9 +121,7 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
             .map(|mip| {
                 let mut data = Vec::with_capacity(mip.len());
                 for p in mip.chunks_exact(4) {
-                    let s = Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0;
-                    let metal = smoothstep(0.2, 0.75, luma(s) * gain) * reflect;
-                    let rough = matte + (shiny - matte) * metal;
+                    let (_, _, metal, rough) = texel(p);
                     data.extend_from_slice(&[0, (rough * 255.0).round() as u8, (metal * 255.0).round() as u8, 255]);
                 }
                 data
@@ -85,14 +129,59 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
             .collect();
         Some(crate::texture::rgba8_image(w, h, &mips, false))
     });
-    if let Some(image) = image {
-        out.metallic_roughness_texture = Some(image);
-        out.metallic = 1.0;
-        out.perceptual_roughness = 1.0;
-        // what is not metal is a plain matte dielectric
+    let Some(image) = image else { return };
+    out.metallic_roughness_texture = Some(image);
+    out.metallic = 1.0;
+    out.perceptual_roughness = 1.0;
+    // The dielectric part (everything that is not metal): the map's colour is the specular tint
+    // (rgb) and its brightness the strength (alpha): F0 = 0.16 * strength * tint^2, a coloured,
+    // masked highlight as in the shader (`Specular` map x `Specular` colour x Phong).
+    out.reflectance = 2.0;
+    let tint_key = format!("spectint:{key}");
+    let tint = prep.baked_image(&tint_key, |loader| {
+        let (w, h, mips) = loader.decode_mips_rgba8(&spec)?;
+        let mips: Vec<Vec<u8>> = mips
+            .iter()
+            .map(|mip| {
+                let mut data = Vec::with_capacity(mip.len());
+                for p in mip.chunks_exact(4) {
+                    let (s, g, _, _) = texel(p);
+                    // only warm maps (gold, bronze, leather) tint: the greenish maps of plate armour are
+                    // silver in the captures
+                    let norm = s / s.max_element().max(1e-3);
+                    let warm = smoothstep(0.0, 0.2, norm.x - norm.y);
+                    let hue = Vec3::ONE.lerp(norm, SPEC_TINT_AMOUNT * warm);
+                    let strength = (SPEC_STRENGTH * g).sqrt().clamp(0.0, 1.0);
+                    data.extend_from_slice(&[
+                        (hue.x * 255.0).round() as u8,
+                        (hue.y * 255.0).round() as u8,
+                        (hue.z * 255.0).round() as u8,
+                        (strength * 255.0).round() as u8,
+                    ]);
+                }
+                data
+            })
+            .collect();
+        Some(crate::texture::rgba8_image(w, h, &mips, false))
+    });
+    if let Some(tint) = tint {
+        // one image: alpha is the strength (`specular_texture`), rgb the tint (`specular_tint_texture`)
+        out.specular_texture = Some(tint.clone());
+        out.specular_tint_texture = Some(tint);
+    } else {
         out.reflectance = 0.25;
     }
 }
+
+/// Roughness of the sharpest dielectric highlights (glossy map texels).
+const SHARP_ROUGHNESS: f32 = 0.42;
+/// Dielectric specular strength per unit of map glossiness: `F0 = 0.16 * strength * tint^2`
+/// (strength 1 at glossiness 1 = the full 16% a dielectric can show).
+const SPEC_STRENGTH: f32 = 1.0;
+/// How much of the specular map's colour tints the dielectric highlight of warm maps (gold trims,
+/// bronze, leather; 0 = white). The greenish maps of plate armour do not tint: in the captures
+/// the plates are silver.
+const SPEC_TINT_AMOUNT: f32 = 0.3;
 
 fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
     let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
@@ -205,10 +294,13 @@ pub fn to_standard_material(
         "hair" => {
             two_sided(&mut out);
             // The shader draws hair twice (an opaque alpha-tested pass and a blended pass with
-            // alpha * 2): alpha-to-coverage gives the same soft strand ends without sorting.
-            out.alpha_mode = AlphaMode::AlphaToCoverage;
-            // Bevy multiplies the emissive term by the sharpened coverage alpha (thousands in
-            // flat areas): hair has no glow, the shader's `Emissive` only brightens the ambient.
+            // alpha * 2). Alpha-to-coverage would give soft strand ends without sorting, but the
+            // depth / normal prepasses (always on in the world, SSAO) treat it as opaque: the
+            // transparent fringe of the hair mesh then hides the head behind it and renders black.
+            // A mask on the doubled alpha keeps the strand ends and works with the prepasses.
+            out.alpha_mode = AlphaMode::Mask(0.5);
+            // Hair has no glow (Bevy multiplies emissive by the sharpened alpha of alpha-to-coverage
+            // materials, thousands in flat areas): the shader's `Emissive` only brightens the ambient.
             out.emissive = LinearRgba::BLACK;
             out.emissive_texture = None;
             // Hair textures are greyscale; the colour is the (customisable) HairColor param.
@@ -218,10 +310,15 @@ pub fn to_standard_material(
             // stays golden instead of turning cream)
             let c = hair.powf(HAIR_GAMMA) * 2.0 * m.diffuse;
             out.base_color = Color::linear_rgba(c.x, c.y, c.z, 2.0);
-            // Hair is lit by the Kajiya-Kay highlight, not the generic one: a broad anisotropic
-            // sheen along the strands.
-            out.perceptual_roughness = 0.7;
-            out.reflectance = 0.2;
+            // Hair is lit by the Kajiya-Kay highlight, not the generic one: streaks along the
+            // strands. Bevy's anisotropic GGX would give them, but it breaks with the normal
+            // prepass (SSAO, `Msaa::Off`): the PBR fragment shader then skips setting the tangent
+            // frame (`anisotropy_T` / `_B` stay zero) while the lighting still takes the
+            // anisotropic path, whose GGX term blows up and turns the hair white. So no
+            // `anisotropy_strength`: `Shading::Full` masks an isotropic highlight with the
+            // strand pattern of the hair map instead ([`bake_hair_specular`]).
+            out.perceptual_roughness = 0.45;
+            out.reflectance = 0.22;
         }
         "humanskin" => {
             // lit skin hue from the bright skin colour, Diffuse = the lighting scale
@@ -238,7 +335,7 @@ pub fn to_standard_material(
         }
         "eye" => {
             out.perceptual_roughness = 0.12;
-            out.reflectance = 0.5;
+            out.reflectance = 0.2;
         }
         "glass" | "liquid" | "ice" => {
             out.alpha_mode = AlphaMode::Blend;
@@ -302,10 +399,15 @@ mod tests {
  <PublicParams HairColor="1,0.5,0.25"/></Material>"#;
 
     #[test]
-    fn hair_has_no_emissive_with_alpha_to_coverage() {
-        // Bevy multiplies emissive by the sharpened coverage alpha: it must stay black
+    fn hair_is_safe_in_the_depth_and_normal_prepasses() {
         let m = convert(HAIR);
-        assert_eq!(m.alpha_mode, AlphaMode::AlphaToCoverage);
+        // alpha-to-coverage is opaque in the prepasses: the transparent fringe of the hair mesh
+        // would hide the head behind it and render black
+        assert!(matches!(m.alpha_mode, AlphaMode::Mask(_)), "{:?}", m.alpha_mode);
+        // Bevy's anisotropic GGX turns white when the normal prepass is loaded (the tangent
+        // frame is never set up in that path)
+        assert_eq!(m.anisotropy_strength, 0.0);
+        assert!(m.anisotropy_texture.is_none());
         assert_eq!(m.emissive, LinearRgba::BLACK);
         assert!(m.double_sided);
         let c = m.base_color.to_linear();
