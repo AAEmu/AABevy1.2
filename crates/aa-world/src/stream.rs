@@ -57,6 +57,8 @@ pub struct WorldConfig {
     pub water_distance: f32,
     /// Main thread time per frame for loading models and spawning object sectors (ms).
     pub object_budget_ms: f32,
+    /// Main thread time per frame for inserting prepared models into the asset collections (ms).
+    pub finish_budget_ms: f32,
     /// Drive sun, ambient light, fog, sky dome and ocean from the time of day data.
     pub environment: bool,
     /// HDR camera with the atmosphere post pass (height fog, film curve, bloom) on the world's camera, see `post.rs`.
@@ -97,6 +99,7 @@ impl WorldConfig {
             tree_distance: 600.0,
             water_distance: 1400.0,
             object_budget_ms: 3.0,
+            finish_budget_ms: 1.0,
             environment: true,
             post: true,
             sky_radius: 9000.0,
@@ -186,6 +189,7 @@ impl Plugin for AaWorldPlugin {
                 )
                     .chain(),
             );
+        crate::pipelines::build(app);
         crate::sky::build(app);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
@@ -319,8 +323,7 @@ pub(crate) fn stream_cells(
         }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let pool = AsyncComputeTaskPool::get();
-    for (_, c) in wanted {
+    for (d, c) in wanted {
         if streamer.loading.len() >= cfg.max_loads {
             break;
         }
@@ -332,10 +335,10 @@ pub(crate) fn stream_cells(
         streamer.loading.insert(c);
         let tx = streamer.tx.clone();
         let library = library.clone();
-        pool.spawn(async move {
+        // on the workers, before everything else they do (see `objects::stream_objects`)
+        aa_cry::workers::Workers::global().spawn(d - 100000.0, move || {
             let _ = tx.send((c, load_cell(&dir, c, p_bevy, library.as_deref(), tint)));
-        })
-        .detach();
+        });
     }
 }
 

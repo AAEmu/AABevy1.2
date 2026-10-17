@@ -8,6 +8,7 @@ pub mod cover;
 pub mod env;
 pub mod heightmap;
 pub mod objects;
+pub mod pipelines;
 pub mod placement;
 pub mod post;
 pub mod profile;

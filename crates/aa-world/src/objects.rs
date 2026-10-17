@@ -30,7 +30,6 @@ use bevy::light::NotShadowCaster;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureViewDimension;
-use bevy::tasks::AsyncComputeTaskPool;
 
 use crate::coords::{CRY_TO_BEVY, CELL_SIZE, SECTOR_SIZE, bevy_to_cry, cell_origin, cry_to_bevy};
 use crate::placement::{CellObjects, load_cell_objects};
@@ -162,8 +161,6 @@ type ModelResult = (u32, Result<PreparedModel, aa_cry::Error>);
 
 /// Most model jobs queued on the workers at once; the rest wait their turn in `Wanted`, so the queue holds what is near.
 const MAX_QUEUED_MODELS: usize = 48;
-/// Main thread time per frame for inserting prepared models into the asset collections (ms).
-const FINISH_BUDGET_MS: f32 = 1.0;
 
 #[derive(Resource)]
 pub struct ObjectState {
@@ -301,17 +298,17 @@ pub fn stream_objects(
     let p = bevy_to_cry(cam.translation());
     let state = &mut *state;
     let _t = timers.as_deref().map(|t| t.time("objects.stream"));
-    let pool = AsyncComputeTaskPool::get();
-
     // vegetation groups (world level)
     if !state.groups_requested {
         state.groups_requested = true;
         let world = cfg.world.clone();
         let tx = state.groups_tx.clone();
-        pool.spawn(async move {
+        // placement files, vegetation groups and terrain cells run on the workers, ahead of the models (priorities far below a
+        // distance): Bevy's async compute pool is also where the pipeline compilation runs, and a first frame full of shaders
+        // keeps it busy for seconds
+        Workers::global().spawn(-60000.0, move || {
             let _ = tx.send(VegGroups::load(&world));
-        })
-        .detach();
+        });
     }
     if state.groups.is_none() {
         if let Ok(g) = state.groups_rx.lock().unwrap().try_recv() {
@@ -350,13 +347,13 @@ pub fn stream_objects(
         let tx = state.tx.clone();
         let world = cfg.world.clone();
         let threshold = cfg.vegetation_distance;
-        pool.spawn(async move {
+        let distance = (dx * dx + dy * dy).sqrt();
+        Workers::global().spawn(distance - 50000.0, move || {
             let objects = load_cell_objects(&world, c.0, c.1);
             let water = water_meshes(&objects.water, &objects.materials);
             let data = CellObjectData::new(objects, threshold);
             let _ = tx.send((c, data, water));
-        })
-        .detach();
+        });
     }
     let received: Vec<CellMessage> = {
         let rx = state.rx.lock().unwrap();
@@ -419,7 +416,7 @@ pub fn stream_objects(
                 ModelState::Failed
             }
         };
-        if finish_start.elapsed().as_secs_f32() * 1000.0 > FINISH_BUDGET_MS {
+        if finish_start.elapsed().as_secs_f32() * 1000.0 > cfg.finish_budget_ms {
             break;
         }
     }

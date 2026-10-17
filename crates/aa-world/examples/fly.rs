@@ -258,6 +258,10 @@ fn main() {
     if let Some(n) = std::env::var("AA_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
         task_pools.compute = bevy::app::TaskPoolThreadAssignmentPolicy { min_threads: n, max_threads: n, percent: 1.0, on_thread_spawn: None, on_thread_destroy: None };
     }
+    // Bevy compiles the render pipelines on the async compute pool (3 threads on 12 hardware threads)
+    if let Some(n) = std::env::var("AA_ASYNC_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        task_pools.async_compute = bevy::app::TaskPoolThreadAssignmentPolicy { min_threads: n, max_threads: n, percent: 1.0, on_thread_spawn: None, on_thread_destroy: None };
+    }
     app.add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window).set(bevy::app::TaskPoolPlugin { task_pool_options: task_pools }))
         .insert_resource(clock)
         .add_plugins(aa_dev::DevPlugin)
@@ -266,6 +270,7 @@ fn main() {
     if aa_world::profile::requested() {
         app.add_plugins(aa_world::profile::ProfilePlugin);
     }
+    app.add_systems(Update, log_pipelines);
     if let Some(play) = play {
         app.insert_resource(play).add_systems(Update, play_cinema);
     }
@@ -350,5 +355,23 @@ fn fly(
         *log = 0.0;
         let p = bevy_to_cry(t.translation);
         info!("camera at {:.0},{:.0},{:.0}", p.x, p.y, p.z);
+    }
+}
+
+/// Logs once when the render pipelines of the first frames are compiled (nothing waiting, the count steady for 30 frames).
+fn log_pipelines(time: Res<Time>, status: Res<aa_world::pipelines::PipelineStatus>, mut last: Local<(usize, u32, bool)>) {
+    if last.2 {
+        return;
+    }
+    let total = status.total();
+    if total == last.0 && status.waiting() == 0 && total > 0 {
+        last.1 += 1;
+    } else {
+        last.1 = 0;
+        last.0 = total;
+    }
+    if last.1 >= 30 {
+        last.2 = true;
+        info!("fly: render pipelines settled after {:.2} s ({total} pipelines)", time.elapsed_secs() - 0.5);
     }
 }

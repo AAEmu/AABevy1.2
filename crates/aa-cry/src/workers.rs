@@ -86,12 +86,15 @@ impl Workers {
         Workers { inner }
     }
 
-    /// The process wide pool: a quarter of the hardware threads, 2 to 4.
+    /// The process wide pool: a third of the hardware threads, 2 to 5 (terrain cells, placement files, models and units all go
+    /// through it; the order is by priority, so more threads only shorten the queue).
     pub fn global() -> &'static Workers {
         static GLOBAL: OnceLock<Workers> = OnceLock::new();
         GLOBAL.get_or_init(|| {
             let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
-            Workers::new((cores / 4).clamp(2, 4))
+            // `AA_WORKERS=N` for experiments
+            let n = std::env::var("AA_WORKERS").ok().and_then(|v| v.parse().ok()).unwrap_or((cores / 3).clamp(2, 5));
+            Workers::new(n)
         })
     }
 
