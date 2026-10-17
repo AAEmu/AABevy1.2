@@ -18,6 +18,7 @@ pub const RUN_SPEED: f32 = 5.4;
 pub const WALK_SPEED: f32 = 2.4;
 
 /// The clips a model can play while moving.
+#[derive(Clone)]
 pub struct ClipSet {
     pub idle: BoundClip,
     run: [Option<BoundClip>; 8],
@@ -49,6 +50,26 @@ impl ClipSet {
     pub fn can_move(&self) -> bool {
         self.run[0].is_some() || self.walk[0].is_some()
     }
+}
+
+/// The clips of the model whose skeleton and `.cal` are given, bound once and shared (any thread); `None` when the model has
+/// no idle clip. Characters of one skeleton share a [`Rig`], so the bindings are the same for all of them.
+pub fn shared_clip_set(skeleton: &str, cal: &str, clips: &ClipLibrary) -> Option<Arc<ClipSet>> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static SETS: OnceLock<Mutex<HashMap<(String, String), Option<Arc<ClipSet>>>>> = OnceLock::new();
+    let key = (skeleton.to_string(), cal.to_string());
+    let sets = SETS.get_or_init(Default::default);
+    if let Some(set) = sets.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return set.clone();
+    }
+    let _t = aa_cry::prof::scope("anim.clip_set");
+    let set = aa_anim::pose::shared_rig(skeleton)
+        .ok()
+        .zip(Cal::shared(cal).ok())
+        .and_then(|(rig, cal)| ClipSet::load(&rig, &cal, clips))
+        .map(Arc::new);
+    sets.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(set).clone()
 }
 
 /// Metres per second the root bone travels in a (forward) locomotion clip.

@@ -16,6 +16,7 @@ pub(crate) mod data;
 mod dev;
 pub(crate) mod enter;
 mod player;
+mod prepare;
 mod units;
 mod weapons;
 
@@ -68,6 +69,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(enter::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
+            .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnEnter(Screen::InGame), player::spawn_player)
             .add_systems(
                 Update,
@@ -84,6 +86,13 @@ impl Plugin for InGamePlugin {
                     .run_if(in_state(Screen::InGame)),
             );
     }
+}
+
+/// Feeds aa-anim's counters into the profile timers (`AA_PROFILE=1`).
+fn report_anim(timers: Res<aa_world::profile::Timers>) {
+    let (updated, nanos) = aa_anim::animator::take_stats();
+    timers.add("anim.animate", nanos as f64 / 1e6);
+    timers.add("anim.animators(count)", f64::from(updated));
 }
 
 /// A line every few seconds: where the player is and how much of the town is drawn.

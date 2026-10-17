@@ -4,17 +4,18 @@
 //! cached: a town has a few dozen distinct templates and hundreds of instances.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use aa_anim::GameDb;
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
-/// The database handles (a connection is `Send` but not `Sync`, hence the mutexes).
-#[derive(Resource)]
+/// The database handles (a connection is `Send` but not `Sync`, hence the mutexes). Cloning shares them, so worker
+/// threads can use the same lookups and caches.
+#[derive(Resource, Clone)]
 pub struct Db {
-    pub game: Mutex<GameDb>,
-    lookups: Mutex<Lookups>,
+    pub game: Arc<Mutex<GameDb>>,
+    lookups: Arc<Mutex<Lookups>>,
 }
 
 struct Lookups {
@@ -121,14 +122,14 @@ impl Db {
             }
         };
         Some(Db {
-            game: Mutex::new(game),
-            lookups: Mutex::new(Lookups {
+            game: Arc::new(Mutex::new(game)),
+            lookups: Arc::new(Mutex::new(Lookups {
                 conn,
                 actor_files: HashMap::new(),
                 doodad_models: HashMap::new(),
                 npc_scale: HashMap::new(),
                 weapons: HashMap::new(),
-            }),
+            })),
         })
     }
 
