@@ -1,25 +1,117 @@
-//! Sound tool: survey the banks, list events, write WAVs, play events.
+//! Sound tool: survey the banks, list events, resolve event paths, write WAVs, play events.
 //!
 //! ```text
 //! cargo run -p aa-audio --release --example sound -- --survey [--prefix sounds/x2skills] [--threads 4]
+//! cargo run -p aa-audio --release --example sound -- --fevs
+//! cargo run -p aa-audio --release --example sound -- --list x2skills [--filter fire_arrow]
+//! cargo run -p aa-audio --release --example sound -- --resolve data/extract/aa-audio/db_sound_paths.txt
+//! cargo run -p aa-audio --release --example sound -- --wav sounds/x2skills:wild:fire_arrow_form shots/aa-audio/skill_hit.wav [--seconds 8]
+//! cargo run -p aa-audio --release --example sound -- --wav sounds/x2skills/x2skills_bank571.fsb:0 out.wav
+//! cargo run -p aa-audio --release --example sound -- --event sounds/x2interface:interface:button_default --sound [--volume 0.3] [--seconds 4]
 //! ```
+//!
+//! `--event` only plays with `--sound` (and stays short and quiet by default): without it the event is
+//! resolved and planned but the engine is muted.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use aa_audio::{Fsb5, decode};
+use aa_audio::fev::{Body, Fev, Wave};
+use aa_audio::library::{PickState, Rng, distance_gain, initial_values, layer_gain, plan};
+use aa_audio::{Engine, Fsb5, Library, Pcm, Settings, Volumes, decode};
+use bevy::math::Vec3;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
-    if args.iter().any(|a| a == "--survey") {
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--survey") {
         survey(&value("--prefix").unwrap_or_else(|| "sounds/".into()), value("--threads").and_then(|t| t.parse().ok()).unwrap_or(4));
-        return;
+    } else if has("--loopstats") {
+        let pak = aa_pak::Pak::global();
+        let mut m: BTreeMap<(String, u32), (usize, String)> = BTreeMap::new();
+        for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")).map(str::to_string).collect::<Vec<_>>() {
+            let f = Fev::parse(&pak.read(&name).unwrap()).unwrap();
+            for e in &f.events {
+                for i in e.instances() {
+                    let r = m.entry((e.category.clone(), i.loop_word)).or_insert((0, e.path()));
+                    r.0 += 1;
+                }
+            }
+        }
+        for ((cat, w), (n, ex)) in m {
+            println!("{cat:28} loop word {w:#x}: {n:6} e.g. {ex}");
+        }
+    } else if has("--params") {
+        let pak = aa_pak::Pak::global();
+        let mut m: BTreeMap<String, (usize, usize, String)> = BTreeMap::new();
+        let (mut simple, mut distance_only, mut other, mut total) = (0, 0, 0, 0);
+        for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")).map(str::to_string).collect::<Vec<_>>() {
+            let f = Fev::parse(&pak.read(&name).unwrap()).unwrap();
+            for e in &f.events {
+                total += 1;
+                match &e.body {
+                    Body::Simple(_) => simple += 1,
+                    Body::Complex { parameters, .. } => {
+                        if parameters.iter().all(|p| p.name == "distance") {
+                            distance_only += 1;
+                        } else {
+                            other += 1;
+                        }
+                        for p in parameters {
+                            if p.velocity != 0.0 || p.seek_speed != 0.0 {
+                                println!("velocity {} seek {} flags {:#x} range {}..{} {} {}", p.velocity, p.seek_speed, p.flags, p.min, p.max, p.name, e.path());
+                            }
+                            let r = m.entry(p.name.clone()).or_insert((0, 0, e.path()));
+                            r.0 += 1;
+                            if p.flags & 0x8 != 0 {
+                                r.1 += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("events {total}: simple {simple}, complex with only distance {distance_only}, complex with other parameters {other}");
+        let mut v: Vec<_> = m.into_iter().collect();
+        v.sort_by_key(|(_, (n, _, _))| std::cmp::Reverse(*n));
+        for (name, (n, loops, ex)) in v.into_iter().take(40) {
+            println!("{name:24} {n:5} (flag 8: {loops}) e.g. {ex}");
+        }
+    } else if has("--fevs") {
+        fevs();
+    } else if let Some(project) = value("--list") {
+        list(&project, value("--filter").as_deref());
+    } else if let Some(file) = value("--resolve") {
+        resolve(&file);
+    } else if let Some(i) = args.iter().position(|a| a == "--wav") {
+        let (Some(what), Some(out)) = (args.get(i + 1), args.get(i + 2)) else {
+            return eprintln!("--wav <event or bank.fsb:index> <out.wav>");
+        };
+        let params = params(&args);
+        wav(what, out, value("--seconds").and_then(|s| s.parse().ok()), value("--distance").and_then(|s| s.parse().ok()), &params);
+    } else if let Some(path) = value("--event") {
+        event(&path, has("--sound"), value("--volume").and_then(|s| s.parse().ok()).unwrap_or(0.3), value("--seconds").and_then(|s| s.parse().ok()).unwrap_or(4.0), value("--at"), &params(&args));
+    } else if let Some(path) = value("--music") {
+        music(&path, has("--sound"), value("--volume").and_then(|s| s.parse().ok()).unwrap_or(0.3), value("--seconds").and_then(|s| s.parse().ok()).unwrap_or(6.0));
+    } else {
+        eprintln!("usage: sound --survey | --fevs | --list <project> | --resolve <paths.txt> | --wav <event|bank.fsb:index> <out.wav> | --event <path> --sound");
     }
-    eprintln!("usage: sound --survey | --list <fev> | --wav <event|bank:index> <out.wav> | --event <path> [--sound]");
 }
+
+/// `--param name=value` (repeatable).
+fn params(args: &[String]) -> Vec<(String, f32)> {
+    args.iter()
+        .enumerate()
+        .filter(|(_, a)| *a == "--param")
+        .filter_map(|(i, _)| args.get(i + 1)?.split_once('='))
+        .filter_map(|(n, v)| Some((n.to_string(), v.parse().ok()?)))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------------------- survey
 
 #[derive(Default)]
 struct Stats {
@@ -151,4 +243,321 @@ fn survey(prefix: &str, threads: usize) {
         total.2 += s.failures.values().map(|f| f.0).sum::<usize>();
     }
     println!("total subsounds {} decoded {} ({:.2} %), failures {}", total.0, total.1, 100.0 * total.1 as f64 / total.0.max(1) as f64, total.2);
+}
+
+// ------------------------------------------------------------------------------------------ FEVs
+
+fn fevs() {
+    let pak = aa_pak::Pak::global();
+    let mut names: Vec<&str> = pak.list("sounds/").filter(|n| n.ends_with(".fev")).collect();
+    names.sort();
+    let (mut ok, mut events, mut simple, mut defs, mut waves) = (0, 0, 0, 0, 0);
+    for name in names {
+        let bytes = pak.read(name).unwrap();
+        match Fev::parse(&bytes) {
+            Ok(f) => {
+                ok += 1;
+                events += f.events.len();
+                simple += f.events.iter().filter(|e| e.is_simple()).count();
+                defs += f.sound_defs.len();
+                waves += f.sound_defs.iter().map(|d| d.waves.len()).sum::<usize>();
+                println!(
+                    "{name}: {} events ({} simple), {} groups, {} banks, {} templates, {} sound defs, {} reverbs",
+                    f.events.len(),
+                    f.events.iter().filter(|e| e.is_simple()).count(),
+                    f.groups.len(),
+                    f.banks.len(),
+                    f.templates.len(),
+                    f.sound_defs.len(),
+                    f.reverbs.len(),
+                );
+            }
+            Err(e) => println!("{name}: ERROR {e}"),
+        }
+    }
+    println!("{ok} FEV files parsed to their last byte: {events} events ({simple} simple), {defs} sound definitions, {waves} waves");
+}
+
+/// `--list <project> [--filter text]`: dump the events.
+fn list(project: &str, filter: Option<&str>) {
+    let pak = aa_pak::Pak::global();
+    let path = if project.ends_with(".fev") { project.to_string() } else { format!("sounds/{project}/{project}.fev") };
+    let f = Fev::parse(&pak.read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap();
+    println!("project {} : {} groups, {} events, {} banks, {} sound defs", f.name, f.groups.len(), f.events.len(), f.banks.len(), f.sound_defs.len());
+    println!("categories: {}", f.categories.paths().join(" "));
+    let filter = filter.map(str::to_ascii_lowercase);
+    for e in &f.events {
+        let p = e.path();
+        if filter.as_ref().is_some_and(|t| !p.to_ascii_lowercase().contains(t)) {
+            continue;
+        }
+        println!(
+            "{p}  [{}] {} vol {:.2} pitch {:+.2}oct (+-{:.2}) volrand {:.2} prio {} max {} dist {}..{} {:?} oneshot {} fade {}/{} ms cat {} flags {:#x} mode {:#x}",
+            if e.is_simple() { "simple" } else { "complex" },
+            if e.is_3d() { "3D" } else { "2D" },
+            e.volume,
+            e.pitch * 4.0,
+            e.pitch_random * 4.0,
+            e.volume_random,
+            e.priority,
+            e.max_playbacks,
+            e.min_distance,
+            e.max_distance,
+            e.rolloff(),
+            e.one_shot(),
+            e.fade_in_ms,
+            e.fade_out_ms,
+            e.category,
+            e.flags,
+            e.mode,
+        );
+        let show = |i: &aa_audio::fev::Instance, indent: &str| {
+            let sd = &f.sound_defs[i.sound_def];
+            let t = &f.templates[sd.template];
+            println!(
+                "{indent}instance {}..+{} loop word {} -> sound def {:?} {:?} vol {} pitch {:+.2}oct (+-{:.2}) volmin {} spawn {}..{} ms max {}",
+                i.start,
+                i.length,
+                i.loop_word,
+                sd.name,
+                t.play_mode(),
+                t.volume,
+                t.pitch * 4.0,
+                t.pitch_random * 4.0,
+                t.volume_random_min,
+                t.spawn_time_min_ms,
+                t.spawn_time_max_ms,
+                t.max_spawned
+            );
+            for w in &sd.waves {
+                match w {
+                    Wave::Bank { weight, name, bank, index, length_ms } => {
+                        println!("{indent}    wave w{weight} {name} = {}:{index} ({length_ms} ms)", f.banks[*bank as usize].name)
+                    }
+                    other => println!("{indent}    {other:?}"),
+                }
+            }
+        };
+        match &e.body {
+            Body::Simple(i) => show(i, "    "),
+            Body::Complex { layers, parameters, .. } => {
+                for p in parameters {
+                    println!("    parameter {} {}..{} flags {:#x}", p.name, p.min, p.max, p.flags);
+                }
+                for (li, l) in layers.iter().enumerate() {
+                    let envs: Vec<String> = l.envelopes.iter().map(|e| format!("{:#x}@p{} {} points", e.flags, e.parameter, e.points.len())).collect();
+                    println!("    layer {li} control p{} envelopes [{}]", l.control_parameter, envs.join(", "));
+                    for i in &l.instances {
+                        show(i, "        ");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------- resolving
+
+/// Resolves every path of a text file (one per line) and checks the banks the events point at.
+fn resolve(file: &str) {
+    let lib = Library::global();
+    let text = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{file}: {e}"));
+    let mut paths: Vec<String> = text.lines().map(|l| l.trim().to_ascii_lowercase()).filter(|l| !l.is_empty()).collect();
+    paths.sort();
+    paths.dedup();
+    let started = Instant::now();
+    let mut outcome: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    let mut absent_projects: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut waves, mut bank_missing, mut index_bad, mut name_ok, mut name_other) = (0, 0, 0, 0, 0);
+    let mut bad_examples = Vec::new();
+    let mut resolved_events = HashSet::new();
+    for p in &paths {
+        let Some(parsed) = aa_audio::library::parse_path(p) else {
+            outcome.entry("malformed path").or_default().push(p.clone());
+            continue;
+        };
+        if lib.project(&parsed.project).is_none() {
+            *absent_projects.entry(parsed.project.clone()).or_default() += 1;
+            outcome.entry("project FEV not in the pak").or_default().push(p.clone());
+            continue;
+        }
+        let Some(event) = lib.event(p) else {
+            outcome.entry("event not in the project").or_default().push(p.clone());
+            continue;
+        };
+        outcome.entry("resolved").or_default().push(p.clone());
+        if !resolved_events.insert(event.key()) {
+            continue;
+        }
+        for inst in event.event().instances() {
+            for w in &event.project.fev.sound_defs[inst.sound_def].waves {
+                let Wave::Bank { name, bank, index, .. } = w else { continue };
+                waves += 1;
+                match lib.bank(&event.project, *bank) {
+                    Err(e) => {
+                        bank_missing += 1;
+                        if bad_examples.len() < 5 {
+                            bad_examples.push(format!("{p}: {e}"));
+                        }
+                    }
+                    Ok(b) => match b.fsb.subsounds.get(*index as usize) {
+                        None => index_bad += 1,
+                        Some(sub) => {
+                            let stem = name.rsplit('/').next().unwrap_or(name).trim_end_matches(".wav").to_ascii_lowercase();
+                            match sub.name.as_deref().map(str::to_ascii_lowercase) {
+                                Some(n) if n.contains(&stem) || stem.contains(n.trim_end_matches(".wav")) => name_ok += 1,
+                                _ => name_other += 1,
+                            }
+                        }
+                    },
+                }
+            }
+        }
+    }
+    println!("{} distinct paths (case-insensitive) in {:.1} s", paths.len(), started.elapsed().as_secs_f64());
+    let show = if std::env::var_os("AA_VERBOSE").is_some() { usize::MAX } else { 3 };
+    for (k, v) in &outcome {
+        if *k == "resolved" && show == usize::MAX {
+            println!("{k:30} {:5}", v.len());
+            continue;
+        }
+        println!("{k:30} {:5}   e.g. {}", v.len(), v.iter().take(show).cloned().collect::<Vec<_>>().join("
+                                      "));
+    }
+    println!("absent projects: {absent_projects:?}");
+    println!("{} distinct events resolved; waves checked {waves}: bank missing {bank_missing}, subsound index out of range {index_bad}, subsound name matches the FEV wave name {name_ok}, differs {name_other}", resolved_events.len());
+    for e in bad_examples {
+        println!("    {e}");
+    }
+}
+
+// ------------------------------------------------------------------------------------------ WAVs
+
+fn mix(parts: &[(Pcm, f32, f32, bool)], seconds: f32) -> Pcm {
+    const RATE: u32 = 44100;
+    let frames = (seconds * RATE as f32) as usize;
+    let mut out = vec![0f32; frames * 2];
+    for (pcm, gain, rate, looping) in parts {
+        let ch = pcm.channels.max(1) as usize;
+        let n = pcm.frames();
+        if n == 0 {
+            continue;
+        }
+        let step = pcm.rate as f64 * *rate as f64 / RATE as f64;
+        let mut pos = 0.0f64;
+        for o in 0..frames {
+            let mut i = pos as usize;
+            if i >= n {
+                if !*looping {
+                    break;
+                }
+                pos -= n as f64;
+                i = pos as usize;
+            }
+            let frac = (pos - i as f64) as f32;
+            let j = if i + 1 < n { i + 1 } else if *looping { 0 } else { i };
+            let at = |f: usize, c: usize| pcm.samples[f * ch + c.min(ch - 1)] as f32 / 32768.0;
+            for c in 0..2 {
+                out[o * 2 + c] += gain * (at(i, c) * (1.0 - frac) + at(j, c) * frac);
+            }
+            pos += step;
+        }
+    }
+    let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
+    let scale = if peak > 1.0 { 1.0 / peak } else { 1.0 };
+    Pcm { rate: RATE, channels: 2, samples: out.iter().map(|v| (v * scale * 32767.0) as i16).collect(), loop_points: None }
+}
+
+fn wav(what: &str, out: &str, seconds: Option<f32>, distance: Option<f32>, params: &[(String, f32)]) {
+    let lib = Library::global();
+    if let Some(parent) = std::path::Path::new(out).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let pcm = if let Some((bank, index)) = what.rsplit_once(':').filter(|(b, _)| b.ends_with(".fsb")) {
+        let bytes = aa_pak::Pak::global().read(bank).unwrap_or_else(|e| panic!("{bank}: {e}"));
+        let fsb = Fsb5::parse(&bytes).unwrap();
+        let mut pcm = decode(&fsb, &bytes, index.parse().expect("subsound index")).unwrap();
+        if let Some(s) = seconds {
+            pcm.samples.truncate((s * pcm.rate as f32) as usize * pcm.channels as usize);
+        }
+        pcm
+    } else {
+        let event = lib.event(what).unwrap_or_else(|| panic!("no event {what}"));
+        let ev = event.event();
+        let distance = ev.is_3d().then_some(distance.unwrap_or(1.0));
+        let values = initial_values(ev, distance, params);
+        let planned = plan(&event, &values, &mut PickState::default(), &mut Rng::new(1));
+        let mut parts = Vec::new();
+        let mut length = 0f32;
+        for p in &planned {
+            let bank = lib.bank(&event.project, p.bank).unwrap_or_else(|e| panic!("{e}"));
+            let pcm = lib.decode(&bank, p.index as usize).unwrap_or_else(|e| panic!("{e}"));
+            let gain = p.gain * layer_gain(ev, &values, p.layer) * distance.map_or(1.0, |d| distance_gain(ev, d));
+            println!(
+                "  layer {} {} = {}:{} gain {:.2} rate {:.3} {:.2} s{}",
+                p.layer,
+                p.name,
+                event.project.fev.banks[p.bank as usize].name,
+                p.index,
+                gain,
+                p.rate,
+                pcm.seconds(),
+                if p.looping { " loop" } else { "" }
+            );
+            length = length.max(pcm.seconds() / p.rate);
+            parts.push((pcm, gain, p.rate, p.looping));
+        }
+        let looping = parts.iter().any(|p| p.3);
+        let seconds = seconds.unwrap_or(if looping { (length * 2.0).min(30.0) } else { length });
+        println!("{what}: {} sounds, {seconds:.2} s{}", parts.len(), if looping { " (looped twice)" } else { "" });
+        mix(&parts, seconds)
+    };
+    std::fs::write(out, pcm.to_wav()).unwrap();
+    println!("wrote {out}: {:.2} s, {} Hz, {} ch, rms {:.4}", pcm.seconds(), pcm.rate, pcm.channels, pcm.rms());
+}
+
+// ------------------------------------------------------------------------------------- playing
+
+fn event(path: &str, audible: bool, volume: f32, seconds: f32, at: Option<String>, params: &[(String, f32)]) {
+    let lib = Library::global();
+    let Some(ev) = lib.event(path) else {
+        return eprintln!("no event {path}");
+    };
+    let e = ev.event();
+    println!("{} : {} {}, volume {:.2}, {} instance(s), category {}", ev.name(), if e.is_3d() { "3D" } else { "2D" }, if e.one_shot() { "one shot" } else { "may loop" }, e.volume, e.instances().len(), e.category);
+    let engine = Engine::start(Settings { audible, ..Settings::default() });
+    engine.set_volumes(Volumes { master: volume, ..Volumes::default() });
+    let pos = at.map(|s| {
+        let v: Vec<f32> = s.split(',').filter_map(|c| c.trim().parse().ok()).collect();
+        Vec3::new(*v.first().unwrap_or(&0.0), *v.get(1).unwrap_or(&0.0), *v.get(2).unwrap_or(&0.0))
+    });
+    if audible {
+        println!("playing for at most {seconds} s at master volume {volume}");
+    } else {
+        println!("muted (pass --sound to hear it)");
+    }
+    let voice = engine.play_with(path, pos, aa_audio::PlayOptions { params: params.to_vec(), ..Default::default() });
+    if engine.wait_idle(Duration::from_secs_f32(seconds)) {
+        println!("finished");
+    } else {
+        engine.stop(voice, true);
+        engine.wait_idle(Duration::from_secs(2));
+        println!("stopped after {seconds} s");
+    }
+    println!("{:#?}", engine.stats());
+}
+
+fn music(path: &str, audible: bool, volume: f32, seconds: f32) {
+    let engine = Engine::start(Settings { audible, ..Settings::default() });
+    engine.set_volumes(Volumes { master: volume, ..Volumes::default() });
+    if audible {
+        println!("streaming {path} for {seconds} s at master volume {volume}");
+    } else {
+        println!("muted (pass --sound to hear it)");
+    }
+    engine.play_music(path, Duration::from_millis(1500), Duration::from_millis(1500));
+    std::thread::sleep(Duration::from_secs_f32(seconds));
+    engine.stop_music(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(700));
+    println!("{:#?}", engine.stats());
 }

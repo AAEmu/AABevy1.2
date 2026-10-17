@@ -63,13 +63,18 @@ impl Pcm {
 
 /// Decodes subsound `index` of the bank whose file is `bytes`.
 pub fn decode(fsb: &Fsb5, bytes: &[u8], index: usize) -> Result<Pcm> {
+    decode_data(fsb, index, fsb.data(bytes, index)?)
+}
+
+/// Decodes subsound `index` from its encoded bytes alone (`data` is what [`Fsb5::data`] returns), for
+/// callers that read just that part of the bank.
+pub fn decode_data(fsb: &Fsb5, index: usize, data: &[u8]) -> Result<Pcm> {
     let sub = fsb.subsounds.get(index).ok_or(Error::NoSubsound(index))?;
-    let data = fsb.data(bytes, index)?;
     let want = sub.samples as usize * sub.channels as usize;
     let samples = match fsb.codec {
         Codec::Vorbis => vorbis::decode(sub, data)?,
         Codec::Mpeg => mpeg::decode(sub, data)?,
-        Codec::Pcm16 => data.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).take(want).collect(),
+        Codec::Pcm16 => data.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).take(want).collect(),
         Codec::Pcm8 => data.iter().map(|&b| ((b as i16) - 128) << 8).take(want).collect(),
         other => return Err(Error::Codec(other)),
     };
