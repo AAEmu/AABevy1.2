@@ -345,10 +345,8 @@ fn ensure_ui(world: &mut World) {
         Screen::Loading => loading::build(world),
         // the create plugin builds its own UI (see the module docs)
         Screen::CharacterCreate => true,
-        Screen::InGame => {
-            host::clear(world);
-            true
-        }
+        // the HUD builds its own stage once the player has spawned (`hud::build_hud`)
+        Screen::InGame => true,
     };
     if built {
         world.resource_mut::<UiBuilt>().0 = Some(screen);

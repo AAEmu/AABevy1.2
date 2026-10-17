@@ -5,7 +5,9 @@
 //! * [`login`]: world select, character select, character create and loading, on the original
 //!   Lua UI
 //! * [`ingame`]: world, player, units, camera, movement (`--enter-world` skips the login stage)
+//! * [`hud`]: the in-game Lua UI on real data, name plates
 
+mod hud;
 mod ingame;
 mod login;
 
@@ -25,6 +27,6 @@ fn main() {
     App::new()
         .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
         .init_state::<Screen>()
-        .add_plugins((login::LoginPlugin, ingame::InGamePlugin))
+        .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
         .run();
 }
