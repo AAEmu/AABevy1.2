@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-use crate::buff::Buff;
+use crate::buff::{Buff, BuffCaster};
 use crate::game::{self, LeaveTarget, VisualOptions};
 use crate::items::{ActionSlot, InvenChunk, ItemMove, ItemTasks};
 use crate::quest::{CompletedBlock, Quest};
@@ -376,6 +376,9 @@ pub enum Event {
         /// Object id and name of the killer, when a unit did it.
         killer: Option<(u32, String)>,
     },
+    /// `SCNotifyResurrection`: an in-place resurrection is offered. A free low-level offer
+    /// has unit caster 0 and can arrive before the death packet; preserve it until dead.
+    ResurrectionOffered { caster: BuffCaster },
     /// A character stands up again at `pos`, facing `yaw`.
     Resurrected { obj_id: u32, pos: Pos, yaw: f32 },
     /// The unit or doodad has loot for the player (`has_loot`) or no longer has ([`state::Loot`]).
@@ -1153,6 +1156,7 @@ impl Session {
                 self.emit(Event::UnitDeath { obj_id });
                 self.emit(Event::DeathDetails { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer });
             }
+            M::ResurrectionOffered { caster } => self.emit(Event::ResurrectionOffered { caster }),
             M::CharacterResurrected { obj_id, pos, yaw } => self.emit(Event::Resurrected { obj_id, pos, yaw }),
             M::Lootable { owner_type, obj_id, has_loot } => self.emit(Event::Lootable { owner_type, obj_id, has_loot }),
             M::UnitLooting { obj_id, looting } => self.emit(Event::UnitLooting { obj_id, looting }),
@@ -1409,6 +1413,21 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn resurrection_offer_is_emitted_before_the_following_death_details() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let caster = BuffCaster { kind: crate::buff::caster_kind::UNIT, obj_id: 0 };
+        session.game_one(game::ServerMsg::ResurrectionOffered { caster }).await;
+        session.game_one(game::ServerMsg::UnitDeath {
+            obj_id: 5, kill_reason: 0, resurrect_wait_ms: 10_000, lost_exp: 0, durability_loss_rate: 0, killer: None,
+        }).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ResurrectionOffered { caster: got }) if got == caster));
+        assert!(matches!(events.try_recv(), Ok(Event::UnitDeath { obj_id: 5 })));
+        assert!(matches!(events.try_recv(), Ok(Event::DeathDetails { obj_id: 5, .. })));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn ship_requests_are_not_announced_as_position_updates() {

@@ -5,7 +5,7 @@
 //! level 4 is a compressed batch of server packets. The 1.2 protocol is neither encrypted nor
 //! compressed otherwise, and the server verifies neither `hash` nor `count`.
 
-use crate::buff::Buff;
+use crate::buff::{Buff, BuffCaster};
 use crate::items::{ActionSlot, InvenChunk, ItemMove, ItemTasks};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit,
@@ -343,6 +343,8 @@ pub enum ServerMsg {
         /// Object id and name of the killer, when a unit did it.
         killer: Option<(u32, String)>,
     },
+    /// `SCNotifyResurrection`: an in-place resurrection offer from this skill caster.
+    ResurrectionOffered { caster: BuffCaster },
     CharacterResurrected { obj_id: u32, pos: Pos, yaw: f32 },
     /// `SCLootableState`: the unit or doodad has loot for the player (`has_loot`) or no longer has.
     Lootable { owner_type: u16, obj_id: u32, has_loot: bool },
@@ -484,6 +486,7 @@ impl ServerMsg {
             Self::UnitMovements(_) => "SCUnitMovements",
             Self::UnitPoints { .. } => "SCUnitPoints",
             Self::UnitDeath { .. } => "SCUnitDeath",
+            Self::ResurrectionOffered { .. } => "SCNotifyResurrection",
             Self::CharacterResurrected { .. } => "SCCharacterResurrected",
             Self::Lootable { .. } => "SCLootableState",
             Self::UnitLooting { .. } => "SCUnitLootingState",
@@ -735,6 +738,7 @@ impl ServerMsg {
                 };
                 Self::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, durability_loss_rate, killer }
             }
+            sc::SCNotifyResurrectionPacket => Self::ResurrectionOffered { caster: BuffCaster::read(r)? },
             sc::SCCharacterResurrectedPacket => Self::CharacterResurrected {
                 obj_id: r.bc()?,
                 pos: r.position()?,
@@ -1112,6 +1116,33 @@ mod tests {
 
     fn decode(op: u16, body: &[u8]) -> ServerMsg {
         ServerMsg::decode(&game_frame(op, body)).unwrap()
+    }
+
+    #[test]
+    fn resurrection_offers_decode_skill_casters_without_losing_the_next_packet() {
+        use crate::buff::caster_kind;
+        for kind in [caster_kind::UNIT, caster_kind::ITEM, caster_kind::MOUNT] {
+            let mut body = Writer::new();
+            body.u8(kind).bc(0x0A0B0C);
+            match kind {
+                // The server's notify_resurrection_writes_skill_caster golden values.
+                caster_kind::ITEM => { body.u64(77).u32(8000).u8(2).u32(3); }
+                caster_kind::MOUNT => { body.u32(9000); }
+                _ => {}
+            }
+            let body = body.finish();
+            let expected = ServerMsg::ResurrectionOffered { caster: BuffCaster { kind, obj_id: 0x0A0B0C } };
+            assert_eq!(decode(sc::SCNotifyResurrectionPacket, &body), expected);
+            let mut batch = Writer::new();
+            batch.u16(0).u16(sc::SCNotifyResurrectionPacket).raw(&body);
+            batch.u16(0).u16(sc::SCUnitPointsPacket).bc(7).i32(100).i32(200);
+            assert_eq!(ServerMsg::decode_batch(&batch.finish(), 2), vec![expected, ServerMsg::UnitPoints { obj_id: 7, hp: 1, mp: 2 }]);
+            for len in 0..body.len() {
+                let mut frame = Writer::new();
+                frame.u8(MAGIC).u8(LEVEL_GAME).u8(0).u8(0).u16(sc::SCNotifyResurrectionPacket).raw(&body[..len]);
+                assert!(ServerMsg::decode(&frame.finish()).is_err(), "kind {kind} length {len}");
+            }
+        }
     }
 
     #[test]
