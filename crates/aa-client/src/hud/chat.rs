@@ -41,7 +41,8 @@ fn join(rt: &UiRuntime, game: Option<&GameData>, chat_type: i16, sub_type: i16, 
     rt.fire_event("CHAT_JOINED_CHANNEL", (chat_type as i64, channel_name(game, chat_type, sub_type, faction_id, name)));
 }
 
-fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage) {
+fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage, friends: &aa_net::Friends) {
+    if (m.sender_obj_id != 0 || m.sender_id != 0) && friends.is_blocked(&m.sender) { return; }
     rt.fire_event(
         "CHAT_MESSAGE",
         (m.chat_type as i64, m.sender_obj_id.to_string(), false, m.sender.clone(), m.message.clone(), false, None::<String>),
@@ -49,12 +50,44 @@ fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage) {
 }
 
 /// The channels joined and the lines received before the HUD existed, in order.
-pub fn replay(rt: &UiRuntime, chat: &Chat, game: Option<&GameData>) {
+pub fn replay(rt: &UiRuntime, chat: &Chat, game: Option<&GameData>, friends: &aa_net::Friends) {
     for c in &chat.channels {
         join(rt, game, c.chat_type, c.sub_type, c.faction_id, &c.name);
     }
     for m in &chat.log {
-        message(rt, m);
+        message(rt, m, friends);
+    }
+}
+
+#[cfg(test)]
+mod blocked_tests {
+    use super::*;
+
+    fn line(name:&str,id:u32) -> aa_net::model::ChatMessage {
+        aa_net::model::ChatMessage { chat_type:0,sub_type:0,channel_faction:0,sender_obj_id:id,
+            sender_id:id,sender_race:1,faction_id:1,sender:name.into(),message:"hello".into(),ability:0 }
+    }
+
+    #[test]
+    fn blocked_chat_is_filtered_for_live_and_replayed_lines_without_losing_raw_log() -> Result<(),Box<dyn std::error::Error>> {
+        let rt=UiRuntime::new("en_us",1280.0,720.0)?;
+        rt.lua.load("lines={}; UIParent:SetEventHandler('CHAT_MESSAGE',function(channel,id,flag,sender,text) lines[#lines+1]=sender end)").exec()?;
+        let friends=aa_net::Friends {blocked:vec![aa_net::friend::BlockedUser {id:1,name:"Blocked".into()}],..default()};
+        let mut chat=Chat::default();
+        for m in [line("bLoCkEd",1),line("Visible",2),line("Blocked",0)] {
+            chat.apply(&Event::Chat(m));
+        }
+        replay(&rt,&chat,None,&friends);
+        assert_eq!(chat.log.len(),3);
+        rt.lua.load("assert(#lines==2 and lines[1]=='Visible' and lines[2]=='Blocked'); lines={}").exec()?;
+        let bridge=std::rc::Rc::new(std::cell::RefCell::new(super::super::api::HudData {friends,..default()}));
+        let mut app=App::new(); app.add_message::<NetEvent>(); app.add_systems(Update,route_chat);
+        app.insert_resource(HudBuilt {up:true,fresh:false}); app.insert_non_send(HudBridge(bridge)); app.insert_non_send(rt);
+        app.world_mut().write_message(NetEvent(Event::Chat(line("blocked",1))));
+        app.world_mut().write_message(NetEvent(Event::Chat(line("Visible",2))));
+        app.update();
+        app.world().non_send::<UiRuntime>().lua.load("assert(#lines==1 and lines[1]=='Visible')").exec()?;
+        Ok(())
     }
 }
 
@@ -75,7 +108,7 @@ pub fn route_chat(
     let game = data.game.get();
     for NetEvent(event) in events.read() {
         match event {
-            Event::Chat(m) => message(&rt, m),
+            Event::Chat(m) => message(&rt, m, &data.friends),
             Event::ChatChannelJoined { chat_type, sub_type, faction_id, name } => join(&rt, game, *chat_type, *sub_type, *faction_id, name),
             Event::ChatChannelLeft { chat_type, sub_type, faction_id } => {
                 rt.fire_event("CHAT_LEAVED_CHANNEL", (*chat_type as i64, channel_name(game, *chat_type, *sub_type, *faction_id, "")));

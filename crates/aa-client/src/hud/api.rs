@@ -46,6 +46,7 @@ pub enum Request {
     ResetSkills { ability: u8 },
     SwapAbility { old: u8, ability: u8 },
     Party(aa_net::party::PartyCommand),
+    Friend(aa_net::friend::FriendCommand),
     Target { obj_id: u32 },
 }
 
@@ -95,6 +96,7 @@ pub struct HudData {
     /// The player's attack numbers and worn items, what the tooltips are worked out from (`tips.rs`).
     pub tips: super::tips::TipState,
     pub party: aa_net::Party,
+    pub friends: aa_net::Friends,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -134,6 +136,7 @@ impl Default for HudData {
             revive_caster: Default::default(),
             tips: Default::default(),
             party: Default::default(),
+            friends: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -212,6 +215,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::skillbook::install(lua, &hud, bridge)?;
     super::markers::install(lua, &hud)?;
     super::party::install(lua, &hud, bridge)?;
+    super::friends::install(lua, bridge)?;
     super::store::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
@@ -496,6 +500,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
+    if let Some(friends) = world.get_resource::<aa_net::Friends>() {
+        if data.friends != *friends { data.friends.clone_from(friends); }
+    }
     if let Some(skills) = world.get_resource::<aa_net::state::Skills>() {
         if skills.known.len() != data.skill_levels.len() || skills.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level)) {
             data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
@@ -650,7 +657,8 @@ pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) 
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }
-    super::chat::replay(rt, chat, bridge.borrow().game.get());
+    let (game,friends) = { let d=bridge.borrow(); (d.game.clone(),d.friends.clone()) };
+    super::chat::replay(rt, chat, game.get(), &friends);
     // the labor gained so far prints as chat lines too ("Gained 10 Labor Point(s). (Total LP: 105)"): push the
     // current state and let the difference against the stage's own say that all of the session's changes are new
     {
@@ -680,6 +688,7 @@ pub fn handle_requests(
     for request in requests {
         match request {
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
+            Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
             Request::Chat { chat_type, message, target } => {
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));

@@ -104,7 +104,7 @@ fn ability_changed(rt: &UiRuntime, new: u8, old: u8) {
 }
 
 /// The name of an `ErrorMessageType` (`SCErrorMsg`), which is the key of its text in the `ERROR_MSG` group.
-fn error_name(code: i16) -> Option<&'static str> {
+pub(super) fn error_name(code: i16) -> Option<&'static str> {
     static NAMES: OnceLock<HashMap<i16, &'static str>> = OnceLock::new();
     NAMES
         .get_or_init(|| {

@@ -42,6 +42,7 @@ mod data;
 mod dialog;
 mod drag;
 mod formula;
+mod friends;
 mod input;
 mod items;
 mod loot;
@@ -273,6 +274,7 @@ impl Plugin for HudPlugin {
         markers::plugin(app);
         drag::plugin(app);
         party::plugin(app);
+        friends::plugin(app);
         store::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
@@ -380,6 +382,7 @@ fn prebuild_hud(world: &mut World) {
         return;
     }
     let bridge = world.non_send::<api::HudBridge>().0.clone();
+    if bridge.borrow().game.get().is_none() { return; }
     if let Some(mut building) = world.remove_non_send::<BuildingStage>() {
         building.frames += 1;
         if building.advance(&bridge, Some(std::time::Duration::from_millis(build_budget_ms()))) {
@@ -426,6 +429,8 @@ fn drop_prebuilt(world: &mut World) {
 /// loading screen), then raises the events of entering the world.
 fn build_hud(world: &mut World) {
     let bridge = world.non_send::<api::HudBridge>().0.clone();
+    // Native widgets query skill/item tables while loading; wait for the background DB read.
+    if bridge.borrow().game.get().is_none() { return; }
     {
         let mut d = bridge.borrow_mut();
         d.leaving = None;
