@@ -39,8 +39,6 @@ pub struct ItemInfo {
     pub category: String,
     /// `items.impl_id` (`ItemImplEnum`): the tooltip's `item_impl` ("portal", "weapon", ...).
     pub impl_id: i64,
-    /// Bound to the character on pickup (`bind_id` 2): the tooltip says "Untradeable".
-    pub soul_bound: bool,
     pub sellable: bool,
     pub price: i64,
     pub refund: i64,
@@ -219,8 +217,12 @@ pub struct GameData {
     pub stats: StatTables,
     /// Which NPCs start and take in which quests.
     pub quests: QuestTables,
+    /// What the tooltips fill in: the numbers of skill and buff descriptions, the stats of weapons and armor.
+    pub tips: super::tipcalc::TipTables,
     /// When a skill can be used (mana, range, target, requirements, buff restrictions): `usable.rs`.
     pub rules: super::usable::Rules,
+    /// Ability trees, passive buffs and the skill points the player may spend.
+    pub book: super::skillbook::Book,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -407,7 +409,6 @@ impl GameData {
                         group: r.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u32,
                         category: name("item_categories", any_int(r, 8)?.max(0) as u32, None),
                         impl_id: any_int(r, 14)?,
-                        soul_bound: any_int(r, 9)? == 2,
                         sellable: any_flag(r, 10)?,
                         price: any_int(r, 11)?,
                         refund: any_int(r, 12)?,
@@ -530,7 +531,9 @@ impl GameData {
         }
         data.stats = StatTables::load(&conn)?;
         data.quests = QuestTables::load(&conn)?;
+        data.tips = super::tipcalc::TipTables::load(&conn, &text)?;
         data.rules = super::usable::Rules::load(&conn)?;
+        data.book = super::skillbook::Book::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }

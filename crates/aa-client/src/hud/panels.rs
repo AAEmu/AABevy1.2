@@ -45,6 +45,11 @@ pub struct SlotSnap {
     pub level: i64,
     /// Items: `item_groups.id` (bag tabs).
     pub group: u32,
+    /// Worn items and bag items: the instance's durability (`None` for an item that does not wear out or is not
+    /// an instance), temper values and item flags (the tooltip's durability, stats and "Untradeable").
+    pub dur: Option<u8>,
+    pub temper: (u16, u16),
+    pub flags: Option<u8>,
     /// Action bar slots that cannot be used now (the icon goes dark, the hotkey red): the skill result that refuses them
     /// (`usable::code`), `None` when the slot is lit.
     pub blocked: Option<u8>,
@@ -57,6 +62,8 @@ pub struct BuffSnap {
     pub icon: String,
     pub desc: String,
     pub stacks: i32,
+    /// The ability level the buff was applied with (its description's numbers scale with it).
+    pub ab_level: i16,
     /// When it ends (HUD clock, ms); `None` for a permanent buff.
     pub ends_ms: Option<u64>,
 }
@@ -127,7 +134,22 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
         desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
         level: info.map_or(0, |i| i.level),
         group: info.map_or(0, |i| i.group),
+        dur: None,
+        temper: (0, 0),
+        flags: None,
         blocked: None,
+    }
+}
+
+impl SlotSnap {
+    /// The slot of an item instance: what its tooltip reads of it besides the template.
+    fn with_instance(mut self, it: &aa_net::model::Item) -> SlotSnap {
+        if let aa_net::model::ItemDetail::Equip(d) = &it.detail {
+            self.dur = Some(d.durability);
+            self.temper = (d.temper_physical, d.temper_magical);
+        }
+        self.flags = Some(it.flags);
+        self
     }
 }
 
@@ -164,6 +186,9 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
         desc: String::new(),
         level: 0,
         group: 0,
+        dur: None,
+        temper: (0, 0),
+        flags: None,
         blocked: None,
     }
 }
@@ -193,6 +218,7 @@ fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::BuffEntry], sta
             icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
             desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
             stacks: b.stacks.max(1),
+            ab_level: b.ability_level,
             ends_ms,
         };
         if good { lists.good.push(snap) } else { lists.bad.push(snap) }
@@ -241,13 +267,13 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     }
     if let Some(inv) = inventory {
         p.bag_slots = inv.bag_slots;
-        p.bag = inv.bag.iter().map(|it| it.as_ref().map(|it| item_slot(game, it.template_id, i64::from(it.count), it.grade))).collect();
+        p.bag = inv.bag.iter().map(|it| it.as_ref().map(|it| item_slot(game, it.template_id, i64::from(it.count), it.grade).with_instance(it))).collect();
         p.equipment = inv
             .equipment
             .slots
             .iter()
             .enumerate()
-            .map(|(i, it)| it.as_ref().filter(|_| !aa_net::model::slot::is_body_part(i)).map(|it| item_slot(game, it.template_id, 1, it.grade)))
+            .map(|(i, it)| it.as_ref().filter(|_| !aa_net::model::slot::is_body_part(i)).map(|it| item_slot(game, it.template_id, 1, it.grade).with_instance(it)))
             .collect();
     }
     if let Some(buffs) = world.get_resource::<Buffs>() {
@@ -318,6 +344,14 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("desc", s.desc.as_str())?;
     t.raw_set("level", s.level)?;
     t.raw_set("group", i64::from(s.group))?;
+    if let Some(d) = s.dur {
+        t.raw_set("dur", i64::from(d))?;
+    }
+    t.raw_set("tp", i64::from(s.temper.0))?;
+    t.raw_set("tm", i64::from(s.temper.1))?;
+    if let Some(f) = s.flags {
+        t.raw_set("fl", i64::from(f))?;
+    }
     if let Some(b) = s.blocked {
         t.raw_set("blocked", i64::from(b))?;
     }
@@ -335,6 +369,7 @@ fn buff_table(lua: &Lua, b: &BuffSnap) -> mlua::Result<Table> {
     t.raw_set("path", b.icon.as_str())?;
     t.raw_set("description", b.desc.as_str())?;
     t.raw_set("stack", i64::from(b.stacks))?;
+    t.raw_set("ab_level", i64::from(b.ab_level))?;
     if let Some(end) = b.ends_ms {
         t.raw_set("ends", end as f64)?;
     }

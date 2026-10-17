@@ -39,6 +39,8 @@ mod cast;
 mod chat;
 mod combat;
 mod data;
+mod dialog;
+mod drag;
 mod formula;
 mod input;
 mod items;
@@ -50,8 +52,11 @@ mod plates;
 mod quests;
 mod ring;
 mod session;
+mod skillbook;
 mod stats;
 mod targeting;
+mod tipcalc;
+mod tipitem;
 mod tips;
 mod usable;
 
@@ -257,8 +262,13 @@ impl Plugin for HudPlugin {
         plates::plugin(app);
         combat::plugin(app);
         loot::plugin(app);
+        dialog::plugin(app);
         ring::plugin(app);
         markers::plugin(app);
+        drag::plugin(app);
+        app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
+        app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
+        app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()
@@ -291,7 +301,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::talk_input, dialog::handle_dialog).chain(), chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
                     cameras::dev_fov,

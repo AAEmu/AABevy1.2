@@ -485,6 +485,9 @@ impl Env<'_> {
 
     /// Why the skill cannot be used now, `slack` metres of range given (0 for the slot's look, [`SEND_SLACK`] before sending).
     fn why_not(&self, skill: u32, slack: f32) -> Option<Fail> {
+        if self.game.is_some_and(|g| g.book.requires_learning(skill)) && self.skills.is_some_and(|s| !s.knows(skill)) {
+            return Some(fail(code::URK_TRAINED_SKILL));
+        }
         let r = self.rules()?.skills.get(&skill)?;
         let dead = self.dead();
         if dead && r.source_alive && !r.source_dead {
@@ -589,6 +592,21 @@ mod tests {
         assert_eq!(env(&g, &me, Some(&target(0, "hostile")), 3.0).why_not(1, 0.0), Some(fail(code::TARGET_DIED)));
         // a friendly unit is no target for a hostile skill
         assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(1, 0.0), Some(fail(code::INVALID_TARGET)));
+    }
+
+    #[test]
+    fn an_unlearned_tree_shortcut_refuses_until_it_is_learned() {
+        let mut g = game(Rules::default().with_skill(1, SkillRules::default()));
+        g.book.active = vec![vec![crate::hud::skillbook::ActiveSkill { id: 1, level: 1, points: 1 }]];
+        g.book.cost.insert(1, (1, 1));
+        let me = me();
+        let mut skills = Skills { obj_id: 5, ..Skills::default() };
+        let blocked = |skills: &Skills| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.precheck(1);
+        assert_eq!(blocked(&skills), Some(fail(code::URK_TRAINED_SKILL)));
+        skills.apply(&aa_net::Event::SkillLearned { skill_id: 1, level: 1 });
+        assert_eq!(blocked(&skills), None);
+        // General/attack skills that are not purchased from a tree remain available.
+        assert!(!g.book.requires_learning(2));
     }
 
     #[test]

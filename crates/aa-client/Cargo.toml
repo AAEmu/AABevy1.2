@@ -26,3 +26,11 @@ anyhow.workspace = true
 # Build without the character create screen (`login/create`), e.g. while it is being rewritten:
 # `cargo build -p aa-client --features no-create`.
 no-create = []
+# Bevy's per-system spans written as a Chrome trace (`TRACE_CHROME=<file.json>`; open it in https://ui.perfetto.dev):
+# `cargo build --release -p aa-client --features trace`. Rebuilds Bevy once (its artifacts are kept next to the
+# normal ones); copy the exe aside, it replaces target/release/aa-client.exe.
+trace = ["bevy/trace_chrome"]
+
+[[example]]
+name = "client"
+path = "src/main.rs"

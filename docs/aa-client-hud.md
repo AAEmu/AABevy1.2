@@ -8,7 +8,8 @@ toolkit does not: name plates over units. The scripts are unchanged. What they a
 Status: after `--enter-world` or the full login flow the screen matches `reference/ingame/spawn/real.png`
 (player frame, buffs, exp/labor bar, roadmap with the zone header and sub zone, clock, chat, both
 action bars, bag/menu buttons, the tutorial window, name plates); 0 script errors.
-`shots/hud/spawn.png` is the comparison shot.
+`shots/hud/spawn.png` is the comparison shot. `cargo run -p aa-client --example client -- ...` runs the same app
+through the `aa-dev` harness for unattended integration captures.
 
 ## Running
 
@@ -57,7 +58,7 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | roadmap: zone name, sub zone, faction, heading, clock | zone from the DB (`WorldInfo` zone group, then position), sub zones from the pak's `subzone_area.xml` polygons (the DB's rectangles are mostly 0), the clock from `aa_world::WorldClock` (the server's, or `--hour`) |
 | sub zone header and the city map | the header is the top of the sub zone's `parent_sub_zone_id` chain (the Royal Palace is in Ezna: "Ezna"). Where that sub zone has a road map of its own (cities, caves: `HUD_ROAD_FRAMES[3]`) the roadmap is that map (level 3, id = sub zone), placed from the sub zone's `x, y, w, h` and the image's frame in the 926 x 556 roadmap window (`road_frames.lua`, generated from the client's `map/road_map_list.lua`); the zone maps are placed the same way (checked on `reference/ingame/spawn`: window pixel 703.2, 147.7; and `royal_palace`: Ezna 770, 363) |
 | the big map (M) | `AAUI.WorldMap`: the player's place on the city or zone map (plain fraction of the rectangle) and on the continent and the world (`world_groups`) |
-| tooltips: bag items, action bar and use-skill, buffs, equipped items | `tips.rs`: `HUD.item_tip` / `HUD.skill_tip` fill the client's tooltip tables (`name`, `grade` / `gradeColor` from `item_grades`, `category`, `item_impl`, `soul_bound`, `skillType`, `description`, price, `tipType = "skill"` with ability, rank, mana, cast, range, cooldown) from the DB; `slot.tooltip`, `X2Bag:GetBagItemInfo`, `X2Skill:GetSkillTooltip`, `X2Unit:UnitBuff` (`tipType = "buff"`) return them |
+| tooltips: bag items, action bar and use-skill, buffs, equipped items | `tips.rs`: `HUD.item_tip` / `HUD.skill_tip` / `HUD.buff_text` fill the client's tooltip tables (`name`, `grade` / `gradeColor` from `item_grades`, `category`, `item_impl`, `soul_bound` / `soul_bind`, `skillType`, `description`, price, `tipType = "skill"` with ability, rank, mana, cast, range, radius, cooldown) from the DB; `slot.tooltip`, `X2Bag:GetBagItemInfo`, `X2Skill:GetSkillTooltip`, `X2Unit:UnitBuff` (`tipType = "buff"`) return them. The numbers in descriptions (`#{avg_damage}`, `#{buff_duration}`, `#{ua_*}` ...) are worked out in `tipcalc.rs`, the weapon and armor sections (attack, defence, speed, stat bonuses, durability, set bonuses) in `tipitem.rs` (see "Tooltip numbers" below) |
 | bag window | `aa_net::Inventory`: items, counts, icons, grade frames, tooltips, "n/50"; the tabs filter by item group (below) |
 | max HP / MP of the player and of the target | the DB's unit formulas (below); the server sends none |
 | quest marks over NPCs | `aa_net::Quests` + the DB's quest tables (below) |
@@ -96,9 +97,41 @@ the character list's `abilities`, kept current by `SCAbilitySwapped`): `Snapshot
 `prevLevelTotalExp`, `nextLevelTotalExp`) and `ability_levels`, which `ingame.lua` serves through
 `GetTargetAbilityTemplates`, `GetActiveAbility`, `NumActiveAbility`, `IndexFromAbility`, `GetAbilityLevel` and
 `GetAllAbility` (the player frame's ability icon and the skill window read the same). The log has one
-`hud: abilities [6] (exp [...])` line per change. Not done: `ABILITY_CHANGED` is not raised after a swap (its
-handlers print the old and new ability), so a window open during a swap keeps the old title until it is reopened;
-the target frame's job text for other players (`GetTargetAbilityTemplates` answers nil for them).
+`hud: abilities [6] (exp [...])` line per change. `ABILITY_CHANGED` refreshes the title and the open skill window
+after a swap; character targets supply their active abilities to the same job-name lookup.
+
+### Skill book and learning
+
+`skillbook.rs` loads all ten ability trees, passive buffs, skill-point budgets and basic/emote lists from the game
+database. `skillbook.lua` answers the original skill window's `X2Ability` queries and `ISLOT_ABILITY_VIEW` slots.
+Learned ranks, free points, ability levels and points spent in a tree determine which skills can be learned.
+The original action-slot script receives `learned`, `canLearn`, `reqPoints` and `skillLevel` for its red/teal tints
+and passive requirement badges. Action-bar shortcuts to unlearned tree skills use the learning tint and refuse
+locally; ordinary target/range/mana/state restrictions still darken usable skills through `usable.rs`.
+
+Clicking a learnable skill or passive opens the original confirmation dialog. OK sends `LearnSkill` / `LearnBuff`;
+resetting a tree and choosing an ability use `ResetSkills` / `SwapAbility`. Server replies refresh the book and
+points through the existing UI events. Reset membership is applied before the HUD snapshot, with subsequent learns
+replayed in packet order so a reset/relearn in one frame retains the new skill. Ability experience refreshes the
+open book without inventing a gained-experience chat message from a total.
+
+`cargo test -p aa-client hud::skillbook` checks the real database's ten trees and skill-point budgets, learning
+requirements, passive spending and same-frame reset/relearn ordering.
+
+Live validation (`shots/hud/sol61/learn_02.png`, `learned-tooltip.png`): reset Battlerage, recover one point,
+show Triple Slash as learnable, confirm learning, receive the server acknowledgement, restore the learned icon
+and show Charge's level/point requirements. Zero script errors; 82-99 FPS in these shared-machine debug runs.
+
+### Death and resurrection
+
+The native `GetResurrectionCountdown` returns `(inPlace, autoTempleSeconds, buttonWaitSeconds)`, rather than two
+button waits. Read-only `D:/aa-re/client12/x2game_unpacked.dll`, callback `0x39495c00`, fixes the automatic deadline
+at 300,000 ms; both times truncate to seconds. Local death starts that deadline and the packet's shorter wait;
+`SCNotifyResurrection` permits in-place revival without restarting either. The HUD tracks this while loading too.
+An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
+
+`--hud-key escape` now follows the physical Escape path: cancel a held icon, close the top window, clear a target,
+then open the system menu. The original edit-box Escape handling still runs while typing.
 
 ### Name plates
 
@@ -376,6 +409,71 @@ starts before the stage is done, `build_hud` finishes it in one go. `build_hud` 
 everything). It is dropped again on the way back to the world, character select or create screens. Without a
 prebuilt stage (`--enter-world`) `build_hud` builds it on entry.
 
+### Tooltip numbers
+
+The client fills the `#{key}` placeholders of a skill, item or buff description itself (C++), the Lua only prints the
+result. Here `tipcalc.rs` does it (`TipTables::skill_text` / `buff_text`), `tipitem.rs` computes the weapon and armor
+stats, `tips.rs` puts both into the tooltip tables the original `baselib/tooltip/tooltip.lua` reads. Both are
+ports of the server (`combat.rs`, `stats.rs`, `models/item.rs`), so the tooltip shows what the server will do.
+
+**The player's numbers** (`TipState`, `Attrs`): the six primaries (character formula + gear stats + buff
+modifiers, flat before percent), the weapon dps of each hand (weapon dps x 1000 + stat / 5 x 1000: strength for the
+main hand, dexterity for the bow, intelligence for spells, spirit for heals), `dps_inc` (formula kinds 21 / 28 / 29 /
+43), the damage multipliers `(cwb(0, attr) + 1000) / 1000`, the level dps (formula kind 12 with `ab_level` = level)
+and the ability levels. It is recomputed only when the level, the equipment, the buffs or the ability points
+change (`TipState::refresh` in the snapshot pass of `api.rs`), never per frame. Checked against
+`reference/ingame/character_info/real.png` (level 1 Battlerage in the starter gear): 19.42 melee, 16.81 ranged,
+2.00 magic, 2.00 healing, 269 physical and 377 magic defense, all reproduced (test
+`a_new_characters_numbers_match_the_capture`; the 200 over the cloth is the shield's gear buff "Equip Shield").
+
+**Skills.** Which effect a key reads: `tooltip_skill_effects` first, else the first effect of that kind that applies at
+the character's level, then the plot's effects, then the effects of a buff's `triggers` (what runs when a buff
+ends). Damage is `level_range(lvl_md, rank, start, end)` + `dps_inc` + the weapon's dps scaled by the cast time
+(`max(1000, casting ms)`), spread by the holdable's `damage_scale`, times the damage-type multiplier; heal, mana
+burn and mana restore are the same with their dps. Ranges print `min-max` (`avg_*` the middle), `buff_total_*` is
+the per-tick value times `duration / tick`. Durations print as the client's `FormatDurationTimeInDesc` does
+("0.7sec", "30m", "1h", no space, mixed ones joined by a space); the number format is `|cFFFF9C27n|r` (`ui_texts`
+4012). `buff_duration` / `duration2` / `duration3` are the first, second and third buff with a duration (a channeled
+skill falls back to its channeling time). A buff's level is `max(ability_level, player_points / level_step *
+level_step)` (without that ability: `ability_level + (rank - 1) * level_step`); `duration + level_duration * level`,
+and `ua_*` is `value + linear_level_bonus * level / 100`, converted per attribute by the Lua
+`GetCalculatedAddModifierValue` rules (percent, per mille, tenths of a second ...). Mana is
+`((ab_level - 1) * 1.6 + 8) * 3 / 3.65 * mana_level_md + mana_cost`.
+
+**Items.** `ItemTables::stats(template, grade, temper_p, temper_m)`: the stat bonuses (`mod_set` weights,
+grade `stat_multiplier`, `item_configs`), the weapon dps / magic dps / heal dps / armor from the holdable formulas with
+the item level and grade (the temper factor over 100 on top), one hit's min / max damage (`dps` x attack delay,
+spread by `damage_scale`), armor and magic resistance of clothes (wearable formula x kind ratio x coverage), the
+maximum durability, repairable, the set (`equip_item_set_bonuses`, bonus text = the bonus buff's description filled
+with the item's level), the slot type name. The tooltip table gets: `slotType`, `DPS`, `minDamage`, `maxDamage`,
+`attackDelay`, `magicDps`, `healDps`, `extraDamage1..3`, `armor`, `magicResistance`, `durability` /
+`maxDurability` / `repairable` (the real wear when the slot carries it: `dur`, `tp`, `tm`, `fl` are extra fields of
+the slot table, from `Inventory`), `modifier` (the stat bonuses), `equipSetInfo` (`equipSetItemInfoDesc`,
+`equippedSetItemCount`, `maxSetItemCount`, `setItems`, `bonuses` with `numPieces` / `satisfied` / `bufDesc`),
+`itemUsage`, and `soul_bound` (the instance flag) or `soul_bind` (`soulbound_pickup` / `_pickup_pack` / `_equip` /
+`_unpack`, from `items.bind_id`, for an item not yet owned). Compare tooltips: the original Lua asks
+`X2Equipment:GetEquippedItemTooltipInfo` for the worn item(s) of the slot and shows them beside the hovered one; that call
+returns the same kind of table (`equippedInfo` in `ingame.lua`, with the wear of the worn item).
+
+**Tests** (`cargo test -p aa-client hud::tip`, they read the real DB and skip when it is missing): every visible
+skill of the ability trees and of `default_skills` has no placeholder left (`the_starter_skills_have_every_number`); the new character's attack and defence numbers match the capture; Flamebolt prints a damage range and its
+burning time; the starter gear has the stats the DB gives and a better grade or temper raises them.
+`cargo test -p aa-client tips_coverage -- --ignored --nocapture` lists what is left over all 840 skills and 3461 buffs
+with placeholders.
+
+**Assumptions and what is missing.**
+
+* The real client shows the damage breakdown (`$1 + $2% Melee Attack`) only with the option "Show Damage Breakdowns
+  in Skill Tooltips" (default off); it is not offered here, so the `details` stay empty as in the default client.
+* A skill's effect level filter uses the character level; a debuff's numbers on another unit use the player's
+  attributes, not the caster's.
+* `*_critical_bonus` uses the 0.2 scaling; `ea_*` are the tooltip-listed effects. `return_point` prints empty.
+* Not filled: placeholders of mob / vehicle / event skills (the ability-0 skills of the DB that no player has; about 40
+  show `?`), the doodad-driven `ea_*` of Missile Rain / Rain of Fire, buffs without a duration (Stun's `#{duration}`),
+  empty-data buffs' `ua_*` (`10363+`), the `din_damage` typo of the DB.
+* Weapons: gems, tempers and enchants add `extraDPS` / `extraArmor` in the original; only the temper factor is applied.
+  No repair cost, `dyeingType`, `gender`, `scalable` / `convertible` lines.
+
 ## How it works
 
 * `Screen::InGame` + the player spawned -> `build_hud` puts the stage built during Loading in place of the
@@ -405,9 +503,6 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 ## Not done
 
-* The skill window shows no skills: its slots are bound with `ISLOT_ABILITY_VIEW` (243), which nothing answers (the skill tree of an
-  ability, `X2Ability:GetAbilitySlotCount`, learned / learnable state). So the skill window's red "not learned" tint (`learned`,
-  `canLearn`, `reqPoints`, `skillLevel` of the slot content) is not fed yet.
 * The target frame's job icon for another character reads `Unit::active_abilities` (`GetTargetAbilityTemplates("target")`): the data path
   is unit tested in aa-net, but no other character was in view on the lane server to see it.
 * Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
@@ -416,11 +511,10 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
   (`X2Map:AddNotifyQuestInfo`), icons for other zones than the one the player is in, the real client's `npc_station`,
   `npc_graveyard`, public farm and live housing icons (no data source), ship markers.
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
-* Bag tabs the player creates are not saved; dragging bag items is not routed (aa-ui does not route a left click).
-* Tooltips: the `#{...}` placeholders of skill, item and buff descriptions are filled in only for
-  `damage_multiplier` (the damage effect's DPS multiplier: Shoot Arrow's 120%); damage ranges and buff
-  durations (`#{avg_damage}`, `#{buff_duration}`, `#{duration}` ...) show `?`. Weapons and armour have no stat
-  sections (attack, defence, durability repair, set bonuses): they show the name, category, durability and price.
+* Bag tabs the player creates are not saved. Bag/equipment/action-bar drag requests are now routed through `drag.lua` / `drag.rs`;
+  their live visual coverage is still being completed.
+* Tooltips: what is still open is listed under "Tooltip numbers" (the damage breakdown option, `ea_*` / `return_point`,
+  the buff caster's own stats for debuffs on others, gems / tempers / enchants, repair cost).
 * `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
 * Quest marks ignore requirements the client cannot check (they hold), so an NPC may show a "!" for a quest
   the server then refuses.
@@ -429,5 +523,5 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 * ingame: skip key bindings while `HudKeyboardFocus.0` and camera orbit / click-to-move while
   `HudPointerOverUi.0` (done in round 2).
-* aa-ui: left click routing of bag items (picking up). The roadmap markers in `AAUI.RoadMap` still take the image
+* aa-ui: the roadmap markers in `AAUI.RoadMap` still take the image
   fraction (`markers.lua` knows the image frames); a window fraction would save that.

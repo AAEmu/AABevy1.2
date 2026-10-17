@@ -110,7 +110,8 @@ local function buffAt(unit, index, good)
   if b == nil then return nil end
   -- the tooltip info (tipType "buff" / "debuff", the category line "Buff" above the name)
   local info = {
-    buff_id = b.buff_id, name = b.name, path = b.path, description = b.description, stack = b.stack,
+    buff_id = b.buff_id, name = b.name, path = b.path, stack = b.stack,
+    description = HUD.buff_text(b.buff_id, b.ab_level) or b.description,
     tipType = good and "buff" or "debuff", category = good and "Buff" or "Debuff",
   }
   if b.ends ~= nil then
@@ -160,12 +161,11 @@ X2Unit.GetTargetAbilityTemplates = function(self, unit)
   for i, id in ipairs(t.abilities) do list[i] = { name = ABILITY_KEYS[id] } end
   return list
 end
--- The death window (x2ui/messageboximpl/death_and_resurrection_window): the seconds until the player may stand up again
--- (the server's wait counted down on the HUD clock; the second and third values are the two ways, in place and at the
--- shrine, which wait the same) and the two buttons (`Resurrect(true)` in place, `Resurrect(false)` at the shrine).
+-- Native GetResurrectionCountdown: server permission for in-place revival, five-minute automatic temple deadline,
+-- and the separate short wait until the buttons enable. An offer does not restart the death timer.
 X2Player.GetResurrectionCountdown = function(self)
   local left = HUD.death_wait()
-  return 0, left, left
+  return HUD.can_resurrect_here(), HUD.death_timeout(), left
 end
 X2Player.Resurrect = function(self, inPlace) HUD.request("resurrect", inPlace and 1 or 0) end
 -- Exp a resurrection at a shrine wins back: the amount and its percent of the level.
@@ -320,10 +320,11 @@ local function slotContent(s)
   if s.kind == "item" then
     if s.stack then c.stack = s.count end
     c.canUse = s.count > 0 and s.blocked == nil
-    c.tooltip = HUD.item_tip(s.id, s.grade, s.count)
+    c.tooltip = HUD.item_tip(s.id, s.grade, s.count, s)
   elseif s.kind == "skill" then
     -- dark and a red hotkey while the skill cannot be used now: no mana, too far, no target, dead ... (usable.rs)
     c.canUse = s.blocked == nil
+    c.learned = HUD.book_learned(s.id)
     c.tooltip = HUD.skill_tip(s.id)
   end
   if s.cd_end ~= nil then
@@ -377,7 +378,7 @@ local function gradeFrame(grade)
   return string.format("ui/icon/item_grade_%d%s.dds", grade, name)
 end
 local function realInfo(s)
-  local tip = HUD.item_tip(s.id, s.grade, s.count)
+  local tip = HUD.item_tip(s.id, s.grade, s.count, s)
   if tip ~= nil then return tip end
   return {
     itemType = s.id, lookType = s.id, itemGrade = s.grade, name = s.name, description = s.desc, stack = s.count,
@@ -476,8 +477,6 @@ local function equippedInfo(slot)
   local s = HUD.equipment[slot]
   if s == nil then return { itemType = 0, lookType = 0, itemGrade = 0 } end
   local info = realInfo(s)
-  info.durability = 100
-  info.maxDurability = 100
   info.equip = true
   return info
 end

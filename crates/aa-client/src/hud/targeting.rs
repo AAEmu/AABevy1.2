@@ -116,9 +116,15 @@ pub fn escape_key(
     rt: Option<NonSend<UiRuntime>>,
     target: Res<Target>,
     mut net: MessageWriter<NetCommand>,
+    mut script: ResMut<super::chat::ScriptedKeys>,
 ) {
     let Some(rt) = rt else { return };
-    if focus.0 || rt.focus().is_some() || !keys.just_pressed(KeyCode::Escape) {
+    let escape = script.take_escape() || keys.just_pressed(KeyCode::Escape);
+    if focus.0 || rt.focus().is_some() || !escape {
+        return;
+    }
+    if rt.holding() {
+        rt.clear_cursor();
         return;
     }
     let window_open = {
