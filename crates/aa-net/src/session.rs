@@ -250,6 +250,8 @@ pub enum Command {
     /// Talk to an NPC, accept / hand in / drop a quest, report a talk objective
     /// ([`crate::interaction::Interact`]); the answers are quest events and `Interaction`.
     Interact(crate::interaction::Interact),
+    Shop(crate::shop::ShopCommand),
+    Bank(crate::bank::BankCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
@@ -470,6 +472,7 @@ pub enum Event {
     QuestReset { quest_id: u32, block: CompletedBlock },
     /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
     Interaction(crate::interaction::InteractEvent),
+    Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
@@ -877,6 +880,20 @@ impl Session {
             Command::Interact(m) => {
                 self.send_game(game::ClientMsg::Interact(m)).await;
             }
+            Command::Shop(m) => {
+                if let Err(message) = m.validate() {
+                    self.emit(Event::Shop(crate::shop::ShopEvent::RequestRejected(message.into())));
+                } else {
+                    self.send_game(game::ClientMsg::Shop(m)).await;
+                }
+            }
+            Command::Bank(m) => {
+                if let Err(message) = m.validate() {
+                    self.emit(Event::Shop(crate::shop::ShopEvent::RequestRejected(message.into())));
+                } else {
+                    self.send_game(game::ClientMsg::Bank(m)).await;
+                }
+            }
             Command::Party(m) => {
                 let replied = match &m {
                     crate::party::PartyCommand::Reply { invite, .. } => Some(invite.sender_id),
@@ -1240,6 +1257,7 @@ impl Session {
             M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
             M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
             M::Interaction(e) => self.emit(Event::Interaction(e)),
+            M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),

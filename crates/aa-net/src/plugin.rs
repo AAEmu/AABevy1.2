@@ -18,8 +18,8 @@ use bevy::ecs::system::SystemParam;
 
 use crate::session::{Client, Command, Event};
 use crate::state::{
-    ActionBar, Buffs, Characters, Chat, Doodads, Inventory, Loot, Party, Player, PlayerStats, Quests, Skills, Status,
-    Target, Units, WorldInfo, Worlds,
+    ActionBar, Buffs, Characters, Chat, Doodads, Inventory, Loot, Party, Player, PlayerStats, Quests, Shop, Skills,
+    Status, Target, Units, WorldInfo, Worlds,
 };
 
 /// Ask the session to do something.
@@ -141,4 +141,5 @@ net_state! {
     quests: Quests,
     loot: Loot,
     party: Party,
+    shop: Shop,
 }
