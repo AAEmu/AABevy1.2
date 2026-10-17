@@ -18,7 +18,7 @@ use bevy::ecs::system::SystemParam;
 
 use crate::session::{Client, Command, Event};
 use crate::state::{
-    ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
+    Auction, ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
     Skills, Status, Target, Trade, Units, WorldInfo, Worlds,
 };
 
@@ -149,4 +149,5 @@ net_state! {
     repair: Repair,
     mailbox: Mailbox,
     trade: Trade,
+    auction: Auction,
 }
