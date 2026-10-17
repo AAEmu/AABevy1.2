@@ -68,14 +68,55 @@ pub fn slot_steps_1_2(race: Race, gender: Gender) -> StageSlot {
     StageSlot::facing(feet, cam.pos, race, gender)
 }
 
-/// Step 3's feet pixel and head row, measured on the step 3 captures (provisional values for the
-/// models not measured yet), and the turn towards the training dummies.
-fn feet_pixels_3(race: Race, gender: Gender) -> (Vec2, f32, f32, f32) {
-    // the combat stance of step 3 is lower than the step 1 stand: the rendered height is smaller
-    let (_, _, height) = feet_pixels(race, gender);
-    let height = height * 0.906;
+/// How far (scale about the screen centre, then pixels right / down) the step 1 position has to be
+/// corrected so the step 2 close-up matches the captures: the real client frames the head
+/// differently for every model. Measured by registering our render onto the capture
+/// (`data/extract/create/align3.py`).
+fn step2_correction(race: Race, gender: Gender) -> (f32, f32, f32) {
     match (race, gender) {
-        (_, _) => (Vec2::new(440.0, 910.0), 362.0, height, 52.0),
+        (Race::Nuian, Gender::Male) => (1.0, -20.0, -40.0),
+        (Race::Nuian, _) => (1.0, -28.0, -20.0),
+        (Race::Elf, Gender::Male) => (1.0, -24.0, -16.0),
+        (Race::Elf, _) => (1.0, -16.0, 8.0),
+        (Race::Hariharan, Gender::Male) => (1.188, 0.0, 28.0),
+        (Race::Hariharan, _) => (1.125, 0.0, 4.0),
+        (Race::Ferre, Gender::Male) => (1.0, 4.0, -20.0),
+        (Race::Ferre, _) => (1.0, 0.0, 0.0),
+    }
+}
+
+/// Where the figure stands on step 2 (the close-up): the step 1 spot moved so the head sits where
+/// the capture has it.
+pub fn slot_step_2(race: Race, gender: Gender) -> StageSlot {
+    let mut slot = slot_steps_1_2(race, gender);
+    let (scale, dx, dy) = step2_correction(race, gender);
+    let cam = pose(2, race, gender);
+    let (forward, right, up) = cam.axes();
+    let (_, _, height) = feet_pixels(race, gender);
+    let head = slot.feet + Vec3::Z * height * 0.92;
+    let depth = (head - cam.pos).dot(forward);
+    let focal = 540.0 / (cam.fov_deg.to_radians() / 2.0).tan();
+    let new_depth = depth / scale;
+    let t = -forward * (depth - new_depth) + right * (dx * new_depth / focal) - up * (dy * new_depth / focal);
+    slot.feet += t;
+    slot
+}
+
+/// Step 3: the pixel of the figure's origin, the row of the head top, the height of the stance in
+/// metres and the turn towards the training dummies. Measured by registering the silhouette of our
+/// render onto the captures (`data/extract/create/bbox.py`); the combat stance is lower than the
+/// step 1 stand and differs per model.
+fn feet_pixels_3(race: Race, gender: Gender) -> (Vec2, f32, f32, f32) {
+    let yaw = 70.0;
+    match (race, gender) {
+        (Race::Nuian, Gender::Male) => (Vec2::new(407.0, 906.0), 376.0, 1.880, yaw),
+        (Race::Nuian, _) => (Vec2::new(464.0, 891.0), 385.0, 1.793, yaw),
+        (Race::Elf, Gender::Male) => (Vec2::new(452.0, 851.0), 385.0, 1.884, yaw),
+        (Race::Elf, _) => (Vec2::new(450.0, 843.0), 417.0, 1.793, yaw),
+        (Race::Hariharan, Gender::Male) => (Vec2::new(488.0, 915.0), 527.0, 1.305, yaw),
+        (Race::Hariharan, _) => (Vec2::new(435.0, 935.0), 555.0, 1.230, yaw),
+        (Race::Ferre, Gender::Male) => (Vec2::new(392.0, 871.0), 471.0, 1.583, yaw),
+        (Race::Ferre, _) => (Vec2::new(426.0, 858.0), 514.0, 1.483, yaw),
     }
 }
 
