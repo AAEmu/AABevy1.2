@@ -103,10 +103,10 @@ fn mist(race: Race) -> Mist {
         }
     }
     match race {
-        Race::Nuian => m(1.0, 1.0, 3.0, 3.15, 1.9),
-        Race::Elf => m(3.0, 1.0, 6.0, 6.0, 3.4),
-        Race::Hariharan => m(3.0, 3.0, 4.0, 3.6, 2.35),
-        Race::Ferre => m(1.3, 1.0, 7.6, 6.6, 4.1),
+        Race::Nuian => m(1.0, 1.0, 2.6, 2.7, 1.55),
+        Race::Elf => m(1.0, 0.5, 5.5, 5.4, 2.7),
+        Race::Hariharan => m(3.0, 3.0, 3.35, 3.0, 1.95),
+        Race::Ferre => m(1.0, 0.6, 7.9, 6.8, 4.6),
     }
 }
 /// Main thread time spent on spawning per frame (ms).
