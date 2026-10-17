@@ -138,7 +138,12 @@ fn window_of(lua: &Lua, edit: Id) -> Option<Id> {
 }
 
 fn edit_text(lua: &Lua, edit: Id) -> String {
-    ui(lua).tree.get(edit).text().map(|t| t.text.clone()).unwrap_or_default()
+    ui(lua)
+        .tree
+        .get(edit)
+        .text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default()
 }
 
 /// Show the input's channel: the selector's text, the edit's whisper prefix, and the selector's
@@ -148,7 +153,11 @@ pub(crate) fn show_method(lua: &Lua, window: Id) {
         return;
     };
     let name = channel_name(lua, c.method);
-    let prefix = if c.method == CHAT_WHISPER { c.whisper.clone() } else { String::new() };
+    let prefix = if c.method == CHAT_WHISPER {
+        c.whisper.clone()
+    } else {
+        String::new()
+    };
     {
         let mut u = ui(lua);
         if let Some(t) = u.tree.get_mut(c.selector).text_mut() {
@@ -157,18 +166,32 @@ pub(crate) fn show_method(lua: &Lua, window: Id) {
         if let Some(e) = u.tree.widget_mut(c.edit).and_then(|w| w.edit.as_mut()) {
             e.prefix = prefix;
         } else if let Some(w) = u.tree.widget_mut(c.edit) {
-            w.edit = Some(super::edit::EditData { prefix, ..Default::default() });
+            w.edit = Some(super::edit::EditData {
+                prefix,
+                ..Default::default()
+            });
         }
         u.tree.touch();
     }
-    let kind = lua.create_string("chat_method_changed").map(Value::String).unwrap_or(Value::Nil);
+    let kind = lua
+        .create_string("chat_method_changed")
+        .map(Value::String)
+        .unwrap_or(Value::Nil);
     call_handler(lua, c.selector, "OnContentUpdated", vec![kind]);
 }
 
 fn set_method(lua: &Lua, window: Id, ch: i64, target: &str) {
-    if let Some(c) = ui(lua).tree.widget_mut(window).and_then(|w| w.chat.as_mut()) {
+    if let Some(c) = ui(lua)
+        .tree
+        .widget_mut(window)
+        .and_then(|w| w.chat.as_mut())
+    {
         c.method = ch;
-        c.whisper = if ch == CHAT_WHISPER { target.to_string() } else { String::new() };
+        c.whisper = if ch == CHAT_WHISPER {
+            target.to_string()
+        } else {
+            String::new()
+        };
     }
     show_method(lua, window);
 }
@@ -179,7 +202,7 @@ fn parse(lua: &Lua, text: &str) -> Option<(i64, String, String)> {
     let rest = text.strip_prefix('/')?;
     let sp = rest.find(char::is_whitespace)?;
     let cmd = rest[..sp].to_lowercase();
-    let after = rest[sp..].trim_start_matches(|c: char| c == ' ');
+    let after = rest[sp..].trim_start_matches(' ');
     let ch = command_channel(lua, &cmd)?;
     if ch == CHAT_WHISPER {
         let sp2 = after.find(char::is_whitespace)?;
@@ -187,7 +210,7 @@ fn parse(lua: &Lua, text: &str) -> Option<(i64, String, String)> {
         if name.is_empty() {
             return None;
         }
-        let msg = after[sp2..].trim_start_matches(|c: char| c == ' ');
+        let msg = after[sp2..].trim_start_matches(' ');
         return Some((ch, name.to_string(), msg.to_string()));
     }
     Some((ch, String::new(), after.to_string()))
@@ -195,9 +218,13 @@ fn parse(lua: &Lua, text: &str) -> Option<(i64, String, String)> {
 
 /// The text of `edit` changed by typing: take a leading command out of it.
 pub(crate) fn text_changed(lua: &Lua, edit: Id) {
-    let Some(win) = window_of(lua, edit) else { return };
+    let Some(win) = window_of(lua, edit) else {
+        return;
+    };
     let text = edit_text(lua, edit);
-    let Some((ch, target, rest)) = parse(lua, &text) else { return };
+    let Some((ch, target, rest)) = parse(lua, &text) else {
+        return;
+    };
     super::edit::set_text(lua, edit, rest);
     set_method(lua, win, ch, &target);
 }
@@ -205,7 +232,9 @@ pub(crate) fn text_changed(lua: &Lua, edit: Id) {
 /// Enter in `edit`. True when it is a chat input without a script `OnEnterPressed`: the line
 /// went to `AAUI.ChatSend` (see the module docs).
 pub(crate) fn enter(lua: &Lua, edit: Id) -> bool {
-    let Some(win) = window_of(lua, edit) else { return false };
+    let Some(win) = window_of(lua, edit) else {
+        return false;
+    };
     if has_handler(lua, edit, "OnEnterPressed") {
         return false;
     }
@@ -229,10 +258,10 @@ pub(crate) fn enter(lua: &Lua, edit: Id) -> bool {
             .ok()
             .flatten()
             .and_then(|t| t.raw_get::<Option<Function>>("ChatSend").ok().flatten());
-        if let Some(f) = hook {
-            if let Err(e) = f.call::<()>((method, text, target)) {
-                bevy::log::warn!("aa-ui: AAUI.ChatSend: {e}");
-            }
+        if let Some(f) = hook
+            && let Err(e) = f.call::<()>((method, text, target))
+        {
+            bevy::log::warn!("aa-ui: AAUI.ChatSend: {e}");
         }
     }
     if super::edit::set_text(lua, edit, String::new()) {

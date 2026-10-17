@@ -5,7 +5,7 @@
 
 use mlua::{Lua, Table, Value};
 
-use super::{method, none, new_object_table, ret, ui};
+use super::{method, new_object_table, none, ret, ui};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -148,7 +148,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetValue",
         method(lua, |lua, id, a| {
             let v = a.f(1);
-            with(lua, id, |s| s.value = v.clamp(s.min.min(s.max), s.max.max(s.min)));
+            with(lua, id, |s| {
+                s.value = v.clamp(s.min.min(s.max), s.max.max(s.min))
+            });
             sync(lua, id);
             none()
         })?,
@@ -174,11 +176,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "GetBarTexture",
-        method(lua, |lua, id, _| {
-            match with(lua, id, |s| s.bar).flatten() {
-                Some(b) => ret(lua, new_object_table(lua, b)?),
-                None => none(),
-            }
+        method(lua, |lua, id, _| match with(lua, id, |s| s.bar).flatten() {
+            Some(b) => ret(lua, new_object_table(lua, b)?),
+            None => none(),
         })?,
     )?;
     Ok(())

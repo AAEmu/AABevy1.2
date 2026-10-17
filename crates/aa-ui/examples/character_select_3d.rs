@@ -19,7 +19,10 @@ use bevy::prelude::*;
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 fn character_select(ui: &mut aa_ui::UiRuntime) {
@@ -54,13 +57,18 @@ fn main() {
         .add_systems(Update, spin);
     // `--no-ui`: the 3D layer alone.
     if !std::env::args().any(|a| a == "--no-ui") {
-        app.add_plugins(aa_ui::UiPlugin { config: Some(config) })
-            .insert_resource(match switch_at {
-                Some(_) => aa_ui::UiSetup::new(world_select),
-                None => aa_ui::UiSetup::new(character_select),
-            })
-            .insert_resource(SwitchAt(switch_at))
-            .add_systems(Update, (switch_stage, fake::dump_tree, fake::scripted_input));
+        app.add_plugins(aa_ui::UiPlugin {
+            config: Some(config),
+        })
+        .insert_resource(match switch_at {
+            Some(_) => aa_ui::UiSetup::new(world_select),
+            None => aa_ui::UiSetup::new(character_select),
+        })
+        .insert_resource(SwitchAt(switch_at))
+        .add_systems(
+            Update,
+            (switch_stage, fake::dump_tree, fake::scripted_input),
+        );
     }
     app.run();
 }

@@ -56,10 +56,10 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             if !w.clickable {
                 continue;
             }
-            if let Some(m) = modal {
-                if !u.tree.is_descendant(id, m) {
-                    continue;
-                }
+            if let Some(m) = modal
+                && !u.tree.is_descendant(id, m)
+            {
+                continue;
             }
             let r = u.tree.rect(id);
             if !r.contains(x, y) {
@@ -94,15 +94,15 @@ fn list_row(lua: &Lua, mut id: Id) -> Option<(Id, usize)> {
     let u = ui(lua);
     loop {
         let parent = u.tree.get(id).parent?;
-        if let Some(l) = u.tree.widget(parent).and_then(|w| w.list.as_ref()) {
-            if let Some(i) = l.rows.iter().position(|&r| r == id) {
-                return l
-                    .has_data
-                    .get(i)
-                    .copied()
-                    .unwrap_or(false)
-                    .then_some((parent, i));
-            }
+        if let Some(l) = u.tree.widget(parent).and_then(|w| w.list.as_ref())
+            && let Some(i) = l.rows.iter().position(|&r| r == id)
+        {
+            return l
+                .has_data
+                .get(i)
+                .copied()
+                .unwrap_or(false)
+                .then_some((parent, i));
         }
         id = parent;
     }
@@ -157,10 +157,10 @@ pub fn update(
         if let (Some(s), Some(c)) = (mouse.slider, cursor) {
             drag_slider(lua, s, c);
         }
-    } else if let (Some(s), Some(c)) = (mouse.slider, cursor) {
-        if mouse.last_cursor != Some(c) {
-            drag_slider(lua, s, c);
-        }
+    } else if let (Some(s), Some(c)) = (mouse.slider, cursor)
+        && mouse.last_cursor != Some(c)
+    {
+        drag_slider(lua, s, c);
     }
     if cursor.is_some() {
         mouse.last_cursor = cursor;
@@ -173,16 +173,14 @@ pub fn update(
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
         }
-        if let (Some(p), Some(h)) = (pressed, hover) {
-            if ui(lua).tree.is_descendant(h, p) || h == p {
-                click(lua, mouse, h, "LeftButton");
-            }
+        if let (Some(p), Some(h)) = (pressed, hover)
+            && (ui(lua).tree.is_descendant(h, p) || h == p)
+        {
+            click(lua, mouse, h, "LeftButton");
         }
     }
-    if right_up {
-        if let Some(h) = hover {
-            click(lua, mouse, h, "RightButton");
-        }
+    if right_up && let Some(h) = hover {
+        click(lua, mouse, h, "RightButton");
     }
     if wheel != 0.0 {
         let name = if wheel > 0.0 {
@@ -322,13 +320,13 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         return;
     }
     // Native list selection.
-    if button == "LeftButton" {
-        if let Some((list, row)) = list_row(lua, target) {
-            let enabled = ui(lua).tree.widget(list).is_some_and(|w| w.enabled);
-            if enabled {
-                lua::widget_set_selected(lua, list, row as i32, true, double);
-                lua::flush(lua);
-            }
+    if button == "LeftButton"
+        && let Some((list, row)) = list_row(lua, target)
+    {
+        let enabled = ui(lua).tree.widget(list).is_some_and(|w| w.enabled);
+        if enabled {
+            lua::widget_set_selected(lua, list, row as i32, true, double);
+            lua::flush(lua);
         }
     }
 }

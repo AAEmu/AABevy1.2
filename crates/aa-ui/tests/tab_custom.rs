@@ -47,8 +47,14 @@ fn add_new_tab_lays_out_the_scripts_buttons() {
     // The shared window sits below the button row (the script anchors its dividers to it at y = -24).
     assert_eq!(eval::<f64>(&ui, "select(2, win:GetOffset())"), 80.0);
     // The first tab is selected: its selected button shows, the others show unselected buttons.
-    assert!(eval::<bool>(&ui, "sel[1]:IsVisible() and not unsel[1]:IsVisible()"));
-    assert!(eval::<bool>(&ui, "unsel[2]:IsVisible() and not sel[2]:IsVisible()"));
+    assert!(eval::<bool>(
+        &ui,
+        "sel[1]:IsVisible() and not unsel[1]:IsVisible()"
+    ));
+    assert!(eval::<bool>(
+        &ui,
+        "unsel[2]:IsVisible() and not sel[2]:IsVisible()"
+    ));
     // Each tab shows its window when selected and hides it otherwise, in tab order: the window
     // all three share ends up hidden (the bag's `tabWindow` in reference/ingame/bag).
     assert!(eval::<bool>(&ui, "not win:IsVisible()"));
@@ -64,7 +70,10 @@ fn add_new_tab_selection_and_removal() {
     ui.exec("@select", "tab:SelectTab(3)").unwrap();
     assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 3);
     assert_eq!(eval::<i64>(&ui, "changed[#changed]"), 3);
-    assert!(eval::<bool>(&ui, "sel[3]:IsVisible() and unsel[1]:IsVisible() and not sel[1]:IsVisible()"));
+    assert!(eval::<bool>(
+        &ui,
+        "sel[3]:IsVisible() and unsel[1]:IsVisible() and not sel[1]:IsVisible()"
+    ));
     // With the last tab selected, the shared window shows.
     assert!(eval::<bool>(&ui, "win:IsVisible()"));
     ui.exec("@select2", "tab:SelectTab(2)").unwrap();
@@ -72,7 +81,8 @@ fn add_new_tab_selection_and_removal() {
     // RemoveAllTabs forgets the tabs but leaves the script's widgets alive (it reuses them).
     ui.exec("@clear", "tab:RemoveAllTabs()").unwrap();
     assert_eq!(eval::<i64>(&ui, "tab:GetActivateTabCount()"), 0);
-    ui.exec("@again", "tab:AddNewTab('again', sel[1], unsel[1], win)").unwrap();
+    ui.exec("@again", "tab:AddNewTab('again', sel[1], unsel[1], win)")
+        .unwrap();
     assert_eq!(eval::<i64>(&ui, "tab:GetActivateTabCount()"), 1);
     assert_eq!(eval::<f64>(&ui, "sel[1]:GetOffset()"), 100.0);
     assert_eq!(eval::<String>(&ui, "sel[1]:GetText()"), "again");

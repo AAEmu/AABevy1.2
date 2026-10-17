@@ -1,7 +1,6 @@
 //! Fake game API for the examples: permissive `X2*` objects, native constants, UI texts from the
 //! game database, and a small scenario (3 servers). The real app registers real objects.
 
-
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -355,7 +354,8 @@ pub fn scripted_input(
             // `--wheel X Y DELTA T`: the pointer goes to X, Y and the wheel turns DELTA notches
             // (> 0 up: scrolls chat back, < 0 down).
             "--wheel" => {
-                let (Some(x), Some(y), Some(delta), Some(at)) = (num(1), num(2), num(3), num(4)) else {
+                let (Some(x), Some(y), Some(delta), Some(at)) = (num(1), num(2), num(3), num(4))
+                else {
                     continue;
                 };
                 if t < at {
@@ -489,16 +489,16 @@ pub fn hotkeys(
         (KeyCode::KeyL, "toggle_quest"),
         (KeyCode::KeyM, "toggle_worldmap"),
     ] {
-        if keys.just_pressed(key) {
-            if let Err(e) = rt.hotkey(action) {
-                warn!("fake: {action}: {e}");
-            }
+        if keys.just_pressed(key)
+            && let Err(e) = rt.hotkey(action)
+        {
+            warn!("fake: {action}: {e}");
         }
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        if let Err(e) = rt.escape() {
-            warn!("fake: escape: {e}");
-        }
+    if keys.just_pressed(KeyCode::Escape)
+        && let Err(e) = rt.escape()
+    {
+        warn!("fake: escape: {e}");
     }
 }
 
@@ -506,7 +506,10 @@ pub fn hotkeys(
 /// closed (`FAKE.enter_world`, defined by `fake_ingame.lua`).
 #[allow(dead_code)]
 pub fn enter_world(rt: &mut UiRuntime) {
-    if let Err(e) = rt.exec("@enter_world", "if FAKE.enter_world then FAKE.enter_world() end") {
+    if let Err(e) = rt.exec(
+        "@enter_world",
+        "if FAKE.enter_world then FAKE.enter_world() end",
+    ) {
         eprintln!("fake: enter_world: {e}");
     }
 }
@@ -514,13 +517,13 @@ pub fn enter_world(rt: &mut UiRuntime) {
 /// Log script errors and the stubbed natives the screen called; `--coverage` also prints the
 /// per-class native coverage as a markdown table.
 pub fn report(ui: &UiRuntime, screen: &str) {
-    if std::env::args().any(|a| a == "--coverage") {
-        if let Ok(cov) = aa_ui::lua::coverage(&ui.lua) {
-            println!("| class | native | stub | listed |");
-            println!("|---|---|---|---|");
-            for (class, n, s) in cov {
-                println!("| `{class}` | {n} | {s} | {} |", n + s);
-            }
+    if std::env::args().any(|a| a == "--coverage")
+        && let Ok(cov) = aa_ui::lua::coverage(&ui.lua)
+    {
+        println!("| class | native | stub | listed |");
+        println!("|---|---|---|---|");
+        for (class, n, s) in cov {
+            println!("| `{class}` | {n} | {s} | {} |", n + s);
         }
     }
     let stubs = ui.stub_calls();

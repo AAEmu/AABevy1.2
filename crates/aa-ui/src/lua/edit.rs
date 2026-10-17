@@ -124,12 +124,12 @@ pub(crate) fn clicked(lua: &Lua, target: Id) {
         let mut t = Some(target);
         let mut found = None;
         while let Some(id) = t {
-            if let Some(w) = u.tree.widget(id) {
-                if is_edit(&w.ty) {
-                    let takes = w.enabled && !w.edit.as_ref().is_some_and(|e| e.no_focus);
-                    found = takes.then_some(id);
-                    break;
-                }
+            if let Some(w) = u.tree.widget(id)
+                && is_edit(&w.ty)
+            {
+                let takes = w.enabled && !w.edit.as_ref().is_some_and(|e| e.no_focus);
+                found = takes.then_some(id);
+                break;
             }
             t = u.tree.get(id).parent;
         }
@@ -170,7 +170,9 @@ fn byte_at(s: &str, chars: usize) -> usize {
 
 /// Deliver a key press to the focused widget. Returns whether a widget had the focus.
 pub fn key(lua: &Lua, k: &UiKey) -> bool {
-    let Some(id) = ui(lua).focus else { return false };
+    let Some(id) = ui(lua).focus else {
+        return false;
+    };
     let name = Value::String(lua.create_string(k.name()).unwrap());
     call_handler(lua, id, "OnKeyDown", vec![name.clone()]);
     let multiline = ui(lua)
@@ -221,8 +223,12 @@ pub fn key(lua: &Lua, k: &UiKey) -> bool {
 pub(crate) fn set_text(lua: &Lua, id: Id, s: String) -> bool {
     let mut u = ui(lua);
     let n = s.chars().count();
-    let Some(w) = u.tree.widget_mut(id) else { return false };
-    let Some(t) = w.text.as_mut() else { return false };
+    let Some(w) = u.tree.widget_mut(id) else {
+        return false;
+    };
+    let Some(t) = w.text.as_mut() else {
+        return false;
+    };
     let changed = t.text != s;
     t.text = s;
     if let Some(e) = w.edit.as_mut() {
@@ -236,7 +242,9 @@ pub(crate) fn set_text(lua: &Lua, id: Id, s: String) -> bool {
 fn insert(lua: &Lua, id: Id, s: &str) -> bool {
     let (text, e) = {
         let u = ui(lua);
-        let Some(w) = u.tree.widget(id) else { return false };
+        let Some(w) = u.tree.widget(id) else {
+            return false;
+        };
         let text = w.text.as_ref().map(|t| t.text.clone()).unwrap_or_default();
         (text, w.edit.clone().unwrap_or_default())
     };
@@ -259,11 +267,11 @@ fn insert(lua: &Lua, id: Id, s: &str) -> bool {
     let mut new = text.clone();
     new.insert_str(byte_at(&text, cursor), &add);
     let mut caret = cursor + add.chars().count();
-    if let (true, Some(max)) = (e.digit, e.digit_max) {
-        if new.parse::<f64>().is_ok_and(|v| v > max) {
-            new = format!("{}", max as i64);
-            caret = new.chars().count();
-        }
+    if let (true, Some(max)) = (e.digit, e.digit_max)
+        && new.parse::<f64>().is_ok_and(|v| v > max)
+    {
+        new = format!("{}", max as i64);
+        caret = new.chars().count();
     }
     store(lua, id, new, caret);
     true
@@ -272,7 +280,9 @@ fn insert(lua: &Lua, id: Id, s: &str) -> bool {
 fn erase(lua: &Lua, id: Id, before: bool) -> bool {
     let (text, e) = {
         let u = ui(lua);
-        let Some(w) = u.tree.widget(id) else { return false };
+        let Some(w) = u.tree.widget(id) else {
+            return false;
+        };
         let text = w.text.as_ref().map(|t| t.text.clone()).unwrap_or_default();
         (text, w.edit.clone().unwrap_or_default())
     };
@@ -314,7 +324,9 @@ fn store(lua: &Lua, id: Id, text: String, caret: usize) {
 fn move_caret(lua: &Lua, id: Id, k: &UiKey) {
     let mut u = ui(lua);
     let n = u.tree.get(id).text().map_or(0, |t| t.text.chars().count());
-    let Some(w) = u.tree.widget_mut(id) else { return };
+    let Some(w) = u.tree.widget_mut(id) else {
+        return;
+    };
     let e = w.edit.get_or_insert_with(EditData::default);
     let c = e.cursor.min(n);
     e.cursor = match k {
@@ -347,7 +359,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "MaxTextLength",
-        method(lua, |lua, id, _| ret(lua, with(lua, id, |e| e.max_len as i64).unwrap_or(0)))?,
+        method(lua, |lua, id, _| {
+            ret(lua, with(lua, id, |e| e.max_len as i64).unwrap_or(0))
+        })?,
     )?;
     def(
         "SetPassword",
@@ -360,7 +374,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "IsPassword",
-        method(lua, |lua, id, _| ret(lua, with(lua, id, |e| e.password).unwrap_or(false)))?,
+        method(lua, |lua, id, _| {
+            ret(lua, with(lua, id, |e| e.password).unwrap_or(false))
+        })?,
     )?;
     def(
         "SetDigit",
@@ -372,7 +388,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "IsDigit",
-        method(lua, |lua, id, _| ret(lua, with(lua, id, |e| e.digit).unwrap_or(false)))?,
+        method(lua, |lua, id, _| {
+            ret(lua, with(lua, id, |e| e.digit).unwrap_or(false))
+        })?,
     )?;
     def(
         "SetDigitMax",

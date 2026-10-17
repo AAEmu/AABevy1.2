@@ -18,7 +18,9 @@ fn main() {
     App::new()
         .add_plugins(aa_dev::default_plugins("aa-ui: world select"))
         .add_plugins(aa_dev::DevPlugin)
-        .add_plugins(aa_ui::UiPlugin { config: Some(fake::config()) })
+        .add_plugins(aa_ui::UiPlugin {
+            config: Some(fake::config()),
+        })
         .insert_resource(aa_ui::UiSetup::new(move |ui| {
             fake::install_with(ui, locale, &fake::worlds_from_args(), &[]);
             ui.run_stage(aa_ui::Stage::WorldSelect);

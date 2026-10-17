@@ -23,7 +23,9 @@ fn main() {
     App::new()
         .add_plugins(aa_dev::default_plugins("aa-ui: in-game HUD"))
         .add_plugins(aa_dev::DevPlugin)
-        .add_plugins(aa_ui::UiPlugin { config: Some(fake::config()) })
+        .add_plugins(aa_ui::UiPlugin {
+            config: Some(fake::config()),
+        })
         .insert_resource(aa_ui::UiSetup::new(|ui| {
             let worlds = fake::worlds_from_args();
             let chars = fake::characters_from_args();
@@ -34,6 +36,9 @@ fn main() {
             fake::report(ui, "ingame_hud");
         }))
         .add_systems(Startup, fake::physical_pixels)
-        .add_systems(Update, (fake::dump_tree, fake::scripted_input, fake::hotkeys))
+        .add_systems(
+            Update,
+            (fake::dump_tree, fake::scripted_input, fake::hotkeys),
+        )
         .run();
 }

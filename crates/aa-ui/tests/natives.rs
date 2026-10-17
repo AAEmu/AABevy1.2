@@ -144,10 +144,16 @@ fn caret_is_drawn() {
     ui.type_text("abc");
     let mut g = aa_ui::lua::ui(&ui.lua);
     let quads = aa_ui::render::build_quads(&mut g, None);
-    let caret: Vec<_> = quads.iter().filter(|q| q.color == [1.0, 0.0, 0.0, 1.0]).collect();
+    let caret: Vec<_> = quads
+        .iter()
+        .filter(|q| q.color == [1.0, 0.0, 0.0, 1.0])
+        .collect();
     assert_eq!(caret.len(), 1, "one caret quad");
     let p = caret[0].pos;
-    assert!(p[0] > 100.0 && p[0] < 140.0 && p[1] >= 100.0 && p[3] <= 130.0, "{p:?}");
+    assert!(
+        p[0] > 100.0 && p[0] < 140.0 && p[1] >= 100.0 && p[3] <= 130.0,
+        "{p:?}"
+    );
 }
 
 #[test]
@@ -173,17 +179,49 @@ fn slider_drag() {
     let mut mouse = aa_ui::input::MouseState::default();
     // Press on the track at 3/4 of the travel: the thumb centre jumps there.
     let x = 100.0 + 10.0 + 0.75 * 200.0;
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((x, 110.0)), true, false, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((x, 110.0)),
+        true,
+        false,
+        false,
+        0.0,
+    );
     assert_eq!(eval::<f64>(&ui, "slider:GetValue()"), 75.0);
     assert_eq!(eval::<i64>(&ui, "changes"), 1);
     let tx = eval::<f64>(&ui, "local x = thumb:GetOffset() return x");
     assert_eq!(tx, 100.0 + 150.0);
     // Drag outside the widget (captured), past the end: clamped to the maximum.
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((900.0, 400.0)), false, false, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((900.0, 400.0)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     assert_eq!(eval::<f64>(&ui, "last"), 100.0);
     // Release, then moving does nothing.
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((900.0, 400.0)), false, true, false, 0.0);
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((110.0, 110.0)), false, false, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((900.0, 400.0)),
+        false,
+        true,
+        false,
+        0.0,
+    );
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((110.0, 110.0)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     assert_eq!(eval::<f64>(&ui, "slider:GetValue()"), 100.0);
     assert_eq!(eval::<i64>(&ui, "changes"), 2);
 }
@@ -220,7 +258,10 @@ fn chat_window_tabs() {
     assert_eq!(eval::<i64>(&ui, "created"), 1);
     assert_eq!(eval::<i64>(&ui, "buttons"), 2);
     assert!(eval::<bool>(&ui, "up ~= nil and slider ~= nil"));
-    assert!(eval::<bool>(&ui, "win:GetChatEdit() ~= nil and win:GetAddButton() ~= nil"));
+    assert!(eval::<bool>(
+        &ui,
+        "win:GetChatEdit() ~= nil and win:GetAddButton() ~= nil"
+    ));
     // "All" takes both lines, "Party" only its own.
     assert_eq!(eval::<i64>(&ui, "msgs[1]:GetMessageLines()"), 2);
     assert_eq!(eval::<i64>(&ui, "msgs[2]:GetMessageLines()"), 1);
@@ -298,7 +339,10 @@ fn content_toggle_and_escape() {
     assert!(!ui.content_visible(bag));
     ui.toggle_content(bag).unwrap();
     assert!(ui.content_visible(bag));
-    assert!(matches!(ui.escape().unwrap(), aa_ui::content::Escaped::Closed(_)));
+    assert!(matches!(
+        ui.escape().unwrap(),
+        aa_ui::content::Escaped::Closed(_)
+    ));
     assert!(!ui.content_visible(bag));
     assert_eq!(eval::<i64>(&ui, "hidden"), 1);
     assert_eq!(ui.escape().unwrap(), aa_ui::content::Escaped::OpenedMenu);
@@ -352,12 +396,21 @@ fn scroll_thumb_follows_the_visible_part() {
     assert!((h - 217.236).abs() < 0.01, "{h}");
     // Nothing to scroll: the whole track; a long list: the minimum.
     ui.exec("@fit", "vs:SetMinMaxValues(0, 0)").unwrap();
-    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 412.0);
+    assert_eq!(
+        eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"),
+        412.0
+    );
     ui.exec("@long", "vs:SetMinMaxValues(0, 100000)").unwrap();
-    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 50.0);
+    assert_eq!(
+        eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"),
+        50.0
+    );
     // A fixed thumb keeps its size.
     ui.exec("@fixed", "vs:SetFixedThumb(true)").unwrap();
-    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 41.0);
+    assert_eq!(
+        eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"),
+        41.0
+    );
 }
 
 #[test]
@@ -384,7 +437,10 @@ fn anchors_on_one_edge_go_by_point_order() {
     )
     .unwrap();
     // reference/ingame/bag: the tab line sits at the TOPLEFT anchor's y (410, not 415).
-    let r: Vec<f64> = eval(&ui, "local x, y = line:GetEffectiveOffset() return {x, y, (line:GetEffectiveExtent())}");
+    let r: Vec<f64> = eval(
+        &ui,
+        "local x, y = line:GetEffectiveOffset() return {x, y, (line:GetEffectiveExtent())}",
+    );
     assert_eq!(r, [1440.0, 410.0, 441.0]);
     // The slot grid: TOPLEFT beats the LEFT it was created with.
     let r: Vec<f64> = eval(&ui, "return {grid:GetEffectiveOffset()}");
@@ -407,7 +463,10 @@ fn image_font_label() {
     .unwrap();
     // ui/image_text.g: "1" is 29 - 14 = 15 wide (reference/ingame/character_info).
     assert_eq!(eval::<f64>(&ui, "return lbl:GetWidth()"), 15.0);
-    assert_eq!(eval::<f64>(&ui, "return lbl.style:GetTextWidth('10')"), 15.0 + 29.0);
+    assert_eq!(
+        eval::<f64>(&ui, "return lbl.style:GetTextWidth('10')"),
+        15.0 + 29.0
+    );
 }
 
 #[test]
@@ -430,11 +489,30 @@ fn slot_click_uses_the_slot() {
     )
     .unwrap();
     let mut mouse = aa_ui::input::MouseState::default();
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((120.0, 120.0)), true, false, false, 0.0);
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((120.0, 120.0)), false, true, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((120.0, 120.0)),
+        true,
+        false,
+        false,
+        0.0,
+    );
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((120.0, 120.0)),
+        false,
+        true,
+        false,
+        0.0,
+    );
     assert_eq!(eval::<i64>(&ui, "clicks"), 1);
     let first: String = eval(&ui, "return used[1]");
-    assert_eq!(first, format!("{}:3:LeftButton", eval::<i64>(&ui, "return ISLOT_ACTION")));
+    assert_eq!(
+        first,
+        format!("{}:3:LeftButton", eval::<i64>(&ui, "return ISLOT_ACTION"))
+    );
 }
 
 #[test]
@@ -487,17 +565,22 @@ fn chat_input_slash_commands() {
     ui.type_text("hello");
     ui.key(&UiKey::Enter);
     assert_eq!(eval::<String>(&ui, "return sent[1][2]"), "hello");
-    assert_eq!(eval::<i64>(&ui, "return sent[1][1]"), eval::<i64>(&ui, "return CHAT_PARTY or 4"));
+    assert_eq!(
+        eval::<i64>(&ui, "return sent[1][1]"),
+        eval::<i64>(&ui, "return CHAT_PARTY or 4")
+    );
     assert!(!eval::<bool>(&ui, "return edit:IsVisible()"));
     // Whisper: the name is the prefix, the channel stays for the next line.
-    ui.exec("@again", "edit:Show(true) edit:SetFocus()").unwrap();
+    ui.exec("@again", "edit:Show(true) edit:SetFocus()")
+        .unwrap();
     ui.type_text("/w Maude hi");
     assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "hi");
     ui.key(&UiKey::Enter);
     assert_eq!(eval::<String>(&ui, "return sent[2][3]"), "Maude");
     assert_eq!(eval::<i64>(&ui, "return sent[2][1]"), -3);
     // Unknown commands stay in the text.
-    ui.exec("@again", "edit:Show(true) edit:SetFocus()").unwrap();
+    ui.exec("@again", "edit:Show(true) edit:SetFocus()")
+        .unwrap();
     ui.type_text("/dance ");
     assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "/dance ");
 }
@@ -535,7 +618,8 @@ fn rewriting_the_same_state_is_no_change() {
     )
     .unwrap();
     assert_eq!(settle(&ui), c0);
-    ui.exec("@move", r#"w:AddAnchor("TOPLEFT", "UIParent", 6, 5)"#).unwrap();
+    ui.exec("@move", r#"w:AddAnchor("TOPLEFT", "UIParent", 6, 5)"#)
+        .unwrap();
     let c1 = settle(&ui);
     assert!(c1 > c0);
     ui.exec("@text", r#"w:SetText("b")"#).unwrap();

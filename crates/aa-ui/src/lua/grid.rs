@@ -27,7 +27,7 @@ use std::collections::HashMap;
 
 use mlua::{Lua, Table};
 
-use super::{call_handler, method, none, ret, ui, value_id, Ui};
+use super::{Ui, call_handler, method, none, ret, ui, value_id};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point, Tree};
 
 /// Height of a row that has no `SetRowHeight` and no widget with a size of its own.
@@ -261,20 +261,23 @@ fn row_image(
     row: Option<usize>,
 ) -> bool {
     let Some(row) = row else {
-        if let Some(img) = look.img {
-            if u.tree.get(img).shown {
-                u.tree.get_mut(img).shown = false;
-                return true;
-            }
+        if let Some(img) = look.img
+            && u.tree.get(img).shown
+        {
+            u.tree.get_mut(img).shown = false;
+            return true;
         }
         return false;
     };
     let img = match look.img {
         Some(i) => i,
         None => {
-            let i = u
-                .tree
-                .create_drawable(gid, DrawKind::Image, "drawable:image", DrawLayer::Background);
+            let i = u.tree.create_drawable(
+                gid,
+                DrawKind::Image,
+                "drawable:image",
+                DrawLayer::Background,
+            );
             look.img = Some(i);
             i
         }
@@ -375,10 +378,10 @@ pub(crate) fn clicked(lua: &Lua, target: Id) {
         let u = ui(lua);
         let mut t = target;
         while let Some(p) = u.tree.get(t).parent {
-            if let Some(g) = gs.map.get(&p).filter(|g| g.sel.line) {
-                if let Some(c) = g.cells.iter().find(|c| c.id == t) {
-                    rows.push((p, c.row));
-                }
+            if let Some(g) = gs.map.get(&p).filter(|g| g.sel.line)
+                && let Some(c) = g.cells.iter().find(|c| c.id == t)
+            {
+                rows.push((p, c.row));
             }
             t = p;
         }

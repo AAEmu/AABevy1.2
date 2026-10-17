@@ -2,8 +2,8 @@
 //! (`SaveMapData`, with the real `image_map.tga` masks), the player's map and cursor from
 //! `AAUI.WorldMap`, hover and click zooming through the masks, the scroll offset of `mapWindow`.
 
-use aa_ui::input::{update, MouseState};
 use aa_ui::UiRuntime;
+use aa_ui::input::{MouseState, update};
 
 fn runtime() -> UiRuntime {
     UiRuntime::new("en_us", 1920.0, 1080.0).expect("runtime")
@@ -101,7 +101,10 @@ fn view_pos(ui: &UiRuntime) -> (f64, f64) {
 }
 
 fn near(a: (f64, f64), b: (f64, f64), tol: f64) {
-    assert!((a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol, "{a:?} vs {b:?}");
+    assert!(
+        (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol,
+        "{a:?} vs {b:?}"
+    );
 }
 
 #[test]
@@ -110,7 +113,10 @@ fn opens_on_the_players_map_with_the_cursor() {
     assert_eq!(eval::<String>(&ui, "shown()"), "");
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "5");
-    assert_eq!(events(&ui), "UPDATE_ZONE_LEVEL_INFO:2,5 SET_DEFAULT_EXPAND_RATIO:true");
+    assert_eq!(
+        events(&ui),
+        "UPDATE_ZONE_LEVEL_INFO:2,5 SET_DEFAULT_EXPAND_RATIO:true"
+    );
     // The cursor is shown at the player's place (u 0.5, v 0.25 of 928 x 556).
     near(view_pos(&ui), (464.0, 139.0), 0.01);
     assert!(eval::<bool>(&ui, "player:IsVisible()"));
@@ -119,8 +125,11 @@ fn opens_on_the_players_map_with_the_cursor() {
     near(view_pos(&ui), (928.0, 278.0), 0.01);
     // Hidden worldmaps cost nothing and keep their state.
     ui.exec("@hide", "wm:Show(false)").unwrap();
-    ui.exec("@hook", "AAUI.WorldMap = function() return { level = 2, zone = 7 } end")
-        .unwrap();
+    ui.exec(
+        "@hook",
+        "AAUI.WorldMap = function() return { level = 2, zone = 7 } end",
+    )
+    .unwrap();
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "5");
 }
@@ -130,14 +139,30 @@ fn right_click_zooms_out_to_the_continent_and_the_world() {
     let ui = setup();
     tick(&ui);
     let mut mouse = MouseState::default();
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), false, false, true, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        false,
+        false,
+        true,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "3");
     assert!(events(&ui).ends_with("UPDATE_ZONE_LEVEL_INFO:1,3 SET_DEFAULT_EXPAND_RATIO:false"));
     // The player on the continent map: the zone's highlight rectangle (575.5, 178.5, 136 x 78)
     // at 0.5, 0.25 of it.
     near(view_pos(&ui), (643.5, 198.0), 0.5);
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), false, false, true, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        false,
+        false,
+        true,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "2");
     // On the world map the continent's mask is registered onto its colour in the world mask:
@@ -145,7 +170,15 @@ fn right_click_zooms_out_to_the_continent_and_the_world() {
     let (x, y) = view_pos(&ui);
     assert!(x > 420.0 && x < 450.0 && y > 330.0 && y < 360.0, "{x} {y}");
     // Nothing above the world.
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), false, false, true, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        false,
+        false,
+        true,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "2");
 }
@@ -157,18 +190,58 @@ fn hover_highlights_and_left_click_shows_the_zone() {
     let mut mouse = MouseState::default();
     // Up to the continent, then hover Solzreed's colour in the continent mask: texel (200, 42)
     // of image_map.tga is at map unit (258 + 4 * 92, 44 + 4 * 42) = (626, 212).
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), false, false, true, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        false,
+        false,
+        true,
+        0.0,
+    );
     tick(&ui);
-    update(&ui.lua, &mut mouse, Some((628.0, 214.0)), false, false, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((628.0, 214.0)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "overs_shown()"), "5");
     // Elsewhere (the sea): no highlight.
-    update(&ui.lua, &mut mouse, Some((60.0, 500.0)), false, false, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((60.0, 500.0)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "overs_shown()"), "");
     // A press and release in place on the zone shows its map.
-    update(&ui.lua, &mut mouse, Some((628.0, 214.0)), true, false, false, 0.0);
-    update(&ui.lua, &mut mouse, Some((628.0, 214.0)), false, true, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((628.0, 214.0)),
+        true,
+        false,
+        false,
+        0.0,
+    );
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((628.0, 214.0)),
+        false,
+        true,
+        false,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "5");
     assert_eq!(eval::<String>(&ui, "overs_shown()"), "");
@@ -180,11 +253,35 @@ fn a_drag_does_not_click() {
     let ui = setup();
     tick(&ui);
     let mut mouse = MouseState::default();
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), false, false, true, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        false,
+        false,
+        true,
+        0.0,
+    );
     tick(&ui);
-    update(&ui.lua, &mut mouse, Some((628.0, 214.0)), true, false, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((628.0, 214.0)),
+        true,
+        false,
+        false,
+        0.0,
+    );
     // Dragged away over Solzreed's neighbour before the release.
-    update(&ui.lua, &mut mouse, Some((520.0, 300.0)), false, true, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((520.0, 300.0)),
+        false,
+        true,
+        false,
+        0.0,
+    );
     tick(&ui);
     assert_eq!(eval::<String>(&ui, "shown()"), "3");
 }
@@ -203,8 +300,24 @@ fn presses_reach_the_parent_window_for_panning() {
     .unwrap();
     tick(&ui);
     let mut mouse = MouseState::default();
-    update(&ui.lua, &mut mouse, Some((300.0, 300.0)), true, false, false, 0.0);
-    update(&ui.lua, &mut mouse, Some((310.0, 300.0)), false, true, false, 0.0);
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((300.0, 300.0)),
+        true,
+        false,
+        false,
+        0.0,
+    );
+    update(
+        &ui.lua,
+        &mut mouse,
+        Some((310.0, 300.0)),
+        false,
+        true,
+        false,
+        0.0,
+    );
     assert_eq!(eval::<i64>(&ui, "downs"), 1);
     assert_eq!(eval::<i64>(&ui, "ups"), 1);
 }
@@ -214,9 +327,17 @@ fn scroll_offset_moves_the_children_and_clips() {
     let ui = setup();
     ui.exec("@scroll", "frame:EnableScroll(true) frame:ChangeChildAnchorByScrollValue('horz', 100) frame:ChangeChildAnchorByScrollValue('vert', 20)")
         .unwrap();
-    near(pair(&ui, "local x, y = wm:GetOffset() return {x, y}"), (-100.0, -20.0), 0.01);
+    near(
+        pair(&ui, "local x, y = wm:GetOffset() return {x, y}"),
+        (-100.0, -20.0),
+        0.01,
+    );
     // The frame itself stays; its children are clipped to it.
-    near(pair(&ui, "local x, y = frame:GetOffset() return {x, y}"), (0.0, 0.0), 0.01);
+    near(
+        pair(&ui, "local x, y = frame:GetOffset() return {x, y}"),
+        (0.0, 0.0),
+        0.01,
+    );
     let tree_clip = {
         let u = aa_ui::lua::ui(&ui.lua);
         let wm = u.tree.find("wm").unwrap();

@@ -49,9 +49,11 @@
 
 use mlua::{Function, Lua, Table, Value};
 
-use super::{method, new_object_table, none, ret, ui, Ui};
+use super::{Ui, method, new_object_table, none, ret, ui};
 use crate::render::{Quad, Tex};
-use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock, TextStyle, Widget};
+use crate::tree::{
+    Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock, TextStyle, Widget,
+};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SlotData {
@@ -153,7 +155,9 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
         Source::Skill(s) => ("UseSkill", vec![Value::Integer(s)]),
         Source::Item(it, g) => ("UseItem", vec![Value::Integer(it), Value::Integer(g)]),
     };
-    let Some(f) = hook(lua, name) else { return false };
+    let Some(f) = hook(lua, name) else {
+        return false;
+    };
     let mut args = args;
     match lua.create_string(button) {
         Ok(s) => args.push(Value::String(s)),
@@ -181,9 +185,12 @@ fn cooltime_block() -> TextBlock {
 pub(crate) fn init(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     let icon = {
         let mut u = ui(lua);
-        let d = u
-            .tree
-            .create_drawable(id, DrawKind::Image, "drawable:iconimage", DrawLayer::Artwork);
+        let d = u.tree.create_drawable(
+            id,
+            DrawKind::Image,
+            "drawable:iconimage",
+            DrawLayer::Artwork,
+        );
         for (point, x, y) in [(Point::TopLeft, 1.0, 1.0), (Point::BottomRight, -1.0, -1.0)] {
             u.tree.add_anchor(
                 d,
@@ -255,7 +262,10 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
     };
     contents(lua)?.raw_set(id, content.clone())?;
     let binded: Option<String> = match &content {
-        Some(c) => Some(c.raw_get::<Option<String>>("type")?.unwrap_or_else(|| "skill".into())),
+        Some(c) => Some(
+            c.raw_get::<Option<String>>("type")?
+                .unwrap_or_else(|| "skill".into()),
+        ),
         None => None,
     };
     let icon_path: Option<String> = match &content {
@@ -283,20 +293,30 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         _ => false,
     };
     let mut u = ui(lua);
-    let icon = u.tree.widget(id).and_then(|w| w.slot.as_ref()).and_then(|s| s.icon);
+    let icon = u
+        .tree
+        .widget(id)
+        .and_then(|w| w.slot.as_ref())
+        .and_then(|s| s.icon);
     if let Some(s) = u.tree.widget_mut(id).and_then(|w| w.slot.as_mut()) {
         s.source = Some(source);
         s.binded = binded.clone();
     }
-    if let Some(d) = icon {
-        if let Some(dr) = u.tree.drawable_mut(d) {
-            dr.texture = icon_path;
-            dr.extra_textures = grade.and_then(grade_frame).into_iter().collect();
-        }
+    if let Some(d) = icon
+        && let Some(dr) = u.tree.drawable_mut(d)
+    {
+        dr.texture = icon_path;
+        dr.extra_textures = grade.and_then(grade_frame).into_iter().collect();
     }
     set_cooldown(lua, &mut u, id, cooldown);
     u.tree.touch();
-    let ev = |what: &str, v: Value| (id, "OnContentUpdated".to_string(), vec![Value::String(lua.create_string(what).unwrap()), v]);
+    let ev = |what: &str, v: Value| {
+        (
+            id,
+            "OnContentUpdated".to_string(),
+            vec![Value::String(lua.create_string(what).unwrap()), v],
+        )
+    };
     let bound = binded.is_some();
     u.pending.push(ev("action_binded", Value::Boolean(bound)));
     if bound {
@@ -306,12 +326,14 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         for (what, v) in extras {
             u.pending.push(ev(what, v));
         }
-        u.pending.push(ev("hotkey_activated", Value::Boolean(hotkey)));
+        u.pending
+            .push(ev("hotkey_activated", Value::Boolean(hotkey)));
         if let Some(n) = stack {
             u.pending.push(ev("stack_count_changed", Value::Integer(n)));
         }
         if let Some((_, total)) = cooldown {
-            u.pending.push(ev("skill_cooldown_start", Value::Number(total as f64)));
+            u.pending
+                .push(ev("skill_cooldown_start", Value::Number(total as f64)));
         }
     }
     Ok(())
@@ -325,10 +347,10 @@ fn set_cooldown(lua: &Lua, u: &mut Ui, id: Id, cd: Option<(f32, f32)>) {
         total_ms: total,
         drawn: (-1, String::new()),
     });
-    if value.is_some() {
-        if let Ok(a) = active(lua) {
-            let _ = a.raw_set(id, true);
-        }
+    if value.is_some()
+        && let Ok(a) = active(lua)
+    {
+        let _ = a.raw_set(id, true);
     }
     if let Some(w) = u.tree.widget_mut(id) {
         w.cooldown = value;
@@ -344,7 +366,11 @@ fn skill_view_state(content: Option<&Table>) -> (bool, Vec<(&'static str, Value)
     let Some(c) = content else {
         return (true, Vec::new());
     };
-    let learned = c.raw_get::<Option<bool>>("learned").ok().flatten().unwrap_or(true);
+    let learned = c
+        .raw_get::<Option<bool>>("learned")
+        .ok()
+        .flatten()
+        .unwrap_or(true);
     let mut extras = Vec::new();
     if let Some(b) = c.raw_get::<Option<bool>>("canLearn").ok().flatten() {
         extras.push(("canLearn", Value::Boolean(b)));
@@ -360,8 +386,18 @@ fn skill_view_state(content: Option<&Table>) -> (bool, Vec<(&'static str, Value)
 /// The client's item grade frame drawn over an item icon.
 fn grade_frame(grade: i64) -> Option<String> {
     const NAMES: [&str; 12] = [
-        "poor", "common", "uncommon", "rare", "ancient", "heroic", "unique", "artifact", "wonder",
-        "epic", "legendary", "mythic",
+        "poor",
+        "common",
+        "uncommon",
+        "rare",
+        "ancient",
+        "heroic",
+        "unique",
+        "artifact",
+        "wonder",
+        "epic",
+        "legendary",
+        "mythic",
     ];
     let name = NAMES.get(usize::try_from(grade).ok()?)?;
     Some(format!("ui/icon/item_grade_{grade}{name}.dds"))
@@ -419,7 +455,10 @@ fn label_of(cd: &Cooldown, remain: f64) -> Option<String> {
 /// What the screen shows of a cooldown with `remain` ms left: (sweep step, label).
 fn drawn_state(cd: &Cooldown, remain: f64) -> (i32, String) {
     let frac = (remain as f32 / cd.total_ms.max(1.0)).clamp(0.0, 1.0);
-    ((frac * SWEEP_STEPS).floor() as i32, label_of(cd, remain).unwrap_or_default())
+    (
+        (frac * SWEEP_STEPS).floor() as i32,
+        label_of(cd, remain).unwrap_or_default(),
+    )
 }
 
 /// Per frame, before the clock advances by `dt_ms`: finish the cooldowns that ran out (the sweep
@@ -427,7 +466,10 @@ fn drawn_state(cd: &Cooldown, remain: f64) -> (i32, String) {
 /// sweep or a label changed on screen.
 pub(crate) fn update(lua: &Lua, dt_ms: f32) {
     let Ok(act) = active(lua) else { return };
-    let ids: Vec<Id> = act.pairs::<Id, bool>().filter_map(|kv| kv.ok().map(|(k, _)| k)).collect();
+    let ids: Vec<Id> = act
+        .pairs::<Id, bool>()
+        .filter_map(|kv| kv.ok().map(|(k, _)| k))
+        .collect();
     if ids.is_empty() {
         return;
     }
@@ -458,16 +500,18 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
                     u.pending.push((
                         id,
                         "OnContentUpdated".into(),
-                        vec![Value::String(lua.create_string("skill_cooldown_done").unwrap())],
+                        vec![Value::String(
+                            lua.create_string("skill_cooldown_done").unwrap(),
+                        )],
                     ));
                 }
                 continue;
             }
             let state = drawn_state(&cd, remain);
-            if state != cd.drawn {
-                if let Some(c) = u.tree.widget_mut(id).and_then(|w| w.cooldown.as_mut()) {
-                    c.drawn = state;
-                }
+            if state != cd.drawn
+                && let Some(c) = u.tree.widget_mut(id).and_then(|w| w.cooldown.as_mut())
+            {
+                c.drawn = state;
             }
         }
     }
@@ -494,8 +538,16 @@ pub fn sweep_triangles(r: [f32; 4], frac: f32) -> Vec<[[f32; 2]; 3]> {
     // Where a ray from the centre at `a` (clockwise from up) leaves the rectangle.
     let edge = |a: f32| -> [f32; 2] {
         let (dx, dy) = (a.sin(), -a.cos());
-        let tx = if dx.abs() > 1e-6 { hw / dx.abs() } else { f32::MAX };
-        let ty = if dy.abs() > 1e-6 { hh / dy.abs() } else { f32::MAX };
+        let tx = if dx.abs() > 1e-6 {
+            hw / dx.abs()
+        } else {
+            f32::MAX
+        };
+        let ty = if dy.abs() > 1e-6 {
+            hh / dy.abs()
+        } else {
+            f32::MAX
+        };
         let t = tx.min(ty);
         [cx + dx * t, cy + dy * t]
     };
@@ -503,9 +555,14 @@ pub fn sweep_triangles(r: [f32; 4], frac: f32) -> Vec<[[f32; 2]; 3]> {
     let c1 = hw.atan2(hh);
     let mut angles = vec![start];
     angles.extend(
-        [c1, std::f32::consts::PI - c1, std::f32::consts::PI + c1, tau - c1]
-            .into_iter()
-            .filter(|&a| a > start + 1e-4 && a < tau - 1e-4),
+        [
+            c1,
+            std::f32::consts::PI - c1,
+            std::f32::consts::PI + c1,
+            tau - c1,
+        ]
+        .into_iter()
+        .filter(|&a| a > start + 1e-4 && a < tau - 1e-4),
     );
     angles.push(tau);
     let mut out = Vec::new();
@@ -533,7 +590,9 @@ pub(crate) fn cooldown_quads(
     scale: f32,
     out: &mut Vec<Quad>,
 ) {
-    let Some(cd) = w.cooldown.as_ref() else { return };
+    let Some(cd) = w.cooldown.as_ref() else {
+        return;
+    };
     let remain = cd.end_ms - u.time_ms;
     if remain <= 0.0 || cd.total_ms <= 0.0 {
         return;
@@ -553,7 +612,12 @@ pub(crate) fn cooldown_quads(
         (area.right() * scale).round(),
         (area.bottom() * scale).round(),
     ];
-    let color = [SWEEP_COLOR[0], SWEEP_COLOR[1], SWEEP_COLOR[2], SWEEP_COLOR[3] * alpha];
+    let color = [
+        SWEEP_COLOR[0],
+        SWEEP_COLOR[1],
+        SWEEP_COLOR[2],
+        SWEEP_COLOR[3] * alpha,
+    ];
     for [a, b, c] in sweep_triangles(px, frac) {
         out.push(Quad {
             tex: Tex::Atlas,
@@ -564,7 +628,9 @@ pub(crate) fn cooldown_quads(
             vcolors: None,
         });
     }
-    let Some(label) = label_of(cd, remain) else { return };
+    let Some(label) = label_of(cd, remain) else {
+        return;
+    };
     let mut tb = w.aux_style.clone().unwrap_or_else(cooltime_block);
     tb.text = label;
     let rect: Rect = widget_rect;
@@ -619,15 +685,21 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     def(
         "GetTooltip",
-        method(lua, |lua, id, _| ret(lua, content_field(lua, id, "tooltip")?))?,
+        method(lua, |lua, id, _| {
+            ret(lua, content_field(lua, id, "tooltip")?)
+        })?,
     )?;
     def(
         "GetExtraInfo",
-        method(lua, |lua, id, _| ret(lua, content_field(lua, id, "extraInfo")?))?,
+        method(lua, |lua, id, _| {
+            ret(lua, content_field(lua, id, "extraInfo")?)
+        })?,
     )?;
     def(
         "GetItemLevelRequirment",
-        method(lua, |lua, id, _| ret(lua, content_field(lua, id, "levelRequirement")?))?,
+        method(lua, |lua, id, _| {
+            ret(lua, content_field(lua, id, "levelRequirement")?)
+        })?,
     )?;
     def("ResetState", method(lua, |_, _, _| none())?)?;
     // (slotType, slotIdx): the key bound to the slot, from `AAUI.SlotHotKey`.
@@ -636,7 +708,12 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, a| {
             let (ty, idx) = match a.opt_f(1) {
                 Some(t) => (t as i64, a.f(2) as i64),
-                None => match ui(lua).tree.widget(id).and_then(|w| w.slot.as_ref()).and_then(|s| s.source.clone()) {
+                None => match ui(lua)
+                    .tree
+                    .widget(id)
+                    .and_then(|w| w.slot.as_ref())
+                    .and_then(|s| s.source.clone())
+                {
                     Some(Source::Slot(t, i)) => (t, i),
                     _ => return none(),
                 },

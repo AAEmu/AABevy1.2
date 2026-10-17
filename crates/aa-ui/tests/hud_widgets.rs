@@ -1,8 +1,8 @@
 //! In-game HUD natives without a window: slot cooldown sweeps, the roadmap's player heading and
 //! markers, chat wheel scrolling.
 
-use aa_ui::render::Tex;
 use aa_ui::UiRuntime;
+use aa_ui::render::Tex;
 
 fn runtime() -> UiRuntime {
     UiRuntime::new("en_us", 1920.0, 1080.0).expect("runtime")
@@ -21,7 +21,9 @@ fn sweep_quads(ui: &UiRuntime) -> usize {
     let mut g = aa_ui::lua::ui(&ui.lua);
     aa_ui::render::build_quads(&mut g, None)
         .iter()
-        .filter(|q| q.corners.is_some() && q.tex == Tex::Atlas && (q.color[3] - 199.0 / 255.0).abs() < 0.01)
+        .filter(|q| {
+            q.corners.is_some() && q.tex == Tex::Atlas && (q.color[3] - 199.0 / 255.0).abs() < 0.01
+        })
         .count()
 }
 
@@ -62,9 +64,19 @@ fn slot_cooldown_sweep_counts_down() {
     // Past its end the sweep goes and the script is told once.
     tick(&ui, 1500.0);
     assert_eq!(sweep_quads(&ui), 0);
-    assert_eq!(eval::<String>(&ui, "table.concat(events, ' ')").matches("skill_cooldown_done").count(), 1);
+    assert_eq!(
+        eval::<String>(&ui, "table.concat(events, ' ')")
+            .matches("skill_cooldown_done")
+            .count(),
+        1
+    );
     tick(&ui, 500.0);
-    assert_eq!(eval::<String>(&ui, "table.concat(events, ' ')").matches("skill_cooldown_done").count(), 1);
+    assert_eq!(
+        eval::<String>(&ui, "table.concat(events, ' ')")
+            .matches("skill_cooldown_done")
+            .count(),
+        1
+    );
 }
 
 /// Glyph quads (the time label): atlas quads that are not the sweep's triangles.
@@ -130,7 +142,9 @@ fn sweep_geometry() {
     use aa_ui::lua::slot::sweep_triangles;
     let area = |t: &[[[f32; 2]; 3]]| {
         t.iter()
-            .map(|[a, b, c]| ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() / 2.0)
+            .map(|[a, b, c]| {
+                ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() / 2.0
+            })
             .sum::<f32>()
     };
     let r = [0.0, 0.0, 40.0, 40.0];
@@ -213,7 +227,10 @@ fn roadmap_heading_and_markers() {
     let markers = icon_quads(&ui, "npc_icon");
     assert_eq!(markers.len(), 1, "quest marker only");
     let uv = markers[0].uv;
-    assert_eq!([uv[0] * 512.0, uv[1] * 256.0, uv[2] * 512.0, uv[3] * 256.0], [216.0, 48.0, 240.0, 72.0]);
+    assert_eq!(
+        [uv[0] * 512.0, uv[1] * 256.0, uv[2] * 512.0, uv[3] * 256.0],
+        [216.0, 48.0, 240.0, 72.0]
+    );
     ui.exec("@npc", "roadmap:SetRoadMapNpc(true)").unwrap();
     tick(&ui, 16.0);
     assert_eq!(icon_quads(&ui, "npc_icon").len(), 2);
@@ -231,22 +248,53 @@ fn roadmap_heading_and_markers() {
     let mid = [(c[0][0] + c[2][0]) / 2.0, (c[0][1] + c[2][1]) / 2.0];
     assert!((mid[0] - centre[0]).abs() < 0.01 && (mid[1] - centre[1]).abs() < 0.01);
     // Top left (-16, -16) turned 90 degrees clockwise is the top right (+16, -16).
-    assert!((c[0][0] - (centre[0] + 16.0)).abs() < 0.01 && (c[0][1] - (centre[1] - 16.0)).abs() < 0.01, "{c:?}");
+    assert!(
+        (c[0][0] - (centre[0] + 16.0)).abs() < 0.01 && (c[0][1] - (centre[1] - 16.0)).abs() < 0.01,
+        "{c:?}"
+    );
     // Tooltips need the window to take the mouse and the cursor over the marker.
     let (mx, my) = {
         let u = aa_ui::lua::ui(&ui.lua);
-        let r = u.tree.rect(u.tree.objects.iter().position(|o| o.alive && o.parent.is_some() && o.shown && o.width == 24.0 && o.height == 24.0).unwrap() as u32);
+        let r = u.tree.rect(
+            u.tree
+                .objects
+                .iter()
+                .position(|o| {
+                    o.alive && o.parent.is_some() && o.shown && o.width == 24.0 && o.height == 24.0
+                })
+                .unwrap() as u32,
+        );
         (r.x + r.w / 2.0, r.y + r.h / 2.0)
     };
     let mut mouse = aa_ui::input::MouseState::default();
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((mx, my)), false, false, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((mx, my)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     tick(&ui, 16.0);
-    assert_eq!(eval::<i64>(&ui, "#tooltips"), 0, "the roadmap is click-through by default");
+    assert_eq!(
+        eval::<i64>(&ui, "#tooltips"),
+        0,
+        "the roadmap is click-through by default"
+    );
     ui.exec("@pick", "roadmapWindow:EnablePick(true)").unwrap();
     tick(&ui, 16.0);
     assert_eq!(eval::<String>(&ui, "tooltips[1]"), "Maude");
     assert!(eval::<bool>(&ui, "tc:IsVisible()"));
-    aa_ui::input::update(&ui.lua, &mut mouse, Some((10.0, 10.0)), false, false, false, 0.0);
+    aa_ui::input::update(
+        &ui.lua,
+        &mut mouse,
+        Some((10.0, 10.0)),
+        false,
+        false,
+        false,
+        0.0,
+    );
     tick(&ui, 16.0);
     assert_eq!(eval::<i64>(&ui, "hides"), 1);
     assert!(!eval::<bool>(&ui, "tc:IsVisible()"));
@@ -303,13 +351,15 @@ fn chat_wheel_scrolls_and_holds_the_view() {
     // Scrolled back, a new message does not move the view: the scroll moves along.
     wheel(&mut mouse, 2.0);
     assert_eq!(scroll(), 6);
-    ui.exec("@new", "X2Chat:DispatchChatMessage(CMF_SAY, 'line 31')").unwrap();
+    ui.exec("@new", "X2Chat:DispatchChatMessage(CMF_SAY, 'line 31')")
+        .unwrap();
     assert_eq!(scroll(), 7);
     assert_eq!(eval::<i64>(&ui, "unreads"), 1);
     // At the bottom nothing is unread and the view follows the newest line.
     ui.exec("@bottom", "m:ScrollToBottom()").unwrap();
     assert_eq!(scroll(), 0);
-    ui.exec("@new", "X2Chat:DispatchChatMessage(CMF_SAY, 'line 32')").unwrap();
+    ui.exec("@new", "X2Chat:DispatchChatMessage(CMF_SAY, 'line 32')")
+        .unwrap();
     assert_eq!(scroll(), 0);
     assert_eq!(eval::<i64>(&ui, "unreads"), 1);
     // The native slider follows: over the frame it shows, with the thumb at the bottom for the
@@ -317,11 +367,14 @@ fn chat_wheel_scrolls_and_holds_the_view() {
     tick(&ui, 16.0);
     assert!(eval::<bool>(&ui, "slider:IsVisible()"));
     let range = |ui: &UiRuntime| -> (f64, f64) {
-        let t: mlua::Table = eval(ui, "local lo, hi = slider:GetMinMaxValues() return { lo, hi, slider:GetValue() }");
+        let t: mlua::Table = eval(
+            ui,
+            "local lo, hi = slider:GetMinMaxValues() return { lo, hi, slider:GetValue() }",
+        );
         (t.get::<f64>(2).unwrap(), t.get::<f64>(3).unwrap())
     };
     let (max, value) = range(&ui);
-    assert!(max >= 1.0 && max < 32.0, "scroll range {max}");
+    assert!((1.0..32.0).contains(&max), "scroll range {max}");
     assert_eq!(value, max);
     wheel(&mut mouse, 1.0);
     assert_eq!(range(&ui), (max, max - 3.0));
@@ -333,7 +386,11 @@ fn chat_wheel_scrolls_and_holds_the_view() {
     let (sx, sy): (f32, f32) = (track.get(1).unwrap(), track.get(2).unwrap());
     aa_ui::input::update(&ui.lua, &mut mouse, Some((sx, sy)), true, false, false, 0.0);
     aa_ui::input::update(&ui.lua, &mut mouse, Some((sx, sy)), false, true, false, 0.0);
-    assert!((scroll() as f64 - max / 2.0).abs() <= 1.0, "scroll {} of {max}", scroll());
+    assert!(
+        (scroll() as f64 - max / 2.0).abs() <= 1.0,
+        "scroll {} of {max}",
+        scroll()
+    );
     // The up button scrolls one message back, the down button one forward.
     ui.exec(
         "@buttons",
@@ -344,7 +401,10 @@ fn chat_wheel_scrolls_and_holds_the_view() {
     tick(&ui, 16.0);
     let before = scroll();
     let at = |ui: &UiRuntime, w: &str| -> (f32, f32) {
-        let t: mlua::Table = eval(ui, &format!("local x, y = {w}:GetOffset() return {{ x + 8, y + 8 }}"));
+        let t: mlua::Table = eval(
+            ui,
+            &format!("local x, y = {w}:GetOffset() return {{ x + 8, y + 8 }}"),
+        );
         (t.get(1).unwrap(), t.get(2).unwrap())
     };
     let (ux, uy) = at(&ui, "up");
