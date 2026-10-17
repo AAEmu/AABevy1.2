@@ -918,8 +918,8 @@ slot. Empty frame tables remain shown without drawing, matching native behavior.
 
 Optional `AAUI.CombatTextPosition(sourceId, targetId)` returns `{x, y, alpha = 1}`: physical
 screen pixels at the projected target's authored height, with optional distance fade. A nil
-result culls the display, including attached art, and skips phase updates while absolute time
-continues. Without a hook the examples use screen center. `SetInitPos(x,y)` truncates to native
+result suppresses the display and attached art while its authored finite timeline continues,
+releasing the pool slot normally. Without a hook the examples use screen center. `SetInitPos(x,y)` truncates to native
 integers and offsets that position. The app supplies projection/height/distance; the toolkit
 keeps the animation and text effects. Movement/shake affect text; attached critical atlas art
 follows the projected widget independently. All samples live outside the layout tree, and
@@ -933,6 +933,13 @@ count/reveal/afterimages, culling, independent art, active restart/stop, shake, 
 `combat_text.alb` events/pool reuse. The full runtime suite passed 101 tests plus both doc
 tests (one font test ignored); the added shake and original combat-state regression also pass,
 bringing runtime coverage to 102 tests.
+
+The projection follow-up fixes offscreen pool exhaustion: native `39287500` proceeds from
+projection (`392876e4`) into phase timing (`3928786f`); only its explicit distance cutoff
+(`39287665` -> hide) exits before timing. A missing application projection therefore suppresses
+painting without pausing finite phases. The original-pool regression fills all ordinary slots
+under nil projection, verifies normal completion and no further hook calls, then reuses a slot
+with fresh source/target IDs and makes its position available on the same frame.
 
 `examples/combat_text.rs` uses `aa_dev` and the original stage scripts with fixture projections.
 `shots/aa-ui/animation/combat-text.png` shows white melee numbers, the critical blood atlas,
