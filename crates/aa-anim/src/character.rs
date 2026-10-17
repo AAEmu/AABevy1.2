@@ -694,6 +694,11 @@ fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
             let c = skin_base_color(diffuse, bright).to_linear();
             let t = look.skin_tune;
             m.base_color = Color::linear_rgb(c.red * t.x, c.green * t.y, c.blue * t.z);
+            if look.kind != PartKind::Face {
+                // the body and the costumes' skin parts: see `BODY_SKIN_ROUGHNESS`
+                m.perceptual_roughness = BODY_SKIN_ROUGHNESS;
+                m.reflectance = BODY_SKIN_REFLECTANCE;
+            }
             if look.fur {
                 m.reflectance = 0.12;
                 m.perceptual_roughness = m.perceptual_roughness.max(0.75);
@@ -716,6 +721,13 @@ fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
         _ => {}
     }
 }
+
+/// Sheen of the skin of the body and of the costumes' skin parts (chest cutouts, bare arms), the
+/// face keeps the conversion's roughness 0.5 / reflectance 0.4. The captures show soft highlights
+/// where the body turns away from the key light (elf female chest cutout); at the face's roughness
+/// the body skin of the same lighting is a flat patch of one colour.
+const BODY_SKIN_ROUGHNESS: f32 = 0.3;
+const BODY_SKIN_REFLECTANCE: f32 = 0.7;
 
 /// Per model colour multiplier of the skin (linear rgb) on top of `aa_cry::shade::skin_base_color`.
 ///
@@ -741,14 +753,26 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
 
 /// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts).
 ///
-/// `skin_tune` is fitted to the face region of the captures. Only the ferre male needs a different
-/// body: his body fur texture is greyer than his face texture while the capture is dark brown all
-/// over, so the body gets a warm, darker tint. (The other bodies are not tinted: their textures
-/// are brighter than the faces', but the faces are lit more frontally and measure brighter in the
-/// captures' lighting.)
+/// `skin_tune` is fitted to the face region of the captures, so it carries the face texture's
+/// colour. A body texture that is much brighter or more saturated than the face's needs its own
+/// tune:
+///
+/// * ferre male: his body fur texture is greyer than his face texture while the capture is dark
+///   brown all over, so the body gets a warm, darker tint;
+/// * elf female: the nude texture is peach `(0.75, 0.41, 0.32)` linear, the face's grey pink
+///   `(0.37, 0.26, 0.26)`, so the face tune (1.6) pushed the red of the costume's chest cutout
+///   (`el_f_login001`, a `HumanSkin` sub-mesh with the nude texture) into the tone curve's shoulder:
+///   a flat salmon patch `(243, 161, 148)` where the capture shows pale pink `(221, 165, 163)`. The
+///   row is the face / body texture ratio `(0.50, 0.63, 0.83)` times about 1.3, fitted to the mean
+///   of the two cutout lobes of `step2_elf_female` (`compare`, same pixels).
+///
+/// The other bodies are not tinted: their textures are brighter than the faces' too, but the faces
+/// are lit more frontally and measure brighter in the captures' lighting, and none of them shows a
+/// large area of skin that disagrees with its capture.
 pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
     match (race, gender) {
         (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),
+        (Race::Elf, Gender::Female) => Vec3::new(0.65, 0.78, 0.90),
         _ => Vec3::ONE,
     }
 }
