@@ -46,12 +46,15 @@ use crate::water_material::{WaterMaterial, WaterStyles};
 pub mod effects;
 pub mod sounds;
 pub mod lights;
+pub mod rigid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Brush,
     /// Static `entities.xml` render slots; separate from brush/vegetation records.
     Entity,
+    /// Playing rigid CGA render slots from `entities.xml`.
+    Animated,
     /// Small vegetation (instances whose own view distance is at most [`WorldConfig::vegetation_distance`]).
     Vegetation,
     /// Large vegetation (trees): own view distance beyond `vegetation_distance`, drawn up to
@@ -65,6 +68,7 @@ pub struct CellObjectData {
     /// Instance indices per sector (`sx * 16 + sy`).
     pub brush_bins: Vec<Vec<u32>>,
     pub entity_bins: Vec<Vec<u32>>,
+    pub animated_bins: Vec<Vec<u32>>,
     pub veg_bins: Vec<Vec<u32>>,
     pub tree_bins: Vec<Vec<u32>>,
 }
@@ -74,6 +78,7 @@ impl CellObjectData {
     pub fn new(objects: CellObjects, tree_threshold: f32) -> Self {
         let mut brush_bins = vec![Vec::new(); 256];
         let mut entity_bins = vec![Vec::new(); 256];
+        let mut animated_bins = vec![Vec::new(); 256];
         let mut veg_bins = vec![Vec::new(); 256];
         let mut tree_bins = vec![Vec::new(); 256];
         let bin = |x: f32, y: f32| {
@@ -109,7 +114,11 @@ impl CellObjectData {
             let bins = if v.max_view_dist > tree_threshold { &mut tree_bins } else { &mut veg_bins };
             bins[bin(v.pos.x, v.pos.y)].push(i as u32);
         }
-        CellObjectData { objects, brush_bins, entity_bins, veg_bins, tree_bins }
+        for (i, prop) in objects.animated_props.iter().enumerate().filter(|(_, p)| !p.hidden) {
+            let t = prop.translation();
+            animated_bins[bin(t.x, t.y)].push(i as u32);
+        }
+        CellObjectData { objects, brush_bins, entity_bins, animated_bins, veg_bins, tree_bins }
     }
 }
 
@@ -162,6 +171,7 @@ struct ModelKey {
 struct Instanced {
     loaded: Arc<LoadedModel>,
     nodes: Vec<Mat4>,
+    rigid: Option<Arc<rigid::Clip>>,
 }
 
 enum ModelState {
@@ -197,7 +207,7 @@ impl Models {
 }
 
 /// A model prepared by a worker.
-type ModelResult = (u32, Result<PreparedModel, aa_cry::Error>);
+type ModelResult = (u32, Result<(PreparedModel, Option<Arc<rigid::Clip>>), aa_cry::Error>);
 
 /// Most model jobs queued on the workers at once; the rest wait their turn in `Wanted`, so the queue holds what is near.
 const MAX_QUEUED_MODELS: usize = 48;
@@ -256,6 +266,8 @@ pub struct ObjectStats {
     pub decals: usize,
     /// Drawn parts of static `entities.xml` slots, also included in `entities`.
     pub entity_props: usize,
+    /// Drawn parts of authored playing CGAs, also included in `entities`.
+    pub animated_props: usize,
 }
 
 impl ObjectState {
@@ -307,8 +319,10 @@ fn sector_distance(p: Vec3, cell: (i32, i32), sector: usize) -> f32 {
 
 /// LOD for a distance band, with hysteresis around the current level.
 fn object_lod(kind: Kind, d: f32, current: Option<u8>) -> u8 {
+    if kind == Kind::Animated { return 0; }
     let bands: [f32; 2] = match kind {
         Kind::Brush | Kind::Entity => [140.0, 380.0],
+        Kind::Animated => unreachable!(),
         Kind::Vegetation => [55.0, 130.0],
         Kind::Trees => [150.0, 350.0],
     };
@@ -539,7 +553,7 @@ pub fn stream_objects(
     while let Some((id, result)) = state.model_queue.pop_front() {
         let key_path = state.models.keys[id as usize].path.clone();
         state.models.states[id as usize] = match result {
-            Ok(prepared) => {
+            Ok((prepared, rigid)) => {
                 let loaded = cry.finish_model(prepared);
                 if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
                     // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
@@ -551,7 +565,7 @@ pub fn stream_objects(
                     }
                 }
                 let nodes = loaded.parts.iter().map(|(ni, _)| Mat4::from(node_world(&loaded.model, *ni))).collect();
-                ModelState::Ready(Arc::new(Instanced { loaded, nodes }))
+                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid }))
             }
             Err(e) => {
                 debug!("aa-world: model {key_path}: {e}");
@@ -579,6 +593,7 @@ pub fn stream_objects(
             for (kind, bin, cap) in [
                 (Kind::Brush, &data.brush_bins[sector], cfg.brush_distance),
                 (Kind::Entity, &data.entity_bins[sector], cfg.brush_distance),
+                (Kind::Animated, &data.animated_bins[sector], cfg.brush_distance),
                 (Kind::Vegetation, &data.veg_bins[sector], cfg.vegetation_distance),
                 (Kind::Trees, &data.tree_bins[sector], cfg.tree_distance),
             ] {
@@ -667,7 +682,16 @@ pub fn stream_objects(
                 workers.spawn(d, move || {
                     let options = ModelOptions { lod: key.lod as u32, material: key.material.clone(), cry_space: true, ..default() };
                     // a panic must not leave the model "loading" for ever
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loader.prepare_model(&key.path, &options)))
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let prepared = loader.prepare_model(&key.path, &options)?;
+                        let rigid = if key.path.to_ascii_lowercase().ends_with(".cga") && key.lod == 0 {
+                            match rigid::Clip::load(&key.path, &prepared.loaded().model) {
+                                Ok(clip) => Some(Arc::new(clip)),
+                                Err(e) => { debug!("aa-world: {}: {e}", key.path); None }
+                            }
+                        } else { None };
+                        Ok((prepared, rigid))
+                    }))
                         .unwrap_or_else(|_| Err(aa_cry::Error::Invalid(format!("panic while preparing {}", key.path))));
                     let _ = tx.send((id, result));
                 });
@@ -739,6 +763,7 @@ pub fn stream_objects(
     state.stats.models_failed = state.models.states.iter().filter(|m| matches!(m, ModelState::Failed)).count();
     let spawned: usize = state.sectors.values().map(|s| s.spawned).sum();
     state.stats.entity_props = state.sectors.iter().filter(|(k, _)| k.3 == Kind::Entity).map(|(_, s)| s.spawned).sum();
+    state.stats.animated_props = state.sectors.iter().filter(|(k, _)| k.3 == Kind::Animated).map(|(_, s)| s.spawned).sum();
     let busy = pending > 0 || waiting > 0;
     if busy {
         state.busy_ticks += 1;
@@ -755,6 +780,7 @@ fn instance_model(data: &CellObjectData, kind: Kind, idx: usize, groups: &VegGro
             ((b.model as usize) < data.objects.models.len()).then_some((b.model, b.material))
         }
         Kind::Entity => data.objects.entity_props.get(idx).map(|_| (idx as u32, -1)),
+        Kind::Animated => data.objects.animated_props.get(idx).map(|_| (idx as u32, -1)),
         Kind::Vegetation | Kind::Trees => {
             let v = data.objects.vegetation.get(idx)?;
             groups.groups.contains_key(&v.group).then_some((u32::from(v.group), -1))
@@ -776,6 +802,10 @@ fn model_names(data: &CellObjectData, kind: Kind, a: u32, b: i32, groups: &VegGr
         }
         Kind::Entity => {
             let prop = data.objects.entity_props.get(a as usize)?;
+            Some((prop.model.clone(), prop.material.clone()))
+        }
+        Kind::Animated => {
+            let prop = data.objects.animated_props.get(a as usize)?;
             Some((prop.model.clone(), prop.material.clone()))
         }
         Kind::Vegetation | Kind::Trees => {
@@ -805,6 +835,7 @@ fn spawn_instance(
             (b.mat4(), view.min(cfg.brush_distance))
         }
         Kind::Entity => (data.objects.entity_props[idx].matrix, cfg.brush_distance),
+        Kind::Animated => (data.objects.animated_props[idx].matrix, cfg.brush_distance),
         Kind::Vegetation | Kind::Trees => {
             let v = &data.objects.vegetation[idx];
             let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
@@ -813,6 +844,13 @@ fn spawn_instance(
         }
     };
     let pre = Mat4::from_quat(CRY_TO_BEVY) * Mat4::from_translation(-sector_origin) * matrix;
+    if kind == Kind::Animated {
+        if let Some(clip) = &inst.rigid {
+            entry.spawned += rigid::spawn(commands, entry.entity, cell, &data.objects.animated_props[idx],
+                &inst.loaded, clip.clone(), pre, view);
+        }
+        return;
+    }
     for ((_, parts), node) in inst.loaded.parts.iter().zip(&inst.nodes) {
         let full = pre * *node;
         if !full.is_finite() || full.determinant().abs() < 1e-9 {
@@ -873,6 +911,7 @@ fn bin_of(data: &CellObjectData, kind: Kind, sector: usize) -> &[u32] {
     match kind {
         Kind::Brush => &data.brush_bins[sector],
         Kind::Entity => &data.entity_bins[sector],
+        Kind::Animated => &data.animated_bins[sector],
         Kind::Vegetation => &data.veg_bins[sector],
         Kind::Trees => &data.tree_bins[sector],
     }
