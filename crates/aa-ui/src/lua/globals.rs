@@ -286,6 +286,7 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok((u.cursor.0 * u.ui_scale, u.cursor.1 * u.ui_scale))
         })?,
     )?;
+    super::keyboard::install_input(lua)?;
     // Hooks the app (or the example fakes) fills in: `AAUI.SlotContent`, `AAUI.ChatTabs`, ...
     if g.raw_get::<Value>("AAUI")?.is_nil() {
         g.raw_set("AAUI", lua.create_table()?)?;

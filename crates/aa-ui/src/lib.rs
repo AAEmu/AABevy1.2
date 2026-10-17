@@ -38,13 +38,14 @@ pub mod tree;
 pub mod uitext;
 
 use bevy::camera::ScalingMode;
-use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::keyboard::{KeyboardFocusLost, KeyboardInput};
 use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 pub use aa_lua::Stage;
 pub use lua::edit::UiKey;
+pub use lua::keyboard::{Modifiers, native_key_name};
 
 use crate::render::{UiBatch, UiCamera, UiRenderState};
 
@@ -79,6 +80,7 @@ impl UiRuntime {
             hover: None,
             entered: Vec::new(),
             focus: None,
+            keyboard: Default::default(),
             caret_visible: false,
             caret_t0: 0.0,
             cursor: (0.0, 0.0),
@@ -205,9 +207,27 @@ impl UiRuntime {
         self.key(&UiKey::Text(s.to_string()))
     }
 
-    /// The widget with the keyboard focus.
+    /// The visible keyboard capture owner, or the focused widget (including navigation focus).
+    /// Use [`Self::keyboard_captured`] to decide whether gameplay keys are suppressed.
     pub fn focus(&self) -> Option<tree::Id> {
-        lua::ui(&self.lua).focus
+        let u = lua::ui(&self.lua);
+        u.keyboard.owner(&u.tree, u.focus)
+    }
+
+    /// True while UI owns keyboard input, including the frame capture ends and held UI keys.
+    /// Gameplay input should check this after [`UiInput`].
+    pub fn keyboard_captured(&self) -> bool {
+        let u = lua::ui(&self.lua);
+        u.keyboard.captured(&u.tree, u.focus)
+    }
+
+    pub fn modifiers(&self) -> Modifiers {
+        lua::ui(&self.lua).keyboard.modifiers()
+    }
+
+    /// Forward an OS key edge. Returns true if UI consumed it.
+    pub fn key_event(&self, code: KeyCode, pressed: bool, text: Option<&str>) -> bool {
+        lua::keyboard::event(&self.lua, code, pressed, text)
     }
 
     /// Load the game database's UI texts (cached per path and locale) and serve
@@ -439,7 +459,7 @@ pub struct UiStats {
     pub quads: usize,
     pub draw_calls: usize,
     pub rebuilds: u64,
-    /// A widget (edit box) has the keyboard focus: the app should not treat keys as game
+    /// A widget has keyboard capture/edit focus, or UI consumed a key this frame: the app should not treat keys as game
     /// bindings this frame.
     pub keyboard_focus: bool,
     /// CPU time of the last UI frame (input, Lua tick, rebuild if any), microseconds.
@@ -465,6 +485,10 @@ pub struct UiPlugin {
     pub config: Option<UiConfig>,
 }
 
+/// UI key delivery and consumption handoff. Gameplay keyboard systems should run after this set.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiInput;
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config.clone().unwrap_or_default())
@@ -472,7 +496,7 @@ impl Plugin for UiPlugin {
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard, ui_frame, ui_cursor).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame, ui_cursor).chain());
     }
 }
 
@@ -599,37 +623,29 @@ fn ui_cursor(
     render::sync_cursor(&mut commands, &mut state, &mut g, pointer, &mut meshes, &mut materials, &mut images, formats.as_deref(), &mut batches);
 }
 
-/// Key presses -> the focused widget ([`UiRuntime::key`]).
-fn ui_keyboard(rt: Option<NonSend<UiRuntime>>, mut keys: MessageReader<KeyboardInput>) {
+/// Physical key edges -> generic capture or edit focus, preserving real release timing.
+fn ui_keyboard(
+    rt: Option<NonSend<UiRuntime>>,
+    mut keys: MessageReader<KeyboardInput>,
+    mut lost: MessageReader<KeyboardFocusLost>,
+    mut stats: ResMut<UiStats>,
+) {
     let Some(rt) = rt else {
         keys.clear();
+        lost.clear();
+        stats.keyboard_focus = false;
         return;
     };
+    lua::keyboard::begin_frame(&rt.lua);
+    let focus_lost = lost.read().next().is_some();
+    lost.clear();
     for ev in keys.read() {
-        if ev.state != bevy::input::ButtonState::Pressed {
-            continue;
-        }
-        let k = match &ev.logical_key {
-            Key::Backspace => UiKey::Backspace,
-            Key::Delete => UiKey::Delete,
-            Key::ArrowLeft => UiKey::Left,
-            Key::ArrowRight => UiKey::Right,
-            Key::ArrowUp => UiKey::Up,
-            Key::ArrowDown => UiKey::Down,
-            Key::Home => UiKey::Home,
-            Key::End => UiKey::End,
-            Key::Enter => UiKey::Enter,
-            Key::Escape => UiKey::Escape,
-            Key::Tab => UiKey::Tab,
-            _ => match &ev.text {
-                Some(t) if !t.is_empty() && !t.chars().any(char::is_control) => {
-                    UiKey::Text(t.to_string())
-                }
-                _ => continue,
-            },
-        };
-        rt.key(&k);
+        rt.key_event(ev.key_code, ev.state == bevy::input::ButtonState::Pressed, ev.text.as_deref());
     }
+    if focus_lost {
+        lua::keyboard::focus_lost(&rt.lua);
+    }
+    stats.keyboard_focus = rt.keyboard_captured();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -745,7 +761,7 @@ fn ui_frame(
         stats.draw_calls = state.draw_calls;
         stats.rebuilds += 1;
     }
-    stats.keyboard_focus = u.focus.is_some();
+    stats.keyboard_focus = u.keyboard.captured(&u.tree, u.focus);
     drop(g);
     stats.frame_us = t0.elapsed().as_secs_f32() * 1e6;
     drop(p_frame);
