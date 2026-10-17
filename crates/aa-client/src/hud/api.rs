@@ -75,8 +75,6 @@ pub struct HudData {
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,
     pub passive_buffs: Vec<u32>,
-    /// The floating combat texts that are playing (`combat.rs`).
-    pub texts: super::combat::Texts,
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
@@ -125,7 +123,6 @@ impl Default for HudData {
             yaw: 0.0,
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
-            texts: Default::default(),
             local_combat: false,
             casts: Default::default(),
             loot: Default::default(),
@@ -165,8 +162,6 @@ const FAKE_INGAME: [(&str, &str); 8] = [
     ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
 ];
 const INGAME_LUA: &str = include_str!("ingame.lua");
-/// The native behaviour of the combat text widgets, run once the stage is built.
-const COMBAT_LUA: &str = include_str!("combat.lua");
 /// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
@@ -207,7 +202,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
-    super::combat::install(lua, &hud, bridge)?;
+    super::combat::install(lua)?;
     super::cast::install(lua, &hud, bridge)?;
     super::loot::install(lua, &hud, bridge)?;
     super::dialog::install(lua, &hud, bridge)?;
@@ -651,9 +646,6 @@ fn dev_sim(s: &mut Snapshot) {
 /// The events the client raises when the player has entered the world and the loading screen closed,
 /// then the chat channels joined and the lines received so far.
 pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) {
-    if let Err(e) = rt.exec("@combat.lua", COMBAT_LUA) {
-        warn!("hud: combat text widgets: {e}");
-    }
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }

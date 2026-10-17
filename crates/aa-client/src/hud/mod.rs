@@ -63,6 +63,12 @@ mod tipitem;
 mod tips;
 mod usable;
 
+/// Run the isolated original-script combat example without a network connection.
+#[allow(dead_code)]
+pub(crate) fn combat_fixture() {
+    combat::fixture::run();
+}
+
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
 use aa_ui::{UiConfig, UiRuntime};

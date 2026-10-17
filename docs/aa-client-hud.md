@@ -171,19 +171,31 @@ pond (account `bevytest`, the Angry Rats) with
 `--enter-world --hour 12 --pos 15578.042,15382.122 --yaw 158.74 --cam-yaw -90 --cam-dist 4 --cam-pitch 0 --hud-fov 71.25 --hud-side-cam --hud-key tab 12 --hud-key slot4 14 --hud-burst shots/hud/b/f 14 0.3 16`
 (Tab, then the melee attack in slot 4; compare with `reference/ingame/combat_*`).
 
-**Floating text** (`combat.rs`, `combat.lua`). The original puts its texts on 30 `damagedisplay` widgets
-(`combattext/combat_text.lua`: `COMBAT_TEXT` for damage and heals of other units, `COMBAT_MSG` for what happens to the
-player, `EXP_CHANGED`, `UNIT_COMBAT_STATE_CHANGED`) and the native widget plays an animation table
-(`COMBAT_TEXT_ANIMATION[CTA_*]`). aa-ui's widget is a stub, so `combat.lua` replaces the widgets' methods after the stage is
-built and hands each started text to Rust (`HUD.combat_text_start`); `update_texts` draws them as 30 pooled `Text2d` on the
-plate camera. The model, calibrated on the captures: a text starts at the first frame's scale and alpha, every frame holds
-its state for `showTime` ms and then changes to the next frame's over `timeToNextFrame` ms (`moveX` / `moveY` pixels during
-that change), the last frame reached ends it; the font is `ui/font/librebaskerville-bold.ttf` (what `fonts.g` maps the
-original's gothic to), 60 px times the resting scale, no outline; the anchor is the point over the unit's head (height +
-0.18 m scaled like the plate gap) plus the script's pixel offset. A basic attack number lives 650 ms, "Battle Start!" 1270
-ms. A hit is `UnitDamaged`: the player's attack is `COMBAT_TEXT` (`SWING` for the auto attack, `SKILL`, `DOT` for buffs,
-the hit type `HIT` / `CRITICAL` / `MISS` / `DODGE` / `BLOCK` ... from the wire's hit type), a hit on the player is `COMBAT_MSG`
-(the red "-12", and the combat log line). Not drawn: the afterimages, the shake and the `critical.dds` burst of critical hits.
+**Floating text** (`combat.rs`, `combat/positions.rs`). Original scripts own the 30
+`damagedisplay` widgets, colors, fonts, frame tables and critical atlas animation. The former
+`combat.lua` method overrides and pooled Bevy `Text2d` renderer have been removed. Native
+toolkit timelines now provide holds/transitions, movement, counting/reveal, shake and afterimages.
+The server event bridge retains negative damage / positive healing and the original event order.
+
+`AAUI.CombatTextPosition(source,target)` reads a separate projection cache, avoiding a borrowed
+game-state callback during Lua events. It selects the target's identity, with empty/player targets
+resolving to the player; unknown IDs never fall back to a different unit. Only active requested
+IDs plus the player are projected. The system follows current camera/player/remote movement,
+before `aa_ui::UiFrame`, so text follows moving units instead of a frozen first-hit world point.
+Logical viewport coordinates become physical pixels before the hook. Unknown/offscreen positions
+return nil: toolkit drawing is suppressed while the authored timeline still ends and releases its
+slot. Measured plate height plus the existing scaled0.18m gap remains an app calibration, not a
+recovered native height rule. Startup's immediate animation sample can be unprojected until that
+frame's cache update.
+
+The server-free `combat_hud` example loads actual game tables and the whole original world stage,
+then moves fixture units and camera through this same app projection system. Its assertions check
+that no method overrides remain, unknown IDs return nil, target identity stays separate and screen
+coordinates actually move. `shots/hud/sol61-combat-native/native-final.png` was inspected: basic22,
+critical128 with the original red burst and Battle End. Zero Lua errors,268-276FPS at1920x1080 on
+the shared machine. The original melee reference was inspected for typography/behavior context;
+this diagnostic scene is not a pixel-matched world capture. Live combat follow-up remains blocked
+by the lane connection timeout. The toolkit's original30-slot nil/reuse regression also passes.
 
 **Fight state.** The server only sends `SCCombatCleared` (when the player's fight ends, the kill); it never sends
 `SCCombatEngaged` in these fights. The HUD enters combat itself when the player attacks or is attacked
