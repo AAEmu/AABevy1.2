@@ -247,7 +247,7 @@ local function bagCount()
 end
 local fake = {}
 for _, name in ipairs({ "Capacity", "CountEmptyBagSlots", "CountItems", "IsInvalidSlot", "SlotByIdx", "GetBagItemInfo",
-                        "ItemIdentifier", "ItemStack", "GetBagNumSlots", "Slots", "CurrentTabIdx" }) do
+                        "ItemIdentifier", "ItemStack", "GetBagNumSlots", "Slots", "CurrentTabIdx", "TabInfo" }) do
   fake[name] = X2Bag[name]
 end
 X2Bag.Capacity = function(self) if not bagKnown() then return fake.Capacity(self) end return HUD.bag_slots end
@@ -262,11 +262,32 @@ X2Bag.IsInvalidSlot = function(self, v)
   if not bagKnown() then return fake.IsInvalidSlot(self, v) end
   return v < 1 or v > HUD.bag_slots
 end
--- the All tab: the slot as it is; the other tabs are not sorted by group yet
+-- the All tab shows the slots as they are; the others (default_inventory_tabs, or the player's own) show the
+-- items of their item groups one after the other, in bag order
+local function tabSlots(groups)
+  local want = {}
+  for _, g in ipairs(groups or {}) do want[g] = true end
+  local list = {}
+  for slot = 1, HUD.bag_slots do
+    local s = HUD.bag[slot]
+    if s ~= nil and want[s.group] then list[#list + 1] = slot end
+  end
+  return list
+end
+local tabCache = { bag = false, groups = false, list = {} }
 X2Bag.SlotByIdx = function(self, v)
   if not bagKnown() then return fake.SlotByIdx(self, v) end
-  if fake.CurrentTabIdx(self) == 1 and HUD.bag[v] ~= nil then return v end
-  return nil
+  local tab = fake.CurrentTabIdx(self)
+  if tab == 1 or fake.TabInfo == nil then
+    if HUD.bag[v] ~= nil then return v end
+    return nil
+  end
+  -- one list per tab and bag change (the scripts ask for every slot in turn)
+  local _, _, groups = fake.TabInfo(X2Bag, tab)
+  if tabCache.bag ~= HUD.bag or tabCache.groups ~= groups then
+    tabCache = { bag = HUD.bag, groups = groups, list = tabSlots(groups) }
+  end
+  return tabCache.list[v]
 end
 X2Bag.GetBagItemInfo = function(self, bagId, slot, needInfo)
   if not bagKnown() then return fake.GetBagItemInfo(self, bagId, slot, needInfo) end

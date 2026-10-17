@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
 /// Makes the UI cameras agree with the 3D world camera (every frame in game, cheap when they do).
+#[allow(clippy::type_complexity)]
 pub fn match_world_camera(
     mut commands: Commands,
     world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<UiCamera>)>,
@@ -37,10 +38,10 @@ pub fn match_world_camera(
         if ui_msaa.copied() != Some(msaa) {
             commands.entity(entity).insert(msaa);
         }
-        if let Some(mut space) = space {
-            if *space != CompositingSpace::Linear {
-                *space = CompositingSpace::Linear;
-            }
+        if let Some(mut space) = space
+            && *space != CompositingSpace::Linear
+        {
+            *space = CompositingSpace::Linear;
         }
     }
 }

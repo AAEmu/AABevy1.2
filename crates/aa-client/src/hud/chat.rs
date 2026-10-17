@@ -114,10 +114,10 @@ impl ScriptedKeys {
         let args: Vec<String> = std::env::args().collect();
         let mut steps = Vec::new();
         for (i, a) in args.iter().enumerate() {
-            if a == "--hud-key" || a == "--hud-type" {
-                if let (Some(v), Some(t)) = (args.get(i + 1), args.get(i + 2).and_then(|t| t.parse::<f32>().ok())) {
-                    steps.push((t, v.clone(), a == "--hud-type"));
-                }
+            if (a == "--hud-key" || a == "--hud-type")
+                && let (Some(v), Some(t)) = (args.get(i + 1), args.get(i + 2).and_then(|t| t.parse::<f32>().ok()))
+            {
+                steps.push((t, v.clone(), a == "--hud-type"));
             }
         }
         steps.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -159,12 +159,12 @@ pub fn chat_keys(
         return;
     };
     // opening requested by the last frame's key
-    if let Some(slash) = pending.take() {
-        if !focus.0 && rt.focus().is_none() {
-            if let Err(e) = rt.exec("@chat_open", &format!("HUD.chat_open({})", if slash { "\"/\"" } else { "nil" })) {
-                warn!("hud: chat input: {e}");
-            }
-        }
+    if let Some(slash) = pending.take()
+        && !focus.0
+        && rt.focus().is_none()
+        && let Err(e) = rt.exec("@chat_open", &format!("HUD.chat_open({})", if slash { "\"/\"" } else { "nil" }))
+    {
+        warn!("hud: chat input: {e}");
     }
     let mut open = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
     // "/" opens the input with a slash already typed, like the real client

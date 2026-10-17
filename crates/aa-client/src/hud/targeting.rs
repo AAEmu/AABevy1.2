@@ -23,6 +23,7 @@ fn unit_centre(pos: aa_net::Pos, scale: f32) -> Vec3 {
 }
 
 /// `Tab`: the nearest unit that is not the one targeted; the next one after it when pressed again.
+#[allow(clippy::too_many_arguments)]
 pub fn tab_target(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<HudKeyboardFocus>,

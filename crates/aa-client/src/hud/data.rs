@@ -12,6 +12,9 @@ use std::sync::{Arc, OnceLock};
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags};
 
+use super::quests::QuestTables;
+use super::stats::StatTables;
+
 /// Name and icon of a skill, item or buff (`ui/icon/<icon>`).
 #[derive(Clone, Debug, Default)]
 pub struct Named {
@@ -30,6 +33,8 @@ pub struct ItemInfo {
     pub use_skill: u32,
     /// `items.description`.
     pub desc: String,
+    /// `item_groups.id` the item's category belongs to (the bag tabs filter by it), 0 when unknown.
+    pub group: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -38,6 +43,10 @@ pub struct SkillInfo {
     /// `skills.cooldown_time` (ms) and `cooldown_tag_id`.
     pub cooldown_ms: u32,
     pub tag: u32,
+    /// The global cooldown casting it starts (ms): `custom_gcd`, or one second for `default_gcd`.
+    pub gcd_ms: u32,
+    /// `skills.ignore_global_cooldown`: the global cooldown does not hold it back.
+    pub ignore_gcd: bool,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -53,10 +62,12 @@ pub struct NpcInfo {
     pub name: String,
     #[allow(dead_code)] // for the quest markers and the level text of the target frame
     pub level: i64,
-    /// `npcs.npc_grade_id` (1 = normal, 2 = ... 7 = ...).
+    /// `npcs.npc_grade_id`, named by [`GameData::grade_name`].
     pub grade: i64,
-    #[allow(dead_code)]
+    /// `npcs.npc_kind_id`.
     pub kind: i64,
+    /// `npcs.npc_template_id`: with the grade and kind the key of the HP formula's variables.
+    pub template: i64,
     pub faction_id: i64,
     pub show_name_tag: bool,
 }
@@ -170,6 +181,10 @@ pub struct GameData {
     pub sub_zone_shapes: Vec<SubZoneShape>,
     /// `zones.group_id` -> the faction protecting the group's zones (0 = none).
     pub group_faction: HashMap<u32, u32>,
+    /// The formulas behind maximum HP / MP.
+    pub stats: StatTables,
+    /// Which NPCs start and take in which quests.
+    pub quests: QuestTables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -212,7 +227,7 @@ impl SharedGameData {
 }
 
 /// A column the table declares as text or integer, whichever the row holds (0 for null).
-fn any_int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
+pub(super) fn any_int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
     use rusqlite::types::Value;
     Ok(match r.get::<_, Value>(i)? {
         Value::Integer(n) => n,
@@ -221,6 +236,19 @@ fn any_int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
         _ => 0,
     })
 }
+
+/// A boolean column the database stores as `'t'` / `'f'` text or as a number.
+pub(super) fn any_flag(r: &rusqlite::Row, i: usize) -> rusqlite::Result<bool> {
+    use rusqlite::types::Value;
+    Ok(match r.get::<_, Value>(i)? {
+        Value::Integer(n) => n != 0,
+        Value::Text(t) => matches!(t.trim(), "t" | "T" | "1" | "true"),
+        _ => false,
+    })
+}
+
+/// The global cooldown of a skill with `default_gcd` (the server: 1000 ms for a player, 1500 for an NPC).
+pub const DEFAULT_GCD_MS: u32 = 1000;
 
 impl GameData {
     pub fn load(path: &str) -> rusqlite::Result<GameData> {
@@ -265,7 +293,7 @@ impl GameData {
         let icon = |id: Option<i64>| id.and_then(|i| icons.get(&i)).map(|f| format!("ui/icon/{}", f.replace('\\', "/").to_ascii_lowercase())).unwrap_or_default();
         let mut data = GameData::default();
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id FROM skills")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -275,12 +303,14 @@ impl GameData {
                         named: Named { name: name("skills", id, r.get(1)?), icon: icon(r.get(2)?) },
                         cooldown_ms: any_int(r, 3)?.max(0) as u32,
                         tag: any_int(r, 4)?.max(0) as u32,
+                        gcd_ms: if any_flag(r, 6)? { DEFAULT_GCD_MS } else { any_int(r, 5)?.max(0) as u32 },
+                        ignore_gcd: any_flag(r, 7)?,
                     },
                 );
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id, max_stack_size, level_requirement, fixed_grade, use_skill_id FROM items")?;
+            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -293,6 +323,7 @@ impl GameData {
                         fixed_grade: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                         use_skill: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
                         desc: name("items_desc", id, None),
+                        group: r.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u32,
                     },
                 );
             }
@@ -313,7 +344,7 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, level, npc_grade_id, npc_kind_id, faction_id, show_name_tag FROM npcs")?;
+            let mut q = conn.prepare("SELECT id, name, level, npc_grade_id, npc_kind_id, faction_id, show_name_tag, npc_template_id FROM npcs")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -326,6 +357,7 @@ impl GameData {
                         kind: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
                         faction_id: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                         show_name_tag: r.get::<_, Option<String>>(6)?.as_deref() != Some("f"),
+                        template: r.get::<_, Option<i64>>(7)?.unwrap_or(0),
                     },
                 );
             }
@@ -381,6 +413,8 @@ impl GameData {
                 data.group_faction.entry(*group).or_insert(*faction);
             }
         }
+        data.stats = StatTables::load(&conn)?;
+        data.quests = QuestTables::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }
@@ -435,15 +469,24 @@ impl GameData {
         }
     }
 
-    /// `npcs.npc_grade_id` as the scripts name the grade (`GetUnitGradeColor`, the target frame's
-    /// ornaments). The table that names them is not in the database: 1 is most NPCs (normal),
-    /// the rest follow the order of strength; a guess.
+    /// `npcs.npc_grade_id` as the scripts name the grade (`UNIT_GRADE_TEXT`, `GetUnitGradeColor`, the
+    /// target frame's ornaments). The server database has no `npc_grades` table and the client keeps
+    /// its own in the encrypted pak database, so the order is derived:
+    ///
+    /// * the scripts know exactly eight grades (`locale_helper.alb`'s `UNIT_GRADE_TEXT`: weak, normal,
+    ///   strong, elite, boss_c, boss_b, boss_a, boss_s, weakest to strongest) and the NPCs use the ids 1 to 8;
+    /// * every `npc_grade` variable of `unit_formula_variables` (HP, mana, kill experience: the
+    ///   multipliers of a grade) puts the ids in the same order, from the weakest: 6, 1, 7, 2, 5, 4, 3, 8
+    ///   (HP of the NPC formula: 0.3, 1, 2, 3, 15, 25, 50, 100; kill experience 0.15, 1, 2, 4, 5, 10, 15, 20).
+    ///   Id 1 is the 11,483 ordinary NPCs, 8 the five world bosses (the Red Dragon).
     pub fn grade_name(grade_id: i64) -> &'static str {
         match grade_id {
-            2 => "strong",
-            3 => "elite",
-            4 => "boss_c",
-            5 => "boss_b",
+            6 => "weak",
+            7 => "strong",
+            2 => "elite",
+            5 => "boss_c",
+            4 => "boss_b",
+            3 => "boss_a",
             8 => "boss_s",
             _ => "normal",
         }

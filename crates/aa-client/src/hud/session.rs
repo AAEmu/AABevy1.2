@@ -182,8 +182,7 @@ pub fn scripted_session(
             warn!("hud: --hud-open {action}: {e}");
         }
     }
-    if script.clicks.last().is_some_and(|c| t >= c.0) {
-        let (_, at) = script.clicks.pop().unwrap();
+    if let Some((_, at)) = script.clicks.pop_if(|c| t >= c.0) {
         pointer.pos = Some(at);
         pointer.press = true;
         script.release = true;
