@@ -8,6 +8,8 @@
 //!     [--bg r,g,b]        background colour 0..255 (default: sampled from the capture)
 //!     [--yaw deg]         extra turn of the character (default: faces the capture's camera)
 //!     [--light K]         scale of the stage lights (default 1)
+//!     [--backlight K]     add the engine's `Char BackLight` term (`aa_cry::shade::backlight`): light 1 = K engine units
+//!                         (the login stage zones' `1 Color` x `1 Diffuse Multiplier` is 1 x 1), light 2 = 0
 //!     [--no-hair 1] [--costume none]
 //! ```
 //!
@@ -211,6 +213,7 @@ fn main() {
         .unwrap_or_else(|| sample_background(&target));
     App::new()
         .add_plugins((aa_dev::default_plugins("aa-anim compare"), aa_dev::DevPlugin, CryPlugin, AnimPlugin))
+        .add_plugins(aa_cry::shade::backlight::CharLightPlugin)
         .insert_resource(ClearColor(Color::srgb(bg.x, bg.y, bg.z)))
         .insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() })
         .insert_resource(CompareTarget(target))
@@ -313,6 +316,11 @@ fn stage_lights(commands: &mut Commands, cry: &mut CryAssets, camera: Entity, ro
         *i *= f("--amb");
     }
     stage.spawn(commands, cry, camera, rotation);
+    if let Some(k) = arg("--backlight").and_then(|v| v.parse::<f32>().ok()) {
+        let lux = k * aa_cry::stage::LIGHT_UNIT_LUX * aa_cry::stage::LOGIN_EXPOSURE;
+        use aa_cry::shade::backlight::{CDF_POSITIONS, CharBackLight};
+        commands.insert_resource(CharBackLight::from_positions(CDF_POSITIONS, [Vec4::new(lux, lux, lux, 1.0), Vec4::ZERO]));
+    }
 }
 
 /// The capture shows one moment of the idle; hold the first frame so renders are comparable.
