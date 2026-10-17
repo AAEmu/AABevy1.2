@@ -6,6 +6,7 @@ pub mod char_light;
 pub mod cinema;
 pub mod collide;
 pub mod coords;
+mod decals;
 pub mod cover;
 pub mod env;
 pub mod heightmap;

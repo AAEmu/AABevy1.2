@@ -16,6 +16,8 @@
 //!   fog), built on the task, drawn with `water_material::WaterMaterial`;
 //! * roads are terrain triangles clipped to the original spline boundaries on the placement task, with
 //!   cached diffuse/normal/opacity materials and the same cell lifetime as the water;
+//! * static decals are planar quads or project onto terrain/visible brush triangles, built once on the
+//!   placement task and released with their cell;
 //! * instancing: all parts of one model share mesh and material handles, which Bevy batches into instanced
 //!   draws. Parts are flattened (the node transform is baked) so an instance costs one entity per drawn part.
 
@@ -189,6 +191,7 @@ pub struct ObjectState {
     water: HashMap<(i32, i32), Vec<Entity>>,
     /// Terrain road entities, released with their owning placement cell.
     roads: HashMap<(i32, i32), Vec<Entity>>,
+    decals: HashMap<(i32, i32), Vec<Entity>>,
     road_assets: RoadAssets,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
@@ -202,7 +205,7 @@ pub struct ObjectState {
 }
 
 /// What a placement task delivers: binned objects, water meshes and prepared roads of the cell.
-type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>, Vec<RoadMesh>);
+type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>, Vec<RoadMesh>, Vec<RoadMesh>);
 
 #[derive(Default, Clone, Debug)]
 pub struct ObjectStats {
@@ -216,6 +219,8 @@ pub struct ObjectStats {
     pub spawn_ms: f32,
     pub water_cells: usize,
     pub roads: usize,
+    /// Drawn decal meshes (a combined terrain/object decal can produce two).
+    pub decals: usize,
 }
 
 impl ObjectState {
@@ -239,6 +244,7 @@ impl ObjectState {
             rx: Mutex::new(rx),
             water: HashMap::new(),
             roads: HashMap::new(),
+            decals: HashMap::new(),
             road_assets: RoadAssets::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
@@ -353,6 +359,12 @@ pub fn stream_objects(
             commands.entity(e).despawn();
         }
     }
+    let gone: Vec<_> = state.decals.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    for c in gone {
+        for e in state.decals.remove(&c).unwrap_or_default() {
+            commands.entity(e).despawn();
+        }
+    }
     let gone: Vec<_> = state.effects.keys().filter(|c| !loaded.contains(c)).copied().collect();
     for c in gone {
         for e in state.effects.remove(&c).unwrap_or_default() {
@@ -393,15 +405,16 @@ pub fn stream_objects(
             let objects = load_cell_objects(&world, c.0, c.1);
             let water = water_meshes(&objects.water, &objects.materials);
             let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
+            let decals = crate::decals::prepare_cell(&world, &objects, c, &terrain, &loader, &road_assets);
             let data = CellObjectData::new(objects, threshold);
-            let _ = tx.send((c, data, water, roads));
+            let _ = tx.send((c, data, water, roads, decals));
         });
     }
     let received: Vec<CellMessage> = {
         let rx = state.rx.lock().unwrap();
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     };
-    for (c, data, water, roads) in received {
+    for (c, data, water, roads, decals) in received {
         state.loading.remove(&c);
         if !loaded.contains(&c) {
             continue;
@@ -443,6 +456,20 @@ pub fn stream_objects(
         if !entities.is_empty() {
             state.roads.insert(c, entities);
         }
+        let mut entities = Vec::new();
+        for decal in decals {
+            let Some(material) = decal.material(&mut cry, &mut road_materials) else { continue };
+            let end = decal.distance.min(cfg.brush_distance).max(0.0) + decal.radius;
+            entities.push(commands.spawn((
+                Name::new("Terrain/object decal"),
+                Mesh3d(cry.meshes.add(decal.mesh)),
+                MeshMaterial3d(material),
+                Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
+                VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 20.0, use_aabb: true },
+                NotShadowCaster,
+            )).id());
+        }
+        if !entities.is_empty() { state.decals.insert(c, entities); }
         let placed = effects::spawn_cell(&mut commands, c, &data.objects.effects);
         if !placed.is_empty() {
             state.effects.insert(c, placed);
@@ -455,6 +482,7 @@ pub fn stream_objects(
     }
     state.stats.water_cells = state.water.len();
     state.stats.roads = state.roads.values().map(Vec::len).sum();
+    state.stats.decals = state.decals.values().map(Vec::len).sum();
     let Some(groups) = state.groups.clone() else { return };
 
     // models prepared by the workers: insert them (a few per frame)

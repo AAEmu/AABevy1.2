@@ -140,7 +140,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 |---|---|
 | 1 | brush, 128 B |
 | 2 | vegetation, 64 B |
-| 9 | decal, 111 B (kept raw) |
+| 9 | decal, 111 B; planar / forward terrain and static-brush projections drawn |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, the rest of the block |
 | 6, 14 | the rest of the block, not decoded (fog volumes / auto cubemaps, probably) |
@@ -179,7 +179,7 @@ example inspects cell (14,11) by default, `--memoria` the forest path, `--refere
 spawn reference, and `--stream-check --exit-after 18` asserts that unloading leaves no road
 entities. Remaining road limits: coarse terrain LODs can diverge from these fine projected
 triangles at distance, and the original per-texture specular/gloss behavior uses the existing
-material approximation. Type 9 decals remain unrendered.
+material approximation. Forward type 9 decals are now rendered as described below.
 
 Visual checks (2026-10-17, shared machine, RX 9070 XT):
 `shots/aa-world/roads/memoria.png` shows the original soft-banked dirt-road junction, 91
@@ -192,6 +192,62 @@ The unload smoke asserts that the road count and actual road entities become zer
 leaving the loaded world. All three screenshot runs and the unload run complete successfully, no
 road shader/runtime errors. Cell (14,11) still logs the existing water `blue_sky.dds` not-a-cube
 warning. All five focused road tests and `cargo check -p aa-world --examples` pass.
+
+Decals (`placement::Decal`, `decals.rs`, sharing the road material cache/shader): the 111-byte
+`SDecalChunk` stores a packed projection word at 39 (projection byte 39, deferred byte 40,
+front/back depth bytes 41/42), position at 43, authoring normal at 55, row-major right/up/front
+basis at 67, radius at 103, and packed material-low24 / sort-high8 at 107. Depth is
+`1 - packed / 255`; 255 is a sentinel read as 254. The normal can be scaled by radius;
+the explicit basis supplies the projection direction. Raw bytes remain available.
+Original 1.2 evidence: `sub_30220FA0` (reflection layout), `sub_30222F10` / `_LoadDecal`
+(packed loads), and `sub_3005DD50` (projection dispatch) in
+`D:/aa-re/zone/out/cry3dengine_dedicate.c`. Shader evidence is the pak's `modificatortc.cfi`
+(`_TCModifyDecal`) and `illum.cfx` (radial attenuation); the corresponding public
+[decal implementation](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/Cry3DEngine/Decal.cpp)
+also gives the UV equations.
+
+Forward projection types: 0 is a planar quad, 1 projects onto static receivers, 2 onto terrain,
+3 onto both. UVs are `S = .5 - dot(up, relative)/(2r)`,
+`T = .5 + dot(right, relative)/(2r)`. Terrain projection follows the native centre-height
+gate (`-.5 < authoredZ - groundZ < radius`), moves its centre onto the ground, and subtracts
+that delta from the radius. It clips the actual two-metre terrain triangles, including
+neighbour cells. Static projection clips visible LOD0 CGF triangles of overlapping brushes
+(including neighbouring placement cells), excluding back faces, helpers/proxies and NoDraw/Cut
+sub-materials. It deliberately uses render meshes rather than collision proxies. Native static
+receiver enumeration excludes vegetation (the original code removes render-node type 2).
+Combined projections can produce a separate terrain and receiver mesh.
+
+The original spherical fade `saturate(1 - dot(relative/r, relative/r))` runs per fragment;
+baking it only at sparse terrain vertices would erase small decals. Planar decals retain their
+authored plane and texture alpha. DDS reads, receiver model parsing and clipping happen on the
+same at-most-two pending placement workers; models are parsed once per placement task and
+materials/textures are shared across cells. Decal textures clamp at their authored footprint,
+including an independent opacity map when present. A 5 mm normal offset avoids depth fighting
+with separately transformed receiver meshes. `ObjectStats.decals` counts the drawn meshes;
+all decal entities disappear on cell unload. The `decals` example provides `--straw`, `--planar`,
+`--no-vegetation`, `--pos`, `--look`, and an asserting `--stream-check`.
+
+Verification: four focused decal tests cover the packed fields/basis, planar UV coverage,
+rotated wall clipping/back-face rejection, and real cell (18,7): its 44 records produce exactly
+43 terrain and five visible-brush receiver meshes. Five road regression tests still pass.
+`shots/aa-world/decals/straw.png` shows the original straw around the mangers in (14,11),
+125 streamed decal meshes + 102 roads, about 120–165 FPS at 1600x900. `receivers.png` inspects
+the (18,7) receiver area with vegetation disabled, 72 streamed decal meshes / 2,573 object parts,
+161–188 FPS after loading. `planar-floor.png` shows the original dirt stain inside a Ferre tent,
+39 streamed decal meshes, about 180–215 FPS. The unload run starts with 72 decal meshes and
+asserts that both the count and actual entities become zero. No decal shader errors; the
+existing non-cube `blue_sky.dds` water warning remains at (14,11). These exact sites have no
+real-client reference capture, so their material lighting is source-backed and visually
+inspected, not a pixel fit to a reference.
+
+Remaining decal limits: deferred volumes and wrapped modes (deferred flag / projection 4..7)
+remain parsed but undrawn; their renderer-side projection matrix, asymmetric depth fade and
+normal/specular accumulation need their own implementation. Most Memoria (10,14) decal records
+name an empty material slot and correctly produce nothing (all 346 in the sampled cell).
+Forward geometry currently uses LOD0 receivers and finest terrain, so coarse distant LODs can
+diverge. Radii above 128 m or projection bounds above a cell width are rejected to bound work.
+Specular/gloss/cubemap effects retain the existing material approximation, and `entities.xml`
+static render props are not yet decal receivers.
 
 Water volume (type 11), cell-local, cry space: `f32 bbox[6]` @0 (z range = `[surface - depth, surface]`), `f32 maxViewDist` @28, `u8 viewDistRatio,
 lodRatio` @36, `u32` volume type @39 (low 2 bits: 2 = area, 3 = river; 515 / 1027 have flags above), an editor guid @43, `u32` material index @51 (into the
@@ -983,8 +1039,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
-  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; `object.dat` decals
-  (type 9, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure. Roads are rendered (see below).
+  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; deferred `object.dat` decals
+  remain undrawn; `terrain_tint` is a fudge for the missing exposure. Roads and forward decals are rendered (see placement formats).
 * Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
   at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
@@ -992,7 +1048,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: object.dat decals (type 9), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
+* Not rendered: deferred object.dat decals (type 9), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
   the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
