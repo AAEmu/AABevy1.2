@@ -95,7 +95,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (quests, mail, houses, guilds, trading, looting windows ...) is decoded as
+Everything else the server sends (mail, houses, guilds, trading, looting windows ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
 
@@ -176,7 +176,7 @@ instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experi
 `Worlds { list, queue, account }`, `Characters { list, race_congestion }` (a cancelled delete clears the
 delete timer of its character), `Player { spawn }`,
 `Units { by_id }`, `Doodads { by_id }`, `Status { phase, last_error }`, and for the HUD `PlayerStats`,
-`Buffs`, `ActionBar`, `Inventory`, `WorldInfo`, `Chat`, `Target`, `Skills` (see "In-game HUD data");
+`Buffs`, `ActionBar`, `Inventory`, `WorldInfo`, `Chat`, `Target`, `Skills`, `Quests` (see "In-game HUD data");
 each has `apply(&Event) -> bool`, `WorldState` bundles them. They clear themselves on `LeftWorld` /
 `Disconnected`.
 
@@ -188,7 +188,7 @@ app.add_plugins(aa_net::NetPlugin);
 // receive: MessageReader<NetEvent>    -> for NetEvent(event) in events.read() { .. }
 // state:   Res<Worlds>, Res<Characters>, Res<Player>, Res<Units>, Res<Doodads>, Res<Status>,
 //          Res<PlayerStats>, Res<Buffs>, Res<ActionBar>, Res<Inventory>, Res<WorldInfo>,
-//          Res<Chat>, Res<Target>, Res<Skills>
+//          Res<Chat>, Res<Target>, Res<Skills>, Res<Quests>
 ```
 
 The plugin starts the session thread in `build`, forwards `NetCommand` messages in `PreUpdate`, drains the
@@ -227,9 +227,11 @@ the table is `model::exp`), `ability_level(id)`, `money_parts() -> (gold, silver
 `hp_fraction()`, `mp_fraction()`, `LABOR_MAX` (2000; 5000 for premium). The title in the unit frame
 ("Battlerage Novice") comes from `active_abilities` and `ability_level`.
 
-The server never sends maximum HP / MP: the real client computes them from its formula tables.
-`max_hp` / `max_mp` are the highest value seen since the spawn (exact for a player who spawns at
-full health), `Unit::max_hp` the same for other units (NPCs are announced at full health).
+The server never sends maximum HP / MP: the real client computes them from the database's unit
+formulas (`unit_formulas`, see `docs/aa-client-hud.md`, "Max HP / MP"). aa-net has no database, so
+`max_hp` / `max_mp` are the highest value seen since the spawn (exact for a player who spawns at full
+health) until the application calls `PlayerStats::set_max(max_hp, max_mp)` with the computed values (never
+below the current points); `Unit::max_hp` is the same for other units (NPCs are announced at full health).
 
 **Buffs: `Buffs`** (`aa_net::state::Buffs`, `Buffs::of(obj_id) -> &[BuffEntry]`)
 
@@ -340,7 +342,7 @@ for other units is event only.
 | `SCSkillLearned`, `SCSkillUpgraded` | `SkillLearned`, `SkillUpgraded { skill_id, level }` | `known` |
 | `SCSkillsReset` | `SkillsReset { obj_id, ability }` | event only (drop the skills of `skills.ability_id`) |
 | `SCBuffLearned` | `PassiveBuffLearned` | `passive_buffs` |
-| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` |
+| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` and `last_cast_skill` (the skill the global cooldown comes from) |
 | `SCSkillStarted` (`result` != 0, `tl` 0) | `SkillStarted` with `failed()` | `last_failure` (`skill::result::name`) |
 | `SCSkillFired` | `SkillFired` | `casting[caster].fired`; starts the skill when no `SkillStarted` came first |
 | `SCPlotEvent` | `PlotEvent { tl, skill_id, caster_obj_id, target_obj_id, casting_ms }` | the first step of a plot skill starts it (`casting`, `last_used`); steps with `casting_ms` > 0 set the cast time |
@@ -363,6 +365,27 @@ session unpacks them and reports every packet as if it had come alone, in order:
 after `PlotEvent`s and so on. A packet in a batch this client cannot decode ends the batch (the
 rest cannot be found: the bodies have no length); real Huffman compressed batches (the C# server)
 are reported as `ServerMsg::Compressed` and skipped.
+
+**Quests: `Quests`** (`aa_net::state::Quests`, `aa_net::quest`)
+
+| packet | event | state |
+|---|---|---|
+| `SCQuests` (sent after the action slots on entering; up to 20 per packet) | `QuestsLoaded(Vec<Quest>)` | `active` |
+| `SCCompletedQuests` (up to 200 blocks per packet) | `CompletedQuests(Vec<CompletedBlock>)` | `completed` |
+| `SCQuestContextStarted` (0x147) | `QuestStarted(Quest)` | `active` gets the quest |
+| `SCQuestContextUpdated` (0x149) | `QuestUpdated(Quest)` | the quest is replaced; status dropped / completed / failed removes it |
+| `SCQuestContextCompleted` (0x14b) | `QuestCompleted { quest_id, block }` | removed from `active`, the block replaces its `completed` entry |
+| `SCQuestContextReset` (0x14c) | `QuestReset { quest_id, block }` | the same: the bit of the quest is cleared |
+
+`Quest { id, template_id, status, objectives: [i32; 5], time_left_ms, component_id, accept_time,
+acceptor_type, acceptor_id }` follows the server's `Quest.Write`; `template_id` is `quest_contexts.id`,
+`status` is `quest::status::*` (1 progress, 2 failed, 3 ready, 4 dropped, 5 completed). A completed quest
+is one bit of a 64 quest `CompletedBlock { id, bits }`: block `quest_id / 64`, bit `quest_id % 64`, the
+first byte of the packet being the lowest. `Quests::active_quest(template_id)`, `is_completed(template_id)`.
+The state clears on `CharacterSelected`, `LeftWorld` and `Disconnected`. The server never says which NPC
+starts a quest: the client works it out from the game database (`docs/aa-client-hud.md`, "Quest marks").
+Quests can be changed on the lane server with the GM chat commands `/quest add <id>` and
+`/quest remove <id>` to watch the updates.
 
 **Commands**
 
@@ -492,7 +515,7 @@ sequences with a 25 m/s landing; the server's move verifier is off by default an
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
-* Server → client packets not decoded (skipped): quests, mail, houses in the character list
+* Server → client packets not decoded (skipped): mail, houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
   parties, trading, shops, looting windows (`SCLootableState`), mounts, `SCBuffUpdated`,
   `SCCombatFirstHit`, `SCAiAggro`, `SCUnitMovements` (batched, no per-entry type byte). Add a
@@ -501,7 +524,10 @@ sequences with a 25 m/s landing; the server's move verifier is off by default an
 * Client → server: skills, items, target, action bar, resurrect, chat and logout only; no
   interaction (NPC dialogs, shops), inventory moves, party or `CSStopCasting` packets yet.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
-  spawns dead or hurt shows too small a maximum until it has been at full health once).
+  spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
+  application sets the formula value with `PlayerStats::set_max` (the HUD does).
+* Quests: only the lists and the context started / updated / completed / reset packets are decoded; the
+  objective texts, `SCQuestContextFailed` / `Dropped` style notices and the NPC dialog packets are not.
 * The sub zone name of the minimap header is not sent: derive it from the position and the
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
 * `DD04` batches with real Huffman compression (the C# server) are skipped; the Rust server writes

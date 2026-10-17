@@ -68,8 +68,10 @@ resource! {
         pub casting: HashMap<u32, Casting>,
         /// When the player last started each skill.
         pub last_used: HashMap<u32, Instant>,
-        /// When the player last started any skill (for the global cooldown).
+        /// When the player last started any skill (for the global cooldown) and which skill it was
+        /// (the length of the global cooldown is that skill's `custom_gcd`, or 1 s with `default_gcd`).
         pub last_cast: Option<Instant>,
+        pub last_cast_skill: u32,
         /// Cooldown tags reset by the server (`SkillCooldownReset::tag_id`) and when: a skill with
         /// that `cooldown_tag_id` used before that moment is ready again.
         pub reset_tags: Vec<(u32, Instant)>,
@@ -108,7 +110,7 @@ impl Skills {
         Duration::from_millis(u64::from(cooldown_ms)).checked_sub(used.elapsed())
     }
 
-    /// Global cooldown left given its length in ms (`custom_gcd` of the skill just used).
+    /// Global cooldown left given its length in ms (`custom_gcd` of [`Skills::last_cast_skill`]).
     pub fn gcd_left(&self, gcd_ms: u32) -> Option<Duration> {
         Duration::from_millis(u64::from(gcd_ms)).checked_sub(self.last_cast?.elapsed())
     }
@@ -164,6 +166,7 @@ impl Skills {
                 if self.is_own(s.caster.obj_id) {
                     self.last_used.insert(s.skill_id, now);
                     self.last_cast = Some(now);
+                    self.last_cast_skill = s.skill_id;
                     self.last_failure = None;
                 }
             }
@@ -192,6 +195,7 @@ impl Skills {
                         if self.is_own(f.caster.obj_id) {
                             self.last_used.insert(f.skill_id, now);
                             self.last_cast = Some(now);
+                            self.last_cast_skill = f.skill_id;
                             self.last_failure = None;
                         }
                     }
@@ -231,6 +235,7 @@ impl Skills {
                 if fresh && self.is_own(p.caster_obj_id) {
                     self.last_used.insert(p.skill_id, now);
                     self.last_cast = Some(now);
+                    self.last_cast_skill = p.skill_id;
                     self.last_failure = None;
                 }
             }
@@ -277,6 +282,7 @@ impl PartialEq for Skills {
             && self.casting == o.casting
             && self.last_used == o.last_used
             && self.last_cast == o.last_cast
+            && self.last_cast_skill == o.last_cast_skill
             && self.reset_tags == o.reset_tags
             && self.last_failure == o.last_failure
     }
@@ -326,6 +332,7 @@ mod tests {
         assert_eq!((c.skill_id, c.tl, c.cast_ms), (18132, 3, 1500));
         assert!(c.progress() < 1.0);
         assert!(s.since_used(18132).is_some() && s.last_cast.is_some());
+        assert_eq!(s.last_cast_skill, 18132);
         // Another unit's cast is shown but is not the player's use.
         assert!(s.apply(&started(777, 4, 8, 0, 0)));
         assert!(s.casting_of(8).is_some() && s.since_used(777).is_none());

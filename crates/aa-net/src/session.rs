@@ -17,6 +17,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::buff::Buff;
 use crate::game::{self, LeaveTarget, VisualOptions};
 use crate::items::{ActionSlot, InvenChunk, ItemTasks};
+use crate::quest::{CompletedBlock, Quest};
 use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
 use crate::model::{
@@ -387,6 +388,17 @@ pub enum Event {
     CastingStopped { tl: u16, duration_ms: u32 },
     /// The cooldown of `skill_id` (or of all skills with `tag_id`) was reset.
     SkillCooldownReset { obj_id: u32, skill_id: u32, tag_id: u32, gcd: bool },
+    /// The player's active quests, listed when the character spawns.
+    QuestsLoaded(Vec<Quest>),
+    /// The completed quests as blocks of 64 flags (see [`CompletedBlock`]).
+    CompletedQuests(Vec<CompletedBlock>),
+    QuestStarted(Quest),
+    /// A quest moved to another step or status (a dropped quest comes as status `DROPPED`).
+    QuestUpdated(Quest),
+    /// Quest `quest_id` was handed in; `block` is its updated block of completed flags.
+    QuestCompleted { quest_id: u32, block: CompletedBlock },
+    /// Quest `quest_id` can be taken again.
+    QuestReset { quest_id: u32, block: CompletedBlock },
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -1067,6 +1079,12 @@ impl Session {
             M::SkillCooldownReset { obj_id, skill_id, tag_id, gcd } => {
                 self.emit(Event::SkillCooldownReset { obj_id, skill_id, tag_id, gcd });
             }
+            M::Quests(list) => self.emit(Event::QuestsLoaded(list)),
+            M::CompletedQuests(list) => self.emit(Event::CompletedQuests(list)),
+            M::QuestStarted(q) => self.emit(Event::QuestStarted(q)),
+            M::QuestUpdated(q) => self.emit(Event::QuestUpdated(q)),
+            M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
+            M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
             M::SkillsReset { obj_id, ability } => self.emit(Event::SkillsReset { obj_id, ability }),
