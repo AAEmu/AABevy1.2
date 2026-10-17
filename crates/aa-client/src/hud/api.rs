@@ -413,6 +413,7 @@ fn ability_row(lua: &Lua, id: u8, total: i32) -> mlua::Result<Table> {
 fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     let t = lua.create_table()?;
     t.raw_set("unit_id", s.unit_id.as_str())?;
+    t.raw_set("instance_id", s.instance_id)?;
     t.raw_set("name", s.name.as_str())?;
     t.raw_set("level", s.level as i64)?;
     t.raw_set("race", s.race as i64)?;
@@ -541,6 +542,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let ability_slots = stats.map_or(character.abilities, |s| s.active_abilities);
     let snapshot = Snapshot {
         unit_id: spawn.obj_id.to_string(),
+        instance_id: spawn.state.instance_id,
         name: spawn.name().to_string(),
         level,
         race: character.race,

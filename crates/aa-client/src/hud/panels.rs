@@ -80,6 +80,7 @@ pub struct BuffLists {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TargetSnap {
     pub obj_id: u32,
+    pub character_id: u32,
     pub name: String,
     pub level: u8,
     pub hp: i32,
@@ -311,6 +312,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         let (max_hp, max_mp) = game.and_then(|g| super::stats::unit_max(g, u, unit_buffs)).unwrap_or((u.max_hp, u.max_mp));
         p.target = Some(TargetSnap {
             obj_id: u.obj_id,
+            character_id: match u.kind { UnitKind::Character { char_id }=>char_id,_=>0 },
             name,
             level: u.level.max(1),
             hp: u.hp,
@@ -437,6 +439,7 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
             Some(t) => {
                 let x = lua.create_table()?;
                 x.raw_set("unit_id", t.obj_id.to_string())?;
+                x.raw_set("character_id",t.character_id)?;
                 x.raw_set("name", t.name.as_str())?;
                 x.raw_set("level", i64::from(t.level))?;
                 x.raw_set("hp", i64::from(t.hp))?;

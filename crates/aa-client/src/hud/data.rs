@@ -657,6 +657,7 @@ impl GameData {
 pub struct Snapshot {
     /// The unit id the scripts use for the player (`X2Unit:GetUnitId("player")`).
     pub unit_id: String,
+    pub instance_id: u32,
     pub name: String,
     pub level: u8,
     pub race: u8,

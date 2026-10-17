@@ -34,6 +34,18 @@ X2Unit.UnitTeamAuthority = function(self, value) local m=unit(value); if m and m
 X2Team.InviteToTeam = function(self, name, isParty) HUD.team_request("invite", nil, name, isParty) end
 X2Team.LeaveTeam = function() HUD.team_request("leave") end
 X2Team.DismissTeam = function() HUD.team_request("dismiss") end
+X2Team.ConvertToRaidTeam = function() HUD.team_request("raid") end
+X2Team.InviteArea = function() HUD.team_request("area") end
+X2Team.SetRole = function(self,role) HUD.team_request("role",role) end
+X2Team.MoveTeamMember = function(self,from,to) HUD.team_move(from,to,false) end
+X2Team.MoveTeamMemberToParty = function(self,member,party) HUD.team_move(member,party,true) end
+X2Team.GetLootingRule = function()
+  return T().loot_method,X2Team:GetTeamDistributorName(),T().loot_grade,T().loot_bop
+end
+X2Team.ChangeLootingRule = function(self,method,name,grade,roll) HUD.team_loot(method,name,grade,roll) end
+X2Unit.SetOverHeadMarker = function(self,value,index) HUD.team_marker(value,index) end
+X2Unit.RemoveAllOverHeadMarker = function() HUD.team_marker(nil,-2) end
+X2Unit.GetOverHeadMarkerUnitId = function(self,index) return T().marker_units and T().marker_units[index] end
 X2Team.KickTeamMember = function(self, index) HUD.team_request("kick", index) end
 X2Team.KickTeamMemberByName = function(self, name)
   for i, m in pairs(T().members) do if m.name == name then HUD.team_request("kick", i); return end end

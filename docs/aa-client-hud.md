@@ -514,7 +514,8 @@ including after Reset reinitializes controls. Bag tab names, icons, groups and s
 edit/switch; bag saves do not commit unapplied option edits. A temporary file replaces the previous
 JSON after a successful write. Graphics option values are retained; renderer quality/resolution
 controls and editable key bindings still need their runtime integrations. Raid role/move/convert,
-looting-rule editing, party buff/combat indicators, and outbound overhead marks/pings remain separate work.
+looting-rule editing, unit-frame marks and map pings are now integrated below. Party buff/combat
+indicators and 3D overhead marks remain separate work.
 
 Validation: `cargo test -p aa-client --bin aa-client` passes 97 tests, with 13 intentional probes
 ignored. This includes real Options Lua Reset/re-Init/Cancel, bag restoration, file replacement,
@@ -614,3 +615,43 @@ its NPC context. A later `--enter-world` cold run opened the bank with the saved
 zero script/handler errors and 79?84 FPS (`cold-bank.png`). Full-flow and direct world entry both
 work with actual spawned data. The earlier empty-data `run_stage(World)` unit probe hang was not
 reproduced by this actual cold path; it is not counted as a client-flow failure.
+
+## Raid controls and authoritative map pings (2026-10-17)
+
+The original raid manager's conversion, role buttons and drag handlers now send `PartyCommand`
+requests with character IDs and physical member slots. Empty-group drops choose the first free
+slot. Authority, slot bounds and role values are checked locally; membership stays unchanged
+until the server acknowledges it. Native moved events receive the two global one-based slots,
+not their group numbers. Loot helpers read and edit current method/master/display grade/BoP
+state; the changed-field notices carry the original typed arguments. Raw item-grade IDs are
+converted at the Lua boundary.
+
+Overhead-marker commands resolve character aliases to character IDs and NPCs to object IDs.
+Server-confirmed marks resolve back to visible object IDs for the original unit-frame markers,
+including when a marked character becomes visible later. Clear/toggle/reset and raid-owner
+permissions are enforced. The separate 3D overhead glyph rendering is still pending.
+
+`party/ping.rs` and `party_ping.lua` bind the toolkit's optional map-ping hooks to real commands.
+A click never places an optimistic local marker. The server echo supplies named projections
+for every overlapping world/continent/zone/city rectangle (bounded to 256); the roadmap applies
+its authored image crop. Repeating an identical echoed point restarts the pulse, a clear removes
+both markers, and a ping for another nonzero instance is hidden. Solo, leader and character-marked
+members may send pings. The lane's initial true ping at (0,0,0) is retained as received.
+
+Native world-map XY is rectangle origin plus `(u,1-v)` times its size. The recovered native Z
+rule is the maximum of two surface queries plus 2 metres; current terrain and authored-water
+queries match ground/lake/sea placement. Brush roofs and instance-specific collision surfaces
+are not yet queried. There is no fallback to the player's height. Native instance selection is
+the current instance only for a matching current map context, otherwise zero. Removal sends
+false, zero position and zero instance.
+
+Validation: six focused party/ping tests pass, including sparse drag/role/loot identity, native
+event shapes, nine overlapping city projections, lake surface+2, repeat pulses, no optimistic
+display and instance filtering. Fresh root character Solraidtest (47) and headless peer (48)
+formed team9. The original conversion/role/drag/popup helpers confirmed owner tank role, peer
+healer role, peer move to group2 slot1, loot-master/grade/BoP edits, marker identity, both peer and
+root ping echoes, original `RemovePing`, reset and original raid dismissal. No area invite was
+broadcast. `shots/hud/sol61-raid/raid_04.png`, `_05.png` and `_06.png` were inspected: original map
+ping pulse and original raid roster/role colors. There were zero Lua errors. Representative
+1920x1080 FPS was 68-95 on the shared machine. Geometry/icon positions are not claimed as an
+exact reference match without a corresponding real raid capture.
