@@ -258,6 +258,9 @@ fn main() {
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(plugin)
         .insert_resource(start);
+    if aa_world::profile::requested() {
+        app.add_plugins(aa_world::profile::ProfilePlugin);
+    }
     if let Some(play) = play {
         app.insert_resource(play).add_systems(Update, play_cinema);
     }

@@ -8,6 +8,7 @@
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 
 mod anim;
+mod bench;
 pub(crate) mod appearance;
 mod camera;
 mod creature;
@@ -59,9 +60,13 @@ impl Plugin for InGamePlugin {
                 clock.zone = dev.zone;
             }
         }
+        if aa_world::profile::requested() && !app.is_plugin_added::<aa_world::profile::ProfilePlugin>() {
+            app.add_plugins(aa_world::profile::ProfilePlugin);
+        }
         app.insert_resource(dev)
             .init_resource::<units::Views>()
             .add_plugins(enter::plugin)
+            .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(OnEnter(Screen::InGame), player::spawn_player)
             .add_systems(

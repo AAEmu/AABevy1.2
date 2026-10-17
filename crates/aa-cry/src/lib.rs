@@ -18,6 +18,7 @@ pub mod shade;
 pub mod skeleton;
 pub mod stage;
 pub mod texture;
+pub mod workers;
 
 pub use chunk::ChunkFile;
 pub use mesh::{MeshData, Model};
