@@ -37,6 +37,7 @@ pub use crate::friend::Friends;
 pub use crate::repair::Repair;
 pub use crate::mail::Mailbox;
 pub use crate::auction::Auction;
+pub use crate::loot_roll::LootRolls;
 pub use crate::trade::Trade;
 
 resource! {
@@ -312,6 +313,7 @@ pub struct WorldState {
     pub mailbox: Mailbox,
     pub trade: Trade,
     pub auction: Auction,
+    pub loot_rolls: LootRolls,
 }
 
 impl WorldState {
@@ -339,6 +341,7 @@ impl WorldState {
         self.repair.apply(e);
         self.mailbox.apply(e);
         self.auction.apply(e);
+        self.loot_rolls.apply(e);
         self.trade.apply(e);
         self.trade.seed_inventory(e, &self.inventory);
     }

@@ -21,6 +21,7 @@ pub mod game;
 pub mod interaction;
 pub mod items;
 pub mod login;
+pub mod loot_roll;
 pub mod mail;
 pub mod model;
 pub mod net;
@@ -44,6 +45,7 @@ pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFail
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use login::Secret;
+pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};
 pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};

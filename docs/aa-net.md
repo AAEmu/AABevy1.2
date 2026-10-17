@@ -1343,12 +1343,104 @@ A read-only query of private MySQL3317 filtered to lane_bevy_* found no active/w
 or InnoDB transaction. Exact runtime blocking call and current in-memory lot state remain
 unproven; no server fix, new risky probe, grant, alternate settlement or restart is hidden.
 
+## Party loot rolls
+
+`Command::LootRoll(LootRollCommand { key, roll })` sends the native loot-dice request;
+`Event::LootRoll(LootRollEvent)` reports offers, notifications, summaries, successful local
+send (`Requested`) and local validation failures (`RequestRejected`). `LootRolls` is both
+`WorldState.loot_rolls` and a Bevy resource. Its public rounds retain the offered full item,
+latest notifications per character name, raw summary character IDs/dice, requested choice,
+pending status, own acknowledged roll, reported own take and matching loot failure.
+
+`LootRollKey { owner_type, owner_obj_id, item_index }` packs to the temporary 64-bit corpse
+ItemID: `(owner_obj_id << 32) | (owner_type << 16) | item_index`. NPC type 1 and doodad type 2
+are supported; owner IDs must be nonzero 24-bit IDs and indices nonzero 16-bit values. This
+key is **not an inventory ItemID**. Server acquisition can create or stack real inventory
+items, whose identity and quantity come only from ordinary authoritative item tasks.
+
+Exact native/lane wire, in `systems/economy/loot_packets.rs`:
+
+| Packet | Body |
+|---|---|
+| CS091 LootDice | packed `u64` key, `bool roll`; exactly 9 bytes |
+| SC0fb LootDice | full non-null `Item.Write` |
+| SC0fc LootDiceNotify | string characterName, full non-null `Item.Write`, signed `i8 dice` |
+| SC0fd LootDiceSummary | packed `u64` key, signed `i32 count`, count rows of `u32 characterId, i8 dice` |
+
+The count is bounded by available bytes before allocation; invalid/duplicate character IDs,
+invalid owners, null items and truncated details fail decoding. There is no invented party
+size limit: the lane can append rollers outside its original eligible list. Signed dice
+values are preserved; the normal lane generates 1..99 for a roll, -1 for a pass and uses 0
+internally for no answer. An empty summary is valid. All three SC bodies consume only their
+own fields in a lengthless DD04 batch, so the next packet remains aligned.
+
+Original `x2ui/loot/loot_dice.lua` and native x2game12 contract:
+
+* `TRY_LOOT_DICE(key, timeStamp, itemLink)` creates `LootDiceWindow(%d)` with an opaque
+  local integer key. `itemLink` contains the complete offered item, for
+  `X2Item:InfoFromLink`; it must not be replaced with a template-only link.
+* `X2Loot:DoDiceAction(key, roll)` takes that local key, not the packed 64-bit corpse ID.
+  True rolls; false passes. Roll, Give Up, close and the 60-second deadline all use this
+  function. The Lua then schedules `X2Loot:RequestNextDiceItem()` after 500ms and animates
+  away the prompt. RequestNextDiceItem is a local queue operation, with no CS packet.
+* `LootRolls.next_prompt_at(now)` / `next_prompt()` return and mark one unshown local
+  prompt among the first `max_concurrent` queued rows. Default 3 matches native
+  manager 394fb250. `set_max_concurrent(i32)` clamps to at least 1, matching wrapper 3948a610;
+  the setter itself neither advances the queue nor sends a packet.
+* On `Offered`, call next_prompt and emit TRY_LOOT_DICE with its `ui_key`, full item link
+  from the matching round and `prompt.ui_timestamp_ms(X2Time:GetUiMsec(), now)`.
+  This preserves receipt time while using the application's UI clock origin.
+  RequestNextDiceItem repeats that operation. `plan_action(ui_key, roll)` translates to
+  the exact network command and rejects finished, submitted or unknown local keys.
+* Native DoDiceAction 3948a5c0 -> 394fa770 removes its queue row after sending; request
+  writer 397ba120 serializes only the full 8-byte key and bool. `Requested` likewise removes
+  the local prompt and records pending, without inventing a server response.
+* RequestNext manager 394fad50 prunes prompts only when older than 60000ms, then exposes
+  one eligible unshown row. The resource follows this timing and does **not** automatically
+  pass: the original Lua owns its deadline action. `plan_action` permits that deadline pass
+  until queue pruning or an authoritative lifecycle event invalidates the key.
+* `LOOT_DICE(characterName, itemLink, dice)` is emitted for SC0fc (native 391d9a10).
+  `x2ui/chat/chat_msg_event.lua` formats every negative dice as a pass, otherwise a roll.
+  Native summary handler 391d9b50 clears the matching loot-bag request bit so ordinary loot
+  can retry; it emits no Lua summary/winner event.
+
+Active duplicate offers are deliberately deduplicated by packed key, preserving the first
+receipt time; native would enqueue each repeated packet. A new offer after a completed
+round starts a fresh opaque local key, allowing an all-pass retry. The resource also
+invalidates prompts on summary, recipient take, typed owner removal, no-loot state,
+character selection, world leave and disconnect. Unknown server errors do not silently
+acknowledge a roll. A matching loot failure is retained without assuming it acknowledges
+the roll or changes inventory. Name-only notifications are never guessed to map to another
+character's numeric summary ID.
+
+Lane limits from `looting.rs`/`loot.rs`: no distance, eligible-member or duplicate-choice
+guard is enforced by do_player_roll; a second raw request can replace a roll and an
+outsider can be appended. The public UI planner prevents repeat local submissions. A
+container's 180-second make-public deadline forces unanswered 0 entries to pass; this is
+separate from the original Lua's 60-second prompt. **Summary is not winner proof**: the
+lane currently takes the minimum positive value and includes every roll greater/equal to
+that minimum before random choice, effectively choosing among all positive rollers.
+No highest-roll winner is fabricated. All-pass summaries leave the item available for a
+new attempt. BagFull keeps the reservation for ordinary loot retry. SCLootItemTook is sent
+only to the actual recipient; it marks `taken_by_me`, while normal item tasks carry the
+resulting inventory identities. No packet here proves another player's actual acquisition.
+
+Validation: eight offline tests cover the exact CS bytes and rejection rules, all three SC
+packets followed by another loot packet in DD04, every truncation, variable item detail,
+count bombs/duplicate IDs, signed results, prompt concurrency/timestamps/deadlines,
+all-pass reopening, typed owner loss, lifecycle reset, silent errors and separation of
+summary/take/actual inventory tasks. Full `cargo test -p aa-net` passed 169 library tests and 2
+scripted-session tests, with 9 opt-in live tests ignored. The Bevy/example check
+`cargo check -p aa-net --features bevy --examples` also passed.
+Natural-loot paired live QA remains **pending** while
+the lane is stalled; this milestone makes no new lane connections or claims.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
+  the mount owner's packets
   (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
   layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
