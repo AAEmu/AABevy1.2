@@ -189,7 +189,7 @@ struct FieldData {
     heights: Arc<CellHeights>,
     cover: Option<CoverAtlas>,
     surfaces: CellSurfaces,
-    arrays: [Image; 3],
+    arrays: [Image; aa_world::terrain_layers::LAYER_ARRAYS],
     objects: CellObjects,
     groups: VegGroups,
     dummies: Vec<Dummy>,
@@ -529,7 +529,7 @@ pub fn update(
             match result {
                 Some(data) => {
                     let cover = data.cover.map(|atlas| cry.images.add(cover_image(atlas)));
-                    let [diffuse, normals, details] = data.arrays.map(|i| cry.images.add(i));
+                    let arrays = data.arrays.map(|i| cry.images.add(i));
                     let surface = cry.images.add(data.surfaces.surface);
                     let material = TerrainMaterial {
                         base: StandardMaterial {
@@ -539,7 +539,7 @@ pub fn update(
                             reflectance: 0.05,
                             ..default()
                         },
-                        extension: TerrainExt { params: data.surfaces.params, diffuse, normals, details, surface },
+                        extension: TerrainExt::new(data.surfaces.params, arrays, surface),
                     };
                     scenery.field = Some(Field { heights: data.heights, material, objects: data.objects, groups: data.groups, dummies: data.dummies });
                 }

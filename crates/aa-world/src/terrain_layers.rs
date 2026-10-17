@@ -22,11 +22,11 @@
 //!
 //! * [`LayerLibrary`] (built once per world on a task, 0.3 s): reads the 16 entry `SurfaceTypes` table of every
 //!   cell's `leveldata.xml`, the `.mtl` of each `DetailMaterial` and every referenced texture and packs
-//!   them into three texture arrays, copying the DDS blocks (BC1 diffuse maps at 512 px, those that are
-//!   1024 px or more in a second array at 1024 px, BC5 normal and detail normal maps at 512 px, where
-//!   the 256 px ones are stored as 2 x 2 copies), each with its mip chain down to 4 px and at most 255
-//!   layers (the limit of a wgpu texture array is 256). The BC1 (`NORMAL_DXT1`) normal maps are transcoded
-//!   to BC5.
+//!   them into [`LAYER_ARRAYS`] texture arrays, copying the DDS blocks: BC1 diffuse maps at 512 px (1024 px
+//!   for the maps of that size, 2048 px for the few that big: a third array each), BC5 normal and detail
+//!   normal maps at 512 px (the 256 px ones stored as 2 x 2 copies) and a second normal array for what does
+//!   not fit the first; each with its mip chain down to 4 px and at most 255 layers (the limit of a wgpu
+//!   texture array is 256). The BC1 (`NORMAL_DXT1`) normal maps are transcoded to BC5.
 //! * per cell: an `R8Uint` image of the 4 bit surface type of every 2 m sample (`heightmap.dat`) and a
 //!   uniform table (`TerrainParams`) with, for each of the 16 surface types and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
@@ -65,9 +65,11 @@ pub const SURFACE_TYPES: usize = 16;
 const PROJECTIONS: usize = 3;
 /// Vectors of the uniform table per surface type and projection.
 const ENTRY: usize = 4;
-/// Added to the slot of a texture that is stored the other way: a diffuse map in the large (1024 px) array, a
-/// normal map of half the size as 2 x 2 copies (which the shader samples at half the uv).
-const ALT: f32 = 1000.0;
+/// Texture arrays of a world, in [`Kind`] order: diffuse, normal, large diffuse, huge diffuse, more normal maps.
+pub const LAYER_ARRAYS: usize = 5;
+/// A texture is `slot + FLAG * flags` in the uniform table, where the flags say which array it is in and how it
+/// is stored (see [`Kind::flag`]).
+const FLAG: f32 = 1000.0;
 /// Detail layers fade out like `1 - (d / DETAIL_DISTANCE)^4` (`e_detail_materials_view_dist_xy`, quality 4).
 pub const DETAIL_DISTANCE: f32 = 1024.0;
 
@@ -79,10 +81,11 @@ pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 pub struct TerrainParams {
     /// Linear colour factor (`WorldConfig::terrain_tint`), `w` = detail fade distance.
     pub tint: Vec4,
-    /// Four vectors per `(surface type * 3 + projection)`: `(diffuse slot (+ 1000: in the large array),
-    /// normal slot (+ 1000: copies at half the uv), uv scale u, v)`,
+    /// Four vectors per `(surface type * 3 + projection)`: `(diffuse, normal, uv scale u, v)` (a texture is
+    /// `slot + 1000 * flags`: diffuse flags 0 / 1 / 2 = 512 / 1024 / 2048 px array, normal flags bit 0 =
+    /// 2 x 2 copies at half the uv, bit 1 = the second array),
     /// `(uv offset u, v, DetailTextureStrength, DetailBumpScale)`,
-    /// `(detail normal slot (+ 1000), detail uv scale u, v, material colour r)` and
+    /// `(detail normal, detail uv scale u, v, material colour r)` and
     /// `(detail uv offset u, v, material colour g, b)`;
     /// a slot `< 0` means none.
     pub layers: [Vec4; SURFACE_TYPES * PROJECTIONS * ENTRY],
@@ -120,13 +123,27 @@ pub struct TerrainExt {
     #[texture(103, dimension = "2d_array")]
     #[sampler(104)]
     pub normals: Handle<Image>,
-    /// The large diffuse maps, BC1 1024 px (the field kept its name when it changed from the 256 px
-    /// detail normal maps, which now live in `normals`).
+    /// The diffuse maps of 1024 px, BC1.
     #[texture(105, dimension = "2d_array")]
     #[sampler(106)]
-    pub details: Handle<Image>,
+    pub large: Handle<Image>,
     #[texture(107, sample_type = "u_int")]
     pub surface: Handle<Image>,
+    /// The diffuse maps of 2048 px, BC1 (sampled with the diffuse sampler, the arrays all filter alike).
+    #[texture(108, dimension = "2d_array")]
+    pub huge: Handle<Image>,
+    /// The normal maps that did not fit `normals`, BC5 512 px (sampled with the normal sampler).
+    #[texture(109, dimension = "2d_array")]
+    pub more_normals: Handle<Image>,
+}
+
+impl TerrainExt {
+    /// The extension from the cell's table, the layer arrays (in [`Kind`] order, see [`BuiltLayers::images`]) and
+    /// its surface map.
+    pub fn new(params: TerrainParams, arrays: [Handle<Image>; LAYER_ARRAYS], surface: Handle<Image>) -> Self {
+        let [diffuse, normals, large, huge, more_normals] = arrays;
+        TerrainExt { params, diffuse, normals, large, huge, more_normals, surface }
+    }
 }
 
 impl MaterialExtension for TerrainExt {
@@ -142,16 +159,34 @@ enum Kind {
     Diffuse,
     /// BC5 (x, y), 512 px: normal maps and detail normal maps.
     Normal,
-    /// BC1, 1024 px: the diffuse maps that are 1024 px or more.
+    /// BC1, 1024 px: the diffuse maps of 1024 px.
     Large,
+    /// BC1, 2048 px: the diffuse maps of 2048 px or more.
+    Huge,
+    /// BC5, 512 px: the normal maps that did not fit the first normal array.
+    NormalMore,
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Diffuse, Kind::Normal, Kind::Large];
+    const ALL: [Kind; LAYER_ARRAYS] = [Kind::Diffuse, Kind::Normal, Kind::Large, Kind::Huge, Kind::NormalMore];
 
     /// Edge of a layer (px). Larger sources use their lower mips.
     fn px(self) -> u32 {
-        if self == Kind::Large { 1024 } else { 512 }
+        match self {
+            Kind::Large => 1024,
+            Kind::Huge => 2048,
+            _ => 512,
+        }
+    }
+
+    /// The flags of a texture in this array in the uniform table: diffuse 0 / 1 / 2 for the 512 / 1024 / 2048 px
+    /// array; normal bit 1 for the second array (bit 0 is for 2 x 2 copies).
+    fn flag(self) -> u8 {
+        match self {
+            Kind::Large => 1,
+            Kind::Huge | Kind::NormalMore => 2,
+            _ => 0,
+        }
     }
 
     /// Mip levels of a layer: down to 4 px, where the DDS files of the pak stop.
@@ -159,12 +194,16 @@ impl Kind {
         self.px().trailing_zeros() - 1
     }
 
+    fn is_normal(self) -> bool {
+        matches!(self, Kind::Normal | Kind::NormalMore)
+    }
+
     fn format(self) -> TextureFormat {
-        if self == Kind::Normal { TextureFormat::Bc5RgUnorm } else { TextureFormat::Bc1RgbaUnorm }
+        if self.is_normal() { TextureFormat::Bc5RgUnorm } else { TextureFormat::Bc1RgbaUnorm }
     }
 
     fn block_bytes(self) -> usize {
-        if self == Kind::Normal { 16 } else { 8 }
+        if self.is_normal() { 16 } else { 8 }
     }
 
     /// Bytes of one layer with its whole mip chain.
@@ -191,18 +230,31 @@ struct Projection {
     detail_scale: f32,
 }
 
-/// A layer of an array and whether it is stored the other way (see [`ALT`]).
+/// A layer of an array: the slot and the flags that find the array (see [`FLAG`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Tex {
     slot: u16,
-    alt: bool,
+    flags: u8,
 }
 
 impl Tex {
     /// The value in the uniform table.
     fn code(self) -> f32 {
-        self.slot as f32 + if self.alt { ALT } else { 0.0 }
+        self.slot as f32 + FLAG * self.flags as f32
     }
+}
+
+/// The array and slot of the next layer of `kind` (normal maps overflow into the second normal array); `None`
+/// when the array is full.
+fn place(counts: &mut [usize; LAYER_ARRAYS], kind: Kind, copies: bool) -> Option<(Kind, Tex)> {
+    let kind = if kind == Kind::Normal && counts[kind as usize] >= MAX_LAYERS { Kind::NormalMore } else { kind };
+    let count = &mut counts[kind as usize];
+    if *count >= MAX_LAYERS {
+        return None;
+    }
+    let tex = Tex { slot: *count as u16, flags: kind.flag() + copies as u8 };
+    *count += 1;
+    Some((kind, tex))
 }
 
 /// A `.mtl` reduced to what the terrain shader needs.
@@ -243,15 +295,16 @@ type CellTable = [(u32, [f32; 2]); SURFACE_TYPES];
 pub struct LayerLibrary {
     mats: Vec<SurfaceMaterial>,
     cells: HashMap<(i32, i32), CellTable>,
-    /// Layers in the diffuse / normal / large diffuse array.
-    pub layers: [usize; 3],
+    /// Layers in each array (diffuse, normal, large, huge, more normal maps).
+    pub layers: [usize; LAYER_ARRAYS],
 }
 
 /// What the loading task returns: the library and the three array images.
 pub struct BuiltLayers {
     pub library: LayerLibrary,
-    /// Diffuse, normal (and detail normal) and large diffuse arrays.
-    pub images: [Image; 3],
+    /// The arrays: diffuse (512 px), normal and detail normal (512 px), large diffuse (1024 px), huge diffuse
+    /// (2048 px) and more normal maps (512 px).
+    pub images: [Image; LAYER_ARRAYS],
 }
 
 impl LayerLibrary {
@@ -309,8 +362,8 @@ impl LayerLibrary {
 
         // 3. read the textures (the most used first) into the arrays, as many as fit
         let mut slots: [HashMap<String, Tex>; 2] = Default::default();
-        let mut data: [Vec<u8>; 3] = Default::default();
-        let mut layers = [0usize; 3];
+        let mut data: [Vec<u8>; LAYER_ARRAYS] = Default::default();
+        let mut layers = [0usize; LAYER_ARRAYS];
         for (set, normal) in [(0, false), (1, true)] {
             let mut paths: Vec<(&String, &usize)> = wants[set].iter().collect();
             paths.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
@@ -322,14 +375,12 @@ impl LayerLibrary {
                     dropped += 1;
                     continue;
                 };
-                let k = layer.kind as usize;
-                if layers[k] >= MAX_LAYERS {
+                let Some((kind, tex)) = place(&mut layers, layer.kind, layer.copies) else {
                     dropped += 1;
                     continue;
-                }
-                slots[set].insert(path, Tex { slot: layers[k] as u16, alt: layer.alt });
-                layers[k] += 1;
-                data[k].extend_from_slice(&layer.data);
+                };
+                slots[set].insert(path, tex);
+                data[kind as usize].extend_from_slice(&layer.data);
             }
             if dropped > 0 {
                 debug!("aa-world: terrain layers: {dropped} unusable {} textures", ["diffuse", "normal"][set]);
@@ -364,24 +415,20 @@ impl LayerLibrary {
             })
             .collect();
         info!(
-            "aa-world: terrain layers of {world}: {} cells, {} materials, {} diffuse + {} large diffuse + {} normal maps ({:.0} MB), {:.1} s",
+            "aa-world: terrain layers of {world}: {} cells, {} materials, {} + {} + {} diffuse (512 / 1024 / 2048 px) + {} + {} normal maps ({:.0} MB), {:.1} s",
             tables.len(),
             mats.len(),
-            layers[0],
-            layers[2],
-            layers[1],
+            layers[Kind::Diffuse as usize],
+            layers[Kind::Large as usize],
+            layers[Kind::Huge as usize],
+            layers[Kind::Normal as usize],
+            layers[Kind::NormalMore as usize],
             data.iter().map(Vec::len).sum::<usize>() as f32 / 1e6,
             started.elapsed().as_secs_f32()
         );
-        let [d0, d1, d2] = data;
-        Some(BuiltLayers {
-            library: LayerLibrary { mats, cells: tables, layers },
-            images: [
-                layer_array(d0, layers[0], Kind::Diffuse),
-                layer_array(d1, layers[1], Kind::Normal),
-                layer_array(d2, layers[2], Kind::Large),
-            ],
-        })
+        let mut data = data.into_iter();
+        let images = Kind::ALL.map(|kind| layer_array(data.next().unwrap(), layers[kind as usize], kind));
+        Some(BuiltLayers { library: LayerLibrary { mats, cells: tables, layers }, images })
     }
 
     /// The uniform table of a cell (`None` when the cell has no `leveldata.xml`).
@@ -456,14 +503,14 @@ impl CellSurfaces {
 }
 
 /// A texture array image from layer after layer of `kind.mips()` mips.
-fn layer_array(mut data: Vec<u8>, layers: usize, kind: Kind) -> Image {
-    let mut image = Image::default();
+fn layer_array(data: Vec<u8>, layers: usize, kind: Kind) -> Image {
     if layers == 0 {
-        // a valid placeholder that is never indexed
-        data = vec![0u8; kind.layer_bytes()];
+        // a small placeholder that is never indexed
+        return dummy_array(kind);
     }
+    let mut image = Image::default();
     image.texture_descriptor.size =
-        Extent3d { width: kind.px(), height: kind.px(), depth_or_array_layers: layers.max(1) as u32 };
+        Extent3d { width: kind.px(), height: kind.px(), depth_or_array_layers: layers as u32 };
     image.texture_descriptor.dimension = TextureDimension::D2;
     image.texture_descriptor.format = kind.format();
     image.texture_descriptor.mip_level_count = kind.mips();
@@ -535,26 +582,27 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
 /// A texture ready for an array.
 struct Layer {
     kind: Kind,
-    /// A diffuse map in the large array, or a normal map stored as 2 x 2 copies (see [`ALT`]).
-    alt: bool,
+    /// A normal map stored as 2 x 2 copies of a half size source (the shader samples it at half the uv).
+    copies: bool,
     /// `kind.layer_bytes()` of blocks.
     data: Vec<u8>,
 }
 
 /// One layer of an array from a DDS, BC1 (diffuse) or BC5 with X in red (normal maps), with its mip chain.
-/// A diffuse map goes to the 1024 px array when it is that big, else to the 512 px one; a normal map to the
-/// 512 px array, where a 256 px one is stored as 2 x 2 copies (the shader samples those at half the uv, which
-/// gives the original back). `None` for any other size or format. Bigger sources use their lower mips.
+/// A diffuse map goes to the array of its size (512, 1024 or 2048 px); a normal map to the 512 px array, where a
+/// 256 px one is stored as 2 x 2 copies (the shader samples those at half the uv, which gives the original back).
+/// `None` for any other size or format. Bigger sources use their lower mips.
 fn load_layer(path: &str, normal: bool) -> Option<Layer> {
     let bytes = aa_cry::read(path).ok()?;
     let dds = Dds::parse(&bytes).ok()?;
     if dds.faces != 1 || dds.depth != 1 || dds.width != dds.height || !dds.width.is_power_of_two() {
         return None;
     }
-    let kind = match (normal, dds.width >= Kind::Large.px()) {
+    let kind = match (normal, dds.width) {
         (true, _) => Kind::Normal,
-        (false, true) => Kind::Large,
-        (false, false) => Kind::Diffuse,
+        (false, w) if w >= Kind::Huge.px() => Kind::Huge,
+        (false, w) if w >= Kind::Large.px() => Kind::Large,
+        (false, _) => Kind::Diffuse,
     };
     let copies = normal && dds.width * 2 == kind.px();
     if dds.width < kind.px() && !copies {
@@ -587,13 +635,13 @@ fn load_layer(path: &str, normal: bool) -> Option<Layer> {
         data.extend_from_slice(&level);
     }
     debug_assert_eq!(data.len(), kind.layer_bytes());
-    Some(Layer { kind, alt: copies || kind == Kind::Large, data })
+    Some(Layer { kind, copies, data })
 }
 
 /// The blocks of one mip level as the array of `kind` wants them: BC1, or BC5 with x in red.
 fn convert(src: &[u8], dds: &Dds, kind: Kind) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(src.len());
-    match (kind == Kind::Normal, dds.format) {
+    match (kind.is_normal(), dds.format) {
         (false, DdsFormat::Bc1) => out.extend_from_slice(src),
         // the colour half of a BC3 block is a BC1 block
         (false, DdsFormat::Bc3) => src.as_chunks::<16>().0.iter().for_each(|b| out.extend_from_slice(&b[8..])),
@@ -683,8 +731,8 @@ enum LayersState {
     /// the terrain then shows the decoded cover colour only.
     Ready {
         library: Option<Arc<LayerLibrary>>,
-        /// Diffuse, normal and large diffuse arrays.
-        arrays: [Handle<Image>; 3],
+        /// The arrays, see [`BuiltLayers::images`].
+        arrays: [Handle<Image>; LAYER_ARRAYS],
     },
 }
 
@@ -725,13 +773,7 @@ impl TerrainLayers {
                 reflectance: 0.05,
                 ..default()
             },
-            extension: TerrainExt {
-                params: surfaces.params,
-                diffuse: arrays[0].clone(),
-                normals: arrays[1].clone(),
-                details: arrays[2].clone(),
-                surface: images.add(surfaces.surface),
-            },
+            extension: TerrainExt::new(surfaces.params, arrays.clone(), images.add(surfaces.surface)),
         })
     }
 }
@@ -798,6 +840,27 @@ mod tests {
         assert_eq!(Kind::Diffuse.layer_bytes(), 174_760);
         assert_eq!(Kind::Normal.layer_bytes(), 349_520);
         assert_eq!(Kind::Large.layer_bytes(), 699_048);
+        assert_eq!(Kind::Huge.layer_bytes(), 2_796_200);
+        assert_eq!(Kind::NormalMore.layer_bytes(), Kind::Normal.layer_bytes());
+    }
+
+    /// The table code of a texture and the overflow of a full array.
+    #[test]
+    fn slots_and_flags() {
+        let mut counts = [0usize; LAYER_ARRAYS];
+        let (kind, tex) = place(&mut counts, Kind::Huge, false).unwrap();
+        assert_eq!((kind, tex.code()), (Kind::Huge, 2000.0));
+        assert_eq!(place(&mut counts, Kind::Large, false).unwrap().1.code(), 1000.0);
+        assert_eq!(place(&mut counts, Kind::Large, false).unwrap().1.code(), 1001.0);
+        assert_eq!(place(&mut counts, Kind::Normal, true).unwrap().1.code(), 1000.0);
+        // a full first normal array continues in the second, a full other array drops
+        counts[Kind::Normal as usize] = MAX_LAYERS;
+        assert_eq!(place(&mut counts, Kind::Normal, false).map(|(k, t)| (k, t.code())), Some((Kind::NormalMore, 2000.0)));
+        assert_eq!(place(&mut counts, Kind::Normal, true).map(|(k, t)| (k, t.code())), Some((Kind::NormalMore, 3001.0)));
+        counts[Kind::NormalMore as usize] = MAX_LAYERS;
+        assert!(place(&mut counts, Kind::Normal, false).is_none());
+        counts[Kind::Diffuse as usize] = MAX_LAYERS;
+        assert!(place(&mut counts, Kind::Diffuse, false).is_none());
     }
 
     #[test]
@@ -834,32 +897,32 @@ mod tests {
         // a DXT1 normal map is transcoded to BC5, a 1024 px one is read from its 512 px mip
         for path in ["wasteland/w_forest_white_sand_a_ddn", "field/tr_field_dirt_241a_ddn"] {
             let n = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), true).unwrap();
-            assert_eq!((n.kind, n.alt, n.data.len()), (Kind::Normal, false, Kind::Normal.layer_bytes()), "{path}");
+            assert_eq!((n.kind, n.copies, n.data.len()), (Kind::Normal, false, Kind::Normal.layer_bytes()), "{path}");
         }
         // a 256 px normal map is stored as 2 x 2 copies: the first row of blocks is the source's row twice
         let small = "game/textures/aa_terrain/canyon/cliff_rock_b_ddn.dds";
         let n = load_layer(small, true).unwrap();
-        assert_eq!((n.kind, n.alt, n.data.len()), (Kind::Normal, true, Kind::Normal.layer_bytes()));
+        assert_eq!((n.kind, n.copies, n.data.len()), (Kind::Normal, true, Kind::Normal.layer_bytes()));
         let row = 64 * Kind::Normal.block_bytes();
         assert_eq!(n.data[..row], n.data[row..2 * row]);
         // a 256 px map is no diffuse map
         assert!(load_layer(small, false).is_none());
     }
 
-    /// Diffuse maps of 1024 px and more go to the large array (the 2048 px ground of Austera from its 1024 px
-    /// mip), 512 px ones to the normal diffuse array.
+    /// Diffuse maps go to the array of their size: the 2048 px ground of Austera to the huge one, 1024 px maps to
+    /// the large one, 512 px maps to the normal one.
     #[test]
     fn large_diffuse_maps() {
         if !crate::pak_available() {
             return;
         }
         for (path, kind) in [
-            ("canyon/cliff_grey_with_dry_bushes", Kind::Large),
+            ("canyon/cliff_grey_with_dry_bushes", Kind::Huge),
             ("canyon/cliff_is7", Kind::Large),
             ("canyon/w_cliff_rock_02", Kind::Diffuse),
         ] {
             let d = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), false).unwrap();
-            assert_eq!((d.kind, d.alt, d.data.len()), (kind, kind == Kind::Large, kind.layer_bytes()), "{path}");
+            assert_eq!((d.kind, d.copies, d.data.len()), (kind, false, kind.layer_bytes()), "{path}");
         }
     }
 
@@ -898,10 +961,13 @@ mod tests {
         assert!(entry(1, 2)[2].x >= 0.0 && (entry(1, 2)[2].y - 0.2 * 0.75).abs() < 1e-5, "{:?}", entry(1, 2));
         for (k, kind) in Kind::ALL.into_iter().enumerate() {
             let image = &built.images[k];
-            // an array without layers holds one placeholder
-            let layers = lib.layers[k].max(1);
-            assert_eq!(image.texture_descriptor.size.depth_or_array_layers as usize, layers);
-            assert_eq!(image.data.as_ref().unwrap().len(), layers * kind.layer_bytes());
+            if lib.layers[k] == 0 {
+                // an array without layers is a 4 px placeholder
+                assert_eq!(image.texture_descriptor.size.width, 4);
+                continue;
+            }
+            assert_eq!(image.texture_descriptor.size.depth_or_array_layers as usize, lib.layers[k]);
+            assert_eq!(image.data.as_ref().unwrap().len(), lib.layers[k] * kind.layer_bytes());
         }
     }
 
