@@ -446,3 +446,20 @@ fn absent_or_declined_ping_hooks_keep_local_fallback_but_failed_requests_do_not(
     click(&ui, 200.,200.);
     assert!(!eval::<bool>(&ui, "ping:IsVisible()"));
 }
+
+#[test]
+fn ping_echo_keeps_later_named_zone_and_city_projections() {
+    let ui = setup();
+    ui.exec("@ping", PING).unwrap();
+    tick(&ui);
+    ui.exec("@projections", r#"
+        echo={level=0,id=2,u=.5,v=.5,maps={}}
+        for i=1,8 do echo.maps[i]={level=2,id=1000+i,u=.1,v=.2} end
+        echo.maps[9]={level=3,id=335,u=.8,v=.3}
+    "#).unwrap();
+    let wm = aa_ui::lua::ui(&ui.lua).tree.find("wm").unwrap();
+    assert!(aa_ui::lua::worldmap::show_map(&ui.lua, wm, 3, 335));
+    tick(&ui);
+    assert!(eval::<bool>(&ui, "ping:IsVisible()"));
+    near(ping_pos(&ui), (742.,167.), 0.01);
+}

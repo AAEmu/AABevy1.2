@@ -685,7 +685,7 @@ fn sync_ping(lua: &Lua, id: Id, table: Option<&Table>, restart: bool) {
     let mut changed = false;
     match map_ping::read(table) {
         Ok(Some(point)) if point != d.ping_place => {
-            d.ping_place = point;
+            d.ping_place = point.clone();
             with(lua, id, |x| x.ping_place = point);
             changed = true;
         }
@@ -693,9 +693,12 @@ fn sync_ping(lua: &Lua, id: Id, table: Option<&Table>, restart: bool) {
         _ => {}
     }
     let Some(frame) = d.ping else { return };
-    let uv = d.ping_place.and_then(|p| d.place_pos(Place {
-        level: p.level, zone: p.id, u: p.u, v: p.v, angle: 0.0, above: p.maps,
-    })).map(|(x, y)| (x / BASE.0, y / BASE.1));
+    let uv = d.ping_place.as_ref().and_then(|p| {
+        let (level, id) = d.current?;
+        p.on_map(level, id).or_else(|| d.place_pos(Place {
+            level: p.level, zone: p.id, u: p.u, v: p.v, angle: 0.0, above: [None; 4],
+        }).map(|(x, y)| (x / BASE.0, y / BASE.1)))
+    });
     map_ping::apply(lua, frame, id, uv, restart || changed);
 }
 
@@ -1024,7 +1027,7 @@ fn place_ping(lua: &Lua, wm: Id, d: &WorldMapData, cursor: (f32, f32)) {
                   ((cursor.1 - r.y) / r.h).clamp(0.0, 1.0));
     if !map_ping::request(lua, "PlaceMapPing", (level, id, u, v)) {
         with(lua, wm, |x| x.ping_place = Some(Ping {
-            level, id, u, v, maps: [None; 4], version: None,
+            level, id, u, v, maps: Vec::new(), version: None,
         }));
         sync_ping(lua, wm, None, true);
     }

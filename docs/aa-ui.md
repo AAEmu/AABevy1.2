@@ -817,16 +817,25 @@ The captured contract is in `docs/ui-api.md` under X2Hotkey; original defaults a
 
 `PlaceMapPing` and `RemoveMapPing` let the app send party requests while the original marker
 retains its last confirmed point. Both maps consume the same optional `ping` echo; the world
-map also accepts exact upper-map projections in `ping.maps`, with the existing mask fallback
+map also accepts up to 256 exact named map projections in `ping.maps`, with the existing mask fallback
 when absent. The original `SET_PING_MODE` and `SET_EFFECT_ICON_VISIBLE` handlers stop the
 placement mode and animate the ping art. Unchanged echoes preserve the mesh content version.
 Local examples keep placement/removal when callbacks are absent or decline the request.
 
 `worldmap` tests cover waiting for echo/removal, callback failure, local fallback, normalized
-coordinates after zoom/pan/widget scale, and explicit continent projections.
+coordinates after zoom/pan/widget scale, explicit continent projections, and a city projection
+after eight other named views.
 `map_ping_original` runs original `ping.alb`/`ping_view.alb` and verifies both icons, pulse
 restart, unchanged echo, and removal. The full runtime suite passes 96 tests (one ignored).
 `shots/aa-ui/animation/map-ping.png` shows both original blue ping icons and pulse art;
 compared with `reference/ingame/worldmap_zone/real.png` for the map frame and art. The existing
 `ingame_hud` / `aa_dev` harness logged 221 FPS with the map open, 413 FPS before opening,
 zero script errors, and closed itself after capture.
+
+The named-projection follow-up passes all 11 targeted ping/worldmap tests, including a ninth
+city projection. Native placement (`392d79c0` -> `392ac150` -> `392ac030`) samples two engine
+surface heights and sends their maximum plus 2; the two interfaces appear to be terrain/water
+but have not been named conclusively. It uses the player's instance only when the displayed
+map kind/id equals the player's current map kind/id; otherwise instance 0. Native removal
+(`392d49c0`) sends false, a zero vector, and instance 0. The app owns surface sampling and
+instance selection; the toolkit callback intentionally exposes map level/id and normalized XY.

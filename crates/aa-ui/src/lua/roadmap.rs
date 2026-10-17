@@ -593,7 +593,7 @@ fn sync_ping(lua: &Lua, id: Id, shown_map: Option<Id>, table: Option<&Table>) ->
     let mut d = data(lua, id);
     let mut changed = false;
     if let Some(point) = super::map_ping::read(table)? && point != d.ping_place {
-        d.ping_place = point;
+        d.ping_place = point.clone();
         with(lua, id, |x| x.ping_place = point);
         changed = true;
     }
@@ -601,7 +601,7 @@ fn sync_ping(lua: &Lua, id: Id, shown_map: Option<Id>, table: Option<&Table>) ->
     let uv = table.and_then(|t| {
         let level = t.raw_get::<Option<i64>>("level").ok().flatten().unwrap_or(1);
         let zone = t.raw_get::<i64>("zone").ok()?;
-        d.ping_place?.on_map(level, zone)
+        d.ping_place.as_ref()?.on_map(level, zone)
     });
     super::map_ping::apply(lua, frame, shown_map.unwrap_or(id), uv.filter(|_| shown_map.is_some()), changed);
     Ok(())
