@@ -561,6 +561,55 @@ cameras the HUD had made HDR without MSAA (`hud::cameras`), which the login stag
 error that ended the app); five round trips in a row are clean and the character list looks the same as on the first visit
 (`shots/perf/flow-charlist-first.png`, `flow-charlist-after-leave.png`: the only difference is the idle pose of the character).
 
+### Prewarm on the character list
+
+The loading screen's critical path was the pipeline compile (1.6 to 1.8 s), which does not need the player or the server, so
+`ingame/prewarm.rs` does it while the player sits on the character list. One second after the list is built, the real world is
+streamed in around the first listed character at a small footprint (`load_radius` 450 m, objects within 300 m, trees 300 m, water 500 m, 2 ms of
+main thread per frame; terrain, objects, vegetation, water, sky and the particle effects through the real systems), the character is
+prepared on a worker and spawned where the player will stand, and a camera renders it into a 96 x 54 image. That camera is the in-game
+camera in everything that decides a pipeline (the lens, aa-world's `Post` with its HDR, no MSAA, prepasses, SSAO, bloom and tonemapping),
+so the combinations compiled are the ones the game asks for; a mock scene with one object of each kind would miss the
+material flags and vertex layouts that only the data decides, and the shadow and prepass variants of each. It ends when
+`PipelineStatus` has stopped changing for 0.6 s (1.4 to 1.6 s on this machine: 117 pipelines, 72 of them are the login screens'), drops the camera and the
+character and moves the anchor away so the world unloads, or at once when the player leaves the list (Start before it settled keeps the
+world that is already there and whatever compiled stays in the pipeline cache). It runs once per process. `--no-prewarm` or `AA_PREWARM=0`
+turns it off.
+
+`tools/perf-flow.sh` with `GOTO=character-select EXTRA="--start-after S"` and `off=<dir>|--no-prewarm on=<dir>` (3 alternating runs, HUD on,
+release; `--start-after S` presses Start S seconds after the list came up):
+
+| Start pressed after | loading screen, off | loading screen, on | Start to first in-game frame, off / on | pipelines compiled on the loading screen, off / on |
+|---|---|---|---|---|
+| 6 s (list settled; 9 s and 3 s the same) | 2.1 to 2.3 s | 1.3 to 1.4 s | 2.19 to 2.30 s / 1.33 to 1.40 s | 61 / 17 |
+| 0.5 s (fast click) | 2.1 to 2.8 s | 2.2 to 2.7 s | 2.1 to 2.8 s / 2.25 to 2.75 s | 61 / 61 |
+| 1.8 s (prewarm cut short at 0.8 s) | 2.3 to 3.2 s | 2.7 s (5.8 s cold) | the same plus 0.05 s | 46 to 49 |
+
+The character list's frames: nothing changes in the first second (the list's own build, 260 to 450 ms for one frame, unchanged);
+after it, the idle list renders at 9 to 16 ms worst frame, and with the prewarm the worst frame is 25 to 39 ms (the frame that starts it and
+the first frames of the new camera; no frame over 33 ms in 5 of 6 runs, two in the sixth), 9 to 14 ms in the second after the world is
+dropped. The loading screen still waits 0.65 s of settle and hold, 0.5 s for models and units and 0.7 s for the last 17 pipelines (units:
+creatures and NPCs the server announces, which the list cannot know). The first in-game frames are as before (worst frame of the
+first 5 s 35 to 49 ms).
+
+Persistent pipeline cache: wgpu 29 has `wgpu::PipelineCache` (Vulkan: `Device::create_pipeline_cache`, `get_data()` to save the driver's blob, `data`
+to start from it), which would make the compile on the second start of the client near free. Bevy 0.20's `PipelineCache` creates every
+pipeline with `cache: None` (three places in `bevy_render/src/render_resource/pipeline_cache.rs`) and has no hook to change that, so it
+needs a patched or vendored `bevy_render`; not built.
+
+What the pipeline key hangs on, found with `AA_PIPELINE_DUMP=<file>` (aa-world's `pipelines.rs` appends one line per requested pipeline,
+descriptor included; sort and diff two runs): the camera's `EnvironmentMapLight`. A camera whose environment map is not on the GPU yet
+has the view layout without `environment_map`, which is another key for every material, so `update_ambient` creating new cube maps
+on every change of the light (1.5 % of a colour, which a moving server clock does all the time) compiled the whole set a second time (19
+pipelines on the loading screen with the clock following the server, none with `--hour`, which hid it) and drew the world without
+ambient light until they were done. `update_ambient` now writes the pixels of its two cube maps in place (`sky::AmbientCubes`, a
+resource) and inserts the component only on a camera that does not have it yet, and it does so when the world focus moves to
+another camera (the login flow's anchor camera holds it first; with a frozen clock the game's camera never got the ambient light at
+all). The prewarm camera takes its `EnvironmentMapLight` from the same maps.
+
+The world's time of day follows the server's game clock (`ingame::sync_clock`: `aa_net::state::WorldInfo::hour_now()`, extrapolated from its
+last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server has sent it; `--hour H` pins it).
+
 ## 6. Known gaps
 
 * Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
