@@ -31,6 +31,7 @@ dependencies = [
  "anyhow",
  "bevy",
  "mlua",
+ "roxmltree",
  "rusqlite",
 ]
 

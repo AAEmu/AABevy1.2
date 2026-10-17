@@ -84,8 +84,10 @@ impl LoginArgs {
             "world-select" => Some(Goto::WorldSelect),
             "character-select" => Some(Goto::CharacterSelect),
             "loading" => Some(Goto::Loading),
+            // the create screen drives itself there (`create::auto_drive`, see its docs)
+            "create" => None,
             other => {
-                eprintln!("--goto: unknown screen {other:?} (world-select, character-select, loading)");
+                eprintln!("--goto: unknown screen {other:?} (world-select, character-select, create, loading)");
                 None
             }
         });
@@ -101,6 +103,7 @@ impl LoginArgs {
                     let screen = match screen {
                         "world-select" => Screen::WorldSelect,
                         "character-select" => Screen::CharacterSelect,
+                        "create" => Screen::CharacterCreate,
                         "loading" => Screen::Loading,
                         other => {
                             eprintln!("--lua: unknown screen {other:?}");
