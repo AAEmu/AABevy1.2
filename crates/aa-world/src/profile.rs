@@ -20,12 +20,13 @@ use bevy::render::diagnostic::RenderDiagnosticsPlugin;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::transform::TransformSystems;
 
+use crate::post::PostUniform;
 use crate::stream::WorldTimings;
 
 const MAIN: usize = 7;
-const RENDER: usize = 12;
+const RENDER: usize = 15;
 const MAIN_NAMES: [&str; MAIN - 1] = ["update", "pre", "anim+propagate", "frusta", "check-visibility", "post"];
-const RENDER_NAMES: [&str; RENDER - 1] = ["extract-cmds", "assets", "meshes", "create-views", "specialize", "acquire-swapchain", "prepare-views", "queue+sort", "prepare", "render+present", "cleanup"];
+const RENDER_NAMES: [&str; RENDER - 1] = ["extract-cmds", "assets", "meshes", "create-views", "specialize", "acquire-swapchain", "prepare-views", "queue+sort", "prep-resources", "batch-phases", "write-buffers", "bind-groups", "render+present", "cleanup"];
 
 /// True when `AA_PROFILE` is set or `--profile` was given.
 pub fn requested() -> bool {
@@ -136,10 +137,13 @@ impl Plugin for ProfilePlugin {
                     rstamp::<5>.after(S::Specialize).before(prepare_windows),
                     rstamp::<6>.after(prepare_windows).before(prepare_view_attachments),
                     rstamp::<7>.after(S::PrepareViews).before(S::Queue),
-                    rstamp::<8>.after(S::PhaseSort).before(S::Prepare),
-                    rstamp::<9>.after(S::Prepare).before(S::Render),
-                    rstamp::<10>.after(S::Render).before(S::Cleanup),
-                    rstamp::<11>.after(S::PostCleanup),
+                    rstamp::<8>.after(S::PhaseSort).before(S::PrepareResources),
+                    rstamp::<9>.after(S::PrepareResources).before(S::PrepareResourcesBatchPhases),
+                    rstamp::<10>.after(S::PrepareResourcesBatchPhases).before(S::PrepareResourcesWritePhaseBuffers),
+                    rstamp::<11>.after(S::PrepareResourcesWritePhaseBuffers).before(S::PrepareBindGroups),
+                    rstamp::<12>.after(S::PrepareBindGroups).before(S::Render),
+                    rstamp::<13>.after(S::Render).before(S::Cleanup),
+                    rstamp::<14>.after(S::PostCleanup),
                 ),
             );
         }
@@ -172,6 +176,7 @@ fn report(
     timers: Res<Timers>,
     world_timings: Option<Res<WorldTimings>>,
     meshes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &ViewVisibility)>,
+    cameras: Query<(&Camera, Option<&Name>, &bevy::camera::RenderTarget, Has<Camera3d>)>,
 ) {
     let first = stamps.t[0].unwrap_or_else(Instant::now);
     let end = stamps.t[MAIN - 1].unwrap_or(first);
@@ -255,6 +260,16 @@ fn report(
             pairs.insert((m.0.id(), mat.0.id()));
         }
     }
+    let mut line = String::from("aa-profile: cameras:");
+    for (c, name, target, is3d) in &cameras {
+        let target = match target {
+            bevy::camera::RenderTarget::Window(_) => "window",
+            bevy::camera::RenderTarget::Image(_) => "image",
+            _ => "other",
+        };
+        line += &format!(" [{} order {} {} {} {}]", name.map_or("-", |n| n.as_str()), c.order, if is3d { "3d" } else { "2d" }, target, if c.is_active { "active" } else { "inactive" });
+    }
+    info!("{line}");
     info!("aa-profile: fps {fps:.0} | entities {entities:.0}, mesh entities {total}, visible {visible}, distinct mesh+material {}", pairs.len());
 }
 
@@ -265,13 +280,14 @@ fn offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    cameras: Query<Entity, With<Camera3d>>,
+    cameras: Query<(Entity, &bevy::camera::RenderTarget), (With<Camera3d>, With<PostUniform>)>,
     mut done: Local<bool>,
 ) {
     if *done {
         return;
     }
-    let (Some(camera), Some(window)) = (cameras.iter().next(), windows.iter().next()) else { return };
+    // the camera with the world's post pass (the login stage and UI cameras are other cameras)
+    let (Some((camera, bevy::camera::RenderTarget::Window(_))), Some(window)) = (cameras.iter().next(), windows.iter().next()) else { return };
     let image = Image::new_target_texture(window.physical_width(), window.physical_height(), bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb, None);
     commands.entity(camera).insert(bevy::camera::RenderTarget::Image(images.add(image).into()));
     *done = true;
