@@ -267,6 +267,31 @@ animator.stop_layer(0.12);                              // fades out (0 = at onc
 | `...EyebrowColor / DecoColor / PupilColor / LipColor (r, g, b)` | `Customization::{eyebrow_color, deco_color, left_pupil_color, right_pupil_color, lip_color}` (`0xAABBGGRR`) |
 | `...FaceNormal(i, weight)`, `...FaceDiffuse(i)` | `normal_map`, `normal_map_weight`; `face_diffuse_maps` is empty in 1.2 |
 
+### Face normal strength
+
+`face_normal_map_weight` now controls the selected normal map instead of always drawing it at
+full strength. This affects normal presets as well as the create screen's wrinkle slider (Nuian
+male presets include weights 0.33, 0.62 and 0.73). At strengths below 1, `face_normal` bakes linear
+RGBA tangent-space normals blended towards `(0,0,1)`; ATI2's two channels are decoded with aa-cry's
+YX correction and Z is reconstructed before blending. Every source mip is retained. At strength
+1 the original compressed texture is used. Equal live path/strength combinations share an image;
+the cache stores asset IDs, allowing discarded preview textures to be freed. No caller changes.
+
+Validation: 41 aa-anim unit tests passed, 1 whole-pak decode test remains intentionally ignored;
+the four new tests cover strength endpoints/interpolation, ATI2 Z reconstruction, invalid weights,
+and the real DDS's linear format/mip sizes. The existing `faces` example accepts `;`-separated
+normal choices, so the same face can be checked side by side:
+
+```powershell
+cargo run -p aa-anim --example faces -- --race nuian --gender m --presets 0,0,0 --normal '35:0;35:0.5;35:1' --fov 14 --shot shots/aa-anim/normal_strengths.png --shot-after 8
+```
+
+`shots/aa-anim/normal_strengths.png` was inspected: left to right, the smooth face develops the
+selected map's forehead and cheek creases progressively. Settled FPS was 190.4-192.3 with three
+characters at 1920x1080, 168.4 during the capture. The reference
+`reference/character_create/step2_nuian_male/real.png` was also inspected; the showroom check uses
+different lighting and verifies the strength behavior, without changing existing skin calibration.
+
 ## API
 
 ```rust
@@ -368,7 +393,7 @@ bind pose, and the customisation colours of the preset. `face_dump` lists / size
   (`asset_1..3`) and beards are not implemented; preset hair colours come from the colour `.mtl` of
   the chosen style (`hair_colors`).
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
-  texture); `face_normal_map_weight` below 1 is not applied (Bevy has no normal strength).
+  texture).
 * Only the idle clips play. Locomotion blending (`Lmg`), facial animation (`.fsq`) and lip sync, eye
   blinks, dye choice for armour other than the default dye are not done. The `.dbh` track database
   is not decoded (not needed).
