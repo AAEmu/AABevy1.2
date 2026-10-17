@@ -531,6 +531,18 @@ fn desaturate(c: Vec3, s: f32) -> Vec3 {
     Vec3::splat(l) + (c - Vec3::splat(l)) * s
 }
 
+fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
+    let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How visible the sun's glow and disc are: by day the full sun, and at the dusk and dawn the warm (red, orange) sun colours of
+/// the data too (a sunset sun has a low sRGB luminance, `day` alone would hide it); the blue colours of the night are the moon.
+fn sun_shine(cur: &EnvSample) -> f32 {
+    let warm = ((cur.sun.x - cur.sun.z) / (cur.sun.x + cur.sun.z).max(1e-3) * 2.0).clamp(0.0, 1.0);
+    cur.day.max(warm)
+}
+
 fn unit_luminance(c: Vec3) -> Vec3 {
     c / luminance(c).max(1e-4)
 }
@@ -704,12 +716,16 @@ fn update_sky(
     let sun_up = ((cur.sun_dir.z + 0.04) / 0.1).clamp(0.0, 1.0);
     let sun_col = cur.sun / luminance(cur.sun).max(1e-3);
     // the hue of the sky light (Rayleigh scattering is blue, Mie scattering white), the brightness of the zone's gradient colours
+    // (the scatter hue is the noon sky of the real captures: towards the dusk the zone's own gradient colours take over, a
+    // sun low in the west must not paint the whole dome with its colour)
     let scatter_hue = unit_luminance((cur.sky_rayleigh + cur.sky_mie * tuning.sky_mie) * Vec3::new(1.0, tuning.sky_green, 1.0));
-    let hue = |c: Vec3| lerp3(unit_luminance(c), scatter_hue, tuning.sky_hue) * luminance(c);
+    let sun_elevation = cur.sun_dir.z.clamp(-1.0, 1.0).asin().to_degrees();
+    let hue_weight = tuning.sky_hue * smoothstep(20.0, 40.0, sun_elevation);
+    let hue = |c: Vec3| lerp3(unit_luminance(c), scatter_hue, hue_weight) * luminance(c);
     m.params.horizon = (hue(cur.horizon) * rs * tuning.sky_gain).extend(tuning.sky_exp);
     m.params.zenith = (hue(cur.zenith) * rs * tuning.sky_gain).extend(0.0);
     m.params.shape = Vec4::new(tuning.sky_tau, tuning.sky_phase, 0.0, 0.0);
-    m.params.sun_dir = sun_bevy.extend(sun_up * cur.day);
+    m.params.sun_dir = sun_bevy.extend(sun_up * sun_shine(cur));
     m.params.sun_color = (sun_col * rs * tuning.sun_sky).extend(tuning.disc);
     match &sky_box {
         Some(b) => {
@@ -746,7 +762,7 @@ fn update_post(
         u.fog_layer = cur.fog_layer;
         u.fog_params = Vec4::new(cur.fog_ramp.x, tuning.fog_ext, 1.0, cfg.sky_radius);
         u.sun_dir = sun_bevy.extend(12.0);
-        u.sun_glow = (cur.sun * rs * tuning.glow * cur.day).extend(0.0);
+        u.sun_glow = (cur.sun * rs * tuning.glow * sun_shine(cur)).extend(0.0);
         u.film = film;
         u.grade = grade * Vec4::new(tuning.saturation, 1.0, 1.0, tuning.exposure);
         u.balance = balance.truncate().extend(if post.fog { 1.0 } else { 0.0 });
