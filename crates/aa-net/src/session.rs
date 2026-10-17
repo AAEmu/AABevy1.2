@@ -254,6 +254,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
+    LootRoll(crate::loot_roll::LootRollCommand),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -479,6 +480,7 @@ pub enum Event {
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
+    LootRoll(crate::loot_roll::LootRollEvent),
     Auction(crate::auction::AuctionEvent),
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
@@ -930,6 +932,13 @@ impl Session {
                     self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
                 }
             }
+            Command::LootRoll(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::LootRoll(crate::loot_roll::LootRollEvent::RequestRejected { command, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::LootRoll(command)).await {
+                    self.emit(Event::LootRoll(crate::loot_roll::LootRollEvent::Requested(command)));
+                }
+            }
             Command::Auction(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected { command, message: message.into() }));
@@ -1311,6 +1320,7 @@ impl Session {
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
+            M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
             M::Trade(e) => {
                 if let crate::trade::TradeEvent::Made(tasks) = &e {
