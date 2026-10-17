@@ -120,6 +120,31 @@ impl<'a> Reader<'a> {
         Ok(String::from_utf8_lossy(self.blob()?).trim_matches('\0').to_string())
     }
 
+    /// A "pisc" group of `n` (at most 4) integers: one header byte with two bits per value
+    /// (`0` = `u8`, `1` = `u16`, `2` = 24-bit `bc`, `3` = `u32`), then the values. Unused entries
+    /// of the result are 0.
+    pub fn pisc(&mut self, n: usize) -> Result<[i64; 4]> {
+        if n > 4 {
+            return Err(WireError::Invalid(format!("pisc group of {n} values")));
+        }
+        let header = self.u8()?;
+        let mut out = [0i64; 4];
+        for (i, v) in out.iter_mut().enumerate().take(n) {
+            *v = match (header >> (i * 2)) & 3 {
+                0 => i64::from(self.u8()?),
+                1 => i64::from(self.u16()?),
+                2 => i64::from(self.bc()?),
+                _ => i64::from(self.u32()?),
+            };
+        }
+        Ok(out)
+    }
+
+    /// Looks at the next byte without consuming it.
+    pub fn peek_u8(&self) -> Result<u8> {
+        self.buf.get(self.pos).copied().ok_or(WireError::Eof { pos: self.pos, wanted: 1, len: self.buf.len() })
+    }
+
     /// A 9-byte packed world position.
     pub fn position(&mut self) -> Result<Pos> {
         let b = self.array::<9>()?;
@@ -199,6 +224,28 @@ impl Writer {
     }
     pub fn string(&mut self, s: &str) -> &mut Self {
         self.blob(s.as_bytes())
+    }
+    /// The server's `WritePisc`: up to four integers behind one header byte (see
+    /// [`Reader::pisc`]); values above `0xFF` use the wider forms.
+    pub fn pisc(&mut self, values: &[i64]) -> &mut Self {
+        debug_assert!(values.len() <= 4);
+        let mut header = 0u8;
+        let mut body = Writer::new();
+        for (i, &v) in values.iter().enumerate() {
+            if v <= 0xFF {
+                body.u8(v as u8);
+            } else if v <= 0xFFFF {
+                header |= 1 << (i * 2);
+                body.u16(v as u16);
+            } else if v <= 0xFF_FFFF {
+                header |= 1 << (i * 2 + 1);
+                body.bc(v as u32);
+            } else {
+                header |= 3 << (i * 2);
+                body.u32(v as u32);
+            }
+        }
+        self.u8(header).raw(&body.buf)
     }
     pub fn position(&mut self, p: Pos) -> &mut Self {
         self.raw(&encode_position(p))
@@ -344,6 +391,27 @@ mod tests {
         // Negative x sets 0x80 in byte 8, negative y 0x40.
         assert_eq!(encode_position(Pos::new(-1.0, 0.0, -100.0))[8] & 0xC0, 0x80);
         assert_eq!(encode_position(Pos::new(0.0, -1.0, -100.0))[8] & 0xC0, 0x40);
+    }
+
+    #[test]
+    fn pisc_groups_use_two_bits_per_value() {
+        // The server's `write_pisc` forms: 5 (u8), 0x1234 (u16), 0x123456 (bc), 0x12345678 (u32).
+        let mut w = Writer::new();
+        w.pisc(&[5, 0x1234, 0x12_3456, 0x1234_5678]);
+        let bytes = w.finish();
+        assert_eq!(
+            bytes,
+            [0b11_10_01_00, 5, 0x34, 0x12, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12]
+        );
+        let mut r = Reader::new(&bytes);
+        assert_eq!(r.pisc(4).unwrap(), [5, 0x1234, 0x12_3456, 0x1234_5678]);
+        assert!(r.is_empty());
+        // Two values: the header still takes a whole byte; the rest reads as zero.
+        let mut w = Writer::new();
+        w.pisc(&[0, 300]);
+        assert_eq!(w.as_bytes(), [0b0100, 0, 0x2C, 0x01]);
+        assert_eq!(Reader::new(w.as_bytes()).pisc(2).unwrap(), [0, 300, 0, 0]);
+        assert!(Reader::new(&[0]).pisc(5).is_err());
     }
 
     #[test]

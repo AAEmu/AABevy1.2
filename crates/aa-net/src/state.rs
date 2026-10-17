@@ -19,6 +19,9 @@ macro_rules! resource {
     };
 }
 
+mod stats;
+pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
+
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
     pub struct Worlds {
@@ -128,6 +131,16 @@ impl Units {
             Event::UnitPoints { obj_id, hp, mp } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 (u.hp, u.mp) = (*hp, *mp);
+                u.max_hp = u.max_hp.max(*hp);
+                u.max_mp = u.max_mp.max(*mp);
+            }
+            Event::LevelChanged { obj_id, level } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.level = *level;
+            }
+            Event::UnitFactionChanged { obj_id, faction_id, .. } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.faction_id = *faction_id;
             }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
@@ -225,6 +238,8 @@ pub struct WorldState {
     pub units: Units,
     pub doodads: Doodads,
     pub status: Status,
+    pub stats: PlayerStats,
+    pub buffs: Buffs,
 }
 
 impl WorldState {
@@ -235,6 +250,8 @@ impl WorldState {
         self.units.apply(e);
         self.doodads.apply(e);
         self.status.apply(e);
+        self.stats.apply(e);
+        self.buffs.apply(e);
     }
 }
 
@@ -244,7 +261,7 @@ mod tests {
     use crate::model::{Equipment, ModelParams, Movement, UnitKind};
     use crate::wire::Pos;
 
-    fn unit(obj_id: u32) -> Unit {
+    pub(crate) fn unit(obj_id: u32) -> Unit {
         Unit {
             obj_id,
             name: format!("u{obj_id}"),
@@ -261,6 +278,17 @@ mod tests {
             mp: 0,
             race_gender: 0,
             movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            max_hp: 10,
+            max_mp: 0,
         }
     }
 

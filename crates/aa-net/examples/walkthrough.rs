@@ -6,10 +6,15 @@
 //! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:27237] [--user bevytest]
 //!     [--password-file PATH] [--world ID] [--character NAME] [--watch-secs 10] [--roundtrip] [--delete-test]
 //!     [--move-secs N] [--move-hz 10] [--scenario circle|far|underground|jump|fall] [--no-ping] [--ping-interval-ms 3000] [--first-ping-delay-ms N]
+//!     [--cmd "/add_labor 10"]...
 //! ```
 //!
 //! `--roundtrip` additionally goes back to the character list, then to the world list, and enters
 //! the game a second time before logging out.
+//!
+//! `--cmd TEXT` (repeatable) sends the text as chat once the player is in the world (server GM
+//! commands such as `/add_labor 10` or `/add_xp 500` start with a slash) and prints the events
+//! that follow, then the player state again.
 //!
 //! `--delete-test` creates a second character, deletes it and shows what the server answers.
 //!
@@ -45,6 +50,7 @@ struct Args {
     ping: bool,
     ping_interval_ms: u64,
     first_ping_delay_ms: u64,
+    cmds: Vec<String>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -63,6 +69,7 @@ fn parse_args() -> Result<Args> {
         ping: true,
         ping_interval_ms: 3000,
         first_ping_delay_ms: 0,
+        cmds: Vec::new(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -82,6 +89,7 @@ fn parse_args() -> Result<Args> {
             "--no-ping" => a.ping = false,
             "--ping-interval-ms" => a.ping_interval_ms = value()?.parse()?,
             "--first-ping-delay-ms" => a.first_ping_delay_ms = value()?.parse()?,
+            "--cmd" => a.cmds.push(value()?),
             other => bail!("unknown argument {other}"),
         }
     }
@@ -371,6 +379,28 @@ async fn main() -> Result<()> {
         );
     }
 
+    print_player_state(&state);
+    if !args.cmds.is_empty() {
+        for text in &args.cmds {
+            println!("== chat: {text}");
+            client.send(Command::Chat {
+                chat_type: aa_net::model::chat_type::SAY,
+                target: String::new(),
+                message: text.clone(),
+            });
+            let end = Instant::now() + Duration::from_millis(2500);
+            while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+                state.apply(&e);
+                if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_)) {
+                    continue;
+                }
+                let line = format!("{e:?}");
+                println!("  event {}", if line.len() > 240 { format!("{}...", &line[..240]) } else { line });
+            }
+        }
+        print_player_state(&state);
+    }
+
     // 6. Move and chat.
     println!("== move and chat");
     let mut pos = here;
@@ -419,6 +449,43 @@ async fn main() -> Result<()> {
     .await?;
     println!("  left the world; done");
     Ok(())
+}
+
+/// What the HUD would read from the state tables.
+fn print_player_state(state: &WorldState) {
+    let s = &state.stats;
+    println!("== player state");
+    let (earned, needed) = s.exp_progress();
+    let (gold, silver, copper) = s.money_parts();
+    println!(
+        "  {} lvl {} hp {}/{} mp {}/{} exp {earned}/{needed} (total {}, recoverable {}) labor {}/{} money {gold}g {silver}s {copper}c bank {} loyalty {} honor {} vocation {}",
+        s.name, s.level, s.hp, s.max_hp, s.mp, s.max_mp, s.exp, s.recoverable_exp, s.labor,
+        aa_net::state::LABOR_MAX, s.bank_money, s.loyalty, s.honor, s.vocation
+    );
+    let levels: Vec<u8> = s.active_abilities.iter().map(|&a| s.ability_level(a)).collect();
+    println!(
+        "  abilities {:?} (levels {:?}, exp {:?}) combat {} dead {}",
+        s.active_abilities, levels, s.ability_exp, s.in_combat, s.dead
+    );
+    let own = state.buffs.of(s.obj_id);
+    println!("  own buffs: {}", own.len());
+    for b in own {
+        println!(
+            "    buff {:>8} index {} {:?} stacks {} duration {} ms left {:?} caster {:?} lvl {}",
+            b.buff.buff_id, b.buff.index, b.buff.kind, b.buff.stacks, b.buff.duration_ms, b.remaining_ms(),
+            b.buff.caster, b.buff.caster_level
+        );
+    }
+    if let Some(sp) = &state.player.spawn {
+        let u = &sp.unit;
+        println!(
+            "  unit: faction {} expedition {} appellation {} skills {:?} passive buffs {:?}",
+            u.faction_id, u.expedition_id, u.appellation, u.skills, u.passive_buffs
+        );
+    }
+    let with_buffs = state.units.iter().filter(|u| !state.buffs.of(u.obj_id).is_empty()).count();
+    let with_faction = state.units.iter().filter(|u| u.faction_id != 0).count();
+    println!("  units with buffs {with_buffs}, with a faction {with_faction} of {}", state.units.by_id.len());
 }
 
 /// Walks a circle around `centre` at about 4 m/s for `secs` seconds, one movement packet every

@@ -13,6 +13,7 @@
 //!
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
+pub mod buff;
 pub mod game;
 pub mod login;
 pub mod model;
