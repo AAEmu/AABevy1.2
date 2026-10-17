@@ -16,6 +16,8 @@ pub struct FxParams {
     pub gain: Vec4,
     /// Weights of the opacity map's channels (all 0 = no opacity map).
     pub mask: Vec4,
+    /// x: refraction strength (fraction of the viewport height a unit normal shifts the scene), y: 1 for a refraction material.
+    pub refr: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -28,6 +30,11 @@ pub struct FxMaterial {
     /// The separate opacity map of a mesh material (sampled with the mesh's second texture coordinates).
     #[texture(3)]
     pub mask: Option<Handle<Image>>,
+    /// The normal map of a refraction material: it shifts the scene behind the particle instead of showing the texture.
+    #[texture(4)]
+    pub normal: Option<Handle<Image>>,
+    /// Reads the scene drawn so far (`ScreenSpaceTransmission` on the camera).
+    pub refract: bool,
     pub blend: Blend,
     /// Sort bias of `DrawLast`: larger draws later among equally distant emitters.
     pub depth_bias: f32,
@@ -42,7 +49,7 @@ impl FxParams {
             Blend::Opaque => 4.0,
             _ => 0.0,
         };
-        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0), mask: Vec4::ZERO }
+        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0), mask: Vec4::ZERO, refr: Vec4::ZERO }
     }
 }
 
@@ -63,6 +70,10 @@ impl Material for FxMaterial {
 
     fn depth_bias(&self) -> f32 {
         self.depth_bias
+    }
+
+    fn reads_view_transmission_texture(&self) -> bool {
+        self.refract
     }
 
     fn enable_prepass() -> bool {

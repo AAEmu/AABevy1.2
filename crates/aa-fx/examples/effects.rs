@@ -20,6 +20,7 @@
 //! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
 //!                                effect in a single shot; add `--loop` and `--no-prime`)
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
+//! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
@@ -151,6 +152,7 @@ fn setup(
     orbit: Res<Orbit>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let day = flag("--day");
     let ground = if day { Color::srgb(0.25, 0.27, 0.2) } else { Color::srgb(0.035, 0.037, 0.045) };
@@ -160,6 +162,32 @@ fn setup(
     ));
     commands.spawn((DirectionalLight { illuminance: if day { 12_000.0 } else { 1_500.0 }, ..default() }, Transform::from_xyz(4.0, 8.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y)));
     commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.5, 0.55, 0.7), brightness: if day { 500.0 } else { 60.0 }, ..default() });
+
+    if flag("--backdrop") {
+        let size = 64u32;
+        let mut data = Vec::with_capacity((size * size * 4) as usize);
+        for y in 0..size {
+            for x in 0..size {
+                let on = ((x / 4) + (y / 4)) % 2 == 0;
+                let v = if on { 200u8 } else { 70u8 };
+                data.extend_from_slice(&[v, v, (v as f32 * 0.9) as u8, 255]);
+            }
+        }
+        let mut image = Image::new(
+            bevy::render::render_resource::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+            bevy::render::render_resource::TextureDimension::D2,
+            data,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        );
+        image.sampler = bevy::image::ImageSampler::nearest();
+        let wall = materials.add(StandardMaterial { base_color_texture: Some(images.add(image)), unlit: true, ..default() });
+        commands.spawn((
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::new(14.0, 5.0)))),
+            MeshMaterial3d(wall),
+            Transform::from_xyz(0.0, 4.0, -3.5),
+        ));
+    }
 
     let pedestal = meshes.add(Cylinder::new(0.18, 0.12));
     let pedestal_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.3, 0.28, 0.26), perceptual_roughness: 0.9, ..default() });

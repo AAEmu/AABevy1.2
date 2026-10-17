@@ -37,7 +37,7 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 
-pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, MatKey, MeshMat, SlotState, Source};
+pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, MatKey, MeshMat, RefrKey, Refraction, SlotState, Source};
 pub use geom::{Geom, GeomKey};
 pub use library::{EffectDef, Library, split_name};
 pub use material::FxMaterial;
@@ -78,6 +78,9 @@ pub struct FxSettings {
     pub wind: Vec3,
     /// Direction to the sun in world space: shades the opaque meshes (debris) of effects.
     pub sun: Vec3,
+    /// Draw refraction particles (`RefrBumpScale` materials) as a distortion of the scene behind them; needs
+    /// `ScreenSpaceTransmission` on the camera, which the plugin adds. Off: they are not drawn.
+    pub refraction: bool,
     pub enabled: bool,
 }
 
@@ -97,6 +100,7 @@ impl Default for FxSettings {
             activations_per_frame: 6,
             wind: Vec3::new(0.5, 0.0, 0.2),
             sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
+            refraction: std::env::var_os("AA_FX_NO_REFRACTION").is_none(),
             enabled: true,
         }
     }
@@ -239,7 +243,7 @@ impl Plugin for FxPlugin {
             .init_resource::<FxAssets>()
             .add_systems(
                 PostUpdate,
-                (camera_view, register, resolve, classify, apply, bind_geometry, simulate, upload)
+                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload)
                     .chain()
                     .run_if(|s: Res<FxSettings>| s.enabled)
                     .after(bevy::transform::TransformSystems::Propagate)
@@ -273,6 +277,16 @@ fn log_stats(time: Res<Time>, stats: Res<FxStats>, view: Res<FxView>, mut since:
                 );
             }
         }
+    }
+}
+
+/// Refraction materials read the scene drawn so far: the camera has to keep a copy of it.
+fn ensure_transmission(mut commands: Commands, assets: Res<FxAssets>, cameras: Query<Entity, (With<Camera3d>, Without<bevy::pbr::ScreenSpaceTransmission>)>) {
+    if !assets.refractive {
+        return;
+    }
+    for camera in &cameras {
+        commands.entity(camera).insert(bevy::pbr::ScreenSpaceTransmission { steps: 1, quality: bevy::pbr::ScreenSpaceTransmissionQuality::Low });
     }
 }
 
@@ -451,6 +465,7 @@ fn apply(
             let mut mesh = Entity::PLACEHOLDER;
             let mut handle = None;
             let mut pending_geom = None;
+            let mut drawn = true;
             if d.draws() && enabled {
                 if d.has_geometry {
                     // the mesh and its material come first, see `bind_geometry`
@@ -464,19 +479,34 @@ fn apply(
                     pending_geom = Some(key);
                 } else {
                     let source = if d.texture.is_empty() { Source::Material(d.material.clone()) } else { Source::Texture(d.texture.clone()) };
-                    material = assets.slot(
-                        MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None },
-                        &mut materials,
-                        settings.gain,
-                        settings.soft_distance,
-                    );
-                    let mesh_handle = meshes.add(new_mesh(false, false));
-                    mesh = spawn_mesh(&mut commands, entity, layers, mesh_handle.clone(), assets.slots[material as usize].handle.clone());
-                    handle = Some((mesh, mesh_handle));
+                    // a refraction material distorts the scene behind it: without that it shows nothing
+                    let refraction = if d.texture.is_empty() { assets.refraction(&d.material) } else { None };
+                    let is_refraction = refraction.is_some();
+                    let refract = match refraction {
+                        Some(r) if r.normal.is_empty() || !settings.refraction => None,
+                        Some(r) => Some(RefrKey { normal: r.normal, bump: (r.bump * 1000.0).round().clamp(0.0, 60_000.0) as u16 }),
+                        None => None,
+                    };
+                    if !is_refraction || refract.is_some() {
+                        material = assets.slot(
+                            MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None, refract },
+                            &mut materials,
+                            settings.gain,
+                            settings.soft_distance,
+                        );
+                        let mesh_handle = meshes.add(new_mesh(false, false));
+                        mesh = spawn_mesh(&mut commands, entity, layers, mesh_handle.clone(), assets.slots[material as usize].handle.clone());
+                        handle = Some((mesh, mesh_handle));
+                    } else {
+                        drawn = false;
+                    }
                 }
             }
             let mut st = EmitterState::new(fe.def.clone(), fe.parent, material, 1.0, hash_seed(entity, i), mesh);
             st.pending_geom = pending_geom;
+            if !drawn {
+                st.draws = false;
+            }
             if !enabled {
                 st.draws = false;
                 st.disable();
@@ -523,7 +553,7 @@ fn bind_geometry(
                         cutoff: (m.cutoff * 255.0).round() as u8,
                     };
                     let slot = assets.slot(
-                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key) },
+                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key), refract: None },
                         &mut materials,
                         settings.gain,
                         settings.soft_distance,
