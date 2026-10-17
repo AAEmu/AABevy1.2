@@ -3,9 +3,13 @@
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
 // and the depth prepass gives the scene depth. Colours are HDR, already multiplied by the view exposure (CPU side).
 //
-//   colour     = mix(body, reflection, fresnel) + sun glint
-//   body       = mix(water colour, refracted scene, exp(-absorption * thickness))
-//   reflection = screen space ray march against the depth prepass, the analytic sky where the ray finds nothing
+// The engine's `Watersurface` shader and the volume fog of the water volume, in that order:
+//
+//   body       = mix(fog colour, refracted scene, exp(-density * thickness))       (volume fog, constant colour)
+//   colour     = mix(body, reflection_amount * reflection, transparency * fresnel)  (surface)
+//              + sun glint + procedural foam (`water_foam.dds`)
+//   reflection = the environment cube map of the material times sun + sky (the engine's), or the analytic sky (the sea);
+//                optionally the scene where a screen space ray march finds it
 
 import bevy_pbr::render::{
     forward_io::VertexOutput,
@@ -18,7 +22,8 @@ import bevy_pbr::render::{
 struct WaterParams {
     // rgb: colour of deep water (pre-exposed), a: absorption per metre
     body: vec4<f32>,
-    // x: reflectance at normal incidence, y: reflection gain, z: bump scale, w: sun shine exponent
+    // x: fresnel bias (reflectance at normal incidence), y: reflection weight (the material's TransparencyRatio times
+    // a gain), z: bump scale, w: sun shine exponent
     refl: vec4<f32>,
     // x: big waves scale, y: small waves scale, z: speed, w: texture repeats per metre
     waves: vec4<f32>,
@@ -30,13 +35,25 @@ struct WaterParams {
     sky_h: vec4<f32>,
     // rgb: sky colour at the zenith
     sky_z: vec4<f32>,
-    // x: screen space reflections on (1) / off (0), y: refraction strength, z: reflection roughness (spread of the rays)
+    // x: screen space reflections on (1) / off (0), y: refraction strength, z: reflection roughness (spread of the rays),
+    // w: the material's ReflectionAmount (scales the reflected colour)
     misc: vec4<f32>,
+    // x: foam intersection factor (how deep the foam reaches), y: waves speed (drifts the foam), zw: unused
+    foam: vec4<f32>,
+    // rgb: foam colour: (sun + sky) times the material's foam multiplier (pre-exposed); zero = no foam
+    foam_col: vec4<f32>,
+    // rgb: the engine's `sun + sky` colour (pre-exposed), a: 1 = the reflection is the environment cube map times it
+    // (ponds, lakes, rivers), 0 = the analytic sky (the sea)
+    env_lit: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var normal_map: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var normal_map_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var foam_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(4) var foam_map_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var env_map: texture_cube<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(6) var env_map_sampler: sampler;
 
 // Depth of the opaque scene at a pixel (reverse z, 0 = far / nothing drawn); 0 without a depth prepass.
 @if(DEPTH_PREPASS)
@@ -150,6 +167,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let ndotv = clamp(abs(dot(v, nr)), 0.0, 1.0);
     let f0 = water.refl.x;
     let fresnel = clamp((f0 + (1.0 - f0) * pow(1.0 - ndotv, 5.0)) * water.refl.y, 0.0, 1.0);
+    // the foam is looked up unconditionally (uniform control flow), see below
+    let foam_anim = fract(globals.time * 0.025 * water.foam.y);
+    let foam_bump = vec2<f32>(n.x, -n.z) * (0.15 * 0.075);
+    let foam_uv_a = vec2<f32>(p.x, -p.z) * 0.3197 - vec2<f32>(foam_anim) + foam_bump;
+    let foam_uv_b = vec2<f32>(-p.z, p.x) * 0.2797 + vec2<f32>(foam_anim) + foam_bump;
+    let foam_sum = textureSample(foam_map, foam_map_sampler, foam_uv_a).rgb + textureSample(foam_map, foam_map_sampler, foam_uv_b).rgb;
 
     // ---- under the surface: thickness of the water along the view ray, refracted scene ----
     var thickness = 4.0;
@@ -174,7 +197,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // ---- reflection: the scene where the ray hits it, the sky elsewhere (two rays spread vertically: the surface is rough) ----
     let r = reflect(-v, nr);
     let rdir = normalize(vec3<f32>(r.x, abs(r.y), r.z));
-    let sky = sky_color(rdir);
+    // the engine reflects a fixed cube map (Cry axes: x east, y north, z up) lit by the sun and the sky colour
+    let cube = textureSample(env_map, env_map_sampler, vec3<f32>(rdir.x, -rdir.z, rdir.y)).rgb * water.env_lit.rgb;
+    let sky = mix(sky_color(rdir), cube, water.env_lit.a);
     var refl = sky;
     if water.misc.x > 0.5 && dist < 160.0 {
         // rough water smears the reflection vertically: two rays above and below the mirror direction
@@ -196,12 +221,20 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // transparent where the water is thin
     let soft = clamp(water.sun.a * thickness, 0.0, 1.0);
-    colour = mix(colour, refl, fresnel * soft);
+    colour = mix(colour, refl * water.misc.w, fresnel * soft);
 
     // sun glint on the ripples
     let rs = reflect(-v, n);
     let glint = pow(clamp(dot(rs, water.sun_dir.xyz), 0.0, 1.0), water.refl.w);
     colour = colour + water.sun.rgb * glint * water.sun_dir.w * soft;
+
+    // procedural foam: the engine's two drifting lookups of the foam texture, strongest where the water is shallow
+    // (around legs and objects, at the shore) but not where it vanishes
+    let foam_lum = clamp(dot(foam_sum, vec3<f32>(0.333)) - 1.0, 0.0, 1.0);
+    let foam_reach = clamp(water.foam.x * (0.2 / max(foam_lum, 1e-3)) * thickness, 0.0, 1.0);
+    var foam = 1.0 - foam_reach;
+    foam = foam * smoothstep(0.2, 0.7, soft * foam);
+    colour = colour + water.foam_col.rgb * foam * foam_lum * soft;
 
     return vec4<f32>(colour, 1.0);
 }
