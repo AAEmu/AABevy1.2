@@ -16,7 +16,8 @@
 //! * `--no-objects`          do not render the brushes (collision only)
 //! * `--bench <n>`           time `n` raycasts / sweeps / ground queries around the player and print them
 //!
-//! Colours: cyan = structures, orange = props, yellow line = the wanted camera arm, green = the clipped one, a red cross at the hit.
+//! Colours: cyan = structures, orange = props, pink = vegetation, yellow line = the wanted camera arm,
+//! green = the clipped one, a red cross at the hit.
 
 use aa_world::collide::{Mask, WorldCollision};
 use aa_world::{AaWorldPlugin, cry_to_bevy};
@@ -180,7 +181,7 @@ fn redraw(
     let centre = feet(&collision, setup.player) + Vec3::Z * 2.0;
     let mut asset = GizmoAsset::default();
     let mut count = 0;
-    for (mask, color) in [(Mask::STRUCTURES, Color::srgb(0.1, 0.9, 1.0)), (Mask::PROPS, Color::srgb(1.0, 0.6, 0.1))] {
+    for (mask, color) in [(Mask::STRUCTURES, Color::srgb(0.1, 0.9, 1.0)), (Mask::PROPS, Color::srgb(1.0, 0.6, 0.1)), (Mask::VEGETATION, Color::srgb(1.0, 0.3, 0.7))] {
         for t in collision.triangles_near(centre, setup.draw, mask) {
             let [a, b, c] = t.map(cry_to_bevy);
             asset.line(a, b, color);

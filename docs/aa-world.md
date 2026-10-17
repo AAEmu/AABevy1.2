@@ -570,10 +570,10 @@ terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. 
 * Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (use `WaterQuery`, see Water),
   and the surface type (the nibble is in `CellHeights::surface`, its meaning in the cell's `leveldata.xml`, see `terrain_layers::parse_surface_types`).
 
-### Collision with brushes (`collide.rs`, `collide/`, `aa_cry::physics`)
+### Collision with brushes and vegetation (`collide.rs`, `collide/`, `aa_cry::physics`)
 
-`aa_world::WorldCollision` (`aa_world::collide`) is the collision of the world's brushes (buildings, rocks, bridges, walls, stairs) next to the
-terrain, for the camera and the player controller of `aa-client`. Like `TerrainQuery` it is a clonable `Arc` handle (`&self` methods,
+`aa_world::WorldCollision` (`aa_world::collide`) is the collision of the world's brushes (buildings, rocks, bridges, walls, stairs), vegetation
+(tree trunks, rocks and plants with physics), and terrain, for the camera and the player controller of `aa-client`. Like `TerrainQuery` it is a clonable `Arc` handle (`&self` methods,
 `Send + Sync`) and a `Resource` (`AaWorldPlugin` inserts one for its world unless the app has one; build your own with
 `WorldCollision::with_config(world, terrain, CollisionConfig { .. })` and insert it before the plugin to change the settings), in game
 coordinates (metres, x east, y north, z up).
@@ -593,6 +593,9 @@ world.raycast(origin, dir, max) -> Option<Hit>                     // terrain + 
 world.ground_below(x, y, z, step_up) -> Option<Ground>             // the highest walkable surface not above z + step_up, terrain or brush
 world.slide(from, Vec2 delta, radius, height, step_up) -> Pushed   // horizontal move of a standing capsule, sub-stepped, slides along walls
 world.push_out(feet, radius, height, step_up) -> Pushed            // the same without the move: Pushed { pos, blocked, normal }
+world.surface_below(x, y, z, step_up) -> Option<Standing>         // ground + Surface + terrain flag, for footsteps / dust
+world.terrain_surface(x, y) -> Surface                           // terrain layer alone; mat_default until the cell is built
+world.raycast_surface(origin, dir, max, mask) -> Option<(Hit, Surface)>
 world.triangles_near(center, half_size, mask) -> Vec<[Vec3; 3]>    // for debug drawing (examples/collide.rs)
 ```
 
@@ -610,8 +613,14 @@ A controller frame is `let m = world.slide(pos, wish_dir * speed * dt, 0.35, 1.8
   only change x and y; terrain slopes are the controller's rule (the terrain is not a wall here). Thin walls cannot be crossed: `slide` pushes out
   after every half radius of the move. A capsule that starts inside a model is pushed out by at most `2 * radius + 0.5`.
 * **Masks.** Brushes are split by the size of their bounding box: `Mask::STRUCTURES` (houses, walls, rocks, bridges, boats: 4 m^3 and
-  more, `prop_volume`) and `Mask::PROPS` (barrels, crates, fences, lamp posts). `Mask::CAMERA` = terrain + structures: the camera does not
-  jump at every barrel; the player collides with `Mask::ALL`.
+  more, `prop_volume`) and `Mask::PROPS` (barrels, crates, fences, lamp posts). Vegetation is `Mask::VEGETATION`; instances whose proxy is at
+  least `vegetation_camera_width` (2 m) wide on both horizontal axes also count as structures. `Mask::CAMERA` = terrain + structures:
+  the camera passes small trunks and barrels, stops at boulders and wide trunks; the player collides with `Mask::ALL`.
+* **Physical surfaces.** Every proxy triangle carries its sub-material id from `aa_cry::physics::CollisionMesh.materials`; its model `.mtl`
+  and the placement's material override supply `SurfaceType` (`mat_wood`, `mat_rock`, `mat_sand_dry`, ...). Terrain uses the nearest
+  heightmap sample's surface nibble and the cell's `leveldata.xml` detail material. `Standing.surface.name()` is the column name in
+  `materialeffects.xml`, and `.kind()` is a coarse class for effects. Unknown materials return `mat_default`. `nocollide` materials and
+  the `no_collide` surface types in `surfacetypes.xml` (canopy, grass, leaves) do not stop the player; `mat_obstruct` is AI-only.
 * **Not loaded yet.** A cell that is not built answers with the terrain only. `WorldCollision::follow(x, y)` (the plugin calls it every 0.25 s
   for the `WorldFocus` entity, else the first `Camera3d`) requests the cells within `radius` (150 m) and drops those beyond `keep` (400 m);
   `radius <= 0` switches it off (character select), `AA_NO_COLLISION=1` leaves the plugin's system out. The first cell of a process takes
@@ -635,7 +644,11 @@ file; none of the 3826 models fails to parse. `CollisionConfig::visible_fallback
 `load_cell_objects`), each distinct model's proxy loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
 tens of MB), the brush matrix and the cell origin applied (mirrored matrices flip the winding), the triangles split into structures and props
 and each indexed by an 8 m grid over XY (`collide/soup.rs`: CSR rows of triangle ids, big triangles only in the cells they touch, ground
-candidates first in every row). Vegetation (trees, 2 M instances) is not included. Measured on the 140 cells with brushes of the middle of the
+candidates first in every row). Vegetation stays instanced: `collide/instances.rs` shares model-space triangles, keeps each placement in 24 bytes,
+and indexes the placements in a 16 m grid. Queries transform nearby trunks' triangles as needed, so a forest does not expand every tree to a
+triangle soup. In Lutesong Harbor 1,013 of 10,957 vegetation placements collide (265 wide enough for the camera), with 0.05 MB of instance data;
+Marianople has 1,348 of 10,439, 429 wide, 0.06 MB; forest cell (12,14) has 732 of 29,770, 660 wide, 0.06 MB. Small grass/bushes without proxies
+are traversable. `CollisionConfig::vegetation = false` omits vegetation. Measured before vegetation on the 140 cells with brushes of the middle of the
 world (dev profile, one thread, models cached): build median 29 ms, 90 % 112 ms, worst 221 ms; memory median 6.8 MB, 90 % 24.5 MB, worst 69 MB
 (cell 14,11: 1.7 M triangles, 1400 instances of two rock cover pieces of 800 to 960 triangles, `cross_plains_102b/c`; a dense town cell such as Lutesong Harbor or Marianople is 21 to 27 MB for 500 to 640 k
 triangles at 42 bytes each); the first cell of a process 100 to 400 ms with cold models and pak. A cell is dropped with `release_outside`, so a
@@ -652,16 +665,27 @@ with `AA_NO_COLLISION=1`: 128, 136, 151, 141, 137, 152 fps (and one run of 63 wh
 slow frames are not in the streaming systems (`WorldTimings` under 1 ms); the `collide` example at 1280 x 720 with 20 k wireframe triangles drawn over the
 scene (retained gizmo): 188 and 190 fps against 184 and 195 without.
 
-**Verification.** `cargo test -p aa-world --lib collide` (geometry, soup against brute force, terrain rays, Lutesong cell, camera at a wall, a walker over the arch
-bridge in both directions, 120 000 walking steps in two towns never crossing a wall), `cargo test -p aa-cry --lib physics` (primitives, a blob, real
+**Verification.** `cargo test -p aa-world --lib collide` (geometry, vegetation placement/rotation/masks, soup against brute force, terrain rays,
+Lutesong cell, camera at a wall, a walker over the arch bridge in both directions, the two embankment stair ramps, wood/stone/terrain surfaces,
+an exposed tree trunk approached from eight sides, and 120 000 walking steps in two towns with two detected crossings), `cargo test -p aa-cry --lib physics` (primitives, a blob, real
 models); `-- --ignored --nocapture` for `survey_world` (the counts above), `survey_cells`, `query_costs`, `find_spots`, `find_camera_spots`,
-`climb_the_stairs` (36 of 46 staircase models of four towns are climbed from the low to the high end with step 0.5 and radius 0.35; the others are
-spiral or ladder like stairs of 64 to 80 degrees (6), two stone embankment stairs of 51 degrees and two long gentle ground stairs that something stands in). Visual: `cargo run -p aa-world --example collide -- --player 21140,10596.2 --yaw 244 --arm 7 --pitch 14
+`climb_the_stairs` (an exploratory survey of routes inferred from placement centroids, not proof of spiral/ladder traversal), `survey_vegetation`,
+`survey_surfaces`. The embankment proxies' low vertices include their underside, so the survey previously started below the slab and reported
+false failures; both actual ramp routes climb with a 0.5 m step, radius 0.35, and less than 0.3 m rise per 0.1 m walking step. Visual: `cargo run -p aa-world --example collide -- --player 21140,10596.2 --yaw 244 --arm 7 --pitch 14
 --shot shots/aa-world/collide_a_clip.png --shot-after 14` draws the collision triangles near the player as a wireframe over the scene (cyan
-structures, orange props) and the camera arm (yellow wanted, green clipped, red contact; `--no-clip` shows the camera inside the wall, `--cam x,y,z
+structures, orange props, pink vegetation) and the camera arm (yellow wanted, green clipped, red contact; `--no-clip` shows the camera inside the wall, `--cam x,y,z
 --look x,y,z` a free camera, `--xray` the wireframe over everything, `--no-objects` collision only, `--bench n` times the queries). The wireframes
 sit on the visible walls, roofs, awnings, railing posts, hulls of boats and carts (`shots/aa-world/collide_a_clip.png`, `collide_a_noclip.png`,
 `collide_bridge.png`, `collide_stairs.png`).
+
+Completion audit: the collision group has **22 passing tests, 9 ignored surveys, 0 failures**. The real exposed birch at
+`9265.508,13333.971,261.663` stops eight walking approaches 0.69 to 1.15 m from its centre; narrow-trunk camera rays pass it. The fixture finds
+the trunk's chest-height cross section because some models' pivots are offset and many vegetation placements are buried in slopes.
+`shots/aa-world/exposed_tree_collision.png` shows its pink proxy following the visible trunk and leaving the leaves clear (aa-dev 173 to 196 FPS
+after loading, final screenshot interval 167 FPS); `shots/aa-world/embankment_stairs_audit.png` shows the stair ramp proxy following the steps
+(150 to 161 FPS after loading). There is no matching real-client capture at these coordinates; these checks compare collision against the
+rendered original models. The broad town walk survey still detects two wall crossings in 120,000 steps and 2,222 residual pushes after
+the controller raises its feet to a new support height; it is not a proof that the controller handles every contact or corner.
 
 **Test coordinates (main_world, game coordinates).** Lutesong Harbor's `sub_zones` box (x 20510 to 21752, y 10222 to 10967) has its centre at
 21131, 10594 (the gallery's `--pos 21130,10594`). A camera that ends inside a house wall: the player at 21140.0, 10596.2 (feet 111.17) with the arm
@@ -673,10 +697,9 @@ walk from 21055.7, 10544.3 to 21126.3, 10558.1), the wooden bridges at 21015.3, 
 `si_woodbridge_stairs02` at 20999.4, 10586.3 (rise 1.7 m over 1.8 m), `mari_stair_a` at 10855.9, 12053.0, `ncom_city_old_stair06` at 10946.3, 11991.6
 (rise 6.7 m over 10 m), `ncom_city_old_stair07` at 11078.3, 12083.0 (rise 9.3 m over 12.9 m), the dock stairs `si_seahouse_dockstair01` at 20567.5, 10296.4.
 
-**Not done.** Vegetation (tree trunks block the player in the real client); terrain steepness as a wall in `push_out`; doors, gates and the
-moving brushes (ships, tram) which are not in `brush.dat`; the per-triangle physics material (`matId` of the blob, surface types for
-footsteps; the sub-materials the physics triangles of Lutesong Harbor's and Marianople's models point to are all the invisible `proxy` material, none has the
-`RAYCAST_PROXY`, `COLLISION_PROXY` or `NO_PHYSICALIZE` flag, so the flags are not read); gaps wider than 0.7 m
+**Not done.** Terrain steepness as a wall in `push_out`; doors, gates and the
+moving brushes (ships, tram) which are not in `brush.dat`; physics material flags (`RAYCAST_PROXY`, `COLLISION_PROXY`, `NO_PHYSICALIZE`;
+the surveyed proxy sub-materials have none); gaps wider than 0.7 m
 between pieces drop the character (as they would a real capsule); proxies that are a solid hull keep the player out of buildings whose interior
 the real client lets you enter only through a separate interior model.
 

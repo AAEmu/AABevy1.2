@@ -47,6 +47,26 @@ pub fn ray_tri(origin: Vec3, dir: Vec3, tri: &Tri, max: f32) -> Option<f32> {
     (0.0..=max).contains(&t).then_some(t)
 }
 
+/// Height of the triangle's plane over `(x, y)` when the point is inside the triangle seen from above (a hair of
+/// tolerance for the shared edges), with the unit normal facing up. Vertical triangles never contain a point.
+#[inline]
+pub fn plan_height(t: &Tri, x: f32, y: f32) -> Option<(f32, Vec3)> {
+    let p = Vec2::new(x, y);
+    let (a, b, c) = (t[0].truncate(), t[1].truncate(), t[2].truncate());
+    let area = (b - a).perp_dot(c - a);
+    let u = (c - b).perp_dot(p - b) / area;
+    let v = (a - c).perp_dot(p - c) / area;
+    let w = (b - a).perp_dot(p - a) / area;
+    const EDGE: f32 = -1e-5;
+    if u < EDGE || v < EDGE || w < EDGE {
+        return None;
+    }
+    let n = cross_normal(t);
+    let z = t[0].z - (n.x * (x - t[0].x) + n.y * (y - t[0].y)) / n.z;
+    let up = if n.z > 0.0 { n } else { -n };
+    z.is_finite().then(|| (z, up.normalize()))
+}
+
 /// The point of the triangle closest to `p` (Ericson, Real-Time Collision Detection 5.1.5).
 pub fn closest_point(p: Vec3, tri: &Tri) -> Vec3 {
     let [a, b, c] = *tri;

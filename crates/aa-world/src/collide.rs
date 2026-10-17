@@ -16,6 +16,8 @@
 //! // the player: stand on bridges and stairs, slide along walls
 //! let ground = world.ground_below(21_130.0, 10_594.0, 20.5, 0.5);                  // Option<Ground { height, normal }>
 //! let moved = world.slide(pivot, bevy::math::Vec2::new(0.1, 0.0), 0.35, 1.8, 0.5);  // Pushed { pos, blocked, normal }
+//! // what the foot stands on, for footsteps: "mat_wood", "mat_dirt", ... (the columns of materialeffects.xml)
+//! let standing = world.surface_below(21_130.0, 10_594.0, 20.5, 0.5);                // Option<Standing { ground, surface, terrain }>
 //! ```
 //!
 //! # What collides
@@ -23,24 +25,41 @@
 //! * The terrain, as the finest mesh the renderer draws ([`TerrainQuery`]).
 //! * Every brush (`brush.dat`; 162k in the main world) whose model has physics geometry (`aa_cry::physics`: the
 //!   CryPhysics proxies of the `.cgf`, 93 % of the placed brushes; the rest are decoration such as ivy, flags and
-//!   laundry, which the real client walks through too). Vegetation (trees) is not included.
+//!   laundry, which the real client walks through too).
+//! * Vegetation whose model has physics: tree trunks, boulders, big plants (`vegetation.dat`, the sector files and
+//!   the octree). Sub-materials that the physics lets through (`no_collide` surface types: canopy, leaves, grass; the
+//!   `nocollide` sub-materials) are left out, so only the trunks and rocks remain.
 //!
 //! Brushes are split by size: [`Mask::STRUCTURES`] (houses, walls, rocks, bridges, ...) and [`Mask::PROPS`]
-//! (everything whose bounding box is below [`CollisionConfig::prop_volume`]: barrels, fences, lamp posts). The
-//! camera should use [`Mask::CAMERA`] (terrain and structures) so that it does not jump at every barrel; the
-//! player collides with everything ([`Mask::ALL`]).
+//! (everything whose bounding box is below [`CollisionConfig::prop_volume`]: barrels, fences, lamp posts).
+//! Vegetation is [`Mask::VEGETATION`], except the instances at least [`CollisionConfig::vegetation_camera_width`]
+//! wide on both horizontal axes (a boulder, a baobab trunk), which count as structures too. The camera should use
+//! [`Mask::CAMERA`] (terrain and structures) so that it does not jump at every barrel or tree; the player collides
+//! with everything ([`Mask::ALL`]).
+//!
+//! # Surfaces
+//!
+//! Every triangle knows its surface type: the sub-material of its physics geometry (the id stored in the physics
+//! blob, see `aa_cry::physics`) looked up in the `.mtl` of the model (or of the brush's material override) gives the
+//! `SurfaceType` (`mat_wood`, `mat_rock`, ...). The terrain's comes from the surface nibble of the heightmap sample
+//! and the cell's `leveldata.xml` (the `DetailMaterial` of that layer). [`WorldCollision::surface_below`] returns
+//! the one under the foot, [`WorldCollision::terrain_surface`] the terrain's alone and
+//! [`WorldCollision::raycast_surface`] the one a ray hits.
 //!
 //! # Cells
 //!
-//! Brush collision is built per terrain cell (1024 m) on the `aa_cry::workers` threads: placement files read,
+//! Collision is built per terrain cell (1024 m) on the `aa_cry::workers` threads: placement files read,
 //! each distinct model's proxy triangles loaded once (shared by all cells), transformed into game space and indexed
-//! by an 8 m grid. A cell that is not built yet only has the terrain: [`request_around`]
+//! by an 8 m grid (vegetation stays instanced, see `collide/instances.rs`). A cell that is not built yet only has
+//! the terrain: [`request_around`]
 //! starts the build, [`ready_around`] says when it is done, and `AaWorldPlugin` follows the camera (or the
 //! [`WorldFocus`](crate::WorldFocus) entity) with [`follow`](WorldCollision::follow): cells within
 //! [`CollisionConfig::radius`] are built, cells beyond [`CollisionConfig::keep`] are dropped.
 
 mod geom;
+mod instances;
 mod soup;
+mod surface;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,13 +70,17 @@ use aa_cry::physics::CollisionMesh;
 use bevy::prelude::*;
 
 use crate::coords::CELL_SIZE;
-use crate::heightmap::CellHeights;
-use crate::placement::{parse_brush_dat, parse_object_dat, parse_statobjs};
+use crate::heightmap::{CellHeights, GRID};
+use crate::placement::load_cell_objects;
 use crate::stream::{WorldConfig, WorldFocus};
 use crate::terrain_query::{Ground, TerrainQuery};
+use crate::vegetation::{VegGroup, VegGroups};
 use crate::world::cell_dir;
 use geom::{Tri, closest_point, cross_normal};
+use instances::{Instances, Item, VegModel, Which};
 use soup::Soup;
+pub use surface::{Surface, SurfaceKind};
+use surface::{Materials, SubSurfaces};
 
 /// Which surfaces a query looks at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,12 +92,27 @@ impl Mask {
     pub const STRUCTURES: Mask = Mask(2);
     /// Small brushes: barrels, crates, fences, lamp posts.
     pub const PROPS: Mask = Mask(4);
-    pub const ALL: Mask = Mask(7);
-    /// What the camera stops at: the terrain and the structures.
+    /// Tree trunks, boulders and the like placed as vegetation. The ones that are wide enough to stop the
+    /// camera ([`CollisionConfig::vegetation_camera_width`]) are also found with [`Mask::STRUCTURES`].
+    pub const VEGETATION: Mask = Mask(8);
+    /// Everything: what a walking player collides with.
+    pub const ALL: Mask = Mask(15);
+    /// What the camera stops at: the terrain and the structures (and the widest vegetation).
     pub const CAMERA: Mask = Mask(3);
 
     pub const fn contains(self, other: Mask) -> bool {
         self.0 & other.0 == other.0
+    }
+
+    /// Which vegetation instances a query with this mask looks at.
+    fn vegetation(self) -> Option<Which> {
+        if self.contains(Mask::VEGETATION) {
+            Some(Which::All)
+        } else if self.contains(Mask::STRUCTURES) {
+            Some(Which::Big)
+        } else {
+            None
+        }
     }
 }
 
@@ -104,12 +142,37 @@ pub struct CollisionConfig {
     /// Models without physics geometry collide as their coarsest visible mesh (the real client lets you walk
     /// through them: ivy, flags, laundry, straw).
     pub visible_fallback: bool,
+    /// Tree trunks and rocks placed as vegetation collide ([`Mask::VEGETATION`]).
+    pub vegetation: bool,
+    /// Vegetation instances whose collision is at least this wide (m) on both horizontal axes also stop the camera.
+    pub vegetation_camera_width: f32,
 }
 
 impl Default for CollisionConfig {
     fn default() -> Self {
-        CollisionConfig { radius: 150.0, keep: 400.0, grid: 8.0, prop_volume: 4.0, max_slope: 55f32.to_radians(), foot_radius: 0.4, visible_fallback: false }
+        CollisionConfig {
+            radius: 150.0,
+            keep: 400.0,
+            grid: 8.0,
+            prop_volume: 4.0,
+            max_slope: 55f32.to_radians(),
+            foot_radius: 0.4,
+            visible_fallback: false,
+            vegetation: true,
+            vegetation_camera_width: 2.0,
+        }
     }
+}
+
+/// What a character stands on, see [`WorldCollision::surface_below`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Standing {
+    /// The surface: the same height and normal [`WorldCollision::ground_below`] returns.
+    pub ground: Ground,
+    /// Its surface type, `mat_wood`, ... (`mat_default` when unknown).
+    pub surface: Surface,
+    /// The terrain (else a brush or vegetation).
+    pub terrain: bool,
 }
 
 /// A ray or sweep hit.
@@ -136,6 +199,14 @@ pub struct Pushed {
     pub normal: Vec3,
 }
 
+/// What a ground or ray query found: the terrain (its surface is looked up when asked for) or a triangle with its
+/// surface id.
+#[derive(Clone, Copy, Debug)]
+enum Found {
+    Terrain,
+    Surface(u16),
+}
+
 /// What a cell's build produced.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CellStats {
@@ -145,30 +216,45 @@ pub struct CellStats {
     pub models: usize,
     pub structure_triangles: usize,
     pub prop_triangles: usize,
+    /// Vegetation instances in the cell / the ones with collision / of those the ones that also stop the camera.
+    pub vegetation: usize,
+    pub vegetation_colliding: usize,
+    pub vegetation_big: usize,
     pub bytes: usize,
     pub build_ms: f32,
 }
 
-/// The collision of one cell's brushes in game space.
+/// The collision of one cell's brushes and vegetation in game space.
 pub struct CellCollision {
     pub cell: (i32, i32),
     structures: Soup,
     props: Soup,
+    vegetation: Instances,
+    /// Surface id of each of the 16 surface layers of the terrain cell.
+    terrain_surfaces: [u16; 16],
     pub stats: CellStats,
 }
 
 impl CellCollision {
     pub fn is_empty(&self) -> bool {
-        self.structures.is_empty() && self.props.is_empty()
+        self.structures.is_empty() && self.props.is_empty() && self.vegetation.is_empty()
     }
 
     fn soups(&self, mask: Mask) -> impl Iterator<Item = &Soup> {
         [(Mask::STRUCTURES, &self.structures), (Mask::PROPS, &self.props)].into_iter().filter(move |(m, _)| mask.contains(*m)).map(|(_, s)| s)
     }
+
+    /// The vegetation of the cell a query with this mask looks at, with the instances to consider.
+    fn trees(&self, mask: Mask) -> Option<(&Instances, Which)> {
+        mask.vegetation().filter(|_| !self.vegetation.is_empty()).map(|w| (&self.vegetation, w))
+    }
 }
 
 /// A model's proxy geometry, filled once (`None`: it has no collision).
 type ModelSlot = Arc<OnceLock<Option<Arc<CollisionMesh>>>>;
+
+/// The collision triangles of a vegetation model of the world's `vegetation.xml`, filled once.
+type VegSlot = Arc<OnceLock<Option<Arc<VegModel>>>>;
 
 enum Entry {
     Loading,
@@ -184,6 +270,12 @@ struct Inner {
     cells: RwLock<HashMap<(i32, i32), Entry>>,
     /// Proxy geometry per distinct model; filled outside the lock like `TerrainQuery`'s cells.
     models: Mutex<HashMap<String, ModelSlot>>,
+    /// `vegetation.xml` of the world, read by the first cell that needs it.
+    groups: OnceLock<VegGroups>,
+    /// Collision of the vegetation groups (by group id).
+    veg_models: Mutex<HashMap<u16, VegSlot>>,
+    /// The `.mtl` files read for surface types.
+    materials: Materials,
     builds: AtomicU64,
     build_micros: AtomicU64,
 }
@@ -201,6 +293,9 @@ pub struct CollisionStats {
     pub cells: usize,
     pub loading: usize,
     pub triangles: usize,
+    /// Vegetation instances with collision in the built cells (of which `vegetation_big` stop the camera).
+    pub vegetation: usize,
+    pub vegetation_big: usize,
     pub bytes: usize,
     /// Distinct models loaded / of those without collision geometry.
     pub models: usize,
@@ -258,6 +353,9 @@ impl WorldCollision {
                 min_nz,
                 cells: RwLock::default(),
                 models: Mutex::default(),
+                groups: OnceLock::new(),
+                veg_models: Mutex::default(),
+                materials: Materials::default(),
                 builds: AtomicU64::new(0),
                 build_micros: AtomicU64::new(0),
             }),
@@ -382,6 +480,8 @@ impl WorldCollision {
                 Entry::Ready(c) => {
                     s.cells += 1;
                     s.triangles += c.stats.structure_triangles + c.stats.prop_triangles;
+                    s.vegetation += c.stats.vegetation_colliding;
+                    s.vegetation_big += c.stats.vegetation_big;
                     s.bytes += c.stats.bytes;
                 }
             }
@@ -429,21 +529,71 @@ impl WorldCollision {
 
     /// [`ground_below`](Self::ground_below) with the radius of the feet given (0: exactly under the point).
     pub fn ground_below_radius(&self, x: f32, y: f32, z: f32, step_up: f32, radius: f32) -> Option<Ground> {
+        self.stand(x, y, z, step_up, radius).map(|(ground, _)| ground)
+    }
+
+    /// What the foot stands on: [`ground_below`](Self::ground_below) and the surface type of the triangle (or of
+    /// the terrain layer) it found, for footsteps and dust: `standing.surface.name()` is `"mat_wood"`, `"mat_dirt"`,
+    /// ... the column of the footstep sheet. A cell whose collision is not built yet only knows the terrain, and
+    /// `mat_default` for it until its terrain layers are read (they are read with the cell). Below the sea level the
+    /// caller decides: this does not know about water.
+    pub fn surface_below(&self, x: f32, y: f32, z: f32, step_up: f32) -> Option<Standing> {
+        self.surface_below_radius(x, y, z, step_up, self.inner.config.foot_radius)
+    }
+
+    /// [`surface_below`](Self::surface_below) with the radius of the feet given.
+    pub fn surface_below_radius(&self, x: f32, y: f32, z: f32, step_up: f32, radius: f32) -> Option<Standing> {
+        let (ground, found) = self.stand(x, y, z, step_up, radius)?;
+        Some(match found {
+            Found::Terrain => Standing { ground, surface: self.terrain_surface(x, y), terrain: true },
+            Found::Surface(id) => Standing { ground, surface: Surface::from_id(id), terrain: false },
+        })
+    }
+
+    /// The surface type of the terrain at `(x, y)` (its layer under the sample nearest to the point), `mat_default`
+    /// where unknown. No brushes, no water.
+    pub fn terrain_surface(&self, x: f32, y: f32) -> Surface {
+        Surface::from_id(self.terrain_surface_id(x, y))
+    }
+
+    fn terrain_surface_id(&self, x: f32, y: f32) -> u16 {
+        if !(x.is_finite() && y.is_finite()) || x < 0.0 || y < 0.0 {
+            return surface::DEFAULT;
+        }
+        let (cx, cy) = ((x / CELL_SIZE).floor() as i32, (y / CELL_SIZE).floor() as i32);
+        let Some(table) = self.cell(cx, cy).map(|c| c.terrain_surfaces) else { return surface::DEFAULT };
+        let Some(heights) = self.inner.terrain.cell(cx, cy) else { return surface::DEFAULT };
+        let (lx, ly) = (x - cx as f32 * CELL_SIZE, y - cy as f32 * CELL_SIZE);
+        let (ix, iy) = (((lx / 2.0).round() as usize).min(GRID - 1), ((ly / 2.0).round() as usize).min(GRID - 1));
+        table[heights.surface.get(iy * GRID + ix).copied().unwrap_or(0) as usize & 15]
+    }
+
+    /// The highest walkable surface under `(x, y)` (see [`ground_below`](Self::ground_below)) and what it is.
+    fn stand(&self, x: f32, y: f32, z: f32, step_up: f32, radius: f32) -> Option<(Ground, Found)> {
         let limit = z + step_up;
-        let mut best = self.inner.terrain.ground_at(x, y).filter(|g| g.height <= limit);
+        let mut best: Option<(Ground, Found)> = self.inner.terrain.ground_at(x, y).filter(|g| g.height <= limit).map(|g| (g, Found::Terrain));
         let cells = self.cells_near(Vec2::new(x, y) - radius, Vec2::new(x, y) + radius);
         if cells.is_empty() {
             return best;
         }
-        let probe = |dx: f32, dy: f32| -> Option<Ground> {
-            let mut found: Option<Ground> = None;
+        let min_nz = self.inner.min_nz;
+        let probe = |dx: f32, dy: f32| -> Option<(Ground, Found)> {
+            let mut found: Option<(Ground, Found)> = None;
+            let mut offer = |height: f32, normal: Vec3, id: u16| {
+                if found.is_none_or(|(f, _)| height > f.height) {
+                    found = Some((Ground { height, normal }, Found::Surface(id)));
+                }
+            };
             for cell in &cells {
                 for soup in cell.soups(Mask::ALL) {
-                    if let Some((height, normal)) = soup.highest_below(x + dx, y + dy, limit)
-                        && found.is_none_or(|f| height > f.height)
-                    {
-                        found = Some(Ground { height, normal });
+                    if let Some((height, normal, tri)) = soup.highest_below(x + dx, y + dy, limit) {
+                        offer(height, normal, soup.surface(tri));
                     }
+                }
+                if let Some((trees, which)) = cell.trees(Mask::ALL)
+                    && let Some((height, normal, id)) = trees.highest_below(x + dx, y + dy, limit, which, min_nz)
+                {
+                    offer(height, normal, id);
                 }
             }
             found
@@ -454,14 +604,14 @@ impl WorldCollision {
             const RIM: [(f32, f32); 8] = [(1.0, 0.0), (0.707, 0.707), (0.0, 1.0), (-0.707, 0.707), (-1.0, 0.0), (-0.707, -0.707), (0.0, -1.0), (0.707, -0.707)];
             for (dx, dy) in RIM {
                 if let Some(g) = probe(dx * radius, dy * radius)
-                    && brush.is_none_or(|b| g.height > b.height)
+                    && brush.is_none_or(|b| g.0.height > b.0.height)
                 {
                     brush = Some(g);
                 }
             }
         }
         if let Some(g) = brush
-            && best.is_none_or(|b| g.height > b.height)
+            && best.is_none_or(|b| g.0.height > b.0.height)
         {
             best = Some(g);
         }
@@ -477,26 +627,46 @@ impl WorldCollision {
     /// [`raycast`](Self::raycast) against the surfaces of `mask`. `dir` need not be normalized; `t` is a distance
     /// in metres. A ray that starts inside the terrain hits it at `t = 0`.
     pub fn raycast_mask(&self, origin: Vec3, dir: Vec3, max: f32, mask: Mask) -> Option<Hit> {
+        self.cast(origin, dir, max, mask).map(|(hit, _)| hit)
+    }
+
+    /// [`raycast_mask`](Self::raycast_mask) and the surface type of what was hit (for impact effects).
+    pub fn raycast_surface(&self, origin: Vec3, dir: Vec3, max: f32, mask: Mask) -> Option<(Hit, Surface)> {
+        let (hit, found) = self.cast(origin, dir, max, mask)?;
+        let surface = match found {
+            Found::Terrain => self.terrain_surface(hit.point.x, hit.point.y),
+            Found::Surface(id) => Surface::from_id(id),
+        };
+        Some((hit, surface))
+    }
+
+    fn cast(&self, origin: Vec3, dir: Vec3, max: f32, mask: Mask) -> Option<(Hit, Found)> {
         let dir = dir.try_normalize()?;
         if !(origin.is_finite() && max.is_finite()) || max < 0.0 {
             return None;
         }
-        let mut best: Option<Hit> = None;
+        let mut best: Option<(Hit, Found)> = None;
         if mask.contains(Mask::TERRAIN)
             && let Some((t, normal)) = self.terrain_ray(origin, dir, max, 0.0)
         {
-            best = Some(Hit { t, point: origin + dir * t, normal, terrain: true });
+            best = Some((Hit { t, point: origin + dir * t, normal, terrain: true }, Found::Terrain));
         }
         let end = origin + dir * max;
+        let face = |tri: &Tri| {
+            let normal = cross_normal(tri).normalize_or(Vec3::Z);
+            if normal.dot(dir) > 0.0 { -normal } else { normal }
+        };
         for cell in self.cells_near(origin.truncate().min(end.truncate()), origin.truncate().max(end.truncate())) {
             for soup in cell.soups(mask) {
-                let reach = best.map_or(max, |b| b.t);
+                let reach = best.map_or(max, |b| b.0.t);
                 if let Some((t, id)) = soup.ray(origin, dir, reach) {
-                    let mut normal = cross_normal(soup.tri(id)).normalize_or(Vec3::Z);
-                    if normal.dot(dir) > 0.0 {
-                        normal = -normal;
-                    }
-                    best = Some(Hit { t, point: origin + dir * t, normal, terrain: false });
+                    best = Some((Hit { t, point: origin + dir * t, normal: face(soup.tri(id)), terrain: false }, Found::Surface(soup.surface(id))));
+                }
+            }
+            if let Some((trees, which)) = cell.trees(mask) {
+                let reach = best.map_or(max, |b| b.0.t);
+                if let Some((t, tri, id)) = trees.ray(origin, dir, reach, which) {
+                    best = Some((Hit { t, point: origin + dir * t, normal: face(&tri), terrain: false }, Found::Surface(id)));
                 }
             }
         }
@@ -543,6 +713,9 @@ impl WorldCollision {
                 ids.clear();
                 soup.gather_along(origin, dir, max, radius + 0.1, &mut ids);
                 tris.extend(ids.iter().map(|&id| *soup.tri(id)));
+            }
+            if let Some((trees, which)) = cell.trees(mask) {
+                trees.tris_along(origin, dir, max, radius + 0.1, which, &mut tris);
             }
         }
         if !tris.is_empty() {
@@ -614,6 +787,9 @@ impl WorldCollision {
                 ids.clear();
                 soup.gather(lo, hi, &mut ids);
                 tris.extend(ids.iter().map(|&id| *soup.tri(id)));
+            }
+            if let Some((trees, which)) = cell.trees(Mask::ALL) {
+                trees.tris_in(lo, hi, which, &mut tris);
             }
         }
         if tris.is_empty() {
@@ -701,6 +877,9 @@ impl WorldCollision {
                 ids.clear();
                 soup.gather(lo, hi, &mut ids);
                 out.extend(ids.iter().map(|&id| *soup.tri(id)));
+            }
+            if let Some((trees, which)) = cell.trees(mask) {
+                trees.tris_in(lo, hi, which, &mut out);
             }
         }
         out
@@ -799,7 +978,14 @@ impl Inner {
         // a panic (a malformed file) must not leave the cell loading forever
         let mut cell = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.build_cell_data(cx, cy))).unwrap_or_else(|_| {
             warn!("aa-world: collision of cell {cx},{cy} failed to build");
-            CellCollision { cell: (cx, cy), structures: Soup::default(), props: Soup::default(), stats: CellStats::default() }
+            CellCollision {
+                cell: (cx, cy),
+                structures: Soup::default(),
+                props: Soup::default(),
+                vegetation: Instances::default(),
+                terrain_surfaces: [surface::DEFAULT; 16],
+                stats: CellStats::default(),
+            }
         });
         cell.stats.build_ms = start.elapsed().as_secs_f32() * 1000.0;
         self.builds.fetch_add(1, Ordering::Relaxed);
@@ -808,20 +994,19 @@ impl Inner {
     }
 
     fn build_cell_data(&self, cx: i32, cy: i32) -> CellCollision {
-        let dir = cell_dir(&self.world, cx, cy);
-        let pak = aa_pak::Pak::global();
-        let read = |f: &str| pak.read(&format!("{dir}/client/{f}")).ok();
-        // brushes as the renderer reads them: brush.dat with statobjs.dat, else the object.dat octree
-        let (brushes, models) = match (read("brush.dat").and_then(|d| parse_brush_dat(&d).ok()), read("statobjs.dat")) {
-            (Some(brushes), Some(statobjs)) => (brushes, parse_statobjs(&statobjs)),
-            _ => read("object.dat").and_then(|d| parse_object_dat(&d).ok()).map(|o| (o.brushes, o.models)).unwrap_or_default(),
-        };
+        // everything the renderer places: brushes (brush.dat with statobjs.dat, else the octree), the material table
+        // their `materialId` points into, and the vegetation
+        let objects = load_cell_objects(&self.world, cx, cy);
         let origin = Vec3::new(cx as f32 * CELL_SIZE, cy as f32 * CELL_SIZE, 0.0);
-        let mut stats = CellStats { brushes: brushes.len(), ..default() };
-        let meshes: Vec<OnceLock<Option<Arc<CollisionMesh>>>> = models.iter().map(|_| OnceLock::new()).collect();
-        let (mut structures, mut props): (Vec<Tri>, Vec<Tri>) = (Vec::new(), Vec::new());
-        for b in &brushes {
-            let Some(path) = models.get(b.model as usize) else { continue };
+        let mut stats = CellStats { brushes: objects.brushes.len(), vegetation: objects.vegetation.len(), ..default() };
+        let meshes: Vec<OnceLock<Option<Arc<CollisionMesh>>>> = objects.models.iter().map(|_| OnceLock::new()).collect();
+        // sub-material -> surface tables, per model and per material override, read when first needed
+        let mut own: HashMap<u32, Option<Arc<SubSurfaces>>> = HashMap::new();
+        let mut overrides: HashMap<i32, Option<Arc<SubSurfaces>>> = HashMap::new();
+        let mut structures: (Vec<Tri>, Vec<u16>) = Default::default();
+        let mut props: (Vec<Tri>, Vec<u16>) = Default::default();
+        for b in &objects.brushes {
+            let Some(path) = objects.models.get(b.model as usize) else { continue };
             let Some(mesh) = meshes[b.model as usize].get_or_init(|| self.model(path)) else { continue };
             let m = b.mat4();
             if !m.is_finite() || m.determinant().abs() < 1e-9 {
@@ -836,22 +1021,102 @@ impl Inner {
                 lo = lo.min(*p);
                 hi = hi.max(*p);
             }
+            let own_table = own.entry(b.model).or_insert_with(|| self.materials.first_of(&aa_cry::physics::material_paths(path, mesh.material_name.as_deref()))).clone();
+            let over_table = match usize::try_from(b.material).ok().and_then(|i| objects.materials.get(i)).filter(|m| !m.is_empty()) {
+                Some(name) => overrides.entry(b.material).or_insert_with(|| self.materials.load(&format!("{name}.mtl"))).clone(),
+                None => None,
+            };
             let size = hi - lo;
-            let target = if size.x * size.y * size.z < self.config.prop_volume { &mut props } else { &mut structures };
-            target.extend(mesh.indices.as_chunks::<3>().0.iter().map(|t| {
+            let (tris, surf) = if size.x * size.y * size.z < self.config.prop_volume { &mut props } else { &mut structures };
+            for (t, &sub) in mesh.indices.as_chunks::<3>().0.iter().zip(&mesh.materials) {
+                // sub-materials the physics lets through (canopy, `nocollide`) are no collision
+                let Some(id) = sub_surface(own_table.as_deref(), over_table.as_deref(), sub) else { continue };
                 let (a, b, c) = (world[t[0] as usize], world[t[1] as usize], world[t[2] as usize]);
-                if mirrored { [a, c, b] } else { [a, b, c] }
-            }));
+                tris.push(if mirrored { [a, c, b] } else { [a, b, c] });
+                surf.push(id);
+            }
             stats.colliding += 1;
         }
         stats.models = meshes.iter().filter(|m| m.get().is_some_and(|m| m.is_some())).count();
-        stats.structure_triangles = structures.len();
-        stats.prop_triangles = props.len();
-        let structures = Soup::build(structures, self.config.grid, self.min_nz);
-        let props = Soup::build(props, self.config.grid, self.min_nz);
-        stats.bytes = structures.bytes() + props.bytes();
-        CellCollision { cell: (cx, cy), structures, props, stats }
+        stats.structure_triangles = structures.0.len();
+        stats.prop_triangles = props.0.len();
+        let structures = Soup::build_with(structures.0, structures.1, self.config.grid, self.min_nz);
+        let props = Soup::build_with(props.0, props.1, self.config.grid, self.min_nz);
+        let vegetation = self.build_vegetation(&objects.vegetation, origin, &mut stats);
+        stats.bytes = structures.bytes() + props.bytes() + vegetation.bytes();
+        CellCollision { cell: (cx, cy), structures, props, vegetation, terrain_surfaces: self.terrain_table(cx, cy), stats }
     }
+
+    /// The instances of a cell's vegetation whose model collides.
+    fn build_vegetation(&self, placed: &[crate::placement::Vegetation], origin: Vec3, stats: &mut CellStats) -> Instances {
+        if !self.config.vegetation || placed.is_empty() {
+            return Instances::default();
+        }
+        let groups = self.groups.get_or_init(|| VegGroups::load(&self.world).unwrap_or_default());
+        let mut slots: HashMap<u16, Option<u32>> = HashMap::new();
+        let mut models: Vec<Arc<VegModel>> = Vec::new();
+        let mut items: Vec<Item> = Vec::new();
+        for v in placed {
+            let slot = *slots.entry(v.group).or_insert_with(|| {
+                let model = groups.groups.get(&v.group).and_then(|g| self.veg_model(g))?;
+                models.push(model);
+                Some(models.len() as u32 - 1)
+            });
+            let Some(slot) = slot else { continue };
+            let big = models[slot as usize].min_width() * v.scale.clamp(0.1, 5.0) >= self.config.vegetation_camera_width;
+            stats.vegetation_big += big as usize;
+            items.push(Item::new(slot, v, origin, big));
+        }
+        stats.vegetation_colliding = items.len();
+        Instances::build(models, items, 16.0)
+    }
+
+    /// The collision triangles of a vegetation group's model (model space), without the parts that let things
+    /// through; `None` when nothing is left.
+    fn veg_model(&self, g: &VegGroup) -> Option<Arc<VegModel>> {
+        let slot = self.veg_models.lock().unwrap_or_else(PoisonError::into_inner).entry(g.id).or_default().clone();
+        slot.get_or_init(|| {
+            let mesh = self.model(&g.model)?;
+            let own = self.materials.first_of(&aa_cry::physics::material_paths(&g.model, mesh.material_name.as_deref()));
+            let over = if g.material.is_empty() { None } else { self.materials.load(&format!("{}.mtl", g.material)) };
+            let (mut tris, mut surf) = (Vec::new(), Vec::new());
+            for (t, &sub) in mesh.indices.as_chunks::<3>().0.iter().zip(&mesh.materials) {
+                if let Some(id) = sub_surface(own.as_deref(), over.as_deref(), sub) {
+                    tris.push([mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]]);
+                    surf.push(id);
+                }
+            }
+            VegModel::new(tris, surf).map(Arc::new)
+        })
+        .clone()
+    }
+
+    /// Surface id of each of the 16 layers of the terrain cell: the `SurfaceType` of the `DetailMaterial` of the
+    /// cell's `leveldata.xml` entries.
+    fn terrain_table(&self, cx: i32, cy: i32) -> [u16; 16] {
+        let mut table = [surface::DEFAULT; 16];
+        let path = format!("{}/client/leveldata.xml", cell_dir(&self.world, cx, cy));
+        let Ok(xml) = aa_pak::Pak::global().read_string(&path) else { return table };
+        for (slot, entry) in table.iter_mut().zip(crate::terrain_layers::parse_surface_types(&xml)) {
+            if entry.material.is_empty() {
+                continue;
+            }
+            let mtl = format!("{}.mtl", entry.material.replace('\\', "/").to_ascii_lowercase());
+            if let Some(m) = self.materials.load(&mtl) {
+                *slot = m.root;
+            }
+        }
+        table
+    }
+}
+
+/// Surface of a sub-material id of a model, with the sub-materials of the material override of its placement taking
+/// precedence: `None` when the triangle does not collide.
+fn sub_surface(own: Option<&SubSurfaces>, over: Option<&SubSurfaces>, sub: u16) -> Option<u16> {
+    if let Some(v) = over.and_then(|o| o.subs.get(sub as usize)) {
+        return *v;
+    }
+    own.map_or(Some(surface::DEFAULT), |t| t.get(sub))
 }
 
 /// `AaWorldPlugin`: inserts the world's [`WorldCollision`] (unless the app has one) and builds the cells around
@@ -889,6 +1154,7 @@ fn follow_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::placement::{parse_brush_dat, parse_statobjs};
 
     /// Marianople's market place and Lutesong Harbor's centre (the middle of its `sub_zones` box).
     const LUTESONG: (f32, f32) = (21_131.0, 10_594.0);
@@ -1158,7 +1424,30 @@ mod tests {
         }
     }
 
-    /// Walks up every staircase model of four towns from its low end to its high end (`--ignored --nocapture`).
+    /// Walks the two thick embankment stair proxies of Lutesong Harbor from the exposed ramp to the landing.
+    #[test]
+    fn walk_up_the_embankment_stairs() {
+        let Some(w) = world() else { return };
+        w.build_blocking(20, 10).unwrap();
+        let direction = Vec2::new(0.193, -0.981).normalize();
+        for start in [Vec3::new(20_985.32, 10_557.44, 105.84), Vec3::new(20_978.31, 10_549.25, 110.70)] {
+            let initial = w.ground_below(start.x, start.y, start.z, 0.1).unwrap();
+            let mut pos = Vec3::new(start.x, start.y, initial.height);
+            let mut max_rise = 0.0f32;
+            for _ in 0..65 {
+                let moved = w.slide(pos, direction * 0.1, 0.35, 1.8, 0.5);
+                let next = w.ground_below(moved.pos.x, moved.pos.y, pos.z, 0.5).unwrap();
+                max_rise = max_rise.max(next.height - pos.z);
+                pos = Vec3::new(moved.pos.x, moved.pos.y, next.height);
+            }
+            let progress = (pos - start).truncate().dot(direction);
+            assert!(progress > 5.5 && pos.z > initial.height + 3.5, "start {start:?}, end {pos:?}");
+            assert!(max_rise < 0.3, "stair ascent jumped {max_rise} m in one 0.1 m step");
+        }
+    }
+
+    /// Surveys inferred straight routes through staircase models in four towns (`--ignored --nocapture`).
+    /// Placement centroids are not a route through spiral stairs; use known paths for regression assertions.
     #[test]
     #[ignore]
     fn climb_the_stairs() {
@@ -1199,7 +1488,9 @@ mod tests {
                 }
                 let dir = run.normalize();
                 let start = Vec2::new(low.x, low.y) - dir * 1.5;
-                let Some(g0) = w.ground_below(start.x, start.y, low.z + 1.0, 0.5) else { continue };
+                // The proxy's low vertices include its underside; the inferred start may already lie over
+                // the ramp. Start on its upper surface rather than beneath a stair that is thicker than a step.
+                let Some(g0) = w.ground_below(start.x, start.y, zmax + 0.5, 0.0) else { continue };
                 tried += 1;
                 let mut pos = Vec3::new(start.x, start.y, g0.height);
                 let steps = ((run.length() + 3.0) / 0.1) as usize;
@@ -1211,6 +1502,9 @@ mod tests {
                 let top_ok = pos.z > high.z - 0.8;
                 climbed += top_ok as usize;
                 println!("  {short:34} rise {:.1} m over {:.1} m (slope {:.0} deg): start z {:.2}, end z {:.2} of {:.2}  {}", high.z - low.z, run.length(), ((high.z - low.z) / run.length()).atan().to_degrees(), g0.height, pos.z, high.z, if top_ok { "up" } else { "STUCK" });
+                if !top_ok {
+                    println!("    start {start:.2?}, direction {dir:.3?}, end {pos:.2?}, target {high:.2?}");
+                }
             }
         }
         println!("{climbed} of {tried} staircases climbed");
@@ -1369,5 +1663,235 @@ mod tests {
         }
         println!("ray hits on brushes: {brush_hits} of 200");
         assert!(brush_hits > 20, "{brush_hits}");
+    }
+
+    /// A vegetation instance of a cell whose collision is at least `min_width` wide: (base position, scale, stops the camera).
+    fn find_trunk(w: &WorldCollision, cx: i32, cy: i32, min_width: f32) -> Option<(Vec3, f32, bool)> {
+        let objects = load_cell_objects("main_world", cx, cy);
+        let groups = VegGroups::load("main_world")?;
+        let origin = Vec3::new(cx as f32 * CELL_SIZE, cy as f32 * CELL_SIZE, 0.0);
+        objects.vegetation.iter().find_map(|v| {
+            let group = groups.groups.get(&v.group)?;
+            if group.model.contains("/bushes/") {
+                return None;
+            }
+            let m = w.inner.veg_model(group)?;
+            let s = v.scale.clamp(0.1, 5.0);
+            let p = origin + v.pos;
+            let ground = w.terrain().height_at(p.x, p.y)?;
+            // Many vegetation records are deliberately buried in a slope. The fixture needs an exposed trunk
+            // whose placement pivot is at the walker's feet rather than several metres under the terrain.
+            if m.min_width() * s < min_width || (p.z - ground).abs() >= 0.5 {
+                return None;
+            }
+            let big = m.min_width() * s >= w.config().vegetation_camera_width;
+            let instance = Instances::build(vec![m], vec![Item::new(0, v, origin, big)], 16.0);
+            // A tree's mesh need not be centred on its placement pivot. Find the centre of the proxy's actual
+            // chest-height cross section, without using a collision query to select the expected contact.
+            let plane = ground + 1.2;
+            let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+            for t in instance.all_triangles() {
+                for k in 0..3 {
+                    let (a, b) = (t[k], t[(k + 1) % 3]);
+                    if (a.z <= plane && b.z > plane) || (b.z <= plane && a.z > plane) {
+                        let q = a.lerp(b, (plane - a.z) / (b.z - a.z)).truncate();
+                        lo = lo.min(q);
+                        hi = hi.max(q);
+                    }
+                }
+            }
+            if !(lo.is_finite() && hi.is_finite()) {
+                return None;
+            }
+            let xy = (lo + hi) * 0.5;
+            let h = w.terrain().height_at(xy.x, xy.y)?;
+            ((h - ground).abs() < 0.5).then_some((xy.extend(ground), s, big))
+        })
+    }
+
+    /// Vegetation collision of the dense cells: counts, memory, build time, the models that matter and the query costs
+    /// (`--ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn survey_vegetation() {
+        let Some(w) = world() else { return };
+        for (name, (cx, cy)) in [("nuian meadow", (15, 15)), ("lutesong", (20, 10)), ("marianople", (10, 11)), ("forest 12,14", (12, 14)), ("forest 16,16", (16, 16)), ("forest 9,13", (9, 13))] {
+            let t = Instant::now();
+            let Some(cell) = w.build_blocking(cx, cy) else { continue };
+            let st = cell.stats;
+            println!(
+                "{name} ({cx},{cy}): {} vegetation records, {} collide ({} big), brushes {} / {} colliding, build {:.0} ms ({:.0} ms wall), {:.2} MB (instances {:.2} MB)",
+                st.vegetation,
+                st.vegetation_colliding,
+                st.vegetation_big,
+                st.brushes,
+                st.colliding,
+                st.build_ms,
+                t.elapsed().as_secs_f32() * 1000.0,
+                st.bytes as f32 / 1e6,
+                cell.vegetation.bytes() as f32 / 1e6
+            );
+            // what the instances are
+            let objects = load_cell_objects("main_world", cx, cy);
+            let groups = VegGroups::load("main_world").unwrap();
+            let mut per: HashMap<u16, (usize, usize, f32)> = HashMap::new();
+            for v in &objects.vegetation {
+                let Some(m) = groups.groups.get(&v.group).and_then(|g| w.inner.veg_model(g)) else { continue };
+                let e = per.entry(v.group).or_default();
+                e.0 += 1;
+                e.1 = m.triangles();
+                e.2 = m.min_width();
+            }
+            let mut rows: Vec<_> = per.into_iter().collect();
+            rows.sort_by_key(|(_, (n, t, _))| std::cmp::Reverse(n * t));
+            let expanded: usize = rows.iter().map(|(_, (n, t, _))| n * t * 38).sum();
+            println!("  {} models; expanded per instance it would be {:.1} MB", rows.len(), expanded as f32 / 1e6);
+            for (g, (n, t, width)) in rows.iter().take(6) {
+                println!("    {n:5} x {t:4} tris, {width:.2} m wide  {}", groups.groups[g].model);
+            }
+        }
+        // query costs in the densest of them, around a trunk
+        let (cx, cy) = (9, 13);
+        let Some((trunk, _, _)) = find_trunk(&w, cx, cy, 0.5) else { return };
+        let mut seed = 99u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / 16777216.0
+        };
+        let points: Vec<Vec3> = (0..2000)
+            .map(|_| {
+                let (x, y) = (trunk.x - 80.0 + rnd() * 160.0, trunk.y - 80.0 + rnd() * 160.0);
+                Vec3::new(x, y, w.terrain().height_at(x, y).unwrap() + 1.7)
+            })
+            .collect();
+        let time = |label: &str, f: &dyn Fn(Vec3, Vec3) -> usize| {
+            let t = Instant::now();
+            let mut hits = 0;
+            for (i, p) in points.iter().enumerate() {
+                let a = i as f32 * 2.399;
+                hits += f(*p, Vec3::new(a.cos(), a.sin(), 0.1).normalize());
+            }
+            println!("  {label}: {:.1} us per call, {hits} of {} hit", t.elapsed().as_secs_f32() * 1e6 / points.len() as f32, points.len());
+        };
+        println!("query costs around {trunk:?} (cell {cx},{cy}):");
+        time("raycast 10 m (all)", &|o, d| w.raycast(o, d, 10.0).is_some() as usize);
+        time("raycast 10 m (camera mask)", &|o, d| w.raycast_mask(o, d, 10.0, Mask::CAMERA).is_some() as usize);
+        time("raycast 60 m (all)", &|o, d| w.raycast(o, d, 60.0).is_some() as usize);
+        time("sweep_sphere 8 m r 0.3 (camera mask)", &|o, d| w.sweep_sphere(o, d, 8.0, 0.3, Mask::CAMERA).is_some() as usize);
+        time("ground_below", &|o, _| w.ground_below(o.x, o.y, o.z - 1.7, 0.5).is_some() as usize);
+        time("surface_below", &|o, _| w.surface_below(o.x, o.y, o.z - 1.7, 0.5).is_some() as usize);
+        time("push_out r 0.35 h 1.8", &|o, _| w.push_out(o - Vec3::Z * 1.7, 0.35, 1.8, 0.5).blocked as usize);
+        time("slide 0.2 m", &|o, d| w.slide(o - Vec3::Z * 1.7, Vec2::new(d.x, d.y) * 0.2, 0.35, 1.8, 0.5).blocked as usize);
+    }
+
+    /// Surfaces seen by the foot on a bridge, stairs, a quay and the ground around Lutesong Harbor (`--ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn survey_surfaces() {
+        let Some(w) = world() else { return };
+        w.build_blocking(20, 10).unwrap();
+        let o = load_cell_objects("main_world", 20, 10);
+        let origin = Vec3::new(20.0 * CELL_SIZE, 10.0 * CELL_SIZE, 0.0);
+        let mut seen: HashMap<&'static str, (usize, String, Vec3)> = HashMap::new();
+        for b in &o.brushes {
+            let model = &o.models[b.model as usize];
+            let p = origin + b.translation();
+            let Some(s) = w.surface_below(p.x, p.y, p.z + 6.0, 0.0) else { continue };
+            if s.terrain {
+                continue;
+            }
+            let e = seen.entry(s.surface.name()).or_insert((0, model.clone(), p));
+            e.0 += 1;
+        }
+        let mut rows: Vec<_> = seen.into_iter().collect();
+        rows.sort_by_key(|(_, (n, _, _))| std::cmp::Reverse(*n));
+        for (name, (n, model, p)) in rows {
+            println!("  {name:20} {n:4} brush centres, e.g. {} at {:.1},{:.1},{:.1}", model.rsplit('/').next().unwrap(), p.x, p.y, p.z);
+        }
+        let mut terrain: HashMap<&'static str, usize> = HashMap::new();
+        for i in 0..400 {
+            let (x, y) = (LUTESONG.0 - 200.0 + (i % 20) as f32 * 20.0, LUTESONG.1 - 200.0 + (i / 20) as f32 * 20.0);
+            *terrain.entry(w.terrain_surface(x, y).name()).or_default() += 1;
+        }
+        println!("terrain around the harbour (400 samples): {terrain:?}");
+        println!("{:?}", w.cell(20, 10).unwrap().terrain_surfaces.map(|id| Surface::from_id(id).name()));
+    }
+
+    /// Terrain, stone and wood decks retain their material for footsteps and agree with the ground and ray queries.
+    #[test]
+    fn surfaces_under_the_foot() {
+        let Some(w) = world() else { return };
+        w.build_blocking(20, 10).unwrap();
+        // the arch bridge of Lutesong Harbor (see walk_over_the_bridge)
+        let (centre, axis) = (Vec2::new(21_091.0, 10_551.2), Vec2::new(0.98, 0.19).normalize());
+        let on_bridge = centre + axis * 9.0;
+        let s = w.surface_below(on_bridge.x, on_bridge.y, 125.0, 0.0).unwrap();
+        println!("on the bridge: {s:?}");
+        assert!(!s.terrain && s.ground.height > 100.0, "{s:?}");
+        assert_eq!(s.surface.kind(), SurfaceKind::Stone, "{s:?}");
+        let wood = w.surface_below(21_015.3, 10_544.9, 125.0, 0.0).unwrap();
+        assert!(!wood.terrain && wood.ground.height > 120.0, "{wood:?}");
+        assert_eq!(wood.surface.kind(), SurfaceKind::Wood, "{wood:?}");
+        // the same position seen from below the deck: the terrain/riverbed, another surface
+        let below = w.surface_below(on_bridge.x, on_bridge.y, w.terrain().height_at(on_bridge.x, on_bridge.y).unwrap(), 0.3).unwrap();
+        println!("under the bridge: {below:?}");
+        assert!(below.terrain);
+        // ground_below and surface_below agree on the height
+        assert_eq!(w.ground_below(on_bridge.x, on_bridge.y, 125.0, 0.0), Some(s.ground));
+        // a ray down onto the deck reports the same
+        let (hit, surface) = w.raycast_surface(Vec3::new(on_bridge.x, on_bridge.y, s.ground.height + 5.0), Vec3::NEG_Z, 20.0, Mask::ALL).unwrap();
+        assert!((hit.point.z - s.ground.height).abs() < 0.05 && surface == s.surface, "{hit:?} {surface:?}");
+        // terrain: whatever layer is under the foot has a name, and the table of the cell has more than the default
+        let cell = w.cell(20, 10).unwrap();
+        assert!(cell.terrain_surfaces.iter().any(|&id| id != surface::DEFAULT), "{:?}", cell.terrain_surfaces);
+        let ground = w.terrain_surface(LUTESONG.0 + 60.0, LUTESONG.1 + 40.0);
+        println!("terrain at the harbour: {ground:?}");
+        assert!(w.terrain_surface(-5.0, 10.0) == Surface::DEFAULT);
+    }
+
+    /// A tree trunk or a rock placed as vegetation: the walker is stopped, the camera arm passes unless the trunk is
+    /// wide, rays hit it with the vegetation mask and the surface says what it is.
+    #[test]
+    fn trunks_stop_the_walker() {
+        let Some(w) = world() else { return };
+        let (cx, cy) = (9, 13);
+        w.build_blocking(cx, cy).unwrap();
+        let Some((trunk, scale, big)) = find_trunk(&w, cx, cy, 0.6) else { panic!("no trunk in cell {cx},{cy}") };
+        println!("trunk at {trunk:?} scale {scale} big {big}");
+        let ground = w.terrain().height_at(trunk.x, trunk.y).unwrap();
+        println!("ground under the trunk: {ground:.2}");
+        // from eight sides at chest height, a ray at the base reaches the trunk within a few metres
+        let mut hits = 0;
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            let from = Vec3::new(trunk.x + a.cos() * 6.0, trunk.y + a.sin() * 6.0, trunk.z + 1.2);
+            let dir = trunk + Vec3::Z * 1.2 - from;
+            // A leaning trunk need not contain its placement pivot. Cast through it, beyond the pivot.
+            let Some((hit, surface)) = w.raycast_surface(from, dir, 12.0, Mask::VEGETATION) else { continue };
+            hits += 1;
+            assert!(hit.t < 12.0 && !hit.terrain, "{hit:?}");
+            assert_ne!(surface.name(), "", "{surface:?}");
+            // without the vegetation mask: nothing but the wide ones
+            let camera = w.raycast_mask(from, dir, 12.0, Mask::CAMERA);
+            assert!(big || camera.is_none_or(|c| c.terrain || (c.t - hit.t).abs() > 0.01), "camera hit a small trunk: {camera:?}");
+        }
+        assert!(hits >= 5, "only {hits} of 8 rays hit the trunk");
+        // a walker pushed against it ends outside
+        let mut blocked = 0;
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            let start = Vec3::new(trunk.x + a.cos() * 4.0, trunk.y + a.sin() * 4.0, ground);
+            let step = Vec2::new(-a.cos(), -a.sin()) * 0.1;
+            let mut pos = Vec3::new(start.x, start.y, w.ground_below(start.x, start.y, start.z + 3.0, 0.5).map_or(ground, |g| g.height));
+            for _ in 0..60 {
+                let moved = w.slide(pos, step, 0.35, 1.8, 0.5);
+                let z = w.ground_below(moved.pos.x, moved.pos.y, pos.z, 0.5).map_or(pos.z, |g| g.height);
+                blocked += moved.blocked as usize;
+                pos = Vec3::new(moved.pos.x, moved.pos.y, z);
+            }
+            let reached = Vec2::new(pos.x - trunk.x, pos.y - trunk.y).length();
+            println!("  from the {:.0} deg side: ended {reached:.2} m from the trunk's base", a.to_degrees());
+        }
+        assert!(blocked > 8, "the walkers were never blocked ({blocked})");
     }
 }
