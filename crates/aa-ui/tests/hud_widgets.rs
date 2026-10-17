@@ -67,6 +67,42 @@ fn slot_cooldown_sweep_counts_down() {
     assert_eq!(eval::<String>(&ui, "table.concat(events, ' ')").matches("skill_cooldown_done").count(), 1);
 }
 
+/// Glyph quads (the time label): atlas quads that are not the sweep's triangles.
+fn glyph_quads(ui: &UiRuntime) -> usize {
+    let mut g = aa_ui::lua::ui(&ui.lua);
+    aa_ui::render::build_quads(&mut g, None)
+        .iter()
+        .filter(|q| q.corners.is_none() && q.tex == Tex::Atlas)
+        .count()
+}
+
+#[test]
+fn short_cooldown_has_no_time_label() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        btn = UIParent:CreateWidget("cooldownbutton", "cdBtn", "UIParent")
+        btn:SetExtent(40, 40)
+        btn:AddAnchor("TOPLEFT", "UIParent", 300, 300)
+        btn:Show(true)
+        btn:SetCoolDown(700, 700)
+        "#,
+    )
+    .unwrap();
+    // The global cooldown: the sweep dims the icon, no "1" over it.
+    assert!(sweep_quads(&ui) >= 1);
+    assert_eq!(glyph_quads(&ui), 0);
+    ui.exec("@limit", "btn:SetCoolDown(1500, 1500)").unwrap();
+    assert_eq!(glyph_quads(&ui), 0);
+    // Longer ones count down in whole seconds, to the last one.
+    ui.exec("@long", "btn:SetCoolDown(1600, 1600)").unwrap();
+    assert!(glyph_quads(&ui) >= 1);
+    tick(&ui, 1000.0);
+    assert!(glyph_quads(&ui) >= 1);
+    assert_eq!(aa_ui::lua::slot::time_label(600.0), "1");
+}
+
 #[test]
 fn cooldown_button_set_cooldown() {
     let ui = runtime();

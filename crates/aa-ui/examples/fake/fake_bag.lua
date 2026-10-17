@@ -10,7 +10,8 @@
 --   X2Bag:SlotByIdx(virtualSlot)      -> real slot, nil = empty
 --   X2Bag:GetBagItemInfo(1, realSlot) -> { lookType = itemType, itemGrade, name, ... } (tooltip info)
 --   X2Item:GetItemIconSet(type, grade) -> { itemIcon, overIcon, frameIcon } (texture paths)
--- so the app serves those, not the AAUI hooks.
+-- so the app serves those, not the AAUI hooks. A right click on an item calls
+-- AAUI.UseSlot(ISLOT_BAG, realSlot, "RightButton") (X2Bag.HandleUse below).
 --
 -- FAKE.items is the item registry the other fakes share (fake_character.lua adds the equipment).
 
@@ -239,7 +240,14 @@ X2Bag.ManualSort = function(self)
   FAKE.fire_later("BAG_TAB_SORTED")
 end
 X2Bag.Sort = X2Bag.ManualSort
+-- Clicks on the bag window's buttons (sort_inventory.lua OnClickProc): a right click on an item uses it
+-- (X2Bag:HandleUse), which goes to the app like a click on an action bar slot, with the real slot:
+--   AAUI.UseSlot(ISLOT_BAG, realSlot, "RightButton")
+-- A left click or a drag (HandleClick) picks the item up onto the cursor in the client: not done here.
 X2Bag.HandleClick = function(self, virtualSlot) end
-X2Bag.HandleUse = function(self, virtualSlot) end
+X2Bag.HandleUse = function(self, virtualSlot)
+  local real = X2Bag:SlotByIdx(virtualSlot)
+  if real ~= nil and AAUI.UseSlot ~= nil then AAUI.UseSlot(ISLOT_BAG, real, "RightButton") end
+end
 X2Bag.Confirm = function(self) unconfirmed = {} end
 X2Bag.FindBagItemByEquipSlot = function(self, bagId, equipSlot) return {} end -- fake_character.lua
