@@ -174,6 +174,7 @@ struct LayoutKey {
     max_width: Option<u32>,
     line_space: u32,
     outline: bool,
+    edit: bool,
 }
 
 const LAYOUT_CACHE_MAX: usize = 8192;
@@ -200,6 +201,16 @@ pub struct LaidOutText {
     pub height: f32,
     pub line_widths: Vec<f32>,
     pub line_height: f32,
+    /// Character-boundary caret positions for literal edit layouts, including trailing lines.
+    pub carets: Vec<TextCaret>,
+    /// Literal character ranges for visual edit lines, excluding a wrapping separator/newline.
+    pub line_ranges: Vec<(usize, usize)>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextCaret {
+    pub x: f32,
+    pub line: usize,
 }
 
 pub struct FontLib {
@@ -507,7 +518,21 @@ impl FontLib {
         line_space: f32,
         outline: bool,
     ) -> LaidOutText {
-        self.layout_ref(font, size, text, max_width, line_space, outline)
+        self.layout_ref(font, size, text, max_width, line_space, outline, false)
+            .clone()
+    }
+
+    /// Literal edit text, preserving trailing lines and character boundaries for picking,
+    /// selection and wrapped caret navigation. Shares the normal glyph and layout caches.
+    pub fn layout_edit(
+        &mut self,
+        font: &str,
+        size: f32,
+        text: &str,
+        max_width: Option<f32>,
+        line_space: f32,
+    ) -> LaidOutText {
+        self.layout_ref(font, size, text, max_width, line_space, false, true)
             .clone()
     }
 
@@ -520,7 +545,7 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
     ) -> (f32, f32) {
-        let lo = self.layout_ref(font, size, text, max_width, line_space, false);
+        let lo = self.layout_ref(font, size, text, max_width, line_space, false, false);
         (lo.width, lo.height)
     }
 
@@ -532,17 +557,18 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
         outline: bool,
+        edit: bool,
     ) -> &LaidOutText {
         use std::hash::{Hash, Hasher};
         let mw = max_width.map(f32::to_bits);
         let (sz, ls) = (size.to_bits(), line_space.to_bits());
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (font, sz, text, mw, ls, outline).hash(&mut h);
+        (font, sz, text, mw, ls, outline, edit).hash(&mut h);
         let hash = h.finish();
         let same = |k: &LayoutKey| {
             k.font == font
                 && k.text == text
-                && (k.size, k.max_width, k.line_space, k.outline) == (sz, mw, ls, outline)
+                && (k.size, k.max_width, k.line_space, k.outline, k.edit) == (sz, mw, ls, outline, edit)
         };
         if let Some(i) = self
             .layouts
@@ -551,7 +577,7 @@ impl FontLib {
         {
             return &self.layouts[&hash][i].1;
         }
-        let lo = self.layout_uncached(font, size, text, max_width, line_space, outline);
+        let lo = self.layout_uncached(font, size, text, max_width, line_space, outline, edit);
         if self.layouts_len >= LAYOUT_CACHE_MAX {
             self.layouts.clear();
             self.layouts_len = 0;
@@ -563,6 +589,7 @@ impl FontLib {
             max_width: mw,
             line_space: ls,
             outline,
+            edit,
         };
         let v = self.layouts.entry(hash).or_default();
         v.push((key, lo));
@@ -578,6 +605,7 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
         outline: bool,
+        edit: bool,
     ) -> LaidOutText {
         if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
             // Bitmap glyphs have no outline of their own.
@@ -592,6 +620,7 @@ impl FontLib {
 
         // 1. Characters with advance and colour; `None` face = line break.
         struct Item {
+            index: usize,
             ch: char,
             face: usize,
             gid: u16,
@@ -602,8 +631,8 @@ impl FontLib {
         // A last line that is empty or only blanks does not count: the client gives
         // `"We fear no death."\r\n\n` 2 lines and `"Claw to earth, ... fur to fire."\r\n\n `
         // (wrapped in two) 3 lines (GetTextHeight in reference/character_create/step1_*).
-        let mut expanded = expand_codes(text);
-        if let Some(nl) = expanded.rfind('\n')
+        let mut expanded = if edit { text.to_string() } else { expand_codes(text) };
+        if !edit && let Some(nl) = expanded.rfind('\n')
             && expanded[nl + 1..]
                 .chars()
                 .all(|c| c == ' ' || c == '\t' || c == '\r')
@@ -618,7 +647,7 @@ impl FontLib {
         let mut i = 0;
         while i < chars.len() {
             let ch = chars[i];
-            if ch == '|' && i + 1 < chars.len() {
+            if !edit && ch == '|' && i + 1 < chars.len() {
                 match chars[i + 1] {
                     'c' | 'C' if i + 10 <= chars.len() => {
                         let hex: String = chars[i + 2..i + 10].iter().collect();
@@ -643,6 +672,7 @@ impl FontLib {
             }
             if ch == '\n' {
                 items.push(Item {
+                    index: i - 1,
                     ch,
                     face: usize::MAX,
                     gid: 0,
@@ -655,6 +685,7 @@ impl FontLib {
                 // Icon plus 1 px on each side (matches the loyalty token width at login).
                 let adv = (ICON_ADVANCE * size / 13.0).round().max(ICON_ADVANCE) + 2.0;
                 items.push(Item {
+                    index: i - 1,
                     ch,
                     face: ICON_FACE,
                     gid: (ch as u32 - ICON_BASE) as u16,
@@ -675,6 +706,7 @@ impl FontLib {
                 }
             }
             items.push(Item {
+                index: i - 1,
                 ch,
                 face,
                 gid,
@@ -732,12 +764,19 @@ impl FontLib {
             line_height: line_h,
             ..Default::default()
         };
+        let mut carets = if edit { vec![None; chars.len()+1] } else { Vec::new() };
         for (li, &(a, b)) in lines.iter().enumerate() {
             let y = li as f32 * (line_h + line_space) + ascent;
             let mut x = 0.0f32;
             // Trailing spaces do not count towards the line width.
             let mut width = 0.0f32;
+            if edit {
+                let first = items.get(a).map_or(chars.len(), |it| it.index);
+                carets[first] = Some(TextCaret { x: 0.0, line: li });
+                out.line_ranges.push((first,items.get(b).map_or(chars.len(),|it|it.index)));
+            }
             for it in &items[a..b] {
+                if edit { carets[it.index] = Some(TextCaret { x, line: li }); }
                 if it.face == ICON_FACE {
                     let [_, _, cw, ch] = INLINE_ICONS[it.gid as usize];
                     let ih = (cw * size / 13.0).round().max(cw) * ch / cw;
@@ -762,8 +801,16 @@ impl FontLib {
                     width = x + it.adv;
                 }
                 x += it.adv;
+                if edit { carets[it.index+1] = Some(TextCaret { x, line: li }); }
             }
-            out.line_widths.push(width);
+            if edit && let Some(end) = items.get(b) {
+                carets[end.index] = Some(TextCaret { x, line: li });
+            }
+            out.line_widths.push(if edit { x } else { width });
+        }
+        if edit {
+            let mut previous = TextCaret::default();
+            out.carets = carets.into_iter().map(|p| { previous = p.unwrap_or(previous); previous }).collect();
         }
         out.width = out.line_widths.iter().copied().fold(0.0, f32::max);
         let n = lines.len() as f32;

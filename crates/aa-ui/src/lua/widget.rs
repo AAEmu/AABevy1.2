@@ -1023,6 +1023,16 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
+    def(
+        "SetLimitWidth",
+        method(lua, |lua, id, a| {
+            // Native label setter and style:SetEllipsis both call 39274900 (style bit 0x10).
+            if let Some(t) = ui(lua).tree.get_mut(id).text_mut() {
+                t.style.ellipsis = a.b(1, true);
+            }
+            none()
+        })?,
+    )?;
     for name in [
         "EnableHidingIsRemove",
         "RegisterForClicks",
@@ -1036,7 +1046,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetMsgToParent",
         "SetMaxTextLength",
         "SetNumberOnly",
-        "SetLimitWidth",
         "UseConsistentTextColor",
         "InheritAnimationData",
         "CheckOutOfScreen",
