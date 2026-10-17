@@ -1,0 +1,447 @@
+{
+ "note": "Title textboxes report GetText()=\"\" in this client; the strings come from the locale tables named in title_source (read through the UI Lua state). optionFrames_index counts the partition-line rows too (5, 16, 28). The list scrolls: the viewport shows rows up to y=~765, later rows exist at the listed offsets but are clipped. Title textbox width is 170 px; \"Status-sensitive Shortcut Slot #N\" wraps to two lines (longest line 162 px, textbox height 32), all other titles are one line.",
+ "rows": [
+  {
+   "optionFrames_index": 1,
+   "title": "Use 1st Interaction Option",
+   "title_source": "locale.optionWindow.key.gameControlMenu1",
+   "eoffset": [
+    860,
+    334.500031
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 150,
+   "text_height": 16,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 2,
+   "title": "Use 2nd Interaction Option",
+   "title_source": "locale.optionWindow.key.gameControlMenu1",
+   "eoffset": [
+    860,
+    364.500031
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 154,
+   "text_height": 16,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 3,
+   "title": "Use 3rd Interaction Option",
+   "title_source": "locale.optionWindow.key.gameControlMenu1",
+   "eoffset": [
+    860,
+    394.500031
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 152,
+   "text_height": 16,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 4,
+   "title": "Use 4th Interaction Option",
+   "title_source": "locale.optionWindow.key.gameControlMenu1",
+   "eoffset": [
+    860,
+    424.500031
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 151,
+   "text_height": 16,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 6,
+   "title": "Status-sensitive Shortcut Slot #1",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    461.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 7,
+   "title": "Status-sensitive Shortcut Slot #2",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    491.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 8,
+   "title": "Status-sensitive Shortcut Slot #3",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    521.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 9,
+   "title": "Status-sensitive Shortcut Slot #4",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    551.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 10,
+   "title": "Status-sensitive Shortcut Slot #5",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    581.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 11,
+   "title": "Status-sensitive Shortcut Slot #6",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    611.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 12,
+   "title": "Status-sensitive Shortcut Slot #7",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    641.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 13,
+   "title": "Status-sensitive Shortcut Slot #8",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    671.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 14,
+   "title": "Status-sensitive Shortcut Slot #9",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    701.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 15,
+   "title": "Status-sensitive Shortcut Slot #10",
+   "title_source": "locale.optionWindow.key.gameControlMenu2",
+   "eoffset": [
+    860,
+    731.500061
+   ],
+   "eextent": [
+    170,
+    32
+   ],
+   "line_count": 2,
+   "longest_line_width": 162,
+   "text_height": 32,
+   "in_viewport": true
+  },
+  {
+   "optionFrames_index": 17,
+   "title": "Select Target",
+   "title_source": "locale.optionWindow.key.subTitleText.selectTarget",
+   "eoffset": [
+    860,
+    784.500061
+   ],
+   "eextent": [
+    385.999756,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 71,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 18,
+   "title": "Target Self/Pet",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    814.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 80,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 19,
+   "title": "Target Party Member 1",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    844.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 129,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 20,
+   "title": "Target Party Member 2",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    874.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 129,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 21,
+   "title": "Target Party Member 3",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    904.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 129,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 22,
+   "title": "Target Party Member 4",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    934.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 129,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 23,
+   "title": "New Target",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    964.500061
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 64,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 24,
+   "title": "Previous Target",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    994.499878
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 86,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 25,
+   "title": "Select a Friend",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    1024.49976
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 80,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 26,
+   "title": "Previous Friend",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    1054.49963
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 85,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 27,
+   "title": "Track Target",
+   "title_source": "locale.optionWindow.key.gameControlMenu3",
+   "eoffset": [
+    860,
+    1084.49963
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 69,
+   "text_height": 16,
+   "in_viewport": false
+  },
+  {
+   "optionFrames_index": 29,
+   "title": "Bloodlust Mode",
+   "title_source": "locale.optionWindow.key.gameControlMenu4",
+   "eoffset": [
+    860,
+    1129.49963
+   ],
+   "eextent": [
+    170,
+    16
+   ],
+   "line_count": 1,
+   "longest_line_width": 87,
+   "text_height": 16,
+   "in_viewport": false
+  }
+ ]
+}
