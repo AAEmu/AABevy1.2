@@ -442,6 +442,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let hp = stats.map_or(character.hp, |s| s.hp);
     let mp = stats.map_or(character.mp, |s| s.mp);
     let (max_hp, max_mp) = formula_max.map_or((known_hp, known_mp), |(h, m)| (h.max(hp), m.max(mp)));
+    // the server's set for the character (the same ids the character list shows), kept current by swaps
+    let ability_slots = stats.map_or(character.abilities, |s| s.active_abilities);
     let snapshot = Snapshot {
         unit_id: spawn.obj_id.to_string(),
         name: spawn.name().to_string(),
@@ -476,12 +478,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         sub_map,
         sub_map_rect,
         faction,
-        // the server's set for the character (the same ids the character list shows), kept current by swaps
-        abilities: stats
-            .map_or(character.abilities, |s| s.active_abilities)
-            .into_iter()
-            .filter(|a| (1..aa_net::model::NO_ABILITY).contains(a))
-            .collect(),
+        abilities: ability_slots.into_iter().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
         ability_exp: stats.map_or([0; 11], |s| s.ability_exp),
         hour: hour.floor() as u8 % 24,
         minute: (hour.fract() * 60.0).floor(),
@@ -497,7 +494,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         data = bridge.borrow_mut();
     }
     if data.snapshot.abilities != snapshot.abilities {
-        info!("hud: abilities {:?} (exp {:?})", snapshot.abilities, snapshot.ability_exp);
+        // slots as the server sent them: 11 (`NO_ABILITY`, the scripts' `ABILITY_MAX`) is an empty slot, not an ability
+        info!("hud: abilities {:?} from the slots {ability_slots:?} (11 = empty), exp {:?}", snapshot.abilities, snapshot.ability_exp);
     }
     data.snapshot = snapshot;
     let own_obj_id = spawn.obj_id;
