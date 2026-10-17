@@ -304,8 +304,10 @@ showroom uses ~0.5 of "nominal" values, higher washes characters out.
 `aa_cry::shade::skin_base_color` has one pink pull for every skin. The models differ (the elf's
 pale face texture needs it, the Nuian male's skin is already pink and turned red), so
 `aa_anim::skin_tune(race, gender)` is a table of linear rgb multipliers on top of it, one row per
-model, plus `body_skin_tune` (ferre male only: his body fur texture is greyer than the face's
-while the capture is dark brown all over; the face tune does not apply to the body there).
+model, plus `body_skin_tune` (ferre male: his body fur texture is greyer than the face's while the
+capture is dark brown all over; elf female: see "Body skin" below) and a sheen for the skin of the
+body and the costumes' skin parts (`BODY_SKIN_ROUGHNESS` 0.3 / `BODY_SKIN_REFLECTANCE` 0.7; the
+face keeps roughness 0.5 / reflectance 0.4).
 
 The face rows are the output of `data/extract/aa-cry/tmp/skintune.py` (not committed: scratch):
 render the 8 `step1_*` targets nude and bald (`compare --costume none --no-hair 1`), take the
@@ -325,6 +327,22 @@ character). Front lit, as on the login stage, the face measures *brighter* than 
 0.17 linear luminance, `faces --nude 1`), and the captures fix the face tone, so the two are not
 equalised. Face decals do not change the skin outside their shapes (compared with and without in
 `faces`, same pixels).
+
+Body skin (elf female chest cutout). The starter costume `el_f_login001` has a heart-shaped cutout
+on the chest. The body triangles under it are collapsed by the `Cut` hull, and the exposed skin is
+the costume's own `skin` sub-mesh: a `HumanSkin` material (678 triangles, UVs on the chest of the
+nude texture) like the body's. It rendered as a flat saturated salmon patch because the elf female
+face tune (about 1.6 on every channel, fitted to the grey-pink face texture) was applied to the peach
+nude texture: its red was pushed into the tone curve's shoulder (`(243, 161, 148)`, sd 1 in red,
+against `(221, 165, 163)` with soft shading in `step2_elf_female`). Face lit by the same shader,
+so the face looked right. The fix is a `body_skin_tune` row of the face / body texture ratio times
+about 1.3, `(0.65, 0.78, 0.90)`, fitted to the mean of the two lobes, plus the sheen above (at the
+face's roughness the chest is one flat colour, the capture has soft highlights). After: lobes
+`(223, 167, 164)` / `(224, 170, 168)` against `(221, 165, 163)` / `(220, 161, 159)`, face, neck and the
+other seven step 2 targets unchanged to the eye (the sheen is slightly glossier on the exposed
+neck / chest skin of the others). The other races have no large area of body skin that disagrees
+with its capture; if one shows up, its row goes in `body_skin_tune` the same way (face texture
+mean / body texture mean per channel is the first guess, then iterate on the cutout pixels).
 
 ### Ferre heads (`FaceMaker::race_gender_weights`)
 
