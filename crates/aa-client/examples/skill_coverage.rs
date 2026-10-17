@@ -359,7 +359,7 @@ struct ClipRow {
     /// `anims.move_ub` of the clip, and the models where none of the names the client tries exists.
     ub: Option<String>,
     ub_missing: Vec<String>,
-    /// The data says the clip loops (`anims.loop`); the client plays fire and plot clips once.
+    /// The data says the clip loops (`anims.loop`): the client loops it until the next clip or the end of the skill.
     loops: bool,
     /// The skill (or the plot step) starts effects or a projectile at the launch of this clip.
     launch_timed: bool,
@@ -515,7 +515,7 @@ impl Ctx<'_> {
         }
         v.channeling_anim.iter().for_each(|n| add(n, "channel"));
         self.weapon_clips(id).iter().for_each(|n| add(n, "weapon"));
-        // anims the client does not play yet: the instruments' (music skills) and the skill controller's (a stance, a charge)
+        // the instruments' (music skills) and the skill controller's (a stance, a charge) anims
         for (anim, role) in self.extra_anims(id) {
             self.book.anim(anim).iter().for_each(|n| add(n, role));
         }
@@ -547,7 +547,7 @@ impl Ctx<'_> {
                 extras = extras.plus(proj.extras);
             }
         }
-        // alternative visuals by skill level (the client does not use them yet)
+        // alternative visuals by skill level (the client picks one by the caster's level)
         let levels: Vec<(u32, u32)> = self
             .db
             .prepare("SELECT COALESCE(fx_group_id, 0), COALESCE(projectile_id, 0) FROM skill_visual_groups WHERE owner_type = 'Skill' AND owner_id = ?1")
@@ -1068,6 +1068,37 @@ fn main() {
         channel.len(),
         channel.iter().map(|r| format!("{} {}{}", r.id, r.name, if r.channel_clip() { "" } else { " [no clip]" })).collect::<Vec<_>>().join("; ")
     );
+
+    // --- what the client does with them (the same lookups `ingame/combat.rs` makes)
+    {
+        let tree = |f: &dyn Fn(&Row) -> bool| -> String {
+            let all = players.iter().filter(|r| f(r)).count();
+            let shown = players.iter().filter(|r| r.shown && f(r)).count();
+            format!("{all} skills ({shown} shown tree skills)")
+        };
+        let plays = |r: &Row, roles: &[&str]| r.clips.values().any(|c| c.roles.iter().any(|x| roles.contains(x)));
+        let loops = |r: &Row| r.clips.values().any(|c| c.loops && c.roles.iter().any(|x| matches!(*x, "fire" | "twohand" | "dual" | "step")));
+        let shakes = |r: &Row| {
+            let Some(v) = book.skill(r.id) else { return false };
+            let flying = |p: &Option<skills::Projectile>| p.as_ref().is_some_and(|p| !p.shakes.is_empty());
+            !v.shakes.is_empty()
+                || flying(&v.projectile)
+                || v.levels.iter().any(|(_, l)| !l.shakes.is_empty() || flying(&l.projectile))
+                || book.plot_steps(r.id).iter().any(|e| book.plot_event(*e).is_some_and(|p| !p.shakes.is_empty() || flying(&p.projectile)))
+        };
+        let levels = |r: &Row| book.skill(r.id).is_some_and(|v| !v.levels.is_empty());
+        println!("\n== client handling (player skills; each is played by ingame/combat.rs)");
+        println!("a plot step that only stops ends the cast loop: {}", tree(&|r| r.steps_stop_only > 0));
+        println!("a clip that loops until the next step or the end (anims.loop; fire, weapon variant and plot step clips): {}", tree(&loops));
+        println!("  of them channeling skills (channeling time or clip) whose pose loops for the channel: {} of {}", players.iter().filter(|r| r.channeling() && loops(r)).count(), players.iter().filter(|r| r.channeling()).count());
+        println!("clip by the weapon held (twohand / dual wield variants): {}", tree(&|r| plays(r, &["twohand", "dual"])));
+        println!("controller clip only (dash, leap, back step: no clip of its own): {}", tree(&|r| plays(r, &["controller"]) && !plays(r, &["start", "fire", "twohand", "dual", "step"])));
+        println!("clip by the instrument held (songs): {}", tree(&|r| plays(r, &["instrument"])));
+        println!("visual group by skill level: {}", tree(&levels));
+        println!("camera shake: {}", tree(&shakes));
+        let lost: Vec<String> = players.iter().filter(|r| r.extras.shake > 0 && !shakes(r)).map(|r| format!("{} {}", r.id, r.name)).collect();
+        println!("  shake items the client does not play: {}", if lost.is_empty() { "none".to_string() } else { lost.join("; ") });
+    }
 
     // --- per set
     println!("\n== effect classes per set (player skills)");
