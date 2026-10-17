@@ -330,8 +330,10 @@ pub struct EmitterDef {
     /// `RotateWorldSpace`: the axis is a world axis, not the emitter's.
     pub rotate_world: bool,
     pub bind_to_emitter: bool,
-    /// `CollideTerrain`: the particles bounce on the ground.
+    /// `CollideTerrain`: the particles bounce on the ground (only with a `PhysicsType`, see `collides`).
     pub collide: bool,
+    /// `PhysicsType` is not `None` (SimpleCollision, SimplePhysics, RigidBody).
+    pub physics: bool,
     /// `Bounciness`: 0 stops dead, 1 bounces fully, below 0 the particle dies on impact.
     pub bounciness: f32,
     /// `DynamicFriction`: how fast a particle on the ground slows down.
@@ -418,6 +420,7 @@ impl Default for EmitterDef {
             rotate_world: false,
             bind_to_emitter: false,
             collide: false,
+            physics: false,
             bounciness: 0.0,
             friction: 0.0,
             inherit_velocity: 0.0,
@@ -566,7 +569,9 @@ impl EmitterDef {
                 "RotateWorldSpace" => d.rotate_world = truth(v),
                 "BindToEmitter" | "MoveRelEmitter" => d.bind_to_emitter |= truth(v),
                 "CollideTerrain" => d.collide = truth(v),
-                "Bounciness" => d.bounciness = Var::parse(v, 0.0).base,
+                "PhysicsType" => d.physics = !matches!(v, "" | "None"),
+                // some libraries say 20: a bounce never gains energy
+                "Bounciness" => d.bounciness = Var::parse(v, 0.0).base.min(1.0),
                 "DynamicFriction" => d.friction = Var::parse(v, 0.0).base,
                 "InheritVelocity" => d.inherit_velocity = Var::parse(v, 0.0).base,
                 "AttachType" => {
@@ -611,6 +616,11 @@ impl EmitterDef {
     /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
         self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())
+    }
+
+    /// Whether the particles hit the ground: `CollideTerrain` counts for emitters with a `PhysicsType` only.
+    pub fn collides(&self) -> bool {
+        self.collide && self.physics
     }
 
     /// Sprites that dissolve: they carry a per-vertex alpha test threshold.

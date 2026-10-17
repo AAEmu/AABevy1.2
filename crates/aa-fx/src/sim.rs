@@ -561,7 +561,7 @@ impl EmitterState {
         let turb = def.turbulence_3d * ctx.scale;
         let want_deaths = self.want_deaths;
         let want_collides = self.want_collides;
-        let collide = def.collide;
+        let collide = def.collides();
         let basis = self.orbit_basis(ctx);
         let orbits = def.orbits();
         let mut w = 0;
@@ -1307,7 +1307,7 @@ mod tests {
     #[test]
     fn particles_bounce_on_the_ground_and_start_collision_children() {
         let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs>
-            <Particles Name="rock"><Params Count="1" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0" GravityScale="1" PositionOffset="0,0,1" CollideTerrain="true" Bounciness="0.5" Size="0.1"/>
+            <Particles Name="rock"><Params Count="1" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0" GravityScale="1" PositionOffset="0,0,1" PhysicsType="SimpleCollision" CollideTerrain="true" Bounciness="0.5" Size="0.1"/>
             <Childs><Particles Name="dust"><Params Count="3" ParticleLifeTime="1" Texture="textures/x.dds" Speed="0" SpawnIndirection="ParentCollide"/></Particles></Childs></Particles>
             </Childs></Particles></ParticleLibrary>"#;
         let lib = Library::parse(xml).unwrap();
@@ -1360,7 +1360,7 @@ mod tests {
         let e = &s.emitters[0];
         // a ribbon of several quads, not one sprite
         assert!(e.units >= 5, "{} quads", e.units);
-        let span = (Vec3::from(e.max) - Vec3::from(e.min)).max_element();
+        let span = (e.max - e.min).max_element();
         // 0.5 s at 5 m/s of flight, all of it within the 1 s tail
         assert!((span - 2.5).abs() < 0.6, "span {span}");
         // the ribbon fades towards its end
