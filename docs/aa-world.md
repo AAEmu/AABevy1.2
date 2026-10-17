@@ -285,7 +285,8 @@ tick. `objects::sounds::spawn_cell(commands, cell, &CellObjects::sounds)` is pub
 ### Environment (`env.rs`, `sky.rs`, `sky_material.rs`)
 
 `WorldClock { hour, speed, zone, layer }` (default hour 10, layer 0) selects the sample of the zone under the camera (`zone_at`), smoothed over
-about 0.3 s. It drives: a sun / moon `DirectionalLight` (illuminance = `sun_lux_scale x luminance(sun color x multiplier)`, cascaded shadows,
+about 0.3 s. `hour` is the server's game hour (the clients' `e_time_of_day`); the zone's splines are read at `env::spline_hour(hour, dawn_hour)`
+(see Time of day warp below), everything else (sun path, `Environment.hour`) takes the raw hour. It drives: a sun / moon `DirectionalLight` (illuminance = `sun_lux_scale x luminance(sun color x multiplier)`, cascaded shadows,
 3 cascades over `shadow_distance`), the ambient light (see below), the sky dome, the cloud sprites, the post pass (fog, film curve, grading) and the
 water materials. The sun follows `env::sun_direction` (see Sun path below); at night the light comes from the moon side.
 
@@ -311,10 +312,27 @@ at 9.998 h (0.46, the wide view 0.38); the formula gives 124.0 / 42.4 and 131.8 
 with the sun in the north at noon, lit none of the yard.) The sun is therefore in front of the camera, to the right, above the picture in the
 first palace view. Test `env::tests::sun_path`.
 
-**The time of day of the capture is not recoverable**: `e_time_of_day` says 19.17 for the spawn and 6.17 for create step 3, 13 h apart, while both
-pictures show full daylight, and the data is night blue at 19.17. So `hour 10, layer 0` is a calibration choice: sun 44 degrees up in the south-east, pale blue
-horizon, grey blue fog; `AtmosphereTuning` was fitted so that region means of `shots/atmosphere/spawn.png` match the capture within about 10 %
-(sky 170 / 190 / 203 against 171 / 184 / 203, hills 81 / 102 / 120 against 91 / 109 / 120, water 54 / 77 / 79 against 45 / 64 / 47 ..).
+**Time of day warp** (`env::spline_hour`, `Lighting::dawn_hour`; `docs/research/time-of-day.md`): the server hour is the capture's hour (`e_time_of_day`
+19.17 at the spawn, 2.7 to 4.3 at the combat frames, 6.17 and 18.03 at create step 3), and the engine's time of day manager hands every zone
+layer a warped hour before the layer reads its splines at `warped / 24`: a quadratic per half day that moves the world's real dawn and dusk
+(`lighting.xml` `DawnTime / 60`, main world 119 min = 1.98 h, so 2:00 and 22:00) onto the splines' authored 6:00 and 18:00 (the second half is clamped
+at 0: on the main world every hour from 12:00 to 19:05 reads the splines at 12.0, 19.17 h reads 12.17, 2.7 h reads 6.7, 22 h reads 17.96).
+`Lighting::dawn_hour` is `DawnTime / 60` (default 355 / 60 for a file without it); 6 (login worlds and almost every instance, `DawnTime 360`) is the
+identity, so the login screens are unchanged. `TimeOfDay::sample(hour, lighting)` does the warp itself; the sun path and the HUD clock keep the
+raw hour. Tests: `env::tests::spline_hour_is_the_engines_warp` (the research test vectors), `splines_are_read_at_the_warped_hour_but_the_sun_at_the_raw_one`,
+`lighting_reads_the_dawn_time`. The palace views (zone 186, 9.56 to 10.0 h read at 10.9 to 11.1 now) changed by under 1 display value of mean abs
+difference: the data is flat between 9 and 13. `AtmosphereTuning` was fitted to the spawn picture at "hour 10" (spline hour 10, a sun 44 degrees up
+in the south-east); at the real hour 19.166 (spline 12.17, sun at azimuth 288 / elevation 13) the same tuning is close but not fitted: region means
+of the spawn picture (rock, grass slope, far bank, left trees) are 6 to 20 display values bright in green and blue, the sky (hills) within 10, the pond water within 5
+at the left and 20 dark at the right, where the real pond has a pale sheet that looks like the sky's mirror image (the cube map reflection is dim at
+that angle). Not re-fitted: it is one picture, and the real client's own shade (AO, the engine's film curve) is not reproduced.
+
+**Sun direction at the spawn hour**: the raw formula (`sun_direction`) puts the sun at azimuth 288 / elevation 13 (west-north-west, low) at 19.166 h.
+An earlier reading of the diffuse picture ("lit from the north-north-east") was wrong: `fly --camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0
+--hour 19.166` with `AA_TUNE=sun_az=A,sun_el=E` for 28 directions (azimuth 20 .. 340, elevation 5 .. 45), correlating the luminance of the left half
+(grass bank and rock, where shadows show) with the real picture: the best Pearson r (0.705, high pass 0.431) is the unpinned engine formula
+(287.5 / 13.2), the neighbours 270 / 13 and 305 / 13 give 0.61 and 0.56, 20 / 13 and 340 / 13 (north) 0.52 to 0.57, 160 to 200 (the sun ahead) 0.60 to 0.63;
+the peak is sharp and at the formula's direction, so the sun path needs no change.
 
 **Sky** (`sky_material.rs`, `sky.wesl`): a dome of radius `sky_radius` following the camera, a `Material` without prepass. Gradient from
 `Night sky: Horizon color` to `Zenith color` (x multipliers x `sky_gain`, 2.4), sun glow and disc, covered by the zone's sky box the way the engine's
@@ -434,9 +452,10 @@ reads the depth prepass. It follows the engine's own two shaders, `watersurface.
   dense where the water is thin (around legs and plants, at the shore).
 
 **Fit** to the real combat frames (`reference/ingame/combat_triple_slash/real_05.png`, `combat_return/real_10.png`, the Nuian pond; `fly
---camera-json cam_c05.json --shift 11264,11264,0 --hour 10` with `AA_TUNE=sun_az=290,sun_el=15`, the sun behind the camera as the real
-picture's, see "Known gaps" for the clock): mean colour of 12 water regions (near / mid / far, left / right, both frames), mean abs error over
-R, G, B in display values: 38.5 before, 6.8 after (the real region means are all within (38..50, 51..60, 33..47), a luminance of 47 to
+--camera-json cam_c05.json --shift 11264,11264,0` at the frames' real game hours 2.81 and 3.76, no pinned sun: they read the splines at 6.7 and
+7.5, the sun is low in the north-east; before the time of day warp the fit used `--hour 10` with `AA_TUNE=sun_az=290,sun_el=15`, which gave 6.8 and
+`water_body` 6 / `water_lit` 0.25, the real hours score 11.9 with those and 7.2 with the current 7 / 0.35): mean colour of 12 water regions (near / mid / far, left / right, both frames), mean abs error over
+R, G, B in display values: 38.5 before, 7.2 after (the real region means are all within (38..50, 51..60, 33..47), a luminance of 47 to
 56 that varies little with distance: the fog colour dominates beyond two metres, the dim cube map reflection gives the green hue). The
 standard deviation of the regions (ripples, flecks) is 3 to 14 against the real 2 to 14. Fleck coverage above luma 85: 4.4 % against 3.8 %
 (c05 bottom right), 7.4 against 7.9, 4.8 against 5.4. The player's legs are seen through the surface in the client
@@ -549,7 +568,7 @@ window is forced to 1 physical pixel per pixel):
 | `--spawn nuian / elf / hariharan / ferre` | the new character spawn, default third person camera, FOV 42.75 |
 | `--camera-json reference/<screen>/camera.json [--shift 11264,11264,0]` | the real client's camera (in game: client local, hence the shift) |
 | `--cinema <name> [--t s] [--play]` | camera of `cinemas/<name>.xml` (default for login2: `01_world_select_e1`) |
-| `--hour h` `--speed h/s` `--zone id` `--layer 0/1` | time of day (default hour 10, layer 0) |
+| `--hour h` `--speed h/s` `--zone id` `--layer 0/1` | time of day: `h` is the game hour as the server sends it (default 10, layer 0); the splines are read at `spline_hour(h)` |
 | `--sun-scale` `--ambient-scale` `--terrain-tint r,g,b` `--fog-visibility m` `--tree-distance m` | calibration |
 | `--radius m` `--no-objects` `--no-shadows` `--no-env` `--no-post` `--no-terrain-detail` | |
 | env `AA_TUNE="key=value,.."` | `AtmosphereTuning` overrides, see Environment |
@@ -770,10 +789,10 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
   (types 13 and 9, `aa_terrain/roads`, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure.
 * Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
-  at one hour with the sun pinned behind the camera; other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
+  at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
   owner's (the cover colour is a flat teal where the real bed is darker and greener), no flow along rivers, the sun glint of the real frames
-  is not visible (the sun is behind the camera there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
+  is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
@@ -796,11 +815,11 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   characters are lit differently in the engine: the time of day has two extra "Char BackLight" lights (`1 Color` 0.49 x 5.0,
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
-* The real client's time of day: `e_time_of_day` in the capture says 19.17 (the spawn) and 6.17 (create step 3) while both pictures show
-  full daylight, yet zone 179's `Sun color` spline is night blue at 19.17 in both of its layers. The clock here is a free parameter (default
-  hour 10, layer 0, see Environment); matching the capture exactly needs the engine's own time mapping. The engine's sun at 19.17 h would be
-  low in the west-north-west (azimuth 288, elevation 13), the capture's shadows point the other way (it is lit from the north-north-east);
-  the palace times (the game clock of the capture) are reliable (the sun path matches), the spawn one is not.
+* The real client's time of day is solved (see Environment, Time of day warp): the splines are read at the engine's warped hour. Not modelled: the
+  engine blends two zone layers by `layer weight` across zone borders (aa-world reads layer 0 of the zone under the camera), and the plateau of
+  12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
+  of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
+  (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
 * login2: cinema cameras and the real cameras are supported, but the race training fields of create step 3 are not part of the cell
   brush data (entities / cinemas); the scene shows terrain and the stage props of `object.dat`.
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
