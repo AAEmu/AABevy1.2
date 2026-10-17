@@ -252,19 +252,9 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
             ret(lua, s)
         })?,
     )?;
-    def(
-        "Animation",
-        method(lua, |lua, id, a| {
-            // (play, visible): frame animation; we show the first frame while it plays.
-            let on = if a.len() >= 3 {
-                a.b(2, true)
-            } else {
-                a.b(1, true)
-            };
-            ui(lua).tree.get_mut(id).shown = on;
-            none()
-        })?,
-    )?;
+    if class == "drawable:image" {
+        super::animation::frame_methods(lua, &m)?;
+    }
     // `SetRotation(r)`: radians, clockwise on screen, about the centre of the drawable's rect.
     def(
         "SetRotation",
@@ -285,55 +275,7 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     if class == "drawable:effect" {
-        def(
-            "SetStartEffect",
-            method(lua, |lua, id, a| {
-                let on = a.b(1, true);
-                // Starting shows the drawable (the action bar's background effect starts hidden,
-                // reference/ingame/tooltip_skill lists it shown); there is no animation, so it
-                // takes the colour the last phase ends in.
-                with(lua, id, |d| {
-                    d.effect = Some(on);
-                    if let (true, false, Some((_, c))) = (on, d.effect_loop, d.effect_final) {
-                        d.color = c;
-                    }
-                });
-                if on {
-                    ui(lua).tree.get_mut(id).shown = true;
-                }
-                none()
-            })?,
-        )?;
-        def(
-            "SetRepeatCount",
-            method(lua, |lua, id, a| {
-                let n = a.f(1) as i64;
-                with(lua, id, |d| d.effect_loop = n == 0);
-                none()
-            })?,
-        )?;
-        def(
-            "SetEffectFinalColor",
-            method(lua, |lua, id, a| {
-                let phase = a.f(1) as i64;
-                let c = [a.f(2), a.f(3), a.f(4), a.f(5)];
-                with(lua, id, |d| {
-                    if d.effect_final.is_none_or(|(p, _)| phase >= p) {
-                        d.effect_final = Some((phase, c));
-                    }
-                });
-                none()
-            })?,
-        )?;
-        def(
-            "IsStartEffect",
-            method(lua, |lua, id, _| {
-                ret(
-                    lua,
-                    with(lua, id, |d| d.effect == Some(true)).unwrap_or(false),
-                )
-            })?,
-        )?;
+        super::animation::effect_methods(lua, &m)?;
         // "ninepart" / "threepart" / "image": how the effect's texture is drawn.
         def(
             "SetInternalDrawType",

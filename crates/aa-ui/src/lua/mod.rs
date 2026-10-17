@@ -10,6 +10,7 @@
 //! (see `stubs`), so a script calling them keeps running; field lookups of unknown names still
 //! return `nil`, as scripts test fields like `if self.bgs == nil`.
 
+pub mod animation;
 mod bounds;
 pub mod chat;
 pub mod chat_input;
@@ -60,6 +61,7 @@ pub struct Ui {
     /// Handler calls queued by natives, run once the native returns.
     pub pending: Vec<(Id, String, Vec<Value>)>,
     pub fades: HashMap<Id, Fade>,
+    pub animations: animation::Animations,
     pub time_ms: f64,
     pub frame_ms: f32,
     /// Calls to stubbed (unimplemented) methods: name -> count.
@@ -418,6 +420,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         let mut u = ui(lua);
         u.time_ms += dt_ms as f64;
         u.frame_ms = dt_ms;
+        animation::tick(&mut u, dt_ms);
         let mut ended = Vec::new();
         let fades: Vec<(Id, Fade)> = u.fades.iter().map(|(k, v)| (*k, *v)).collect();
         for (id, mut f) in fades {
