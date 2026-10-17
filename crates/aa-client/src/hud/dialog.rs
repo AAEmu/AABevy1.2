@@ -559,8 +559,12 @@ fn begin_talk(d: &mut HudData, facts: &PlayerFacts, npc: (u32, u32), target: Opt
     };
     info!("hud: talk to npc {obj_id} (template {template}): start {:?}, complete {:?}, talk {:?}", d.dialog.start, d.dialog.complete, d.dialog.talk);
     if what.is_none() {
-        net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
-        d.dialog.npc = None;
+        if d.game.get().is_some_and(|g| g.stores.has_service(template)) {
+            net.write(NetCommand(Command::Interact(Interact::Start { npc_obj_id:obj_id, obj_id:d.snapshot.unit_id.parse().unwrap_or(0), extra_info:0, pick_id:0, mouse_button:2, modifier_keys:0 })));
+        } else {
+            net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
+            d.dialog.npc = None;
+        }
     }
     what
 }
@@ -632,7 +636,7 @@ pub fn talk_input(
     if scripted_talk {
         script.talk_at = None;
     }
-    let typing = focus.0 || rt.focus().is_some();
+    let typing = focus.0 || rt.keyboard_captured();
     let pressed = |code: KeyCode, c: char| scripted_key == Some(c) || (!typing && keys.just_pressed(code));
     let picked = right_click_pick(&pointer, &units, own, &mut pressed_at);
 

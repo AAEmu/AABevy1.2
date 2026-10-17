@@ -81,7 +81,7 @@ pub fn install(lua: &Lua, hud: &mlua::Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |_, k: usize| {
             let d = b.borrow();
             Ok(match k.checked_sub(1).and_then(|i| d.loot.rows.get(i)) {
-                Some(r) => (Some(r.template_id), Some(r.count), Some(r.grade)),
+                Some(r) => (Some(r.template_id), Some(r.count), Some(super::store::ui_grade(r.grade))),
                 None => (None, None, None),
             })
         })?,
@@ -192,7 +192,7 @@ pub fn loot_input(
     }
     // the keys (a scripted one, `--hud-key f 20`, counts too)
     let scripted = script.take_loot();
-    let typing = focus.0 || rt.is_some_and(|rt| rt.focus().is_some());
+    let typing = focus.0 || rt.is_some_and(|rt| rt.keyboard_captured());
     let all = scripted == Some(true) || (!typing && keys.just_pressed(KeyCode::KeyF));
     let open = scripted == Some(false) || (!typing && keys.just_pressed(KeyCode::KeyG));
     if (all || open)

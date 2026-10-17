@@ -139,7 +139,14 @@ fn register_functions(lua: &Lua, hud: &Table) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    hud.raw_set("shift_down", lua.create_function(|_, ()| Ok(SHIFT.load(Ordering::Relaxed)))?)?;
+    hud.raw_set("shift_down", lua.create_function(|lua, ()| {
+        if SHIFT.load(Ordering::Relaxed) { return Ok(true); }
+        // UI capture consumes Bevy buttons, while native modifiers keep the physical key state.
+        let input: Option<Table> = lua.globals().get("X2Input")?;
+        let Some(input) = input else { return Ok(false) };
+        let f: mlua::Function = input.get("IsShiftKeyDown")?;
+        f.call::<bool>(input)
+    })?)?;
     // where an item can be worn: the equipment slots (`ES_*`, 1 based) in the order they are tried, nil for other items
     hud.raw_set(
         "equip_slots",

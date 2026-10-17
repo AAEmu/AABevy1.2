@@ -33,7 +33,7 @@ fn link(game: Option<&GameData>, template_id: u32, grade: u8) -> Option<String> 
     if info.named.name.is_empty() {
         return None;
     }
-    let grade = if grade == 0 && info.fixed_grade > 0 { info.fixed_grade } else { i64::from(grade) };
+    let grade = i64::from(super::store::ui_grade(grade));
     let color = game.grades.get(&grade).map_or("FFFFFFFF", |g| g.1.as_str());
     Some(format!("|c{color}[{}]|r", info.named.name))
 }
@@ -57,6 +57,7 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
             match task {
                 ItemTask::Add { container: c, item, .. } if *c == container::INVENTORY => {
                     if let Some(text) = link(game, item.template_id, item.grade) {
+                        if changes.reason == 54 { rt.fire_event("STORE_BUY", (text.clone(), i64::from(item.count))); }
                         rt.fire_event("ADDED_ITEM", (text, i64::from(item.count), reason, ""));
                     }
                 }
@@ -64,8 +65,10 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
                     let grade = known.get(item_id).map_or(0, |k| k.2);
                     if let Some(text) = link(game, *template_id, grade) {
                         if *delta > 0 {
+                            if changes.reason == 54 { rt.fire_event("STORE_BUY", (text.clone(), i64::from(*delta))); }
                             rt.fire_event("ADDED_ITEM", (text, i64::from(*delta), reason, ""));
                         } else {
+                            if changes.reason == 53 { rt.fire_event("STORE_SELL", (text.clone(), -i64::from(*delta))); }
                             rt.fire_event("REMOVED_ITEM", (text, i64::from(*delta), state, reason, ""));
                         }
                     }
@@ -73,6 +76,7 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
                 ItemTask::Remove { container: c, item_id, template_id, .. } if *c == container::INVENTORY => {
                     let (count, grade) = known.get(item_id).map_or((1, 0), |k| (k.1.max(1), k.2));
                     if let Some(text) = link(game, *template_id, grade) {
+                        if changes.reason == 53 { rt.fire_event("STORE_SELL", (text.clone(), i64::from(count))); }
                         rt.fire_event("REMOVED_ITEM", (text, -i64::from(count), state, reason, ""));
                     }
                 }

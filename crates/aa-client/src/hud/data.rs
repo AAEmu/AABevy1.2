@@ -42,6 +42,8 @@ pub struct ItemInfo {
     pub sellable: bool,
     pub price: i64,
     pub refund: i64,
+    pub honor_price: i64,
+    pub living_price: i64,
     pub level_limit: i64,
 }
 
@@ -223,6 +225,7 @@ pub struct GameData {
     pub rules: super::usable::Rules,
     /// Ability trees, passive buffs and the skill points the player may spend.
     pub book: super::skillbook::Book,
+    pub stores: super::store::Tables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -393,7 +396,7 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id, i.category_id, i.bind_id, i.sellable, i.price, i.refund, i.level_limit, i.impl_id FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
+            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id, i.category_id, i.bind_id, i.sellable, i.price, i.refund, i.level_limit, i.impl_id, i.honor_price, i.living_point_price FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -412,6 +415,8 @@ impl GameData {
                         sellable: any_flag(r, 10)?,
                         price: any_int(r, 11)?,
                         refund: any_int(r, 12)?,
+                        honor_price: any_int(r, 15)?,
+                        living_price: any_int(r, 16)?,
                         level_limit: any_int(r, 13)?,
                     },
                 );
@@ -534,6 +539,7 @@ impl GameData {
         data.tips = super::tipcalc::TipTables::load(&conn, &text)?;
         data.rules = super::usable::Rules::load(&conn)?;
         data.book = super::skillbook::Book::load(&conn)?;
+        data.stores = super::store::Tables::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }
@@ -673,6 +679,7 @@ pub struct Snapshot {
     pub labor_log: Vec<(i32, i32)>,
     pub labor_seq: u32,
     pub money: i64,
+    pub bank_money: i64,
     pub bm_point: i64,
     pub honor: i32,
     pub vocation: i32,

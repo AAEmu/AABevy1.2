@@ -119,7 +119,8 @@ impl Plugin for InGamePlugin {
                         player::control_player.run_if(in_state(Screen::InGame)),
                         camera::follow_player,
                     )
-                        .chain(),
+                        .chain()
+                        .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
                     swim::drive_swim.after(anim::drive_locomotion),

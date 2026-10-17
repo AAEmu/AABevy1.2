@@ -75,7 +75,7 @@ pub fn pointer_over_ui(
 /// The client's window key bindings.
 pub fn hotkeys(keys: Res<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt: Option<NonSend<UiRuntime>>) {
     let Some(rt) = rt else { return };
-    if focus.0 || rt.focus().is_some() {
+    if focus.0 || rt.keyboard_captured() {
         return;
     }
     for (key, action) in [

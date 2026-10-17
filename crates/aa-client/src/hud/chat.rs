@@ -168,7 +168,7 @@ pub fn chat_keys(
     // opening requested by the last frame's key
     if let Some(slash) = pending.take()
         && !focus.0
-        && rt.focus().is_none()
+        && !rt.keyboard_captured()
         && let Err(e) = rt.exec("@chat_open", &format!("HUD.chat_open({})", if slash { "\"/\"" } else { "nil" }))
     {
         warn!("hud: chat input: {e}");
@@ -188,7 +188,7 @@ pub fn chat_keys(
         } else if v == "f" || v == "g" {
             script.loot = Some(v == "f");
         } else if let Some(k) = ui_key(&v) {
-            if focus.0 || rt.focus().is_some() {
+            if focus.0 || rt.keyboard_captured() {
                 rt.key(&k);
             } else if k == UiKey::Enter {
                 open = true;
@@ -199,7 +199,7 @@ pub fn chat_keys(
             }
         }
     }
-    if focus.0 || rt.focus().is_some() {
+    if focus.0 || rt.keyboard_captured() {
         return;
     }
     if open || slash {

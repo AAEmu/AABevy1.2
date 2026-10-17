@@ -31,6 +31,8 @@ pub struct SlotSnap {
     pub kind: &'static str,
     /// Skill id, or item template id.
     pub id: u32,
+    /// Real item instance identity, never cast through a Lua number.
+    pub uid: u64,
     pub name: String,
     pub icon: String,
     /// Items: how many (the bag total for a template slot).
@@ -108,6 +110,8 @@ pub struct Panels {
     pub actions_known: bool,
     pub bag: Vec<Option<SlotSnap>>,
     pub bag_slots: u32,
+    pub bank: Vec<Option<SlotSnap>>,
+    pub bank_slots: u32,
     /// Worn items by aa-net slot index (`model::slot`, the scripts' `ES_*` minus one); body parts
     /// are not items to the window.
     pub equipment: Vec<Option<SlotSnap>>,
@@ -125,11 +129,12 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
     SlotSnap {
         kind: "item",
         id: template,
+        uid: 0,
         name: info.map(|i| i.named.name.clone()).unwrap_or_default(),
         icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
         count,
         stack: info.is_some_and(|i| i.max_stack > 1),
-        grade: if grade > 0 { grade } else { info.map_or(0, |i| i.fixed_grade.clamp(0, 12) as u8) },
+        grade: super::store::ui_grade(grade),
         cooldown: None,
         desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
         level: info.map_or(0, |i| i.level),
@@ -144,6 +149,7 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
 impl SlotSnap {
     /// The slot of an item instance: what its tooltip reads of it besides the template.
     fn with_instance(mut self, it: &aa_net::model::Item) -> SlotSnap {
+        self.uid = it.id;
         if let aa_net::model::ItemDetail::Equip(d) = &it.detail {
             self.dur = Some(d.durability);
             self.temper = (d.temper_physical, d.temper_magical);
@@ -177,6 +183,7 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
     SlotSnap {
         kind: "skill",
         id: skill,
+        uid: 0,
         name: info.map(|i| i.named.name.clone()).unwrap_or_default(),
         icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
         count: 0,
@@ -252,7 +259,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
                     ActionKind::ItemType | ActionKind::ItemId => {
                         let inv = inventory?;
                         let (template, grade) = match slot.item_template_id() {
-                            Some(t) => (t, inv.find_template(t).map_or(0, |(_, it)| it.grade)),
+                            Some(t) => (t, inv.find_template(t).map_or_else(|| game.and_then(|g| g.items.get(&t)).map_or(0, |i| i.fixed_grade.max(0) as u8), |(_, it)| it.grade)),
                             None => {
                                 let (_, _, it) = inv.find_by_id(slot.id)?;
                                 (it.template_id, it.grade)
@@ -267,6 +274,8 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     }
     if let Some(inv) = inventory {
         p.bag_slots = inv.bag_slots;
+        p.bank_slots = inv.bank_slots;
+        p.bank = inv.bank.iter().map(|it| it.as_ref().map(|it| item_slot(game, it.template_id, i64::from(it.count), it.grade).with_instance(it))).collect();
         p.bag = inv.bag.iter().map(|it| it.as_ref().map(|it| item_slot(game, it.template_id, i64::from(it.count), it.grade).with_instance(it))).collect();
         p.equipment = inv
             .equipment
@@ -341,6 +350,7 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("count", s.count)?;
     t.raw_set("stack", s.stack)?;
     t.raw_set("grade", i64::from(s.grade))?;
+    t.raw_set("uid", s.uid.to_string())?;
     t.raw_set("desc", s.desc.as_str())?;
     t.raw_set("level", s.level)?;
     t.raw_set("group", i64::from(s.group))?;
@@ -408,6 +418,11 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
         c.slots = true;
         c.bag = true;
     }
+    if old.is_none_or(|o| o.bank != new.bank || o.bank_slots != new.bank_slots) {
+        hud.raw_set("bank", slots_table(lua, &new.bank)?)?;
+        hud.raw_set("bank_slots", i64::from(new.bank_slots))?;
+        c.bank = true;
+    }
     if old.is_none_or(|o| o.equipment != new.equipment) {
         hud.raw_set("equipment", slots_table(lua, &new.equipment)?)?;
         c.equipment = true;
@@ -453,6 +468,7 @@ pub struct Changed {
     /// Action bar or bag: the slot widgets should ask again.
     pub slots: bool,
     pub bag: bool,
+    pub bank: bool,
     pub equipment: bool,
     pub buffs: bool,
     pub target: bool,
