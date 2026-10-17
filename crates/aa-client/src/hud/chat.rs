@@ -90,14 +90,26 @@ pub fn route_chat(
 }
 
 /// `--hud-key NAME T` / `--hud-type TEXT T`: scripted keyboard for unattended runs (`enter`,
-/// `escape`, `backspace`, ...; typed text), at T seconds after the HUD is up.
+/// `escape`, `backspace`, `tab`, `slot3` ...; typed text), at T seconds after the HUD is up.
 #[derive(Resource, Default)]
 pub struct ScriptedKeys {
     steps: Vec<(f32, String, bool)>,
     started: Option<f32>,
+    /// A scripted `tab` is waiting for `targeting::tab_target`.
+    tab: bool,
+    /// A scripted `slotN` (action bar slot N, 1 based) waits for `panels::action_keys`.
+    slot: Option<usize>,
 }
 
 impl ScriptedKeys {
+    pub fn take_tab(&mut self) -> bool {
+        std::mem::take(&mut self.tab)
+    }
+
+    pub fn take_slot(&mut self) -> Option<usize> {
+        self.slot.take()
+    }
+
     pub fn from_args() -> ScriptedKeys {
         let args: Vec<String> = std::env::args().collect();
         let mut steps = Vec::new();
@@ -110,7 +122,7 @@ impl ScriptedKeys {
         }
         steps.sort_by(|a, b| a.0.total_cmp(&b.0));
         steps.reverse(); // pop from the end
-        ScriptedKeys { steps, started: None }
+        ScriptedKeys { steps, started: None, tab: false, slot: None }
     }
 }
 
@@ -164,11 +176,15 @@ pub fn chat_keys(
         let (_, v, is_text) = script.steps.pop().unwrap();
         if is_text {
             rt.type_text(&v);
+        } else if let Some(n) = v.strip_prefix("slot").and_then(|n| n.parse::<usize>().ok()) {
+            script.slot = Some(n.saturating_sub(1));
         } else if let Some(k) = ui_key(&v) {
             if focus.0 || rt.focus().is_some() {
                 rt.key(&k);
             } else if k == UiKey::Enter {
                 open = true;
+            } else if k == UiKey::Tab {
+                script.tab = true;
             }
         }
     }

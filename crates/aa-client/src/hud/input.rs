@@ -7,7 +7,7 @@
 //!   that went down over one is still held (a window being dragged): the camera orbit and the click
 //!   to move should ignore that frame.
 //! * The key bindings of the windows (`I` / `B` bag, `C` character, `K` skills, `L` quests, `M` map,
-//!   `Escape`) go to the toolkit's `hotkey` / `escape`.
+//!   `Escape`) go to the toolkit's `hotkey` (`Escape` is `targeting::escape_key`).
 
 use aa_ui::{UiRuntime, UiVirtualPointer};
 use bevy::prelude::*;
@@ -89,11 +89,6 @@ pub fn hotkeys(keys: Res<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt
             if let Err(e) = rt.hotkey(action) {
                 warn!("hud: {action}: {e}");
             }
-        }
-    }
-    if keys.just_pressed(KeyCode::Escape) {
-        if let Err(e) = rt.escape() {
-            warn!("hud: escape: {e}");
         }
     }
 }

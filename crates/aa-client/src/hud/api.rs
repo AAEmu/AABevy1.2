@@ -12,6 +12,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use aa_net::state::{LABOR_MAX, Player, PlayerStats};
 use aa_net::{Command, NetCommand};
@@ -20,6 +21,7 @@ use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 
 use super::data::{SharedGameData, Snapshot};
+use super::panels::{self, Panels};
 use crate::login::gameapi;
 
 /// What a script asked the app to do (queued by `HUD.request(kind, ...)`).
@@ -30,11 +32,17 @@ pub enum Request {
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
-#[derive(Default)]
 pub struct HudData {
     pub snapshot: Snapshot,
     /// What the Lua state has seen last.
     pub pushed: Option<Snapshot>,
+    /// The action bars, bag, buffs and target, and what the Lua state has seen of them.
+    pub panels: Panels,
+    pub panels_pushed: Option<Panels>,
+    /// Game position of the target.
+    pub target_pos: Option<Vec3>,
+    /// The HUD's clock starts here (`HUD.now_ms()`).
+    pub start: Instant,
     pub game: SharedGameData,
     pub requests: Vec<Request>,
     /// The local player's entity (found by its name once), its game position and facing.
@@ -47,6 +55,24 @@ pub type Shared = Rc<RefCell<HudData>>;
 
 /// The non-send resource holding the shared state.
 pub struct HudBridge(pub Shared);
+
+impl Default for HudData {
+    fn default() -> Self {
+        HudData {
+            snapshot: Snapshot::default(),
+            pushed: None,
+            panels: Panels::default(),
+            panels_pushed: None,
+            target_pos: None,
+            start: Instant::now(),
+            game: SharedGameData::default(),
+            requests: Vec::new(),
+            player_entity: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+        }
+    }
+}
 
 impl Default for HudBridge {
     fn default() -> Self {
@@ -92,6 +118,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     install_functions(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
+    panels::push(lua, &hud, &bridge.borrow().panels, None)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()
 }
 
@@ -133,6 +160,37 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
             };
             b.borrow_mut().requests.push(request);
             Ok(())
+        })?,
+    )?;
+    // the HUD's clock: buff and cooldown end times are on it
+    let b = bridge.clone();
+    hud.raw_set("now_ms", lua.create_function(move |_, ()| Ok(panels::now_ms(b.borrow().start) as f64))?)?;
+    // metres from the player to the target
+    let b = bridge.clone();
+    hud.raw_set(
+        "target_distance",
+        lua.create_function(move |_, ()| {
+            let d = b.borrow();
+            Ok(d.target_pos.map(|t| t.distance(d.pos) as f64))
+        })?,
+    )?;
+    // database lookups for the content hooks: name, icon (and the rest)
+    let b = bridge.clone();
+    hud.raw_set(
+        "skill_info",
+        lua.create_function(move |_, id: u32| {
+            let d = b.borrow();
+            let info = d.game.get().and_then(|g| g.skills.get(&id));
+            Ok((info.map(|s| s.named.name.clone()), info.map(|s| s.named.icon.clone())))
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "item_info",
+        lua.create_function(move |_, id: u32| {
+            let d = b.borrow();
+            let info = d.game.get().and_then(|g| g.items.get(&id));
+            Ok((info.map(|i| i.named.name.clone()), info.map(|i| i.named.icon.clone()), info.map(|i| i.max_stack), info.map(|i| i.fixed_grade)))
         })?,
     )?;
     // the chat window widget (the scripts create it; `GetEntityByName` is a stub)
@@ -263,6 +321,13 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         minute: (hour.fract() * 60.0).floor(),
     };
     data.snapshot = snapshot;
+    let own_obj_id = spawn.obj_id;
+    let own_faction = character.faction_id;
+    let start = data.start;
+    let game = data.game.clone();
+    let (new_panels, target_pos) = panels::refresh(world, game.get(), own_faction, own_obj_id, start);
+    data.panels = new_panels;
+    data.target_pos = target_pos;
 }
 
 /// The events the client raises when the player has entered the world and the loading screen closed,
@@ -291,11 +356,56 @@ pub fn handle_requests(bridge: NonSend<HudBridge>, mut net: MessageWriter<NetCom
 pub fn mark_pushed(bridge: &Shared) {
     let mut d = bridge.borrow_mut();
     d.pushed = Some(d.snapshot.clone());
+    d.panels_pushed = Some(d.panels.clone());
 }
 
-/// Push a changed snapshot into the Lua state and raise the events the scripts listen for.
+/// Push what changed into the Lua state and raise the events the scripts listen for.
 pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
+    push_state(rt, bridge);
+    push_panels(rt, bridge);
+}
+
+fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     let (old, new) = {
+        let mut d = bridge.borrow_mut();
+        if d.panels_pushed.as_ref() == Some(&d.panels) {
+            return;
+        }
+        let new = d.panels.clone();
+        (d.panels_pushed.replace(new.clone()), new)
+    };
+    let Some(old) = old else { return };
+    let lua = &rt.lua;
+    let Ok(hud) = lua.globals().raw_get::<Table>("HUD") else { return };
+    let changed = match panels::push(lua, &hud, &new, Some(&old)) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("hud: panels: {e}");
+            return;
+        }
+    };
+    if changed.slots {
+        if let Err(e) = rt.refresh_slots() {
+            warn!("hud: refresh slots: {e}");
+        }
+    }
+    let id = |t: &Option<panels::TargetSnap>| t.as_ref().map(|t| t.obj_id);
+    if id(&old.target) != id(&new.target) {
+        match &new.target {
+            Some(t) => rt.fire_event("TARGET_CHANGED", (t.obj_id.to_string(), "npc")),
+            None => rt.fire_event("TARGET_CHANGED", (mlua::Value::Nil, mlua::Value::Nil)),
+        }
+    } else if let (Some(o), Some(n)) = (&old.target, &new.target) {
+        if (o.hp, o.max_hp) != (n.hp, n.max_hp) {
+            rt.fire_event("TARGET_HEALTH_CHANGED", (n.hp as i64, n.max_hp as i64));
+        }
+        if (o.mp, o.max_mp) != (n.mp, n.max_mp) {
+            rt.fire_event("TARGET_MANA_CHANGED", (n.mp as i64, n.max_mp as i64));
+        }
+    }
+}
+
+fn push_state(rt: &UiRuntime, bridge: &Shared) {    let (old, new) = {
         let mut d = bridge.borrow_mut();
         if d.pushed.as_ref() == Some(&d.snapshot) {
             return;

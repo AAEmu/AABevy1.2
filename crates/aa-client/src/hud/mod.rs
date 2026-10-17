@@ -29,6 +29,8 @@ mod cameras;
 mod chat;
 mod data;
 mod input;
+mod panels;
+mod targeting;
 
 use aa_net::state::Player;
 use aa_ui::UiRuntime;
@@ -85,7 +87,7 @@ impl Plugin for HudPlugin {
                 Update,
                 (
                     build_hud.run_if(hud_wanted),
-                    (sync_hud, chat::route_chat, chat::chat_keys, input::hotkeys, api::handle_requests).run_if(hud_up),
+                    (sync_hud, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
                 )
