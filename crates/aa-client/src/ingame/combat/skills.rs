@@ -139,9 +139,23 @@ pub struct Look {
     pub projectile: Option<Projectile>,
 }
 
+/// What cancels a cast of the player, from the skill's flags: most casts (and every combat spell of the trees) go on while the
+/// player runs (`move_ub` clips on the upper body); the ones that do not are flagged, and their tooltips say "cancelled by
+/// movement" (Invincibility, Twilight, Absorb Lifeforce, the place a pot casts).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CancelRules {
+    /// `casting_cancelable`: moving ends the cast before it fires.
+    pub cast_on_move: bool,
+    /// `channeling_cancelable`: moving ends the channel.
+    pub channel_on_move: bool,
+    /// `stop_casting_by_turn`: turning the character ends the cast.
+    pub on_turn: bool,
+}
+
 /// The looks of one skill.
 #[derive(Clone, Debug, Default)]
 pub struct SkillVisual {
+    pub cancel: CancelRules,
     /// Clip names of the caster's `.cal`.
     pub start_anim: Option<Arc<str>>,
     pub fire_anim: Option<Arc<str>>,
@@ -544,7 +558,8 @@ impl Inner {
                 "SELECT start_anim_id, fire_anim_id, twohand_fire_anim_id, dual_wield_fire_anim_id, fx_group_id, projectile_id, effect_delay, plot_id, channeling_anim_id, \
                         (SELECT start_anim_id FROM skill_controllers c WHERE c.id = skills.skill_controller_id), \
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
-                        string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id \
+                        string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
+                        casting_cancelable = 't', channeling_cancelable = 't', stop_casting_by_turn = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -558,13 +573,15 @@ impl Inner {
                         int(r, 9)? as u32,
                         std::array::from_fn(|i| int(r, 10 + i).unwrap_or(0) as u32),
                         std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
+                        CancelRules { cast_on_move: int(r, 16).unwrap_or(0) != 0, channel_on_move: int(r, 17).unwrap_or(0) != 0, on_turn: int(r, 18).unwrap_or(0) != 0 },
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel)| {
             let [start, fire, twohand, dual] = anims;
             Arc::new(SkillVisual {
+                cancel,
                 start_anim: self.anim(start),
                 fire_anim: self.anim(fire),
                 twohand_fire_anim: self.anim(twohand),
@@ -824,5 +841,20 @@ mod tests {
         assert!(!shake.on_target);
         assert!((shake.shake.duration - 0.1).abs() < 1e-6, "{shake:?}");
         assert!(book.skill(16064).unwrap().shakes.is_empty());
+    }
+
+    /// Moving cancels only the flagged skills: Invincibility's channel, Telekinesis' channel (not its cast), placing a pot; Return and
+    /// the combat spells go on while the player walks.
+    #[test]
+    fn cancel_flags() {
+        let Some(book) = book() else { return };
+        let rules = |id| book.skill(id).expect("skill").cancel;
+        assert_eq!(rules(10372), CancelRules { channel_on_move: true, ..Default::default() });
+        assert_eq!(rules(11504), CancelRules { channel_on_move: true, ..Default::default() });
+        assert_eq!(rules(21959), CancelRules { cast_on_move: true, ..Default::default() });
+        assert!(rules(26860).on_turn);
+        for id in [10594, 10752, 10546, 16064, 18132] {
+            assert_eq!(rules(id), CancelRules::default(), "{id}");
+        }
     }
 }

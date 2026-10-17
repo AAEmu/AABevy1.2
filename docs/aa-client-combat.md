@@ -73,6 +73,7 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 | `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
 | `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
+| the local player moves, jumps or turns during a flagged cast (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
 | `SkillEnded` / `CastingStopped` / `PlotEnded` / `PlotStopped` / `SkillStopped` | the effects held until END are released; the looping clip of that cast (cast pose, channel pose) ends and the unit returns to locomotion (an interrupted cast too); a one-shot clip runs its course |
 | a unit that spawns dead (`Unit::dead`) | lies on its last death frame at once |
 
@@ -85,6 +86,19 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   `SkillStopped` of that cast ends it (`Acting` removed, `Locomotion::invalidate`), and a cast that is not the unit's current one
   leaves the clip of the newer cast alone. The safety hold, for an end that never comes, is `channeling_ms + 2 s` (20 s for a plot
   step). `channeling_anim_id` is a stop marker in every player skill: the channel pose is the fire clip or the plot step's clip.
+* **Cancelling a cast** (`cancel_on_move`, `PlayerInput` of `player.rs`, `Command::StopCasting`): the server never cancels a cast
+  because the player walks (it only keeps `skill_state.moving` for `source_cannot_use_while_walk`, a refusal at the start); the
+  client sends `CSStopCasting`. The rule is the skill's own flags: `casting_cancelable` ends the cast time when the player moves
+  (60 of the 6,877 skills with a cast time: placing a pot or an anvil, the recall point, siege and quest casts; none of the player's
+  tree skills), `channeling_cancelable` ends the channel (Invincibility, Twilight, Play Dead, Absorb Lifeforce, Crippling Mire,
+  Telekinesis' channel, ...: their tooltips say "canceled if you move"), `stop_casting_by_turn` ends the cast when the character turns
+  (two quest skills). Every other cast goes on while the player runs: Return (10 s), Revive and the combat spells have none of
+  the flags, and the `move_ub` upper body clips exist for them. Moving is a held movement key that went somewhere, or the jump;
+  turning is any change of the facing (Q / E, the right mouse button, the swing to the camera heading). Fields: a plain skill
+  sends its `tl`, a plot its timeline as `plot_tl` (the real client sends 0 for the other one), each once per cast. The local clip
+  stops at once (`Acting` removed, the looping clip ends, the effects held until END are released). `AA_COMBAT_CANCEL_ALL=1` makes
+  every cast of the player cancellable by moving, for testing the path with Return.
+
 * **Weapon class** (`weapons.rs` `Wield`, inserted when the character's weapons are built): `two_handed` (`holdables.slot_type_id`
   16), `dual` (a weapon in the off hand that is not a shield), `instrument` (string 0 / percussion 1 / tube 2). The skill's fire clip
   is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
@@ -152,6 +166,7 @@ slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all enviro
 * `AA_DEV_MAINHAND=<item>` / `AA_DEV_OFFHAND=<item>` / `AA_DEV_MUSICAL=<item>` (0 for none): the item the character holds in that
   slot instead of its own, to see the two handed (5660 is the first two handed sword), dual wield (5569 in both) and instrument (6177
   the first lute) clips with the one handed test character.
+* `AA_COMBAT_CANCEL_ALL=1`: moving, jumping or turning cancels any cast of the player (`CSStopCasting`), not only the flagged ones.
 * `AA_COMBAT_FAKE="T:op:args;..."`: server events for the local player, `T` seconds after the first frame (the test character has
   no channeled or two handed skills, and the lane does not interrupt a cast when the player walks): `start:TL:SKILL:CAST_MS`,
   `fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `plot:TL:EVENT:SKILL[:CASTING_MS]`, `hit:TL:SKILL:DAMAGE`, `end:TL`, `stop:TL`,
@@ -333,8 +348,9 @@ the client runs; "shown" = the shown tree skills):
 ## Not done
 
 * Channel poses of the skills that have none in the skill data (Play Dead, `/bow`, `/kneel`: 3 of the 12 channeling skills).
-* The client never sends `CSStopCastingPacket`: a player that walks during a cast keeps casting (the real client cancels it), so
-  `CastingStopped` only arrives when the server interrupts (a hit, a stun). The visuals for it are tested with `AA_COMBAT_FAKE`.
+* Cancelling by other player actions: pressing another skill, jumping off a mount, entering the water; only moving, jumping and
+  turning cancel a cast here. The cancel rule is the DB flags (no 1.2 client capture or disassembly to check them against: the
+  real client may cancel more casts than the flags say).
 * The two handed sword is tied to the right hand bone (the clip's pose holds it with both hands only because the grip is
   close); a dual wielder's second sword sits on `item_hand_l`. The instruments are placed by their `attachment_offset` of the
   right hand only (no frame of a real capture to compare).

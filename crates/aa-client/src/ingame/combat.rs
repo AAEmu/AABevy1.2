@@ -45,12 +45,12 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_clip};
-use super::player::{LocalPlayer, Mover, approach_angle};
+use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::RemoteUnit;
 use super::camera::CameraShake;
 use super::weapons::{Drawn, Wield, hold_weapons, weapon_for_clip};
 use crate::Screen;
-use skills::{FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
+use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
 
 /// What a unit is busy with, so locomotion does not take its clip away.
 #[derive(Component, Clone, Copy, Debug)]
@@ -154,6 +154,47 @@ struct Cast {
     casting: bool,
     /// A clip of this cast has played on the caster.
     played: bool,
+    /// What the player's input cancels now (a cast of the local player whose skill is flagged for it).
+    cancel: Option<Cancel>,
+    /// The cancel went to the server (once per cast).
+    cancel_sent: bool,
+    /// The skill is a plot: the server names its timeline in `plot_tl_id`.
+    plot: bool,
+}
+
+/// What cancels a running cast: moving (or jumping), turning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cancel {
+    on_move: bool,
+    on_turn: bool,
+}
+
+/// Which part of a skill is running, for its cancel flags.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// The cast time before the skill fires.
+    Cast,
+    /// The channel after it fired.
+    Channel,
+    /// A plot: its steps cast and channel as they go.
+    Plot,
+}
+
+/// `AA_COMBAT_CANCEL_ALL=1`: every cast of the player ends when it moves (to test the cancel with a skill the data does not flag).
+fn cancel_all() -> bool {
+    static ALL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALL.get_or_init(|| std::env::var_os("AA_COMBAT_CANCEL_ALL").is_some())
+}
+
+/// What cancels `phase` of a skill with these flags (`None`: nothing, the cast goes on while the player moves).
+fn cancel_of(rules: CancelRules, phase: Phase) -> Option<Cancel> {
+    let on_move = match phase {
+        Phase::Cast => rules.cast_on_move,
+        Phase::Channel => rules.channel_on_move,
+        Phase::Plot => rules.cast_on_move || rules.channel_on_move,
+    } || cancel_all();
+    let on_turn = rules.on_turn && phase != Phase::Channel;
+    (on_move || on_turn).then_some(Cancel { on_move, on_turn })
 }
 
 struct Timer {
@@ -344,11 +385,12 @@ pub fn plugin(app: &mut App) {
     }
     app.init_resource::<Combat>()
         .init_resource::<CameraShake>()
+        .init_resource::<PlayerInput>()
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(
             Update,
             (
-                (handle_events, retry_cast, run_timers, mark_corpses, ensure_corpses, end_actions, release_layers, fly_projectiles, hold_weapons)
+                (handle_events, cancel_on_move, retry_cast, run_timers, mark_corpses, ensure_corpses, end_actions, release_layers, fly_projectiles, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
@@ -668,7 +710,19 @@ fn handle_events(
 ) {
     let now = time.elapsed_secs_f64();
     for NetEvent(event) in events.read() {
-        if verbose() && matches!(event, Event::SkillStarted(_) | Event::SkillFired(_) | Event::PlotEvent(_) | Event::UnitDamaged(_) | Event::UnitDeath { .. } | Event::SkillEnded { .. }) {
+        if verbose() && matches!(
+                event,
+                Event::SkillStarted(_)
+                    | Event::SkillFired(_)
+                    | Event::PlotEvent(_)
+                    | Event::UnitDamaged(_)
+                    | Event::UnitDeath { .. }
+                    | Event::SkillEnded { .. }
+                    | Event::CastingStopped { .. }
+                    | Event::SkillStopped { .. }
+                    | Event::PlotEnded { .. }
+                    | Event::PlotStopped { .. }
+            ) {
             info!("combat: {event:?}");
         }
         match event {
@@ -701,6 +755,8 @@ fn handle_events(
                     cast.target_pos = target_pos;
                     cast.hit_fx = look.fx.clone();
                     cast.hit_shakes = look.shakes.clone();
+                    cast.plot = visual.plot;
+                    cast.cancel = if s.cast_ms > 0 { cancel_of(visual.cancel, if visual.plot { Phase::Plot } else { Phase::Cast }) } else { None };
                 }
                 if s.cast_ms > 0 {
                     // the cast: its clip loops until the skill fires; the charge-up effects play meanwhile
@@ -739,6 +795,9 @@ fn handle_events(
                     let cast = combat.cast_for(f.tl, f.skill_id, f.caster.obj_id, target_obj, now);
                     cast.target_pos = target_pos;
                     cast.fired = Some(now);
+                    cast.plot = visual.plot;
+                    // the channel after the fire may be cancelled; a plain cast is over
+                    cast.cancel = if f.channeling_ms > 0 { cancel_of(visual.cancel, if visual.plot { Phase::Plot } else { Phase::Channel }) } else { None };
                     cast.delay = f64::from(f.delay_ms.max(0)) / 1000.0;
                     if cast.hit_fx.is_empty() {
                         cast.hit_fx = look.fx.clone();
@@ -810,6 +869,12 @@ fn handle_events(
                     cast.target_pos = target_pos;
                     if p.target_obj_id != 0 {
                         cast.target = p.target_obj_id;
+                    }
+                    if let Some(v) = &visual {
+                        cast.plot = true;
+                        if p.casting_ms > 0 || v.cancel.channel_on_move {
+                            cast.cancel = cancel_of(v.cancel, Phase::Plot);
+                        }
                     }
                 }
                 if p.casting_ms > 0
@@ -910,6 +975,9 @@ fn handle_events(
                 combat.release(&mut st.commands, tl, ev::END);
                 // a looping clip ends with the skill, or with the cast that was interrupted
                 end_loop(&mut st, &mut combat, tl);
+                if let Some(c) = combat.casts.get_mut(&tl) {
+                    c.cancel = None;
+                }
                 // the damage of this timeline may still be on its way: keep the cast until the timers ran out
                 if let Some(c) = combat.casts.get_mut(&tl) {
                     c.started = now - 15.0;
@@ -920,6 +988,9 @@ fn handle_events(
                 for tl in tls {
                     combat.release(&mut st.commands, tl, ev::END);
                     end_loop(&mut st, &mut combat, tl);
+                    if let Some(c) = combat.casts.get_mut(&tl) {
+                        c.cancel = None;
+                    }
                 }
             }
             _ => {}
@@ -1129,6 +1200,39 @@ fn retry_cast(time: Res<Time>, mut combat: ResMut<Combat>, player: Query<&Mover,
     }
 }
 
+/// The player moves, jumps or turns while a cast that is flagged for it runs: the cast is cancelled (`CSStopCasting`, the server
+/// answers `CastingStopped` / `PlotStopped`) and the clip and the held effects end at once, without waiting for the answer.
+fn cancel_on_move(input: Res<PlayerInput>, mut st: Stage, mut combat: ResMut<Combat>, mut out: MessageWriter<NetCommand>) {
+    if !(input.moving || input.jumped || input.turned) {
+        return;
+    }
+    let Some(me) = st.local.iter().next().map(|(_, l)| l.obj_id) else { return };
+    let tls: Vec<(u16, bool)> = combat
+        .casts
+        .iter()
+        .filter(|(_, c)| c.caster == me && !c.cancel_sent)
+        .filter(|(_, c)| c.cancel.is_some_and(|r| (r.on_move && (input.moving || input.jumped)) || (r.on_turn && input.turned)))
+        .map(|(tl, c)| (*tl, c.plot))
+        .collect();
+    for (tl, plot) in tls {
+        out.write(NetCommand(Command::StopCasting { tl: if plot { 0 } else { tl }, plot_tl: if plot { tl } else { 0 } }));
+        combat.release(&mut st.commands, tl, ev::END);
+        let caster = combat.casts.get_mut(&tl).map(|c| {
+            c.cancel_sent = true;
+            c.cancel = None;
+            c.casting = false;
+            c.caster
+        });
+        // the unit goes back to locomotion, unless a newer cast has its clip
+        if let Some(e) = caster.filter(|obj| combat.owner.get(obj) == Some(&tl)).and_then(|obj| st.entity(obj)) {
+            st.commands.entity(e).remove::<Acting>();
+        }
+        if verbose() {
+            info!("combat: the player moved: cast {tl} cancelled ({}, moving {}, jump {}, turn {})", if plot { "plot" } else { "skill" }, input.moving, input.jumped, input.turned);
+        }
+    }
+}
+
 /// Units that were announced dead (a corpse in view when it appeared) lie down at once.
 #[allow(clippy::type_complexity)]
 fn mark_corpses(mut commands: Commands, units: Res<Units>, new: Query<(Entity, &RemoteUnit), (Added<RemoteUnit>, Without<Dead>)>) {
@@ -1194,5 +1298,32 @@ fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entit
                 loco.invalidate();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Moving casts go on unless the skill is flagged; the flag of the phase counts.
+    #[test]
+    fn what_cancels_which_phase() {
+        let none = CancelRules::default();
+        assert_eq!(cancel_of(none, Phase::Cast), None);
+        assert_eq!(cancel_of(none, Phase::Channel), None);
+        assert_eq!(cancel_of(none, Phase::Plot), None);
+        // Telekinesis: the cast goes on while moving, the channel does not
+        let channel = CancelRules { channel_on_move: true, ..none };
+        assert_eq!(cancel_of(channel, Phase::Cast), None);
+        assert_eq!(cancel_of(channel, Phase::Channel), Some(Cancel { on_move: true, on_turn: false }));
+        assert_eq!(cancel_of(channel, Phase::Plot), Some(Cancel { on_move: true, on_turn: false }));
+        // placing a pot: the cast is cancelled by moving
+        let cast = CancelRules { cast_on_move: true, ..none };
+        assert_eq!(cancel_of(cast, Phase::Cast), Some(Cancel { on_move: true, on_turn: false }));
+        assert_eq!(cancel_of(cast, Phase::Channel), None);
+        // turning only matters before the fire
+        let turn = CancelRules { on_turn: true, ..none };
+        assert_eq!(cancel_of(turn, Phase::Cast), Some(Cancel { on_move: false, on_turn: true }));
+        assert_eq!(cancel_of(turn, Phase::Channel), None);
     }
 }
