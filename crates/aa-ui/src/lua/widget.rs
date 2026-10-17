@@ -78,11 +78,16 @@ fn set_handler(lua: &Lua, id: Id, name: &str, f: Option<mlua::Function>) -> mlua
     Ok(())
 }
 
-/// Show / hide with optional fade (ms), queueing `OnShow` / `OnHide`.
+/// Show / hide with optional fade (ms), queueing `OnShow` / `OnHide`. A top-level window that comes up is put in
+/// front of the others of its layer, as the client does (the bag opened over the quest tracker takes the mouse
+/// before the tracker's invisible window).
 pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     let mut g = ui(lua);
     let u = &mut *g;
     let was = u.tree.get(id).shown;
+    if visible && !was && id != crate::tree::ROOT && u.tree.get(id).parent.is_none() && u.tree.get(id).is_widget() {
+        u.tree.raise(id);
+    }
     match fade_ms.filter(|&ms| ms > 0.0) {
         Some(ms) if visible => {
             let o = u.tree.get_mut(id);
@@ -1076,6 +1081,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     // `titleBar:SetTitleText(text)` (baselib windows) is the title setter under another name.
     let set_title: mlua::Function = m.raw_get("SetTitle")?;
     def("SetTitleText", set_title)?;
+    super::drag::methods(lua, &m)?;
     if matches!(ty, "editbox" | "editboxmultiline") {
         super::edit::methods(lua, &m)?;
     }

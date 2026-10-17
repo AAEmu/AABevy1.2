@@ -83,6 +83,7 @@ impl UiRuntime {
             cursor: (0.0, 0.0),
             queued_events: Vec::new(),
             widget_sounds: Default::default(),
+            drag: Default::default(),
         };
         lua::install(&lua, state).map_err(|e| anyhow::anyhow!("{e}"))?;
         prof::wrap_natives(&lua).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -289,6 +290,24 @@ impl UiRuntime {
     pub fn set_focus(&self, id: Option<tree::Id>) {
         lua::edit::set_focus(&self.lua, id);
     }
+
+    /// Whether the pointer holds something that can be dropped (a picked up item or skill, see
+    /// [`lua::drag`]); a window's move cursor is not.
+    pub fn holding(&self) -> bool {
+        lua::drag::holding(&self.lua)
+    }
+
+    /// Let go of what the pointer holds (`X2Cursor:ClearCursor()`).
+    pub fn clear_cursor(&self) {
+        lua::drag::clear(&self.lua);
+    }
+
+    /// The held thing was dropped where no widget takes it (a click on the game world): `AAUI.DropOnNothing(overUi)`.
+    pub fn drop_on_nothing(&self, over_ui: bool) {
+        if self.holding() {
+            lua::drag::drop_on_nothing(&self.lua, over_ui);
+        }
+    }
 }
 
 /// `tostring(v)` as Lua prints it (whole numbers without a fraction).
@@ -452,7 +471,7 @@ impl Plugin for UiPlugin {
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard, ui_frame).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard, ui_frame, ui_cursor).chain());
     }
 }
 
@@ -548,6 +567,35 @@ fn init_runtime(world: &mut World) {
         rt.ui_scale()
     );
     world.insert_non_send(rt);
+}
+
+/// The icon of what the pointer holds ([`lua::drag`]) follows the pointer, drawn over everything.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn ui_cursor(
+    rt: Option<NonSendMut<UiRuntime>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    virt: Res<UiVirtualPointer>,
+    mut commands: Commands,
+    mut state: ResMut<UiRenderState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
+    mut batches: Query<(Entity, &mut Transform, &mut Visibility), (With<render::UiCursorBatch>, Without<UiCamera>)>,
+) {
+    let Some(rt) = rt else { return };
+    let Ok(window) = windows.single() else { return };
+    let pointer = match virt.pos {
+        Some(p) => Some(p),
+        None => window.cursor_position().map(|p| p * window.resolution.scale_factor()),
+    };
+    let mut g = lua::ui(&rt.lua);
+    // nothing held and nothing drawn: the common case costs a comparison
+    if g.drag.held.is_none() && batches.is_empty() {
+        state.cursor_key = None;
+        return;
+    }
+    render::sync_cursor(&mut commands, &mut state, &mut g, pointer, &mut meshes, &mut materials, &mut images, formats.as_deref(), &mut batches);
 }
 
 /// Key presses -> the focused widget ([`UiRuntime::key`]).
