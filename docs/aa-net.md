@@ -914,6 +914,76 @@ broadcast, removals on both peers and persisted empty lists after a second recon
 Both peers logged out cleanly. Six unit tests cover every incoming packet in DD04 batches,
 long coordinates/time, malformed list counts/duplicates, failures/pending and spawn ordering.
 
+## Repair, sorting and expansion workflow (2026-10-17)
+
+`Command::Repair(RepairCommand)` sends `Single { container, slot, auto_use_aa_point }`
+(0x03c; u8/u8/bool) or `All { auto_use_aa_point }` (0x03d; bool). Single targets the bag or
+equipment with physical zero-based slots; bank targets are rejected locally. All repairs
+equipped items only, in server container order, and may skip unaffordable entries. The AA
+flag is parsed but ignored. Original Lua calls `X2Item:RepairAll()`, `RepairAllCost()`,
+`EnterRepairMode()` / `LeaveRepairMode()` and `X2Equipment:ItemRepair(slot)`.
+
+`Repair` is a Bevy resource and `WorldState::repair`. `pending: Vec<RepairCommand>` tracks
+successful sends (`Event::Repair(RepairEvent::Requested(command))`); malformed requests use
+`RequestRejected { command, message }` and `last_error`. `last_report: Option<RepairReport>`
+is cleared when sending and filled only by the server's `ItemsChanged` reason3 (repair).
+Its `items: Vec<RepairedItem { container, slot, item_id, durability }>` lists confirmed
+detail updates. `Some(empty)` means a response with no repairs; `None` means no response yet.
+Ordinary reason4 durability loss does not complete a repair. Inventory folds full item details
+and preserves identity, dyes, gems and temper values. Repair costs arrive separately as
+reason83 money tasks before the repair detail packet; PlayerStats applies that confirmed delta.
+
+The lane requires `Interact::Npc` to a **blacksmith** within5m. It advertises repair skill12086
+for `npc.repairman`, but the transaction instead checks `npc.blacksmith`: the current database
+has331 blacksmith-only and3 repairman-only templates, with none having both flags. This is a
+real server mismatch. Blacksmith8233 at(13573.98,15907.689,175.212) is also a merchant and
+advertises12087 due to option precedence; repair itself needs no UseSkill cast. Wrong NPC,
+healthy/unrepairable item and insufficient funds produce an empty reason3 report; distance
+also emits a server error. No successful repair is synthesized from a request or an empty report.
+
+`repair::repair_cost(price,raw_grade_refund_multiplier,factor,current,maximum)` implements
+the lane's f32 formula then ceil. The factor is `item_configs.durability_repair_cost_factor`
+(25.0 in current data); maximum durability comes from equipment data, not a network quote.
+The result is `ceil(factor * .01f32 * (1-current/maximum) * price * refund_multiplier * .01f32)`
+with the server's ordered f32 operations. Invalid/missing maximum returns None.
+
+`bank::ExpansionRule` mirrors `bag_expands` fields `is_bank,step,price,item_id,item_count,
+currency_id`. `bank::expansion_quote(&inventory,container,money,&rules)` returns the first
+matching row for `(slots-50)/10`, current/new capacity, price/certificate metadata and owned
+certificates **in the bag**, including bank expansion. Quotes remain available when
+unaffordable; `quote.check()` returns typed `NotEnoughMoney { required, available }` or
+`NotEnoughCertificates { item_id, required, available }`. Invalid container/capacity,
+missing row and malformed negative requirements have separate `ExpansionFailure` variants.
+These are local preflight results: the lane silently ignores missing money/items, so they
+must not be presented as received server errors. Confirmation sends existing
+`BankCommand::Expand`; `InventoryExpanded` alone confirms capacity. Current rows expand by10,
+require certificate8000025x1 at price0, and stop at bag150 / bank130. Native dialog info uses
+`kind="bag"|"bank"`, `dialog="money"|"item"|"item_money"`, `currency,cost,itemType,itemCount`;
+the original `DLG_TASK_EXPAND_INVENTORY` handler formats this supplied metadata.
+
+Inventory sorting has **no packet** in the 1.2 opcode table. Native X2Bag/X2Bank ManualSort
+wrappers3944c720/39452130 call394dc6d0, which sorts the current local tab, emits TAB_SORTED
+and persists/refreshes local tab data. The default tab's manual sorter392024d0 sorts an array
+of real slot indices (container2 or3); filtered tabs use their own item-ID lists. It never
+rewrites the server inventory. Keep a UI-owned virtual-to-physical mapping; Lua
+`SlotByIdx(virtual_one_based)` returns physical_slot+1 (wrapper3944ef90). Use the physical
+slot for item lookup and every repair/sell/swap request. Sort should update this view mapping
+and fire BAG_TAB_SORTED/BANK_TAB_SORTED; confirmed item changes rebuild the view. The default
+sort keys are `item_categories.category_order` ascending, `item_grades.grade_order` descending,
+localized item name ascending, physical slot ascending; empty/missing items sort last.
+Native comparators391f8640/391f8720 call391f7c50/391f7ce0; category loader396c9c53 stores
+category_order as record field0, grade_order is grade record+0x2c, name is item template+0x70,
+and the final tie compares the physical slot byte. This ordering belongs to the client view;
+aa-net does not invent a server sort or optimistically change `Inventory`.
+
+`cargo test -p aa-net --test live_repair -- --ignored --nocapture` passed in10.41s with
+fresh character38. Verified no-interaction and healthy-blacksmith empty acknowledgements,
+real merchant funds from its own starter weapon, and local bank-target rejection. Ordinary
+nonlethal falls did not yield damaged armor, so a positive **paid** repair remains unverified
+live; no item/grant fixture was injected. Unit coverage checks full repair details plus
+separate money tasks before the next DD04 opcode, empty reports, wear/pending behavior and
+certificate/money/capacity preflight. The test account logged out cleanly.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
@@ -927,7 +997,7 @@ long coordinates/time, malformed list counts/duplicates, failures/pending and sp
   that is not decoded ends that batch.
 * Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
   shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy). Trade, mail,
-  coin/doodad shops, priest buffs, repair and the other NPC functions still need their own requests.
+  coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).

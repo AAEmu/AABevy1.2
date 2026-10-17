@@ -120,6 +120,7 @@ pub enum ClientMsg {
     Shop(crate::shop::ShopCommand),
     Bank(crate::bank::BankCommand),
     Friend(crate::friend::FriendCommand),
+    Repair(crate::repair::RepairCommand),
     /// Party command plus the local character name used by `CSReplyToJoinTeam`.
     Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
@@ -170,6 +171,7 @@ impl ClientMsg {
             Self::Shop(m) => m.opcode(),
             Self::Bank(m) => m.opcode(),
             Self::Friend(m) => m.opcode(),
+            Self::Repair(m) => m.opcode(),
             Self::Party { command, .. } => command.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
@@ -260,6 +262,7 @@ impl ClientMsg {
             Self::Shop(m) => m.write(&mut w),
             Self::Bank(m) => m.write(&mut w),
             Self::Friend(m) => m.write(&mut w),
+            Self::Repair(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);

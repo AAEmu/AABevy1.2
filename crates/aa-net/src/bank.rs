@@ -5,6 +5,93 @@
 use crate::opcodes::cs;
 use crate::wire::Writer;
 
+/// Read-only `bag_expands` row supplied by the application's game data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpansionRule {
+    pub is_bank: bool,
+    pub step: i32,
+    pub price: i32,
+    pub item_id: u32,
+    pub item_count: i32,
+    pub currency_id: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpansionQuote {
+    pub container: u8,
+    pub current_slots: u32,
+    pub new_slots: u32,
+    pub rule: ExpansionRule,
+    pub money: i64,
+    /// Certificates in the bag, including when expanding the bank.
+    pub owned_certificates: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpansionFailure {
+    InvalidContainer(u8),
+    InvalidCapacity(u32),
+    NoRule { is_bank: bool, step: i32 },
+    InvalidRule,
+    NotEnoughMoney { required: i32, available: i64 },
+    NotEnoughCertificates { item_id: u32, required: i32, available: i64 },
+}
+
+impl ExpansionQuote {
+    /// Local preflight only. The acknowledgement remains `InventoryExpanded`; missing
+    /// requirements are silently ignored by the lane, without a rejection packet.
+    pub fn check(&self) -> std::result::Result<(), ExpansionFailure> {
+        if self.rule.price != 0 && self.money < i64::from(self.rule.price) {
+            return Err(ExpansionFailure::NotEnoughMoney { required: self.rule.price, available: self.money });
+        }
+        if self.rule.item_id != 0
+            && self.rule.item_count != 0
+            && self.owned_certificates < i64::from(self.rule.item_count)
+        {
+            return Err(ExpansionFailure::NotEnoughCertificates {
+                item_id: self.rule.item_id,
+                required: self.rule.item_count,
+                available: self.owned_certificates,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Select exactly the lane's step `(slots-50)/10` and first matching bank/bag row.
+/// Returns costs even when unaffordable so the original confirmation dialog can show them.
+pub fn expansion_quote(
+    inventory: &crate::state::Inventory,
+    container: u8,
+    money: i64,
+    rules: &[ExpansionRule],
+) -> std::result::Result<ExpansionQuote, ExpansionFailure> {
+    let (is_bank, current_slots) = match container {
+        2 => (false, inventory.bag_slots),
+        3 => (true, inventory.bank_slots),
+        other => return Err(ExpansionFailure::InvalidContainer(other)),
+    };
+    if !(50..=245).contains(&current_slots) || (current_slots - 50) % 10 != 0 {
+        return Err(ExpansionFailure::InvalidCapacity(current_slots));
+    }
+    let step = ((current_slots - 50) / 10) as i32;
+    let rule = *rules
+        .iter()
+        .find(|r| r.is_bank == is_bank && r.step == step)
+        .ok_or(ExpansionFailure::NoRule { is_bank, step })?;
+    if rule.price < 0 || rule.item_count < 0 {
+        return Err(ExpansionFailure::InvalidRule);
+    }
+    Ok(ExpansionQuote {
+        container,
+        current_slots,
+        new_slots: current_slots + 10,
+        rule,
+        money,
+        owned_certificates: inventory.count_of(rule.item_id),
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BankCommand {
     DepositMoney {
@@ -62,6 +149,35 @@ impl BankCommand {
 mod tests {
     use super::*;
     use crate::game::ClientMsg;
+
+    #[test]
+    fn expansion_preflight_exposes_certificate_money_and_current_capacity() {
+        use crate::model::Item;
+        use crate::state::Inventory;
+        let mut inv = Inventory::default();
+        inv.bag_slots = 50;
+        inv.bank_slots = 60;
+        inv.bag = vec![Some(Item { id: 555, template_id: 8000025, count: 2, ..Item::default() })];
+        let rules = [
+            ExpansionRule { is_bank: false, step: 0, price: 10, item_id: 8000025, item_count: 1, currency_id: 0 },
+            ExpansionRule { is_bank: true, step: 1, price: 20, item_id: 8000025, item_count: 3, currency_id: 0 },
+        ];
+        let quote = expansion_quote(&inv, 2, 9, &rules).unwrap();
+        assert_eq!((quote.current_slots, quote.new_slots, quote.owned_certificates), (50, 60, 2));
+        assert_eq!(quote.check(), Err(ExpansionFailure::NotEnoughMoney { required: 10, available: 9 }));
+        let quote = expansion_quote(&inv, 3, 20, &rules).unwrap();
+        assert_eq!(
+            quote.check(),
+            Err(ExpansionFailure::NotEnoughCertificates { item_id: 8000025, required: 3, available: 2 })
+        );
+        assert!(expansion_quote(&inv, 2, 10, &rules).unwrap().check().is_ok());
+        assert_eq!((inv.bag_slots, inv.bank_slots, inv.bag[0].as_ref().unwrap().count), (50, 60, 2));
+        assert_eq!(expansion_quote(&inv, 1, 20, &rules), Err(ExpansionFailure::InvalidContainer(1)));
+        inv.bank_slots = 130;
+        assert_eq!(expansion_quote(&inv, 3, 20, &rules), Err(ExpansionFailure::NoRule { is_bank: true, step: 8 }));
+        inv.bag_slots = 51;
+        assert_eq!(expansion_quote(&inv, 2, 20, &rules), Err(ExpansionFailure::InvalidCapacity(51)));
+    }
 
     #[test]
     fn bank_requests_match_server_readers_and_reject_invalid_values() {

@@ -25,6 +25,7 @@ pub mod net;
 pub mod opcodes;
 pub mod party;
 pub mod quest;
+pub mod repair;
 pub mod session;
 pub mod skill;
 pub mod shop;
@@ -43,6 +44,7 @@ pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
+pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use wire::Pos;
 
 #[cfg(feature = "bevy")]
