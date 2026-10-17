@@ -1,15 +1,42 @@
 //! NPC and monster models that are not player characters: a `.cdf` (skeleton model plus skin
 //! attachments) or a `.chr`, rigged and animated through aa-anim, or a static `.cgf`.
 
-use std::sync::Arc;
-
-use aa_anim::pose::Rig;
-use aa_anim::{Animator, Cal, Cdf, ClipLibrary, spawn_bones};
+use aa_anim::{Animator, Cdf, ClipLibrary, spawn_bones};
 use aa_cry::scene::{CryAssets, ModelOptions, SkeletonBinding, spawn_loaded};
-use aa_cry::{CRY_TO_BEVY, Skeleton};
+use aa_cry::CRY_TO_BEVY;
 use bevy::prelude::*;
 
-use super::anim::{ClipSet, Locomotion, Motion};
+use super::anim::{Locomotion, Motion};
+
+/// The model files (with their material override) [`spawn`] loads for `file`, to prepare them ahead on a worker thread.
+pub fn model_files(file: &str) -> Vec<(String, Option<String>)> {
+    let (main, main_material, attachments) = if file.ends_with(".cdf") {
+        let Ok(cdf) = Cdf::load(file) else { return Vec::new() };
+        let parts = cdf
+            .attachments
+            .iter()
+            .filter(|a| a.kind == aa_anim::cdf::AttachmentKind::Skin && !a.binding.is_empty() && a.flags & 1 == 0)
+            .map(|a| (a.binding.clone(), a.material.clone()))
+            .collect::<Vec<_>>();
+        (cdf.model, cdf.material, parts)
+    } else {
+        (file.to_string(), None, Vec::new())
+    };
+    if main.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![(main, main_material.clone())];
+    for (path, material) in attachments {
+        if path.ends_with(".cdf") {
+            if let Ok(c) = Cdf::load(&path) {
+                out.push((c.model, c.material.or(material)));
+            }
+        } else {
+            out.push((path, material));
+        }
+    }
+    out
+}
 
 /// Spawns the model at `file` (`.cdf`, `.chr` or `.cgf`, pak path). Returns the root entity with
 /// `transform` (feet at the origin, facing Bevy -Z at identity rotation like game north), or `None`
@@ -40,8 +67,8 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
         return None;
     }
 
-    let skeleton = Skeleton::load(&main).ok().filter(|s| !s.is_empty());
-    let Some(skeleton) = skeleton else {
+    let rig = aa_anim::pose::shared_rig(&main).ok().filter(|r| !r.is_empty());
+    let Some(rig) = rig else {
         // a static model
         let options = ModelOptions::default();
         let loaded = cry.load_model(&main, &options).ok()?;
@@ -50,8 +77,7 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
         commands.entity(model).insert(ChildOf(root));
         return Some(root);
     };
-    let skeleton = Arc::new(skeleton);
-    let rig = Arc::new(Rig::new(skeleton.clone()));
+    let skeleton = rig.skeleton.clone();
     let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
     let model_root = commands.spawn((Name::new("model"), Transform::from_rotation(CRY_TO_BEVY), Visibility::default(), ChildOf(root))).id();
     let bones = spawn_bones(commands, model_root, &rig);
@@ -83,9 +109,9 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
     let cal_path = format!("{}.cal", main.trim_end_matches(".chr"));
     let mut animator = Animator::new(rig.clone(), bones);
     let mut entity = commands.entity(root);
-    if let Some(set) = Cal::load(&cal_path).ok().and_then(|cal| ClipSet::load(&rig, &cal, clips)) {
+    if let Some(set) = super::anim::shared_clip_set(&main, &cal_path, clips) {
         animator.play(set.idle.clone(), true, 0.0);
-        entity.insert(Locomotion::new(set));
+        entity.insert(Locomotion::new((*set).clone()));
     }
     entity.insert((animator, Motion::default()));
     Some(root)

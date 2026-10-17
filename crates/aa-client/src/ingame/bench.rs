@@ -60,6 +60,12 @@ fn bench(time: Res<Time<Real>>, mut state: ResMut<Bench>, views: Res<Views>, ent
         over,
         f.get(n / 2).copied().unwrap_or(0.0) * 1000.0
     );
-    info!("BENCH scene: entities {}, units drawn {}, doodads drawn {}", entities.count_spawned(), views.unit_entities(), views.doodad_entities());
+    info!(
+        "BENCH scene: entities {}, units drawn {}, doodads drawn {}, still preparing {}",
+        entities.count_spawned(),
+        views.unit_entities(),
+        views.doodad_entities(),
+        views.pending()
+    );
     exit.write(AppExit::Success);
 }

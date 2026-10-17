@@ -8,22 +8,25 @@
 //! cheap.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
-use aa_anim::{Animator, ClipLibrary, Costume, Gender, Race};
+use aa_anim::{Animator, ClipLibrary, spawn_character};
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
-use aa_net::model::{Unit, UnitKind};
+use aa_cry::workers::Workers;
+use aa_net::model::Unit;
 use aa_net::state::{Doodads, Units};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
 use bevy::prelude::*;
 
-use super::anim::Motion;
-use super::appearance;
+use super::anim::{Locomotion, Motion};
 use super::creature;
 use super::data::Db;
+use super::player::{LocalPlayer, Mover, approach_angle, placement};
+use super::prepare::{DoodadBuild, UnitBuild, prepare_doodad, prepare_unit};
 use super::weapons;
-use super::player::{LocalPlayer, Mover, approach_angle, placement, spawn_with_locomotion};
 
 /// Units are drawn within this many metres of the player, and dropped again beyond `* 1.25`.
 pub const UNIT_RADIUS: f32 = 140.0;
@@ -34,6 +37,8 @@ const SPAWN_BUDGET_MS: f32 = 10.0;
 /// stays playable while a town fills up.
 const SPAWN_SLOW_FRAME: f32 = 0.025;
 const SPAWN_MAX_WAIT: f32 = 0.2;
+/// Unit and doodad preparations on the workers at once; the nearest are started first.
+const MAX_JOBS: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;
@@ -60,14 +65,33 @@ pub struct RemoteDoodad {
 }
 
 /// Which server objects have entities. `None` = known but not drawn (too far, or no model).
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Views {
     units: HashMap<u32, View>,
     doodads: HashMap<u32, View>,
+    tx: Sender<Built>,
+    rx: Mutex<Receiver<Built>>,
+    /// Prepared objects waiting for the main thread.
+    ready: Vec<Built>,
+    /// Jobs on the workers.
+    jobs: usize,
     /// Counters for the log.
     pub spawned_units: u32,
     pub spawned_doodads: u32,
     pub failed: u32,
+}
+
+impl Default for Views {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        Views { units: HashMap::new(), doodads: HashMap::new(), tx, rx: Mutex::new(rx), ready: Vec::new(), jobs: 0, spawned_units: 0, spawned_doodads: 0, failed: 0 }
+    }
+}
+
+/// What a worker delivers.
+enum Built {
+    Unit(u32, UnitBuild),
+    Doodad(u32, DoodadBuild),
 }
 
 #[derive(Default)]
@@ -75,6 +99,8 @@ struct View {
     entity: Option<Entity>,
     /// The model failed to build or the object has none: do not try again.
     no_model: bool,
+    /// A worker is preparing it.
+    preparing: bool,
 }
 
 impl Views {
@@ -85,27 +111,19 @@ impl Views {
     pub fn doodad_entities(&self) -> usize {
         self.doodads.values().filter(|v| v.entity.is_some()).count()
     }
+
+    /// Objects being prepared or waiting to be spawned.
+    pub fn pending(&self) -> usize {
+        self.jobs + self.ready.len()
+    }
 }
 
 fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
 }
 
-/// Race and gender of a humanoid model file (`objects/characters/<race>/<gender>/nude/...`).
-fn humanoid_of_file(file: &str) -> Option<(Race, Gender)> {
-    let rest = file.split("characters/").nth(1)?;
-    let mut it = rest.split('/');
-    let folder = it.next()?;
-    let race = Race::ALL.into_iter().find(|r| r.folder() == folder)?;
-    let gender = match it.next()? {
-        "male" => Gender::Male,
-        "female" => Gender::Female,
-        _ => return None,
-    };
-    (it.next()? == "nude").then_some((race, gender))
-}
-
-/// Creates and removes entities for the units and doodads the server reports.
+/// Creates and removes entities for the units and doodads the server reports. The models are prepared on the worker
+/// threads ([`super::prepare`]); this system only sends the jobs and spawns what came back, a few per frame.
 #[allow(clippy::too_many_arguments)]
 pub fn sync_views(
     mut commands: Commands,
@@ -120,8 +138,10 @@ pub fn sync_views(
     time: Res<Time>,
     mut last_spawn: Local<f32>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
+    timers: Option<Res<aa_world::profile::Timers>>,
 ) {
     let (Some(db), Ok(me)) = (db, player.single()) else { return };
+    let _t = timers.as_deref().map(|t| t.time("units.sync"));
     let me = me.pos;
     let started = Instant::now();
     *last_spawn += time.delta_secs();
@@ -129,6 +149,16 @@ pub fn sync_views(
     let may_build = time.delta_secs() < SPAWN_SLOW_FRAME || *last_spawn > SPAWN_MAX_WAIT;
     // units behind the camera can wait
     let facing = camera.single().map(|c| flat_dir(c)).unwrap_or(Vec2::ZERO);
+
+    // what the workers finished
+    {
+        let arrived: Vec<Built> = {
+            let rx = views.rx.lock().unwrap();
+            std::iter::from_fn(|| rx.try_recv().ok()).collect()
+        };
+        views.jobs = views.jobs.saturating_sub(arrived.len());
+        views.ready.extend(arrived);
+    }
 
     // units that are gone
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
@@ -148,7 +178,7 @@ pub fn sync_views(
         }
     }
 
-    // units: follow the server, drop the far ones, collect the ones to build
+    // units: follow the server, drop the far ones, collect the ones to prepare
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, unit) in &units.by_id {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
@@ -173,7 +203,7 @@ pub fn sync_views(
                     });
                 }
             }
-            None if !view.no_model && d <= UNIT_RADIUS => {
+            None if !view.no_model && !view.preparing && d <= UNIT_RADIUS => {
                 let ahead = Vec2::new(pos.x - me.x, pos.y - me.y).normalize_or_zero().dot(facing_game(facing));
                 wanted.push((d + if ahead < -0.2 { 50.0 } else { 0.0 }, *id));
             }
@@ -181,32 +211,22 @@ pub fn sync_views(
         }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, id) in wanted {
-        if !may_build || started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
+    let loader = cry.loader();
+    for (priority, id) in wanted {
+        if views.jobs >= MAX_JOBS {
             break;
         }
-        *last_spawn = 0.0;
         let Some(unit) = units.by_id.get(&id) else { continue };
-        let t0 = Instant::now();
-        let entity = spawn_unit(&mut commands, &mut cry, &clips, &db, unit);
-        let ms = t0.elapsed().as_secs_f32() * 1000.0;
-        if ms > 60.0 {
-            debug!("spawning unit {} ({:?}) took {ms:.0} ms", unit.obj_id, unit.kind);
-        }
-        let view = views.units.entry(id).or_default();
-        match entity {
-            Some(e) => {
-                view.entity = Some(e);
-                views.spawned_units += 1;
-            }
-            None => {
-                view.no_model = true;
-                views.failed += 1;
-            }
-        }
+        views.units.entry(id).or_default().preparing = true;
+        views.jobs += 1;
+        let (unit, db, loader, clips, tx) = (unit.clone(), db.clone(), loader.clone(), clips.clone(), views.tx.clone());
+        Workers::global().spawn(priority, move || {
+            let build = prepare_unit(&db, &loader, &clips, &unit);
+            let _ = tx.send(Built::Unit(unit.obj_id, build));
+        });
     }
 
-    // doodads
+    // doodads: drop the far ones, collect the ones to prepare
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, doodad) in &doodads.by_id {
         let d = flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me);
@@ -217,88 +237,143 @@ pub fn sync_views(
                 view.entity = None;
             }
             Some(_) => {}
-            None if !view.no_model && d <= DOODAD_RADIUS => wanted.push((d, *id)),
+            None if !view.no_model && !view.preparing && d <= DOODAD_RADIUS => wanted.push((d, *id)),
             None => {}
         }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, id) in wanted {
-        if !may_build || started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
+    for (priority, id) in wanted {
+        if views.jobs >= MAX_JOBS {
             break;
         }
         let Some(doodad) = doodads.by_id.get(&id) else { continue };
-        let entity = db.doodad_model(doodad.template_id).and_then(|path| {
-            let options = ModelOptions::default();
-            let loaded = match cry.load_model(&path, &options) {
-                Ok(l) => l,
-                Err(e) => {
-                    debug!("doodad {} model {path}: {e}", doodad.template_id);
-                    return None;
-                }
-            };
-            let model = spawn_loaded(&mut commands, &path, &loaded, &options);
-            let [x, y, z, w] = doodad.rotation;
-            let transform = Transform {
-                translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
-                rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
-                scale: Vec3::splat(if doodad.scale > 0.0 { doodad.scale } else { 1.0 }),
-            };
-            let root = commands
-                .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, transform, Visibility::default()))
-                .id();
-            commands.entity(model).insert(ChildOf(root));
-            Some(root)
+        views.doodads.entry(id).or_default().preparing = true;
+        views.jobs += 1;
+        let (template, db, loader, tx) = (doodad.template_id, db.clone(), loader.clone(), views.tx.clone());
+        Workers::global().spawn(priority, move || {
+            let build = prepare_doodad(&db, &loader, template);
+            let _ = tx.send(Built::Doodad(id, build));
         });
-        let view = views.doodads.entry(id).or_default();
-        match entity {
-            Some(e) => {
-                view.entity = Some(e);
-                views.spawned_doodads += 1;
+    }
+
+    // spawn what is ready, nearest first, while the frame can take it
+    let mut ready = std::mem::take(&mut views.ready);
+    let distance = |b: &Built| match b {
+        Built::Unit(id, _) => units.by_id.get(id).map_or(f32::MAX, |u| flat_distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z), me)),
+        Built::Doodad(id, _) => doodads.by_id.get(id).map_or(f32::MAX, |d| flat_distance(Vec3::new(d.pos.x, d.pos.y, d.pos.z), me)),
+    };
+    ready.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+    let mut later = Vec::new();
+    for built in ready {
+        if !may_build || started.elapsed().as_secs_f32() * 1000.0 > SPAWN_BUDGET_MS {
+            later.push(built);
+            continue;
+        }
+        match built {
+            Built::Unit(id, build) => {
+                let view = views.units.entry(id).or_default();
+                view.preparing = false;
+                let Some(unit) = units.by_id.get(&id) else { continue };
+                if view.entity.is_some() || flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS * 1.25 {
+                    continue;
+                }
+                *last_spawn = 0.0;
+                let t0 = Instant::now();
+                let t_spawn = timers.as_deref().map(|t| t.time("units.spawn_unit"));
+                let entity = spawn_unit(&mut commands, &mut cry, &clips, unit, build);
+                drop(t_spawn);
+                let ms = t0.elapsed().as_secs_f32() * 1000.0;
+                if ms > 30.0 {
+                    debug!("spawning unit {} ({:?}) took {ms:.0} ms", unit.obj_id, unit.kind);
+                }
+                let view = views.units.entry(id).or_default();
+                match entity {
+                    Some(e) => {
+                        view.entity = Some(e);
+                        views.spawned_units += 1;
+                    }
+                    None => {
+                        view.no_model = true;
+                        views.failed += 1;
+                    }
+                }
             }
-            None => view.no_model = true,
+            Built::Doodad(id, build) => {
+                let view = views.doodads.entry(id).or_default();
+                view.preparing = false;
+                let Some(doodad) = doodads.by_id.get(&id) else { continue };
+                if view.entity.is_some() || flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me) > DOODAD_RADIUS * 1.25 {
+                    continue;
+                }
+                let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
+                let entity = build.model.and_then(|prepared| {
+                    let loaded = cry.finish_model(prepared);
+                    let options = ModelOptions::default();
+                    let model = spawn_loaded(&mut commands, &build.path, &loaded, &options);
+                    let [x, y, z, w] = doodad.rotation;
+                    let transform = Transform {
+                        translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
+                        rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
+                        scale: Vec3::splat(if doodad.scale > 0.0 { doodad.scale } else { 1.0 }),
+                    };
+                    let root = commands
+                        .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, transform, Visibility::default()))
+                        .id();
+                    commands.entity(model).insert(ChildOf(root));
+                    Some(root)
+                });
+                drop(t_doodad);
+                let view = views.doodads.entry(id).or_default();
+                match entity {
+                    Some(e) => {
+                        view.entity = Some(e);
+                        views.spawned_doodads += 1;
+                    }
+                    None => view.no_model = true,
+                }
+            }
         }
     }
+    views.ready = later;
 }
 
-/// Builds the model of one unit. `None` when it has none we can draw.
-fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, db: &Db, unit: &Unit) -> Option<Entity> {
+/// Builds the entity of one unit from what the worker prepared. `None` when there is nothing we can draw.
+fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Option<Entity> {
     let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
     let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
     let transform = placement(pos, unit.yaw(), scale);
-    let file = db.actor_model_file(unit.model_id);
-    let humanoid = match unit.kind {
-        UnitKind::Character { .. } => appearance::race_gender(unit.model_id, unit.race(), unit.gender()),
-        _ => file.as_deref().and_then(humanoid_of_file),
-    };
-    debug!(
-        "unit {} {:?} {:?} model {} {:?} humanoid {:?} at ({:.1}, {:.1}, {:.1}) scale {:.2}",
-        unit.obj_id,
-        unit.name,
-        unit.kind,
-        unit.model_id,
-        file,
-        humanoid,
-        pos.x,
-        pos.y,
-        pos.z,
-        scale
-    );
-    let entity = if let Some((race, gender)) = humanoid {
-        let t = Instant::now();
-        let game = db.game.lock().unwrap();
-        let mut desc = appearance::describe(&game, race, gender, &unit.equipment, &unit.model_params)?;
-        if matches!(desc.costume, Costume::Items(ref i) if i.is_empty()) && !unit.is_character() {
-            // an NPC without armour data: the default outfit beats a naked body
-            desc.costume = Costume::Login;
+    debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
+    let entity = match build {
+        UnitBuild::Character { assets, models, carried, clips: set } => {
+            for m in models {
+                cry.finish_model(m);
+            }
+            let _t = aa_cry::prof::scope("unit.spawn_character");
+            let root = match spawn_character(commands, cry, clips, *assets, transform) {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("cannot spawn a character: {e}");
+                    return None;
+                }
+            };
+            let mut entity = commands.entity(root);
+            entity.insert(Motion::default());
+            if !carried.is_empty() {
+                entity.insert(weapons::Carried(carried));
+            }
+            if let Some(set) = set {
+                entity.insert(Locomotion::new((*set).clone()));
+            }
+            root
         }
-        let assets = desc.resolve(&game).map_err(|e| debug!("unit {} {}: {e}", unit.obj_id, unit.name)).ok()?;
-        drop(game);
-        let t_resolve = t.elapsed().as_secs_f32() * 1000.0;
-        let e = spawn_with_locomotion(commands, cry, clips, assets, transform, weapons::carried(db, &unit.equipment))?;
-        debug!("unit {} look {t_resolve:.0} ms, spawn {:.0} ms", unit.obj_id, t.elapsed().as_secs_f32() * 1000.0 - t_resolve);
-        e
-    } else {
-        creature::spawn(commands, cry, clips, file.as_deref()?, transform)?
+        UnitBuild::Creature { file, models } => {
+            for m in models {
+                cry.finish_model(m);
+            }
+            let _t = aa_cry::prof::scope("unit.spawn_creature");
+            creature::spawn(commands, cry, clips, &file, transform)?
+        }
+        UnitBuild::None => return None,
     };
     commands.entity(entity).insert((
         Name::new(format!("unit {} {}", unit.obj_id, unit.name)),
@@ -334,7 +409,9 @@ pub fn move_units(
     time: Res<Time>,
     units: Res<Units>,
     mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>)>,
+    timers: Option<Res<aa_world::profile::Timers>>,
 ) {
+    let _t = timers.as_deref().map(|t| t.time("units.move"));
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
@@ -394,7 +471,9 @@ pub fn cull_units(
     mut commands: Commands,
     camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
     mut units: Query<(Entity, &GlobalTransform, &mut Visibility, Has<Animator>, Has<Asleep>), With<RemoteUnit>>,
+    timers: Option<Res<aa_world::profile::Timers>>,
 ) {
+    let _t = timers.as_deref().map(|t| t.time("units.cull"));
     let Ok((cam, projection)) = camera.single() else { return };
     let (cam_pos, forward) = (cam.translation(), cam.forward().as_vec3());
     let (vfov, aspect) = match projection {

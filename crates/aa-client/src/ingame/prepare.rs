@@ -1,0 +1,131 @@
+//! Everything about a unit or doodad that does not need the ECS, done on the worker threads of [`aa_cry::workers`] before
+//! the main thread builds the entity.
+//!
+//! Spawning a character from scratch costs tens of milliseconds of CPU (database rows, pak files, model parsing, texture
+//! decoding, the composed face texture, the clip bindings), which showed as 50-300 ms frames whenever a town filled in or
+//! a crowd came into range. A job here does all of it for one object and hands the results over:
+//!
+//! * [`prepare_unit`]: the [`CharacterAssets`] (database + pak), the composed face
+//!   ([`aa_anim::character::prewarm_character_face`]), the part models as [`PreparedModel`]s (their caches are filled when
+//!   the main thread calls `finish_model`), the weapons it carries and its locomotion clips;
+//! * [`prepare_doodad`]: the doodad's model.
+//!
+//! The main thread then only inserts assets and spawns entities; every lookup it still does hits a cache.
+
+use std::sync::Arc;
+
+use aa_anim::{CharacterAssets, ClipLibrary, Costume, Gender, Race};
+use aa_cry::scene::{ModelOptions, Shading};
+use aa_cry::{CryLoader, PreparedModel};
+use aa_net::model::{Unit, UnitKind};
+use bevy::prelude::*;
+
+use super::anim::{ClipSet, shared_clip_set};
+use super::appearance;
+use super::creature;
+use super::data::Db;
+use super::weapons::{self, CarriedItem};
+
+/// A unit that is ready to be spawned.
+pub enum UnitBuild {
+    /// Drawn like a player character.
+    Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>> },
+    /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
+    Creature { file: String, models: Vec<PreparedModel> },
+    /// Nothing we can draw.
+    None,
+}
+
+/// A doodad that is ready to be spawned.
+pub struct DoodadBuild {
+    pub path: String,
+    pub model: Option<PreparedModel>,
+}
+
+/// Race and gender of a humanoid model file (`objects/characters/<race>/<gender>/nude/...`).
+pub fn humanoid_of_file(file: &str) -> Option<(Race, Gender)> {
+    let rest = file.split("characters/").nth(1)?;
+    let mut it = rest.split('/');
+    let folder = it.next()?;
+    let race = Race::ALL.into_iter().find(|r| r.folder() == folder)?;
+    let gender = match it.next()? {
+        "male" => Gender::Male,
+        "female" => Gender::Female,
+        _ => return None,
+    };
+    (it.next()? == "nude").then_some((race, gender))
+}
+
+/// Prepares the models of `unit`; callable from any thread.
+pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit) -> UnitBuild {
+    let _t = aa_cry::prof::scope("unit.prepare");
+    let file = db.actor_model_file(unit.model_id);
+    let humanoid = match unit.kind {
+        UnitKind::Character { .. } => appearance::race_gender(unit.model_id, unit.race(), unit.gender()),
+        _ => file.as_deref().and_then(humanoid_of_file),
+    };
+    if let Some((race, gender)) = humanoid {
+        let assets = {
+            let game = db.game.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(mut desc) = appearance::describe(&game, race, gender, &unit.equipment, &unit.model_params) else { return UnitBuild::None };
+            if matches!(desc.costume, Costume::Items(ref i) if i.is_empty()) && !unit.is_character() {
+                // an NPC without armour data: the default outfit beats a naked body
+                desc.costume = Costume::Login;
+            }
+            match desc.resolve(&game) {
+                Ok(a) => a,
+                Err(e) => {
+                    debug!("unit {} {}: {e}", unit.obj_id, unit.name);
+                    return UnitBuild::None;
+                }
+            }
+        };
+        if let Err(e) = aa_anim::character::prewarm_character_face(&assets) {
+            debug!("unit {} face: {e}", unit.obj_id);
+        }
+        let mut models = Vec::new();
+        for part in &assets.parts {
+            let options = ModelOptions { material: part.material.clone(), cry_space: true, shading: Shading::Full, ..default() };
+            if let Ok(m) = loader.prepare_model(&part.path, &options) {
+                models.push(m);
+            }
+        }
+        let carried = weapons::carried(db, &unit.equipment);
+        for item in &carried {
+            let options = ModelOptions { cry_space: true, shading: Shading::Full, ..default() };
+            if let Ok(m) = loader.prepare_model(&item.path, &options) {
+                models.push(m);
+            }
+        }
+        let set = shared_clip_set(&assets.skeleton, &assets.cal, clips);
+        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set }
+    } else if let Some(file) = file {
+        let mut models = Vec::new();
+        for (path, material) in creature::model_files(&file) {
+            let options = ModelOptions { material, cry_space: true, ..default() };
+            if let Ok(m) = loader.prepare_model(&path, &options) {
+                models.push(m);
+            }
+        }
+        if models.is_empty() {
+            return UnitBuild::None;
+        }
+        UnitBuild::Creature { file, models }
+    } else {
+        UnitBuild::None
+    }
+}
+
+/// Prepares the model of the doodad template `template_id`; callable from any thread.
+pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32) -> DoodadBuild {
+    let _t = aa_cry::prof::scope("doodad.prepare");
+    let Some(path) = db.doodad_model(template_id) else { return DoodadBuild { path: String::new(), model: None } };
+    let model = match loader.prepare_model(&path, &ModelOptions::default()) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            debug!("doodad {template_id} model {path}: {e}");
+            None
+        }
+    };
+    DoodadBuild { path, model }
+}
