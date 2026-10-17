@@ -184,10 +184,11 @@ impl WidgetType {
             | WidgetType::ListBox
             | WidgetType::GameTooltip => true,
             // Message frames (`custom_saveload.lua`: `wnd.style:SetAlign(...)`), combat texts,
-            // cooldown buttons (buffs).
+            // cooldown buttons (buffs), folders (`SetViewOfFolder` sets `fld.style`).
             WidgetType::Other(s) => matches!(
                 s.as_str(),
                 "message"
+                    | "folder"
                     | "listctrlitem"
                     | "damagedisplay"
                     | "cooldownbutton"
@@ -454,6 +455,16 @@ pub struct Widget {
     pub message: Option<crate::lua::chat::MessageData>,
     pub chat: Option<crate::lua::chat::ChatData>,
     pub roadmap: Option<crate::lua::roadmap::RoadMapData>,
+    /// `worldmap`: the registered maps, the shown one, the player's cursor (`crate::lua::worldmap`).
+    pub worldmap: Option<crate::lua::worldmap::WorldMapData>,
+    /// `EnableScroll(true)`: children are clipped to this widget's rectangle, and
+    /// `ChangeChildAnchorByScrollValue` shifts the children anchored to it (`scroll`).
+    pub clip: bool,
+    /// Scroll offset in UI units (x, y): children anchored to this widget sit that much up / left.
+    pub scroll: [f32; 2],
+    /// A running cooldown sweep (a `slot` bound to a cooling skill or item, `SetCoolDown` of the
+    /// cooldown buttons): `crate::lua::slot`.
+    pub cooldown: Option<crate::lua::slot::Cooldown>,
     /// A second text style without its own text (`slot.cooltime_style`, `listbox.childStyle`,
     /// `damagedisplay.extraStyle`, `editbox.prefixStyle`).
     pub aux_style: Option<TextBlock>,
@@ -491,6 +502,9 @@ pub struct Drawable {
     /// Effect drawables (`CreateEffectDrawable`): drawn only while the effect runs
     /// (`SetStartEffect(true)`), with no animation.
     pub effect: Option<bool>,
+    /// `SetRotation(r)`: radians, clockwise on screen, about the centre of the rect (image
+    /// drawables; the roadmap's player cursor turns with the player's heading).
+    pub rotation: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -830,8 +844,15 @@ impl Tree {
             let (mut t, mut b, mut cy) = (None, None, None);
             for a in &anchors {
                 let tr = self.resolve(a.target, cache, visiting);
-                let px = tr.x + tr.w * a.rel.fx() + a.x;
-                let py = tr.y + tr.h * a.rel.fy() + a.y;
+                let mut px = tr.x + tr.w * a.rel.fx() + a.x;
+                let mut py = tr.y + tr.h * a.rel.fy() + a.y;
+                if a.target == owner {
+                    // Children of a scrolled widget (`ChangeChildAnchorByScrollValue`).
+                    if let Some(s) = self.widget(owner).map(|w| w.scroll) {
+                        px -= s[0];
+                        py -= s[1];
+                    }
+                }
                 match a.point.fx() {
                     f if f == 0.0 => l = Some(px),
                     f if f == 1.0 => r = Some(px),
@@ -879,6 +900,21 @@ impl Tree {
         visiting.pop();
         cache[id as usize] = Some(r);
         r
+    }
+
+    /// The area an object is clipped to: the intersection of the rectangles of its ancestors
+    /// that clip their children (`EnableScroll(true)`), `None` when nothing clips it.
+    pub fn clip_rect(&self, id: Id) -> Option<Rect> {
+        let mut out: Option<Rect> = None;
+        let mut t = self.get(id).parent;
+        while let Some(p) = t {
+            if self.widget(p).is_some_and(|w| w.clip) {
+                let r = self.rect(p);
+                out = Some(out.map_or(r, |o| o.intersect(&r)));
+            }
+            t = self.get(p).parent;
+        }
+        out
     }
 
     /// Width/height as scripts see them (`GetWidth`): anchored size if stretched, else extent.
@@ -1008,6 +1044,10 @@ impl Widget {
             message: None,
             chat: None,
             roadmap: None,
+            worldmap: None,
+            clip: false,
+            scroll: [0.0; 2],
+            cooldown: None,
             aux_style: None,
             modal: false,
             close_on_escape: false,

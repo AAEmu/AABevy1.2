@@ -5,7 +5,7 @@
 use mlua::{Lua, Table, Value};
 
 use super::widget::show;
-use super::{method, none, ret, ui, value_id};
+use super::{method, none, queue_ui_event, ret, ui, value_id};
 use crate::tree::{Anchor, Id, Point};
 
 #[derive(Clone, Debug, Default)]
@@ -18,6 +18,12 @@ pub struct FolderData {
     pub close_button: Option<Id>,
     pub child: Option<Id>,
     pub configured: bool,
+    /// `SetTitleButtonWidget`: the title button, placed in the title row inside `inset`.
+    pub title_button: Option<Id>,
+    /// `SetInset(left, top, right, bottom)`: the title row's insets (positive = inward).
+    pub inset: [f32; 4],
+    /// `SetTitleText`: the folder's name (the `FOLDER_STATE_CHANGED` argument).
+    pub title: String,
 }
 
 fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut FolderData) -> R) -> Option<R> {
@@ -58,6 +64,29 @@ fn apply(lua: &Lua, id: Id) {
                 },
             ];
         }
+    }
+    if let Some(t) = fd.title_button {
+        // The title button fills the title row between the insets (clear of the state buttons).
+        let [l, top, r, b] = fd.inset;
+        let mut u = ui(lua);
+        let o = u.tree.get_mut(t);
+        o.height = (fd.title_height - top - b).max(0.0);
+        o.anchors = vec![
+            Anchor {
+                point: Point::TopLeft,
+                target: id,
+                rel: Point::TopLeft,
+                x: l,
+                y: top,
+            },
+            Anchor {
+                point: Point::TopRight,
+                target: id,
+                rel: Point::TopRight,
+                x: -r,
+                y: top,
+            },
+        ];
     }
     if let Some(b) = fd.open_button {
         show(lua, b, fd.open, None);
@@ -138,11 +167,16 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         def(
             name,
             method(lua, move |lua, id, _| {
-                with(lua, id, |f| {
+                let title = with(lua, id, |f| {
                     f.open = state.unwrap_or(!f.open);
                     f.configured = true;
+                    f.title.clone()
                 });
                 apply(lua, id);
+                // A toggle (the title was clicked) tells the scripts: `FOLDER_STATE_CHANGED(title)`.
+                if state.is_none() {
+                    queue_ui_event(lua, "FOLDER_STATE_CHANGED", vec![Value::String(lua.create_string(title.unwrap_or_default())?)]);
+                }
                 none()
             })?,
         )?;
@@ -154,14 +188,36 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             ret(lua, if open { "open" } else { "close" })
         })?,
     )?;
-    for name in [
-        "UseAnimation",
-        "SetAnimateStep",
-        "EnableAutoToggle",
-        "SetTitleButtonWidget",
-    ] {
+    for name in ["UseAnimation", "SetAnimateStep", "EnableAutoToggle"] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
-    let _ = Value::Nil;
+    def(
+        "SetTitleButtonWidget",
+        method(lua, |lua, id, a| {
+            let b = value_id(lua, &a.v(1));
+            with(lua, id, |f| f.title_button = b);
+            apply(lua, id);
+            none()
+        })?,
+    )?;
+    def(
+        "SetInset",
+        method(lua, |lua, id, a| {
+            let i = [a.f(1), a.f(2), a.f(3), a.f(4)];
+            with(lua, id, |f| f.inset = i);
+            apply(lua, id);
+            none()
+        })?,
+    )?;
+    for name in ["SetTitleText", "SetTitle"] {
+        def(
+            name,
+            method(lua, |lua, id, a| {
+                let t = a.s(1).unwrap_or_default();
+                with(lua, id, |f| f.title = t);
+                none()
+            })?,
+        )?;
+    }
     Ok(())
 }

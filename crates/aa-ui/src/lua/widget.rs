@@ -423,9 +423,11 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
+    // The object's own flag, not its ancestors': the system menu lays its buttons out
+    // (`UpdateSystemConfigLayout` counts `buttons[i]:IsVisible()`) before showing the frame.
     def(
         "IsVisible",
-        method(lua, |lua, id, _| ret(lua, ui(lua).tree.visible(id)))?,
+        method(lua, |lua, id, _| ret(lua, ui(lua).tree.get(id).shown))?,
     )?;
     def(
         "Enable",
@@ -933,11 +935,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "AddLine",
         method(lua, |lua, id, a| {
             let s = a.s(1).unwrap_or_default();
+            let mut index = -1i64;
             text_of(lua, id, |t| {
                 t.lines.push(s.clone());
                 t.text = t.lines.join("\n");
+                index = t.lines.len() as i64 - 1;
             });
-            none()
+            // The 0-based index of the new line (tooltip.lua keeps it: `lastLineIndex + 1`).
+            ret(lua, index)
         })?,
     )?;
     def(
@@ -981,6 +986,34 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         def(name, method(lua, |_, _, _| none())?)?;
     }
     def("IsNowAnimation", method(lua, |lua, _, _| ret(lua, false))?)?;
+    // Scroll windows: `EnableScroll(true)` clips the children to the widget (and to mouse
+    // hits); `ChangeChildAnchorByScrollValue("horz" | "vert", value)` sets how far the children
+    // anchored to it are scrolled (absolute, in UI units; the scripts' sliders and `SetExpandMapAnchor`).
+    def(
+        "EnableScroll",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            if ui(lua).tree.widget(id).is_some_and(|w| w.clip != on) {
+                if let Some(w) = ui(lua).tree.widget_mut(id) {
+                    w.clip = on;
+                }
+            }
+            none()
+        })?,
+    )?;
+    def(
+        "ChangeChildAnchorByScrollValue",
+        method(lua, |lua, id, a| {
+            let axis = usize::from(!a.s(1).unwrap_or_default().to_ascii_lowercase().starts_with('h'));
+            let v = a.f(2);
+            if ui(lua).tree.widget(id).is_some_and(|w| w.scroll[axis] != v) {
+                if let Some(w) = ui(lua).tree.widget_mut(id) {
+                    w.scroll[axis] = v;
+                }
+            }
+            none()
+        })?,
+    )?;
     super::edit::focus_methods(lua, &m)?;
     def(
         "SetTitleInset",
@@ -1004,6 +1037,12 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if ty == "slot" {
         super::slot::methods(lua, &m)?;
     }
+    if matches!(
+        ty,
+        "cooldownbutton" | "cooldownactionbutton" | "cooldownconstantbutton" | "cooldowninventorybutton"
+    ) {
+        super::slot::cooldown_button_methods(lua, &m)?;
+    }
     if ty == "message" {
         super::chat::message_methods(lua, &m)?;
     }
@@ -1014,13 +1053,13 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         super::roadmap::methods(lua, &m)?;
     }
     if ty == "worldmap" {
-        super::roadmap::worldmap_methods(lua, &m)?;
+        super::worldmap::methods(lua, &m)?;
     }
     if ty == "listbox" {
         super::roadmap::listbox_methods(lua, &m)?;
     }
     if ty == "grid" {
-        super::roadmap::grid_methods(lua, &m)?;
+        super::grid::methods(lua, &m)?;
     }
 
     // --- buttons -----------------------------------------------------------------------------

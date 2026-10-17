@@ -417,12 +417,16 @@ pub struct UiStats {
 
 /// Scripted pointer for tests and automation: while `pos` is set it replaces the OS cursor
 /// (physical pixels); `press` / `release` act like a left button edge this frame and are
-/// cleared after use.
+/// cleared after use. `wheel` is mouse wheel notches for this frame (> 0 = up, scrolls chat
+/// back), added to the OS wheel and cleared after use.
 #[derive(Resource, Default, Debug, Clone)]
 pub struct UiVirtualPointer {
     pub pos: Option<Vec2>,
     pub press: bool,
     pub release: bool,
+    /// A right button click (the release counts: right clicks fire on release), cleared after use.
+    pub right_release: bool,
+    pub wheel: f32,
 }
 
 #[derive(Default)]
@@ -623,7 +627,7 @@ fn ui_frame(
             .cursor_position()
             .map(|p| (p.x * sf / scale, p.y * sf / scale)),
     };
-    let wheel = scroll.delta.y;
+    let wheel = scroll.delta.y + std::mem::take(&mut virt.wheel);
     let (vpress, vrelease) = (
         std::mem::take(&mut virt.press),
         std::mem::take(&mut virt.release),
@@ -634,7 +638,7 @@ fn ui_frame(
         cursor,
         buttons.just_pressed(MouseButton::Left) || vpress,
         buttons.just_released(MouseButton::Left) || vrelease,
-        buttons.just_released(MouseButton::Right),
+        buttons.just_released(MouseButton::Right) || std::mem::take(&mut virt.right_release),
         wheel,
     );
     // Script time.

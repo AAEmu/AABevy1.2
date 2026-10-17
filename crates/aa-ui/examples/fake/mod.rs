@@ -311,8 +311,9 @@ pub fn dump_tree(rt: Option<NonSend<UiRuntime>>, time: Res<Time>, mut done: Loca
 }
 
 /// Scripted input for screenshots: `--hover X Y T` moves the virtual pointer at T seconds,
-/// `--click X Y T` clicks there (press at T, release one frame later), `--lua CODE T` runs Lua.
-/// Flags may repeat; coordinates are physical pixels.
+/// `--click X Y T` clicks there (press at T, release one frame later), `--wheel X Y DELTA T`
+/// turns the mouse wheel there, `--lua CODE T` runs Lua. Flags may repeat; coordinates are
+/// physical pixels.
 pub fn scripted_input(
     rt: Option<NonSend<UiRuntime>>,
     time: Res<Time>,
@@ -332,7 +333,7 @@ pub fn scripted_input(
         }
         let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
         match a.as_str() {
-            "--hover" | "--click" => {
+            "--hover" | "--click" | "--rclick" => {
                 let (Some(x), Some(y), Some(at)) = (num(1), num(2), num(3)) else {
                     continue;
                 };
@@ -345,7 +346,25 @@ pub fn scripted_input(
                     ptr.press = true;
                     *release_next = true;
                 }
+                // `--rclick X Y T`: a right click (OnClick "RightButton" fires on release).
+                if a == "--rclick" {
+                    ptr.right_release = true;
+                }
                 info!("fake: {a} {x} {y}");
+            }
+            // `--wheel X Y DELTA T`: the pointer goes to X, Y and the wheel turns DELTA notches
+            // (> 0 up: scrolls chat back, < 0 down).
+            "--wheel" => {
+                let (Some(x), Some(y), Some(delta), Some(at)) = (num(1), num(2), num(3), num(4)) else {
+                    continue;
+                };
+                if t < at {
+                    continue;
+                }
+                done.push(i);
+                ptr.pos = Some(Vec2::new(x, y));
+                ptr.wheel += delta;
+                info!("fake: --wheel {x} {y} {delta}");
             }
             "--lua" => {
                 let (Some(code), Some(at)) = (args.get(i + 1), num(2)) else {
@@ -428,6 +447,10 @@ pub fn scripted_input(
 /// of `reference/ingame/spawn`. Run after [`install_with`], before the world stage scripts.
 #[allow(dead_code)]
 pub fn install_ingame(rt: &mut UiRuntime) {
+    // `--cooldown`: an action bar skill cooling down (the spawn capture has none).
+    if std::env::args().any(|a| a == "--cooldown") {
+        let _ = rt.exec("@--cooldown", "FAKE_COOLDOWN_DEMO = true");
+    }
     // The HUD first, then the game data of the windows players open (one file per window).
     for (name, code) in [
         ("fake_ingame.lua", include_str!("fake_ingame.lua")),

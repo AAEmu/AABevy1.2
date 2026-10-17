@@ -3,6 +3,12 @@
 //! others show their unselected button). Buttons line up from the tab's corner (`SetCorner`,
 //! `SetVertical`, `SetGap`, `SetOffset`); windows fill the rest of the tab. Checked against the
 //! appearance tab of `reference/character_create/step2_*`.
+//!
+//! `AddNewTab(text, selectedButton, unselectedButton, window)` is the variant of the bag, bank and
+//! coffer: the script made the two buttons and the content window itself (many tabs may share one
+//! window) and the tab only lays them out and switches them (`TabData::borrowed`: removing such a
+//! tab forgets the widgets instead of destroying them). The window is anchored below the button
+//! row, where the script's divider drawables expect it (`AddAnchor("TOPLEFT", tabWindow, x, -24)`).
 
 use mlua::{Lua, Table, Value};
 
@@ -14,6 +20,8 @@ use crate::tree::{Anchor, Id, Point};
 pub struct TabData {
     /// (window, selected button, unselected button) per tab.
     pub tabs: Vec<(Id, Id, Id)>,
+    /// Parallel to `tabs`: the widgets belong to the script (`AddNewTab` with its own buttons).
+    pub borrowed: Vec<bool>,
     /// 1-based, 0 = none.
     pub selected: usize,
     pub vertical: bool,
@@ -32,9 +40,11 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut TabData) -> R) -> Option<R> {
 /// Show the selected tab's window and button, the other tabs' unselected buttons.
 fn apply_selection(lua: &Lua, id: Id) {
     let Some(td) = with(lua, id, |t| t.clone()) else { return };
+    // Tabs may share one window: it shows when any tab using it is the selected one.
+    let selected_win = td.tabs.get(td.selected.wrapping_sub(1)).map(|t| t.0);
     for (i, &(win, sel, unsel)) in td.tabs.iter().enumerate() {
         let on = i + 1 == td.selected;
-        show(lua, win, on, None);
+        show(lua, win, Some(win) == selected_win, None);
         show(lua, sel, on, None);
         show(lua, unsel, !on, None);
     }
@@ -132,6 +142,30 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             name,
             method(lua, |lua, id, a| {
                 let text = a.s(1).unwrap_or_default();
+                // `AddNewTab(text, selectedButton, unselectedButton, window)`: the script's own widgets.
+                if let (Some(sel), Some(unsel), Some(win)) =
+                    (value_id(lua, &a.v(2)), value_id(lua, &a.v(3)), value_id(lua, &a.v(4)))
+                {
+                    {
+                        let mut u = ui(lua);
+                        for b in [sel, unsel] {
+                            if let Some(t) = u.tree.get_mut(b).text_mut() {
+                                t.text = text.clone();
+                            }
+                        }
+                    }
+                    with(lua, id, |t| {
+                        t.tabs.push((win, sel, unsel));
+                        t.borrowed.resize(t.tabs.len() - 1, false);
+                        t.borrowed.push(true);
+                        if t.selected == 0 {
+                            t.selected = 1;
+                        }
+                    });
+                    apply_selection(lua, id);
+                    relayout_all(lua);
+                    return ret(lua, a.v(4));
+                }
                 let i = with(lua, id, |t| t.tabs.len() + 1).unwrap_or(1) as i64;
                 let win = create_child(lua, Some(id), "window", "window", i, true)?;
                 let sel = create_child(lua, Some(id), "button", "selectedButton", i, true)?;
@@ -208,14 +242,18 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "RemoveAllTabs",
         method(lua, |lua, id, _| {
-            let tabs = with(lua, id, |t| {
+            let (tabs, borrowed) = with(lua, id, |t| {
                 t.selected = 0;
-                std::mem::take(&mut t.tabs)
+                (std::mem::take(&mut t.tabs), std::mem::take(&mut t.borrowed))
             })
             .unwrap_or_default();
             {
                 let mut u = ui(lua);
-                for (w, s, un) in tabs {
+                for (i, (w, s, un)) in tabs.into_iter().enumerate() {
+                    // The script's own widgets (`AddNewTab`) live on; it hides them itself.
+                    if borrowed.get(i).copied().unwrap_or(false) {
+                        continue;
+                    }
                     for x in [w, s, un] {
                         u.tree.get_mut(x).alive = false;
                     }

@@ -252,9 +252,17 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
+    // `SetRotation(r)`: radians, clockwise on screen, about the centre of the drawable's rect.
+    def(
+        "SetRotation",
+        method(lua, |lua, id, a| {
+            let r = a.f(1);
+            with(lua, id, |d| d.rotation = r);
+            none()
+        })?,
+    )?;
     for name in [
         "SetSnap",
-        "SetRotation",
         "SetBlendMode",
         "SetMask",
         "SetMaskCoords",

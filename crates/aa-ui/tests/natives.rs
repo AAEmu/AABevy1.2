@@ -241,7 +241,7 @@ fn textbox_line_count_and_grid_rows() {
         grid = UIParent:CreateWidget("grid", "testGrid", "UIParent")
         grid:SetRowCount(3)
         grid:SetDefaultRowHeight(20)
-        grid:SetRowHeight(2, 35)
+        grid:SetRowHeight(35, 2)
         "#,
     )
     .unwrap();
@@ -306,4 +306,24 @@ fn content_toggle_and_escape() {
     assert!(ui.hotkey("open_config").unwrap());
     assert_eq!(eval::<i64>(&ui, "menus"), 2);
     assert!(!ui.hotkey("toggle_walk").unwrap());
+}
+
+#[test]
+fn is_visible_is_the_own_flag() {
+    // The system menu counts `buttons[i]:IsVisible()` to lay itself out before it shows.
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        frame = UIParent:CreateWidget("window", "testFrame", "UIParent")
+        child = frame:CreateChildWidget("button", "child", 0, true)
+        hiddenChild = frame:CreateChildWidget("button", "hiddenChild", 0, true)
+        hiddenChild:Show(false)
+        frame:Show(false)
+        "#,
+    )
+    .unwrap();
+    assert!(eval::<bool>(&ui, "child:IsVisible()"));
+    assert!(!eval::<bool>(&ui, "hiddenChild:IsVisible()"));
+    assert!(!eval::<bool>(&ui, "frame:IsVisible()"));
 }

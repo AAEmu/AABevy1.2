@@ -7,10 +7,12 @@
 //! weak-keyed Lua table maps object table -> id), so `pairs(widget)` sees only script fields.
 //!
 //! Methods we know exist in the client but have not implemented are installed as logging stubs
-//! (see [`stubs`]), so a script calling them keeps running; field lookups of unknown names still
+//! (see `stubs`), so a script calling them keeps running; field lookups of unknown names still
 //! return `nil`, as scripts test fields like `if self.bgs == nil`.
 
+mod bounds;
 pub mod chat;
+pub mod grid;
 pub mod classes;
 pub mod constants;
 pub mod diagram;
@@ -25,6 +27,7 @@ mod globals;
 mod stubs;
 pub mod tab;
 pub(crate) mod widget;
+pub mod worldmap;
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -358,8 +361,12 @@ pub fn queue_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
 
 pub fn tick(lua: &Lua, dt_ms: f32) {
     tab::relayout_all(lua);
+    grid::update(lua);
+    bounds::update(lua);
     roadmap::update(lua);
+    worldmap::update(lua);
     chat::update(lua);
+    slot::update(lua, dt_ms);
     edit::tick(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
     for (name, args) in queued {
