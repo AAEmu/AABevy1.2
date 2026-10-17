@@ -1489,6 +1489,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         )?;
     }
     super::animation::widget_methods(lua, &m)?;
+    super::attachment::methods(lua, &m)?;
     if ty == "damagedisplay" { super::damage::methods(lua, &m)?; }
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)
