@@ -119,6 +119,8 @@ pub fn leave(how: i64, net: &mut MessageWriter<NetCommand>) {
 /// `--hud-disconnect T` (show the disconnect dialog T seconds after the HUD is up, as if the server
 /// dropped the connection), `--hud-click X Y T` (a left click at physical pixel X, Y), `--hud-rclick`
 /// and `--hud-hover` (the same for a right click and a bare pointer move): for unattended runs.
+/// `--hud-burst PREFIX T DT N` takes N screenshots `PREFIX_01.png` ... starting T seconds after the HUD is up, DT
+/// seconds apart (frame by frame comparisons with the real client's captures; the game keeps running).
 #[derive(Resource, Default)]
 pub struct ScriptedSession {
     disconnect: Option<f32>,
@@ -129,6 +131,8 @@ pub struct ScriptedSession {
     hovers: Vec<(f32, Vec2)>,
     /// `--hud-open ACTION T`: a key binding action (`toggle_character`, `toggle_bag`, ...) at T seconds.
     opens: Vec<(f32, String)>,
+    /// `--hud-burst`: file prefix, first time, interval, count, taken so far.
+    burst: Option<(String, f32, f32, u32, u32)>,
     started: Option<f32>,
     release: bool,
 }
@@ -141,6 +145,11 @@ impl ScriptedSession {
         for (i, a) in args.iter().enumerate() {
             match a.as_str() {
                 "--hud-disconnect" => s.disconnect = num(i + 1),
+                "--hud-burst" => {
+                    if let (Some(prefix), Some(t), Some(dt), Some(n)) = (args.get(i + 1), num(i + 2), num(i + 3), num(i + 4)) {
+                        s.burst = Some((prefix.clone(), t, dt, n as u32, 0));
+                    }
+                }
                 "--hud-open" => {
                     if let (Some(action), Some(t)) = (args.get(i + 1), num(i + 2)) {
                         s.opens.push((t, action.clone()));
@@ -173,6 +182,7 @@ impl ScriptedSession {
 }
 
 pub fn scripted_session(
+    mut commands: Commands,
     time: Res<Time>,
     mut script: ResMut<ScriptedSession>,
     rt: Option<NonSend<UiRuntime>>,
@@ -186,6 +196,17 @@ pub fn scripted_session(
     if script.release {
         script.release = false;
         pointer.release = true;
+    }
+    if let Some((prefix, first, dt, count, taken)) = script.burst.as_mut()
+        && *taken < *count
+        && t >= *first + *dt * *taken as f32
+    {
+        *taken += 1;
+        let path = format!("{prefix}_{:02}.png", *taken);
+        if let Some(dir) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
     }
     if script.disconnect.is_some_and(|d| t >= d) {
         script.disconnect = None;
