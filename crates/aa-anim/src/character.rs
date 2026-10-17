@@ -22,7 +22,7 @@ use std::sync::Arc;
 use aa_cry::material::Material as CryMaterial;
 use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, SkeletonBinding, VertexHook, spawn_loaded};
 use aa_cry::shade::skin_base_color;
-use aa_cry::{CRY_TO_BEVY, Shading, Skeleton};
+use aa_cry::{CRY_TO_BEVY, Shading};
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -35,7 +35,7 @@ use crate::cut::{Hull, cut_hulls, cut_mesh};
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
 use crate::face::{EyeTint, FaceKey, FaceLayer, abgr, take_face};
 use crate::morph::{FaceMaker, MorphSet};
-use crate::pose::{BoundClip, Rig, SampleOptions};
+use crate::pose::{BoundClip, SampleOptions};
 use crate::{Error, Result};
 
 /// What a character wears.
@@ -332,8 +332,11 @@ pub fn spawn_character(
     assets: CharacterAssets,
     transform: Transform,
 ) -> Result<Entity> {
-    let skeleton = Arc::new(Skeleton::load(&assets.skeleton)?);
-    let rig = Arc::new(Rig::new(skeleton.clone()));
+    let t_skeleton = aa_cry::prof::scope("char.skeleton");
+    // one rig per skeleton file: clip bindings and skeleton-bound models are shared between the characters
+    let rig = crate::pose::shared_rig(&assets.skeleton)?;
+    let skeleton = rig.skeleton.clone();
+    drop(t_skeleton);
 
     let root = commands.spawn((Name::new(format!("{:?} {:?}", assets.desc.race, assets.desc.gender)), transform, Visibility::default())).id();
     let model_root = commands
@@ -342,7 +345,9 @@ pub fn spawn_character(
     let bones = spawn_bones(commands, model_root, &rig);
 
     // costumes hide the nude body triangles inside their `Cut` hulls
+    let t_hulls = aa_cry::prof::scope("char.hulls");
     let hulls = Arc::new(costume_hulls(cry, &assets));
+    drop(t_hulls);
 
     let mut part_entities = Vec::new();
     for part in &assets.parts {
@@ -360,12 +365,15 @@ pub fn spawn_character(
                 continue;
             }
         };
+        let t_spawn = aa_cry::prof::scope("char.spawn_loaded");
         let e = spawn_loaded(commands, &part.path, &loaded, &options);
+        drop(t_spawn);
         commands.entity(e).insert(ChildOf(model_root));
         part_entities.push(e);
     }
 
     // animation
+    let _t_idle = aa_cry::prof::scope("char.idle");
     let mut animator = Animator::new(rig.clone(), bones);
     match start_idle(&mut animator, clips, &assets) {
         Ok(()) => {}
@@ -380,7 +388,7 @@ pub fn spawn_character(
 }
 
 fn start_idle(animator: &mut Animator, clips: &ClipLibrary, assets: &CharacterAssets) -> Result<()> {
-    let cal = Cal::load(&assets.cal)?;
+    let cal = Cal::shared(&assets.cal)?;
     let rig = animator.rig.clone();
     let bind = |name: &str| -> Result<BoundClip> {
         let entry = cal.animation(name).ok_or_else(|| Error::Missing(format!("animation {name} in {}", assets.cal)))?;
@@ -408,10 +416,16 @@ fn load_part(
     hulls: &Arc<Vec<Hull>>,
 ) -> Result<Arc<LoadedModel>> {
     // the plain model (cached): material path and mesh data for the face texture
+    let t_plain = aa_cry::prof::scope("char.part.plain");
     let plain = cry.load_model(&part.path, options)?;
+    drop(t_plain);
     let mtl = plain.material_path.as_deref().and_then(|p| cry.mtl(p));
+    let t_look = aa_cry::prof::scope("char.part.face_look");
     let face = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &plain) } else { FaceLook::default() };
+    drop(t_look);
+    let t_dyes = aa_cry::prof::scope("char.part.dyes");
     let dyes = dyed_diffuses(cry, mtl.as_deref(), part);
+    drop(t_dyes);
     let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
     let cut = (part.kind == PartKind::Body && !hulls.is_empty()).then(|| hulls.clone());
 
@@ -441,6 +455,7 @@ fn load_part(
             }
         }));
     }
+    let _t_hooked = aa_cry::prof::scope("char.part.hooked");
     Ok(cry.load_model(&part.path, &hooked)?)
 }
 
@@ -614,6 +629,7 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
     let Some(key) = inputs.key else { return look };
     let id = key.id();
     let known = FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&id).copied());
+    eprintln!("FACEDBG known={:?} contains={:?} id={}", known, known.map(|a| cry.images.contains(a)), id.len());
     if let Some(handle) = known.and_then(|asset| cry.images.get_strong_handle(asset)) {
         crate::face::discard_face(&key);
         look.texture = Some(handle);

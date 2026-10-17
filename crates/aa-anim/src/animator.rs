@@ -10,12 +10,14 @@
 //! optional random-idle schedule, which is all the login stage and the in-game idle need.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use bevy::prelude::*;
 
 use crate::caf::Clip;
-use crate::pose::{BoundClip, Pose, Rig, SampleOptions};
+use crate::pose::{BoundClip, ClipBinding, Pose, Rig, SampleOptions};
 
 /// One clip being played.
 #[derive(Clone, Debug)]
@@ -216,12 +218,23 @@ impl Plugin for AnimPlugin {
     }
 }
 
+static UPDATED: AtomicU32 = AtomicU32::new(0);
+static NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// Animators updated and nanoseconds spent in the animation system since the last call (for profiling).
+pub fn take_stats() -> (u32, u64) {
+    (UPDATED.swap(0, Ordering::Relaxed), NANOS.swap(0, Ordering::Relaxed))
+}
+
 fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms: Query<&mut Transform>) {
+    let started = Instant::now();
     let dt = time.delta_secs();
+    let mut updated = 0;
     for mut a in &mut animators {
         if a.current.is_none() {
             continue;
         }
+        updated += 1;
         a.update(dt);
         let a = &*a;
         for (i, &e) in a.bones.iter().enumerate() {
@@ -231,6 +244,8 @@ fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms:
             }
         }
     }
+    UPDATED.fetch_add(updated, Ordering::Relaxed);
+    NANOS.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }
 
 /// Spawns one entity per bone under `parent` (bind pose, `Name`d) and returns them in bone order.
@@ -255,6 +270,8 @@ pub fn spawn_bones(commands: &mut Commands, parent: Entity, rig: &Rig) -> Vec<En
 #[derive(Resource, Default, Clone)]
 pub struct ClipLibrary {
     clips: Arc<Mutex<HashMap<String, Arc<Clip>>>>,
+    /// Bindings by rig and clip: characters sharing a rig bind each clip once.
+    bindings: Arc<Mutex<HashMap<(u64, String), Arc<ClipBinding>>>>,
 }
 
 impl ClipLibrary {
@@ -264,6 +281,7 @@ impl ClipLibrary {
         if let Some(c) = self.clips.lock().unwrap().get(&key) {
             return Ok(c.clone());
         }
+        let _t = aa_cry::prof::scope("anim.clip_load");
         let clip = Arc::new(Clip::load(&key)?);
         self.clips.lock().unwrap().insert(key, clip.clone());
         Ok(clip)
@@ -271,6 +289,17 @@ impl ClipLibrary {
 
     /// Loads a clip and binds it to a rig.
     pub fn bound(&self, rig: &Rig, path: &str, options: SampleOptions) -> crate::Result<BoundClip> {
-        Ok(BoundClip::new(rig, self.get(path)?, options))
+        let clip = self.get(path)?;
+        let key = (rig.id, path.to_ascii_lowercase().replace('\\', "/"));
+        let cached = self.bindings.lock().unwrap().get(&key).cloned();
+        let binding = match cached {
+            Some(b) => b,
+            None => {
+                let b = Arc::new(rig.bind_clip(&clip));
+                self.bindings.lock().unwrap().insert(key, b.clone());
+                b
+            }
+        };
+        Ok(BoundClip { clip, binding, options })
     }
 }
