@@ -17,9 +17,12 @@ resource! {
     /// The numbers the HUD shows for the local player. Filled when the character is selected,
     /// refreshed when it spawns and then kept current from the server's change packets.
     ///
-    /// The server never sends maximum HP / MP (the real client computes them from its formula
-    /// tables), so `max_hp` / `max_mp` are the highest values seen since the spawn: right after a
-    /// spawn at full health they are exact.
+    /// The server never sends maximum HP / MP (the real client computes them from the formula tables
+    /// of the game database: `unit_formulas` of kind MaxHealth / MaxMana over level and stamina /
+    /// intelligence, plus the gear's stats and the buffs' bonuses), so `max_hp` / `max_mp` here are
+    /// the highest values seen since the spawn, which are exact right after a spawn at full health.
+    /// An app that has the database computes the real ones and stores them with
+    /// [`PlayerStats::set_max`] (aa-client's HUD does: `hud/stats.rs`).
     pub struct PlayerStats {
         /// The player's object id (0 until the character spawned).
         pub obj_id: u32,
@@ -84,6 +87,11 @@ impl PlayerStats {
 
     fn is_self(&self, obj_id: u32) -> bool {
         self.obj_id != 0 && self.obj_id == obj_id
+    }
+
+    /// Stores the maxima an app worked out from the game database (never below the current points).
+    pub fn set_max(&mut self, max_hp: i32, max_mp: i32) {
+        (self.max_hp, self.max_mp) = (max_hp.max(self.hp), max_mp.max(self.mp));
     }
 
     fn set_points(&mut self, hp: i32, mp: i32) {
@@ -328,6 +336,10 @@ mod tests {
         assert!(!s.apply(&Event::UnitPoints { obj_id: 0x99, hp: 1, mp: 1 }));
         assert!(s.apply(&Event::UnitPoints { obj_id: 0x77, hp: 650, mp: 320 }));
         assert_eq!((s.hp, s.mp, s.max_hp, s.max_mp), (650, 320, 700, 320));
+        // an app that knows the formulas stores the real maxima (never below the current points)
+        s.set_max(900, 100);
+        assert_eq!((s.max_hp, s.max_mp), (900, 320));
+        assert!((s.hp_fraction() - 650.0 / 900.0).abs() < 1e-6);
         assert!(s.apply(&Event::ExpChanged { obj_id: 0x77, delta: 500, add_ability_exp: true }));
         assert_eq!(s.exp, 1_500);
         assert!(s.apply(&Event::LevelChanged { obj_id: 0x77, level: 4 }));

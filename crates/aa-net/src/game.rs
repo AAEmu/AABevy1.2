@@ -11,6 +11,7 @@ use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit,
 };
 use crate::opcodes::{cs, pp, sc};
+use crate::quest::{self, CompletedBlock, Quest};
 use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
 use crate::wire::{Pos, Reader, Result, WireError, Writer};
 
@@ -309,6 +310,17 @@ pub enum ServerMsg {
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots`.
     InvenExpanded { container: u8, slots: u8 },
+    // -- quests
+    /// The player's active quests (when the character spawns).
+    Quests(Vec<Quest>),
+    /// The completed quests, as blocks of 64 flags.
+    CompletedQuests(Vec<CompletedBlock>),
+    QuestStarted(Quest),
+    QuestUpdated(Quest),
+    /// Quest `quest_id` was handed in; `block` is its updated block of completed flags.
+    QuestCompleted { quest_id: u32, block: CompletedBlock },
+    /// Quest `quest_id` may be taken again (its completed flag was cleared).
+    QuestReset { quest_id: u32, block: CompletedBlock },
     // -- skills and combat
     SkillStarted(SkillStarted),
     SkillFired(SkillFired),
@@ -398,6 +410,12 @@ impl ServerMsg {
             Self::ItemTasks(_) => "SCItemTaskSuccess",
             Self::EquipmentChanged { .. } => "SCUnitEquipmentsChanged",
             Self::InvenExpanded { .. } => "SCInvenExpanded",
+            Self::Quests(_) => "SCQuests",
+            Self::CompletedQuests(_) => "SCCompletedQuests",
+            Self::QuestStarted(_) => "SCQuestContextStarted",
+            Self::QuestUpdated(_) => "SCQuestContextUpdated",
+            Self::QuestCompleted { .. } => "SCQuestContextCompleted",
+            Self::QuestReset { .. } => "SCQuestContextReset",
             Self::SkillStarted(_) => "SCSkillStarted",
             Self::SkillFired(_) => "SCSkillFired",
             Self::SkillEnded { .. } => "SCSkillEnded",
@@ -682,6 +700,20 @@ impl ServerMsg {
                 Self::EquipmentChanged { obj_id, items }
             }
             sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
+            sc::SCQuestsPacket => Self::Quests(quest::read_quests(r)?),
+            sc::SCCompletedQuestsPacket => Self::CompletedQuests(quest::read_completed(r)?),
+            sc::SCQuestContextStartedPacket => Self::QuestStarted(Quest::read(r)?),
+            sc::SCQuestContextUpdatedPacket => Self::QuestUpdated(Quest::read(r)?),
+            sc::SCQuestContextCompletedPacket | sc::SCQuestContextResetPacket => {
+                let quest_id = r.u32()?;
+                let bytes: [u8; 8] = r.bytes(8)?.try_into().expect("8 bytes");
+                let block = CompletedBlock { id: CompletedBlock::block_of(quest_id), bits: u64::from_le_bytes(bytes) };
+                if opcode == sc::SCQuestContextCompletedPacket {
+                    Self::QuestCompleted { quest_id, block }
+                } else {
+                    Self::QuestReset { quest_id, block }
+                }
+            }
             sc::SCSkillStartedPacket => Self::SkillStarted(SkillStarted::read(r)?),
             sc::SCSkillFiredPacket => Self::SkillFired(SkillFired::read(r)?),
             sc::SCSkillEndedPacket => Self::SkillEnded { tl: r.u16()? },
@@ -1179,6 +1211,26 @@ mod tests {
         out.extend((!len).to_le_bytes());
         out.extend(data);
         out
+    }
+
+    #[test]
+    fn quest_packets_decode() {
+        // SCQuestContextCompleted(questId, 8 flag bytes, componentId): quest 330 is bit 10 of block 5
+        let mut w = Writer::new();
+        w.u32(330).raw(&[0, 0b0000_0100, 0, 0, 0, 0, 0, 0]).u32(0);
+        match decode(sc::SCQuestContextCompletedPacket, &w.finish()) {
+            ServerMsg::QuestCompleted { quest_id: 330, block } => assert!(block.id == 5 && block.has(330)),
+            other => panic!("{other:?}"),
+        }
+        // SCCompletedQuests(count, (u16 block id, 8 bytes)...)
+        let mut w = Writer::new();
+        w.i32(1).u16(0).raw(&[0b10, 0, 0, 0, 0, 0, 0, 0]);
+        match decode(sc::SCCompletedQuestsPacket, &w.finish()) {
+            ServerMsg::CompletedQuests(blocks) => assert!(blocks.len() == 1 && blocks[0].has(1) && !blocks[0].has(0)),
+            other => panic!("{other:?}"),
+        }
+        // SCQuests with none
+        assert_eq!(decode(sc::SCQuestsPacket, &[0, 0, 0, 0]), ServerMsg::Quests(vec![]));
     }
 
     #[test]

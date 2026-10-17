@@ -20,6 +20,7 @@ pub mod login;
 pub mod model;
 pub mod net;
 pub mod opcodes;
+pub mod quest;
 pub mod session;
 pub mod skill;
 pub mod state;
