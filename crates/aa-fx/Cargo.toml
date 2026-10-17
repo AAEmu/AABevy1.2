@@ -1,0 +1,15 @@
+[package]
+name = "aa-fx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CryEngine particle effects: library XML, CPU simulation, batched billboard rendering"
+
+[dependencies]
+aa-pak.workspace = true
+aa-cry.workspace = true
+bevy.workspace = true
+roxmltree.workspace = true
+
+[dev-dependencies]
+aa-dev.workspace = true
