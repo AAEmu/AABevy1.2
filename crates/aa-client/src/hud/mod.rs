@@ -33,7 +33,7 @@
 //! `HudKeyboardFocus.0` is true.
 
 mod alerts;
-mod api;
+pub(crate) mod api;
 mod cameras;
 mod cast;
 mod chat;
@@ -48,6 +48,7 @@ mod loot;
 mod marks;
 mod markers;
 mod panels;
+mod party;
 mod plates;
 mod quests;
 mod ring;
@@ -266,6 +267,7 @@ impl Plugin for HudPlugin {
         ring::plugin(app);
         markers::plugin(app);
         drag::plugin(app);
+        party::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));

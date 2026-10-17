@@ -13,6 +13,7 @@ mod hud;
 mod ingame;
 mod login;
 mod priority;
+mod settings;
 mod sound;
 
 use bevy::prelude::*;

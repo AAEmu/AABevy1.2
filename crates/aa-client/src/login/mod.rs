@@ -33,7 +33,7 @@
 //! `--goto world-select|character-select|loading` drives the screens through the original UI
 //! scripts up to that screen (for `--shot`); `--hold-loading PCT` keeps the loading screen at that
 //! progress instead of entering the game; `--lua SCREEN:CODE` (repeatable) runs Lua in the UI of a
-//! screen (`world-select`, `character-select`, `loading`) once it has been up for a moment;
+//! screen (`world-select`, `character-select`, `loading`, `ingame`) once it has been up for a moment;
 //! `--stage-clear R,G,B` shows what the stage camera draws on its own, `AA_BG_GRADE=tonemap,ev,sat`
 //! overrides the background grading of [`stage3d::Grade`].
 
@@ -105,6 +105,7 @@ impl LoginArgs {
                         "character-select" => Screen::CharacterSelect,
                         "create" => Screen::CharacterCreate,
                         "loading" => Screen::Loading,
+                        "ingame" => Screen::InGame,
                         other => {
                             eprintln!("--lua: unknown screen {other:?}");
                             return None;
@@ -168,11 +169,14 @@ fn run_lua(
     built: Res<UiBuilt>,
     args: Res<LoginArgs>,
     time: Res<Time>,
+    screen_state: Res<State<Screen>>,
     mut state: Local<(usize, f32, Option<Screen>)>,
 ) {
     let (next, wait, seen) = &mut *state;
     let (Some(rt), Some((screen, code))) = (rt, args.lua.get(*next)) else { return };
-    if built.0 != Some(*screen) {
+    let in_game = *screen == Screen::InGame && *screen_state.get() == Screen::InGame
+        && rt.lua.globals().raw_get::<Option<mlua::Table>>("HUD").ok().flatten().is_some();
+    if built.0 != Some(*screen) && !in_game {
         *wait = 0.0;
         *seen = None;
         return;

@@ -495,6 +495,41 @@ with placeholders.
   taken by `handle_requests` and become `NetCommand`s.
 * Countdowns are absolute end times on `HUD.now_ms()`, never per-frame pushes.
 
+## Parties and saved settings (2026-10-17)
+
+`party.rs` / `party.lua` bind the original party and raid frames to `aa_net::Party`, including sparse
+one-based `team1`..`team50` aliases, HP/MP, names, levels, abilities, offline/death state, authority,
+member targeting, and local frame visibility preferences. Original popup actions send invite,
+leave, kick, dismiss and transfer-leader requests. Invitations use the original localized
+Join/Decline dialog, with replies tied to the current invitation sender. Membership changes wait
+for the server; native UI event argument shapes are preserved. The roadmap and world map show
+party/raid/leader/offline icons in the current zone and instance.
+
+`settings.rs`, `settings_options.lua` and `settings.lua` share option values between all screen
+Lua states and persist applied edits per account under `%LOCALAPPDATA%/AABevy1.2/settings/`.
+`AA_SETTINGS_FILE` selects an isolated file for development. Account filenames use lowercase
+UTF-8 hex encoding. Options save when the original UI calls `X2Option:Save`; sound changes also
+reach the audio mixer immediately. Cancel, Escape and close restore the window's opening values,
+including after Reset reinitializes controls. Bag tab names, icons, groups and selection save on
+edit/switch; bag saves do not commit unapplied option edits. A temporary file replaces the previous
+JSON after a successful write. Graphics option values are retained; renderer quality/resolution
+controls and editable key bindings still need their runtime integrations. Raid role/move/convert,
+looting-rule editing, party buff/combat indicators, and outbound overhead marks/pings remain separate work.
+
+Validation: `cargo test -p aa-client --bin aa-client` passes 97 tests, with 13 intentional probes
+ignored. This includes real Options Lua Reset/re-Init/Cancel, bag restoration, file replacement,
+corrupt-file recovery, sparse raid aliases, command character/object IDs, and batched leader-transfer/disband
+notifications. The live two-client
+party protocol test passed twice in aa-net. The integrated full-flow client joined a fresh headless
+peer, showed its original party frame/leader mark and localized join message without Lua errors:
+`shots/hud/sol61-wave2/party_08.png`, about 85–94 FPS at 1920x1080 after joining (shared debug build).
+`--lua ingame:CODE` now supports unattended checks after the full login flow.
+The restart run verified persisted master volume 0.4, ShowBuffDuration=0, custom Supplies tab
+(icon 3, groups 1/7), its selected index, Reset/re-Init/Cancel, and party-frame targeting with Lua
+assertions. `shots/hud/sol61-wave2/restart-bag.png` shows the restored bag. The peer observed the
+real offline/rejoin snapshots, then left/logout cleanly. Both client runs had zero script errors
+and no warning/error log entries; test processes exited automatically.
+
 ## Cost
 
 `aa-dev: fps=` in the spawn scene, debug build, shared machine (noisy, +-5 fps and worse while other agents
@@ -510,11 +545,11 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
   is unit tested in aa-net, but no other character was in view on the lane server to see it.
 * Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
   met range, mana, casting, target and combat. The unit requirement kinds that need quests, doodads, zones or factions count as met.
-* Map icons: party members (aa-net has no party data), quest objective areas and the numbered notifier icons
+* Map icons: quest objective areas and the numbered notifier icons
   (`X2Map:AddNotifyQuestInfo`), icons for other zones than the one the player is in, the real client's `npc_station`,
   `npc_graveyard`, public farm and live housing icons (no data source), ship markers.
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
-* Bag tabs the player creates are not saved. Bag/equipment/action-bar drag requests are now routed through `drag.lua` / `drag.rs`;
+* Bag/equipment/action-bar drag requests are now routed through `drag.lua` / `drag.rs`;
   their live visual coverage is still being completed.
 * Tooltips: what is still open is listed under "Tooltip numbers" (the damage breakdown option, `ea_*` / `return_point`,
   the buff caster's own stats for debuffs on others, gems / tempers / enchants, repair cost).
