@@ -82,8 +82,10 @@ fn drive(
     mut events: MessageReader<NetEvent>,
     mut out: MessageWriter<NetCommand>,
     mut next: ResMut<NextState<Screen>>,
+    screen: Res<State<Screen>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let in_game = *screen.get() == Screen::InGame;
     for NetEvent(event) in events.read() {
         match event {
             Event::WorldList(list) => match list.worlds.iter().find(|w| w.online) {
@@ -120,7 +122,14 @@ fn drive(
                 info!("enter-world: spawned {} (obj {}) at ({:.1}, {:.1}, {:.1}) facing {:.2}", s.name(), s.obj_id, p.x, p.y, p.z, s.yaw());
                 next.set(Screen::InGame);
             }
-            Event::LoginFailed { message } | Event::ConnectFailed { message } | Event::Disconnected { message } => {
+            Event::LoginFailed { message } | Event::ConnectFailed { message } => {
+                error!("enter-world: {message}");
+                exit.write(AppExit::error());
+            }
+            // in game the HUD owns a lost connection: it shows the disconnect dialog (and ends the run itself without a HUD,
+            // `hud::session::route_session`); only a connection lost on the way in ends the run here
+            Event::Disconnected { message } if in_game => info!("enter-world: disconnected in game ({message})"),
+            Event::Disconnected { message } => {
                 error!("enter-world: {message}");
                 exit.write(AppExit::error());
             }
@@ -128,6 +137,7 @@ fn drive(
                 error!("enter-world: world denied ({reason})");
                 exit.write(AppExit::error());
             }
+            Event::Kicked { reason, message } if in_game => info!("enter-world: kicked in game ({reason}): {message}"),
             Event::Kicked { reason, message } => {
                 error!("enter-world: kicked ({reason}): {message}");
                 exit.write(AppExit::error());
