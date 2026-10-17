@@ -51,9 +51,11 @@ pub struct BuffInfo {
 #[derive(Clone, Debug, Default)]
 pub struct NpcInfo {
     pub name: String,
+    #[allow(dead_code)] // for the quest markers and the level text of the target frame
     pub level: i64,
     /// `npcs.npc_grade_id` (1 = normal, 2 = ... 7 = ...).
     pub grade: i64,
+    #[allow(dead_code)]
     pub kind: i64,
     pub faction_id: i64,
     pub show_name_tag: bool,
@@ -374,7 +376,7 @@ impl GameData {
                 data.sub_zone_names.insert(id, name("sub_zones", id, r.get(1)?));
             }
         }
-        for (_, (group, faction)) in data.zones.iter() {
+        for (group, faction) in data.zones.values() {
             if *faction != 0 {
                 data.group_faction.entry(*group).or_insert(*faction);
             }
