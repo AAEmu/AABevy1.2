@@ -685,6 +685,10 @@ pub struct Snapshot {
     pub sub_map_rect: [f32; 4],
     /// The player's faction name.
     pub faction: String,
+    /// The active abilities (archetype ids 1..=10) in slot order, and the experience of every ability (index =
+    /// id, 0 is the general one): what `X2Ability` and the character window's title ("Archery Novice") answer from.
+    pub abilities: Vec<u8>,
+    pub ability_exp: [i32; 11],
     /// Game clock: hour 0..24 and minute.
     pub hour: u8,
     pub minute: f32,

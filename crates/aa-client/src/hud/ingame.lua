@@ -117,6 +117,35 @@ X2Unit.UnitDeBuff = function(self, unit, index, flags) return buffAt(unit, index
 
 -- Experience: percent of the level, exp of the level, exp for the next level.
 X2Player.GetExpInfo = function(self) return S().exp_percent, S().exp_cur, S().exp_need end
+-- Abilities (archetype ids 1..10: fight illusion adamant will death wild magic vocation romance love): the
+-- character's own three active ones in slot order, as the server sent them (HUD.state.abilities: the rows
+-- GetActiveAbility lists; ability_levels: every ability's level). The character window's title ("Archery Novice")
+-- is GetCombinedAbilityName over the names GetTargetAbilityTemplates answers, the same ids the character list shows.
+local ABILITY_KEYS = { "fight", "illusion", "adamant", "will", "death", "wild", "magic", "vocation", "romance", "love" }
+local function activeAbilities() return S().abilities or {} end
+X2Ability.GetActiveAbility = function(self) return activeAbilities() end
+X2Ability.NumActiveAbility = function(self) return #activeAbilities() end
+X2Ability.IndexFromAbility = function(self, ability)
+  for i, a in ipairs(activeAbilities()) do
+    if a.type == ability then return i end
+  end
+  return nil
+end
+X2Ability.GetAbilityLevel = function(self, ability)
+  local levels = S().ability_levels
+  return levels and levels[ability] or 0
+end
+X2Ability.GetAllAbility = function(self)
+  local all = {}
+  for i = 1, 10 do all[i] = { type = i, level = X2Ability:GetAbilityLevel(i) } end
+  return all
+end
+X2Unit.GetTargetAbilityTemplates = function(self, unit)
+  if not isPlayer(unit) then return nil end
+  local list = {}
+  for i, a in ipairs(activeAbilities()) do list[i] = { name = ABILITY_KEYS[a.type] } end
+  return list
+end
 -- Exp a resurrection at a shrine wins back: the amount and its percent of the level.
 X2Player.GetRecoverableExp = function(self)
   local need = tonumber(S().exp_need) or 0
