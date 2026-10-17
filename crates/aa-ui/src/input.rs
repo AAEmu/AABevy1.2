@@ -74,12 +74,12 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             {
                 continue;
             }
-            let r = u.tree.rect(id);
+            let r = u.animations.widget_rect(&u.tree, id);
             if !r.contains(x, y) {
                 continue;
             }
             // Scrolled out of its scroll window (`EnableScroll`): not there.
-            if u.tree.clip_rect(id).is_some_and(|c| !c.contains(x, y)) {
+            if u.animations.widget_clip_rect(&u.tree, id).is_some_and(|c| !c.contains(x, y)) {
                 continue;
             }
             let in_list = u

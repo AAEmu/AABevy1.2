@@ -237,8 +237,12 @@ fn original_action_slot_bytecode_pulses_autoattack_and_combo_borders() {
         0.3,
     );
     let combo = sample(&ui, "slot.combo_action_for_me_effect");
-    near(combo.color.unwrap()[3], 0.7);
-    near(combo.scale[0], 0.65);
+    near(combo.color.unwrap()[3], 0.746875);
+    near(combo.scale[0], 0.7046875);
+    let arrow = sample(&ui, "slot.auto_attack_effect_arrow");
+    near(arrow.offset[0], 13.8564);
+    near(arrow.offset[1], -8.0);
+    near(arrow.rotation, std::f32::consts::FRAC_PI_3);
     lua::tick(&ui.lua, 350.0);
     near(
         sample(&ui, "slot.auto_attack_effect_bg").color.unwrap()[3],
@@ -248,7 +252,7 @@ fn original_action_slot_bytecode_pulses_autoattack_and_combo_borders() {
         sample(&ui, "slot.combo_action_for_me_effect")
             .color
             .unwrap()[3],
-        0.6,
+        0.0,
     );
     ui.exec("@reset", "slot:ResetAllAnimEffect()").unwrap();
     assert!(
@@ -284,6 +288,13 @@ fn renderer_uses_animated_uv_color_scale_and_rotation() {
     near(quads[0].color[3], 0.5);
     near(quads[0].pos[2] - quads[0].pos[0], 21.0);
     assert!(quads[0].corners.is_some());
+    ui.exec("@pivot", "effect:SetEffectScaleAxis(1, 'TOPLEFT'); effect:SetEffectRotate(1, 0, 0); effect:SetStartEffect(true)").unwrap();
+    lua::tick(&ui.lua, 500.0);
+    let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+    let rect = lua::ui(&ui.lua).tree.rect(id(&ui, "effect"));
+    near(quads[0].pos[0], rect.x);
+    near(quads[0].pos[1], rect.y);
+    near(quads[0].pos[2], rect.x + 21.0);
     ui.exec(
         "@atlas_render",
         r#"
@@ -308,4 +319,154 @@ fn renderer_uses_animated_uv_color_scale_and_rotation() {
         .0 as f32;
     near(quads[0].uv[0] * width, 139.0);
     near(quads[0].uv[2] * width, 160.0);
+}
+
+#[test]
+fn motion_runs_independently_rotates_art_and_clears_a_finished_channel() {
+    let ui = setup();
+    ui.exec(
+        "@circle",
+        r#"
+        effect:SetEffectPriority(1, 'alpha', 0.2, 0.2)
+        effect:SetEffectInitialColor(1, 1, 1, 1, 0)
+        effect:SetEffectFinalColor(1, 1, 1, 1, 1)
+        effect:SetMoveRepeatCount(1)
+        effect:SetMoveEffectType(1, 'circle', 0.5, 0.25, 1, 0)
+        effect:SetMoveEffectCircle(1, 0, 360)
+        effect:SetStartEffect(true)
+    "#,
+    )
+    .unwrap();
+    near(sample(&ui, "effect").offset[1], -10.5);
+    lua::tick(&ui.lua, 250.0);
+    let s = sample(&ui, "effect");
+    near(s.color.unwrap()[3], 1.0);
+    near(s.offset[0], 21.0);
+    near(s.offset[1], 0.0);
+    near(s.rotation, std::f32::consts::FRAC_PI_2);
+    assert!(eval::<bool>(&ui, "effect:IsRunning()"));
+    let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+    assert_eq!(quads.len(), 1);
+    near((quads[0].pos[0] + quads[0].pos[2]) * 0.5, 171.0);
+    assert!(quads[0].corners.is_some());
+    lua::tick(&ui.lua, 750.0);
+    assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
+    near(sample(&ui, "effect").offset[1], -10.5);
+    ui.exec("@clear_motion", "effect:ClearMoveEffect()")
+        .unwrap();
+    near(sample(&ui, "effect").offset[1], 0.0);
+    near(sample(&ui, "effect").rotation, 0.0);
+    assert!(!eval::<bool>(&ui, "effect:IsVisible()"));
+    ui.exec("@replay_color", "effect:SetStartEffect(true)")
+        .unwrap();
+    lua::tick(&ui.lua, 100.0);
+    near(sample(&ui, "effect").color.unwrap()[3], 0.5);
+    near(sample(&ui, "effect").offset[0], 0.0);
+}
+
+#[test]
+fn edge_motion_has_extent_relative_positions_orientation_delay_and_hold() {
+    let ui = setup();
+    ui.exec(
+        "@edge",
+        r#"
+        effect:SetMoveRepeatCount(1)
+        effect:SetMoveInterval(0.1)
+        effect:SetMoveEffectType(1, 'top', 0, 0.25, 0.2, 0.2)
+        effect:SetMoveEffectEdge(1, 0.5, 1.5)
+        effect:SetMoveEffectInterval(1, 0.1)
+        effect:SetMoveEffectType(2, 'right', 0.5, 0, 0.2, 0.2)
+        effect:SetMoveEffectEdge(2, 0.5, 1.5)
+        effect:SetStartEffect(true)
+    "#,
+    )
+    .unwrap();
+    near(sample(&ui, "effect").offset[0], 0.0);
+    lua::tick(&ui.lua, 200.0);
+    near(sample(&ui, "effect").offset[0], 21.0);
+    near(sample(&ui, "effect").offset[1], -10.5);
+    lua::tick(&ui.lua, 150.0);
+    near(sample(&ui, "effect").offset[0], 42.0);
+    lua::tick(&ui.lua, 150.0);
+    near(sample(&ui, "effect").offset[0], 21.0);
+    near(sample(&ui, "effect").offset[1], 21.0);
+    near(sample(&ui, "effect").rotation, std::f32::consts::FRAC_PI_2);
+    ui.exec("@no_rotate", "effect:SetMoveRotate(false)")
+        .unwrap();
+    lua::tick(&ui.lua, 10.0);
+    near(sample(&ui, "effect").rotation, 0.0);
+    lua::tick(&ui.lua, 200.0);
+    assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
+}
+
+#[test]
+fn widget_animation_scales_descendants_about_the_anchor_and_finishes_once() {
+    let ui = setup();
+    ui.exec(
+        "@widget",
+        r#"
+        child = window:CreateChildWidget('button', 'scaleChild', 0, true)
+        child:SetExtent(40, 20)
+        child:AddAnchor('TOPLEFT', window, 20, 20)
+        local fill = child:CreateColorDrawable(1, 1, 1, 1, 'artwork')
+        fill:AddAnchor('TOPLEFT', child, 0, 0)
+        fill:AddAnchor('BOTTOMRIGHT', child, 0, 0)
+        alphaEnded, scaleEnded = 0, 0
+        window:SetHandler('OnAlphaAnimeEnd', function() alphaEnded = alphaEnded + 1 end)
+        window:SetHandler('OnScaleAnimeEnd', function() scaleEnded = scaleEnded + 1 end)
+        window:SetAlphaAnimation(0, 1, 0.2, 0.2)
+        window:SetScaleAnimation(0.5, 1, 0.2, 0.2, 'TOPLEFT')
+        window:SetStartAnimation(true, true)
+    "#,
+    )
+    .unwrap();
+    let window = id(&ui, "window");
+    let child = id(&ui, "child");
+    let rect = lua::ui(&ui.lua).tree.rect(child);
+    lua::ui(&ui.lua).tree.settle();
+    let generation = lua::ui(&ui.lua).tree.generation;
+    lua::tick(&ui.lua, 100.0);
+    let s = lua::ui(&ui.lua).animations.widget_sample(window);
+    near(s.alpha.unwrap(), 0.5);
+    near(s.scale, 0.75);
+    assert_eq!(lua::ui(&ui.lua).tree.rect(child), rect);
+    assert_eq!(lua::ui(&ui.lua).tree.generation, generation);
+    let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+    assert_eq!(quads.len(), 1);
+    assert_eq!(quads[0].pos, [15.0, 15.0, 45.0, 30.0]);
+    near(quads[0].color[3], 0.5);
+    assert_eq!(aa_ui::input::pick(&ui.lua, 16.0, 16.0), Some(child));
+    assert_ne!(aa_ui::input::pick(&ui.lua, 59.0, 39.0), Some(child));
+    lua::tick(&ui.lua, 150.0);
+    assert_eq!(eval::<i64>(&ui, "alphaEnded + scaleEnded"), 2);
+    assert!(!eval::<bool>(&ui, "window:IsNowAnimation()"));
+    lua::ui(&ui.lua).tree.settle();
+    let content = lua::ui(&ui.lua).tree.content();
+    lua::tick(&ui.lua, 1000.0);
+    assert_eq!(eval::<i64>(&ui, "alphaEnded + scaleEnded"), 2);
+    assert_eq!(lua::ui(&ui.lua).tree.settle(), content);
+}
+
+#[test]
+fn original_window_animation_helper_fades_and_scales_together() {
+    let ui = setup();
+    aa_lua::run_alb(&ui.lua, "scriptsbin/x2ui/baselib/window_view.alb").unwrap();
+    ui.exec(
+        "@window_animation",
+        "SetttingUIAnimation(window); window:SetStartAnimation(true,true)",
+    )
+    .unwrap();
+    let window = id(&ui, "window");
+    let s = lua::ui(&ui.lua).animations.widget_sample(window);
+    near(s.alpha.unwrap(), 0.0);
+    near(s.scale, 0.95);
+    lua::tick(&ui.lua, 50.0);
+    let s = lua::ui(&ui.lua).animations.widget_sample(window);
+    near(s.alpha.unwrap(), 0.5);
+    near(s.scale, 0.975);
+    ui.exec("@stop_alpha", "window:SetStartAnimation(false,true)")
+        .unwrap();
+    near(eval::<f32>(&ui, "window:GetAlpha()"), 1.0);
+    ui.exec("@explicit_alpha", "window:SetAlpha(0.4)").unwrap();
+    near(eval::<f32>(&ui, "window:GetAlpha()"), 0.4);
 }

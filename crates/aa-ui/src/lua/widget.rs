@@ -85,6 +85,12 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     let mut g = ui(lua);
     let u = &mut *g;
     let was = u.tree.get(id).shown;
+    if (was != visible || fade_ms.is_some_and(|ms| ms > 0.0))
+        && let Some(alpha) = u.animations.widget_sample(id).alpha
+    {
+        u.tree.get_mut(id).alpha = alpha;
+        u.animations.clear_widget_alpha(id);
+    }
     if visible && !was && id != crate::tree::ROOT && u.tree.get(id).parent.is_none() && u.tree.get(id).is_widget() {
         u.tree.raise(id);
     }
@@ -490,15 +496,23 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetAlpha",
         method(lua, |lua, id, a| {
             let (mut u, v) = (ui(lua), a.f(1));
+            let animated = u.animations.widget_sample(id).alpha;
+            u.animations.clear_widget_alpha(id);
             if u.tree.get(id).alpha != v {
                 u.tree.get_mut(id).alpha = v;
+            }
+            if animated.is_some_and(|old| old != v) && u.tree.visible(id) {
+                u.tree.repaint();
             }
             none()
         })?,
     )?;
     def(
         "GetAlpha",
-        method(lua, |lua, id, _| ret(lua, ui(lua).tree.get(id).alpha))?,
+        method(lua, |lua, id, _| {
+            let u = ui(lua);
+            ret(lua, u.animations.widget_sample(id).alpha.unwrap_or(u.tree.get(id).alpha))
+        })?,
     )?;
     def(
         "SetUILayer",
@@ -1024,9 +1038,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetNumberOnly",
         "SetLimitWidth",
         "UseConsistentTextColor",
-        "SetStartAnimation",
-        "SetAlphaAnimation",
-        "SetScaleAnimation",
         "InheritAnimationData",
         "CheckOutOfScreen",
         "CorrectOffsetByScreen",
@@ -1468,6 +1479,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             })?,
         )?;
     }
+    super::animation::widget_methods(lua, &m)?;
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)
 }
