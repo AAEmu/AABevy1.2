@@ -102,6 +102,36 @@ pub struct Decal {
     pub raw: Vec<u8>,
 }
 
+/// A terrain road (`SRoadChunk_NEW`, 63 B followed by paired left/right spline edges).
+/// Points and bounding box are cell-local, cry space. Z on the spline is only a bound: the
+/// engine clips terrain triangles against each four-point trapezoid, not a floating strip.
+#[derive(Clone, Debug)]
+pub struct Road {
+    pub bbox: [f32; 6],
+    pub max_view_dist: f32,
+    pub flags: u32,
+    pub tex_coords: [f32; 2],
+    /// UV bounds of the whole spline (a spline is split across several road objects).
+    pub global_tex_coords: [f32; 2],
+    pub material: u32,
+    pub sort_priority: u8,
+    pub points: Vec<Vec3>,
+}
+
+fn read_road(head: &[u8], points: &[u8]) -> Road {
+    let packed_material = u32_at(head, 59);
+    Road {
+        bbox: std::array::from_fn(|i| f32_at(head, i * 4)),
+        max_view_dist: f32_at(head, 28),
+        flags: u32_at(head, 32),
+        tex_coords: [f32_at(head, 43), f32_at(head, 47)],
+        global_tex_coords: [f32_at(head, 51), f32_at(head, 55)],
+        material: packed_material & 0x00ff_ffff,
+        sort_priority: (packed_material >> 24) as u8,
+        points: points.chunks_exact(12).map(|p| Vec3::new(f32_at(p, 0), f32_at(p, 4), f32_at(p, 8))).collect(),
+    }
+}
+
 /// A water volume (object type 11, the whole objects block): rivers are chains of 4-point quads, lakes and
 /// ponds a ring of 8..30 points. Cell-local, cry space.
 ///
@@ -179,6 +209,7 @@ pub struct CellObjects {
     pub brushes: Vec<Brush>,
     pub vegetation: Vec<Vegetation>,
     pub decals: Vec<Decal>,
+    pub roads: Vec<Road>,
     pub water: Vec<Water>,
     /// The active `ParticleEffect` entities of `entities.xml`.
     pub effects: Vec<PlacedEffect>,
@@ -387,7 +418,11 @@ fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
             13 => {
                 let head = r.bytes(63).ok()?;
                 let points = u32_at(head, 39) as usize;
-                r.skip(points.checked_mul(12)?).ok()?;
+                let bytes = points.checked_mul(12)?;
+                if bytes > end.checked_sub(r.pos())? {
+                    return None;
+                }
+                out.roads.push(read_road(head, r.bytes(bytes).ok()?));
             }
             11 => {
                 let rest = end.checked_sub(r.pos())?;
@@ -452,6 +487,7 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
     }
     if let Some(o) = from_octree {
         objects.decals = o.decals;
+        objects.roads = o.roads;
         objects.water = o.water;
     }
     if let Some(xml) = read("entities.xml") {
@@ -465,6 +501,17 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn road_count_is_bounded_by_its_octree_block() {
+        // Empty tables, one root node, one road claiming a vertex outside its object block.
+        let mut bytes = vec![0; 8 + 33 + 4 + 63];
+        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
+        bytes[36..40].copy_from_slice(&67u32.to_le_bytes());
+        bytes[41..45].copy_from_slice(&13u32.to_le_bytes());
+        bytes[84..88].copy_from_slice(&1u32.to_le_bytes());
+        assert!(parse_object_dat(&bytes).is_err());
+    }
 
     #[test]
     fn effect_entities_are_parsed() {
