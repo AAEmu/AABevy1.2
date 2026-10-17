@@ -264,6 +264,8 @@ pub struct EmitterDef {
     pub size: Var,
     pub size_x: Var,
     pub size_y: Var,
+    /// Scale of a mesh along its up axis (`Geometry` emitters only).
+    pub size_z: Var,
     pub stretch: Var,
     pub stretch_offset: f32,
     pub alpha: Var,
@@ -299,8 +301,16 @@ pub struct EmitterDef {
     pub config_min: u8,
     pub config_max: u8,
     pub has_geometry: bool,
-    /// The `Geometry` model of an emitter that emits meshes (not drawn here; see [`crate::EffectDef::geometry`]).
+    /// The `Geometry` model of an emitter that emits meshes (see [`crate::geom`]).
     pub geometry: String,
+    /// `BlendType` was written (a mesh takes its blend mode from its `.mtl` otherwise).
+    pub blend_explicit: bool,
+    /// `NoOffset`: a mesh keeps its own pivot instead of being centred on its bounding box.
+    pub no_offset: bool,
+    /// `NoUseMaterialAlpha`: the opacity of a mesh's material is ignored.
+    pub no_material_alpha: bool,
+    /// `IndependentUVTimer`: the texture animation of a mesh's material starts with every particle.
+    pub independent_uv_timer: bool,
     luts: OnceLock<Luts>,
 }
 
@@ -324,6 +334,7 @@ impl Default for EmitterDef {
             size: Var::constant(1.0),
             size_x: Var::constant(1.0),
             size_y: Var::constant(1.0),
+            size_z: Var::constant(1.0),
             stretch: Var::constant(0.0),
             stretch_offset: 0.0,
             alpha: Var::constant(1.0),
@@ -360,6 +371,10 @@ impl Default for EmitterDef {
             config_max: 3,
             has_geometry: false,
             geometry: String::new(),
+            blend_explicit: false,
+            no_offset: false,
+            no_material_alpha: false,
+            independent_uv_timer: false,
             luts: OnceLock::new(),
         }
     }
@@ -425,6 +440,7 @@ impl EmitterDef {
                     };
                 }
                 "BlendType" => {
+                    d.blend_explicit = true;
                     d.blend = match v {
                         "Additive" => Blend::Additive,
                         "ColorBased" => Blend::ColorBased,
@@ -449,6 +465,10 @@ impl EmitterDef {
                 "Size" => d.size = Var::parse(v, 1.0),
                 "SizeX" => d.size_x = Var::parse(v, 1.0),
                 "SizeY" => d.size_y = Var::parse(v, 1.0),
+                "SizeZ" => d.size_z = Var::parse(v, 1.0),
+                "NoOffset" => d.no_offset = truth(v),
+                "NoUseMaterialAlpha" => d.no_material_alpha = truth(v),
+                "IndependentUVTimer" => d.independent_uv_timer = truth(v),
                 "Stretch" => d.stretch = Var::parse(v, 0.0),
                 "StretchOffsetRatio" => d.stretch_offset = num(v).unwrap_or(0.0),
                 "Alpha" => d.alpha = Var::parse(v, 1.0),
@@ -500,9 +520,9 @@ impl EmitterDef {
         d
     }
 
-    /// Whether the emitter draws sprites: it has a texture (or a material) and a blend mode that shows.
+    /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
-        self.enabled && !self.has_geometry && self.blend != Blend::None && (!self.texture.is_empty() || !self.material.is_empty())
+        self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())
     }
 
     /// Emitter life in seconds, 0 = endless.
@@ -569,6 +589,7 @@ pub struct Luts {
     pub size: Lut,
     pub size_x: Lut,
     pub size_y: Lut,
+    pub size_z: Lut,
     pub alpha: Lut,
     pub color: Lut3,
     pub air: Lut,
@@ -588,6 +609,7 @@ impl Luts {
             size: Lut::bake(d.size.age.as_ref()),
             size_x: Lut::bake(d.size_x.age.as_ref()),
             size_y: Lut::bake(d.size_y.age.as_ref()),
+            size_z: Lut::bake(d.size_z.age.as_ref()),
             alpha: Lut::bake(d.alpha.age.as_ref()),
             color: Lut3(color),
             air: Lut::bake(d.air_resistance.age.as_ref()),

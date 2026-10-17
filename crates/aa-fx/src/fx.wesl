@@ -2,7 +2,9 @@
 //
 // The vertex colour carries the particle's colour (already lit) and alpha. `fx.gain.x` scales the colour into the camera's HDR
 // range (the world's materials output pre-exposed colours, see `FxSettings::gain`), `fx.gain.y` is the soft particle distance
-// in metres (0 = off), `fx.gain.z` is the blend mode (0 alpha, 1 premultiplied, 2 additive, 3 multiply).
+// in metres (0 = off), `fx.gain.z` is the blend mode (0 alpha, 1 premultiplied, 2 additive, 3 multiply, 4 opaque) and
+// `fx.gain.w` the alpha test threshold. Mesh particles with a separate opacity map (`fx.mask` weights its channels) sample it
+// with the mesh's second texture coordinates, so that the diffuse texture can scroll over a fixed mask.
 
 import bevy_pbr::render::{
     forward_io::VertexOutput,
@@ -12,11 +14,13 @@ import bevy_pbr::render::{
 
 struct FxParams {
     gain: vec4<f32>,
+    mask: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> fx: FxParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var fx_texture: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var fx_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var fx_mask: texture_2d<f32>;
 
 fn linear_depth(ndc_z: f32) -> f32 {
     return -depth_ndc_to_view_z(max(ndc_z, 1e-9));
@@ -40,11 +44,30 @@ fn soft_fade(frag: vec4<f32>) -> f32 {
     return 1.0;
 }
 
+// Opacity of the separate opacity map (1 where the material has none).
+@if(VERTEX_UVS_B)
+fn mask_opacity(in: VertexOutput) -> f32 {
+    if fx.mask.x + fx.mask.y + fx.mask.z + fx.mask.w <= 0.0 {
+        return 1.0;
+    }
+    return dot(textureSample(fx_mask, fx_sampler, in.uv_b), fx.mask);
+}
+@else
+fn mask_opacity(in: VertexOutput) -> f32 {
+    return 1.0;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(fx_texture, fx_sampler, in.uv);
-    let a = t.a * in.color.a * soft_fade(in.position);
+    let a = t.a * mask_opacity(in) * in.color.a * soft_fade(in.position);
+    if a < fx.gain.w {
+        discard;
+    }
     let rgb = t.rgb * in.color.rgb * fx.gain.x;
+    if fx.gain.z > 3.5 {
+        return vec4<f32>(rgb, 1.0);
+    }
     // Bevy's additive, premultiplied and multiply modes all expect premultiplied colour (additive with alpha 0)
     if fx.gain.z > 1.5 && fx.gain.z < 2.5 {
         return vec4<f32>(rgb * a, 0.0);
