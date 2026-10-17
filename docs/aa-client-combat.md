@@ -26,7 +26,9 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 * **Plots.** 1,328 of the 15,126 skills have a `plot_id`; every player weapon skill is one (the server's `skills.plot_id`). The
   server then sends `SCPlotEvent { event_id }` per step instead of one `SCSkillFired`. `plot_effects.actual_id` ->
   `special_effects` of type 34 (`Anim`: `value1` = `anims.id`), 35 / 36 (`FxGroup` / `FxGroupAnim`: `value1` = `fx_groups.id`),
-  37 / 38 (`Projectile` / `ProjectileAnim`: `value1` = `projectiles.id`). 3-hit slash 18132: steps 12130 / 12132 / 12133 play
+  37 / 38 (`Projectile` / `ProjectileAnim`: `value1` = `projectiles.id`). 450 steps carry two anims: `all_co_sk_stop` (id 46; or
+  `all_ac_stop`, 48), which only ends the clip before it and is in no `.cal`, then the clip: the step plays the last anim that is not a
+  stop (`PlotVisual::anim`; before, the stop won and the clip was lost). 3-hit slash 18132: steps 12130 / 12132 / 12133 play
   `onehand_co_sk_streakattack_1 / _2 / _3` (the skill's own `fire_anim_id` 296 is stage 1; `twohand_*` 299 and
   `twoswords_*` 504 are the other weapon classes), the hit check steps (12144, 12148, ...) carry nothing.
 * **Effect groups.** `fx_items`: `asset_name` is the aa-fx effect (`library.group.name` of `game/libs/particles/*.xml`),
@@ -144,9 +146,160 @@ the extra effects) but are short and small in the frames; effect
 brightness, the arrow's glow (the mesh is a flat additive model; the particle trail of `st1000b` is aa-fx's), and the exact hand
 pose of the bow.
 
+## Coverage
+
+How many skills would look right, measured from the data alone (no server, no window):
+
+```
+cargo run -p aa-client --example skill_coverage [-- --out data/extract/combat/skill_coverage.tsv]
+```
+
+The example (about 3 s once built) includes `combat/skills.rs` and `combat/clips.rs` as they are, so every skill is resolved by the
+code the client runs (`SkillBook`, `upper_candidates`, `ClipEvents::of`; a few `pub(crate)` entry points were added for it:
+`plot_steps`, `fx_group`, `fx_extras`, `projectile`). It writes one row per skill to `data/extract/combat/skill_coverage.tsv` (clips
+with their roles and the models that lack them, `miss_<model>` counts, stop markers, unresolved `move_ub` variants, looping clips,
+event gaps, effect class, missing / look-changing / invisible effects, features, hints, sound / voice / shake / material counts) and
+prints the tables below.
+
+**Skills.** Database `compact.sqlite3`, tables `skills`, `default_skills`, `localized_texts` (English names), `anims`, `plots`,
+`plot_events`, `plot_effects`, `special_effects`, `fx_groups`, `fx_group_fx_items`, `fx_items`, `fx_particles`, `projectiles`,
+`skill_visual_groups`, `skill_controllers`, `holdables` + `item_weapons` (the weapon attack clips of the auto attacks 2 / 3 / 4,
+which the server picks per weapon), and for monsters `npcs`, `npc_spawner_npcs`, `np_skills`, `models`, `actor_models`.
+
+* **Player skills, 231** = the ten ability trees (`skills.ability_id` 1 to 10: 170 skills, 110 of them `show`n in the skill window,
+  60 hidden sub skills such as call skills and weapon variants) + the 61 `default_skills` (15 basic: melee attack, kick, Shoot
+  Arrow, Return, instruments, glider, ...; 46 emotes). This DB has no racial skill table: nothing ties a skill to a race, so the
+  race axis is the 8 models (nuian / elf / hariharan / ferre x male / female, the `.cal` of `<race>/<gender>/nude/<pfx>_base.cal`).
+* **Monster skills, 370** (not already player skills): `base_skill_id` and `np_skills` of the NPCs that have a spawner and level 1
+  to 12 (the starting areas are not in the DB; the level is the stand in). Their clips are checked against the model of each NPC
+  that uses the skill.
+
+**Clips** are `start_anim` (when the skill casts or is a plot), `fire_anim`, `twohand_*`, `dual_wield_*`, `channeling_anim`, every anim of every plot step, the weapon attack clips, and the
+instrument and skill controller anims (the last two are not played by the client yet). "Present" means: a `.cal` entry, the `.caf`
+in the pak, and it decodes and binds to the model's skeleton (`ClipLibrary::bound`). `all_co_sk_stop` and `all_ac_stop` are
+markers ("end the clip before"), not clips: no `.cal` has them.
+
+**Effects** are all `fx_items.asset_name` of the skill's group, its projectile's group, its plot steps and its per level groups
+(`_dot` buff visuals left out, as the client does), looked up with aa-fx's own `Library::load` / `get`. What aa-fx cannot do is read
+off the raw emitter XML of the effects that exist: an attribute `EmitterDef::from_attributes` never reads (found by feeding the
+parser test values), a `Geometry` model, a `.mtl` with `RefrBumpScale`. aa-fx logs nothing for ignored attributes. The features
+marked `*` change how an effect looks; the rest (a light, a sound, a rendering detail) leave its sprites as they are.
+
+| | player (all) | tree, shown | basic + emote | monsters |
+|---|---:|---:|---:|---:|
+| skills | 231 | 110 | 61 | 370 |
+| with clips (incl. instrument / controller anims) | 205 | 101 | 47 | 244 |
+| **all clips present on all 8 models** (monsters: on their models) | 205 | 101 | 47 | 230 |
+| clips missing on some model | 0 | 0 | 0 | 14 |
+| clips missing on nu_m / nu_f / el_m / el_f / ha_m / ha_f / fe_m / fe_f | 0 each | 0 each | 0 each | n/a |
+| uses a stop marker (no clip) | 22 | 17 | 0 | 30 |
+| `move_ub` variant unresolved on the model (plays the whole clip through the mask) | 31 | 21 | 2 | 49 |
+| with particle effects | 173 | 110 | 5 | 219 |
+| **effects all found, nothing ignored by aa-fx** | 5 | 5 | 0 | 4 |
+| effects all found, minor loss only (light / sound / detail) | 10 | 7 | 2 | 34 |
+| effects all found, at least one looks different (`*` features) | 156 | 96 | 3 | 180 |
+| **effects missing** (at least one) | 2 | 2 | 0 | 1 |
+| at least one effect invisible (a mesh / trail / orbit and no sprite) | 10 | 7 | 0 | 16 |
+| uses a sound (any kind) | 168 | 109 | 4 | 222 |
+| ... `FxSound` item / sound bound to a particle item / emitter `Sound` | 26 / 151 / 12 | 7 / 109 / 2 | 0 / 1 / 3 | 18 / 207 / 20 |
+| voice (`FxVoice`) | 137 | 97 | 2 | 54 |
+| camera shake | 22 | 11 | 0 | 18 |
+| material flash (`FxMaterial`) | 24 | 9 | 2 | 34 |
+| **channeling** (channeling time or clip) | 12 | 10 | 2 | 10 |
+| **plot skills** | 40 | 31 | 1 | 19 |
+
+Distinct things of the player skills: **202 clips needed, none missing on any model** (the elf and hariharan `.cal` take the player clips of
+`global_player.cal` from the Nuian folders, and those files exist); **356 effects, 354 found** (37 plain, 50 with a minor loss, 267 that look different, of which 9
+draw nothing at all; 17 have nothing to draw by design: every emitter is switched off, or it only carries a sound or a light), 2
+missing. Of the 2,364 switched on emitters of the 354 effects, 674 (28 %) carry a feature that changes the look; the other 72 % draw as
+authored. Items that are not particles: 49 `FxSound`, 641 sounds bound to particles, 231 voices, 46 camera shakes, 55 material flashes.
+
+**Top missing clips (player skills): none.** The only names that no `.cal` has are the two stop markers (`all_co_sk_stop`, 20 skills;
+`all_ac_stop`, 4). Monsters (skills that use a clip their model's `.cal` lacks): `all_co_sk_spell_launch_d` 3, then 1 each:
+`all_co_sk_pull`, `all_co_sk_spell_cast_d`, `all_co_sk_spell_cast_missile`, `all_co_sk_spell_channel_nd`,
+`all_co_sk_spell_launch_missile`, `all_co_sk_spell_launch_nd`, `all_re_combat_stun`, `fist_ba_spawn`, `fist_co_sk_bite`,
+`onehand_co_sk_shieldpush`, `onehand_co_sk_throw`, `onehand_co_sk_weapon_slash_3`, `onehand_co_sk_windslash`,
+`twohand_co_sk_weapon_slash_3`, `twohand_co_sk_windslash`.
+
+**Top missing effects (player skills): two**, one skill each, both typos of the data (the effect exists under another name):
+`abillity_skill_table_m.illusion.tired_curse_form` (10134 Lassitude; the library has `_cast` and `_hit` only) and
+`abillity_skill_table_m.wild.long_distance_shot_launch` (13281 Missile Rain; the library has `test.long_distance_shot_launch`). Monsters:
+`ability_skill_table_k.p_skill_adament.p_skill_disarmament`.
+
+**Unsupported features by player skills affected** (231 player skills; "tree" = the 110 shown tree skills; "share" = the part of the
+enabled emitters of the effects that have the feature that carry it):
+
+| skills | tree | effects | emitters | share | feature |
+|---:|---:|---:|---:|---:|---|
+| 157 | 96 | 242 | 312 | 15 % | light (`LightSource*`, `LightHDRDynamic`) |
+| 98 | 57 | 120 | 150 | 13 % | **refraction** `*` (`.mtl` with `RefrBumpScale`; drawn as the plain diffuse map) |
+| 78 | 49 | 100 | 167 | 20 % | **geometry** `*` (47 skills in projectile groups, 53 elsewhere; 9 effects are nothing but meshes) |
+| 75 | 43 | 72 | 159 | 25 % | `InheritVelocity` |
+| 75 | 49 | 78 | 140 | 19 % | `NoOffset` |
+| 68 | 34 | 62 | 92 | 18 % | **tails** `*` (`TailLength`, `TailSteps`) |
+| 62 | 34 | 62 | 135 | 19 % | **collisions** `*` (`PhysicsType`, `Collide*`, `Bounciness`, `ParentCollide`) |
+| 61 | 35 | 58 | 113 | 21 % | `EmissiveHDRDynamic` |
+| 58 | 26 | 48 | 81 | 29 % | `IndependentUVTimer` |
+| 58 | 38 | 67 | 103 | 23 % | `SizeZ` |
+| 57 | 37 | 65 | 116 | 18 % | **`Rotate*` orbiting** `*` |
+| 37 | 23 | 47 | 72 | 21 % | **`AttachType` / `AttachForm`** `*` (emission shapes) |
+| 31 | 19 | 33 | 50 | 11 % | **decals** `*` (`DecalMode`, ...) |
+| 27 | 14 | 23 | 39 | 13 % | `AlphaTest` |
+| 20 | 13 | 22 | 24 | 13 % | `ForceGeneration` |
+| 12 | 2 | 10 | 14 | 8 % | emitter `Sound` |
+| 10 | 1 | 5 | 12 | 20 % | `BindToOffset` |
+| 8 | 4 | 15 | 38 | 16 % | `OceanParticle` |
+| 5 / 4 / 4 / 3 / 2 | | | | | `SecondGenerationRemoveCamera`, `NoUseMaterialAlpha`, `Thickness`, `LocalRotate`, `SurfaceType` |
+
+Ignored cost and visibility hints, not counted: `IgnoreAttractor` 39 skills, `VisibleUnderwater` 27, `NotAffectedByFog` 23,
+`FillRateCost` 14, `DisableVisClipping` 3, `ViewDistanceAdjust` 2, `CastShadows` 1. By set, every ability tree has 11 to 22 skills that
+look different and at most 2 plain ones.
+
+**What the data says the client does not do yet** (counted over the player skills):
+
+* **Stop markers.** 17 plot steps play two anims, `all_co_sk_stop` first and then the clip; 4 steps play a stop only (it means
+  "end the clip that loops"). The two anims were a bug (see below); the stop-only steps still do nothing, so a cast loop that a
+  plot ends with a stop keeps looping until its hold time runs out.
+* **Looping clips are played once.** 16 clips of the fire / plot steps have `anims.loop` (every mage and healer cast and channel pose:
+  `all_co_sk_spell_cast_fireball`, `_flash`, `_spear`, `_cure`, `all_co_sk_spell_channel_cure`, `_sorb`, `_tug`, `_pray`,
+  `all_co_sk_pull_cast`, `bow_co_sk_high_cast`, `onehand_co_sk_weapon_blunt_3_cast`, ...) and the client plays plot clips once; 19
+  player skills, 16 of the 110 shown tree skills. Channeling is part of it: every `channeling_anim_id` of the player skills is a stop
+  marker, so the 12 channeling skills channel with their `fire_anim` (6: Invincibility, Protective Wings, Meditate, Summon Wraith,
+  Telekinesis, Twilight), a plot step (3: Lasso, Crippling Mire, Absorb Lifeforce) or no clip (3: Play Dead, `/bow`, `/kneel`), and the
+  pose plays once while the channel lasts 4 to 60 s.
+* **Weapon class.** 25 player skills have a `twohand_*` clip and 10 a `dual_wield_*` clip (9 and 3 shown tree skills); the client plays the one hand
+  clip. All of them exist on all models.
+* **Controller and instrument anims** (5 and 5 skills: Charge, Overwhelm, Drop Back, the music skills) are not played; 9 shown tree
+  skills have no clip anywhere in the data (passives and buffs: Stealth, Freerunner, Play Dead, ...).
+* **Per level visuals** (`skill_visual_groups`: 27 rows for 9 tree skills) are not used.
+* **Anim events.** 112 player skills time launch effects or a projectile by a clip; 7 of them (6 tree skills: Sunder Earth, Lasso,
+  Freezing Arrow, Arc Lightning, Flamebolt, Skewer) use a looping cast clip that has no `launch` / `combat_sync` event, which is
+  right: the effects start with the clip (release 0). Every other launch timed clip has a `launch` event on all 8 models.
+
+**Build next**, in order of skills fixed per effort:
+
+1. **Plot step clips in aa-client** (0.5 day): end the loop on a stop marker, loop `anims.loop` clips until the next step or
+   `PlotEnded` / `PlotStopped`, pick the `twohand_` / `dual_` clip by the equipped weapon, play the controller and instrument
+   anims. 16 shown tree skills' casting and channeling poses, 9 + 3 weapon variants.
+2. **Geometry emitters in aa-fx** (2 to 3 days): mesh particles (size from `Size` / `SizeX` / `SizeY` / `SizeZ`, material from the
+   `.mtl`, aa-cry's `MaterialHook` for the additive look; the arrow is done by hand in `combat.rs`). 78 skills, 49 tree skills, and the
+   main shape of the slash, lightning and shock effects; 9 effects draw nothing without it.
+3. **`Rotate*` orbiting in aa-fx** (0.5 to 1 day, simulation only): 57 skills, 37 tree skills.
+4. **Refraction** (0.25 day to stop drawing them as plain glow sprites if the frames show blobs, then 1 to 2 days for a screen space
+   distortion pass): 98 skills, 57 tree skills; the largest group after the light.
+5. **Tails** (0.5 day as `Stretch` streaks, 1.5 days as ribbons): 68 skills, 34 tree skills.
+6. **Lights** (1 day: a budgeted `PointLight` per effect): 157 skills, 96 tree skills, but only 15 % of the emitters.
+7. **Camera shakes** (0.5 day, `fx_shake_cameras`: 22 skills, 46 items), **decals** on terrain (1 day, 31 skills: ground rings),
+   **material flashes** (1 day, 24 skills), **per level visual groups** (0.5 day).
+8. **Collisions** (1 day, terrain only: sparks that bounce, 62 skills) and **emission shapes** (1 to 2 days, 37 skills) last.
+9. **Sounds and voices** (168 skills with a sound, 137 with a voice) need a sound system first (`Sounds/x2skills:...` names); a
+   separate project.
+
 ## Not done
 
-* Channeling skills (`channeling_anim_id`, `channeling_time`): the channel clip is not played.
+* Channeling skills (`channeling_anim_id`, `channeling_time`): the channel clip is not played. Looping clips of plot steps and fire
+  clips (`anims.loop`) play once, stop markers do not end a cast loop, and the controller and instrument anims are unused; see
+  "Coverage" for the counts.
 * Two-handed / dual wield clip choice for plot steps is whatever the step names; the weapon in the hand is a single sword
   (`Grip::Blade` puts the main hand weapon in the right hand, an off-hand weapon in the left).
 * Mounted, swimming and flying casters, doodad and ship cannon projectiles.
