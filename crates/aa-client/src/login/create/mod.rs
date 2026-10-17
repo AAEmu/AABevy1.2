@@ -329,6 +329,7 @@ fn sync_net(screen: Option<ResMut<CreateScreen>>, characters: Res<Characters>) {
 fn step_slot(step: u8, race: Race, gender: Gender) -> StageSlot {
     match step {
         3 => poses::slot_step_3(race, gender),
+        2 => poses::slot_step_2(race, gender),
         _ => poses::slot_steps_1_2(race, gender),
     }
 }
@@ -429,6 +430,10 @@ fn update_preview(
     };
     let model_changed = screen.built.is_none_or(|(_, r, g)| (r, g) != (race, gender));
     let look_changed = screen.built.is_none_or(|(v, _, _)| v != rev);
+    // dev: `AA_CREATE_NO_SUBJECT=1` leaves the stage empty (background shots for silhouette measuring)
+    if std::env::var_os("AA_CREATE_NO_SUBJECT").is_some() {
+        return;
+    }
     if look_changed && (model_changed || now - screen.last_build >= REBUILD_SECONDS) {
         let t0 = std::time::Instant::now();
         let assets = {
