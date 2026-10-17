@@ -40,7 +40,7 @@ pub use login::Secret;
 pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;
-pub use party::{Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
+pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use wire::Pos;
 
 #[cfg(feature = "bevy")]

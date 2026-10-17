@@ -895,6 +895,10 @@ impl Session {
                 }
             }
             Command::Party(m) => {
+                if let Err(message) = m.validate() {
+                    self.emit(Event::Party(crate::party::PartyEvent::RequestRejected(message.into())));
+                    return;
+                }
                 let replied = match &m {
                     crate::party::PartyCommand::Reply { invite, .. } => Some(invite.sender_id),
                     _ => None,
