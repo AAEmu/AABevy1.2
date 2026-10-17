@@ -16,6 +16,7 @@ pub mod post;
 mod post_bloom;
 pub mod profile;
 pub mod reader;
+mod roads;
 pub mod sky;
 pub mod sky_clouds;
 pub mod sky_material;

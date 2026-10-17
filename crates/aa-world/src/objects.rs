@@ -14,6 +14,8 @@
 //!   when the band changes (the new sector is built hidden next to the old one and swapped in when complete);
 //! * water volumes (rivers, lakes, ponds) of a cell are merged into one flat mesh per water style (material and
 //!   fog), built on the task, drawn with `water_material::WaterMaterial`;
+//! * roads are terrain triangles clipped to the original spline boundaries on the placement task, with
+//!   cached diffuse/normal/opacity materials and the same cell lifetime as the water;
 //! * instancing: all parts of one model share mesh and material handles, which Bevy batches into instanced
 //!   draws. Parts are flattened (the node transform is baked) so an instance costs one entity per drawn part.
 
@@ -33,6 +35,7 @@ use bevy::render::render_resource::TextureViewDimension;
 
 use crate::coords::{CRY_TO_BEVY, CELL_SIZE, SECTOR_SIZE, bevy_to_cry, cell_origin, cry_to_bevy};
 use crate::placement::{CellObjects, load_cell_objects};
+use crate::roads::{RoadAssets, RoadMaterial, RoadMesh};
 use crate::stream::{Streamer, WorldConfig, WorldFocus};
 use crate::vegetation::VegGroups;
 use crate::water::{WaterStyle, water_meshes};
@@ -184,6 +187,9 @@ pub struct ObjectState {
     rx: Mutex<Receiver<CellMessage>>,
     /// The water mesh entities of each cell (one per water style).
     water: HashMap<(i32, i32), Vec<Entity>>,
+    /// Terrain road entities, released with their owning placement cell.
+    roads: HashMap<(i32, i32), Vec<Entity>>,
+    road_assets: RoadAssets,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
     /// The placed sounds of each cell ([`sounds`]).
@@ -195,8 +201,8 @@ pub struct ObjectState {
     pub stats: ObjectStats,
 }
 
-/// What a placement task delivers: the binned data and the water meshes of the cell.
-type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>);
+/// What a placement task delivers: binned objects, water meshes and prepared roads of the cell.
+type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>, Vec<RoadMesh>);
 
 #[derive(Default, Clone, Debug)]
 pub struct ObjectStats {
@@ -209,6 +215,7 @@ pub struct ObjectStats {
     pub models_failed: usize,
     pub spawn_ms: f32,
     pub water_cells: usize,
+    pub roads: usize,
 }
 
 impl ObjectState {
@@ -231,6 +238,8 @@ impl ObjectState {
             tx,
             rx: Mutex::new(rx),
             water: HashMap::new(),
+            roads: HashMap::new(),
+            road_assets: RoadAssets::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
             groups_tx,
@@ -296,6 +305,8 @@ pub fn stream_objects(
     mut cry: CryAssets,
     mut water_styles: ResMut<WaterStyles>,
     mut water_materials: ResMut<Assets<WaterMaterial>>,
+    mut road_materials: ResMut<Assets<RoadMaterial>>,
+    terrain: Res<crate::TerrainQuery>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
     timers: Option<Res<crate::profile::Timers>>,
@@ -336,6 +347,12 @@ pub fn stream_objects(
             commands.entity(e).despawn();
         }
     }
+    let gone: Vec<_> = state.roads.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    for c in gone {
+        for e in state.roads.remove(&c).unwrap_or_default() {
+            commands.entity(e).despawn();
+        }
+    }
     let gone: Vec<_> = state.effects.keys().filter(|c| !loaded.contains(c)).copied().collect();
     for c in gone {
         for e in state.effects.remove(&c).unwrap_or_default() {
@@ -369,18 +386,22 @@ pub fn stream_objects(
         let world = cfg.world.clone();
         let threshold = cfg.vegetation_distance;
         let distance = (dx * dx + dy * dy).sqrt();
+        let terrain = terrain.clone();
+        let loader = cry.loader();
+        let road_assets = state.road_assets.clone();
         Workers::global().spawn(distance - 50000.0, move || {
             let objects = load_cell_objects(&world, c.0, c.1);
             let water = water_meshes(&objects.water, &objects.materials);
+            let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
             let data = CellObjectData::new(objects, threshold);
-            let _ = tx.send((c, data, water));
+            let _ = tx.send((c, data, water, roads));
         });
     }
     let received: Vec<CellMessage> = {
         let rx = state.rx.lock().unwrap();
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     };
-    for (c, data, water) in received {
+    for (c, data, water, roads) in received {
         state.loading.remove(&c);
         if !loaded.contains(&c) {
             continue;
@@ -402,6 +423,26 @@ pub fn stream_objects(
         if !entities.is_empty() {
             state.water.insert(c, entities);
         }
+        let mut entities = Vec::new();
+        for road in roads {
+            let Some(material) = road.material(&mut cry, &mut road_materials) else { continue };
+            let end = road.distance.min(cfg.brush_distance).max(0.0) + road.radius;
+            entities.push(commands.spawn((
+                Name::new("Terrain road"),
+                Mesh3d(cry.meshes.add(road.mesh)),
+                MeshMaterial3d(material),
+                Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
+                VisibilityRange {
+                    start_margin: 0.0..0.0,
+                    end_margin: end..end + 20.0,
+                    use_aabb: true,
+                },
+                NotShadowCaster,
+            )).id());
+        }
+        if !entities.is_empty() {
+            state.roads.insert(c, entities);
+        }
         let placed = effects::spawn_cell(&mut commands, c, &data.objects.effects);
         if !placed.is_empty() {
             state.effects.insert(c, placed);
@@ -413,6 +454,7 @@ pub fn stream_objects(
         state.cells.insert(c, Arc::new(data));
     }
     state.stats.water_cells = state.water.len();
+    state.stats.roads = state.roads.values().map(Vec::len).sum();
     let Some(groups) = state.groups.clone() else { return };
 
     // models prepared by the workers: insert them (a few per frame)

@@ -141,9 +141,57 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 1 | brush, 128 B |
 | 2 | vegetation, 64 B |
 | 9 | decal, 111 B (kept raw) |
-| 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); skipped |
+| 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, the rest of the block |
 | 6, 14 | the rest of the block, not decoded (fog volumes / auto cubemaps, probably) |
+
+Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
+63-byte header: common render-node data through byte 38, `u32 vertexCount` at 39,
+`f32 uvBegin, uvEnd` at 43/47, `f32 globalUvBegin, globalUvEnd` at 51/55, and a packed
+material/sort word at 59 (material index in the low 24 bits, sort priority in the high byte).
+Then come `vertexCount` float3 points, alternating left/right edges along the spline. These
+are spline boundaries, not mesh vertices to connect directly. Source evidence:
+`D:/aa-re/zone/out/cry3dengine_dedicate.c`, `sub_302207D0` (reflection offsets, size 63)
+and `sub_30222AA0` (load, material mask and sort byte). The corresponding public
+[engine road implementation](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/Cry3DEngine/RoadRenderNode.cpp)
+documents terrain-triangle clipping and plane-distance UV generation.
+
+Each pair of adjacent left/right edges defines four vertical clipping planes. The worker
+clips the full-resolution two-metre terrain triangles against them, retains interpolated
+terrain normals, and raises the result by the engine's 0.06 m road offset. Roads that cross
+a cell boundary read the neighbouring heightmap; they are not clamped to their owner's cell.
+UV U spans the object's stored range uniformly over its trapezoids, V spans the road's width;
+only the global spline ends fade through vertex alpha. The source material's diffuse/normal
+maps, colour, opacity, roughness and UV modifier use the existing `aa-cry` conversion.
+An extended material samples `Map="Opacity"` independently and multiplies alpha by
+`saturate(dot(opacityChannelMask, opacityMap))`, as `illum.cfx` does. This matters: of the
+88 original `aa_terrain/roads` materials, 15 have a separate opacity map and 11 of those
+give it different tiling from diffuse. DDS reads and meshes are prepared on placement workers,
+materials/textures are cached across cells, and road entities despawn with their placement
+cell. Per-road visibility uses the stored view distance capped by `brush_distance`.
+
+Focused checks: `cargo test -p aa-world --lib road` covers malformed payload bounds,
+clipped area/winding and sloped heights, UV continuity and global end fades, independent
+opacity transforms/channel masks, and all 11 roads of (14,11) plus 35 Memoria (10,14) roads,
+including cross-cell geometry. Adjacent original heightmaps can disagree by centimetres at
+their shared samples; each side retains its own rendered terrain triangle. The `roads`
+example inspects cell (14,11) by default, `--memoria` the forest path, `--reference` the Nuian
+spawn reference, and `--stream-check --exit-after 18` asserts that unloading leaves no road
+entities. Remaining road limits: coarse terrain LODs can diverge from these fine projected
+triangles at distance, and the original per-texture specular/gloss behavior uses the existing
+material approximation. Type 9 decals remain unrendered.
+
+Visual checks (2026-10-17, shared machine, RX 9070 XT):
+`shots/aa-world/roads/memoria.png` shows the original soft-banked dirt-road junction, 91
+streamed road sections / 20,543 object parts, 100–120 FPS at 1600x900 after loading;
+`cell14_11.png` has 12 road sections / 6,645 object parts, 126–165 FPS (the zone's orange
+fog remains); `spawn-reference.png` uses the same camera/hour as `reference/ingame/spawn/real.png`,
+107–122 FPS at 1920x1080. Terrain/vegetation framing aligns with that reference; the
+pre-existing water, lighting and missing gameplay entities are outside this road change.
+The unload smoke asserts that the road count and actual road entities become zero after
+leaving the loaded world. All three screenshot runs and the unload run complete successfully, no
+road shader/runtime errors. Cell (14,11) still logs the existing water `blue_sky.dds` not-a-cube
+warning. All five focused road tests and `cargo check -p aa-world --examples` pass.
 
 Water volume (type 11), cell-local, cry space: `f32 bbox[6]` @0 (z range = `[surface - depth, surface]`), `f32 maxViewDist` @28, `u8 viewDistRatio,
 lodRatio` @36, `u32` volume type @39 (low 2 bits: 2 = area, 3 = river; 515 / 1027 have flags above), an editor guid @43, `u32` material index @51 (into the
@@ -935,8 +983,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
-  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
-  (types 13 and 9, `aa_terrain/roads`, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure.
+  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; `object.dat` decals
+  (type 9, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure. Roads are rendered (see below).
 * Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
   at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
@@ -944,7 +992,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
+* Not rendered: object.dat decals (type 9), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
   the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
