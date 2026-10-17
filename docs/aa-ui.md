@@ -454,6 +454,7 @@ App::new()
   | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
   | `AAUI.ChatColor(filter)` | `X2Chat:DispatchChatMessage` | `{ r, g, b }` or nil (a default per filter) |
   | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 2, zone = 5, player = { u, v, angle }, markers = { { u, v, kind, icon, coords, tooltip }, ... } }` (level as the scripts register maps: 2 zone, 3 city; `u, v` on the map image, 0..1; `angle` the heading in radians, 0 north, clockwise, `-yaw` of the engine; `kind` a lower-case `M_*` name of `map/common.lua` such as `"quest_zone_gives"` (yellow !) or `"quest_main_gives"`, icons from `ui/map/icon/npc_icon.dds` unless `icon` / `coords` are given; `npc_*` kinds show with the map's NPC option; `markers_version`, an integer, keeps an unchanged list from being read again) |
+  | `AAUI.PlaceMapPing(level, id, u, v)` / `AAUI.RemoveMapPing()` | original world map ping placement / removal | Optional: return true to send an app request and retain the last confirmed marker until echo; nil/false uses local behavior. Coordinates are normalized on the displayed map image after zoom, pan, and widget scale. Callback failure logs and consumes the request. `WorldMap` / `RoadMap` results accept `ping = false` to clear or `ping = { level, id, u, v, maps = {{level,id,u,v}, ...}, version = sequence }` to place the echo on both maps; omitted `ping` preserves local state. Optional version restarts the pulse for a repeated point. `UpdatePingInfo` applies immediately; visible map ticking also reads the echo. |
 
   The scripts' `UIParent:Log` / `LogAlways` (`print`) output (state names, event names) is logged at debug level
   under the target `aa_ui::lua` (`RUST_LOG=aa_ui::lua=debug` shows it); `UIParent:Warning` / `Error` stay
@@ -811,3 +812,21 @@ passes, bringing the total to 92. Captures use the existing
 
 The captured contract is in `docs/ui-api.md` under X2Hotkey; original defaults are in the pak's
 `default_binding.g`. No application integration hook is needed for the animation milestone.
+
+## Authoritative party map pings
+
+`PlaceMapPing` and `RemoveMapPing` let the app send party requests while the original marker
+retains its last confirmed point. Both maps consume the same optional `ping` echo; the world
+map also accepts exact upper-map projections in `ping.maps`, with the existing mask fallback
+when absent. The original `SET_PING_MODE` and `SET_EFFECT_ICON_VISIBLE` handlers stop the
+placement mode and animate the ping art. Unchanged echoes preserve the mesh content version.
+Local examples keep placement/removal when callbacks are absent or decline the request.
+
+`worldmap` tests cover waiting for echo/removal, callback failure, local fallback, normalized
+coordinates after zoom/pan/widget scale, and explicit continent projections.
+`map_ping_original` runs original `ping.alb`/`ping_view.alb` and verifies both icons, pulse
+restart, unchanged echo, and removal. The full runtime suite passes 96 tests (one ignored).
+`shots/aa-ui/animation/map-ping.png` shows both original blue ping icons and pulse art;
+compared with `reference/ingame/worldmap_zone/real.png` for the map frame and art. The existing
+`ingame_hud` / `aa_dev` harness logged 221 FPS with the map open, 413 FPS before opening,
+zero script errors, and closed itself after capture.
