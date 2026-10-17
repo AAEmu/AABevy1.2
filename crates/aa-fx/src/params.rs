@@ -203,9 +203,10 @@ pub enum Facing {
     Camera,
     /// A card in 3D space turned by the particle's angles.
     Free,
-    /// Faces the camera, hangs from the particle (its bottom edge) and turns about the vertical axis only.
-    Bottom,
-    /// Flat on the ground (horizontal, water, terrain, decals).
+    /// Flat on the ground (`Bottom`, `Water`, `Decal`, `Horizontal`, `Terrain`). `Bottom` is the ring, ripple, glow and fire of
+    /// the ground: the click marker of the interface (`ui.click_0000`) stacks a `Decal` ring and a `Bottom` ring of the same
+    /// texture, the ground fires and the bases of the area skills (`Size 10`) are `Bottom` too (it was a standing billboard
+    /// before round 5, which stood every magic circle up in the air).
     Flat,
 }
 
@@ -243,7 +244,7 @@ pub enum Spawn {
     ParentCollide,
 }
 
-/// Tiled / animated texture: `TextureTiling="tilesX,tilesY,firstTile,variants,frames,fps,fpsVariation,cycle"`.
+/// Tiled / animated texture: `TextureTiling="tilesX,tilesY,firstTile,variants,frames,fps,cycle,blend"`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tiling {
     pub x: u32,
@@ -500,7 +501,8 @@ impl EmitterDef {
                         variants: n(3, 1).max(1),
                         frames: n(4, 1).max(1),
                         fps: p.get(5).and_then(|s| num(s)).unwrap_or(0.0),
-                        cycle: p.get(7).is_some_and(|s| truth(s.trim())),
+                        // field 6 is `AnimCycle`, 7 is `AnimBlend` (true on 3877 emitters: frame blending, not looping; 36 loop)
+                        cycle: p.get(6).is_some_and(|s| truth(s.trim())),
                     };
                 }
                 "BlendType" => {
@@ -517,8 +519,7 @@ impl EmitterDef {
                 "Facing" => {
                     d.facing = match v {
                         "Free" => Facing::Free,
-                        "Bottom" => Facing::Bottom,
-                        "Water" | "Decal" | "Horizontal" | "Terrain" => Facing::Flat,
+                        "Bottom" | "Water" | "Decal" | "Horizontal" | "Terrain" => Facing::Flat,
                         _ => Facing::Camera,
                     };
                     if v == "Velocity" {

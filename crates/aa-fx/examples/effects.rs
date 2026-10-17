@@ -20,6 +20,8 @@
 //! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
 //!   effect in a single shot; add `--loop` and `--no-prime`)
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
+//! * `--swing <s>`              a sword slash: the effect starts at 3 s, and the entity swings like a hand with a blade (the effect's
+//!   forward -Z is the blade) through 170 degrees in the plane facing the camera, in `<s>` seconds (0.3 is a fast cut)
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
 //! * `--lift <m>`                 raises every effect (the pedestal stays): a cast orb at hand height
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
@@ -79,6 +81,26 @@ struct Sweep {
     radius: f32,
 }
 
+/// An effect swung like a hand with a sword in the plane facing the camera: the blade (the effect's -Z) turns through
+/// `from..to` degrees in `duration` seconds from `t0`, the hand riding on a circle of 0.45 m round `centre`.
+#[derive(Component)]
+struct Swing {
+    t0: f32,
+    duration: f32,
+    centre: Vec3,
+}
+
+fn swing(time: Res<Time>, mut q: Query<(&Swing, &mut Transform)>) {
+    for (s, mut t) in &mut q {
+        let k = ((time.elapsed_secs() - s.t0) / s.duration).clamp(0.0, 1.0);
+        let k = k * k * (3.0 - 2.0 * k);
+        let phi = (100.0 + (-70.0 - 100.0) * k).to_radians();
+        let dir = Vec3::new(phi.cos(), phi.sin(), 0.0);
+        t.translation = s.centre + Vec3::Y * 1.2 + dir * 0.45;
+        t.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, dir);
+    }
+}
+
 fn sweep(time: Res<Time>, mut q: Query<(&Sweep, &mut Transform)>) {
     let a = time.elapsed_secs() * 8.0;
     for (s, mut t) in &mut q {
@@ -92,12 +114,16 @@ struct Later {
     at: f32,
     effect: Effect,
     place: Transform,
+    swing: Option<Swing>,
 }
 
 fn start_later(mut commands: Commands, time: Res<Time>, later: Query<(Entity, &Later)>) {
     for (e, l) in &later {
         if time.elapsed_secs() >= l.at {
-            commands.spawn((l.effect.clone(), l.place));
+            let mut spawned = commands.spawn((l.effect.clone(), l.place));
+            if let Some(s) = &l.swing {
+                spawned.insert(Swing { t0: s.t0, duration: s.duration, centre: s.centre });
+            }
             commands.entity(e).despawn();
         }
     }
@@ -139,7 +165,7 @@ fn main() {
         .insert_resource(Spawn { effects, grid, spacing })
         .insert_resource(ClearColor(Color::srgb(0.01, 0.012, 0.02)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep))
+        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep, swing))
         .run();
 }
 
@@ -223,14 +249,19 @@ fn setup(
     for (i, (name, pos)) in positions.into_iter().enumerate() {
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
-        if num("--sweep", 0.0) > 0.0 {
+        if num("--swing", 0.0) > 0.0 {
+            // loads the effect behind the camera first, then slashes at 3 s
+            commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
+            let swing = Swing { t0: 3.0, duration: num("--swing", 0.3), centre: pos };
+            commands.spawn(Later { at: 3.0, effect, place, swing: Some(swing) });
+        } else if num("--sweep", 0.0) > 0.0 {
             commands.spawn((effect, place, Sweep { centre: pos, radius: num("--sweep", 0.0) }));
         } else if stagger > 0.0 {
             // the copies start once the first one has loaded everything (an identical effect behind the camera loads it)
             if i == 0 {
                 commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
             }
-            commands.spawn(Later { at: 3.0 + i as f32 * stagger, effect, place });
+            commands.spawn(Later { at: 3.0 + i as f32 * stagger, effect, place, swing: None });
         } else {
             commands.spawn((effect, place));
         }
