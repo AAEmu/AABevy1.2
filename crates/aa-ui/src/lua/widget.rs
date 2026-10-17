@@ -85,6 +85,9 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     let mut g = ui(lua);
     let u = &mut *g;
     let was = u.tree.get(id).shown;
+    if !visible && fade_ms.is_none_or(|ms| ms <= 0.0) {
+        super::damage::hide(u, id);
+    }
     if (was != visible || fade_ms.is_some_and(|ms| ms > 0.0))
         && let Some(alpha) = u.animations.widget_sample(id).alpha
     {
@@ -1477,6 +1480,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         )?;
     }
     super::animation::widget_methods(lua, &m)?;
+    if ty == "damagedisplay" { super::damage::methods(lua, &m)?; }
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)
 }

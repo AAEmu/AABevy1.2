@@ -839,3 +839,37 @@ but have not been named conclusively. It uses the player's instance only when th
 map kind/id equals the player's current map kind/id; otherwise instance 0. Native removal
 (`392d49c0`) sends false, a zero vector, and instance 0. The app owns surface sampling and
 instance selection; the toolkit callback intentionally exposes map level/id and normalized XY.
+
+## Native combat text display
+
+`damagedisplay:SetAnimFrameInfo` now reads the original combat frame grammar; it is separate
+from drawable atlas animation. Frames support hold/transition timing, alpha/scale interpolation,
+accumulated movement, counting numbers, timed letter reveal (spaces are free), deterministic
+shake, and authored afterimages. Native scale is clamped to at least 0.1. Exactly one phase
+advances per render tick, with overshoot discarded. `Animation(true)` does not restart an active
+display; stopping, hiding, or completing clears the active state and releases the original pool
+slot. Empty frame tables remain shown without drawing, matching native behavior.
+
+Optional `AAUI.CombatTextPosition(sourceId, targetId)` returns `{x, y, alpha = 1}`: physical
+screen pixels at the projected target's authored height, with optional distance fade. A nil
+result culls the display, including attached art, and skips phase updates while absolute time
+continues. Without a hook the examples use screen center. `SetInitPos(x,y)` truncates to native
+integers and offsets that position. The app supplies projection/height/distance; the toolkit
+keeps the animation and text effects. Movement/shake affect text; attached critical atlas art
+follows the projected widget independently. All samples live outside the layout tree, and
+continuous scale transforms reuse rasterized glyphs instead of filling the font atlas with
+intermediate sizes. Whole-text primary/extra font selection uses real glyph support.
+
+Native references in the unpacked 1.2 client: frame parser `39288530`, animation start
+`39286710`, rendering/timeline `39287500`, shake `39286860`, and afterimages `39286920`.
+`tests/damage.rs` covers native timing, no layout/content churn during holds, projection,
+count/reveal/afterimages, culling, independent art, active restart/stop, shake, and original
+`combat_text.alb` events/pool reuse. The full runtime suite passed 101 tests plus both doc
+tests (one font test ignored); the added shake and original combat-state regression also pass,
+bringing runtime coverage to 102 tests.
+
+`examples/combat_text.rs` uses `aa_dev` and the original stage scripts with fixture projections.
+`shots/aa-ui/animation/combat-text.png` shows white melee numbers, the critical blood atlas,
+and the red "Battle Start!" text. Compared with `reference/ingame/combat_melee/real_06.png`
+for font shape, size, color and alignment; fixture positions replace unit projection.
+Captures logged 435-515 FPS during repeated bursts, zero script errors, and exited.

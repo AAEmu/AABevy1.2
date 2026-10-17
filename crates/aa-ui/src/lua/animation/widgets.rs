@@ -12,6 +12,7 @@ pub struct WidgetSample {
     pub alpha: Option<f32>,
     pub scale: f32,
     pub pivot: Point,
+    pub offset: [f32; 2],
 }
 
 impl Default for WidgetSample {
@@ -20,6 +21,7 @@ impl Default for WidgetSample {
             alpha: None,
             scale: 1.0,
             pivot: Point::Center,
+            offset: [0.0; 2],
         }
     }
 }
@@ -30,7 +32,7 @@ impl WidgetSample {
             rect.x + rect.w * self.pivot.fx(),
             rect.y + rect.h * self.pivot.fy(),
         ];
-        std::array::from_fn(|i| pivot[i] + (point[i] - pivot[i]) * self.scale)
+        std::array::from_fn(|i| pivot[i] + (point[i] - pivot[i]) * self.scale + self.offset[i])
     }
 }
 
@@ -38,6 +40,7 @@ pub(super) struct Widgets {
     states: HashMap<Id, State>,
     active: BTreeSet<Id>,
     ui_scale: f32,
+    offsets: HashMap<Id, [f32; 2]>,
 }
 
 struct State {
@@ -55,6 +58,7 @@ impl Default for Widgets {
             states: Default::default(),
             active: Default::default(),
             ui_scale: 1.0,
+            offsets: Default::default(),
         }
     }
 }
@@ -164,6 +168,7 @@ impl State {
             } else {
                 Point::Center
             },
+            offset: [0.0; 2],
         }
     }
     fn running(&self) -> bool {
@@ -173,9 +178,16 @@ impl State {
 
 impl Widgets {
     pub fn sample(&self, id: Id) -> WidgetSample {
-        self.states
+        let mut sample = self.states
             .get(&id)
-            .map_or_else(Default::default, |s| s.sample(self.ui_scale))
+            .map_or_else(Default::default, |s| s.sample(self.ui_scale));
+        sample.offset = self.offsets.get(&id).copied().unwrap_or([0.0; 2]);
+        sample
+    }
+
+    pub fn set_offset(&mut self, id: Id, offset: [f32; 2]) {
+        if offset == [0.0; 2] { self.offsets.remove(&id); }
+        else { self.offsets.insert(id, offset); }
     }
 
     pub fn set_ui_scale(&mut self, value: f32) {
@@ -368,7 +380,7 @@ pub(super) fn transform_rect(widgets: &Widgets, tree: &Tree, mut owner: Id, rect
     let mut hi = [rect.right(), rect.bottom()];
     loop {
         let sample = widgets.sample(owner);
-        if sample.scale != 1.0 {
+        if sample.scale != 1.0 || sample.offset != [0.0; 2] {
             let pivot_rect = tree.rect(owner);
             lo = sample.point(pivot_rect, lo);
             hi = sample.point(pivot_rect, hi);
