@@ -60,15 +60,19 @@ fn mask_opacity(in: VertexOutput) -> f32 {
     return 1.0;
 }
 
-// A refraction particle shows the scene behind it, shifted by its normal map: alpha blended over the same scene it copies.
+// A refraction particle shows the scene behind it, shifted by its normal map. It adds the difference between the shifted and the
+// unshifted copy of the scene (blended additively, alpha 0): where the normal map is flat nothing changes, whatever the copy's
+// brightness is (it is not the target's, so replacing the target with it would show the quad as a lighter rectangle), and what
+// was drawn after the copy stays.
 @if(VIEW_TRANSMISSION_TEXTURE)
 fn refract_scene(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {
     let a = t.a * in.color.a * soft_fade(in.position);
     let n = textureSample(fx_normal, fx_sampler, in.uv).xy * 2.0 - 1.0;
     let full = vec2<f32>(textureDimensions(view_bindings::view_transmission_texture));
     let shift = n * fx.refr.x * view_bindings::view.viewport.w * a;
-    let bg = textureSampleLevel(view_bindings::view_transmission_texture, view_bindings::view_transmission_sampler, (in.position.xy + shift) / full, 0.0);
-    return vec4<f32>(bg.rgb, a);
+    let moved = textureSampleLevel(view_bindings::view_transmission_texture, view_bindings::view_transmission_sampler, (in.position.xy + shift) / full, 0.0);
+    let here = textureSampleLevel(view_bindings::view_transmission_texture, view_bindings::view_transmission_sampler, in.position.xy / full, 0.0);
+    return vec4<f32>(moved.rgb - here.rgb, 0.0);
 }
 @else
 fn refract_scene(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {

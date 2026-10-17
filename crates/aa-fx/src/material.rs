@@ -60,6 +60,10 @@ impl Material for FxMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
+        // a refraction particle adds the scene's shift, see `refract_scene`
+        if self.refract {
+            return AlphaMode::Add;
+        }
         match self.blend {
             Blend::Additive => AlphaMode::Add,
             Blend::ColorBased => AlphaMode::Premultiplied,
