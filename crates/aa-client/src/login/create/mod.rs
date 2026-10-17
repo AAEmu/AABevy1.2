@@ -400,6 +400,11 @@ fn handle_requests(
                 info!("character create: back to character select");
                 next.set(Screen::CharacterSelect);
             }
+            Request::ReloadCosmetic => {
+                if let Some(ui) = ui.as_deref() {
+                    ui.queue_event("RELOAD_COSMETIC_WINDOW", ());
+                }
+            }
             Request::SkillAction(ability) => {
                 lock(&screen.shared).ability = ability;
             }
