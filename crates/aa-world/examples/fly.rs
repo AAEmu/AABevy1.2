@@ -253,7 +253,12 @@ fn main() {
         clock.layer = l;
     }
     let mut app = App::new();
-    app.add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window))
+    // experiments: AA_COMPUTE_THREADS=N sizes the ECS task pool (the default takes whatever the IO pools leave)
+    let mut task_pools = bevy::app::TaskPoolOptions::default();
+    if let Some(n) = std::env::var("AA_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        task_pools.compute = bevy::app::TaskPoolThreadAssignmentPolicy { min_threads: n, max_threads: n, percent: 1.0, on_thread_spawn: None, on_thread_destroy: None };
+    }
+    app.add_plugins(aa_dev::default_plugins("aa-world fly").build().set(window).set(bevy::app::TaskPoolPlugin { task_pool_options: task_pools }))
         .insert_resource(clock)
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(plugin)
