@@ -206,8 +206,10 @@ pub fn control_player(
     mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion)>,
     terrain: Res<TerrainQuery>,
     mut out: MessageWriter<NetCommand>,
-    mut state: Local<SendState>,
+    mut state: ResMut<SendState>,
     dev: Res<DevOptions>,
+    typing: Option<Res<crate::hud::HudKeyboardFocus>>,
+    over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
 ) {
     let Ok((local, mut mover, mut transform, mut motion)) = player.single_mut() else { return };
     let Ok(mut orbit) = cameras.single_mut() else { return };
@@ -215,7 +217,10 @@ pub fn control_player(
     state.since_spawn += dt;
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
-    let pressed = |k: KeyCode, c: char| keys.pressed(k) || dev.scripted(t, c);
+    // an edit box of the HUD (the chat input) has the keyboard: no movement, no jump; a drag that began on the HUD does not turn us
+    let typing = typing.is_some_and(|f| f.0);
+    let over_ui = over_ui.is_some_and(|o| o.0);
+    let pressed = |k: KeyCode, c: char| (!typing && keys.pressed(k)) || dev.scripted(t, c);
     let key = |k: KeyCode, c: char| pressed(k, c) as i32 as f32;
 
     let (fwd, strafe) = (key(KeyCode::KeyW, 'W') - key(KeyCode::KeyS, 'S'), key(KeyCode::KeyD, 'D') - key(KeyCode::KeyA, 'A'));
@@ -227,14 +232,14 @@ pub fn control_player(
         orbit.yaw += d; // the camera turns with the character
     }
     let input = Vec2::new(strafe, fwd);
-    if mouse.pressed(MouseButton::Right) {
+    if mouse.pressed(MouseButton::Right) && !over_ui {
         mover.facing = orbit.yaw;
     } else if input != Vec2::ZERO {
         mover.facing = approach_angle(mover.facing, orbit.yaw, ALIGN_RATE * dt);
     }
 
     // horizontal velocity from the input (backward and walking are slower, as in the actor model)
-    let walking = pressed(KeyCode::ShiftLeft, 'H') || keys.pressed(KeyCode::ShiftRight);
+    let walking = pressed(KeyCode::ShiftLeft, 'H') || (!typing && keys.pressed(KeyCode::ShiftRight));
     let local_dir = input.normalize_or_zero();
     let mut speed = if walking { WALK_SPEED } else { RUN_SPEED };
     if local_dir.y < -0.1 {
@@ -258,7 +263,7 @@ pub fn control_player(
 
     // vertical: terrain following and jumping
     let ground = height_or(&terrain, pos.x, pos.y, mover.pos.z);
-    if mover.grounded && (keys.just_pressed(KeyCode::Space) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) {
+    if mover.grounded && ((!typing && keys.just_pressed(KeyCode::Space)) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) {
         mover.vz = JUMP_SPEED;
         mover.grounded = false;
     }
@@ -333,8 +338,8 @@ pub fn control_player(
     state.was_active = active;
 }
 
-/// Bookkeeping of the movement packets.
-#[derive(Default)]
+/// Bookkeeping of the movement packets (reset when the game screen is left).
+#[derive(Resource, Default)]
 pub struct SendState {
     since_sent: f32,
     since_spawn: f32,
@@ -355,6 +360,8 @@ pub fn follow_server(
     mut events: MessageReader<NetEvent>,
     mut player: Query<(&mut Mover, &mut Transform), With<LocalPlayer>>,
     mut cameras: Query<&mut OrbitCamera>,
+    mut out: MessageWriter<NetCommand>,
+    mut state: ResMut<SendState>,
 ) {
     for NetEvent(event) in events.read() {
         let Event::Teleported { pos } = event else { continue };
@@ -366,6 +373,23 @@ pub fn follow_server(
         if let Ok(mut orbit) = cameras.single_mut() {
             orbit.yaw = mover.facing;
         }
+        // aa-net already answered with `CSTeleportEnded`; a standing movement packet at the new position makes the server's
+        // idea of where we stand (and its view of us for the other players) agree with ours
+        out.write(NetCommand(Command::Move(
+            MoveCommand {
+                pos: Pos::new(mover.pos.x, mover.pos.y, mover.pos.z),
+                yaw: mover.facing,
+                moving: false,
+                stance: stance::RELAXED,
+                velocity: [0; 3],
+                delta_movement: [0; 3],
+                ..MoveCommand::default()
+            }
+            .with_state(if mover.grounded { MoveState::Ground } else { MoveState::Fall }),
+        )));
+        mover.velocity = Vec3::ZERO;
+        state.since_sent = 0.0;
+        state.was_active = false;
     }
 }
 
