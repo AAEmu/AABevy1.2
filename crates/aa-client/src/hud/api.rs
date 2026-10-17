@@ -29,6 +29,10 @@ use crate::login::gameapi;
 pub enum Request {
     /// `HUD.request("chat", channel, message, target)`: a line typed into the chat input.
     Chat { chat_type: i16, message: String, target: String },
+    /// `HUD.request("leave", how)`: `X2World:LeaveWorld(EXIT_*)`.
+    Leave { how: i64 },
+    /// `HUD.request("leave_cancel")`: `X2World:CancelLeaveWorld()`.
+    CancelLeave,
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -43,6 +47,10 @@ pub struct HudData {
     pub target_pos: Option<Vec3>,
     /// The HUD's clock starts here (`HUD.now_ms()`).
     pub start: Instant,
+    /// The leave target the server counts down to / granted (`LeaveTarget` number).
+    pub leaving: Option<u8>,
+    /// The connection dropped and the disconnect dialog was shown.
+    pub disconnected: bool,
     pub game: SharedGameData,
     pub requests: Vec<Request>,
     /// The local player's entity (found by its name once), its game position and facing.
@@ -65,6 +73,8 @@ impl Default for HudData {
             panels_pushed: None,
             target_pos: None,
             start: Instant::now(),
+            leaving: None,
+            disconnected: false,
             game: SharedGameData::default(),
             requests: Vec::new(),
             player_entity: None,
@@ -153,6 +163,8 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
             };
             let request = match text(0).as_str() {
                 "chat" => Request::Chat { chat_type: num(1) as i16, message: text(2), target: text(3) },
+                "leave" => Request::Leave { how: num(1) },
+                "leave_cancel" => Request::CancelLeave,
                 other => {
                     warn!("hud: unknown request {other:?}");
                     return Ok(());
@@ -257,7 +269,13 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 /// Recompute the snapshot from the Bevy world.
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let Some(spawn) = world.resource::<Player>().spawn.clone() else { return };
-    let hour = world.get_resource::<aa_world::WorldClock>().map_or(12.0, |c| c.hour);
+    // the server's clock (extrapolated from its last packet), else the world renderer's
+    let net_world = world.get_resource::<aa_net::state::WorldInfo>();
+    let hour = net_world
+        .and_then(|w| w.hour_now())
+        .or_else(|| world.get_resource::<aa_world::WorldClock>().map(|c| c.hour))
+        .unwrap_or(12.0);
+    let net_group = net_world.and_then(|w| w.zone_group_id);
     // where the player is (game coordinates), from its entity's transform
     let known = bridge.borrow().player_entity;
     let entity = known.filter(|e| world.get::<Transform>(*e).is_some()).or_else(|| find_player(world, spawn.name()));
@@ -268,10 +286,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
             (Vec3::new(p.x, p.y, p.z), spawn.yaw())
         }
     };
-    let zone_key = world
-        .get_resource::<aa_world::stream::WorldInfo>()
-        .and_then(|w| w.0.zone_at(pos))
-        .map_or(spawn.zone_id(), u32::from);
+    // the zone under the player (the world's sector map), else the zone channel's group, else the spawn's
+    let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
     data.player_entity = entity;
     data.pos = pos;
@@ -286,7 +302,13 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let exp_percent = if exp_need > 0 { 100.0 * exp_cur as f64 / exp_need as f64 } else { 100.0 };
     let faction_name = |g: &super::data::GameData, id: u32| g.factions.get(&id).cloned().filter(|f| !f.is_empty());
     let faction = game.and_then(|g| faction_name(g, character.faction_id)).unwrap_or_else(|| character.faction_name.clone());
-    let zone = game.and_then(|g| g.zone(zone_key));
+    let zone = game.and_then(|g| {
+        zone_key
+            .and_then(|k| g.zone(k))
+            .or_else(|| net_group.and_then(|id| g.zone_by_group(id).map(|(z, f)| (id, z, f))))
+            .or_else(|| g.zone(spawn.zone_id()))
+    });
+    let sub_zone = game.and_then(|g| g.sub_zone_at(pos.x, pos.y)).unwrap_or_default().to_string();
     let snapshot = Snapshot {
         unit_id: spawn.obj_id.to_string(),
         name: spawn.name().to_string(),
@@ -315,7 +337,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         zone_rect: zone.map_or([0.0; 4], |(_, g, _)| g.rect),
         zone_faction: zone.map_or(0, |(_, _, f)| f),
         zone_faction_name: zone.and_then(|(_, _, f)| game.and_then(|g| faction_name(g, f))).unwrap_or_default(),
-        sub_zone: String::new(),
+        sub_zone,
         faction,
         hour: hour.floor() as u8 % 24,
         minute: (hour.fract() * 60.0).floor(),
@@ -341,12 +363,29 @@ pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) 
 }
 
 /// Carry out what the scripts asked for.
-pub fn handle_requests(bridge: NonSend<HudBridge>, mut net: MessageWriter<NetCommand>) {
+pub fn handle_requests(
+    bridge: NonSend<HudBridge>,
+    mut net: MessageWriter<NetCommand>,
+    mut next: ResMut<NextState<crate::Screen>>,
+    credentials: Option<Res<crate::ingame::enter::Credentials>>,
+) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     for request in requests {
         match request {
             Request::Chat { chat_type, message, target } => {
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));
+            }
+            Request::Leave { how } => {
+                let disconnected = bridge.0.borrow().disconnected;
+                if disconnected {
+                    // the connection is gone: the dialog's OK (EXIT_CLIENT) goes back to the server list
+                    super::session::return_to_world_select(credentials.as_deref(), &mut net, &mut next);
+                } else {
+                    super::session::leave(how, &mut net);
+                }
+            }
+            Request::CancelLeave => {
+                net.write(NetCommand(Command::CancelLeave));
             }
         }
     }
@@ -441,6 +480,9 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {    let (old, new) = {
     }
     if old.recoverable_exp != new.recoverable_exp {
         rt.fire_event("RECOVERABLE_EXP", (id, new.recoverable_exp as i64));
+    }
+    if old.sub_zone != new.sub_zone && !new.sub_zone.is_empty() {
+        rt.fire_event("ENTERED_SUBZONE", (0i64, new.sub_zone.as_str()));
     }
     if old.money != new.money {
         rt.fire_event("PLAYER_MONEY", (new.money.to_string(), (new.money - old.money).to_string()));

@@ -68,6 +68,83 @@ pub struct ZoneGroup {
     pub rect: [f32; 4],
 }
 
+/// A sub zone ("Desiree Peak") as the level designers drew it: a polygon on the ground.
+#[derive(Clone, Debug, Default)]
+pub struct SubZoneShape {
+    /// `sub_zones.id`.
+    pub id: u32,
+    /// West, south, east, north of the polygon, game metres.
+    pub bounds: [f32; 4],
+    pub points: Vec<[f32; 2]>,
+}
+
+impl SubZoneShape {
+    fn contains(&self, x: f32, y: f32) -> bool {
+        let b = self.bounds;
+        if x < b[0] || x > b[2] || y < b[1] || y > b[3] {
+            return false;
+        }
+        let mut inside = false;
+        let mut j = self.points.len().wrapping_sub(1);
+        for i in 0..self.points.len() {
+            let (pi, pj) = (self.points[i], self.points[j]);
+            if (pi[1] > y) != (pj[1] > y) && x < (pj[0] - pi[0]) * (y - pi[1]) / (pj[1] - pi[1]) + pi[0] {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+
+    fn area(&self) -> f32 {
+        (self.bounds[2] - self.bounds[0]) * (self.bounds[3] - self.bounds[1])
+    }
+}
+
+/// The value of attribute `name` in the first tag of `text` that has it (`name="..."`).
+fn attr<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let key = format!(" {name}=\"");
+    let at = text.find(&key)? + key.len();
+    let end = text[at..].find('"')?;
+    Some(&text[at..at + end])
+}
+
+fn pair(text: &str) -> Option<(f32, f32)> {
+    let mut it = text.split(',');
+    Some((it.next()?.trim().parse().ok()?, it.next()?.trim().parse().ok()?))
+}
+
+/// `worlds/<w>/level_design/zone/<id>/client/subzone_area.xml`: one `AreaShape` entity per polygon, the
+/// points relative to the entity, the entity relative to its cell in the zone, the zone to its origin
+/// cell in `world.xml` (cells are 1024 m).
+fn parse_sub_zone_areas(text: &str, origin: (f32, f32), out: &mut Vec<SubZoneShape>) {
+    for entity in text.split("<Entity ").skip(1) {
+        let (Some(pos), Some(cx), Some(cy)) = (attr(entity, "Pos").and_then(pair), attr(entity, "cellX"), attr(entity, "cellY")) else {
+            continue;
+        };
+        let (Ok(cx), Ok(cy)) = (cx.parse::<f32>(), cy.parse::<f32>()) else { continue };
+        let Some(id) = entity.find("<Area Id=\"").and_then(|a| entity[a + 10..].split('"').next()).and_then(|v| v.parse::<u32>().ok()) else {
+            continue;
+        };
+        let gx = (origin.0 + cx) * 1024.0 + pos.0;
+        let gy = (origin.1 + cy) * 1024.0 + pos.1;
+        let points: Vec<[f32; 2]> = entity
+            .split("<Point Pos=\"")
+            .skip(1)
+            .filter_map(|p| pair(p.split('"').next()?))
+            .map(|(x, y)| [gx + x, gy + y])
+            .collect();
+        if points.len() < 3 {
+            continue;
+        }
+        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for p in &points {
+            bounds = [bounds[0].min(p[0]), bounds[1].min(p[1]), bounds[2].max(p[0]), bounds[3].max(p[1])];
+        }
+        out.push(SubZoneShape { id, bounds, points });
+    }
+}
+
 /// The static game data the HUD queries.
 #[derive(Default)]
 pub struct GameData {
@@ -83,6 +160,12 @@ pub struct GameData {
     pub factions: HashMap<u32, String>,
     /// `system_faction_relations`: (faction, other faction) -> 1 friendly, 2 neutral, 3 hostile.
     pub relations: HashMap<(u32, u32), u8>,
+    /// `sub_zones.id` -> English name.
+    pub sub_zone_names: HashMap<u32, String>,
+    /// The sub zone polygons of the world (the database rectangles are mostly empty).
+    pub sub_zone_shapes: Vec<SubZoneShape>,
+    /// `zones.group_id` -> the faction protecting the group's zones (0 = none).
+    pub group_faction: HashMap<u32, u32>,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -104,12 +187,13 @@ impl SharedGameData {
                 match GameData::load(&path) {
                     Ok(d) => {
                         info!(
-                            "hud: game data in {:.0} ms ({} skills, {} items, {} buffs, {} npcs)",
+                            "hud: game data in {:.0} ms ({} skills, {} items, {} buffs, {} npcs, {} sub zone shapes)",
                             t.elapsed().as_secs_f32() * 1000.0,
                             d.skills.len(),
                             d.items.len(),
                             d.buffs.len(),
-                            d.npcs.len()
+                            d.npcs.len(),
+                            d.sub_zone_shapes.len()
                         );
                         let _ = slot.set(d);
                     }
@@ -278,7 +362,58 @@ impl GameData {
                 data.relations.insert((r.get(0)?, r.get(1)?), r.get::<_, i64>(2)? as u8);
             }
         }
+        {
+            let mut q = conn.prepare("SELECT id, name FROM sub_zones")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id: u32 = r.get(0)?;
+                data.sub_zone_names.insert(id, name("sub_zones", id, r.get(1)?));
+            }
+        }
+        for (_, (group, faction)) in data.zones.iter() {
+            if *faction != 0 {
+                data.group_faction.entry(*group).or_insert(*faction);
+            }
+        }
+        data.load_sub_zone_shapes();
         Ok(data)
+    }
+
+    /// Reads the sub zone polygons of `main_world` from the pak (about 90 small files).
+    fn load_sub_zone_shapes(&mut self) {
+        let pak = aa_pak::Pak::global();
+        let world = "worlds/main_world";
+        let Ok(world_xml) = pak.read_string(&format!("{world}/world.xml")) else { return };
+        let mut origins: HashMap<u32, (f32, f32)> = HashMap::new();
+        for tag in world_xml.split("<Zone ").skip(1) {
+            let tag = format!(" {}", tag.split('>').next().unwrap_or(""));
+            let (Some(id), Some(x), Some(y)) = (attr(&tag, "id"), attr(&tag, "originX"), attr(&tag, "originY")) else {
+                continue;
+            };
+            if let (Ok(id), Ok(x), Ok(y)) = (id.parse(), x.parse(), y.parse()) {
+                origins.insert(id, (x, y));
+            }
+        }
+        let prefix = format!("{world}/level_design/zone/");
+        let files: Vec<String> = pak.list(&prefix).filter(|p| p.ends_with("/client/subzone_area.xml")).map(str::to_string).collect();
+        for file in files {
+            let zone: Option<u32> = file.split("level_design/zone/").nth(1).and_then(|r| r.split('/').next()).and_then(|z| z.parse().ok());
+            let Some(origin) = zone.and_then(|z| origins.get(&z)).copied() else { continue };
+            if let Ok(text) = pak.read_string(&file) {
+                parse_sub_zone_areas(&text, origin, &mut self.sub_zone_shapes);
+            }
+        }
+    }
+
+    /// The name of the sub zone at a game position: the smallest polygon around it.
+    pub fn sub_zone_at(&self, x: f32, y: f32) -> Option<&str> {
+        let shape = self.sub_zone_shapes.iter().filter(|s| s.contains(x, y)).min_by(|a, b| a.area().total_cmp(&b.area()))?;
+        self.sub_zone_names.get(&shape.id).map(String::as_str).filter(|n| !n.is_empty())
+    }
+
+    /// A zone group by id: its data and the faction protecting it.
+    pub fn zone_by_group(&self, group: u32) -> Option<(&ZoneGroup, u32)> {
+        Some((self.zone_groups.get(&group)?, self.group_faction.get(&group).copied().unwrap_or(0)))
     }
 
     /// How a unit of faction `other` looks to a unit of faction `own`: what the unit frames and
