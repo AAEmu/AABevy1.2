@@ -1100,6 +1100,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if ty == "grid" {
         super::grid::methods(lua, &m)?;
     }
+    if matches!(ty, "gametooltip" | "unitframetooltip") {
+        super::tooltip::methods(lua, &m)?;
+    }
 
     // --- buttons -----------------------------------------------------------------------------
     if is_button_class(ty) {

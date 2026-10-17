@@ -650,3 +650,65 @@ fn timed_out_chat_lines_redraw() {
     aa_ui::lua::tick(&ui.lua, 16.0);
     assert!(settle(&ui) > c0);
 }
+
+/// An anchor that would make a widget depend on itself is refused (the old one stays): the tooltip
+/// scripts' `ResetSetctions` anchors every section below the second last one, and the client keeps
+/// the chain `PushSection` built (reference/ingame/tooltip_item).
+#[test]
+fn cyclic_anchor_is_refused() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        a = UIParent:CreateWidget("emptywidget", "a", "UIParent")
+        a:SetExtent(10, 10)
+        a:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        b = UIParent:CreateWidget("emptywidget", "b", "UIParent")
+        b:SetExtent(10, 20)
+        b:AddAnchor("TOPLEFT", a, "BOTTOMLEFT", 0, 10)
+        c = UIParent:CreateWidget("emptywidget", "c", "UIParent")
+        c:SetExtent(10, 10)
+        c:AddAnchor("TOPLEFT", b, "BOTTOMLEFT", 0, 10)
+        a:AddAnchor("TOPLEFT", c, "BOTTOMLEFT", 0, 10)
+        b:AddAnchor("TOPLEFT", b, "BOTTOMLEFT", 0, 10)
+        a:Show(true) b:Show(true) c:Show(true)
+        "#,
+    )
+    .unwrap();
+    let off = |w: &str| -> Vec<f64> { eval(&ui, &format!("return {{ {w}:GetOffset() }}")) };
+    assert_eq!(off("a"), [100.0, 100.0]);
+    assert_eq!(off("b"), [100.0, 120.0]);
+    assert_eq!(off("c"), [100.0, 150.0]);
+}
+
+/// The mouse is over the hovered widget and its ancestors under the cursor: a window's OnEnter runs
+/// when the cursor comes onto its child button (the action bar shows its lock button while a slot
+/// is hovered, reference/ingame/tooltip_skill), its OnLeave only when the cursor leaves it.
+#[test]
+fn parents_under_the_cursor_get_on_enter() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        log = {}
+        bar = UIParent:CreateWidget("window", "bar", "UIParent")
+        bar:SetExtent(200, 50)
+        bar:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        bar:Show(true)
+        bar:SetHandler("OnEnter", function() log[#log + 1] = "bar+" end)
+        bar:SetHandler("OnLeave", function() log[#log + 1] = "bar-" end)
+        btn = bar:CreateChildWidget("button", "btn", 0, true)
+        btn:SetExtent(40, 40)
+        btn:AddAnchor("TOPLEFT", bar, 5, 5)
+        btn:SetHandler("OnEnter", function() log[#log + 1] = "btn+" end)
+        btn:SetHandler("OnLeave", function() log[#log + 1] = "btn-" end)
+        "#,
+    )
+    .unwrap();
+    let mut mouse = aa_ui::input::MouseState::default();
+    let mut at = |x: f32, y: f32| aa_ui::input::update(&ui.lua, &mut mouse, Some((x, y)), false, false, false, 0.0);
+    at(120.0, 120.0);
+    at(250.0, 120.0);
+    at(500.0, 500.0);
+    assert_eq!(eval::<String>(&ui, "table.concat(log, ' ')"), "bar+ btn+ btn- bar-");
+}

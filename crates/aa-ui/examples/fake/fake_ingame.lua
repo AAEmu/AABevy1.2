@@ -370,7 +370,14 @@ local function icon(file) return "ui/icon/" .. file .. ".dds" end
 -- Skills the new character has on its action bars (default_skills + the Battlerage starter skill).
 local SKILLS = {
   [18132] = { name = "Triple Slash", icon = "icon_skill_fight02", usable = false },
-  [16064] = { name = "Shoot Arrow", icon = "icon_skill_basic10", usable = false },
+  -- The tooltip of Shoot Arrow as the client builds it (reference/ingame/tooltip_skill: skills, skill texts;
+  -- #{damage_multiplier} is 120 at rank 1).
+  [16064] = { name = "Shoot Arrow", icon = "icon_skill_basic10", usable = false,
+              tip = { ability = "general", skillLevel = 1, mana = 0, casting = 0, channeling = 0, minRange = 0,
+                      maxRange = 20, cooldown = 0,
+                      description = "Shoots an arrow at a target, dealing damage equal to |cFFFF9C27120%|r of Ranged "
+                        .. "Attack.\nDamage is reduced |cFFFF9C27-20%|r if target is within |cFFFF9C278m|r. |cff00ff45\n"
+                        .. "Fast skill; no cooldown. Hold down for continuous use." } },
   [2] = { name = "Melee Attack", icon = "icon_skill_basic01", usable = false },
   [16287] = { name = "Dash", icon = "icon_skill_basic09", usable = true },
   [14495] = { name = "Kick", icon = "icon_skill_fight22", usable = false },
@@ -403,8 +410,11 @@ local ACTION = {
 local BUFFS = {
   { buff_id = 4831, name = "Adapting to Society", path = icon("icon_skill_romance23"), timeLeft = 0, stack = 1,
     description = "Your time in prison has left you temporarily out-of-touch with society. Unable to attack or be attacked." },
-  { buff_id = 6442, name = "ArcheLife", path = icon("icon_skill_buff220"), stack = 1,
-    description = "Increases drop rate." },
+  -- Patron (the premium buff; reference/ingame/tooltip_buff: its tooltip).
+  { buff_id = 8000011, name = "Patron", path = icon("icon_skill_buff220"), stack = 1, tipType = "buff", category = "Buff",
+    description = "Regenerates |cFFFF9C2710 Labor|r every |cFFFF9C275 minutes|r while online and |cFFFF9C275 Labor|r every "
+      .. "|cFFFF9C275 minutes|r while offline.\nMax Labor: |cFFFF9C275000|r\nBestows |cFFFF9C275|r Loyalty Tokens daily "
+      .. "for logging in.\nIncreases XP gain |cFFFF9C27+10%|r.\nAllows items to be listed on the Auction House." },
   { buff_id = 30810, name = "Tutorial Blessing", path = icon("icon_item_1657"), timeLeft = 6 * 86400000 + 3600000, stack = 1,
     description = "A gift for new adventurers." },
   { buff_id = 8226, name = "Equip Shield", path = icon("icon_skill_buff260"), stack = 1,
@@ -417,14 +427,31 @@ local BUFFS = {
 -- bound; the native counts it down from there).
 local COOLDOWNS = FAKE_COOLDOWN_DEMO and { [16287] = { remain = 8000, total = 12000 } } or {}
 
--- AAUI.SlotContent(slotType, slotIdx) -> nil | { type, id, icon, stack, grade [, canUse, cooldown] }.
+-- The tooltip info of a skill (slot:GetTooltip): tipType "skill" and the fields the tooltip sections read.
+function FAKE.skill_tooltip(id)
+  local s = SKILLS[id]
+  if s == nil or s.tip == nil then return nil end
+  local t = { tipType = "skill", type = id, name = s.name, path = icon(s.icon) }
+  for k, v in pairs(s.tip) do t[k] = v end
+  return t
+end
+-- X2Skill:GetSkillTooltip(skillType, itemType, flags): the description of an item's use skill (the item
+-- tooltip's "Use" text, FAKE.skill_descs of fake_bag.lua) or of an action bar skill.
+X2Skill.GetSkillTooltip = function(self, skillType, itemType, flags)
+  local t = FAKE.skill_tooltip(skillType)
+  if t ~= nil then return t end
+  return { description = (FAKE.skill_descs or {})[skillType] }
+end
+
+-- AAUI.SlotContent(slotType, slotIdx) -> nil | { type, id, icon, stack, grade [, canUse, cooldown, tooltip] }.
 AAUI.SlotContent = function(slotType, slotIdx)
   if slotType == ISLOT_ACTION then
     local a = ACTION[slotIdx]
     if a == nil then return nil end
     if a[1] == "skill" then
       local s = SKILLS[a[2]]
-      return { type = "skill", id = a[2], icon = icon(s.icon), canUse = s.usable, cooldown = COOLDOWNS[a[2]] }
+      return { type = "skill", id = a[2], icon = icon(s.icon), canUse = s.usable, cooldown = COOLDOWNS[a[2]],
+               tooltip = FAKE.skill_tooltip(a[2]) }
     end
     local it = ITEMS[a[2]]
     return { type = "item", id = a[2], icon = icon(it.icon), stack = (it.maxStack > 1) and it.stack or nil,
@@ -573,8 +600,9 @@ X2Option.SetItemDefaultStringValue = X2Option.SetItemDefaultFloatValue
 X2Option.IsRestartOption = function(self) return false end
 
 -- Hotkeys ---------------------------------------------------------------------------------------------------
+-- The first key of each action (the bag's is I: reference/ingame/tooltip_hud shows "Bag (I)").
 local defaultKeys = {
-  toggle_character = "C", toggle_bag = "B", toggle_quest_context_list = "L", toggle_achievement = "Y",
+  toggle_character = "C", toggle_bag = "I", toggle_quest_context_list = "L", toggle_achievement = "Y",
   toggle_skill = "K", toggle_worldmap = "M", toggle_craft = "N", toggle_community = "O",
   toggle_ranking = "R", toggle_option = "ESC", toggle_commercial_mail = "", toggle_ingameshop = "",
   toggle_friend = "F", toggle_expedition = "X", toggle_raid_team_manager = "",

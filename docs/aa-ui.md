@@ -25,6 +25,7 @@ original scripts with no script errors. The layout tree matches the real client'
 | bag (I), 4 of 50 slots used | `reference/ingame/bag` | 331 of 331 |
 | world map (M): zone / continent (one right click) / world (two) | `reference/ingame/worldmap_*` | 88 of 88, 86 of 86 (+5), 86 of 86 |
 | options, Game Keybinds page | `reference/ingame/options_keybinds` | 180 of 182 (***) |
+| tooltips: bag item (Teleport Book), action bar skill (Shoot Arrow), buff (Patron), HUD button ("Bag (I)") | `reference/ingame/tooltip_*` | 349 of 349, 19 of 19, 14 of 15, 8 of 9 (****) |
 
 (*) The one left is `step1.content.congestionTip_bg`, a drawable of a hidden tooltip that the
 capture reports by its own visible flag; not drawn by either.
@@ -40,6 +41,12 @@ menu list's scroll thumb and `releaseHotkeyBtn` (disabled before its skin is app
 draws them and the pixels are the same. (+5): the continent's conflict circles
 (`MAP_LIST[3][i].conflictImg`, shown by the scripts) are drawn in `real.png` (same place and
 colour as ours) but the capture's walk does not list them.
+
+(****) The one left in the buff and HUD captures is the action bar's background effect: the
+client's pointer had crossed the bar before, and its leave effect ends at alpha 0 but leaves it
+shown. Pixels inside the tooltips (`check_ingame.sh`): mean absolute error 2.4 (item), 3.2
+(skill), 7.4 (buff: the bright sky behind the translucent background), 4.3 (HUD button); the
+text sits on the capture's pixels, the rest is the 3D world behind.
 
 In-game windows (laid out by the original scripts, fake data in
 `examples/fake/fake_<window>.lua` (the captured ones as in the capture), opened with
@@ -132,6 +139,7 @@ cargo build lock. `cmp_tree.py` drops the runtime ids that tables are keyed by f
 | `lua/widget.rs` | the widget natives: bounds, anchors, visibility, text, drawables, buttons, lists, sliders |
 | `lua/drawable.rs` | drawable natives (`SetTexture`, `SetCoords`, `SetColor`, ...) |
 | `lua/folder.rs`, `lua/tab.rs`, `lua/edit.rs`, `lua/diagram.rs` | `folder`, `tab`, edit box and `circlediagram` behaviour |
+| `lua/tooltip.rs` | `gametooltip` lines (`AddLine`, `AddAnotherSideLine`, line spaces, `GetHeightToLastLine`), wrapping, sizing to the lines, drawing |
 | `lua/slot.rs`, `lua/statusbar.rs` | `slot` (action bar and skill icons bound to game slots, cooldown sweeps) and `statusbar` (HP / MP / exp / labor bars) |
 | `lua/grid.rs` | `grid` cells, rows and selection (the quest list and the quest tracker) |
 | `lua/bounds.rs` | `OnBoundChanged` after layout changes |
@@ -176,7 +184,11 @@ rectangles lazily and caches them per tree generation. Re-adding a point replace
 when two different points set the same edge (TOPLEFT and TOPRIGHT both set the top), the point
 first in the order TOPLEFT, TOP, TOPRIGHT, LEFT, CENTER, RIGHT, BOTTOMLEFT, BOTTOM, BOTTOMRIGHT
 wins, whatever the order they were added in (`reference/ingame/bag`: the tab line's TOPLEFT
-beats its TOPRIGHT, the slot grid's later TOPLEFT beats the LEFT it was created with).
+beats its TOPRIGHT, the slot grid's later TOPLEFT beats the LEFT it was created with). An
+anchor that would make an object depend on itself (directly or through its target's anchors)
+is refused and the old one stays, as in the client: the tooltip scripts' `ResetSetctions`
+anchors every section below the second last one, itself included
+(`reference/ingame/tooltip_item` keeps the chain `PushSection` built).
 
 Drawing order: top-level widgets by UI layer (`SetUILayer`: background, game, hud, normal,
 dialog, tooltip, system), then creation / `Raise` order; children above their parent; inside a
@@ -225,6 +237,20 @@ Alignment without `SetAlign`: centred for buttons, labels and `textbox` (world s
 warning line, which never sets one, is centred in `real.png`), top left for game tooltips,
 left for the rest.
 `GetLineCount()` is the wrapped line count of the widget's text.
+Game tooltips (`gametooltip`, `lua/tooltip.rs`) hold lines rather than one text:
+`AddLine(text, fontPath, fontSize, column, align, indent)` (`""` / 0: the widget's style;
+`indent` 45 puts item and skill names next to their icon) returns the line's index,
+`AddAnotherSideLine(index, ...)` adds a second text on its rows,
+`AttachUpperSpaceLine` / `AttachLowerSpaceLine(index, px)` set the space around a line, and
+`GetHeightToLastLine()` returns the height of the lines so far without and with the last
+line's lower space; the tooltip scripts size their sections (title, item time, portal,
+description, sell price, skill info, ...) from those differences and chain them 10 units apart.
+Measured on `reference/ingame/tooltip_*`: a 13 px row is 16 high, the rows of a wrapped line
+have no extra space, an empty line has no rows, and a line wraps 5 units before the right
+inset (a 204 wide row of the 230 wide item tooltip stays, a 206 one wraps). The widget sizes
+itself: the height is the insets plus the lines; without word wrap (`SetTooltip`'s text
+tooltips) the width follows the longest row ("Bag (I)" is 58 x 36). `GetLineCount()` counts the
+rows (24 for the Teleport Book, as the capture reports).
 Image fonts: font names that are not files (`style:SetFont("characterInfo", 37)` for the
 character window's level, `actionBar` for the menu bar badges, `combat`, `arrest`) are the
 bitmap fonts of `ui/image_text.g` (`infomation` blocks: `size`, cell `width` / `height`, one
@@ -251,8 +277,12 @@ widgets that have one): the skill window's scroll windows place their columns th
 
 Mouse: the topmost widget under the cursor that takes the mouse (buttons, check buttons, edit
 boxes, sliders, list boxes, or anything with a mouse handler) by layer and paint order; a
-visible modal window (`SetWindowModal`) blocks everything outside it. It gets `OnEnter` /
-`OnLeave`, `OnMouseDown` / `OnMouseUp`, `OnClick(self, "LeftButton" | "RightButton")` (on the
+visible modal window (`SetWindowModal`) blocks everything outside it. The mouse is over that
+widget and its ancestors whose rectangle holds the cursor (the captures' `mouse_over`: the
+action bar window with its hovered slot, `newbag`, its tab and slot window with the hovered
+bag button); each gets `OnEnter` when the cursor comes onto it and `OnLeave` when it leaves it
+(the action bar shows its lock and page buttons while a slot is hovered). The hovered widget
+gets `OnMouseDown` / `OnMouseUp`, `OnClick(self, "LeftButton" | "RightButton")` (on the
 nearest ancestor with a handler, if enabled), `OnWheelUp` / `OnWheelDown` (on the widget under
 the cursor or its nearest ancestor with one; a wheel no script takes scrolls the message frame
 under the cursor, 3 messages a notch). Native behaviour:
@@ -377,6 +407,7 @@ App::new()
   | `AAUI.MapClimate(zoneGroupId)` | the world map's climate display (`GetClimateInfo`) | nil, or `{ climateId, ... }` (`climates.id`: 2 temperate, 3 tropical, 4 subarctic, 5 arid) |
   | `AAUI.ConflictZones(worldGroupId)`, `AAUI.ConflictState(zoneGroupId)` | the continent map's tension circles (`GetConflictZoneListByWorldId`, `GetConflictStateByZoneId`), the zone map's state panel | `{ zoneGroupId, ... }` (west 19, 20, 22, 26, 27); `state, remainMs` with `state` `HPWS_TROUBLE_0` .. `4` (0..4), `HPWS_BATTLE` 5, `HPWS_WAR` 6, `HPWS_PEACE` 7, nil or -1 none (both optional; `fake_worldmap.lua` has the capture's states) |
   | `AAUI.UseSlot(slotType, slotIdx, button)`, `AAUI.UseSkill(skillType, button)`, `AAUI.UseItem(itemType, grade, button)` | a click on a bound, enabled `slot` (`EstablishSlot` / `EstablishSkill` / `EstablishItem`), after the script's `OnClick` | nothing; `button` is `"LeftButton"` or `"RightButton"`. Run what the slot's hotkey runs (the action bar scripts' `OnClick` only hides the tooltip; the client uses the slot natively). The app decides by `slotType` and `button`. The bag window's buttons are not slots: a right click on an item runs the scripts' `X2Bag:HandleUse(virtualSlot)`, which `fake_bag.lua` turns into `AAUI.UseSlot(ISLOT_BAG, realSlot, "RightButton")` (the real slot from `X2Bag:SlotByIdx`, so the app's own `SlotByIdx` applies); a left click (`HandleClick`, picking the item up onto the cursor in the client) is not routed |
+  | slot `tooltip` (in `SlotContent` / `SkillContent` / `ItemContent`), `X2Bag:GetBagItemInfo`, `X2Unit:UnitBuff`, `X2Skill:GetSkillTooltip(skill, item, flags)` | the game tooltips (`slot:GetTooltip`, the bag buttons, the buff icons, an item's use skill) | the client's tooltip info tables, which the tooltip scripts read: items `{ name, grade = "Basic", gradeColor = "FFBA976D" (item_grades), itemGrade, category (item_categories name), item_impl ("portal", "weapon", "armor", "accessory", ... or "etc"), soul_bound = 1 ("Untradeable"), skillType (the use skill: its description is the "Use" text), description, sellable, refund, stack, isStackable, level_requirement, level_limit, lifeSpan }`; skills `{ tipType = "skill", name, ability ("general" is "Basic"), skillLevel ("Rank 1"), path (icon), mana, casting, channeling (0: "Instant"), minRange, maxRange, cooldown, description }`; buffs `{ tipType = "buff", name, category = "Buff", path, description, timeLeft, stack }`; texts may carry `|c` colours (`fake_bag.lua`, `fake_ingame.lua` have the captured ones) |
   | `AAUI.ChatSend(channel, text, target)` | Enter in the chat input when no script set `OnEnterPressed` on it | nothing; `channel` `CHAT_SAY` 0, `CHAT_ZONE` 1, `CHAT_TRADE` 2, `CHAT_FIND_PARTY` 3, `CHAT_PARTY` 4, `CHAT_RAID` 5, `CHAT_FACTION` 6, `CHAT_EXPEDITION` 7, `CHAT_TRIAL` 11, `CHAT_RACE` 14, `CHAT_WHISPER` -3; `target` the whisper name or `""`; the slash command is already stripped |
   | `AAUI.Entity(name)` | `UIParent:GetEntityByName(name)` | nil (no such entity), or `{ pos = { x, y, z }, angles = { x, y, z } }` (or `{ 1, 2, 3 }` arrays); the scripts get an object with `GetName`, `GetPos` / `GetWorldPos`, `GetAngles` / `GetWorldAngles` (read from the table at each call, so the app may update it) and `IsValid` |
   | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
@@ -450,7 +481,10 @@ App::new()
 | `X2Locale:GetLocale()` returns `"en_us"` (the configured locale) | `globals.rs` |
 | `IsVisible()` is the object's own flag, not its ancestors' (the system menu counts its buttons before it shows) | `widget.rs` |
 | `AddNewTab(text, selectedBtn, unselectedBtn, window)` uses the script's widgets (several tabs may share a window, which each tab shows when selected and hides otherwise, in tab order: the bag's shared `tabWindow` is hidden); `RemoveAllTabs` leaves script-made widgets alive | `lua/tab.rs` |
-| `gametooltip:AddLine` returns the new line's 0-based index | `widget.rs` |
+| `gametooltip` lines, spaces and heights (`AddLine` returns the new line's 0-based index), the tooltip sizes itself to them | `lua/tooltip.rs` |
+| an anchor that would make an object depend on itself is refused | `tree.rs` |
+| `OnEnter` / `OnLeave` for the hovered widget's ancestors under the cursor too | `input.rs` |
+| `SetStartEffect(true)` shows an effect drawable, in the colour its last phase ends in unless it loops (`SetRepeatCount(0)`) | `lua/drawable.rs` |
 | `SetCloseOnEscape(true)` windows are what `UiRuntime::escape` hides | `content.rs` |
 | `EnableScroll(true)` clips the children and the picking to the widget; `ChangeChildAnchorByScrollValue(dir, v)` offsets the anchors that target it | `tree.rs`, `widget.rs` |
 | folders place their title button by `SetTitleButtonWidget` / `SetInset` (the right value moves the right edge: negative is inward; the world map's filter folders are 130 px wide) | `lua/folder.rs` |
@@ -476,7 +510,8 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 * 3D is not drawn: the character model view, the login stage scene behind the UI.
 * Fades and animations are simplified: `Show(visible, ms)` alpha fades work; `SetStartAnimation`,
   `SetAlphaAnimation` and `SetScaleAnimation` are no-ops; effect drawables show while started
-  (`SetStartEffect(true)`) without their animation phases.
+  (`SetStartEffect(true)`) without their animation phases, in the colour of the last phase's
+  end (`SetEffectFinalColor`) unless they loop.
 * In-game HUD: what the 3D engine draws is not here (name plates over units, the world, the
   player model between the equipment slot columns). Cooldown sweeps: the direction and the
   time label format (`8`, `5m`, `2h`, `6d`) are guesses; no label on cooldowns of 1.5 s or less
@@ -488,8 +523,10 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   scrolls by messages, not wrapped lines (`GetMessageLines`, `SetScrollPos` are stubs). The idle
   chat window fades its tab backgrounds out and its unselected tabs to 60 % (measured by eye on
   the capture).
-* In-game windows: item and skill tooltips lay out roughly and have no background (the
-  `gametooltip` section natives are stubs; no capture shows one yet); the world map draws no
+* In-game windows: tooltips are drawn as the scripts lay them out (item, skill, buff and text
+  tooltips match their captures); the comparison tooltips beside an equipped item and the
+  `|n...;` colour codes of some skill texts are not checked against a capture. The world map
+  draws no
   NPC, doodad, quest or ship markers and no zone-name tooltips (the zone capture's quest marker
   and route are missing), and without the `WorldMap` hook's `maps` the player cursor on the
   continent and world maps is estimated from the masks; the quest list's tree lines and zebra
