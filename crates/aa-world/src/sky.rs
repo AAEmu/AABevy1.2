@@ -261,6 +261,7 @@ pub fn build(app: &mut App) {
     crate::sky_material::build(app);
     crate::water_material::build(app);
     crate::sky_clouds::build(app);
+    crate::char_light::build(app);
     app.init_resource::<WorldClock>()
         .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3) })
         .init_resource::<TodCache>()

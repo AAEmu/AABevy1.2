@@ -2,6 +2,7 @@
 //!
 //! See `docs/aa-world.md` for the formats, coordinates, API and performance numbers.
 
+pub mod char_light;
 pub mod cinema;
 pub mod coords;
 pub mod cover;

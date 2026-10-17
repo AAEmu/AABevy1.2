@@ -198,7 +198,7 @@ pub struct EnvSample {
     pub saturation: f32,
     pub contrast: f32,
     pub color_balance: Vec3,
-    /// `Levels: min input` (0..1 of the sRGB range).
+    /// `Levels: min input`, in the engine's `AdjustLevels` input units (0..255 of the sRGB range, not a 0..1 fraction).
     pub levels_min: f32,
     /// `Filters: photofilter` colour (sRGB) and density.
     pub photofilter: Vec4,
@@ -215,6 +215,14 @@ pub struct EnvSample {
     /// `Ambient min height` / `Ambient max height` (metres): below the first the ambient light has the `Ambient ground color`,
     /// above the second the `Sky color`, in between a blend.
     pub ambient_heights: Vec2,
+    /// The two `Char BackLight` lights, which the engine applies to characters only (`illum` / `humanskin` / `hair` /
+    /// `cloth` / `metal` under `%_RT_OBJECT_BACKLIGHT`, direction from the character's `.cdf`): `rgb` = `"i Color"` (linear)
+    /// `x "i Diffuse Multiplier"` (engine renderer parameter 71, `"i HDR dynamic"` is 0 in the main world and not applied),
+    /// `w` = `"i Specular Multiplier"` (parameter 72). Engine light units; the engine adds them to the ambient light's sum, see
+    /// `crate::char_light` for the conversion to lux. A file without the group (an old one) has no back light: colour 0.
+    pub char_back: [Vec4; 2],
+    /// `Char BackLight: InShadowIntensity`.
+    pub char_back_shadow: f32,
 }
 
 /// Linear interpolation of the sample's field types.
@@ -246,6 +254,16 @@ impl Mix for Vec4 {
     }
 }
 
+impl<T: Mix, const N: usize> Mix for [T; N] {
+    fn mix(self, o: [T; N], t: f32) -> [T; N] {
+        let mut i = 0;
+        self.map(|a| {
+            i += 1;
+            a.mix(o[i - 1], t)
+        })
+    }
+}
+
 impl EnvSample {
     /// Component-wise interpolation between two samples (zone changes, time steps).
     pub fn lerp(&self, other: &EnvSample, t: f32) -> EnvSample {
@@ -257,7 +275,8 @@ impl EnvSample {
         mix!(
             sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
-            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights
+            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
+            char_back, char_back_shadow
         )
     }
 }
@@ -296,6 +315,10 @@ impl TimeOfDay {
         let (red, green, blue) = (wavelength("Sky light: Wavelength (R)"), wavelength("Sky light: Wavelength (G)"), wavelength("Sky light: Wavelength (B)"));
         let scatter = Vec3::new(1.0, (red / green).powi(4), (red / blue).powi(4));
         let sky_sun = srgb_to_linear(self.color("Sky light: Sun intensity", t));
+        let back = |i: u32| {
+            let (_, c) = col(&format!("{i} Color"), &format!("{i} Diffuse Multiplier"));
+            c.extend(self.scalar(&format!("{i} Specular Multiplier"), t))
+        };
         EnvSample {
             sun_dir: sun_direction(hour, lighting),
             sun,
@@ -344,6 +367,8 @@ impl TimeOfDay {
             sky_rayleigh: scatter * self.scalar("Sky light: Rayleigh scattering", t) * sky_sun,
             sky_mie: Vec3::splat(self.scalar("Sky light: Mie scattering", t)) * sky_sun,
             ambient_heights: Vec2::new(self.scalar("Ambient min height", t), self.scalar("Ambient max height", t)),
+            char_back: [back(1), back(2)],
+            char_back_shadow: self.scalar("InShadowIntensity", t),
         }
     }
 }
@@ -405,6 +430,26 @@ mod tests {
         assert!((TimeOfDay::parse(xml).unwrap().scalar("Saturation", 0.5) - 1.0).abs() < 1e-5);
         assert!((TimeOfDay::parse_layer(xml, 0).unwrap().scalar("Saturation", 0.5) - 1.0).abs() < 1e-5);
         assert!((TimeOfDay::parse_layer(xml, 1).unwrap().scalar("Saturation", 0.5) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn character_back_lights_are_colour_times_multiplier() {
+        // zone 186: light 1 is grey 0.486 (= 0.2 linear) x 5, light 2 white x 0.7 with a specular multiplier of 0.7
+        let xml = r#"<TimeOfDayList><TimeOfDay>
+            <Variable Name="1 Color" Color="0.486275,0.486275,0.486275"><Spline Keys="0:(0.486275:0.486275:0.486275):0,1:(0.486275:0.486275:0.486275):0,"/></Variable>
+            <Variable Name="1 Diffuse Multiplier" Value="5"><Spline Keys="0:5:0,1:5:0,"/></Variable>
+            <Variable Name="1 Specular Multiplier" Value="1"><Spline Keys="0:1:0,1:1:0,"/></Variable>
+            <Variable Name="2 Color" Color="1,1,1"><Spline Keys="0:(1:1:1):0,1:(1:1:1):0,"/></Variable>
+            <Variable Name="2 Diffuse Multiplier" Value="0.7"><Spline Keys="0:0.7:0,1:0.7:0,"/></Variable>
+            <Variable Name="2 Specular Multiplier" Value="0.7"><Spline Keys="0:0.7:0,1:0.7:0,"/></Variable>
+            </TimeOfDay></TimeOfDayList>"#;
+        let s = TimeOfDay::parse(xml).unwrap().sample(9.6, Lighting::default());
+        assert!((s.char_back[0] - Vec4::new(1.0, 1.0, 1.0, 1.0)).abs().max_element() < 0.01, "{:?}", s.char_back[0]);
+        assert!((s.char_back[1] - Vec4::new(0.7, 0.7, 0.7, 0.7)).abs().max_element() < 1e-5);
+        let blended = s.lerp(&TimeOfDay::default().sample(9.6, Lighting::default()), 0.5);
+        assert!((blended.char_back[1].x - 0.35).abs() < 1e-5);
+        // a file without the group has no back light
+        assert_eq!(TimeOfDay::default().sample(9.6, Lighting::default()).char_back, [Vec4::ZERO; 2]);
     }
 
     #[test]
