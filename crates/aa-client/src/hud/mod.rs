@@ -44,6 +44,7 @@ mod input;
 mod items;
 mod loot;
 mod marks;
+mod markers;
 mod panels;
 mod plates;
 mod quests;
@@ -257,6 +258,7 @@ impl Plugin for HudPlugin {
         combat::plugin(app);
         loot::plugin(app);
         ring::plugin(app);
+        markers::plugin(app);
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()

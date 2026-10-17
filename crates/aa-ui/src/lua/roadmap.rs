@@ -43,15 +43,22 @@
 //! `quest_main_completes` / `quest_zone_completes` (?), `quest_*_progress` (grey ?),
 //! `quest_repeat`, `quest_livelihood_*`, `quest_hunt_gives`, `party`, `portal`, `npc_store_*`,
 //! `npc_station`, `doodad_*`, `housing_*`, ... An unknown `kind` without `icon` is not drawn.
-//! Quest and other markers always show; `npc_*`, `friendly` and `hostile` ones only while the
-//! "NPC" check of the map options is on (`roadmap:SetRoadMapNpc(true)`). The markers are only
+//! Quest, party, corpse and the like always show; the NPC, doodad and housing ones (`npc_*`,
+//! `doodad_*`, `housing_*`, `house_*`, `friendly`, `hostile`) only while the "NPC" check of the
+//! map options is on (`roadmap:SetRoadMapNpc(true)`; the reference capture at the Nuian spawn
+//! shows the quest "!" and no bank, mailbox or stable icon of Desireen). The markers are only
 //! drawn while the zone's map is.
+//!
+//! A result that has `markers_version` (an integer) is read again only when the number changes:
+//! an app that keeps the same `markers` table until something moves costs nothing per frame.
 //!
 //! A marker with a `tooltip` gets what the client's roadmap does: while the roadmap window takes
 //! the mouse (`SET_ROADMAP_PICKABLE`, `roadmapWindow:EnablePick(true)`) and the cursor is over
 //! it, the tooltip controller (`roadmap:GetTooltipController()`) is put on the marker and
 //! `SHOW_ROADMAP_TOOLTIP({ { tooltipType = "normal", text = tooltip } }, 1)` is raised (the
 //! scripts show their map tooltip); `HIDE_ROADMAP_TOOLTIP` when the cursor leaves it.
+
+use std::sync::Arc;
 
 use mlua::{Function, Lua, Table, Value};
 
@@ -169,7 +176,7 @@ pub const KIND_CELLS: &[(&str, [f32; 4])] = &[
     ("my_slave", [48.0, 216.0, 24.0, 24.0]),
 ];
 
-/// One entry of `AAUI.RoadMap().markers`.
+/// One entry of `AAUI.RoadMap().markers` (and of `AAUI.WorldMap().markers`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Marker {
     pub u: f32,
@@ -178,12 +185,15 @@ pub struct Marker {
     pub icon: Option<String>,
     pub coords: Option<[f32; 4]>,
     pub tooltip: Option<String>,
+    /// The big map: the map `(level, id)` the marker is on (`level` and `id` of the entry); the
+    /// roadmap shows one map and ignores it.
+    pub map: Option<(i64, i64)>,
 }
 
 impl Marker {
-    /// Hidden unless the map options' "NPC" check is on.
+    /// Hidden on the roadmap unless the map options' "NPC" check is on.
     fn is_npc(&self) -> bool {
-        self.kind.starts_with("npc_") || self.kind == "friendly" || self.kind == "hostile"
+        ["npc_", "doodad_", "housing_", "house_"].iter().any(|p| self.kind.starts_with(p)) || self.kind == "friendly" || self.kind == "hostile"
     }
 }
 
@@ -202,7 +212,9 @@ pub struct RoadMapData {
     /// `SetRoadMapNpc(checked)`: the "NPC" check of the map options.
     pub show_npcs: bool,
     /// The markers last placed, with the map drawable and `show_npcs` they were placed for.
-    pub markers: Vec<Marker>,
+    pub markers: Arc<Vec<Marker>>,
+    /// `markers_version` of the result they were read from.
+    pub markers_version: Option<i64>,
     pub placed: Option<(Option<Id>, bool)>,
     /// One image drawable per marker (reused).
     pub marker_drawables: Vec<Id>,
@@ -220,7 +232,8 @@ impl Default for RoadMapData {
             last_player: None,
             last_angle: 0.0,
             show_npcs: false,
-            markers: Vec::new(),
+            markers: Arc::default(),
+            markers_version: None,
             placed: None,
             marker_drawables: Vec::new(),
             hover: None,
@@ -269,8 +282,8 @@ pub(crate) fn update(lua: &Lua) {
     }
 }
 
-/// `AAUI.RoadMap().markers`.
-fn parse_markers(r: &Table) -> mlua::Result<Vec<Marker>> {
+/// `markers` of an `AAUI.RoadMap()` / `AAUI.WorldMap()` result.
+pub(super) fn parse_markers(r: &Table) -> mlua::Result<Vec<Marker>> {
     let Some(list) = r.raw_get::<Option<Table>>("markers")? else {
         return Ok(Vec::new());
     };
@@ -299,13 +312,17 @@ fn parse_markers(r: &Table) -> mlua::Result<Vec<Marker>> {
             icon: v.raw_get("icon")?,
             coords,
             tooltip: v.raw_get("tooltip")?,
+            map: match (v.raw_get::<Option<i64>>("level")?, v.raw_get::<Option<i64>>("id")?) {
+                (Some(level), Some(id)) => Some((level, id)),
+                _ => None,
+            },
         });
     }
     Ok(out)
 }
 
 /// The texture and texel rectangle a marker is drawn with.
-fn marker_cell(u: &mut super::Ui, m: &Marker) -> Option<(String, [f32; 4])> {
+pub(super) fn marker_cell(u: &mut super::Ui, m: &Marker) -> Option<(String, [f32; 4])> {
     match &m.icon {
         Some(path) => {
             let c = match m.coords {
@@ -325,12 +342,16 @@ fn marker_cell(u: &mut super::Ui, m: &Marker) -> Option<(String, [f32; 4])> {
 }
 
 /// Place the markers' drawables on the shown map (created once, reused; hidden without a map).
-fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Vec<Marker>) {
+/// `markers` is the list read from this frame's result, `None` when its `markers_version` is the
+/// one already placed.
+fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Option<Arc<Vec<Marker>>>) {
     let d = data(lua, id);
     let key = Some((shown_map, d.show_npcs));
-    if markers == d.markers && d.placed == key {
+    let changed = markers.as_ref().is_some_and(|m| *m != d.markers);
+    if !changed && d.placed == key {
         return;
     }
+    let markers = markers.unwrap_or_else(|| d.markers.clone());
     let mut pool = d.marker_drawables.clone();
     {
         let mut g = ui(lua);
@@ -505,7 +526,7 @@ fn place_player(lua: &Lua, id: Id, shown_map: Option<Id>, player: Option<(f32, f
 
 fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
     let d = data(lua, id);
-    let (want, player, angle, markers) = match r {
+    let (want, player, angle, markers, version) = match r {
         Some(r) => {
             let level = r.raw_get::<Option<i64>>("level")?.unwrap_or(1);
             let zone = r.raw_get::<Option<i64>>("zone")?;
@@ -516,14 +537,22 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
                 ),
                 None => (None, 0.0),
             };
+            // the same `markers_version` as the last result: the list is unchanged
+            let version = r.raw_get::<Option<i64>>("markers_version")?;
+            let markers = if version.is_some() && version == d.markers_version {
+                None
+            } else {
+                Some(Arc::new(parse_markers(r)?))
+            };
             (
                 zone.map(|z| (level, format!("{z}_{}", d.map_size))),
                 player,
                 angle,
-                parse_markers(r)?,
+                markers,
+                version,
             )
         }
-        None => (None, None, 0.0, Vec::new()),
+        None => (None, None, 0.0, Some(Arc::new(Vec::new())), None),
     };
     let shown_map = want
         .as_ref()
@@ -550,6 +579,7 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
     }
     place_player(lua, id, shown_map, player, angle);
     sync_markers(lua, id, shown_map, markers);
+    with(lua, id, |x| x.markers_version = version);
     update_tooltip(lua, id);
     Ok(())
 }
