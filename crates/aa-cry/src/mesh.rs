@@ -131,6 +131,26 @@ pub struct MeshData {
     pub bbox_max: Vec3,
 }
 
+impl MeshData {
+    /// Whether every vertex referenced by this subset has finite UVs within 0..1. Static
+    /// material bakes can use this square; repeated/out-of-range UVs need the original shader.
+    /// Unreferenced vertices and other material subsets do not constrain this subset's domain.
+    pub fn subset_uvs_in_unit_square(&self, subset: &Subset) -> bool {
+        let start = subset.first_index as usize;
+        let Some(end) = start.checked_add(subset.index_count as usize) else {
+            return false;
+        };
+        let Some(indices) = self.indices.get(start..end).filter(|v| !v.is_empty()) else {
+            return false;
+        };
+        indices.iter().all(|&i| {
+            self.uvs.get(i as usize).is_some_and(|uv| {
+                uv.is_finite() && uv.cmpge(Vec2::ZERO).all() && uv.cmple(Vec2::ONE).all()
+            })
+        })
+    }
+}
+
 impl Model {
     /// Parses `.cgf` / `.cga` / `.chr` bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Model> {
@@ -746,6 +766,40 @@ fn flat_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subset_uv_domain_checks_referenced_vertices_and_rejects_missing_data() {
+        let mut mesh = MeshData {
+            uvs: vec![Vec2::ZERO, Vec2::ONE, Vec2::splat(-2.0)],
+            indices: vec![0, 1, 0, 2, 1, 0],
+            ..Default::default()
+        };
+        let sub = Subset {
+            first_index: 0,
+            index_count: 3,
+            first_vertex: 0,
+            vertex_count: 2,
+            material_id: 3,
+            radius: 0.0,
+            center: Vec3::ZERO,
+        };
+        assert!(
+            mesh.subset_uvs_in_unit_square(&sub),
+            "another subset's UVs do not constrain this one"
+        );
+        assert!(!mesh.subset_uvs_in_unit_square(&Subset {
+            first_index: 3,
+            ..sub
+        }));
+        mesh.uvs[1] = Vec2::splat(f32::NAN);
+        assert!(!mesh.subset_uvs_in_unit_square(&sub));
+        mesh.uvs.clear();
+        assert!(!mesh.subset_uvs_in_unit_square(&sub));
+        assert!(!mesh.subset_uvs_in_unit_square(&Subset {
+            first_index: u32::MAX,
+            ..sub
+        }));
+    }
 
     #[test]
     fn node_kinds() {

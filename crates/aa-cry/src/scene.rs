@@ -286,6 +286,8 @@ impl CryAssets<'_> {
 
     /// The Bevy material for sub-material `sub` of a `.mtl` (cached). `None` when the
     /// sub-material is not drawn (NoDraw, Cut, proxies).
+    /// Manually assigned UCC materials require mesh UVs in 0..1; model loading validates each
+    /// subset and keeps the original material for unsupported domains.
     pub fn material(&mut self, mtl_path: Option<&str>, sub: usize) -> Option<Handle<StandardMaterial>> {
         self.with_prep(|p| p.material(mtl_path, sub))
     }
