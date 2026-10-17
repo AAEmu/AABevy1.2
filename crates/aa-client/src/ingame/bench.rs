@@ -23,8 +23,15 @@ pub fn plugin(app: &mut App) {
     let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok());
     let Some(seconds) = value("--bench") else { return };
     aa_world::profile::uncapped(app);
+    // the benchmark window may have the focus while someone else drives the machine: only the scripted keys count
+    app.add_systems(PreUpdate, clear_input.after(bevy::input::InputSystems));
     app.insert_resource(Bench { seconds, warmup: value("--bench-after").unwrap_or(12.0), in_game: 0.0, frames: Vec::new() })
         .add_systems(Update, bench.run_if(in_state(crate::Screen::InGame)));
+}
+
+fn clear_input(mut keys: ResMut<ButtonInput<KeyCode>>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
+    keys.reset_all();
+    mouse.reset_all();
 }
 
 fn bench(time: Res<Time<Real>>, mut state: ResMut<Bench>, views: Res<Views>, entities: &Entities, mut exit: MessageWriter<AppExit>) {
