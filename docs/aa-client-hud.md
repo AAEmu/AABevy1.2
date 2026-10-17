@@ -25,13 +25,17 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 
 | flag | does |
 |---|---|
-| `--hud-key NAME T` | a key (lower case): `enter`, `escape`, `backspace`, `delete`, `tab` (target next), `slotN` (action bar slot N, 1 based) |
+| `--hud-key NAME T` | a key (lower case): `enter`, `escape`, `backspace`, `delete`, `tab` (target the next enemy), `slotN` (action bar slot N, 1 based), `f` / `g` (loot all / open the loot) |
 | `--hud-type TEXT T` | typed text (in Git Bash set `MSYS_NO_PATHCONV=1` before a text starting with `/`) |
 | `--hud-open ACTION T` | a key binding action: `toggle_bag`, `toggle_character`, `toggle_spellbook`, `toggle_quest`, `toggle_worldmap` |
 | `--hud-click X Y T` | a left click at physical pixel X, Y |
 | `--hud-rclick X Y T` | a right click at X, Y (a bag item: use it) |
 | `--hud-hover X Y T` | the pointer moves to X, Y and stays (tooltips; move it somewhere else first when a window was just opened, then onto the slot) |
 | `--hud-disconnect T` | the disconnect dialog, as if the server dropped the connection |
+| `--hud-burst PREFIX T DT N` | N screenshots `PREFIX_01.png` ... from T seconds on, DT seconds apart (frame by frame comparisons; the game keeps running) |
+| `--hud-fov DEG`, `--hud-side-cam` | the world camera's vertical field of view (the combat captures use 71.25), and the capture's side-on camera (yaw = the player's yaw - 90 degrees; add `--cam-dist 4 --cam-pitch 0`) |
+| `--hud-afk` | the "-Away-" state at once (else after 300 s without input) |
+| `--hud-fake-loot T` | the lane server's Angry Rat never drops anything: T seconds after the HUD is up the nearest unit is a lootable corpse (the F / G icons) and two seconds later the loot window opens on three made up items |
 
 ## What is wired
 
@@ -53,6 +57,11 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | quest marks over NPCs | `aa_net::Quests` + the DB's quest tables (below) |
 | character info window | stats from `PlayerStats`, equipment slots from `Inventory` (see below) |
 | name plates | `Units` + the DB; see below |
+| combat: floating damage / heal / miss texts, "Battle Start!" / "Battle End!", "XP +14", the red numbers over the player | `UnitDamaged`, `UnitHealed`, `ExpChanged`, `CombatChanged` as the scripts' `COMBAT_TEXT` / `COMBAT_MSG` / `UNIT_COMBAT_STATE_CHANGED` / `EXP_CHANGED` events; see "Combat" |
+| target ring under the selected unit | `ring.rs`, see "Combat" |
+| cast bar ("Recall") | `SkillStarted` / `SkillFired` / `CastingStopped` / plot events, see "Combat" |
+| chat lines "Received:" / "Used:", "Gained 14 XP." | `ItemsChanged` (`items.rs`), `ExpChanged` |
+| loot: the F / G icons, the loot window | `Loot` (`SCLootableState`, `SCLootBagData` ...), `loot.rs`, see "Combat" |
 | leave the game, back to the character or server list, the leave countdown | `Command::LeaveWorld`, `Event::LeavePending` / `LeaveCancelled` / `LeftWorld` |
 | disconnect dialog | `Event::Disconnected` / `Kicked` not asked for -> `DISCONNECTED_BY_WORLD`; OK logs in again and shows `Screen::WorldSelect` |
 | keys I B C K L M, Escape | `UiRuntime::hotkey` / `escape()`; skipped while an edit box has the keyboard |
@@ -74,16 +83,88 @@ world and before the UI camera at 10): `Text2d` in the client's English UI font 
 plus two sprites for the 69 x 6 bar. Per frame, in `PostUpdate` before transform propagation, up to 40
 plates for the nearest units (NPCs 45 m, characters 70 m, the player's own always):
 
-* position: `Camera::world_to_viewport` of the unit's feet + the height of its model + 0.3 m. The height
-  is measured from the AABBs of the model's meshes (they arrive part by part while the model loads, so
-  the first 40 samples keep the maximum); a character's is capped at 1.85 m (the bounds take in the bow);
-* colour by relation: hostile red, neutral yellow, friendly green (`system_faction_relations`; an NPC of the
-  player's own faction is yellow, as in the capture; the player's own plate is green);
+* position: `Camera::world_to_viewport` of the unit's feet + the height of its model + a gap over the head (0.3 m for
+  a person, `0.3 * sqrt(height / 1.8)` for smaller units: the capture's rat bar is 0.24 m over its feet). The
+  height (`plates::unit_height`, also used by the quest marks and the floating texts) comes from the bounds of the
+  model's static meshes and, since skinned meshes carry none (aa-cry draws them without frustum culling), from the
+  highest joint of its skeleton (hair and cloth bones, `rope*`, left out) + 4 %. The first result is kept (the unit at rest;
+  a rat that rears up in a fight is not tall) with a few more tries for late parts; a character's is capped at 1.85 m
+  (the bounds take in the bow). The Angry Rat (scale 1.5) comes out at 0.16 m, Maude at 1.7 m;
+* colour by relation: hostile orange-red, neutral yellow, friendly green. The rule is the server's: both factions go
+  to their root faction (`system_factions.mother_id`: 1 friendly, 2 neutral, 3 hostile), the same group is friendly, else
+  the stored relation (`system_faction_relations`, state 1 hostile, 2 neutral, 3 friendly) of the mother faction or the
+  faction; the Angry Rat (faction 115) is hostile to a Nuian (101). An NPC of the player's own faction is yellow, as in
+  the capture; the player's own plate is green;
+* the target has a bigger name (26 px) over a framed yellow bar (81 x 14); a corpse has a grey name and an empty
+  bar; the player's own plate shows "-Away-" under the name after 300 s without input (the capture, assumed time);
 * NPCs with `show_name_tag = 0` get no plate; names are 11 px for NPCs and 26 px for characters.
 
 The camera copies `Hdr` and `Msaa` from the world camera and is spawned only after the world camera has
 `Hdr` (aa-world's post processing adds it a frame later); a frame where the two disagree is a wgpu
 validation error ("attachments have differing sample counts"). `cameras.rs` keeps the UI camera in step.
+
+### Combat
+
+All of it is fed by `route_combat` / `route_casts` / `route_items` / `sync_loot` (systems after `sync_hud`) from
+aa-net's events; what the scripts get is what the client's C++ raises. Tested on the lane server at the Nuian spawn
+pond (account `bevytest`, the Angry Rats) with
+`--enter-world --hour 12 --pos 15578.042,15382.122 --yaw 158.74 --cam-yaw -90 --cam-dist 4 --cam-pitch 0 --hud-fov 71.25 --hud-side-cam --hud-key tab 12 --hud-key slot4 14 --hud-burst shots/hud/b/f 14 0.3 16`
+(Tab, then the melee attack in slot 4; compare with `reference/ingame/combat_*`).
+
+**Floating text** (`combat.rs`, `combat.lua`). The original puts its texts on 30 `damagedisplay` widgets
+(`combattext/combat_text.lua`: `COMBAT_TEXT` for damage and heals of other units, `COMBAT_MSG` for what happens to the
+player, `EXP_CHANGED`, `UNIT_COMBAT_STATE_CHANGED`) and the native widget plays an animation table
+(`COMBAT_TEXT_ANIMATION[CTA_*]`). aa-ui's widget is a stub, so `combat.lua` replaces the widgets' methods after the stage is
+built and hands each started text to Rust (`HUD.combat_text_start`); `update_texts` draws them as 30 pooled `Text2d` on the
+plate camera. The model, calibrated on the captures: a text starts at the first frame's scale and alpha, every frame holds
+its state for `showTime` ms and then changes to the next frame's over `timeToNextFrame` ms (`moveX` / `moveY` pixels during
+that change), the last frame reached ends it; the font is `ui/font/librebaskerville-bold.ttf` (what `fonts.g` maps the
+original's gothic to), 60 px times the resting scale, no outline; the anchor is the point over the unit's head (height +
+0.18 m scaled like the plate gap) plus the script's pixel offset. A basic attack number lives 650 ms, "Battle Start!" 1270
+ms. A hit is `UnitDamaged`: the player's attack is `COMBAT_TEXT` (`SWING` for the auto attack, `SKILL`, `DOT` for buffs,
+the hit type `HIT` / `CRITICAL` / `MISS` / `DODGE` / `BLOCK` ... from the wire's hit type), a hit on the player is `COMBAT_MSG`
+(the red "-12", and the combat log line). Not drawn: the afterimages, the shake and the `critical.dds` burst of critical hits.
+
+**Fight state.** The server only sends `SCCombatCleared` (when the player's fight ends, the kill); it never sends
+`SCCombatEngaged` in these fights. The HUD enters combat itself when the player attacks or is attacked
+(`HudData::local_combat`, in the snapshot's `in_combat`, so the diff raises `UNIT_COMBAT_STATE_CHANGED(true)`: the red
+"Battle Start!") and leaves it on `CombatChanged` for the player, death or resurrection ("Battle End!", with the pink
+"XP +14" from `EXP_CHANGED`). The packet of the killing blow follows the one that ends the fight, so damage within a
+second of the end does not start a new one.
+
+**Target ring** (`ring.rs`). The decal `textures/decal/target/target_enemy04.dds` under the selected unit, drawn over
+the water like the real one: a grid of 12 x 12 points on the terrain around the unit is projected every frame and drawn
+as a textured 2D mesh on the plate camera ("up" of the texture points away from the camera). Red (250, 80, 68) hostile,
+green friendly player, yellow-gold friendly NPC, yellow neutral; the diameter is 1.2 m at least (the rat's 1.28 m).
+
+**Cast bar** (`cast.rs`). The original's `player_casting_bar.lua` (and the target frame's) listens for
+`SPELLCAST_START(name, ms, caster)` / `SPELLCAST_STOP` / `SPELLCAST_SUCCEEDED` (`caster` "player" or "target") and asks
+`X2Unit:UnitCastingInfo(unit)` (`HUD.casting_info`: name, total ms, ms so far) each frame. `SkillStarted` with a cast time
+starts a cast (the skill's name from the DB), `SkillFired` ends it (a channel keeps it and counts down), `CastingStopped` /
+`SkillStopped` / death interrupt, plot steps with a cast time restart it. Recall (10 s) gives the capture's blue bar at
+x 848-1070, y 910-928.
+
+**Chat lines** (`items.rs`). `ItemsChanged` in the bag becomes `ADDED_ITEM` / `REMOVED_ITEM` ("Received: [item]",
+"Used: [Heart's Beat]" when a skill consumed it, the reasons 13, 40, 41, 45; swaps and splits are silent); the link is the
+item's name in brackets in its grade's colour (`item_grades.color_argb`; the capture's tan is the basic grade). "Gained 14
+XP." is `EXP_CHANGED` with the gain (`X2Util:MakeMarkedCiphersStr` puts the thousands commas in).
+
+**Loot** (`loot.rs`, aa-net's `Loot`). The server tells the client a corpse has loot for it (`SCLootableState`): two icons
+appear beside the player (the capture: 25 px to each side, 0.52 m over the feet): F, three bags
+(`ui/icon/interaction/icon_interaction20.dds`), loots everything (`Command::LootOpen` with `loot_all`), G, one bag
+(`icon_interaction21.dds`), opens the window; both act on the nearest corpse within 8 m (assumed range). What is left comes as
+`SCLootBagData` and the original's loot window (`x2ui/loot`) shows it: `LOOT_BAG_CHANGED(setTime)` (`setTime` for a "loot all":
+the window lists what could not be taken for two seconds), `LOOT_BAG_CLOSE`; `X2Loot` answers from `HUD.loot_count` /
+`HUD.loot_item` and takes an item with `HUD.loot_take` (`Command::LootItem`). The Angry Rat of the lane server drops nothing,
+so this has only been seen with `--hud-fake-loot` (the icons match `reference/ingame/combat_death_2/real_08.png`; the
+window is the script's). The wire formats are checked against the server's own byte tests.
+
+**Tab** targets the nearest living enemy (the next one when pressed again), any unit if there is no enemy.
+
+**Not done / assumptions.** The afterimage, shake and critical bursts; the plate shows no party, guild or PvP marks;
+auto-away after 300 s and the loot range of 8 m are guesses; the capture's side-on camera is only approximated by
+`--hud-side-cam` (the character is not exactly side-on); a unit's height has no source for models without a skeleton
+and bounds (1.8 m times its scale).
 
 ### Max HP / MP
 
