@@ -192,6 +192,9 @@ pub enum Command {
     /// Put `action` into hotbar slot `slot` (0 based). The server does not echo it: the session
     /// reports `ActionSlotChanged` itself.
     SetActionSlot { slot: u8, action: ActionSlot },
+    /// Select a unit (`obj_id`) as the target, 0 clears the target. The server answers with
+    /// `TargetChanged` for the player (also to the sender).
+    Target { obj_id: u32 },
     /// Leave the game: `Quit` logs out, `CharacterSelect` returns to the character list.
     LeaveWorld(LeaveTarget),
     CancelLeave,
@@ -330,6 +333,18 @@ pub enum Event {
     /// A unit entered or left combat.
     CombatChanged { obj_id: u32, engaged: bool },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    /// The game clock: `hour` 0..24, `speed` in game hours per real second when the server sent it
+    /// (the first packet after spawning; later ones only move `hour`).
+    TimeOfDay { hour: f32, speed: Option<f32> },
+    /// Snow switched on or off.
+    Snow(bool),
+    /// A chat channel was joined: `chat_type` (see `model::chat_type`), `sub_type` (the zone group
+    /// id for zone channels), `faction_id` and the channel's name (empty for zone channels).
+    ChatChannelJoined { chat_type: i16, sub_type: i16, faction_id: u32, name: String },
+    ChatChannelLeft { chat_type: i16, sub_type: i16, faction_id: u32 },
+    /// A unit selected (or dropped, `target_obj_id` 0) a target. For the local player this is the
+    /// server's answer to [`Command::Target`].
+    TargetChanged { obj_id: u32, target_obj_id: u32 },
     /// The whole hotbar, 85 slots, sent when the character is selected.
     ActionSlots(Vec<ActionSlot>),
     /// One hotbar slot changed by [`Command::SetActionSlot`].
@@ -698,6 +713,9 @@ impl Session {
                     self.emit(Event::ActionSlotChanged { slot, action });
                 }
             }
+            Command::Target { obj_id } => {
+                self.send_game(game::ClientMsg::ChangeTarget { obj_id }).await;
+            }
             Command::LeaveWorld(target) => {
                 self.send_game(game::ClientMsg::LeaveWorld(target)).await;
             }
@@ -960,6 +978,15 @@ impl Session {
             M::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary } => {
                 self.emit(Event::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary });
             }
+            M::TimeOfDay { hour, speed } => self.emit(Event::TimeOfDay { hour, speed }),
+            M::Snow(on) => self.emit(Event::Snow(on)),
+            M::ChatJoined { chat_type, sub_type, faction_id, name } => {
+                self.emit(Event::ChatChannelJoined { chat_type, sub_type, faction_id, name });
+            }
+            M::ChatLeft { chat_type, sub_type, faction_id } => {
+                self.emit(Event::ChatChannelLeft { chat_type, sub_type, faction_id });
+            }
+            M::TargetChanged { obj_id, target_obj_id } => self.emit(Event::TargetChanged { obj_id, target_obj_id }),
             M::ActionSlots(slots) => self.emit(Event::ActionSlots(slots)),
             M::InvenInit { bag_slots, bank_slots } => self.emit(Event::InventoryInit { bag_slots, bank_slots }),
             M::InvenContents(chunk) => self.emit(Event::InventoryChunk(chunk)),

@@ -273,6 +273,15 @@ pub enum ServerMsg {
     CombatEngaged { obj_id: u32 },
     CombatCleared { obj_id: u32 },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
+    // -- world: clock, weather, chat channels, targets
+    /// The game clock in hours (0..24); `speed` (game hours per real second) comes with the
+    /// detailed form only.
+    TimeOfDay { hour: f32, speed: Option<f32> },
+    Snow(bool),
+    ChatJoined { chat_type: i16, sub_type: i16, faction_id: u32, name: String },
+    ChatLeft { chat_type: i16, sub_type: i16, faction_id: u32 },
+    /// `target_obj_id` 0 clears the target.
+    TargetChanged { obj_id: u32, target_obj_id: u32 },
     // -- action bar, bag and equipment
     /// All hotbar slots (`SCActionSlots`).
     ActionSlots(Vec<ActionSlot>),
@@ -343,6 +352,12 @@ impl ServerMsg {
             Self::CombatEngaged { .. } => "SCCombatEngaged",
             Self::CombatCleared { .. } => "SCCombatCleared",
             Self::UnitFactionChanged { .. } => "SCUnitFactionChanged",
+            Self::TimeOfDay { speed: None, .. } => "SCTimeOfDay",
+            Self::TimeOfDay { .. } => "SCDetailedTimeOfDay",
+            Self::Snow(_) => "SCOnOffSnow",
+            Self::ChatJoined { .. } => "SCJoinedChatChannel",
+            Self::ChatLeft { .. } => "SCLeavedChatChannel",
+            Self::TargetChanged { .. } => "SCTargetChanged",
             Self::ActionSlots(_) => "SCActionSlots",
             Self::InvenInit { .. } => "SCCharacterInvenInit",
             Self::InvenContents(_) => "SCCharacterInvenContents",
@@ -550,6 +565,27 @@ impl ServerMsg {
                 faction_id2: r.u32()?,
                 temporary: r.bool()?,
             },
+            sc::SCTimeOfDayPacket => Self::TimeOfDay { hour: r.f32()?, speed: None },
+            sc::SCDetailedTimeOfDayPacket => {
+                let hour = r.f32()?;
+                let speed = r.f32()?;
+                // Day start and end (0 and 24).
+                r.skip(8)?;
+                Self::TimeOfDay { hour, speed: Some(speed) }
+            }
+            sc::SCOnOffSnowPacket => Self::Snow(r.bool()?),
+            sc::SCJoinedChatChannelPacket => Self::ChatJoined {
+                chat_type: r.i16()?,
+                sub_type: r.i16()?,
+                faction_id: r.u32()?,
+                name: r.string()?,
+            },
+            sc::SCLeavedChatChannelPacket => Self::ChatLeft {
+                chat_type: r.i16()?,
+                sub_type: r.i16()?,
+                faction_id: r.u32()?,
+            },
+            sc::SCTargetChangedPacket => Self::TargetChanged { obj_id: r.bc()?, target_obj_id: r.bc()? },
             sc::SCActionSlotsPacket => Self::ActionSlots(crate::items::read_action_slots(r)?),
             sc::SCCharacterInvenInitPacket => Self::InvenInit { bag_slots: r.u32()?, bank_slots: r.u32()? },
             sc::SCCharacterInvenContentsPacket => Self::InvenContents(InvenChunk::read(r)?),
@@ -955,6 +991,54 @@ mod tests {
                 temporary: false
             }
         );
+    }
+
+    #[test]
+    fn world_packets_golden_bytes() {
+        // SCTimeOfDay: f32 hour. SCDetailedTimeOfDay: hour, speed 0.0016666, start 0, end 24.
+        let mut w = Writer::new();
+        w.f32(13.5);
+        assert_eq!(
+            decode(sc::SCTimeOfDayPacket, &w.finish()),
+            ServerMsg::TimeOfDay { hour: 13.5, speed: None }
+        );
+        let mut w = Writer::new();
+        w.f32(6.25).f32(0.001_666_6).f32(0.0).f32(24.0);
+        let bytes = w.finish();
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(
+            decode(sc::SCDetailedTimeOfDayPacket, &bytes),
+            ServerMsg::TimeOfDay { hour: 6.25, speed: Some(0.001_666_6) }
+        );
+        // SCOnOffSnow: bool.
+        assert_eq!(decode(sc::SCOnOffSnowPacket, &[1]), ServerMsg::Snow(true));
+        assert_eq!(decode(sc::SCOnOffSnowPacket, &[0]), ServerMsg::Snow(false));
+        // SCJoinedChatChannel: i16 type, i16 sub type (zone group), u32 faction, string name.
+        // "Entering Chat: 1.Shout.Solzreed Peninsula" is Shout (1) in zone group 5.
+        let mut w = Writer::new();
+        w.i16(1).i16(5).u32(0).string("");
+        let bytes = w.finish();
+        assert_eq!(bytes, [1, 0, 5, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            decode(sc::SCJoinedChatChannelPacket, &bytes),
+            ServerMsg::ChatJoined { chat_type: 1, sub_type: 5, faction_id: 0, name: String::new() }
+        );
+        // SCLeavedChatChannel: the same without the name.
+        assert_eq!(
+            decode(sc::SCLeavedChatChannelPacket, &[1, 0, 5, 0, 0, 0, 0, 0]),
+            ServerMsg::ChatLeft { chat_type: 1, sub_type: 5, faction_id: 0 }
+        );
+        // SCTargetChanged: bc object id, bc target (0 = none).
+        let mut w = Writer::new();
+        w.bc(0x0102).bc(0x0A0B0C);
+        let bytes = w.finish();
+        assert_eq!(bytes.len(), 6);
+        assert_eq!(
+            decode(sc::SCTargetChangedPacket, &bytes),
+            ServerMsg::TargetChanged { obj_id: 0x0102, target_obj_id: 0x0A0B0C }
+        );
+        // CSChangeTarget: the bc target.
+        assert_eq!(ClientMsg::ChangeTarget { obj_id: 0x0A0B0C }.encode_body().len(), 3);
     }
 
     #[test]

@@ -14,10 +14,12 @@ use std::sync::Mutex;
 use bevy::app::{App, Plugin, PreUpdate};
 use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::ecs::prelude::*;
+use bevy::ecs::system::SystemParam;
 
 use crate::session::{Client, Command, Event};
 use crate::state::{
-    ActionBar, Buffs, Characters, Doodads, Inventory, Player, PlayerStats, Status, Units, Worlds,
+    ActionBar, Buffs, Characters, Chat, Doodads, Inventory, Player, PlayerStats, Status, Target, Units,
+    WorldInfo, Worlds,
 };
 
 /// Ask the session to do something.
@@ -44,19 +46,9 @@ pub struct NetPlugin;
 
 impl Plugin for NetPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<NetCommand>()
-            .add_message::<NetEvent>()
-            .init_resource::<Worlds>()
-            .init_resource::<Characters>()
-            .init_resource::<Player>()
-            .init_resource::<Units>()
-            .init_resource::<Doodads>()
-            .init_resource::<Status>()
-            .init_resource::<PlayerStats>()
-            .init_resource::<Buffs>()
-            .init_resource::<ActionBar>()
-            .init_resource::<Inventory>()
-            .add_systems(PreUpdate, (send_commands, receive_events).chain());
+        app.add_message::<NetCommand>().add_message::<NetEvent>();
+        init_state(app);
+        app.add_systems(PreUpdate, (send_commands, receive_events).chain());
         match Client::spawn_thread() {
             Ok(client) => {
                 app.insert_resource(NetClient(Mutex::new(client)));
@@ -79,55 +71,11 @@ fn send_commands(client: Option<Res<NetClient>>, mut commands: MessageReader<Net
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn receive_events(
-    client: Option<Res<NetClient>>,
-    mut out: MessageWriter<NetEvent>,
-    mut worlds: ResMut<Worlds>,
-    mut characters: ResMut<Characters>,
-    mut player: ResMut<Player>,
-    mut units: ResMut<Units>,
-    mut doodads: ResMut<Doodads>,
-    mut status: ResMut<Status>,
-    mut stats: ResMut<PlayerStats>,
-    mut buffs: ResMut<Buffs>,
-    mut actions: ResMut<ActionBar>,
-    mut inventory: ResMut<Inventory>,
-) {
+fn receive_events(client: Option<Res<NetClient>>, mut out: MessageWriter<NetEvent>, mut state: NetState) {
     let Some(client) = client else { return };
     let mut client = client.0.lock().expect("net client poisoned");
     while let Some(event) = client.try_recv() {
-        // `apply` reports whether anything changed, so change detection stays meaningful.
-        if worlds.apply_if_changed(&event) {
-            worlds.set_changed();
-        }
-        if characters.apply_if_changed(&event) {
-            characters.set_changed();
-        }
-        if player.apply_if_changed(&event) {
-            player.set_changed();
-        }
-        if units.apply_if_changed(&event) {
-            units.set_changed();
-        }
-        if doodads.apply_if_changed(&event) {
-            doodads.set_changed();
-        }
-        if status.apply_if_changed(&event) {
-            status.set_changed();
-        }
-        if stats.apply_if_changed(&event) {
-            stats.set_changed();
-        }
-        if buffs.apply_if_changed(&event) {
-            buffs.set_changed();
-        }
-        if actions.apply_if_changed(&event) {
-            actions.set_changed();
-        }
-        if inventory.apply_if_changed(&event) {
-            inventory.set_changed();
-        }
+        state.apply(&event);
         out.write(NetEvent(event));
     }
 }
@@ -137,14 +85,53 @@ trait ApplyIfChanged {
     fn apply_if_changed(&mut self, e: &Event) -> bool;
 }
 
-macro_rules! apply_if_changed {
-    ($($t:ty),*) => {$(
-        impl ApplyIfChanged for ResMut<'_, $t> {
-            fn apply_if_changed(&mut self, e: &Event) -> bool {
-                // `bypass_change_detection` avoids flagging the resource for events it ignores.
-                self.bypass_change_detection().apply(e)
+/// Declares the state resources once: the resources the plugin adds, the system parameter that
+/// holds them all (a plain system parameter list stops at 16), and the fold of an event into each.
+macro_rules! net_state {
+    ($($field:ident: $t:ty),* $(,)?) => {
+        $(
+            impl ApplyIfChanged for ResMut<'_, $t> {
+                fn apply_if_changed(&mut self, e: &Event) -> bool {
+                    // `bypass_change_detection` avoids flagging the resource for events it ignores.
+                    self.bypass_change_detection().apply(e)
+                }
+            }
+        )*
+
+        #[derive(SystemParam)]
+        struct NetState<'w> {
+            $($field: ResMut<'w, $t>,)*
+        }
+
+        impl NetState<'_> {
+            fn apply(&mut self, event: &Event) {
+                // `apply` reports whether anything changed, so change detection stays meaningful.
+                $(
+                    if self.$field.apply_if_changed(event) {
+                        self.$field.set_changed();
+                    }
+                )*
             }
         }
-    )*};
+
+        fn init_state(app: &mut App) {
+            $(app.init_resource::<$t>();)*
+        }
+    };
 }
-apply_if_changed!(Worlds, Characters, Player, Units, Doodads, Status, PlayerStats, Buffs, ActionBar, Inventory);
+
+net_state! {
+    worlds: Worlds,
+    characters: Characters,
+    player: Player,
+    units: Units,
+    doodads: Doodads,
+    status: Status,
+    stats: PlayerStats,
+    buffs: Buffs,
+    actions: ActionBar,
+    inventory: Inventory,
+    world: WorldInfo,
+    chat: Chat,
+    target: Target,
+}
