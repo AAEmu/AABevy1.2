@@ -873,3 +873,22 @@ bringing runtime coverage to 102 tests.
 and the red "Battle Start!" text. Compared with `reference/ingame/combat_melee/real_06.png`
 for font shape, size, color and alignment; fixture positions replace unit projection.
 Captures logged 435-515 FPS during repeated bursts, zero script errors, and exited.
+
+## Native 3D overhead marker audit
+
+This is a read-only audit for application integration; `aa-ui` does not render world markers.
+`game/ui/hud/overhead_mark.dds` is a 256x256 atlas. Native `3940b340` builds 12 row-major
+64x75 cells: `[64*(i%4),75*(i/4),64,75]`, zero-based i=0..11. The order is
+1,2,3,4 / 5,6,7,8 / 9,heart,star,X. The tiny glyph row below y=225 is unused by this renderer.
+
+`3940bcf0` rejects indices above 11 and calls camera-facing world billboard `3940b7c0` with
+anchor 7 (bottom center). Runtime float cvars at globals `3a5a0128` and `3a5a012c` supply
+world width/height, multiplied by the caller's scale; these are not 64x75 screen-pixel quads.
+Global `3a5a0124` supplies a scaled offset along the camera direction. Caller `39411fed`
+passes name-tag field +0x9c as the zero-based atlas index and uses its world anchor +0x28.
+There is no marker-specific animation time in this draw path: it remains until cleared,
+subject to the normal name-tag visibility path. Names/defaults of the three hashed cvars
+remain unconfirmed; world sizes should not be guessed from the atlas dimensions.
+
+Targeted read-only extracts: `data/extract/aa-ui/overhead-native.txt`,
+`overhead-marker-native.txt`; decoded asset preview `data/extract/aa-ui/markers/overhead_mark.png`.
