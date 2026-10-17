@@ -10,12 +10,13 @@
 //! while it moves plays the clip on its upper body (an [`aa_anim::Animator`] layer, [`Acting::layered`]); locomotion keeps driving
 //! the legs underneath.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use aa_anim::{Animator, BoneMask, Cal, ClipLibrary, pose::{BoundClip, Rig, SampleOptions}};
 use bevy::prelude::*;
 
 use super::combat::{Acting, Dead};
+use super::weapons::{Drawn, Out, Wield};
 
 /// Direction suffixes of the 8-way locomotion clips; index = [`direction_index`].
 const DIRS: [&str; 8] = ["f", "fl", "fr", "l", "r", "b", "bl", "br"];
@@ -97,6 +98,63 @@ pub struct ClipSet {
     /// Ground speed (m/s) the forward run / walk clips cover per second of playback.
     run_clip_speed: f32,
     walk_clip_speed: f32,
+    /// The combat stances, bound when a unit first fights in one.
+    stances: Arc<[OnceLock<Arc<StanceClips>>; 4]>,
+}
+
+/// The stance a unit fights in, from the weapon it holds: its idle and run clips are `<prefix>_ba_combat_idle` and
+/// `<prefix>_mo_combat_run_<dir>` of the model's `.cal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    /// One handed (and dual wield) weapons.
+    Onehand,
+    Twohand,
+    /// Instruments.
+    Music,
+    /// The bow and everything without a stance of its own (the `fist_` clips are the one handed ones).
+    Fist,
+}
+
+impl Stance {
+    const ALL: [Stance; 4] = [Stance::Onehand, Stance::Twohand, Stance::Music, Stance::Fist];
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Stance::Onehand => "onehand",
+            Stance::Twohand => "twohand",
+            Stance::Music => "music",
+            Stance::Fist => "fist",
+        }
+    }
+
+    /// The stance of a unit with `out` in its hand.
+    pub fn of(out: Out, wield: Wield) -> Stance {
+        match out {
+            Out::Blade { .. } if wield.two_handed => Stance::Twohand,
+            Out::Blade { .. } => Stance::Onehand,
+            Out::Instrument => Stance::Music,
+            Out::Bow => Stance::Fist,
+        }
+    }
+}
+
+/// The clips of one stance: standing and running with the weapon out (a clip a stance lacks is the one handed one, else the
+/// peaceful one).
+pub struct StanceClips {
+    idle: Option<BoundClip>,
+    run: [Option<BoundClip>; 8],
+    run_clip_speed: f32,
+}
+
+impl StanceClips {
+    fn load(rig: &Rig, cal: &Cal, clips: &ClipLibrary, stance: Stance) -> StanceClips {
+        let prefix = stance.prefix();
+        let bind = |name: String, fallback: String| bind_clip(rig, cal, clips, &name).or_else(|| bind_clip(rig, cal, clips, &fallback));
+        let idle = bind(format!("{prefix}_ba_combat_idle"), "fist_ba_combat_idle".to_string());
+        let run: [Option<BoundClip>; 8] = std::array::from_fn(|i| bind(format!("{prefix}_mo_combat_run_{}", DIRS[i]), format!("fist_mo_combat_run_{}", DIRS[i])));
+        let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
+        StanceClips { idle, run, run_clip_speed }
+    }
 }
 
 impl ClipSet {
@@ -110,7 +168,13 @@ impl ClipSet {
         let jump = bind("fist_mo_relaxed_jump_s_loop");
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
-        Some(ClipSet { cal, idle, upper: BoneMask::upper_body(rig), run, walk, jump, run_clip_speed, walk_clip_speed })
+        Some(ClipSet { cal, idle, upper: BoneMask::upper_body(rig), run, walk, jump, run_clip_speed, walk_clip_speed, stances: Default::default() })
+    }
+
+    /// The clips of a stance, bound the first time a unit of this model fights in it (the characters of a skeleton share them).
+    fn stance(&self, rig: &Rig, clips: &ClipLibrary, stance: Stance) -> Arc<StanceClips> {
+        let i = Stance::ALL.iter().position(|s| *s == stance).unwrap_or(0);
+        self.stances[i].get_or_init(|| Arc::new(StanceClips::load(rig, &self.cal, clips, stance))).clone()
     }
 
     pub fn can_move(&self) -> bool {
@@ -164,11 +228,13 @@ pub struct Motion {
 pub struct Locomotion {
     pub clips: ClipSet,
     state: State,
+    /// The combat stance the playing clip belongs to (`None`: the peaceful clips).
+    stance: Option<Stance>,
 }
 
 impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
-        Locomotion { clips, state: State::Idle }
+        Locomotion { clips, state: State::Idle, stance: None }
     }
 
     /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
@@ -204,12 +270,23 @@ pub fn direction_index(local_dir: Vec2) -> usize {
     }
 }
 
-/// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed.
-pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>), Without<Dead>>) {
-    for (mut animator, mut loco, motion, acting) in &mut units {
+/// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed. A unit with its weapon out ([`Drawn`]) stands
+/// and runs in the stance of the weapon until it puts it away; walking stays the peaceful walk.
+pub fn drive_locomotion(
+    time: Res<Time>,
+    library: Res<ClipLibrary>,
+    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>), Without<Dead>>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (mut animator, mut loco, motion, acting, drawn, wield) in &mut units {
         // an action on the whole body owns the clip; one on the upper body leaves the legs to locomotion
         if acting.is_some_and(|a| !a.layered) {
             continue;
+        }
+        let stance = drawn.and_then(|d| d.stance(now)).map(|out| Stance::of(out, wield.copied().unwrap_or_default()));
+        if stance != loco.stance {
+            loco.stance = stance;
+            loco.state = State::Unknown;
         }
         let moving = motion.speed > 0.3 && loco.clips.can_move();
         let walk = moving && motion.speed < (WALK_SPEED + RUN_SPEED) * 0.5;
@@ -220,14 +297,17 @@ pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motio
         } else {
             State::Idle
         };
+        let stance_clips = stance.map(|s| loco.clips.stance(&animator.rig, &library, s));
+        let stance_clips = stance_clips.as_deref();
         if wanted != loco.state {
             // fall back to the other speed set / forward clip when a direction has no clip
             let clip = match wanted {
-                State::Unknown | State::Idle => Some(loco.clips.idle.clone()),
+                State::Unknown | State::Idle => stance_clips.and_then(|c| c.idle.clone()).or_else(|| Some(loco.clips.idle.clone())),
                 State::Air => loco.clips.jump.clone(),
                 State::Moving(d, walk) => {
                     let (primary, secondary) = if walk { (&loco.clips.walk, &loco.clips.run) } else { (&loco.clips.run, &loco.clips.walk) };
-                    primary[d].clone().or_else(|| secondary[d].clone()).or_else(|| primary[0].clone()).or_else(|| secondary[0].clone())
+                    let combat_run = stance_clips.filter(|_| !walk).and_then(|c| c.run[d].clone());
+                    combat_run.or_else(|| primary[d].clone()).or_else(|| secondary[d].clone()).or_else(|| primary[0].clone()).or_else(|| secondary[0].clone())
                 }
             };
             if let Some(clip) = clip {
@@ -237,11 +317,33 @@ pub fn drive_locomotion(mut units: Query<(&mut Animator, &mut Locomotion, &Motio
             loco.state = wanted;
         }
         animator.speed = match loco.state {
-            State::Moving(_, walk) => {
-                let clip_speed = if walk { loco.clips.walk_clip_speed } else { loco.clips.run_clip_speed };
+            State::Moving(d, walk) => {
+                let combat_run = stance_clips.filter(|c| !walk && c.run[d].is_some());
+                let clip_speed = match combat_run {
+                    Some(c) if c.run_clip_speed > 0.1 => c.run_clip_speed,
+                    _ if walk => loco.clips.walk_clip_speed,
+                    _ => loco.clips.run_clip_speed,
+                };
                 if clip_speed > 0.1 { (motion.speed / clip_speed).clamp(0.4, 2.0) } else { 1.0 }
             }
             _ => 1.0,
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_weapon_in_hand_picks_the_stance() {
+        let none = Wield::default();
+        assert_eq!(Stance::of(Out::Blade { dual: false }, none), Stance::Onehand);
+        assert_eq!(Stance::of(Out::Blade { dual: true }, none), Stance::Onehand);
+        assert_eq!(Stance::of(Out::Blade { dual: false }, Wield { two_handed: true, ..none }), Stance::Twohand);
+        assert_eq!(Stance::of(Out::Instrument, none), Stance::Music);
+        assert_eq!(Stance::of(Out::Bow, none), Stance::Fist);
+        // every stance has a slot
+        assert_eq!(Stance::ALL.len(), 4);
     }
 }

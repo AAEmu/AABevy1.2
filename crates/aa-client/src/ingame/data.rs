@@ -24,6 +24,8 @@ struct Lookups {
     doodad_models: HashMap<u32, Option<String>>,
     npc_scale: HashMap<u32, f32>,
     weapons: HashMap<u32, Option<Weapon>>,
+    anim_actions: HashMap<u32, Option<String>>,
+    mount_poses: HashMap<u32, u32>,
 }
 
 /// How a weapon item is drawn (`item_weapons` + its `item_assets` row).
@@ -133,6 +135,8 @@ impl Db {
                 doodad_models: HashMap::new(),
                 npc_scale: HashMap::new(),
                 weapons: HashMap::new(),
+                anim_actions: HashMap::new(),
+                mount_poses: HashMap::new(),
             })),
         })
     }
@@ -156,6 +160,39 @@ impl Db {
             .filter(|f| !f.is_empty());
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// The clip (`.cal` entry name, lower case) of an animation action (`anim_actions.anim_name`): the idle pose of an NPC.
+    pub fn anim_action_clip(&self, id: u32) -> Option<String> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(c) = l.anim_actions.get(&id) {
+            return c.clone();
+        }
+        let clip: Option<String> = l
+            .conn
+            .query_row("SELECT anim_name FROM anim_actions WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+            .map(|n| n.to_ascii_lowercase())
+            .filter(|n| !n.is_empty() && n != "none");
+        l.anim_actions.insert(id, clip.clone());
+        clip
+    }
+
+    /// What a model is ridden like (`models.mount_pose_id`: 1 horse, 2 lion, 4 wildboar, 10 pangolin; 0 for none).
+    pub fn mount_pose(&self, model_id: u32) -> u32 {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(p) = l.mount_poses.get(&model_id) {
+            return *p;
+        }
+        let pose: u32 = l
+            .conn
+            .query_row("SELECT mount_pose_id FROM models WHERE id = ?1", params![model_id], |r| r.get::<_, Option<u32>>(0))
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        l.mount_poses.insert(model_id, pose);
+        pose
     }
 
     /// `npcs.scale` of an NPC template (1 when unknown).

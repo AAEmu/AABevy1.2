@@ -54,6 +54,8 @@ pub struct Wield {
     pub two_handed: bool,
     pub dual: bool,
     pub instrument: Option<usize>,
+    /// The character carries a sword, axe, staff ... (the basic attack has no clip of its own: the server picks the weapon's).
+    pub melee: bool,
 }
 
 impl Wield {
@@ -61,6 +63,7 @@ impl Wield {
         Wield {
             two_handed: items.iter().any(|i| i.grip == Grip::Blade && i.two_handed),
             dual: items.iter().any(|i| i.grip == Grip::Blade && i.offhand),
+            melee: items.iter().any(|i| i.grip == Grip::Blade),
             instrument: items.iter().find_map(|i| match i.grip {
                 Grip::Instrument(kind) => Some(kind),
                 _ => None,
@@ -96,6 +99,39 @@ pub enum Out {
 pub struct Drawn {
     pub until: f64,
     pub out: Out,
+    /// The holster has begun: `until` is the moment the weapon leaves the hand, and the combat stance is over.
+    pub sheathing: bool,
+}
+
+impl Drawn {
+    /// The weapon comes out for an action that ends at `ends`: it stays out for a while after it.
+    pub fn after_action(ends: f64, out: Out) -> Drawn {
+        Drawn { until: ends + stay(out), out, sheathing: false }
+    }
+
+    /// The weapon in hand while the character is in its combat stance at `now` (`None` at peace, or while it is put away).
+    pub fn stance(&self, now: f64) -> Option<Out> {
+        (!self.sheathing && now < self.until).then_some(self.out)
+    }
+}
+
+/// Seconds a weapon stays out after the last action with it: a fight is not over with the blow (the real client's captures show the
+/// shield still up 7 s after the kill); an instrument goes away sooner.
+fn stay(out: Out) -> f64 {
+    match out {
+        Out::Instrument => 4.0,
+        Out::Bow | Out::Blade { .. } => 10.0,
+    }
+}
+
+/// The holster clip of the weapon a character puts away (the bow and the instruments have none): the weapon leaves the hand at the
+/// clip's `aw_none` moment.
+pub fn holster_clip(out: Out, wield: Wield) -> Option<&'static str> {
+    match out {
+        Out::Blade { .. } if wield.two_handed => Some("twohand_ac_holster_back_r"),
+        Out::Blade { .. } => Some("onehand_ac_holster_side_l"),
+        Out::Bow | Out::Instrument => None,
+    }
 }
 
 /// Which weapon the clip `name` is for (`None` for a clip that needs none: fists, the generic `all_` clips, a hit reaction).
@@ -114,15 +150,17 @@ pub fn weapon_for_clip(name: &str) -> Option<Out> {
 }
 
 /// Where a holdable hangs while it is not in the hand (bones of the base skeleton: `item_bow_l`
-/// slings a bow diagonally across the back, `item_side_l / r` at the hips, `item_arm_l` on the left
+/// slings a bow diagonally across the back, `item_side_l / r` at the left and right hip, `item_arm_l` on the left
 /// forearm, `item_back_c` the back: the two handed weapons).
 fn sheath_bone(code: &str, slot: usize, two_handed: bool) -> &'static str {
     match (code, slot) {
         ("bow", _) => "item_bow_l",
         ("shield", _) => "item_arm_l",
         _ if two_handed => "item_back_c",
-        (_, slot::OFFHAND) => "item_side_l",
-        (_, slot::MAINHAND) => "item_side_r",
+        // the real client hangs the main sword on the left hip (`onehand_ac_holster_side_l` puts it there) and an off hand weapon
+        // on the right one (`onehand_ac_holster_side_r`)
+        (_, slot::OFFHAND) => "item_side_r",
+        (_, slot::MAINHAND) => "item_side_l",
         _ => "item_back_c",
     }
 }
@@ -186,10 +224,20 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
     out
 }
 
+/// What the character select screen shows of a character's weapons: the sword in its scabbard; the bow only for a character that
+/// has no other weapon (`reference/character_select`: Refone carries a sword and a bow, and only the sword is on the model).
+pub fn select_weapons(mut items: Vec<CarriedItem>) -> Vec<CarriedItem> {
+    if items.iter().any(|i| i.grip == Grip::Blade) {
+        items.retain(|i| i.grip != Grip::Bow);
+    }
+    items
+}
+
 /// Spawns the carried models under their bones once the character's skeleton exists.
 pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Query<(Entity, &Animator, &Carried)>) {
     for (entity, animator, carried) in &characters {
         let bone_of = |name: &str| animator.rig.skeleton.bones.iter().position(|b| b.name == name).and_then(|i| animator.bones.get(i).copied());
+        debug!("weapons: {entity:?} carries {:?}", carried.0.iter().map(|i| (i.path.rsplit('/').next().unwrap_or(""), i.grip, i.bone)).collect::<Vec<_>>());
         for item in &carried.0 {
             let Some(bone) = bone_of(item.bone) else { continue };
             // Full shading bakes the Illum specular map into metal / roughness: wood stays wood, blades shine
@@ -273,9 +321,10 @@ mod tests {
     fn the_class_of_what_is_held() {
         assert_eq!(Wield::of(&[]), Wield::default());
         let sword_and_shield = [item(Grip::Blade, false, false), item(Grip::Shield, false, false), item(Grip::Bow, false, false)];
-        assert_eq!(Wield::of(&sword_and_shield), Wield::default());
-        assert_eq!(Wield::of(&[item(Grip::Blade, true, false)]), Wield { two_handed: true, ..Default::default() });
-        assert_eq!(Wield::of(&[item(Grip::Blade, false, false), item(Grip::Blade, false, true)]), Wield { dual: true, ..Default::default() });
+        assert_eq!(Wield::of(&sword_and_shield), Wield { melee: true, ..Default::default() });
+        assert_eq!(Wield::of(&[item(Grip::Bow, false, false)]), Wield::default());
+        assert_eq!(Wield::of(&[item(Grip::Blade, true, false)]), Wield { two_handed: true, melee: true, ..Default::default() });
+        assert_eq!(Wield::of(&[item(Grip::Blade, false, false), item(Grip::Blade, false, true)]), Wield { dual: true, melee: true, ..Default::default() });
         assert_eq!(Wield::of(&[item(Grip::Instrument(2), false, false)]).instrument, Some(2));
     }
 
@@ -288,6 +337,31 @@ mod tests {
         assert_eq!(weapon_for_clip("music_co_sk_lute_cast"), Some(Out::Instrument));
         assert_eq!(weapon_for_clip("fist_co_attack_r"), None);
         assert_eq!(weapon_for_clip("all_co_sk_spell_cast_fireball"), None);
+    }
+
+    #[test]
+    fn a_weapon_stays_out_after_the_action_and_goes_back_with_the_holster() {
+        let drawn = Drawn::after_action(5.0, Out::Blade { dual: false });
+        assert_eq!(drawn.stance(14.9), Some(Out::Blade { dual: false }), "the stance lasts after the swing");
+        assert_eq!(drawn.stance(15.1), None);
+        // once the holster began the stance is over though the weapon is still in the hand until `until`
+        let sheathing = Drawn { sheathing: true, until: 20.0, ..drawn };
+        assert_eq!(sheathing.stance(16.0), None);
+        // a song is over sooner than a fight
+        assert!(Drawn::after_action(0.0, Out::Instrument).until < drawn.until - 5.0);
+        let two_handed = Wield { two_handed: true, ..Default::default() };
+        assert_eq!(holster_clip(Out::Blade { dual: false }, Wield::default()), Some("onehand_ac_holster_side_l"));
+        assert_eq!(holster_clip(Out::Blade { dual: false }, two_handed), Some("twohand_ac_holster_back_r"));
+        assert_eq!(holster_clip(Out::Bow, Wield::default()), None);
+    }
+
+    #[test]
+    fn the_select_screen_shows_the_sword_or_else_the_bow() {
+        let both = vec![item(Grip::Blade, false, false), item(Grip::Bow, false, false)];
+        let shown = select_weapons(both);
+        assert_eq!(shown.iter().map(|i| i.grip).collect::<Vec<_>>(), [Grip::Blade]);
+        assert_eq!(select_weapons(vec![item(Grip::Bow, false, false)]).len(), 1);
+        assert!(select_weapons(Vec::new()).is_empty());
     }
 
     #[test]

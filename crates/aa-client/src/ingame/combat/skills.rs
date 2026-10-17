@@ -39,6 +39,9 @@ pub mod ev {
     pub const END: u8 = 5;
     /// The voice line of the launch (`FxVoice` items; the clip's `voice_launch` anim event says when).
     pub const VOICE: u8 = 7;
+    /// `fx_items.offset_axis_id` 3: the effect has the orientation of its bone (the blade trails on the weapon hand); 4 turns a
+    /// hit effect towards the attacker.
+    pub const BONE_AXIS: u8 = 3;
 }
 
 /// What a sound of an effect group plays.
@@ -125,7 +128,7 @@ pub struct FxItem {
     pub bone: u8,
     /// Offset from the bone in cry axes (m).
     pub offset: Vec3,
-    /// `fx_items.offset_axis_id`: 4 turns a hit effect towards the attacker.
+    /// `fx_items.offset_axis_id`: [`ev::BONE_AXIS`] keeps the bone's orientation, 4 turns a hit effect towards the attacker.
     pub axis: u8,
     /// `fx_particles.scale`.
     pub scale: f32,

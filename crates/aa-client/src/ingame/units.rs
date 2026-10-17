@@ -15,18 +15,22 @@ use std::time::Instant;
 use aa_anim::{Animator, ClipLibrary, spawn_character};
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_cry::workers::Workers;
-use aa_net::model::Unit;
+use aa_net::model::{Movement, Unit, actor_flags, alertness, move_flags, stance};
 use aa_net::state::{Doodads, Units};
+use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
-use aa_world::cry_to_bevy;
+use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion};
 use super::creature;
 use super::data::Db;
+use super::idle::IdleClips;
+use super::mount::Rider;
 use super::player::{LocalPlayer, Mover, approach_angle, placement};
 use super::prepare::{DoodadBuild, UnitBuild, prepare_doodad, prepare_unit};
+use super::remote::{self, Report, Track};
 use super::weapons;
 
 /// Units are drawn within this many metres of the player, and dropped again beyond `* 1.25`.
@@ -59,22 +63,33 @@ fn tuning() -> (bool, f32) {
     })
 }
 
-/// A spawned unit, smoothed towards the server's position.
+/// A spawned unit, played back from the movement packets the server sent ([`remote::Track`]).
 #[derive(Component)]
 pub struct RemoteUnit {
     pub obj_id: u32,
+    /// The buffered reports and the playback clock.
+    track: Track,
     /// Displayed position / facing (game coordinates, radians).
-    pos: Vec3,
-    facing: f32,
-    /// Last position the server reported, the velocity it came with and how long ago.
-    target: Vec3,
-    velocity: Vec3,
-    since_update: f32,
+    pub(super) pos: Vec3,
+    pub(super) facing: f32,
     scale: f32,
-    /// Measured ground speed, low-pass filtered (m/s).
-    speed: f32,
+    /// A player character (8 way run clips, jump and fall) rather than an NPC or a creature (always faces where it goes).
+    character: bool,
+    /// Its movement says it is in combat (see [`remote::Report::combat`]).
+    pub combat: bool,
     /// Its meshes cast shadows (see [`SHADOW_RADIUS`]).
     casting: bool,
+}
+
+impl RemoteUnit {
+    pub(super) fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// Starts the buffered movement over at `pos` (a rider got off).
+    pub(super) fn reset_track(&mut self, pos: Vec3, facing: f32) {
+        self.track = Track::new(pos, facing);
+    }
 }
 
 #[derive(Component)]
@@ -119,17 +134,46 @@ struct View {
     entity: Option<Entity>,
     /// The model failed to build or the object has none: do not try again.
     no_model: bool,
+    /// Why there is no model (for the report).
+    why: String,
     /// A worker is preparing it.
     preparing: bool,
 }
 
 impl Views {
+    /// The entity drawing the unit `obj_id`, when it is drawn.
+    pub fn unit_entity(&self, obj_id: u32) -> Option<Entity> {
+        self.units.get(&obj_id).and_then(|v| v.entity)
+    }
+
     pub fn unit_entities(&self) -> usize {
         self.units.values().filter(|v| v.entity.is_some()).count()
     }
 
     pub fn doodad_entities(&self) -> usize {
         self.doodads.values().filter(|v| v.entity.is_some()).count()
+    }
+
+    /// Why the units the server reports are not drawn: `(beyond the draw radius, model failed, still being built)`, and the
+    /// failures as `(object id, reason)`. A unit within range that is none of these has not been looked at yet.
+    pub fn census(&self, units: &Units, me: Vec3) -> (usize, usize, usize, Vec<(u32, &str)>) {
+        let (mut far, mut failed, mut pending) = (0, 0, 0);
+        let mut reasons = Vec::new();
+        for (id, unit) in &units.by_id {
+            let view = self.units.get(id);
+            if view.is_some_and(|v| v.entity.is_some()) {
+                continue;
+            }
+            if view.is_some_and(|v| v.no_model) {
+                failed += 1;
+                reasons.push((*id, view.map_or("", |v| v.why.as_str())));
+            } else if flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS {
+                far += 1;
+            } else {
+                pending += 1;
+            }
+        }
+        (far, failed, pending, reasons)
     }
 
     /// Objects being prepared or waiting to be spawned.
@@ -159,7 +203,6 @@ pub fn sync_views(
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
     player: Query<&Mover, With<LocalPlayer>>,
-    mut remote: Query<&mut RemoteUnit>,
     time: Res<Time>,
     mut last_spawn: Local<f32>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
@@ -214,18 +257,6 @@ pub fn sync_views(
                 if d > UNIT_RADIUS * 1.25 {
                     commands.entity(e).despawn();
                     view.entity = None;
-                } else if let Ok(mut r) = remote.get_mut(e) {
-                    if r.target != pos {
-                        r.target = pos;
-                        r.since_update = 0.0;
-                    }
-                    r.velocity = unit.movement.as_ref().map_or(Vec3::ZERO, |m| {
-                        if m.flags & aa_net::model::move_flags::MOVING != 0 {
-                            Vec3::new(f32::from(m.velocity[0]), f32::from(m.velocity[1]), 0.0) / 1024.0
-                        } else {
-                            Vec3::ZERO
-                        }
-                    });
                 }
             }
             None if !view.no_model && !view.preparing && d <= UNIT_RADIUS => {
@@ -249,7 +280,8 @@ pub fn sync_views(
         let (unit, db, loader, clips, tx) = (unit.clone(), db.clone(), loader.clone(), clips.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
             // a panic must not leave the unit "preparing" for ever
-            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_unit(&db, &loader, &clips, &unit))).unwrap_or(UnitBuild::None);
+            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_unit(&db, &loader, &clips, &unit)))
+                .unwrap_or_else(|_| UnitBuild::None("the preparation panicked".into()));
             let _ = tx.send(Built::Unit(unit.obj_id, build));
         });
     }
@@ -315,18 +347,22 @@ pub fn sync_views(
                 let t_spawn = timers.as_deref().map(|t| t.time("units.spawn_unit"));
                 let entity = spawn_unit(&mut commands, &mut cry, &clips, unit, build);
                 drop(t_spawn);
+                let entity = entity.inspect_err(|why| {
+                    warn!("unit {} {:?} {:?} (model {}) is not drawn: {why}", unit.obj_id, unit.name, unit.kind, unit.model_id);
+                });
                 let ms = t0.elapsed().as_secs_f32() * 1000.0;
                 if ms > 30.0 {
                     debug!("spawning unit {} ({:?}) took {ms:.0} ms", unit.obj_id, unit.kind);
                 }
                 let view = views.units.entry(id).or_default();
                 match entity {
-                    Some(e) => {
+                    Ok(e) => {
                         view.entity = Some(e);
                         views.spawned_units += 1;
                     }
-                    None => {
+                    Err(why) => {
                         view.no_model = true;
+                        view.why = why;
                         views.failed += 1;
                     }
                 }
@@ -371,23 +407,20 @@ pub fn sync_views(
 }
 
 /// Builds the entity of one unit from what the worker prepared. `None` when there is nothing we can draw.
-fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Option<Entity> {
+fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Result<Entity, String> {
     let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
     let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
     let transform = placement(pos, unit.yaw(), scale);
     debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
     let entity = match build {
-        UnitBuild::Character { assets, models, carried, clips: set } => {
+        UnitBuild::Character { assets, models, carried, clips: set, pose } => {
             for m in models {
                 cry.finish_model(m);
             }
             let _t = aa_cry::prof::scope("unit.spawn_character");
             let root = match spawn_character(commands, cry, clips, *assets, transform) {
                 Ok(r) => r,
-                Err(e) => {
-                    error!("cannot spawn a character: {e}");
-                    return None;
-                }
+                Err(e) => return Err(format!("cannot spawn the character: {e}")),
             };
             let mut entity = commands.entity(root);
             entity.insert(Motion::default());
@@ -397,6 +430,9 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             if let Some(set) = set {
                 entity.insert(Locomotion::new((*set).clone()));
             }
+            if pose.is_some() {
+                entity.insert(IdleClips::new(pose, None));
+            }
             root
         }
         UnitBuild::Creature { file, models } => {
@@ -404,21 +440,20 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
                 cry.finish_model(m);
             }
             let _t = aa_cry::prof::scope("unit.spawn_creature");
-            creature::spawn(commands, cry, clips, &file, transform)?
+            creature::spawn(commands, cry, clips, &file, transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
         }
-        UnitBuild::None => return None,
+        UnitBuild::None(why) => return Err(why),
     };
     commands.entity(entity).insert((
         Name::new(format!("unit {} {}", unit.obj_id, unit.name)),
         RemoteUnit {
             obj_id: unit.obj_id,
+            track: Track::new(pos, unit.yaw()),
             pos,
             facing: unit.yaw(),
-            target: pos,
-            velocity: Vec3::ZERO,
-            since_update: 1.0,
             scale,
-            speed: 0.0,
+            character: unit.is_character(),
+            combat: false,
             casting: true,
         },
     ));
@@ -431,54 +466,202 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             cur.time = (unit_hash(obj_id) % 3000) as f32 / 1000.0;
         }
     });
-    Some(entity)
+    Ok(entity)
 }
 
 fn unit_hash(v: u32) -> u32 {
     v.wrapping_mul(2654435761) >> 7
 }
 
-/// Moves the displayed units towards what the server last said, with dead reckoning between reports.
+/// The systems that follow the movement packets and the idle poses; they run around the main chain of `sync_views`,
+/// `move_units` and `cull_units` (registered by [`super::InGamePlugin`]) and [`super::anim::drive_locomotion`].
+pub fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            receive_moves.before(move_units),
+            (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders).chain().after(move_units),
+            super::idle::posture_changes,
+            super::idle::remote_idles.after(super::anim::drive_locomotion),
+        )
+            .run_if(super::world_screens),
+    );
+}
+
+/// What the movement packet says, for the track.
+fn report_of(m: &Movement) -> Report {
+    // standing on a deck or a vehicle, the packet's position is relative to it: the world position is the next block's
+    let pos = m.support.as_ref().and_then(|s| s.world).map_or(m.pos, |(world, _)| world);
+    // the air: a jump, or no ground under the feet (neither solid ground nor an object, and not swimming or flying)
+    let airborne = m.move_type <= 1
+        && (m.flags & move_flags::JUMPING == move_flags::JUMPING
+            || m.actor_flags & actor_flags::JUMPING != 0
+            || (m.actor_flags & (actor_flags::STANDING_ON_SOLID | actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) == 0
+                && !matches!(m.stance, stance::SWIM | stance::CO_SWIM | stance::FLY)));
+    let combat = m.flags & move_flags::IN_COMBAT != 0 || m.alertness == alertness::COMBAT;
+    Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.yaw(), server_ms: m.time, airborne, combat }
+}
+
+/// Feeds the movement packets to the tracks of the units that are drawn (the others take their position from the server's
+/// state when they are built).
+pub fn receive_moves(mut events: MessageReader<NetEvent>, views: Res<Views>, mut units: Query<&mut RemoteUnit>, time: Res<Time>) {
+    let now = time.elapsed_secs();
+    for NetEvent(event) in events.read() {
+        let obj_id = match event {
+            Event::UnitMoved { obj_id, .. } | Event::UnitDeath { obj_id } | Event::Resurrected { obj_id, .. } => obj_id,
+            _ => continue,
+        };
+        let Some(entity) = views.units.get(obj_id).and_then(|v| v.entity) else { continue };
+        if let Ok(mut unit) = units.get_mut(entity) {
+            match event {
+                // A ship request has no position.
+                Event::UnitMoved { movement, .. } if movement.move_type != 4 => unit.track.push(now, report_of(movement)),
+                Event::UnitDeath { .. } => unit.track = Track::new(unit.pos, unit.facing),
+                Event::Resurrected { pos, yaw, .. } => {
+                    unit.pos = Vec3::new(pos.x, pos.y, pos.z);
+                    unit.facing = *yaw;
+                    unit.track = Track::new(unit.pos, unit.facing);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// `AA_UNIT_SMOOTHNESS=1`: logs, every 5 s, how evenly the units that move are carried along (their speed from frame to frame
+/// against the speed of the path): the mean, the spread and the extremes of `displayed speed / path speed`.
+fn smoothness_wanted() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("AA_UNIT_SMOOTHNESS").is_ok_and(|v| v != "0"))
+}
+
+#[derive(Default)]
+pub struct Smoothness {
+    /// Characters and the others.
+    ratios: [Vec<f32>; 2],
+    since: f32,
+    frames: u32,
+}
+
+impl Smoothness {
+    fn add(&mut self, character: bool, shown: f32, path: f32) {
+        if path > 0.5 {
+            self.ratios[usize::from(character)].push(shown / path);
+        }
+    }
+
+    fn report(&mut self, dt: f32) {
+        self.since += dt;
+        self.frames += 1;
+        if self.since < 5.0 {
+            return;
+        }
+        for (name, ratios) in ["npcs", "players"].iter().zip(&self.ratios) {
+            if ratios.is_empty() {
+                continue;
+            }
+            let n = ratios.len() as f32;
+            let mean = ratios.iter().sum::<f32>() / n;
+            let sd = (ratios.iter().map(|r| (r - mean).powi(2)).sum::<f32>() / n).sqrt();
+            // the middle 90 %: a hitch or a start / stop is one or two frames
+            let mut sorted = ratios.clone();
+            sorted.sort_by(f32::total_cmp);
+            let (p5, p95) = (sorted[sorted.len() / 20], sorted[sorted.len() * 19 / 20]);
+            info!("unit smoothness {name}: {} samples in {} frames, displayed / path speed mean {mean:.3} sd {sd:.3} p5 {p5:.2} p95 {p95:.2}", ratios.len(), self.frames);
+        }
+        *self = Smoothness::default();
+    }
+}
+
+/// How fast a unit turns to face where the server says it faces (rad/s); the actor models turn at 360 degrees a second.
+const TURN_RATE: f32 = 8.0;
+/// A unit within this height (m) of the terrain stands on it; one that is higher is on a bridge, a deck or in the air.
+const GROUND_SNAP: f32 = 1.0;
+
+/// Moves the displayed units along their tracks: the position the server reported, turned to face where the server says,
+/// set on the terrain, and the speed and direction of travel handed to the locomotion clips ([`Motion`]).
 pub fn move_units(
     time: Res<Time>,
-    units: Res<Units>,
-    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>)>,
+    terrain: Res<TerrainQuery>,
+    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), Without<Rider>>,
     timers: Option<Res<aa_world::profile::Timers>>,
+    mut smoothness: Local<Smoothness>,
 ) {
     let _t = timers.as_deref().map(|t| t.time("units.move"));
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
     }
-    let blend = 1.0 - (-14.0 * dt).exp();
+    let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
-        unit.since_update += dt;
-        // where the unit should be by now
-        let ahead = unit.velocity * unit.since_update.min(0.6);
-        let predicted = unit.target + ahead;
-        let from = unit.pos;
-        if (predicted - from).length() > 12.0 {
-            unit.pos = predicted; // a jump (teleport / respawn): do not glide across the town
-        } else {
-            unit.pos = from.lerp(predicted, blend);
+        let before = unit.pos;
+        let pose = unit.track.sample(dt);
+        let mut pos = pose.pos;
+        // on the ground: the terrain under it (the server's height differs by a few centimetres from our mesh)
+        let ground = terrain.height_at(pos.x, pos.y);
+        let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
+        if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) {
+            pos.z = g;
         }
-        let moved = flat_distance(unit.pos, from);
-        let speed_now = moved / dt;
-        unit.speed += (speed_now - unit.speed) * (1.0 - (-8.0 * dt).exp());
-        // facing: the server's heading, or the direction of travel when it is walking
-        let want = units.by_id.get(&unit.obj_id).map(|u| u.yaw()).unwrap_or(unit.facing);
-        let heading = if unit.speed > 0.5 && moved > 1e-4 {
-            let d = unit.pos - from;
-            (-d.x).atan2(d.y)
-        } else {
-            want
-        };
-        unit.facing = approach_angle(unit.facing, heading, 10.0 * dt);
-        *transform = placement(unit.pos, unit.facing, unit.scale);
+        unit.pos = pos;
+        if measure {
+            smoothness.add(unit.character, flat_distance(before, pos) / dt, pose.speed);
+            if unit.character && pose.speed > 0.5 {
+                trace!("unit {} t {:.3} dt {:.4} shown {:.3} path {:.3} clock {:.3} delay {:.3}", unit.obj_id, time.elapsed_secs(), dt, flat_distance(before, pos) / dt, pose.speed, unit.track.clock(), unit.track.delay());
+            }
+        }
+        unit.combat = pose.combat;
+        // a unit that walks faces where it goes; one that turns on the spot follows the server's heading
+        unit.facing = approach_angle(unit.facing, pose.yaw, TURN_RATE * dt);
+        // only a real move touches the transform: a changed root propagates through every bone and part of the unit and
+        // re-extracts its meshes, and most of a town stands still
+        let placed = placement(unit.pos, unit.facing, unit.scale);
+        if !(transform.translation.abs_diff_eq(placed.translation, 1e-4) && transform.rotation.abs_diff_eq(placed.rotation, 1e-6) && transform.scale == placed.scale) {
+            *transform = placed;
+        }
         if let Some(mut m) = motion {
-            let moving = unit.speed > 0.4;
-            *m = Motion { speed: if moving { unit.speed } else { 0.0 }, local_dir: if moving { Vec2::Y } else { Vec2::ZERO }, airborne: false };
+            let moving = pose.speed > remote::STANDING && !airborne;
+            let local_dir = if !moving {
+                Vec2::ZERO
+            } else if unit.character {
+                remote::local_dir(pose.heading, pose.yaw)
+            } else {
+                Vec2::Y
+            };
+            *m = Motion { speed: if moving { pose.speed } else { 0.0 }, local_dir, airborne: airborne && unit.character };
         }
+    }
+    if measure {
+        smoothness.report(dt);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn death_stops_interpolation_and_resurrection_restarts_at_the_announced_pose() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update, receive_moves);
+        let pos = Vec3::new(3.0, 4.0, 5.0);
+        let mut track = Track::new(pos, 1.0);
+        track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
+        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, pos, facing: 1.0, scale: 1.0, character: true, combat: true, casting: false }).id();
+        app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
+        app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
+        app.update();
+        let pose = app.world().get::<RemoteUnit>(entity).unwrap().track.pose_at(2.0);
+        assert_eq!(pose.pos, pos);
+        assert_eq!(pose.speed, 0.0);
+        assert!(!pose.combat);
+        let resurrect = aa_net::Pos { x: 30.0, y: 40.0, z: 50.0 };
+        app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 7, pos: resurrect, yaw: 2.0 }));
+        app.update();
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        let pose = unit.track.pose_at(2.0);
+        assert_eq!((pose.pos, pose.yaw, pose.speed), (Vec3::new(30.0, 40.0, 50.0), 2.0, 0.0));
+        assert_eq!((unit.pos, unit.facing), (pose.pos, pose.yaw));
     }
 }
 

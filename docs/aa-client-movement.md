@@ -33,6 +33,10 @@ next half metre is not walked up (the mesh facets are rougher than that, so a fa
 collision cells within 24 m are built; after the wait or a teleport a landing is not reported for 1.5 s (the server applies fall damage from it). The
 saved height of the server is kept at spawn (a deck, not the river bed under it).
 
+Dead players start in their corpse pose and cannot move, jump or auto-run. A local resurrection applies the server's
+position and facing and restarts the collision wait, just as a teleport does. Loading honours the same `--pos` override
+as the player instead of waiting for cells around a different saved spawn.
+
 `AA_MOVE_TRACE=1` logs the position, the ground, the state and the water twice a second.
 
 ## Swimming (`swim.rs`)

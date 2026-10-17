@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use aa_anim::pose::BoundClip;
 use aa_anim::{CharacterAssets, ClipLibrary, Costume, Gender, Race};
 use aa_cry::scene::{ModelOptions, Shading};
 use aa_cry::{CryLoader, PreparedModel};
@@ -29,11 +30,11 @@ use super::weapons::{self, CarriedItem};
 /// A unit that is ready to be spawned.
 pub enum UnitBuild {
     /// Drawn like a player character.
-    Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>> },
+    Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>>, pose: Option<BoundClip> },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
     Creature { file: String, models: Vec<PreparedModel> },
-    /// Nothing we can draw.
-    None,
+    /// Nothing we can draw, and why (logged once by [`super::units`]).
+    None(String),
 }
 
 /// A doodad that is ready to be spawned.
@@ -67,17 +68,16 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
     if let Some((race, gender)) = humanoid {
         let assets = {
             let game = db.game.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(mut desc) = appearance::describe(&game, race, gender, &unit.equipment, &unit.model_params) else { return UnitBuild::None };
+            let Some(mut desc) = appearance::describe(&game, race, gender, &unit.equipment, &unit.model_params) else {
+                return UnitBuild::None(format!("no appearance for {race:?} {gender:?} (model {})", unit.model_id));
+            };
             if matches!(desc.costume, Costume::Items(ref i) if i.is_empty()) && !unit.is_character() {
                 // an NPC without armour data: the default outfit beats a naked body
                 desc.costume = Costume::Login;
             }
             match desc.resolve(&game) {
                 Ok(a) => a,
-                Err(e) => {
-                    debug!("unit {} {}: {e}", unit.obj_id, unit.name);
-                    return UnitBuild::None;
-                }
+                Err(e) => return UnitBuild::None(format!("character assets of {race:?} {gender:?} (model {}): {e}", unit.model_id)),
             }
         };
         if let Err(e) = aa_anim::character::prewarm_character_face(&assets) {
@@ -98,7 +98,9 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
             }
         }
         let set = shared_clip_set(&assets.skeleton, &assets.cal, clips);
-        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set }
+        // an NPC that stands in a pose (a merchant's, a guard's stance)
+        let pose = super::idle::pose_clip(db, unit.anim_action, &assets.skeleton, &assets.cal, clips);
+        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set, pose }
     } else if let Some(file) = file {
         let mut models = Vec::new();
         for (path, material) in creature::model_files(&file) {
@@ -108,11 +110,11 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
             }
         }
         if models.is_empty() {
-            return UnitBuild::None;
+            return UnitBuild::None(format!("no model could be loaded from {file} (model {})", unit.model_id));
         }
         UnitBuild::Creature { file, models }
     } else {
-        UnitBuild::None
+        UnitBuild::None(format!("model {} has no actor model file", unit.model_id))
     }
 }
 

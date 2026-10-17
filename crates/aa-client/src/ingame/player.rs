@@ -217,6 +217,9 @@ pub fn spawn_player(
         Mover { pos, facing, vz: 0.0, grounded: true, velocity: Vec3::ZERO, swim: None, wading: 0.0 },
         actor,
     ));
+    if spawn.unit.hp <= 0 {
+        commands.entity(root).insert(super::combat::Dead { at: f64::MIN / 4.0 });
+    }
     if let Some(swim_clips) = swim_clips {
         commands.entity(root).insert(swim_clips);
     }
@@ -284,7 +287,8 @@ pub fn control_player(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>)>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>)>,
+    stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     water: Res<WaterQuery>,
@@ -296,7 +300,17 @@ pub fn control_player(
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
     mut trace: Local<(f32, Option<bool>)>,
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead)) = player.single_mut() else { return };
+    if dead || stats.is_some_and(|s| s.obj_id == local.obj_id && s.dead) {
+        *motion = Motion::default();
+        *input_state = PlayerInput::default();
+        mover.velocity = Vec3::ZERO;
+        mover.vz = 0.0;
+        mover.swim = None;
+        state.autorun = false;
+        state.was_active = false;
+        return;
+    }
     let Ok(mut orbit) = cameras.single_mut() else { return };
     let actor = actor.copied().unwrap_or_default();
     let dt = time.delta_secs().min(0.1);
@@ -578,16 +592,26 @@ pub fn approach_angle(from: f32, to: f32, max: f32) -> f32 {
 /// The server moved the player (a teleport): follow it.
 pub fn follow_server(
     mut events: MessageReader<NetEvent>,
-    mut player: Query<(&mut Mover, &mut Transform), With<LocalPlayer>>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform)>,
     mut cameras: Query<&mut OrbitCamera>,
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
 ) {
     for NetEvent(event) in events.read() {
-        let Event::Teleported { pos } = event else { continue };
-        let Ok((mut mover, mut transform)) = player.single_mut() else { continue };
+        let (pos, yaw, own) = match event {
+            Event::Teleported { pos } => (pos, None, None),
+            Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id)),
+            _ => continue,
+        };
+        let Ok((local, mut mover, mut transform)) = player.single_mut() else { continue };
+        if own.is_some_and(|id| id != local.obj_id) {
+            continue;
+        }
         info!("teleported to ({:.1}, {:.1}, {:.1})", pos.x, pos.y, pos.z);
         mover.pos = Vec3::new(pos.x, pos.y, pos.z);
+        if let Some(yaw) = yaw {
+            mover.facing = yaw;
+        }
         mover.vz = 0.0;
         mover.swim = None;
         // the new place is stood on once its collision is built
@@ -614,6 +638,31 @@ pub fn follow_server(
         mover.velocity = Vec3::ZERO;
         state.since_sent = 0.0;
         state.was_active = false;
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_local_resurrection_moves_the_player_and_restarts_collision_wait() {
+        let mut app = App::new();
+        app.init_resource::<SendState>().add_message::<NetEvent>().add_message::<NetCommand>().add_systems(Update, follow_server);
+        let entity = app.world_mut().spawn((LocalPlayer { obj_id: 5 }, Mover {
+            pos: Vec3::ZERO, facing: 0.0, vz: -3.0, grounded: true, velocity: Vec3::X, swim: None, wading: 0.0,
+        }, Transform::default())).id();
+        app.world_mut().resource_mut::<SendState>().settled = true;
+        let pos = Pos::new(10.0, 20.0, 30.0);
+        app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 6, pos, yaw: 1.0 }));
+        app.update();
+        assert_eq!(app.world().get::<Mover>(entity).unwrap().pos, Vec3::ZERO);
+        app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 5, pos, yaw: 1.0 }));
+        app.update();
+        let mover = app.world().get::<Mover>(entity).unwrap();
+        assert_eq!((mover.pos, mover.facing, mover.vz, mover.velocity), (Vec3::new(10.0, 20.0, 30.0), 1.0, 0.0, Vec3::ZERO));
+        assert_eq!(app.world().get::<Transform>(entity).unwrap().translation, cry_to_bevy(mover.pos));
+        assert!(!app.world().resource::<SendState>().settled);
     }
 }
 

@@ -11,8 +11,8 @@
 //!   the pack comes from the caster's model (`models.sound_pack_id`), which is what makes the voice follow race and gender.
 //! * **Animation sounds** ([`anim_sounds`]): the clip a unit plays has events in the `$SoundEventDatabase` of its `.cal`: `sound`
 //!   (an event path), `sound_pack` (an item of the unit's pack: the grunt of a hit) and `footstep` (a row of
-//!   `materialeffects.xml`; the column is the surface under the foot, read from the terrain layer of the cell
-//!   ([`SoundBook::surface`]), the cell gives the sound of `fxlibs/<row>.xml`). The run and walk clips have none of their own: the
+//!   `materialeffects.xml`; the column is the water, object or terrain surface under the foot
+//!   ([`Audio::surface`]), the cell gives the sound of `fxlibs/<row>.xml`). The run and walk clips have none of their own: the
 //!   steps are phases (0.25, 0.75 of a cycle) in the `.lmg` of their group ([`SoundBook::clip_events`]). A clip on the upper body of
 //!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock.
 //! * **Blows.** A melee blow that lands plays the weapon's sound on the target's material (`combat_sounds`, [`SoundBook::blow`]).
@@ -353,6 +353,8 @@ pub struct Audio<'w, 's> {
     time: Res<'w, Time>,
     units: Option<Res<'w, Units>>,
     player: Option<Res<'w, Player>>,
+    collision: Option<Res<'w, aa_world::WorldCollision>>,
+    water: Option<Res<'w, aa_world::WaterQuery>>,
 }
 
 impl Audio<'_, '_> {
@@ -373,6 +375,20 @@ impl Audio<'_, '_> {
     /// The camera, for the distance of sounds.
     fn camera(&self) -> Option<Vec3> {
         self.listener.iter().next().map(|g| g.translation())
+    }
+
+    /// Query the actual supporting material, so a wooden deck does not sound like the terrain underneath it.
+    fn surface(&self, book: &SoundBook, terrain: &TerrainQuery, at: Vec3) -> Arc<str> {
+        let pos = aa_world::bevy_to_cry(at);
+        if self.water.as_ref().and_then(|w| w.water_at(pos)).is_some_and(|(height, _)| height > pos.z + 0.05) {
+            return Arc::from("mat_water");
+        }
+        if let Some(standing) = self.collision.as_ref().and_then(|c| c.surface_below(pos.x, pos.y, pos.z, 0.5))
+            && (!standing.terrain || standing.surface != aa_world::collide::Surface::DEFAULT)
+        {
+            return Arc::from(standing.surface.name());
+        }
+        book.surface(terrain, at)
     }
 
     /// Starts the event `play.path`.
@@ -824,7 +840,7 @@ fn play_event(
         Kind::Sound => Some(event.param.to_string()),
         Kind::Pack => obj_id.and_then(|id| audio.pack_path(id, &event.param)),
         Kind::Footstep => {
-            let surface = book.surface(terrain, at);
+            let surface = audio.surface(book, terrain, at);
             book.footstep(&event.param, &surface).map(|p| p.to_string())
         }
     };
