@@ -1,0 +1,222 @@
+{
+ "burst": {
+  "frames": [
+   {
+    "file": "real_01.png",
+    "t_done_s": 0.265,
+    "t_req_s": 0.0
+   },
+   {
+    "file": "real_02.png",
+    "t_done_s": 0.506,
+    "t_req_s": 0.265
+   },
+   {
+    "file": "real_03.png",
+    "t_done_s": 0.758,
+    "t_req_s": 0.506
+   },
+   {
+    "file": "real_04.png",
+    "t_done_s": 1.059,
+    "t_req_s": 0.758
+   },
+   {
+    "file": "real_05.png",
+    "t_done_s": 1.32,
+    "t_req_s": 1.059
+   },
+   {
+    "file": "real_06.png",
+    "t_done_s": 1.796,
+    "t_req_s": 1.32
+   },
+   {
+    "file": "real_07.png",
+    "t_done_s": 2.243,
+    "t_req_s": 1.796
+   },
+   {
+    "file": "real_08.png",
+    "t_done_s": 2.482,
+    "t_req_s": 2.243
+   },
+   {
+    "file": "real_09.png",
+    "t_done_s": 2.783,
+    "t_req_s": 2.482
+   },
+   {
+    "file": "real_10.png",
+    "t_done_s": 3.431,
+    "t_req_s": 2.783
+   },
+   {
+    "file": "real_11.png",
+    "t_done_s": 3.667,
+    "t_req_s": 3.431
+   },
+   {
+    "file": "real_12.png",
+    "t_done_s": 3.922,
+    "t_req_s": 3.667
+   },
+   {
+    "file": "real_13.png",
+    "t_done_s": 4.174,
+    "t_req_s": 3.922
+   },
+   {
+    "file": "real_14.png",
+    "t_done_s": 4.449,
+    "t_req_s": 4.174
+   },
+   {
+    "file": "real_15.png",
+    "t_done_s": 5.146,
+    "t_req_s": 4.449
+   },
+   {
+    "file": "real_16.png",
+    "t_done_s": 5.42,
+    "t_req_s": 5.146
+   },
+   {
+    "file": "real_17.png",
+    "t_done_s": 5.7,
+    "t_req_s": 5.42
+   }
+  ],
+  "key_press_returned_s": 0.0,
+  "key_press_sent_at_s": 0.0,
+  "trigger_result": "burst started with the rat at 45 HP"
+ },
+ "camera_after": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": 32.4311981
+  },
+  "cam": {
+   "x": 4315.76953,
+   "y": 4113.28809,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 3.995,
+  "camera_yaw_minus_player_yaw_deg": -147.2,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": -0.00636676187
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.84,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.61914,
+    "y": 4115.81445,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.62451,
+   "y": 4116.6582,
+   "z": 126.245697
+  },
+  "pyaw": 3.13522696,
+  "tod": 2.69262695
+ },
+ "camera_before": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": 32.4311981
+  },
+  "cam": {
+   "x": 4315.76953,
+   "y": 4113.28809,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 3.995,
+  "camera_yaw_minus_player_yaw_deg": -147.2,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": -0.00636480097
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.84,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.61914,
+    "y": 4115.81445,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.62451,
+   "y": 4116.6582,
+   "z": 126.245697
+  },
+  "pyaw": 3.13522696,
+  "tod": 2.68280363
+ },
+ "captured": "2026-10-17 08:58:02",
+ "hp_poll_s_hp": [
+  [
+   0.96,
+   65
+  ],
+  [
+   1.13,
+   65
+  ],
+  [
+   1.29,
+   65
+  ],
+  [
+   1.47,
+   65
+  ],
+  [
+   1.64,
+   65
+  ],
+  [
+   1.86,
+   65
+  ],
+  [
+   2.06,
+   65
+  ],
+  [
+   2.22,
+   45
+  ]
+ ],
+ "name": "death",
+ "note": "Angry Rat killed by the repeating Melee Attack (skill 2); time 0 = start of the burst (the rat had 45 HP left), there is no key press in this burst; cl_fov 75",
+ "server_log": [],
+ "skill_id": 2,
+ "units_after": {
+  "player": {
+   "health": 720,
+   "max_health": 720
+  },
+  "target": {
+   "distance_m": null,
+   "health": null,
+   "max_health": null,
+   "name": null,
+   "present": false
+  }
+ }
+}

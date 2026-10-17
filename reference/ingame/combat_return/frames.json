@@ -1,0 +1,199 @@
+{
+ "arrival_frames": [
+  {
+   "file": "real_20.png",
+   "note": "after the zone reload, at the arrival (same pond: the return point is the Nuian spawn); approximate time from the file time",
+   "t_done_s": 169.3
+  },
+  {
+   "file": "real_21.png",
+   "note": "after the zone reload, at the arrival (same pond: the return point is the Nuian spawn); approximate time from the file time",
+   "t_done_s": 169.6
+  },
+  {
+   "file": "real_22.png",
+   "note": "after the zone reload, at the arrival (same pond: the return point is the Nuian spawn); approximate time from the file time",
+   "t_done_s": 170.1
+  }
+ ],
+ "burst": {
+  "frames": [
+   {
+    "file": "real_01.png",
+    "t_done_s": 0.0,
+    "t_req_s": -0.45,
+    "target_s": null
+   },
+   {
+    "file": "real_02.png",
+    "t_done_s": 0.823,
+    "t_req_s": 0.4,
+    "target_s": 0.4
+   },
+   {
+    "file": "real_03.png",
+    "t_done_s": 1.629,
+    "t_req_s": 1.034,
+    "target_s": 1.0
+   },
+   {
+    "file": "real_04.png",
+    "t_done_s": 2.674,
+    "t_req_s": 2.006,
+    "target_s": 2.0
+   },
+   {
+    "file": "real_05.png",
+    "t_done_s": 3.708,
+    "t_req_s": 3.036,
+    "target_s": 3.0
+   },
+   {
+    "file": "real_06.png",
+    "t_done_s": 4.642,
+    "t_req_s": 4.025,
+    "target_s": 4.0
+   },
+   {
+    "file": "real_07.png",
+    "t_done_s": 5.651,
+    "t_req_s": 5.014,
+    "target_s": 5.0
+   },
+   {
+    "file": "real_08.png",
+    "t_done_s": 7.089,
+    "t_req_s": 6.031,
+    "target_s": 6.0
+   },
+   {
+    "file": "real_09.png",
+    "t_done_s": 7.99,
+    "t_req_s": 7.089,
+    "target_s": 7.0
+   },
+   {
+    "file": "real_10.png",
+    "t_done_s": 8.496,
+    "t_req_s": 8.0,
+    "target_s": 8.0
+   },
+   {
+    "file": "real_11.png",
+    "t_done_s": 9.953,
+    "t_req_s": 9.019,
+    "target_s": 9.0
+   },
+   {
+    "file": "real_12.png",
+    "t_done_s": 10.927,
+    "t_req_s": 9.953,
+    "target_s": 9.6
+   },
+   {
+    "file": "real_13.png",
+    "t_done_s": 13.551,
+    "t_req_s": 10.927,
+    "target_s": 10.1
+   },
+   {
+    "file": "real_14.png",
+    "t_done_s": 14.03,
+    "t_req_s": 13.551,
+    "target_s": 10.6
+   },
+   {
+    "file": "real_15.png",
+    "t_done_s": 14.629,
+    "t_req_s": 14.03,
+    "target_s": 11.2
+   },
+   {
+    "file": "real_16.png",
+    "t_done_s": 15.598,
+    "t_req_s": 14.629,
+    "target_s": 12.0
+   },
+   {
+    "file": "real_17.png",
+    "t_done_s": 16.381,
+    "t_req_s": 15.598,
+    "target_s": 13.0
+   },
+   {
+    "file": "real_18.png",
+    "t_done_s": 16.874,
+    "t_req_s": 16.381,
+    "target_s": 14.5
+   },
+   {
+    "file": "real_19.png",
+    "t_done_s": 17.687,
+    "t_req_s": 17.03,
+    "target_s": 17.0
+   }
+  ],
+  "key_press_returned_s": 0.184,
+  "key_press_sent_at_s": 0.0,
+  "trigger_result": "pressed (automatic release scheduled)"
+ },
+ "camera_before": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": -148.365387
+  },
+  "cam": {
+   "x": 4308.85498,
+   "y": 4115.30811,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 4.0,
+  "camera_yaw_minus_player_yaw_deg": -90.0,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": 2.96455598
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.97,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4311.07764,
+    "y": 4112.86426,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4310.95801,
+   "y": 4111.90527,
+   "z": 126.245697
+  },
+  "pyaw": -1.01866841,
+  "tod": 3.76261711
+ },
+ "captured": "2026-10-17 09:08:52",
+ "key": "SHIFT-9",
+ "name": "return",
+ "note": "Return/Recall (skill 10594 \"Recall\", 10 s cast, action bar slot 21, SHIFT-9); frames are scheduled at target_s after the key press; cl_fov 75 ; the cast frames (t 0.8 .. 10.9 s) show the cast bar and the glowing orb around the hands, the fire at about 10 s is a zone reload: loading screen from about t=11 s (real_13 on) and arrival at the same pond after about 1 minute (real_20..22)",
+ "server_log": [
+  "09:08:52 [INFO] handlers - StartSkill: Id 10594, flag 0, caster=22524, target=0"
+ ],
+ "skill_id": 10594,
+ "units_before": {
+  "player": {
+   "health": 720,
+   "max_health": 720
+  },
+  "target": {
+   "distance_m": null,
+   "health": null,
+   "max_health": null,
+   "name": null,
+   "present": false
+  }
+ }
+}
