@@ -4,6 +4,7 @@
 
 pub mod char_light;
 pub mod cinema;
+pub mod collide;
 pub mod coords;
 pub mod cover;
 pub mod env;
@@ -27,6 +28,7 @@ pub mod water_material;
 pub mod water_query;
 pub mod world;
 
+pub use collide::WorldCollision;
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
 pub use sky::{AmbientCubes, WorldClock};
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
