@@ -26,7 +26,7 @@ pub mod water_material;
 pub mod world;
 
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
-pub use sky::WorldClock;
+pub use sky::{AmbientCubes, WorldClock};
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
 pub use terrain_query::{Ground, TerrainQuery};
 pub use world::World;

@@ -17,9 +17,11 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::Exposure;
 use bevy::light::{CascadeShadowConfigBuilder, EnvironmentMapLight, NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
 
 use crate::coords::{bevy_to_cry, cry_to_bevy};
 use crate::env::{EnvSample, Lighting, TimeOfDay};
@@ -473,6 +475,8 @@ fn update_ambient(
     tuning: Res<AtmosphereTuning>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<[f32; 9]>,
+    mut lit: Local<Option<Entity>>,
+    mut cubes: Local<Option<AmbientCubes>>,
     focus: Query<Entity, With<WorldFocus>>,
     cameras: Query<Entity, With<Camera3d>>,
 ) {
@@ -493,20 +497,83 @@ fn update_ambient(
     let now = [top.x, top.y, top.z, mid.x, mid.y, mid.z, bottom.x, bottom.y, bottom.z];
     let peak = now.iter().cloned().fold(1e-3, f32::max);
     let change = now.iter().zip(last.iter()).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-    if change < 0.015 * peak {
+    // a colour that did not move still has to reach a camera that just became the focus (the login flow's anchor camera
+    // holds the focus first; with a frozen clock the game's camera never got the ambient light)
+    let moved = *lit != Some(camera);
+    if change < 0.015 * peak && !moved {
         return;
     }
+    *lit = Some(camera);
     *last = now;
-    let color = |c: Vec3| Color::linear_rgb(c.x, c.y, c.z);
     // the specular half is much dimmer: shiny things (hair, metal, wet rock) would blow out under the full sky radiance
-    let diffuse = EnvironmentMapLight::hemispherical_gradient(&mut images, color(top), color(mid), color(bottom));
     let k = tuning.ambient_spec;
-    let specular = EnvironmentMapLight::hemispherical_gradient(&mut images, color(top * k), color(mid * k), color(bottom * k));
+    let (diffuse, specular) = (cube_pixels(top, mid, bottom), cube_pixels(top * k, mid * k, bottom * k));
+    // The maps are written in place: a new image is not on the GPU for a frame or two, and a camera whose environment map is
+    // not ready is a different pipeline key (`environment_map` off), so every change of the light compiled the whole
+    // material set again (20 pipelines in a loading screen) and drew without ambient meanwhile.
+    let maps = match cubes.clone() {
+        Some(maps) => {
+            for (handle, data) in [(&maps.diffuse, diffuse), (&maps.specular, specular)] {
+                if let Some(mut image) = images.get_mut(handle) {
+                    image.data = Some(data);
+                }
+            }
+            maps
+        }
+        None => {
+            let maps = AmbientCubes { diffuse: images.add(cube_image(diffuse)), specular: images.add(cube_image(specular)) };
+            commands.insert_resource(maps.clone());
+            *cubes = Some(maps.clone());
+            maps
+        }
+    };
+    if !moved {
+        return;
+    }
     commands.entity(camera).insert(EnvironmentMapLight {
-        diffuse_map: diffuse.diffuse_map,
-        specular_map: specular.specular_map,
-        ..diffuse
+        diffuse_map: maps.diffuse,
+        specular_map: maps.specular,
+        intensity: 1.0,
+        ..default()
     });
+}
+
+/// The two cube maps of the ambient environment light (1 x 1 pixels per face); [`update_ambient`] rewrites their pixels in
+/// place. Cameras that must render with the game's pipeline keys without having the world focus (the character list's
+/// prewarm) take their [`EnvironmentMapLight`] from these.
+#[derive(Resource, Clone)]
+pub struct AmbientCubes {
+    pub diffuse: Handle<Image>,
+    pub specular: Handle<Image>,
+}
+
+impl AmbientCubes {
+    /// An environment light of these maps.
+    pub fn light(&self) -> EnvironmentMapLight {
+        EnvironmentMapLight { diffuse_map: self.diffuse.clone(), specular_map: self.specular.clone(), intensity: 1.0, ..default() }
+    }
+}
+
+/// The six faces (+X, -X, +Y, -Y, +Z, -Z of the cube: sky on top, ground below) as `Rgba16Float` pixels.
+fn cube_pixels(top: Vec3, mid: Vec3, bottom: Vec3) -> Vec<u8> {
+    [mid, mid, top, bottom, mid, mid]
+        .into_iter()
+        .flat_map(|c| [c.x, c.y, c.z, 1.0].map(half::f16::from_f32))
+        .flat_map(half::f16::to_le_bytes)
+        .collect()
+}
+
+fn cube_image(data: Vec<u8>) -> Image {
+    Image {
+        texture_view_descriptor: Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() }),
+        ..Image::new(
+            Extent3d { width: 1, height: 1, depth_or_array_layers: 6 },
+            TextureDimension::D2,
+            data,
+            TextureFormat::Rgba16Float,
+            RenderAssetUsages::default(),
+        )
+    }
 }
 
 /// The zone's `env.xml` (sky box, angle, ocean colour), read once.

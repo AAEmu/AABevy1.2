@@ -43,8 +43,21 @@ pub fn build(app: &mut App) {
     }
 }
 
-fn update(cache: Res<PipelineCache>, status: Res<PipelineStatus>) {
+fn update(cache: Res<PipelineCache>, status: Res<PipelineStatus>, mut dumped: Local<usize>) {
     status.waiting.store(cache.waiting_pipelines().count(), Ordering::Relaxed);
     status.total.store(cache.pipelines().count(), Ordering::Relaxed);
     status.frames.fetch_add(1, Ordering::Relaxed);
+    // `AA_PIPELINE_DUMP=<file>`: one line per requested pipeline (what is different between two runs?)
+    if let Some(path) = std::env::var_os("AA_PIPELINE_DUMP") {
+        let total = cache.pipelines().count();
+        if total > *dumped {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                for (i, p) in cache.pipelines().enumerate().skip(*dumped) {
+                    let _ = writeln!(f, "{i}	{:?}", p.descriptor);
+                }
+            }
+            *dumped = total;
+        }
+    }
 }

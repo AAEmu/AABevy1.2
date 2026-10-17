@@ -120,6 +120,7 @@ dependencies = [
  "aa-fx",
  "aa-pak",
  "bevy",
+ "half",
  "roxmltree",
  "thiserror 2.0.21",
 ]
