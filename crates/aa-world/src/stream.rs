@@ -77,7 +77,8 @@ pub struct WorldConfig {
     pub fog_visibility: f32,
     /// Linear colour factor on the decoded terrain colour (cover colour + detail layers). The engine's
     /// exposure and film curve are not reproduced; this brings the ground to the brightness of the real
-    /// client (calibrated on `reference/ingame/spawn/real.png`, sunlit rock and hill grass).
+    /// client (calibrated against the real captures of the spawn and of the Royal Palace court yard, see
+    /// `docs/aa-world.md`; re-fit it when the sun / ambient calibration changes).
     pub terrain_tint: Vec3,
     /// Blend the surface type detail layers (grass, dirt, rock, ... with normal maps) over the cover colour.
     pub terrain_detail: bool,
@@ -108,7 +109,7 @@ impl WorldConfig {
             sun_lux_scale: 1000.0,
             ambient_scale: 1700.0,
             fog_visibility: 2500.0,
-            terrain_tint: Vec3::new(1.2, 1.2, 1.3),
+            terrain_tint: Vec3::new(1.75, 1.75, 1.65),
             terrain_detail: true,
         }
     }
