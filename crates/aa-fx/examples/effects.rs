@@ -12,7 +12,7 @@
 //! * `--grid <n>`                 `n` copies in a grid, cycling through the `--effect` list (a cost test); labels off
 //! * `--spacing <m>`              distance between the effects (default 3.2)
 //! * `--dist <m>` `--height <m>` `--yaw <deg>` `--orbit <deg/s>`   the camera (orbit defaults to 12 deg/s, 0 with `--shot`)
-//! * `--gain <x>` `--light <x>` `--size-scale <x>` `--alpha-scale <x>` `--no-soft` `--max-particles <n>`   `FxSettings`
+//! * `--gain <x>` `--light <x>` `--size-scale <x>` `--sprite <half>` `--alpha-scale <x>` `--no-soft` `--max-particles <n>`   `FxSettings`
 //! * `--scale <x>`               scale of every effect (the cell entities scale them, e.g. 0.65)
 //! * `--fx-yaw <deg>`            turns every effect about the vertical axis (effects emit along their own forward, -Z)
 //! * `--day`                      a brighter ground (default: dark, so that additive glows show)
@@ -21,6 +21,7 @@
 //!   effect in a single shot; add `--loop` and `--no-prime`)
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
+//! * `--lift <m>`                 raises every effect (the pedestal stays): a cast orb at hand height
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
 //!   `ParentCollide` children (`Effect::ground_y`)
@@ -123,6 +124,7 @@ fn main() {
     settings.gain = num("--gain", settings.gain);
     settings.light = num("--light", settings.light);
     settings.size_scale = num("--size-scale", settings.size_scale);
+    settings.sprite_half = num("--sprite", settings.sprite_half);
     settings.alpha_scale = num("--alpha-scale", settings.alpha_scale);
     settings.max_particles = num("--max-particles", settings.max_particles as f32) as usize;
     if flag("--no-soft") {
@@ -220,7 +222,7 @@ fn setup(
     let stagger = num("--stagger", 0.0);
     for (i, (name, pos)) in positions.into_iter().enumerate() {
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
-        let place = Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
+        let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
         if num("--sweep", 0.0) > 0.0 {
             commands.spawn((effect, place, Sweep { centre: pos, radius: num("--sweep", 0.0) }));
         } else if stagger > 0.0 {

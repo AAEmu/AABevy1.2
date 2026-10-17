@@ -78,6 +78,8 @@ pub struct StepCtx<'a> {
     /// 1 = full emission, less thins far effects.
     pub lod: f32,
     pub size_scale: f32,
+    /// Half the width of a sprite per unit of `Size`.
+    pub sprite_half: f32,
     /// A continuous emitter with a finite life spreads `Count` over that life (see `EmitterState::emit`).
     pub count_over_life: bool,
     /// Colour of the light on the effect.
@@ -185,6 +187,8 @@ pub struct EmitterState {
     age: f32,
     delay: f32,
     spawn_acc: f32,
+    /// A continuous emitter has emitted its first particle (it does so at its first step, not one period later).
+    begun: bool,
     burst_done: bool,
     done: bool,
     off: bool,
@@ -231,6 +235,7 @@ impl EmitterState {
             age: 0.0,
             delay: def.spawn_delay.base.max(0.0),
             spawn_acc: 0.0,
+            begun: false,
             burst_done: false,
             done: spawn != Spawn::Direct,
             off: false,
@@ -304,6 +309,7 @@ impl EmitterState {
         self.age = 0.0;
         self.delay = self.def.spawn_delay.base.max(0.0);
         self.spawn_acc = 0.0;
+        self.begun = false;
         self.burst_done = false;
         self.done = self.def.spawn != Spawn::Direct;
         self.units = 0;
@@ -371,6 +377,13 @@ impl EmitterState {
                     } else {
                         (plife, 1.0)
                     };
+                    if !self.begun {
+                        // the first particle comes at time 0, the next ones one period apart
+                        self.begun = true;
+                        if count > 0.0 {
+                            self.spawn_acc += 1.0;
+                        }
+                    }
                     self.spawn_acc += count / period * overlap * dt * ctx.lod;
                     let n = self.spawn_acc as usize;
                     self.spawn_acc -= n as f32;
@@ -743,8 +756,8 @@ impl EmitterState {
             if alpha < 0.003 || sz < 1e-5 {
                 continue;
             }
-            let hx = 0.5 * sz * p.sx * luts.size_x.at(a);
-            let mut hy = 0.5 * sz * p.sy * luts.size_y.at(a) * aspect;
+            let hx = ctx.sprite_half * sz * p.sx * luts.size_x.at(a);
+            let mut hy = ctx.sprite_half * sz * p.sy * luts.size_y.at(a) * aspect;
             let mut center = frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis);
             if orbit > 0.0 {
                 let t = orbit_speed * p.age + p.seed;
@@ -1178,6 +1191,7 @@ mod tests {
             count_scale: 1.0,
             lod: 1.0,
             size_scale: 1.0,
+            sprite_half: 1.0,
             count_over_life: true,
             tint: Vec3::ONE,
             sun: Vec3::Y,
@@ -1200,6 +1214,24 @@ mod tests {
             .map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER))
             .collect();
         EffectSim::new(em, 0.8, 1.0)
+    }
+
+    #[test]
+    fn a_continuous_emitter_emits_its_first_particle_at_once() {
+        let budget = AtomicI32::new(10_000);
+        // two particles per 4 s: one on the first frame, the next one 2 s later
+        let mut s = sim(r#"Continuous="true" Count="2" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        assert_eq!(s.alive(), 1);
+        for _ in 0..59 {
+            s.step(&c);
+        }
+        assert_eq!(s.alive(), 1, "nothing new after 1 s");
+        for _ in 0..120 {
+            s.step(&c);
+        }
+        assert_eq!(s.alive(), 2, "the second one after 2 s");
     }
 
     #[test]
