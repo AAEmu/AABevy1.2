@@ -244,6 +244,13 @@ impl Skills {
                     return false;
                 }
             }
+            Event::UnitsRemoved(ids) => {
+                let before = self.casting.len();
+                for id in ids {
+                    self.casting.remove(id);
+                }
+                return self.casting.len() != before;
+            }
             Event::SkillCooldownReset { obj_id, skill_id, tag_id, .. } if self.is_own(*obj_id) => {
                 if *skill_id != 0 {
                     self.last_used.remove(skill_id);
@@ -293,6 +300,18 @@ mod tests {
     use super::*;
     use crate::buff::BuffCaster;
     use crate::skill::{result, PlotEvent, SkillFired, SkillStarted};
+
+    #[test]
+    fn removed_units_stop_casting_without_clearing_other_casts() {
+        let mut s = Skills { obj_id: 5, ..Skills::default() };
+        s.apply(&started(1, 1, 5, 3000, 0));
+        s.apply(&started(2, 2, 9, 3000, 0));
+        s.apply(&started(3, 3, 10, 3000, 0));
+        assert!(s.apply(&Event::UnitsRemoved(vec![9, 11])));
+        assert!(s.casting_of(9).is_none());
+        assert!(s.casting_of(5).is_some() && s.casting_of(10).is_some());
+        assert!(!s.apply(&Event::UnitsRemoved(vec![9, 11])));
+    }
 
     fn started(skill_id: u32, tl: u16, caster: u32, cast_ms: u32, res: u8) -> Event {
         Event::SkillStarted(SkillStarted {
