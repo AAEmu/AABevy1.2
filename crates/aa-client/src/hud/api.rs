@@ -33,6 +33,10 @@ pub enum Request {
     Leave { how: i64 },
     /// `HUD.request("leave_cancel")`: `X2World:CancelLeaveWorld()`.
     CancelLeave,
+    /// `HUD.request("use_action", slot)`: a click on action bar slot `slot` (1 based).
+    UseAction { slot: usize },
+    /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
+    UseBag { slot: usize },
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -179,6 +183,8 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 "chat" => Request::Chat { chat_type: num(1) as i16, message: text(2), target: text(3) },
                 "leave" => Request::Leave { how: num(1) },
                 "leave_cancel" => Request::CancelLeave,
+                "use_action" => Request::UseAction { slot: num(1).max(1) as usize },
+                "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
                 other => {
                     warn!("hud: unknown request {other:?}");
                     return Ok(());
@@ -407,6 +413,9 @@ pub fn handle_requests(
     mut net: MessageWriter<NetCommand>,
     mut next: ResMut<NextState<crate::Screen>>,
     credentials: Option<Res<crate::ingame::enter::Credentials>>,
+    bar: Res<aa_net::state::ActionBar>,
+    inventory: Res<aa_net::state::Inventory>,
+    target: Res<aa_net::state::Target>,
 ) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     for request in requests {
@@ -425,6 +434,14 @@ pub fn handle_requests(
             }
             Request::CancelLeave => {
                 net.write(NetCommand(Command::CancelLeave));
+            }
+            Request::UseAction { slot } => {
+                let data = bridge.0.borrow();
+                panels::use_slot(slot - 1, data.game.get(), &bar, &inventory, &target, &mut net);
+            }
+            Request::UseBag { slot } => {
+                let data = bridge.0.borrow();
+                panels::use_bag_slot(slot - 1, data.game.get(), &inventory, &target, &mut net);
             }
         }
     }

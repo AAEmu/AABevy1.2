@@ -429,11 +429,22 @@ pub fn use_slot(slot: usize, game: Option<&GameData>, bar: &ActionBar, inventory
                 None => inventory.find_by_id(action.id).map(|(_, _, it)| it),
             };
             let Some(item) = found else { return };
-            let skill_id = game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
-            net.write(NetCommand(Command::UseItem { item_id: item.id, template_id: item.template_id, skill_id, target_obj_id }));
+            use_item(item, game, target_obj_id, net);
         }
         _ => {}
     }
+}
+
+/// Use a bag item (a right click in the bag window): its skill, on the target.
+pub fn use_bag_slot(slot: usize, game: Option<&GameData>, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>) {
+    if let Some(Some(item)) = inventory.bag.get(slot) {
+        use_item(item, game, target.obj_id.unwrap_or(0), net);
+    }
+}
+
+fn use_item(item: &aa_net::model::Item, game: Option<&GameData>, target_obj_id: u32, net: &mut MessageWriter<NetCommand>) {
+    let skill_id = game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
+    net.write(NetCommand(Command::UseItem { item_id: item.id, template_id: item.template_id, skill_id, target_obj_id }));
 }
 
 /// The action bar's number keys.
