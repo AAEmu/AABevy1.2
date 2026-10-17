@@ -117,14 +117,16 @@ pub fn leave(how: i64, net: &mut MessageWriter<NetCommand>) {
 }
 
 /// `--hud-disconnect T` (show the disconnect dialog T seconds after the HUD is up, as if the server
-/// dropped the connection) and `--hud-click X Y T` (a left click at physical pixel X, Y): for
-/// unattended runs.
+/// dropped the connection), `--hud-click X Y T` (a left click at physical pixel X, Y), `--hud-rclick`
+/// and `--hud-hover` (the same for a right click and a bare pointer move): for unattended runs.
 #[derive(Resource, Default)]
 pub struct ScriptedSession {
     disconnect: Option<f32>,
     clicks: Vec<(f32, Vec2)>,
     /// `--hud-rclick X Y T`: a right click.
     rclicks: Vec<(f32, Vec2)>,
+    /// `--hud-hover X Y T`: the pointer moves there and stays (tooltips).
+    hovers: Vec<(f32, Vec2)>,
     /// `--hud-open ACTION T`: a key binding action (`toggle_character`, `toggle_bag`, ...) at T seconds.
     opens: Vec<(f32, String)>,
     started: Option<f32>,
@@ -149,6 +151,11 @@ impl ScriptedSession {
                         s.clicks.push((t, Vec2::new(x, y)));
                     }
                 }
+                "--hud-hover" => {
+                    if let (Some(x), Some(y), Some(t)) = (num(i + 1), num(i + 2), num(i + 3)) {
+                        s.hovers.push((t, Vec2::new(x, y)));
+                    }
+                }
                 "--hud-rclick" => {
                     if let (Some(x), Some(y), Some(t)) = (num(i + 1), num(i + 2), num(i + 3)) {
                         s.rclicks.push((t, Vec2::new(x, y)));
@@ -159,6 +166,7 @@ impl ScriptedSession {
         }
         s.clicks.sort_by(|a, b| b.0.total_cmp(&a.0)); // pop from the end
         s.rclicks.sort_by(|a, b| b.0.total_cmp(&a.0));
+        s.hovers.sort_by(|a, b| b.0.total_cmp(&a.0));
         s.opens.sort_by(|a, b| b.0.total_cmp(&a.0));
         s
     }
@@ -189,6 +197,9 @@ pub fn scripted_session(
         if let Err(e) = rt.hotkey(&action) {
             warn!("hud: --hud-open {action}: {e}");
         }
+    }
+    if let Some((_, at)) = script.hovers.pop_if(|c| t >= c.0) {
+        pointer.pos = Some(at);
     }
     if let Some((_, at)) = script.rclicks.pop_if(|c| t >= c.0) {
         pointer.pos = Some(at);

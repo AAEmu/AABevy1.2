@@ -171,12 +171,18 @@ pub struct GameData {
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
     pub zone_groups: HashMap<u32, ZoneGroup>,
+    /// `world_groups.id` -> map rectangle: 2 the world, 3 / 4 / 5 the western / eastern / origin continent.
+    pub world_rects: HashMap<u32, [f32; 4]>,
     /// `system_factions.id` -> English name.
     pub factions: HashMap<u32, String>,
     /// `system_faction_relations`: (faction, other faction) -> 1 friendly, 2 neutral, 3 hostile.
     pub relations: HashMap<(u32, u32), u8>,
     /// `sub_zones.id` -> English name.
     pub sub_zone_names: HashMap<u32, String>,
+    /// `sub_zones.id` -> `parent_sub_zone_id` (a city's districts have the city as parent).
+    pub sub_zone_parent: HashMap<u32, u32>,
+    /// `sub_zones.id` -> rectangle (west, south, width, height) of the cities, caves and mines.
+    pub sub_zone_rects: HashMap<u32, [f32; 4]>,
     /// The sub zone polygons of the world (the database rectangles are mostly empty).
     pub sub_zone_shapes: Vec<SubZoneShape>,
     /// `zones.group_id` -> the faction protecting the group's zones (0 = none).
@@ -386,6 +392,14 @@ impl GameData {
             }
         }
         {
+            let mut q = conn.prepare("SELECT id, x, y, w, h FROM world_groups WHERE w > 0")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
+                data.world_rects.insert(r.get(0)?, [f(1)?, f(2)?, f(3)?, f(4)?]);
+            }
+        }
+        {
             let mut q = conn.prepare("SELECT id, name FROM system_factions")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -401,11 +415,21 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name FROM sub_zones")?;
+            let mut q = conn.prepare("SELECT id, name, parent_sub_zone_id, x, y, w, h FROM sub_zones")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
                 data.sub_zone_names.insert(id, name("sub_zones", id, r.get(1)?));
+                let parent = r.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as u32;
+                if parent != 0 {
+                    data.sub_zone_parent.insert(id, parent);
+                }
+                let f = |i: usize| r.get::<_, Option<f64>>(i).map(|v| v.unwrap_or(0.0) as f32);
+                let rect = [f(3)?, f(4)?, f(5)?, f(6)?];
+                // the cities, caves and mines (the client has a road map of): the rest has no rectangle
+                if rect[2] > 0.0 && rect[3] > 0.0 {
+                    data.sub_zone_rects.insert(id, rect);
+                }
             }
         }
         for (group, faction) in data.zones.values() {
@@ -445,10 +469,19 @@ impl GameData {
         }
     }
 
-    /// The name of the sub zone at a game position: the smallest polygon around it.
-    pub fn sub_zone_at(&self, x: f32, y: f32) -> Option<&str> {
+    /// The sub zone at a game position: the smallest polygon around it, then up to the top of its
+    /// parents. A city is a sub zone ("Ezna") with its districts and landmarks ("Royal Palace") drawn
+    /// inside it as sub zones of their own; the zone text of the HUD and the map are the city's.
+    pub fn sub_zone_root_at(&self, x: f32, y: f32) -> Option<u32> {
         let shape = self.sub_zone_shapes.iter().filter(|s| s.contains(x, y)).min_by(|a, b| a.area().total_cmp(&b.area()))?;
-        self.sub_zone_names.get(&shape.id).map(String::as_str).filter(|n| !n.is_empty())
+        let mut id = shape.id;
+        for _ in 0..8 {
+            match self.sub_zone_parent.get(&id) {
+                Some(p) if *p != id => id = *p,
+                _ => break,
+            }
+        }
+        Some(id)
     }
 
     /// A zone group by id: its data and the faction protecting it.
@@ -522,6 +555,10 @@ pub struct Snapshot {
     pub recoverable_exp: i32,
     pub labor: i32,
     pub max_labor: i32,
+    /// The labor changes the server announced (`PlayerStats::labor_log`: `(amount, total)`, the last few) and
+    /// how many there were: a difference of the count between two snapshots says which are new.
+    pub labor_log: Vec<(i32, i32)>,
+    pub labor_seq: u32,
     pub money: i64,
     pub bm_point: i64,
     pub honor: i32,
@@ -535,6 +572,10 @@ pub struct Snapshot {
     pub zone_faction: u32,
     pub zone_faction_name: String,
     pub sub_zone: String,
+    /// The top of the sub zone the player is in (`sub_zones.id`, 0 for none) when it has a rectangle (a
+    /// city, a cave: the road map is its own), and the rectangle.
+    pub sub_map: u32,
+    pub sub_map_rect: [f32; 4],
     /// The player's faction name.
     pub faction: String,
     /// Game clock: hour 0..24 and minute.
