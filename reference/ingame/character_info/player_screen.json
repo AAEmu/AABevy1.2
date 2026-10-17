@@ -1,0 +1,13 @@
+{
+ "note": "Result of X2Unit:GetUnitScreenPosition / GetScreenPosition for the player while the character window is open (client pixels, 1920x1080). The 3D model is the in-world player itself; the equipment slot columns are widgets around it: left column x=760..802, right column x=1118..1160, y=290..774, model centred near x=960.",
+ "screen_pos": [
+  960,
+  426.453278,
+  4.36514282
+ ],
+ "screen_pos2": [
+  959.831909,
+  103.042465,
+  4.20197296
+ ]
+}
