@@ -17,12 +17,19 @@ pub struct ClipEvents {
     pub launch: Option<f32>,
     /// Where the clip meets the server's timeline: the blow lands, the arrow is released.
     pub combat_sync: Option<f32>,
+    /// `voice_launch`: where the character calls out (the `FxVoice` items of the skill).
+    pub voice: Option<f32>,
 }
 
 impl ClipEvents {
     /// The moment the attack is released: `launch`, else `combat_sync`.
     pub fn release(&self) -> Option<f32> {
         self.launch.or(self.combat_sync)
+    }
+
+    /// The moment of the voice line: `voice_launch`, else the release.
+    pub fn voice_time(&self) -> Option<f32> {
+        self.voice.or_else(|| self.release())
     }
 
     /// The events of clip `name` of the model whose animation table is `cal` (none when the model has no event database or no
@@ -68,6 +75,7 @@ fn parse(xml: &str) -> Table {
                 (Some("skill_effect" | "!skill_effect"), Some("form")) => &mut events.form,
                 (Some("skill_effect" | "!skill_effect"), Some("throw")) => &mut events.throw,
                 (Some("skill_effect" | "!skill_effect"), Some("launch")) => &mut events.launch,
+                (Some("skill_effect" | "!skill_effect"), Some("voice_launch")) => &mut events.voice,
                 (Some("combat_sync"), _) => &mut events.combat_sync,
                 _ => continue,
             };
@@ -103,8 +111,9 @@ mod tests {
         assert_eq!((bow.launch, bow.combat_sync, bow.form), (Some(0.35793), Some(0.35793), None));
         assert!((bow.throw.unwrap() - 0.0922).abs() < 1e-3);
         assert_eq!(bow.release(), Some(0.35793), "the first launch event wins");
+        assert_eq!((bow.voice, bow.voice_time()), (Some(0.2), Some(0.2)));
         let rat = t["fist_co_attack_r_01.caf"];
-        assert_eq!((rat.launch, rat.release()), (None, Some(0.48708001)));
+        assert_eq!((rat.launch, rat.release()), (None, Some(0.487_08)));
     }
 
     #[test]

@@ -34,22 +34,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aa_anim::{Animator, ClipLibrary};
-use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, spawn_loaded};
-use aa_fx::{Effect, FxLibraries, LibStatus};
+use aa_fx::{Effect, FxSettings, Ground};
 use aa_net::buff::BuffCaster;
 use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, hit_type, target_kind};
 use aa_net::state::{Skills, Units};
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
-use aa_world::cry_to_bevy;
+use aa_world::sky::SunLight;
+use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::anim::{Locomotion, Motion, bind_clip};
+use super::anim::{Locomotion, Motion, bind_action_clip, bind_clip, clip_file};
 use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::RemoteUnit;
 use super::camera::CameraShake;
+use super::sounds::{AnimSound, Audio, Class, LayerSounds};
 use super::weapons::{Drawn, Wield, hold_weapons, weapon_for_clip};
 use crate::Screen;
+pub(super) use skills::Sfx;
 use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
 
 /// What a unit is busy with, so locomotion does not take its clip away.
@@ -90,10 +92,11 @@ struct FaceTarget {
     until: f64,
 }
 
-/// A particle effect of a skill in the world: follows its bone for as long as it lives.
+/// A particle effect of a skill in the world. It rides its bone as a child of it; only a hit effect with a fixed orientation is
+/// moved by hand (`follow`), and every effect has a time to live.
 #[derive(Component)]
 struct Fx {
-    /// The unit and the bone entity the effect rides, with the offset in the unit's frame.
+    /// The unit and the bone entity a fixed orientation effect follows, with the offset in the unit's frame.
     follow: Option<(Entity, Entity, Vec3)>,
     /// Keep the orientation it was spawned with (a hit effect turned towards the attacker).
     fixed_rotation: bool,
@@ -120,8 +123,6 @@ struct Combat {
     last_hit: HashMap<u32, f64>,
     /// A skill the server refused because the player did not face the target: when to ask again (once the player turned).
     retry: Option<Retry>,
-    /// The meshes of effects that emit geometry (the arrow of a bow shot), by effect name; `None` when there is none.
-    geometry: HashMap<String, Option<Arc<LoadedModel>>>,
     /// The cast (timeline id) whose clip a unit (object id) is playing: only that cast may end it.
     owner: HashMap<u32, u16>,
 }
@@ -206,7 +207,7 @@ enum Later {
     /// A projectile leaves.
     Launch { projectile: Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32 },
     /// Damage lands.
-    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str> },
+    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str>, melee: bool },
     /// A unit dies.
     Die { obj: u32 },
     /// The camera shakes.
@@ -314,17 +315,21 @@ fn fake_events(time: Res<Time>, mut fake: ResMut<Fake>, local: Query<&LocalPlaye
     }
 }
 
-/// `AA_COMBAT_SHOT=<png>@<start|fire|fire2|plot|hit|death>+<seconds>`: a screenshot that many game seconds after the first such event (the local
-/// player's skill started, the local
-/// player fired (`fire2`: for the second time; `plot`: a step of the player's plot skill), a unit other than the player was hit, a unit died), then exit. Catches a flying arrow without guessing the
-/// network latency.
+/// `AA_COMBAT_SHOT=<png>@<start|fire|fire2|plot|hit|death>+<seconds>[,<seconds>...]`: screenshots that many game seconds after the first
+/// such event (the local player's skill started, the local player fired (`fire2`: for the second time; `plot`: a step of the player's
+/// plot skill), a unit other than the player was hit, a unit died), then exit. Catches a flying arrow without guessing the network
+/// latency. With several times the files are `<name>_01.png`, `<name>_02.png`, ... (a series to line up with a capture of the real
+/// client).
 #[derive(Resource)]
 struct DevShot {
     path: String,
     on: String,
-    after: f64,
+    /// Seconds after the event, in order.
+    after: Vec<f64>,
     at: Option<f64>,
-    taken: Option<f64>,
+    /// How many have been taken, and when (real time) the last one was.
+    taken: usize,
+    taken_at: f64,
     /// How many times the player fired (`fire2` is the second time).
     fires: u32,
 }
@@ -334,7 +339,20 @@ impl DevShot {
         let spec = std::env::var("AA_COMBAT_SHOT").ok()?;
         let (path, rest) = spec.split_once('@')?;
         let (on, after) = rest.split_once('+')?;
-        Some(DevShot { path: path.to_string(), on: on.to_string(), after: after.parse().ok()?, at: None, taken: None, fires: 0 })
+        let mut after: Vec<f64> = after.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+        after.sort_by(f64::total_cmp);
+        (!after.is_empty()).then(|| DevShot { path: path.to_string(), on: on.to_string(), after, at: None, taken: 0, taken_at: 0.0, fires: 0 })
+    }
+
+    /// The file of the n-th shot (0-based): the path itself for a single shot, else numbered.
+    fn file(&self, n: usize) -> String {
+        if self.after.len() == 1 {
+            return self.path.clone();
+        }
+        match self.path.rsplit_once('.') {
+            Some((stem, ext)) => format!("{stem}_{:02}.{ext}", n + 1),
+            None => format!("{}_{:02}", self.path, n + 1),
+        }
     }
 
     fn event(&mut self, on: &str, now: f64) {
@@ -345,32 +363,40 @@ impl DevShot {
             on
         };
         if self.on == on && self.at.is_none() {
-            self.at = Some(now + self.after);
+            self.at = Some(now);
         }
     }
 }
 
 fn dev_shot(mut commands: Commands, time: Res<Time>, real: Res<Time<Real>>, mut shot: ResMut<DevShot>, mut exit: MessageWriter<AppExit>) {
     let now = time.elapsed_secs_f64();
-    match (shot.at, shot.taken) {
-        (Some(at), None) if now >= at => {
-            if let Some(dir) = std::path::Path::new(&shot.path).parent() {
+    let Some(start) = shot.at else { return };
+    if shot.taken < shot.after.len() {
+        if now >= start + shot.after[shot.taken] {
+            let file = shot.file(shot.taken);
+            if let Some(dir) = std::path::Path::new(&file).parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(shot.path.clone()));
-            shot.taken = Some(real.elapsed_secs_f64());
-            info!("combat: screenshot -> {}", shot.path);
+            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(file.clone()));
+            shot.taken += 1;
+            shot.taken_at = real.elapsed_secs_f64();
+            info!("combat: screenshot {} -> {file}", shot.taken);
         }
-        (_, Some(taken)) if real.elapsed_secs_f64() - taken > 1.5 && std::path::Path::new(&shot.path).exists() => {
-            exit.write(AppExit::Success);
-        }
-        _ => {}
+    } else if real.elapsed_secs_f64() - shot.taken_at > 1.5 && std::path::Path::new(&shot.file(shot.after.len() - 1)).exists() {
+        exit.write(AppExit::Success);
     }
 }
 
 pub fn plugin(app: &mut App) {
     if let Some(shot) = DevShot::from_env() {
         app.insert_resource(shot).add_systems(Update, dev_shot);
+    }
+    app.add_systems(Update, feed_fx.run_if(resource_exists::<TerrainQuery>));
+    if std::env::var_os("AA_COMBAT_CHASE").is_some() {
+        app.init_resource::<super::camera::Chase>();
+    }
+    if let Some(degrees) = std::env::var("AA_COMBAT_CAM_REL").ok().and_then(|v| v.parse::<f32>().ok()) {
+        app.insert_resource(super::camera::CamRel(degrees));
     }
     if let Some(fake) = Fake::from_env() {
         app.insert_resource(fake).add_systems(Update, fake_events.before(handle_events));
@@ -422,9 +448,15 @@ struct Stage<'w, 's> {
     #[allow(clippy::type_complexity)]
     actors: Query<'w, 's, (&'static mut Animator, Option<&'static Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
     xforms: Query<'w, 's, &'static GlobalTransform>,
+    audio: Audio<'w, 's>,
 }
 
 impl Stage<'_, '_> {
+    /// The object id of a unit's entity.
+    fn obj_of(&self, e: Entity) -> Option<u32> {
+        self.remote.get(e).map(|(_, r)| r.obj_id).or_else(|_| self.local.get(e).map(|(_, l)| l.obj_id)).ok()
+    }
+
     fn entity(&self, obj: u32) -> Option<Entity> {
         if obj == 0 {
             return None;
@@ -478,7 +510,7 @@ impl Stage<'_, '_> {
     fn clip(&self, unit: Entity, name: &str) -> Option<(aa_anim::BoundClip, Arc<aa_anim::Cal>)> {
         let (animator, loco, ..) = self.actors.get(unit).ok()?;
         let cal = loco?.clips.cal.clone();
-        let clip = bind_clip(&animator.rig, &cal, &self.clips, name)?;
+        let clip = bind_action_clip(&animator.rig, &cal, &self.clips, name)?;
         Some((clip, cal))
     }
 
@@ -517,6 +549,8 @@ impl Stage<'_, '_> {
             return None;
         };
         let duration = clip.clip.duration;
+        // the sounds of a clip on the upper body are the combat code's: the animator has it as a layer
+        let layer_sounds = if layered { self.layer_sounds(unit, &clip) } else { None };
         let (mut animator, ..) = self.actors.get_mut(unit).ok()?;
         if let Some(mask) = mask {
             animator.play_layer(mask, clip, looping, 0.1);
@@ -529,6 +563,9 @@ impl Stage<'_, '_> {
         // a hit reaction is a flinch: the start of its clip, then locomotion fades back in
         let until = now + if looping { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
         self.commands.entity(unit).insert(Acting { until, layered });
+        if let Some(events) = layer_sounds {
+            self.commands.entity(unit).insert(LayerSounds::new(events, now));
+        }
         if kind != Act::Hurt
             && let Some(out) = weapon_for_clip(name)
         {
@@ -541,8 +578,75 @@ impl Stage<'_, '_> {
         Some(duration)
     }
 
-    /// Starts one effect item on a unit. `toward` is the other party (a hit effect turns to it). Returns the effect entity.
+    /// Starts one item of an effect group on a unit: a particle effect (with the sound it carries), or a sound (a voice is the unit's
+    /// own). `toward` is the other party (a hit effect turns to it). Returns the entity that plays it.
     fn spawn_item(&mut self, item: &FxItem, on: Entity, toward: Option<Vec3>, hold: bool) -> Option<Entity> {
+        if item.effect.is_empty() {
+            return self.sound_item(item, on);
+        }
+        let effect = self.spawn_effect(item, on, toward, hold)?;
+        // the effect entity has no place in the world yet: its sounds start where its bone is
+        let bone = self.bone(on, item.bone).unwrap_or(on);
+        let at = self.bone_point(on, item.bone, 1.0).unwrap_or(Vec3::ZERO);
+        self.effect_sounds(item, on, if hold { effect } else { bone }, at);
+        Some(effect)
+    }
+
+    /// The sound events of a clip that plays on the unit's upper body.
+    fn layer_sounds(&self, unit: Entity, clip: &aa_anim::BoundClip) -> Option<Arc<[AnimSound]>> {
+        let (_, loco, ..) = self.actors.get(unit).ok()?;
+        let database = loco?.clips.cal.sound_events.as_deref()?;
+        let events = self.audio.book()?.clip_sounds(database, &clip_file(clip)?)?;
+        (!events.is_empty()).then_some(events)
+    }
+
+    /// The sound of a weapon hitting a unit, at its hit bone.
+    fn blow_sound(&mut self, caster: Option<Entity>, target: Entity) {
+        let (Some(caster), Some(target_obj)) = (caster, self.obj_of(target)) else { return };
+        let Some(attacker) = self.obj_of(caster) else { return };
+        let parent = self.bone(target, 19).unwrap_or(target);
+        let Some(at) = self.xforms.get(parent).ok().map(|g| g.translation()) else { return };
+        self.audio.blow(&mut self.commands, attacker, (target, target_obj), parent, at);
+    }
+
+    /// A sound item of a group: an event at its bone, or the voice of the unit at its head.
+    fn sound_item(&mut self, item: &FxItem, on: Entity) -> Option<Entity> {
+        let sfx = item.sound.as_ref()?;
+        let (class, bone) = match sfx {
+            Sfx::Event(_) => (Class::Skill, self.bone(on, item.bone)),
+            Sfx::Voice(_) => (Class::Voice, self.bone(on, 2)),
+        };
+        let parent = bone.unwrap_or(on);
+        let at = self.xforms.get(parent).ok()?.translation();
+        let obj = self.obj_of(on);
+        self.audio.sfx(&mut self.commands, sfx, class, on, obj, parent, at)
+    }
+
+    /// The sounds a particle effect carries: the one of its database row and the `Sound=""` of its emitters (once each). They start
+    /// where the effect starts, under `parent`.
+    fn effect_sounds(&mut self, item: &FxItem, unit: Entity, parent: Entity, at: Vec3) {
+        if !self.audio.active() {
+            return;
+        }
+        let own = match &item.sound {
+            Some(Sfx::Event(p)) => Some(p.clone()),
+            _ => None,
+        };
+        if let Some(sfx) = item.sound.as_ref() {
+            let obj = self.obj_of(unit);
+            self.audio.sfx(&mut self.commands, sfx, Class::Skill, unit, obj, parent, at);
+        }
+        let Some(book) = self.audio.book() else { return };
+        for path in book.particle_sounds(&item.effect).iter() {
+            if own.as_ref().is_some_and(|o| o.eq_ignore_ascii_case(path)) {
+                continue;
+            }
+            self.audio.start(&mut self.commands, &super::sounds::Play { path, class: Class::Skill, unit, parent, at });
+        }
+    }
+
+    /// Starts the particle effect of an item on a unit.
+    fn spawn_effect(&mut self, item: &FxItem, on: Entity, toward: Option<Vec3>, hold: bool) -> Option<Entity> {
         let bone = self.bone(on, item.bone);
         let unit_xf = *self.xforms.get(on).ok()?;
         let (scale, rotation, _) = unit_xf.to_scale_rotation_translation();
@@ -563,46 +667,28 @@ impl Stage<'_, '_> {
                 fixed_rotation = true;
             }
         }
-        let effect = Effect { scale: item.scale, prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
-        let follow = bone.map(|b| (on, b, offset));
-        let id = self.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Fx { follow, fixed_rotation, ttl: if hold { 12.0 } else { 6.0 } })).id();
-        Some(id)
+        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+        let ttl = if hold { 12.0 } else { 6.0 };
+        if fixed_rotation {
+            // a hit effect turned towards the attacker keeps that orientation: it only follows the bone's position (`follow_fx`)
+            let follow = bone.map(|b| (on, b, offset));
+            return Some(self.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Fx { follow, fixed_rotation, ttl })).id());
+        }
+        // the effect is a child of its bone (of the unit, for an effect on the origin), so that its tails and `InheritVelocity` see
+        // the motion of the bone; the local pose gives it the world pose it would have had: the unit's orientation and scale
+        let parent = bone.unwrap_or(on);
+        let parent_xf = *self.xforms.get(parent).ok()?;
+        let (parent_scale, parent_rotation, _) = parent_xf.to_scale_rotation_translation();
+        let local = Transform {
+            translation: parent_xf.affine().inverse().transform_point3(transform.translation),
+            rotation: parent_rotation.inverse() * transform.rotation,
+            scale: Vec3::splat(transform.scale.y / ((parent_scale.x + parent_scale.y + parent_scale.z) / 3.0).max(1e-4)),
+        };
+        Some(self.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, local, ChildOf(parent), Fx { follow: None, fixed_rotation: false, ttl })).id())
     }
-}
-
-/// The loaders the projectile meshes need.
-#[derive(SystemParam)]
-struct Models<'w> {
-    cry: CryAssets<'w>,
-    libs: ResMut<'w, FxLibraries>,
 }
 
 impl Combat {
-    /// The mesh a particle effect emits (`Geometry` of its definition), as a glowing unlit model; loaded once.
-    fn geometry_of(&mut self, models: &mut Models, effect: &str) -> Option<Arc<LoadedModel>> {
-        if let Some(known) = self.geometry.get(effect) {
-            return known.clone();
-        }
-        let (library, name) = aa_fx::split_name(effect)?;
-        models.libs.request(library);
-        let LibStatus::Ready(lib) = models.libs.status(library) else { return None };
-        let model = lib.get(name).and_then(|def| def.geometry()).and_then(|(path, _material)| {
-            let hook = MaterialHook::new(|_, m| {
-                // what the particle does with it: an additive glow
-                m.unlit = true;
-                m.alpha_mode = AlphaMode::Add;
-                m.base_color_texture = None;
-                m.base_color = Color::linear_rgb(2.2, 1.8, 1.0);
-                m.double_sided = true;
-                m.cull_mode = None;
-            });
-            let options = ModelOptions { material_hook: Some(hook), ..default() };
-            models.cry.load_model(path, &options).ok()
-        });
-        self.geometry.insert(effect.to_string(), model.clone());
-        model
-    }
-
     fn after(&mut self, at: f64, what: Later) {
         self.timers.push(Timer { at, what });
     }
@@ -635,7 +721,7 @@ fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], m
     let toward_target = target.and_then(|t| st.xforms.get(t).ok()).map(|g| g.translation());
     for item in items.iter().filter(|i| moments.contains(&i.start)) {
         // buff visuals (damage over time, auras) belong to the buff, not to the skill
-        if item.effect.to_ascii_lowercase().contains("_dot") {
+        if item.is_dot() {
             continue;
         }
         // an instant skill never shows what only lives until it fires
@@ -816,10 +902,12 @@ fn handle_events(
                     // a dash or a leap has nothing but its controller's clip
                     .or_else(|| if idle { visual.controller_anim.clone() } else { None });
                 let mut release = 0.0;
+                let mut voice = 0.0;
                 let mut played = false;
                 if let Some(name) = &name {
                     let events = st.events(caster, name);
                     release = f64::from(events.release().unwrap_or(0.0));
+                    voice = f64::from(events.voice_time().unwrap_or(0.0));
                     combat.casts.get_mut(&f.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
                     // a channel pose loops for the channeling time
                     let hold = if f.channeling_ms > 0 { f64::from(f.channeling_ms) / 1000.0 + 2.0 } else { 20.0 };
@@ -842,6 +930,8 @@ fn handle_events(
                     }
                     start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::THROW], caster, target, now, 0.0, false);
                     start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, now, release, false);
+                    // the voice line at the moment the clip calls it
+                    start_items(&mut st, &mut combat, f.tl, &look.fx, &[ev::VOICE], caster, target, now, if voice > 0.0 { voice } else { release }, false);
                     start_shakes(&st, &mut combat, &look.shakes, &[ev::THROW], caster, target, now, 0.0);
                     start_shakes(&st, &mut combat, &look.shakes, &[ev::LAUNCH], caster, target, now, release);
                     if let Some(projectile) = &look.projectile {
@@ -887,9 +977,11 @@ fn handle_events(
                 let idle = !combat.casts.get(&p.tl).is_some_and(|c| c.played);
                 let clip = step.as_ref().and_then(|s| s.clip().cloned()).or_else(|| if idle { visual.as_ref().and_then(|v| v.controller_anim.clone()) } else { None });
                 let mut release = 0.0;
+                let mut voice = 0.0;
                 if let Some(name) = &clip {
                     let events = st.events(caster, name);
                     release = f64::from(events.release().unwrap_or(0.0));
+                    voice = f64::from(events.voice_time().unwrap_or(0.0));
                     let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
                     play_clip(&mut st, &mut combat, p.tl, caster, name, Act::Attack, hold, now);
                     combat.casts.get_mut(&p.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
@@ -903,6 +995,7 @@ fn handle_events(
                 }
                 start_items(&mut st, &mut combat, p.tl, &step.fx, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0, true);
                 start_items(&mut st, &mut combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, now, release, false);
+                start_items(&mut st, &mut combat, p.tl, &step.fx, &[ev::VOICE], caster, target, now, if voice > 0.0 { voice } else { release }, false);
                 start_shakes(&st, &mut combat, &step.shakes, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0);
                 start_shakes(&st, &mut combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
                 if let Some(projectile) = &step.projectile {
@@ -938,12 +1031,14 @@ fn handle_events(
                     _ => now,
                 }
                 .max(now);
+                // a blow (not a shot that flew; buff ticks were left out above) has the sound of the attacker's weapon on the target
+                let melee = !cast.is_some_and(|c| c.delay > 0.0);
                 let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
                 let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
                 let caster = st.entity(d.caster_obj_id);
                 let last = combat.last_hit.entry(d.target_obj_id).or_default();
                 *last = last.max(at);
-                combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt });
+                combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, melee });
             }
             Event::UnitDeath { obj_id } => {
                 if let Some(shot) = shot.as_mut() {
@@ -1002,7 +1097,7 @@ fn face(st: &mut Stage, caster: Entity, target: Option<Entity>, pos: Option<Vec3
 }
 
 /// Starts what is due: effects, projectiles, hits and deaths.
-fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut models: Models, mut camera: ResMut<CameraShake>) {
+fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut camera: ResMut<CameraShake>) {
     let now = time.elapsed_secs_f64();
     if combat.timers.is_empty() {
         return;
@@ -1020,10 +1115,13 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut mo
                     cast.held.push((e, item.end));
                 }
             }
-            Later::Launch { projectile, caster, target, target_pos, duration } => launch(&mut st, &mut combat, &mut models, &projectile, caster, target, target_pos, duration),
-            Later::Hit { caster, target, items, shakes, hurt } => {
+            Later::Launch { projectile, caster, target, target_pos, duration } => launch(&mut st, &projectile, caster, target, target_pos, duration),
+            Later::Hit { caster, target, items, shakes, hurt, melee } => {
                 let toward = caster.and_then(|c| st.xforms.get(c).ok()).map(|g| g.translation());
-                for item in items.iter().filter(|i| i.start == ev::HIT && !i.effect.to_ascii_lowercase().contains("_dot")) {
+                if melee && hurt.is_some() {
+                    st.blow_sound(caster, target);
+                }
+                for item in items.iter().filter(|i| i.start == ev::HIT && !i.is_dot()) {
                     let on = if item.on_target { Some(target) } else { caster };
                     if let Some(on) = on {
                         let toward = if item.on_target { toward } else { st.xforms.get(target).ok().map(|g| g.translation()) };
@@ -1062,9 +1160,27 @@ fn add_shake(camera: &mut CameraShake, shake: &skills::Shake) {
     camera.add(shake.ang, shake.shift, shake.frequency, shake.randomness, shake.duration);
 }
 
+/// Tells aa-fx where the sun is (the shading of mesh particles) and how high the ground is (particles that bounce, effects that start
+/// where a particle lands). The sun is the world's directional light; the ground is the terrain under a world position.
+fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLight>>, fx: Option<ResMut<FxSettings>>, mut wired: Local<bool>) {
+    let Some(mut fx) = fx else { return };
+    if !*wired {
+        *wired = true;
+        let terrain = terrain.clone();
+        // Bevy position -> game position (x east, y north = -z); the height is Bevy's y
+        fx.ground = Some(Ground(Arc::new(move |p: Vec3| terrain.height_at(p.x, -p.z))));
+    }
+    if let Ok(light) = sun.single() {
+        let to_sun = (-light.forward().as_vec3()).normalize_or_zero();
+        if to_sun != Vec3::ZERO && fx.sun.distance_squared(to_sun) > 1e-6 {
+            fx.sun = to_sun;
+        }
+    }
+}
+
 /// Sends a projectile from the caster's launch bone to the target's hit point.
 #[allow(clippy::too_many_arguments)]
-fn launch(st: &mut Stage, combat: &mut Combat, models: &mut Models, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32) {
+fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32) {
     // the launch bone: the projectile's own, else the first effect item's (the left hand of a bow, the right hand of a spell)
     let src_bone = if projectile.src_bone != 0 { projectile.src_bone } else { projectile.items.first().map_or(9, |i| i.bone) };
     let Some(from) = st.bone_point(caster, src_bone, 1.0) else { return };
@@ -1086,18 +1202,20 @@ fn launch(st: &mut Stage, combat: &mut Combat, models: &mut Models, projectile: 
             Fx { follow: None, fixed_rotation: true, ttl: duration + 3.0 },
         ))
         .id();
-    for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.effect.to_ascii_lowercase().contains("_dot")) {
-        let effect = Effect { scale: item.scale, prime: false, looping: true, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
-        st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
-        // the emitter that throws the mesh (the arrow itself) is not drawn by aa-fx: draw the mesh
-        if let Some(model) = combat.geometry_of(models, &item.effect) {
-            let root = spawn_loaded(&mut st.commands, &item.effect, &model, &ModelOptions::default());
-            // the emitter's SizeX / SizeZ 1.2 widen the arrow (more here: the glow it has in the real client is missing)
-            st.commands.entity(root).insert((ChildOf(anchor), Transform::from_rotation(aa_cry::CRY_TO_BEVY).with_scale(Vec3::new(2.5, 1.0, 2.5))));
-            if verbose() {
-                info!("combat: projectile mesh of {}", item.effect);
+    for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
+        // the sounds of the projectile fly with it
+        if item.effect.is_empty() {
+            if let Some(sfx) = &item.sound {
+                let class = if matches!(sfx, Sfx::Voice(_)) { Class::Voice } else { Class::Skill };
+                let obj = st.obj_of(caster);
+                st.audio.sfx(&mut st.commands, sfx, class, caster, obj, anchor, from);
             }
+            continue;
         }
+        st.effect_sounds(item, caster, anchor, from);
+        let effect = Effect { scale: item.scale, prime: false, looping: true, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
+        // the effect flies with the anchor: its forward (-Z) is the flight direction, the mesh emitters (the arrow) draw their model
+        st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
     }
     if verbose() {
         info!("combat: projectile {} flies {:.2} s over {:.1} m", projectile.id, duration, from.distance(to));
@@ -1105,9 +1223,25 @@ fn launch(st: &mut Stage, combat: &mut Combat, models: &mut Models, projectile: 
 }
 
 /// Moves the projectiles to their targets; on arrival they stop and their trail fades.
-fn fly_projectiles(time: Res<Time>, mut commands: Commands, mut flying: Query<(Entity, &mut Transform, &mut Flying, &mut Fx)>, xforms: Query<&GlobalTransform>, actors: Query<&Animator>) {
+fn fly_projectiles(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut flying: Query<(Entity, &mut Transform, &mut Flying, &mut Fx, Option<&Children>)>,
+    xforms: Query<&GlobalTransform>,
+    actors: Query<&Animator>,
+    mut effects: Query<&mut Effect>,
+    mut chase: Option<ResMut<super::camera::Chase>>,
+) {
     let dt = time.delta_secs();
-    for (entity, mut transform, mut f, mut fx) in &mut flying {
+    // dev: the camera follows the projectile (see `Chase`); it goes back to the player when the last one landed
+    if let Some(chase) = chase.as_mut() {
+        chase.0 = flying.iter().next().map(|(_, t, ..)| {
+            let (forward, up) = (t.rotation * Vec3::NEG_Z, Vec3::Y);
+            let eye = t.translation - forward * 2.6 + t.rotation * Vec3::X * 0.9 + up * 0.5;
+            Transform::from_translation(eye).looking_at(t.translation + forward * 3.0, up)
+        });
+    }
+    for (entity, mut transform, mut f, mut fx, children) in &mut flying {
         f.elapsed += dt;
         // homing: the target's hit bone as it moves
         if let Some((unit, bone_id)) = f.to_unit
@@ -1127,14 +1261,20 @@ fn fly_projectiles(time: Res<Time>, mut commands: Commands, mut flying: Query<(E
         }
         transform.translation = at;
         if t >= 1.0 {
-            // arrived: the emitters stay and die out with the trail
+            // arrived: the emitters stay and die out with the trail, but nothing starts again at the target
             commands.entity(entity).remove::<Flying>();
             fx.ttl = fx.ttl.min(0.6);
+            for child in children.into_iter().flatten() {
+                if let Ok(mut effect) = effects.get_mut(*child) {
+                    effect.looping = false;
+                }
+            }
         }
     }
 }
 
-/// Keeps effects on their bones, ends the ones that ran out of time or lost their unit.
+/// Ends the effects that ran out of time, and moves the ones that follow a bone with a fixed orientation (the others are children
+/// of their bone) or lost their unit.
 fn follow_fx(time: Res<Time>, mut commands: Commands, mut fx: Query<(Entity, &mut Transform, &mut Fx)>, xforms: Query<&GlobalTransform, Without<Fx>>) {
     let dt = time.delta_secs();
     for (entity, mut transform, mut fx) in &mut fx {
