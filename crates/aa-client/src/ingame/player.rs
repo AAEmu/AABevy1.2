@@ -1,9 +1,18 @@
-//! The local player: spawned from the server's data, moved by the keyboard, snapped to the
-//! terrain and reported to the server.
+//! The local player: spawned from the server's data, moved by the keyboard, standing on the terrain and on
+//! the world's brushes (bridges, stairs), stopped by walls, swimming in deep water, and reported to the server.
 //!
-//! Keys (ArcheAge defaults): W / S forward / back, A / D strafe, Q / E turn, Space jump, Shift
-//! walk. The mouse drives the camera ([`super::camera`]); with the right button held the character
-//! faces where the camera looks, otherwise it turns to the camera heading when it starts to move.
+//! Keys (ArcheAge's `default_binding.g`): W / S forward / back, Q / E strafe left / right, A / D turn, Space jump (swim
+//! up in the water), X swim down, `.` toggles walking, NumLock auto-run (S or a movement-less release of it cancels).
+//! Both mouse buttons held run forward. Shift held also walks (a convenience, the real client has none). The mouse drives the
+//! camera ([`super::camera`]); with the right button held the character faces where the camera looks, otherwise it turns
+//! to the camera heading when it starts to move.
+//!
+//! Collision ([`aa_world::WorldCollision`]): every step slides the character's capsule along the walls, then stands it on the
+//! highest surface under it, terrain or brush, within a step height. Terrain steeper than the actor's climb angle cannot be
+//! walked up. The server stays authoritative; the client sends where it thinks it is.
+//!
+//! Swimming ([`super::swim`]): water deeper than [`ActorParams::swim_depth`] (1.3 m) over the ground makes the character swim
+//! at the surface; the packets then carry the swim stance and no ground flag.
 
 use aa_anim::pose::Rig;
 use aa_anim::{Cal, CharacterAssets, ClipLibrary, spawn_character};
@@ -12,14 +21,15 @@ use aa_cry::scene::CryAssets;
 use aa_net::model::stance;
 use aa_net::state::Player;
 use aa_net::{Command, Event, MoveCommand, MoveState, NetCommand, NetEvent, Pos};
-use aa_world::{TerrainQuery, cry_to_bevy};
+use aa_world::{TerrainQuery, WaterQuery, WorldCollision, cry_to_bevy};
 use bevy::prelude::*;
 
-use super::anim::{ClipSet, Locomotion, Motion, RUN_SPEED, WALK_SPEED};
+use super::anim::{ClipSet, Locomotion, Motion, RUN_SPEED};
 use super::appearance;
 use super::camera::OrbitCamera;
 use super::data::Db;
 use super::dev::DevOptions;
+use super::swim::{self, ActorParams, Swim, SwimClips, Wet};
 use super::weapons::{self, CarriedItem};
 
 /// Marks the local player's character entity.
@@ -39,6 +49,10 @@ pub struct Mover {
     pub grounded: bool,
     /// World velocity of the last step (m/s), for the movement packets.
     pub velocity: Vec3,
+    /// In the water and swimming (`Some`), else walking or in the air.
+    pub swim: Option<Swim>,
+    /// Water over the ground under the feet (m): wading slows the character down.
+    pub wading: f32,
 }
 
 /// What the player's input did in the last step: moving, jumping and turning cancel some casts ([`super::combat`]).
@@ -48,15 +62,27 @@ pub struct PlayerInput {
     pub moving: bool,
     /// The jump started in this step.
     pub jumped: bool,
-    /// The facing changed (Q / E, the right mouse button, the swing to the camera heading).
+    /// The facing changed (A / D, the right mouse button, the swing to the camera heading).
     pub turned: bool,
 }
 
-/// Gravity and jump speed (the actor model has `physics_living_gravity` 25, `game_jump_height` 1.3).
-const GRAVITY: f32 = 25.0;
-const JUMP_SPEED: f32 = 8.06;
-/// Turning with Q / E (radians per second); the actor models turn at 360 degrees per second.
+/// Gravity and jump speed come from the actor model (`physics_living_gravity` 25, `game_jump_height` 1.3: [`ActorParams`]).
+/// The capsule that collides with the walls (m), the tallest step it climbs, and how far it may drop before it falls.
+const RADIUS: f32 = 0.35;
+const HEIGHT: f32 = 1.8;
+const STEP_UP: f32 = 0.5;
+const DROP: f32 = 0.6;
+/// `physics_living_max_climb_angle` 50 degrees: terrain that rises faster than this over [`CLIMB_LOOK`] metres ahead cannot be
+/// walked up (tan 50).
+const MAX_CLIMB_TAN: f32 = 1.19;
+const CLIMB_LOOK: f32 = 0.5;
+/// Turning with A / D (radians per second); the actor models turn at 360 degrees per second.
 const TURN_RATE: f32 = 2.4;
+/// Seconds after the character settles or is teleported during which a landing is not reported (the server applies fall damage
+/// from it, and a spawn above a bridge that is not built yet must not hurt).
+const LANDING_GRACE: f32 = 1.5;
+/// The longest the first step waits for the collision around the spawn to be built (seconds).
+const COLLISION_WAIT: f32 = 5.0;
 /// How fast the character swings to the camera heading when it starts to move (radians per second).
 const ALIGN_RATE: f32 = 12.0;
 /// Interval between movement packets while moving.
@@ -114,7 +140,15 @@ pub fn spawn_player(
     let (px, py) = dev.pos.map_or((p.x, p.y), |d| (d.x, d.y));
     terrain.prefetch(px, py, PREFETCH_RADIUS);
     let ground = height_or(&terrain, px, py, p.z);
-    let pos = Vec3::new(px, py, ground);
+    // the server's height is kept when it is above the terrain by a bridge deck's worth (the first steps put the character on
+    // what is under it once the collision around is built); `--pos x,y,z` gives one, `--pos x,y` stands on the terrain
+    let saved = match dev.pos {
+        Some(d) if d.z.is_finite() => d.z,
+        Some(_) => ground,
+        None if p.z.is_finite() && p.z >= ground && p.z - ground < 40.0 => p.z,
+        None => ground,
+    };
+    let pos = Vec3::new(px, py, saved);
     let facing = dev.yaw.unwrap_or_else(|| spawn.yaw());
     info!(
         "player {} race {} gender {} model {} hair color {} skin color {} at ({:.1}, {:.1}, {:.1}) terrain {:.2} facing {:.1} deg",
@@ -173,12 +207,19 @@ pub fn spawn_player(
     };
     drop(game);
     let carried = weapons::carried(&db, equipment);
+    let swim_clips = SwimClips::load(&assets.skeleton, &assets.cal, &clips);
+    let actor = ActorParams::load(spawn.unit.model_id).unwrap_or_default();
+    debug!("actor params: {actor:?}, swim clips: {}", swim_clips.is_some());
     let Some(root) = spawn_with_locomotion(&mut commands, &mut cry, &clips, assets, placement(pos, facing, 1.0), carried) else { return };
     commands.entity(root).insert((
         Name::new(format!("player {}", spawn.name())),
         LocalPlayer { obj_id: spawn.obj_id },
-        Mover { pos, facing, vz: 0.0, grounded: true, velocity: Vec3::ZERO },
+        Mover { pos, facing, vz: 0.0, grounded: true, velocity: Vec3::ZERO, swim: None, wading: 0.0 },
+        actor,
     ));
+    if let Some(swim_clips) = swim_clips {
+        commands.entity(root).insert(swim_clips);
+    }
 }
 
 /// `spawn_character` plus the in-world locomotion clips.
@@ -219,128 +260,251 @@ pub fn spawn_with_locomotion(
     Some(root)
 }
 
-/// Keyboard movement, jumping, terrain following and the movement packets.
+/// What is under a point and whether it is a brush (a deck, a stair) rather than the terrain.
+#[derive(Clone, Copy, Debug)]
+struct Support {
+    height: f32,
+    brush: bool,
+}
+
+/// The highest surface under `(x, y)` that is not above `z + step_up`: a brush (bridge, stairs, floor) or the terrain; the terrain
+/// also where it is higher than that (the character is inside the ground and comes out on top of it). `None` off the map.
+fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z: f32, step_up: f32) -> Option<Support> {
+    let terr = terrain.height_at(x, y)?;
+    match collision.ground_below(x, y, z, step_up) {
+        Some(g) if g.height > terr + 0.02 => Some(Support { height: g.height, brush: true }),
+        _ => Some(Support { height: terr, brush: false }),
+    }
+}
+
+/// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
 #[allow(clippy::too_many_arguments)]
 pub fn control_player(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion)>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>)>,
     terrain: Res<TerrainQuery>,
+    collision: Res<WorldCollision>,
+    water: Res<WaterQuery>,
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
     dev: Res<DevOptions>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
+    mut trace: Local<(f32, Option<bool>)>,
 ) {
-    let Ok((local, mut mover, mut transform, mut motion)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor)) = player.single_mut() else { return };
     let Ok(mut orbit) = cameras.single_mut() else { return };
+    let actor = actor.copied().unwrap_or_default();
     let dt = time.delta_secs().min(0.1);
     state.since_spawn += dt;
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
+    // the first step waits for the collision around the character (a deck or a house is not there before it is built)
+    if !state.settled {
+        state.wait += dt;
+        if collision.ready_around(mover.pos.x, mover.pos.y, 24.0) || state.wait > COLLISION_WAIT {
+            state.settled = true;
+            state.grace = LANDING_GRACE;
+        } else {
+            return;
+        }
+    }
+    state.grace = (state.grace - dt).max(0.0);
     // an edit box of the HUD (the chat input) has the keyboard: no movement, no jump; a drag that began on the HUD does not turn us
     let typing = typing.is_some_and(|f| f.0);
     let over_ui = over_ui.is_some_and(|o| o.0);
     let pressed = |k: KeyCode, c: char| (!typing && keys.pressed(k)) || dev.scripted(t, c);
+    let tapped = |k: KeyCode| !typing && keys.just_pressed(k);
     let key = |k: KeyCode, c: char| pressed(k, c) as i32 as f32;
 
-    let (fwd, strafe) = (key(KeyCode::KeyW, 'W') - key(KeyCode::KeyS, 'S'), key(KeyCode::KeyD, 'D') - key(KeyCode::KeyA, 'A'));
-    let turn = key(KeyCode::KeyQ, 'Q') - key(KeyCode::KeyE, 'E');
+    // auto-run (NumLock) and the walking toggle (`.`); S stops the auto-run
+    if tapped(KeyCode::NumLock) {
+        state.autorun = !state.autorun;
+    }
+    if tapped(KeyCode::Period) {
+        state.walk = !state.walk;
+    }
+    let back = key(KeyCode::KeyS, 'S');
+    if back > 0.0 {
+        state.autorun = false;
+    }
+    // both mouse buttons run forward
+    let both_buttons = mouse.pressed(MouseButton::Left) && mouse.pressed(MouseButton::Right) && !over_ui;
+    let ahead = key(KeyCode::KeyW, 'W') > 0.0 || state.autorun || both_buttons;
+    let fwd = ahead as i32 as f32 - back;
+    let strafe = key(KeyCode::KeyE, 'E') - key(KeyCode::KeyQ, 'Q');
+    let turn = key(KeyCode::KeyA, 'A') - key(KeyCode::KeyD, 'D');
+    let jump_held = pressed(KeyCode::Space, 'J');
+    let jump_tapped = tapped(KeyCode::Space) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'));
+    let vertical = jump_held as i32 as f32 - key(KeyCode::KeyX, 'X');
+
     let before_facing = mover.facing;
     if turn != 0.0 {
         let d = turn * TURN_RATE * dt;
         mover.facing += d;
         orbit.yaw += d; // the camera turns with the character
     }
-    let input = Vec2::new(strafe, fwd);
+    let local_dir = Vec2::new(strafe, fwd).normalize_or_zero();
     if mouse.pressed(MouseButton::Right) && !over_ui {
         mover.facing = orbit.yaw;
-    } else if input != Vec2::ZERO {
+    } else if local_dir != Vec2::ZERO {
         mover.facing = approach_angle(mover.facing, orbit.yaw, ALIGN_RATE * dt);
     }
 
-    // horizontal velocity from the input (backward and walking are slower, as in the actor model)
-    let walking = pressed(KeyCode::ShiftLeft, 'H') || (!typing && keys.pressed(KeyCode::ShiftRight));
-    let local_dir = input.normalize_or_zero();
-    let mut speed = if walking { WALK_SPEED } else { RUN_SPEED };
-    if local_dir.y < -0.1 {
-        speed *= 0.65;
-    }
-    let step = (forward(mover.facing) * local_dir.y + right(mover.facing) * local_dir.x) * speed;
-    let mut pos = mover.pos;
-    let mut candidate = pos;
-    candidate.x += step.x * dt;
-    candidate.y += step.y * dt;
+    let old = mover.pos;
+    let swimming = mover.swim.is_some();
+    // local velocity (x right, y forward): walking and running as the actor model says, swimming at the swim speed
+    let walking = state.walk != (pressed(KeyCode::ShiftLeft, 'H') || (!typing && keys.pressed(KeyCode::ShiftRight)));
+    let local_vel = if swimming {
+        swim::local_velocity(local_dir)
+    } else {
+        let sideways = local_dir.y.abs() <= 0.1 && local_dir.x != 0.0;
+        let mult = match (walking, local_dir.y < -0.1, sideways) {
+            (false, true, _) => actor.backward,
+            (false, _, true) => actor.strafe,
+            (false, _, _) => 1.0,
+            (true, true, _) => actor.walk_backward,
+            (true, _, true) => actor.walk_strafe,
+            (true, _, _) => actor.walk,
+        };
+        local_dir * (RUN_SPEED * mult * swim::wading_factor(mover.wading))
+    };
+    let step = forward(mover.facing) * local_vel.y + right(mover.facing) * local_vel.x;
+    let mut pos = old;
     // load the neighbouring heightmap cells in the background when a cell border is crossed
     let cell = ((pos.x / aa_world::CELL_SIZE).floor() as i32, (pos.y / aa_world::CELL_SIZE).floor() as i32);
     if state.cell != cell {
         state.cell = cell;
         terrain.prefetch(pos.x, pos.y, PREFETCH_RADIUS);
     }
-    // stay on the map
-    if terrain.height_at(candidate.x, candidate.y).is_some() {
-        pos = candidate;
-    }
-
-    // vertical: terrain following and jumping
-    let ground = height_or(&terrain, pos.x, pos.y, mover.pos.z);
-    let mut jumped = false;
-    if mover.grounded && ((!typing && keys.just_pressed(KeyCode::Space)) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) {
-        mover.vz = JUMP_SPEED;
-        mover.grounded = false;
-        jumped = true;
-    }
-    if mover.grounded {
-        // follow the slope; walking off a ledge turns into a fall
-        if pos.z - ground > 0.6 {
-            mover.grounded = false;
-            mover.vz = 0.0;
-        } else {
-            pos.z = ground;
+    // walls: slide along them; stay on the map
+    if step != Vec2::ZERO {
+        let candidate = collision.slide(pos, step * dt, RADIUS, HEIGHT, STEP_UP).pos;
+        if terrain.height_at(candidate.x, candidate.y).is_some() {
+            // terrain steeper than the climb angle is not walked up: looked at over half a metre ahead, the facets of the
+            // mesh are rougher than that (a brush under the feet, stairs, is not terrain)
+            let ahead = Vec2::new(candidate.x, candidate.y) + step.normalize_or_zero() * CLIMB_LOOK;
+            let rise = terrain.height_at(ahead.x, ahead.y).map_or(0.0, |h| h - pos.z);
+            let climbing = !swimming && mover.grounded && rise > CLIMB_LOOK * MAX_CLIMB_TAN;
+            let on_brush = climbing && support(&terrain, &collision, candidate.x, candidate.y, pos.z, STEP_UP).is_some_and(|s| s.brush);
+            if !climbing || on_brush {
+                pos.x = candidate.x;
+                pos.y = candidate.y;
+            }
         }
     }
+
+    // what is under the feet and the water around
+    let step_up = if mover.grounded || swimming { STEP_UP } else { 0.05 };
+    let ground = support(&terrain, &collision, pos.x, pos.y, old.z, step_up).map_or(old.z, |s| s.height);
+    let wet = water.water_at(pos).map(|(surface, kind)| Wet { surface, kind, depth: (surface - ground).max(0.0) });
+    mover.wading = if swimming { 0.0 } else { wet.map_or(0.0, |w| w.depth) };
+    let rising = !mover.grounded && mover.vz > 0.0 && !swimming;
+    let mut jumped = false;
+    // swimming starts and stops with the depth of the water over the ground (a body that rises out of it does not start)
+    let want_swim = swim::should_swim(swimming, pos.z, wet, actor.swim_depth()) && (swimming || !rising);
+    if want_swim && !swimming {
+        mover.grounded = false;
+        let w = wet.expect("swimming needs water");
+        mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: 0.0, vertical: 0.0, deep: false });
+        info!("swimming in {:?} water at ({:.1}, {:.1}, {:.2}), surface {:.2}, ground {:.2}", w.kind, pos.x, pos.y, pos.z, w.surface, ground);
+    } else if !want_swim && swimming {
+        mover.swim = None;
+        mover.grounded = false;
+        mover.vz = mover.vz.min(0.0);
+        info!("left the water at ({:.1}, {:.1}, {:.2}), ground {:.2}", pos.x, pos.y, pos.z, ground);
+    }
+
     // impact speed (m/s) of a landing in this step: sent once, in the movement packet of the landing
     let mut landed = None;
-    if !mover.grounded {
-        mover.vz -= GRAVITY * dt;
-        pos.z += mover.vz * dt;
-        if pos.z <= ground && mover.vz <= 0.0 {
-            pos.z = ground;
-            landed = Some(-mover.vz);
-            mover.vz = 0.0;
-            mover.grounded = true;
+    if let (Some(w), true) = (wet, mover.swim.is_some()) {
+        // swimming: float at the surface, dive with X, surface with Space; a jump near the surface leaves the water
+        let rest = w.surface - actor.swim_depth();
+        if jump_tapped && pos.z >= rest - swim::JUMP_RANGE {
+            mover.swim = None;
+            mover.vz = actor.jump_speed();
+            jumped = true;
+        } else {
+            let wanted = swim::wanted_vz(vertical, pos.z, rest);
+            mover.vz = swim::approach(mover.vz, wanted, swim::WATER_DRAG, dt);
+            pos.z = (pos.z + mover.vz * dt).max(ground + 0.05);
+            if pos.z <= ground + 0.05 {
+                mover.vz = mover.vz.max(0.0);
+            }
+            mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: local_vel.length(), vertical, deep: rest - pos.z > swim::DEEP });
+        }
+    }
+    if mover.swim.is_none() {
+        if mover.grounded && jump_tapped {
+            mover.vz = actor.jump_speed();
+            mover.grounded = false;
+            jumped = true;
+        }
+        if mover.grounded {
+            // follow the slope, the stairs and the decks; walking off a ledge turns into a fall
+            if pos.z - ground > DROP {
+                mover.grounded = false;
+                mover.vz = 0.0;
+            } else {
+                pos.z = ground;
+            }
+        }
+        if !mover.grounded {
+            // water slows a fall down; the splash is no landing
+            let in_water = wet.is_some_and(|w| pos.z < w.surface);
+            mover.vz -= actor.gravity * if in_water { swim::WATER_GRAVITY } else { 1.0 } * dt;
+            if in_water {
+                mover.vz = mover.vz.max(-4.0);
+            }
+            pos.z += mover.vz * dt;
+            if pos.z <= ground && mover.vz <= 0.0 {
+                pos.z = ground;
+                if state.grace <= 0.0 && !wet.is_some_and(|w| w.depth > swim::WADE_LO) {
+                    landed = Some(-mover.vz);
+                }
+                mover.vz = 0.0;
+                mover.grounded = true;
+            }
         }
     }
 
-    let velocity = Vec3::new(step.x, step.y, if mover.grounded { 0.0 } else { mover.vz });
+    // the step that was taken, not the one asked for: a wall takes the speed away
+    let actual = if dt > 0.0 { Vec2::new(pos.x - old.x, pos.y - old.y) / dt } else { Vec2::ZERO };
+    let swimming = mover.swim.is_some();
+    let airborne = !mover.grounded && !swimming;
+    let velocity = Vec3::new(actual.x, actual.y, if swimming || airborne { mover.vz } else { 0.0 });
     mover.velocity = velocity;
     mover.pos = pos;
     *transform = placement(pos, mover.facing, 1.0);
-    let moving = local_dir != Vec2::ZERO && step.length() > 0.0;
-    *motion = Motion { speed: if moving { step.length() } else { 0.0 }, local_dir, airborne: !mover.grounded };
+    let moving = local_dir != Vec2::ZERO && actual.length() > 0.05;
+    // the swim clips are driven by `swim::drive_swim`; the locomotion sees a character standing still
+    *motion = if swimming { Motion::default() } else { Motion { speed: if moving { actual.length() } else { 0.0 }, local_dir, airborne } };
     let turned = (mover.facing - before_facing).abs() > 1e-4;
     let input = PlayerInput { moving, jumped, turned };
     if *input_state != input {
         *input_state = input;
     }
 
-    // movement packets: every SEND_INTERVAL while moving, facing or airborne; one more when it stops,
-    // and one at once when the character lands
+    // movement packets: every SEND_INTERVAL while moving, facing, airborne or swimming about; one more when it stops,
+    // one at once when the character lands and when it starts or stops swimming
     state.since_sent += dt;
-    let active = moving || !mover.grounded || turned;
+    let swim_active = swimming && (moving || vertical != 0.0 || mover.vz.abs() > 0.05);
+    let active = moving || airborne || turned || swim_active;
     let due = state.since_sent >= SEND_INTERVAL;
     let first = !state.sent_first && state.since_spawn > 0.5;
-    if (active && due) || (!active && state.was_active) || first || landed.is_some() {
+    let stance_changed = swimming != state.swimming;
+    if (active && due) || (!active && state.was_active) || first || landed.is_some() || stance_changed {
         let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
         // pressed direction relative to the facing, [right, forward, up]; forward is [0, 127, 0]
-        let delta = [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, 0];
-        // rising after a jump, falling otherwise in the air, on the ground when standing on the terrain
+        let delta = [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, if swimming { (vertical * 127.0) as i8 } else { 0 }];
+        // rising after a jump, falling otherwise in the air (and swimming: nothing under the feet), on the ground when standing
         let move_state = if mover.grounded {
             MoveState::Ground
-        } else if mover.vz > 0.0 {
+        } else if mover.vz > 0.0 && !swimming {
             MoveState::Jump
         } else {
             MoveState::Fall
@@ -349,7 +513,7 @@ pub fn control_player(
             pos: Pos::new(pos.x, pos.y, pos.z),
             yaw: mover.facing,
             moving: active,
-            stance: stance::RELAXED,
+            stance: if swimming { stance::SWIM } else { stance::RELAXED },
             velocity: if active { [to_wire(velocity.x), to_wire(velocity.y), to_wire(velocity.z)] } else { [0; 3] },
             delta_movement: delta,
             ..MoveCommand::default()
@@ -366,18 +530,43 @@ pub fn control_player(
             debug!("move #{} to ({:.1}, {:.1}, {:.1}) for obj {}", state.moves_sent, pos.x, pos.y, pos.z, local.obj_id);
         }
     }
+    state.swimming = swimming;
     state.was_active = active;
+    // `AA_MOVE_TRACE=1`: where the character is, twice a second
+    trace.0 += dt;
+    if trace.0 >= 0.5 && *trace.1.get_or_insert_with(|| std::env::var_os("AA_MOVE_TRACE").is_some()) {
+        trace.0 = 0.0;
+        info!(
+            "move: ({:.2}, {:.2}, {:.2}) ground {ground:.2} {} vz {:.2} speed {:.2}{}",
+            pos.x,
+            pos.y,
+            pos.z,
+            if swimming { "swimming" } else if mover.grounded { "grounded" } else { "airborne" },
+            mover.vz,
+            actual.length(),
+            wet.map_or(String::new(), |w| format!(" water {:.2} deep {:.2}", w.surface, w.depth))
+        );
+    }
 }
 
-/// Bookkeeping of the movement packets (reset when the game screen is left).
+/// Bookkeeping of the movement packets and the movement toggles (reset when the game screen is left).
 #[derive(Resource, Default)]
 pub struct SendState {
     since_sent: f32,
     since_spawn: f32,
     sent_first: bool,
     was_active: bool,
+    swimming: bool,
     moves_sent: u32,
     cell: (i32, i32),
+    /// NumLock auto-run is on; `.` walking is on.
+    autorun: bool,
+    walk: bool,
+    /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
+    settled: bool,
+    wait: f32,
+    /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
+    grace: f32,
 }
 
 /// Rotates `from` towards `to` (radians) by at most `max`, the short way round.
@@ -400,6 +589,10 @@ pub fn follow_server(
         info!("teleported to ({:.1}, {:.1}, {:.1})", pos.x, pos.y, pos.z);
         mover.pos = Vec3::new(pos.x, pos.y, pos.z);
         mover.vz = 0.0;
+        mover.swim = None;
+        // the new place is stood on once its collision is built
+        state.settled = false;
+        state.wait = 0.0;
         *transform = placement(mover.pos, mover.facing, 1.0);
         if let Ok(mut orbit) = cameras.single_mut() {
             orbit.yaw = mover.facing;
