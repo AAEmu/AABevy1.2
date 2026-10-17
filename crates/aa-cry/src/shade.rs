@@ -43,6 +43,7 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
             out.alpha_mode = AlphaMode::Opaque;
         }
     }
+    bake_hair_colour(prep, m, &mut out);
     if prep.shading == Shading::Full {
         bake_specular(prep, m, &mut out);
         bake_hair_specular(prep, m, &mut out);
@@ -50,28 +51,138 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
     Some(out)
 }
 
-/// Strength of the hair highlight on the brightest strands (`reflectance` of the material, scaled
-/// by the baked strand map: `F0 = 0.16 * (reflectance * 0.5 * map)^2`).
-const HAIR_SPEC_REFLECTANCE: f32 = 1.5;
+/// Hair textures have white (or any) colour in the fully transparent texels: with the mask at the
+/// strand ends, bilinear and mip filtering pull it into the visible edge pixels (a white halo,
+/// worst on dark hair). The colour map is baked again with the colour of the visible hair spread
+/// into the transparent texels and the mips averaged weighted by alpha.
+fn bake_hair_colour(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut StandardMaterial) {
+    if !m.shader.eq_ignore_ascii_case("hair") || out.base_color_texture.is_none() {
+        return;
+    }
+    let Some(df) = m.texture(&TextureMap::Diffuse).map(|t| t.pak_path()) else { return };
+    if prep.loader.mean_alpha(&df).is_none_or(|a| a >= 0.98) {
+        return;
+    }
+    let key = format!("haircolor:{df}");
+    let image = prep.baked_image(&key, |loader| {
+        let (w, h, mips) = loader.decode_mips_rgba8(&df)?;
+        let mut base = mips.into_iter().next()?;
+        spread_colour(&mut base, w as usize, h as usize, HAIR_VISIBLE_ALPHA);
+        Some(crate::texture::rgba8_image(w, h, &alpha_weighted_mips(base, w as usize, h as usize), true))
+    });
+    if let Some(image) = image {
+        out.base_color_texture = Some(image);
+    }
+}
+
+/// Alpha (0..255) below which a hair texel is cut by the mask (`Mask(0.5)` on the doubled alpha).
+const HAIR_VISIBLE_ALPHA: u8 = 64;
+
+/// Gives every texel with alpha below `visible` the average colour of the visible texels around it
+/// (up to 8 texels away, growing one ring per pass); the alpha stays.
+fn spread_colour(px: &mut [u8], w: usize, h: usize, visible: u8) {
+    let mut known: Vec<bool> = px.chunks_exact(4).map(|p| p[3] >= visible).collect();
+    for _ in 0..8 {
+        let mut next: Vec<(usize, [u8; 3])> = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                if known[y * w + x] {
+                    continue;
+                }
+                let (mut sum, mut n) = ([0u32; 3], 0u32);
+                for (dx, dy) in [(-1i32, -1i32), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                    let nx = (x as i32 + dx).rem_euclid(w as i32) as usize;
+                    let ny = (y as i32 + dy).rem_euclid(h as i32) as usize;
+                    if known[ny * w + nx] {
+                        let p = &px[(ny * w + nx) * 4..];
+                        sum[0] += p[0] as u32;
+                        sum[1] += p[1] as u32;
+                        sum[2] += p[2] as u32;
+                        n += 1;
+                    }
+                }
+                if n > 0 {
+                    next.push((y * w + x, [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]));
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        for (i, c) in next {
+            px[i * 4..i * 4 + 3].copy_from_slice(&c);
+            known[i] = true;
+        }
+    }
+}
+
+/// A full mip chain of RGBA8 `base`: colour averaged weighted by alpha (transparent texels do not
+/// dilute the visible ones), alpha averaged plainly.
+fn alpha_weighted_mips(base: Vec<u8>, w: usize, h: usize) -> Vec<Vec<u8>> {
+    let mut chain = vec![base];
+    let (mut mw, mut mh) = (w, h);
+    while mw > 1 || mh > 1 {
+        let (nw, nh) = ((mw / 2).max(1), (mh / 2).max(1));
+        let prev = chain.last().expect("a level");
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                let (mut rgb, mut wsum, mut asum, mut plain) = ([0f32; 3], 0f32, 0f32, [0f32; 3]);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (sx, sy) = ((x * 2 + dx).min(mw - 1), (y * 2 + dy).min(mh - 1));
+                    let p = &prev[(sy * mw + sx) * 4..][..4];
+                    let a = p[3] as f32;
+                    for c in 0..3 {
+                        rgb[c] += p[c] as f32 * a;
+                        plain[c] += p[c] as f32;
+                    }
+                    wsum += a;
+                    asum += a;
+                }
+                let o = &mut next[(y * nw + x) * 4..][..4];
+                for c in 0..3 {
+                    o[c] = (if wsum > 0.0 { rgb[c] / wsum } else { plain[c] / 4.0 }).round() as u8;
+                }
+                o[3] = (asum / 4.0).round() as u8;
+            }
+        }
+        chain.push(next);
+        (mw, mh) = (nw, nh);
+    }
+    chain
+}
 
 /// `Hair` materials: the highlight follows the strand pattern of the hair map. The shader's
 /// Kajiya-Kay term shines on the strands that face the light; a strand map (bright strands, dark
-/// gaps) as specular strength makes the same streaks with Bevy's isotropic GGX.
+/// gaps) as specular strength makes the same streaks with Bevy's isotropic GGX. Its strength is
+/// the material's `PrimarySpecColor` (dark hair has a dark highlight: 0.13, blond 0.55) and the
+/// map is cut where the colour map is transparent.
 fn bake_hair_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut StandardMaterial) {
     if !m.shader.eq_ignore_ascii_case("hair") {
         return;
     }
-    let Some(spec) = m.texture(&TextureMap::Specular).or_else(|| m.texture(&TextureMap::Diffuse)).map(|t| t.pak_path()) else { return };
-    let key = format!("hairspec:{spec}");
+    let Some(df) = m.texture(&TextureMap::Diffuse).map(|t| t.pak_path()) else { return };
+    let spec = m.texture(&TextureMap::Specular).map(|t| t.pak_path()).unwrap_or_else(|| df.clone());
+    let key = format!("hairspec:{spec}:{df}");
     let image = prep.baked_image(&key, |loader| {
         let (w, h, mips) = loader.decode_mips_rgba8(&spec)?;
+        // coverage of the colour map (same uv): never light texels that are cut away
+        let cover = loader.decode_mips_rgba8(&df);
         let mips: Vec<Vec<u8>> = mips
             .iter()
-            .map(|mip| {
+            .enumerate()
+            .map(|(level, mip)| {
+                let (mw, mh) = ((w as usize >> level).max(1), (h as usize >> level).max(1));
+                let alpha_at = |x: usize, y: usize| -> f32 {
+                    let Some((cw, ch, cm)) = &cover else { return 1.0 };
+                    let lvl = level.min(cm.len() - 1);
+                    let (lw, lh) = ((*cw as usize >> lvl).max(1), (*ch as usize >> lvl).max(1));
+                    cm[lvl][((y * lh / mh).min(lh - 1) * lw + (x * lw / mw).min(lw - 1)) * 4 + 3] as f32 / 255.0
+                };
                 let mut data = Vec::with_capacity(mip.len());
-                for p in mip.chunks_exact(4) {
+                for (i, p) in mip.chunks_exact(4).enumerate() {
                     let l = luma(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0);
-                    let strength = 0.15 + 0.85 * smoothstep(0.12, 0.7, l);
+                    let strength = (0.3 + 0.7 * smoothstep(0.12, 0.7, l)) * smoothstep(0.15, 0.45, alpha_at(i % mw, i / mw));
                     data.extend_from_slice(&[255, 255, 255, (strength * 255.0).round() as u8]);
                 }
                 data
@@ -80,9 +191,18 @@ fn bake_hair_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: 
         Some(crate::texture::rgba8_image(w, h, &mips, false))
     });
     if let Some(image) = image {
+        let (strength, tint) = hair_spec_colour(m);
         out.specular_texture = Some(image);
-        out.reflectance = HAIR_SPEC_REFLECTANCE;
+        // F0 = 0.16 * (0.5 * reflectance * strand map)^2: peaks at `0.16 * strength^0.8`
+        out.reflectance = (2.0 * strength.powf(0.4)).clamp(0.5, 1.8);
+        out.specular_tint = Color::linear_rgb(tint.x, tint.y, tint.z);
     }
+}
+
+/// `PrimarySpecColor` of a hair material: its brightness, and its hue (damped) as a tint.
+fn hair_spec_colour(m: &CryMaterial) -> (f32, Vec3) {
+    let c = param_rgb(m, "PrimarySpecColor").unwrap_or(Vec3::splat(0.2));
+    (luma(c).clamp(0.02, 1.0), Vec3::ONE.lerp(c / c.max_element().max(1e-3), 0.5))
 }
 
 /// `Illum` materials: the specular (gloss) map becomes a metallic / roughness texture. In the
@@ -317,8 +437,13 @@ pub fn to_standard_material(
             // anisotropic path, whose GGX term blows up and turns the hair white. So no
             // `anisotropy_strength`: `Shading::Full` masks an isotropic highlight with the
             // strand pattern of the hair map instead ([`bake_hair_specular`]).
-            out.perceptual_roughness = 0.45;
-            out.reflectance = 0.22;
+            // `PrimarySpecPow` (60..180) is the sharpness of the strand highlight, `PrimarySpecColor`
+            // its strength (dark hair has a dark highlight)
+            out.perceptual_roughness = shininess_to_roughness(param_f32(m, "PrimarySpecPow").unwrap_or(60.0)).clamp(0.3, 0.5);
+            let (strength, tint) = hair_spec_colour(m);
+            // without the strand map the highlight is uniform: the mean of the map is about 0.5
+            out.reflectance = (0.5 * strength.powf(0.4)).clamp(0.2, 0.6);
+            out.specular_tint = Color::linear_rgb(tint.x, tint.y, tint.z);
         }
         "humanskin" => {
             // lit skin hue from the bright skin colour, Diffuse = the lighting scale
@@ -413,6 +538,22 @@ mod tests {
         let c = m.base_color.to_linear();
         assert!(c.red > c.green && c.green > c.blue, "hair colour from HairColor: {c:?}");
         assert!(c.red < 0.2, "Diffuse 0.067 keeps the hair dark: {c:?}");
+    }
+
+    #[test]
+    fn hair_colour_map_has_no_white_in_the_cut_texels() {
+        // 4x1: dark visible texels next to white transparent ones (the usual hair map)
+        let mut px = vec![30, 20, 10, 255, 30, 20, 10, 255, 255, 255, 255, 0, 255, 255, 255, 0];
+        spread_colour(&mut px, 4, 1, HAIR_VISIBLE_ALPHA);
+        for t in px.chunks_exact(4) {
+            assert_eq!(&t[..3], &[30, 20, 10], "{px:?}");
+        }
+        assert_eq!(px[11], 0, "the alpha stays");
+        // mips weigh the colour by alpha: a half transparent white texel does not lighten the strand
+        let chain = alpha_weighted_mips(vec![30, 20, 10, 255, 255, 255, 255, 0], 2, 1);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(&chain[1][..3], &[30, 20, 10]);
+        assert_eq!(chain[1][3], 128);
     }
 
     #[test]

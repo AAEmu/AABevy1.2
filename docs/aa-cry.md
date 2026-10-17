@@ -247,7 +247,7 @@ BC1 maps); additive flag -> add; `TexMod` of the diffuse slot -> `uv_transform`.
 |---|---|
 | `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`); with `Shading::Full` and a `Specular` map, three images are baked from the map (`g = luma(map) * min(Specular * modifier, 1.2)`): metallic / roughness (`metal = smoothstep(0.2, 0.75, g) * f(ReflectAmount)`; matte roughness from `Shininess`, glossy dielectric texels down to `SHARP_ROUGHNESS` 0.42 = sharper leather highlights, metal 0.6 x matte) and Bevy's `specular_texture` (alpha = `sqrt(SPEC_STRENGTH * g)`, the highlight strength of the dielectric part, `reflectance` 2.0) and `specular_tint_texture` (the map's colour, `SPEC_TINT_AMOUNT` 0.3 of it, only for warm maps: gold, bronze, leather; the greenish maps of plate armour stay white because the plates are silver in the captures) |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5) |
-| `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness 0.45, reflectance 0.22, no emissive, **no anisotropy** (see below); with `Shading::Full` the highlight strength follows the strand pattern of the hair map (`specular_texture` baked from the `Specular` map, `bake_hair_specular`): streaks along the strands |
+| `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness from `PrimarySpecPow` (0.3-0.5), reflectance and tint from `PrimarySpecColor` (dark hair 0.13 has a dark highlight, blond 0.55), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`); with `Shading::Full` the highlight strength follows the strand pattern of the hair map, cut where the colour map is transparent (`specular_texture` baked from the `Specular` map, `bake_hair_specular`): streaks along the strands |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
 | `Eye` | roughness 0.12, reflectance 0.2 (more mirrors the sky over the iris: grey eyes; aa-anim composes the iris colour into the texture) |
 | `Metal` | metallic 0.6 |
@@ -285,6 +285,13 @@ with `cargo run -p aa-anim --example lineup -- --only 3 --ssao 1` (also `--prepa
   prepass (the prepass treats it as opaque and writes the depth of the whole mesh, the main pass
   covers nothing there and the head behind fails the depth test), so hair is `Mask(0.5)` on the
   doubled alpha. The unit test `hair_is_safe_in_the_depth_and_normal_prepasses` keeps both.
+
+Hair edges. The hair maps hold white (or any) colour in their fully transparent texels. With the
+mask, bilinear and mip filtering pull it into the visible edge pixels: a white halo along the
+hairline, and the strand-map highlight lit those texels too. `bake_hair_colour` spreads the colour
+of the visible texels (alpha >= 64) into the cut ones (8 texels) and rebuilds the mips weighted by
+alpha; the highlight map is multiplied by the colour map's coverage. A dark hair also needs a dark
+highlight: before it was a fixed strength and black hair turned silver (`PrimarySpecColor`).
 
 Not mapped (no `StandardMaterial` equivalent): the SSS map, `Environment` cube maps per
 material (scene-level: use `stage::environment_light`), detail maps and blend layers (surveyed:

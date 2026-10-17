@@ -155,11 +155,18 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
      chain; the face normal map of the preset replaces the material's.
    * lips: `face/<pfx>_face_mask_new.dds` (Nuian male only) or `<pfx>_face_mask.dds` (all others;
      before only the first was read, so only the Nuian male had tinted lips); the orange part of
-     the mask (red and green set) is the lips.
+     the mask (red and green set) is the lips. Skin-coloured lips are tinted 55% of the mask; the
+     ferre lips are painted grey for the colour to replace and get up to 70%.
    * Eye: the same composited texture (the eye lives in the face atlas), iris recoloured from
-     `left_pupil_color` inside the eyeball UV square: the two eye meshes that share one UV
-     rectangle (the ferre `Eye` sub-material also draws teeth and tongue of the same atlas, whose
-     union box covers the whole strip).
+     `left_pupil_color` (only its grey pixels: the pupil and sclera stay) inside the eyeball UV
+     squares: the two square, equally sized pieces of the `Eye` geometry, either one shared rectangle
+     (elf, nuian: both eyes use the same texels) or one each (ferre: two eyeballs side by side; the
+     sub-material also draws teeth and tongue of the same atlas, whose union box covers the whole
+     strip). `compose_face_eyes` takes the list, `compose_face` keeps its single `Option<EyeTint>`.
+   * face mips are averaged as light (linear), not as sRGB codes, and decals are sampled with their
+     colour weighted by alpha: sRGB averaging darkened every contrasty face texture (tattoos, scars)
+     by up to a quarter in the mips a face uses at game distance, and the colour of a decal's
+     transparent texels bled into its edges.
    * Hair: aa-cry's conversion (`HairColor^1.5 * 2 * Diffuse`, alpha mask on the doubled alpha,
      isotropic highlight masked by the strand pattern; see `docs/aa-cry.md` for why not
      alpha-to-coverage / anisotropy); the colour `.mtl` of the chosen hair colour is the material.
@@ -221,7 +228,10 @@ The examples are the reference usage: `compare` (the calibrated login stage, abo
 `--only N`, `--cam x,y,z --look x,y,z --fov deg`, `--light K`, `--env I`, `--ssao 1`, `--msaa off`,
 `--prepass 1`: the last three check the materials under SSAO / the normal prepass) and `faces` (`--race`,
 `--gender`, `--presets 0,1,2`, `--morph "4=35,25=65;..."`, `--skin`, `--hair`, `--hair-color`,
-`--fov`, `--full 1`). Lighting note: Bevy lights are in lux against its default exposure; the
+`--decals "282:1:1,313:1"`, `--colors "lip=ffbeb1ff,deco=..."`, `--normal 29:0.62`, `--nude 1`,
+`--fov`, `--full 1`; the create-screen looks without the server: the in-game character `Bevylook1`
+is `--race nuian --gender m --skin 1 --decals "282:1:1,313:1,588:1,681:1" --normal 29:0.62`).
+Lighting note: Bevy lights are in lux against its default exposure; the
 showroom uses ~0.5 of "nominal" values, higher washes characters out.
 
 ### Skin calibration (`skin_tune`)
@@ -241,6 +251,15 @@ Hariharan rows are about 0.7 (their skin was too bright), the Nuian / elf female
 The ferre male row was set by hand from the `step2` close-up (`step1` shows him turned about 25
 degrees, so the same pixels are not his face): `(0.30, 0.33, 0.30)` face, `(0.75, 0.52, 0.45)` more
 on the body. The table is between `BEGIN SKIN TUNE` / `END SKIN TUNE` in `character.rs`.
+
+Face against body. The body textures are brighter than the face textures of the same model (mean
+linear luminance of `nude_df` / `face01_df`: Nuian male 1.66, female 1.70, elf male 1.24, female 1.65,
+hariharan male 1.20, female 1.06) and both parts share the tune, so in ambient or back light the
+neck is lighter than the face (in game, `shots/create/ingame2.png`: the sun is behind the
+character). Front lit, as on the login stage, the face measures *brighter* than the neck (0.34 vs
+0.17 linear luminance, `faces --nude 1`), and the captures fix the face tone, so the two are not
+equalised. Face decals do not change the skin outside their shapes (compared with and without in
+`faces`, same pixels).
 
 ### Ferre heads (`FaceMaker::race_gender_weights`)
 

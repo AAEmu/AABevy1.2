@@ -33,7 +33,7 @@ use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::cut::{Hull, cut_hulls, cut_mesh};
 use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
-use crate::face::{EyeTint, FaceLayer, abgr, compose_face};
+use crate::face::{EyeTint, FaceLayer, abgr, compose_face_eyes};
 use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, Rig, SampleOptions};
 use crate::{Error, Result};
@@ -467,15 +467,16 @@ struct FaceLook {
     normal: Option<Handle<Image>>,
 }
 
-/// UV bounding box `[u0, v0, u1, v1]` of the eyeballs: the geometry drawn with the `Eye` shader.
+/// UV rectangles `[u0, v0, u1, v1]` of the eyeballs: the geometry drawn with the `Eye` shader.
 ///
 /// The ferre `Eye` sub-material also draws teeth and tongue of the same atlas, so the union box
-/// spans the whole strip. The eyeballs are the two separate meshes of the shader that share one UV
-/// rectangle (both eyes use the same texels); if there is no such pair the union box is used.
-fn eye_uv_box(loaded: &LoadedModel, mtl: &CryMaterial) -> Option<[f32; 4]> {
+/// spans the whole strip. The eyeballs are the two separate meshes of the shader that are square
+/// and of the same size: both eyes use one rectangle (elf, nuian: returned once) or one each
+/// (ferre). If there is no such pair the union box is used.
+fn eye_uv_boxes(loaded: &LoadedModel, mtl: &CryMaterial) -> Vec<[f32; 4]> {
     let union = |a: [f32; 4], b: [f32; 4]| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
     let mut all: Option<[f32; 4]> = None;
-    // (uv box) of every connected piece of eye geometry
+    // uv box of every connected piece of eye geometry
     let mut pieces: Vec<[f32; 4]> = Vec::new();
     for mesh in &loaded.model.meshes {
         // union-find over vertices touched by eye triangles
@@ -520,16 +521,24 @@ fn eye_uv_box(loaded: &LoadedModel, mtl: &CryMaterial) -> Option<[f32; 4]> {
         let uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
         if uni > 0.0 { inter / uni } else { 0.0 }
     };
-    let mut best: Option<(f32, [f32; 4])> = None;
-    for (i, a) in pieces.iter().enumerate() {
-        for b in &pieces[i + 1..] {
-            let score = iou(*a, *b);
-            if score > 0.7 && best.is_none_or(|(s, _)| score > s) {
-                best = Some((score, union(*a, *b)));
+    let size = |a: [f32; 4]| (a[2] - a[0], a[3] - a[1]);
+    // the largest pair of square pieces of one size
+    let mut best: Option<(f32, [f32; 4], [f32; 4])> = None;
+    for (i, &a) in pieces.iter().enumerate() {
+        for &b in &pieces[i + 1..] {
+            let ((aw, ah), (bw, bh)) = (size(a), size(b));
+            let similar = (aw - bw).abs() <= 0.1 * aw.max(bw) && (ah - bh).abs() <= 0.1 * ah.max(bh);
+            let square = ah > 0.0 && (0.8..=1.25).contains(&(aw / ah));
+            if similar && square && best.is_none_or(|(s, ..)| aw * ah > s) {
+                best = Some((aw * ah, a, b));
             }
         }
     }
-    best.map(|(_, b)| b).or(all)
+    match best {
+        Some((_, a, b)) if iou(a, b) > 0.7 => vec![union(a, b)],
+        Some((_, a, b)) => vec![a, b],
+        None => all.into_iter().collect(),
+    }
 }
 
 /// Does the sub-material's diffuse texture match `path` (lower-case pak path)?
@@ -554,12 +563,15 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
     if let Some((path, _)) = &assets.face_normal {
         look.normal = cry.texture(path, false);
     }
-    let eye = assets.pupil_color.and_then(|color| eye_uv_box(loaded, mtl?).map(|uv| EyeTint { uv, color }));
-    if assets.face_layers.is_empty() && assets.face_lips.is_none() && eye.is_none() && base == named {
+    let eyes: Vec<EyeTint> = match (assets.pupil_color, mtl) {
+        (Some(color), Some(mtl)) => eye_uv_boxes(loaded, mtl).into_iter().map(|uv| EyeTint { uv, color }).collect(),
+        _ => Vec::new(),
+    };
+    if assets.face_layers.is_empty() && assets.face_lips.is_none() && eyes.is_empty() && base == named {
         return look;
     }
     let lips = assets.face_lips.as_ref().map(|(p, c)| (p.as_str(), *c));
-    match compose_face(&base, &assets.face_layers, lips, eye) {
+    match compose_face_eyes(&base, &assets.face_layers, lips, &eyes) {
         Ok(img) => look.texture = Some(cry.images.add(img)),
         Err(e) => warn!("aa-anim: face texture {base}: {e}"),
     }
@@ -660,9 +672,13 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     Vec3::from(t)
 }
 
-/// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts):
-/// the face tune is fitted to the face region of the captures; the ferre male's body fur texture is
-/// greyer than his face texture, while the capture is a dark brown all over.
+/// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts).
+///
+/// `skin_tune` is fitted to the face region of the captures. Only the ferre male needs a different
+/// body: his body fur texture is greyer than his face texture while the capture is dark brown all
+/// over, so the body gets a warm, darker tint. (The other bodies are not tinted: their textures
+/// are brighter than the faces', but the faces are lit more frontally and measure brighter in the
+/// captures' lighting.)
 pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
     match (race, gender) {
         (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),

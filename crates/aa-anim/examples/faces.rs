@@ -6,6 +6,10 @@
 //!     [--presets 0,1,2,3,4]      create-screen presets (0..8)
 //!     [--morph 4=30,12=-50;25=-60]   extra face sliders (`Idx=value`); `;` separates one list per face
 //!     [--skin ID] [--hair ITEM] [--hair-color ID]   override preset values for every face
+//!     [--decals "282:1:1,313:1,588:0.8"]   face decals `asset:weight[:scale]` replacing the preset's
+//!     [--nude 1]                 no costume (skin of face vs neck / chest)
+//!     [--normal ID[:WEIGHT]]     face normal map (`face_normal_maps.id`) instead of the preset's
+//!     [--colors "lip=ffbeb1ff,brow=ff3a4f5c,deco=ff483e60,pupil=ff4f39d8"]   `0xAABBGGRR` colours
 //!     [--fov DEG]                vertical field of view (zoom)
 //!     [--full 1]                 full body instead of the head close-up
 //! ```
@@ -79,6 +83,43 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         }
         if let Some(v) = arg("--hair-color").and_then(|v| v.parse().ok()) {
             desc.hair_color = Some(v);
+        }
+        if arg("--nude").is_some() {
+            desc.costume = aa_anim::Costume::None;
+        }
+        if let Some(list) = arg("--decals") {
+            desc.customization.decals = list
+                .split(',')
+                .filter_map(|d| {
+                    let mut it = d.split(':');
+                    let asset_id = it.next()?.trim().parse().ok()?;
+                    let weight = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+                    let scale = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+                    Some(aa_anim::db::Decal { asset_id, weight, scale, ..Default::default() })
+                })
+                .collect();
+        }
+        if let Some(v) = arg("--normal") {
+            let mut it = v.split(':');
+            if let Some(id) = it.next().and_then(|v| v.parse().ok()) {
+                desc.customization.normal_map = id;
+                desc.customization.normal_map_weight = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+            }
+        }
+        for kv in arg("--colors").unwrap_or_default().split(',') {
+            let Some((k, v)) = kv.split_once('=') else { continue };
+            let Ok(v) = u32::from_str_radix(v.trim(), 16) else { continue };
+            let c = &mut desc.customization;
+            match k.trim() {
+                "lip" => c.lip_color = v,
+                "brow" => c.eyebrow_color = v,
+                "deco" => c.deco_color = v,
+                "pupil" => {
+                    c.left_pupil_color = v;
+                    c.right_pupil_color = v;
+                }
+                _ => {}
+            }
         }
         let at = Transform::from_xyz(x0 + i as f32 * spacing, 0.0, 0.0).with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
         if let Err(e) = desc.resolve(&db).and_then(|a| spawn_character(&mut commands, &mut cry, &clips, a, at)) {
