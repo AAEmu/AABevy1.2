@@ -64,8 +64,18 @@ pub struct AtmosphereTuning {
     pub glow: f32,
     /// Multiplier on the sky gradient.
     pub sky_gain: f32,
-    /// Exponent of the horizon -> zenith blend (larger keeps the horizon colour higher up).
+    /// Exponent of the horizon -> zenith blend (larger keeps the horizon colour higher up); used when `sky_tau` is 0.
     pub sky_exp: f32,
+    /// Sky gradient: e-fold height in degrees of elevation of the horizon colour's share (0 = the old exponent blend).
+    pub sky_tau: f32,
+    /// Sky gradient: how much brighter the sky is towards the sun (Rayleigh phase; 0 = even).
+    pub sky_phase: f32,
+    /// Sky colour: 1 = the hue of the zone's sky light (Rayleigh / Mie scattering and wavelengths), 0 = the gradient colours.
+    pub sky_hue: f32,
+    /// Sky colour: weight of the Mie scattering (white haze) against the Rayleigh scattering in the hue.
+    pub sky_mie: f32,
+    /// Sky colour: multiplier of the green of the scattering hue (the real sky is greener than single scattering of 650 nm).
+    pub sky_green: f32,
     /// Radiance of the sun's glow and disc in the sky.
     pub sun_sky: f32,
     /// Sun disc multiplier.
@@ -92,6 +102,9 @@ pub struct AtmosphereTuning {
     pub ambient_sat: f32,
     /// Ambient light: brightness of the environment light's specular reflections relative to its diffuse light.
     pub ambient_spec: f32,
+    /// Ambient light: how much the ground colour gives way to the sky colour with the camera's height (1 = as the zone's data
+    /// says: `Ambient min height` to `Ambient max height`, 0 = never).
+    pub ambient_height: f32,
     /// Ambient light: how much of the sky dome's colour (horizon / zenith, blue grey) replaces `Sky color` (green yellow in the data).
     pub ambient_dome: f32,
     /// Water: multiplier of the volume's fog colour (the lit colour of the water body).
@@ -110,6 +123,11 @@ pub struct AtmosphereTuning {
     pub water_rough: f32,
     /// Sea: multiplier of the zone's ocean fog colour.
     pub sea_body: f32,
+    /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
+    pub sun_az: f32,
+    pub sun_el: f32,
+    /// Experiments: the hour at which the sun is highest (NaN = the fitted [`crate::env::HIGHEST_HOUR`]).
+    pub sun_noon: f32,
 }
 
 impl Default for AtmosphereTuning {
@@ -119,8 +137,13 @@ impl Default for AtmosphereTuning {
             fog_gain: 1.0,
             fog_ext: 0.04,
             glow: 0.05,
-            sky_gain: 2.7,
+            sky_gain: 2.4,
             sky_exp: 1.0,
+            sky_tau: 16.5,
+            sky_phase: 2.0,
+            sky_hue: 1.0,
+            sky_mie: 0.5,
+            sky_green: 1.2,
             sun_sky: 0.6,
             disc: 40.0,
             box_gain: 2.0,
@@ -131,10 +154,11 @@ impl Default for AtmosphereTuning {
             ssao: 0.0,
             cloud_gain: 1.0,
             ambient_env: 1.0,
-            ambient_gain: 0.9,
-            ambient_sat: 0.3,
+            ambient_gain: 1.3,
+            ambient_sat: 0.75,
             ambient_dome: 1.0,
             ambient_spec: 0.2,
+            ambient_height: 1.0,
             water_body: 20.0,
             water_absorb: 6.0,
             water_refl: 0.5,
@@ -143,6 +167,9 @@ impl Default for AtmosphereTuning {
             refraction: 0.012,
             water_rough: 0.06,
             sea_body: 2.5,
+            sun_az: f32::NAN,
+            sun_el: f32::NAN,
+            sun_noon: f32::NAN,
         }
     }
 }
@@ -160,6 +187,11 @@ impl AtmosphereTuning {
                 "glow" => t.glow = v,
                 "sky_gain" => t.sky_gain = v,
                 "sky_exp" => t.sky_exp = v,
+                "sky_tau" => t.sky_tau = v,
+                "sky_phase" => t.sky_phase = v,
+                "sky_hue" => t.sky_hue = v,
+                "sky_mie" => t.sky_mie = v,
+                "sky_green" => t.sky_green = v,
                 "sun_sky" => t.sun_sky = v,
                 "disc" => t.disc = v,
                 "box_gain" => t.box_gain = v,
@@ -174,6 +206,7 @@ impl AtmosphereTuning {
                 "ambient_sat" => t.ambient_sat = v,
                 "ambient_dome" => t.ambient_dome = v,
                 "ambient_spec" => t.ambient_spec = v,
+                "ambient_height" => t.ambient_height = v,
                 "water_body" => t.water_body = v,
                 "water_absorb" => t.water_absorb = v,
                 "water_refl" => t.water_refl = v,
@@ -182,6 +215,9 @@ impl AtmosphereTuning {
                 "refraction" => t.refraction = v,
                 "water_rough" => t.water_rough = v,
                 "sea_body" => t.sea_body = v,
+                "sun_az" => t.sun_az = v,
+                "sun_el" => t.sun_el = v,
+                "sun_noon" => t.sun_noon = v,
                 _ => {}
             }
         }
@@ -393,8 +429,17 @@ pub fn update_environment(
         .and_then(|z| cache.zones.entry((z, layer)).or_insert_with(|| load_tod(&cfg.world, Some(z), layer)).clone())
         .or_else(|| cache.world_default.entry(layer).or_insert_with(|| load_tod(&cfg.world, None, layer)).clone());
     let Some(tod) = tod else { return };
-    let lighting = cache.lighting.unwrap_or_default();
-    let target = tod.sample(clock.hour, lighting);
+    let mut lighting = cache.lighting.unwrap_or_default();
+    if tuning.sun_noon.is_finite() {
+        lighting.highest_hour = tuning.sun_noon;
+    }
+    let mut target = tod.sample(clock.hour, lighting);
+    // the clouds are shaded by the sky colour, which some zones keep green (see `update_ambient`): same hue as the ambient light
+    target.cloud_sky = ambient_hue(&target, &tuning, target.cloud_sky);
+    if tuning.sun_az.is_finite() && tuning.sun_el.is_finite() {
+        let (az, el) = (tuning.sun_az.to_radians(), tuning.sun_el.to_radians());
+        target.sun_dir = Vec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin());
+    }
     // glide between zones / times
     let k = 1.0 - (-time.delta_secs() * 3.0).exp();
     let cur = match (&env.sample, env.zone == zone) {
@@ -453,6 +498,12 @@ pub fn update_environment(
     env.sample = Some(cur);
 }
 
+/// `colour` with the hue of the sky dome mixed in (`ambient_dome`) and desaturated (`ambient_sat`), at the same luminance.
+fn ambient_hue(sample: &EnvSample, tuning: &AtmosphereTuning, colour: Vec3) -> Vec3 {
+    let dome = unit_luminance(sample.horizon * 0.6 + sample.zenith * 0.4);
+    desaturate(lerp3(unit_luminance(colour), dome, tuning.ambient_dome), tuning.ambient_sat) * luminance(colour)
+}
+
 fn desaturate(c: Vec3, s: f32) -> Vec3 {
     let l = luminance(c);
     Vec3::splat(l) + (c - Vec3::splat(l)) * s
@@ -478,21 +529,27 @@ fn update_ambient(
     mut lit: Local<Option<Entity>>,
     mut cubes: Local<Option<AmbientCubes>>,
     focus: Query<Entity, With<WorldFocus>>,
-    cameras: Query<Entity, With<Camera3d>>,
+    cameras: Query<(Entity, &GlobalTransform), With<Camera3d>>,
 ) {
     if !cfg.environment || tuning.ambient_env < 0.5 {
         return;
     }
     let Some(cur) = &env.sample else { return };
     let focus = focus.iter().next();
-    let Some(camera) = cameras.iter().find(|e| Some(*e) == focus).or_else(|| cameras.iter().next()) else { return };
+    let Some((camera, camera_tf)) = cameras.iter().find(|(e, _)| Some(*e) == focus).or_else(|| cameras.iter().next()) else { return };
 
     let dome = unit_luminance(cur.horizon * 0.6 + cur.zenith * 0.4);
     let sky_dir = lerp3(unit_luminance(cur.sky), dome, tuning.ambient_dome);
     let ground_dir = lerp3(unit_luminance(cur.ambient_ground), dome, tuning.ambient_dome * 0.5);
     let scale = cfg.ambient_scale * tuning.ambient_gain;
     let top = desaturate(sky_dir, tuning.ambient_sat) * luminance(cur.sky) * scale;
-    let bottom = desaturate(ground_dir, tuning.ambient_sat) * luminance(cur.ambient_ground) * scale;
+    let ground = desaturate(ground_dir, tuning.ambient_sat) * luminance(cur.ambient_ground) * scale;
+    // the ground colour fades into the sky colour with the height above the ground (`Ambient min / max height`: in the
+    // court yard of the palace, 240 m up, it is the sky colour already)
+    let height = bevy_to_cry(camera_tf.translation()).z;
+    let span = (cur.ambient_heights.y - cur.ambient_heights.x).max(1e-3);
+    let up = ((height - cur.ambient_heights.x) / span).clamp(0.0, 1.0);
+    let bottom = lerp3(ground, top, up * tuning.ambient_height);
     let mid = (top + bottom) * 0.5;
     let now = [top.x, top.y, top.z, mid.x, mid.y, mid.z, bottom.x, bottom.y, bottom.z];
     let peak = now.iter().cloned().fold(1e-3, f32::max);
@@ -624,9 +681,13 @@ fn update_sky(
     let sun_bevy = cry_to_bevy(cur.sun_dir).normalize();
     let sun_up = ((cur.sun_dir.z + 0.04) / 0.1).clamp(0.0, 1.0);
     let sun_col = cur.sun / luminance(cur.sun).max(1e-3);
-    m.params.horizon = (cur.horizon * rs * tuning.sky_gain).extend(tuning.sky_exp);
-    m.params.zenith = (cur.zenith * rs * tuning.sky_gain).extend(0.0);
-    m.params.sun_dir = sun_bevy.extend(sun_up * cur.day.max(0.05));
+    // the hue of the sky light (Rayleigh scattering is blue, Mie scattering white), the brightness of the zone's gradient colours
+    let scatter_hue = unit_luminance((cur.sky_rayleigh + cur.sky_mie * tuning.sky_mie) * Vec3::new(1.0, tuning.sky_green, 1.0));
+    let hue = |c: Vec3| lerp3(unit_luminance(c), scatter_hue, tuning.sky_hue) * luminance(c);
+    m.params.horizon = (hue(cur.horizon) * rs * tuning.sky_gain).extend(tuning.sky_exp);
+    m.params.zenith = (hue(cur.zenith) * rs * tuning.sky_gain).extend(0.0);
+    m.params.shape = Vec4::new(tuning.sky_tau, tuning.sky_phase, 0.0, 0.0);
+    m.params.sun_dir = sun_bevy.extend(sun_up * cur.day);
     m.params.sun_color = (sun_col * rs * tuning.sun_sky).extend(tuning.disc);
     match &sky_box {
         Some(b) => {
