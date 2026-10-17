@@ -25,6 +25,9 @@ pub struct SkyParams {
     pub box_sky: Vec4,
     pub box_sun: Vec4,
     pub box_params: Vec4,
+    /// x: e-fold height of the gradient in degrees of elevation (0 = `horizon.w` as an exponent of the blend), y: how much
+    /// brighter the sky is towards the sun than away from it (Rayleigh phase, 0 = not at all), zw: unused
+    pub shape: Vec4,
 }
 
 impl Default for SkyParams {
@@ -37,6 +40,7 @@ impl Default for SkyParams {
             box_sky: Vec4::ZERO,
             box_sun: Vec4::ZERO,
             box_params: Vec4::new(1.0, 1.0, 0.0, 0.0),
+            shape: Vec4::ZERO,
         }
     }
 }

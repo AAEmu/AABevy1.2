@@ -23,6 +23,8 @@ struct SkyParams {
     box_sun: vec4<f32>,
     // x: alpha saturation, y: cos(angle), z: sin(angle) of the box rotation about the vertical, w: 1 when textures are bound
     box_params: vec4<f32>,
+    // x: e-fold height of the gradient (degrees of elevation, 0: use the exponent in `horizon.w`), y: phase gain
+    shape: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> sky: SkyParams;
@@ -82,10 +84,21 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let d = normalize(in.world_position.xyz - view.world_position);
     let h = d.y;
     let e = clamp(h, 0.0, 1.0);
-    var col = mix(sky.horizon.rgb, sky.zenith.rgb, pow(e, sky.horizon.w));
+    var col: vec3<f32>;
+    let cos_sun = dot(d, sky.sun_dir.xyz);
+    if sky.shape.x > 0.0 {
+        // the sky light falls off with the elevation, and is brighter towards the sun (Rayleigh phase, normalised to the
+        // side of the sky, 100 degrees from the sun)
+        let elevation = degrees(asin(e));
+        col = mix(sky.zenith.rgb, sky.horizon.rgb, exp(-elevation / sky.shape.x));
+        let phase = (1.0 + cos_sun * cos_sun) / 1.03;
+        col = col * (1.0 + sky.shape.y * (phase - 1.0));
+    } else {
+        col = mix(sky.horizon.rgb, sky.zenith.rgb, pow(e, sky.horizon.w));
+    }
 
     // sun: a wide glow, a halo and the disc
-    let mu = max(dot(d, sky.sun_dir.xyz), 0.0);
+    let mu = max(cos_sun, 0.0);
     let glow = pow(mu, 6.0) * 0.12 + pow(mu, 48.0) * 0.35 + pow(mu, 1200.0) * 2.0;
     col = col + sky.sun_color.rgb * glow * sky.sun_dir.w;
     let disc = smoothstep(0.99985, 0.99995, mu);
