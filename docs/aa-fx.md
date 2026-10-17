@@ -19,7 +19,7 @@ commands.spawn((aa_fx::Effect::new("X2_EFFECTS.fire_smoke.torchlight_b"), Transf
   for this effect (collisions, see below).
 * `FxSettings` (resource): `max_particles` (20000, the hard global budget), `max_distance` (160 m activation radius cap),
   `gain` (colour multiplier; a world with pre-exposed HDR colours sets `radiance * exposure`, aa-world does), `light`
-  (0.8, how much of `DiffuseLighting` shows), `emissive`, `size_scale`, `alpha_scale`, `quality` (0..3, `ConfigMin/Max`),
+  (0.8, how much of `DiffuseLighting` shows), `emissive`, `size_scale`, `sprite_half` (1: a sprite's `Size` is a radius), `alpha_scale`, `quality` (0..3, `ConfigMin/Max`),
   `count_over_life`, `soft_distance` (0.6 m, needs `DepthPrepass` on the camera, otherwise particles are not softened),
   `activations_per_frame`, `wind`, `sun` (world direction to the sun, shades opaque mesh particles), `refraction` (distort the
   scene behind refraction materials, default on, `AA_FX_NO_REFRACTION=1` switches it off), `ground` (`Some(Ground(Arc<dyn Fn(Vec3)
@@ -29,7 +29,9 @@ commands.spawn((aa_fx::Effect::new("X2_EFFECTS.fire_smoke.torchlight_b"), Transf
 * `library::Library` / `EffectDef` / `params::EmitterDef`: the parsed data, usable without Bevy
   (`Library::load("x2_effects")`, `lib.get("fire_smoke.torchlight_b")`).
 * Env: `AA_FX_LOG=1` logs the counters every 2 s (`=2` also lists every active emitter with its bounds); `AA_NO_FX=1` leaves
-  the world's placed effects out (aa-world); `AA_FX_COUNT_OLD=1` goes back to `Count` per particle life (see below);
+  the world's placed effects out (aa-world); `AA_FX_COUNT_OLD=1` goes back to `Count` per particle life (see below); `AA_FX_SPRITE=0.5` reads a sprite's `Size` as its full width
+  again (before round 4); `AA_FX_ONLY=a,b` / `AA_FX_SKIP=a,b` run only the effects whose name contains one of the words / all but those
+  (debugging, case insensitive, matched against `lib.group.effect`);
   `AA_CREATE_NO_FX=1` leaves the step 3 mist out, `AA_MIST=alpha,count,r,g,b` overrides its fit (aa-client).
 
 ## How it runs
@@ -59,10 +61,11 @@ SizeX/Y/Z = 1; everything else 0 (`ParticleLifeTime=0` is endless). A continuous
 still runs, `ceil(life / pulse)` emissions at a time (`flow_fog_01`: Count 10, life 1, pulse 0.5, particle life 3.5 s = 20
 per second, 70 alive; reading it as 10 alive made the mist 7 times too thin, see "Step 3 mist"). This is inferred from the
 captures, not read from the engine; `FxSettings::count_over_life = false` (or `AA_FX_COUNT_OLD=1`) restores the old reading.
-A non continuous emitter bursts `Count`; `PulsePeriod` restarts it; `EmitterLifeTime` ends it;
+A continuous emitter emits its first particle at once when it starts (not one period later: a short arrow flight is
+visible from its first frame). A non continuous emitter bursts `Count`; `PulsePeriod` restarts it; `EmitterLifeTime` ends it;
 `Enabled=false` emitters still hand their children to `SpawnIndirection` triggers (`ParentStart`, `ParentDeath`).
-The focus axis is the emitter's cry +Y (up with `FocusGravityDir`); `Acceleration` is in world space; Size is the full width;
-with `OrientToVelocity` or `Stretch` the sprite's long axis follows the velocity (`Stretch` = seconds of travel), otherwise
+The focus axis is the emitter's cry +Y (up with `FocusGravityDir`); `Acceleration` is in world space; a sprite's `Size` is its
+radius (the quad runs from -Size to +Size, see "Round 4"), a mesh's scales the model; with `OrientToVelocity` or `Stretch` the sprite's long axis follows the velocity (`Stretch` = seconds of travel), otherwise
 the quad faces the camera and spins with `RotationRate`.
 
 Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (tiles, first tile, variants, frame animation),
@@ -142,6 +145,41 @@ strips, `--sweep` for moving effects, `--backdrop` for refraction, `--ground` fo
   motion.
 * The camera needs nothing else: `ScreenSpaceTransmission` is added by the plugin.
 
+## Round 4: size convention, first particle, the slash trail
+
+* **Sprite `Size` is a radius.** The Return cast orb (`reference/ingame/combat_return`, around the left hand) is about 0.39 m across
+  in the real client; its emitter has `Size = 0.2`: the quad runs from -Size to +Size (before round 4 this crate drew `Size` as the
+  full width, half of that, nearly invisible). The ratio real / old is 1.95-2.2 over the frames. The other checks agree: torches
+  and campfires look right with it (compared by eye in the effects example), and the Hariharan mist excess needs no change.
+  Mesh particles are unchanged (`Size` 1 is the model's native size). `FxSettings::sprite_half` (default 1,
+  `AA_FX_SPRITE`, `--sprite` in the example) is the one switch. Ribbons (`TailLength`) take their width from the same rule.
+  The earlier rejection ("`Size` as a radius turns the fog_01 haze of the Nuian field into a blanket") only held for the old light
+  gains: a sprite twice as wide covers four times the area, so the mist's light, opacity and count come down instead
+  (refit below). Nothing else in the client scales a sprite: the entity `Scale` (0.334 on the step 3 mist, already applied) is the
+  only factor, and `fx_particles.scale` of the database is 1 on 2229 of its 2253 rows (the others, 2 to 8, are the combat
+  code's, it spawns the skill effects).
+* **Refraction and glow.** `GenMask` bit 4 is refraction; a material that also has bit 0x10 (the glow bit: it draws its own colour)
+  is drawn as a plain sprite (the Return orb's `love_book_skill1`: with the distortion it was a barely visible lens). The real
+  client shows that orb as a bloomed white disc with a purple halo: ours has the halo and the petals but no bloom (a camera
+  effect, not the particle's).
+* **First particle at time 0.** `EmitterState::begun`: the first update of a continuous emitter spawns one particle at once and
+  then goes on with the rate. Test `a_continuous_emitter_emits_its_first_particle_at_once`.
+* **Triple Slash (18132) trail.** The plot's effects with a trail (`skill_coverage`): `X2_EFFECTS.sword_trail_test1`
+  in steps 1 and 2 and `abillity_skill_table_m.fight.3stage_slash_step3_trail` in step 3, both on bone 9 (the weapon).
+  `sword_trail_test1` has, among others, a refraction ribbon `_ref` with
+  `sword_line_ref_skill`, `TailLength 20`, and `sword_trail_test16`, the blue-white one: `Color (0.408, 0.616, 1)`, texture
+  `sword_line_13` with the material `sword_line_critical`, `TailLength 100`, life 0.5 s, alpha 1 only between 7 and 13 % of the
+  life, 0.067 at half of it). They are drawn (the ribbon follows
+  the entity), but faint: the texture is an edge lit line, so the ribbon is a thin pale blue arc (`shots/aa-fx/r3/trail6_sheet.png`); the real client adds its bloom to it, and at the 0.3 s spacing of the
+  capture the real trail is not clearly visible either (only the blade itself glows white-blue, `real_09.png`). What would still help: the ribbon is
+  camera facing (it has the head positions only); the engine's `Facing = Free` ribbon would take its width axis from the
+  bone's orientation. The client must move the effect entity with the weapon bone every frame (`prime: false`).
+* **Debugging.** `AA_FX_ONLY` / `AA_FX_SKIP` (above), `AA_FX_LOG=2`. They showed that the pale green sheets and white blocks of the
+  Memoria screenshot (`shots/gallery/29_memoria.png`) are not particles: the screenshot is identical with `AA_NO_FX=1`, with
+  `AA_FX_SKIP=waterfall` and with `AA_FX_ONLY` of the only geometry waterfall near it (`X2_EFFECTS_K.waterfall.waterfall_sm_new01`,
+  80 m away, its material has Opacity 0.08 and is invisible in the example). The cell's object table
+  (`010_014`) places `game/materials/ocean/water_volume_gw01` (a water volume), which is aa-world's.
+
 ## Coordinates
 
 `aa_fx::c2b` maps a cry vector into Bevy (`(x, y, z) -> (x, z, -y)`). Entities of a cell's `entities.xml` carry `Rotate` as
@@ -171,7 +209,7 @@ Flags: `--effect` (repeatable), `--grid n` (n copies, cycling through the `--eff
 --orbit`, `--gain --light --size-scale --alpha-scale --no-soft --max-particles`, `--scale`, `--fx-yaw`, `--day`, and for skill
 effects (they are one shots that start from nothing): `--loop`, `--no-prime`, `--stagger s` (a film strip of one effect),
 `--sweep r` (the effect moves on a circle: tails, `InheritVelocity`), `--backdrop` (a checker wall: refraction), `--ground`
-(collisions). A single shot of a skill effect needs `--shot-after 4` or more (the models and textures load on tasks).
+(collisions), `--lift m` (the effect's height above the floor, for effects that hang in the air), `--sprite h` (`FxSettings::sprite_half`). A single shot of a skill effect needs `--shot-after 4` or more (the models and textures load on tasks).
 
 Release, 100 torches (600 emitters, ~2350 quads, 1080p): simulation 0.15-0.27 ms, mesh upload 0.10-0.15 ms, management
 0.01-0.13 ms on the main thread (about 0.3-0.5 ms together), ~100 fps on the dev box with everything else idle.
@@ -196,7 +234,8 @@ shots, against a run without the mist, `AA_CREATE_NO_FX=1`):
 * Particle colour in gamma space: would make it darker (not the reason). Entity `Scale`, `CountScale`, `bPrime`: 0.334..0.646,
   1, primed. Soft particles: off in the stage (no depth prepass), they could only thin the mist. Unscaled effects (scale 1):
   1.5-3x more mist but also wrong sizes and speeds. `Size` as a radius (sprites twice as wide): the fog_01 haze of the Nuian
-  field becomes a blanket, no.
+  field becomes a blanket at the old light gains (the fit of round 2 and 3); round 4 uses the radius (the Return orb needs it) and
+  fits the light, opacity and count again (table below).
 * Switching on the `bActive=0` mist and haze effects of the cell: the near `flow_fog_01` of the Hariharan field washes the near
   grass (the capture has none there), `fog_01` makes the Elf and Hariharan scenes hazy over their whole width. No.
 * Count: reading `Count` with `EmitterLifeTime` / `PulsePeriod` as above (x7 for the flowing mist, no change for `fog_01`
@@ -211,17 +250,24 @@ Final values (`mist()` in `scenery.rs`, flowing mist opacity x, count x, light R
 
 | race | alpha | count | light (r, g, b) | peak colour ours / capture | band excess ours / capture |
 |---|---|---|---|---|---|
-| Nuian | 1.0 | 1 | 3.0, 3.15, 1.9 | 0.97, 1.00, 1.00 | n/a (see below) |
-| Elf | 3.0 | 1 | 6.0, 6.0, 3.4 | 0.70, 0.72, 0.91 (tile pick hits grass) | n/a, looks alike |
-| Hariharan | 3.0 | 3 | 4.0, 3.6, 2.35 | 1.05, 1.07, 1.07 | 0.77, 0.75, 0.82 |
-| Ferre | 1.3 | 1 | 7.6, 6.6, 4.1 | 0.97, 0.97, 0.93 | 1.32, 1.07, 0.86 |
+| Nuian | 1.0 | 1 | 2.6, 2.7, 1.55 | 1.00, 1.02, 1.07 | n/a (see below) |
+| Elf | 1.0 | 0.5 | 5.5, 5.4, 2.7 | 0.91, 0.91, 1.02 | n/a (see below) |
+| Hariharan | 3.0 | 3 | 3.35, 3.0, 1.95 | 1.02, 1.04, 1.04 | 0.86, 0.85, 0.91 (ours 48, 51, 50 against 56, 60, 55) |
+| Ferre | 1.0 | 0.6 | 7.9, 6.8, 4.6 | 0.94, 0.95, 0.91 | 1.52, 1.32, 1.02 (ours 38, 37, 52 against 25, 28, 51) |
+
+(Round 4, with `Size` as a radius; the round 2 and 3 values, sprites as full width, were Nuian 1.0 / 1 / 3.0, 3.15, 1.9, Elf 3.0 / 1
+/ 6.0, 6.0, 3.4, Hariharan 3.0 / 3 / 4.0, 3.6, 2.35, Ferre 1.3 / 1 / 7.6, 6.6, 4.1. A sprite twice as wide covers four times the
+area: the light comes down 13-20 % (Nuian, Hariharan), the Elf opacity and count down to 1 / 0.5, the Ferre ones to 1 / 0.6.
+The peak pick has a noise of about 4 % between runs: a second Elf / Ferre set with other count and light products came out
+the same within that. The grass under the Elf band still gets +18..+22 of mist where the capture has +5..+9: the Elf haze
+and the flowing mist cannot be told apart by one gain, and lowering it takes the peak with it; kept.)
 
 Peak colour: the mean of the 12 brightest, least saturated, least varying 24 x 14 px tiles of the mist band (the same pick on
 both images). Band excess: the mist's added light in the band (ours: with minus without the mist; the capture: the band minus
 the clear control scaled by our grass's band/control ratio), in 0..255 steps; 5 % is out of reach, between two runs the same
 setting moves the excess by 10-20 % (random particles). Nuian and Elf have no usable excess: the capture's grass is much brighter
 than ours, so its band minus control comes out negative, and in Nuian our `fog_01` haze also covers the control region. The near
-grass under the band gets +5..+9 of mist in Nuian, Elf and Ferre, 0 in Hariharan.
+grass under the band gets +6..+9 of mist in Nuian, +1..+8 in Ferre, +18..+22 in Elf (round 4), and none in Hariharan.
 
 Known gaps: `elf_fog_01` (placed in the Elf and Ferre fields) does not exist in any library of the pak, so that mist is missing (the
 Elf capture shows more mist than the two flowing sources make, so it may have existed); the brightness of lit particles is not tied

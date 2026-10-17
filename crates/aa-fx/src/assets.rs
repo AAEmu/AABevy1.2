@@ -292,6 +292,11 @@ impl FxAssets {
             .or_insert_with(|| {
                 let m = aa_cry::material::Material::load(mtl).ok()?;
                 let sub = std::iter::once(&m).chain(m.sub_materials.iter()).find(|m| m.public_param("RefrBumpScale").is_some())?;
+                // `GenMask` bit 4 is refraction. A material that has the glow bit (0x10) as well, like the Return orb's, also draws its own
+                // colour: the real client shows it bright, so it is drawn as a plain sprite here (no distortion)
+                if sub.gen_mask & 0x10 != 0 {
+                    return None;
+                }
                 let bump = sub.public_param("RefrBumpScale")?.trim().parse().unwrap_or(0.1);
                 let normal = sub.texture(&aa_cry::material::TextureMap::Normal).map(|t| t.pak_path()).unwrap_or_default();
                 Some(Refraction { normal, bump })

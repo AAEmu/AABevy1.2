@@ -64,6 +64,10 @@ pub struct FxSettings {
     pub emissive: f32,
     /// Multiplier on every particle size.
     pub size_scale: f32,
+    /// Half the width of a sprite in units of its `Size`: CryEngine's `Size` is a radius (the quad runs from -Size to +Size), so 1.
+    /// 0.5 would read it as the full width (what this crate did before round 4). Meshes are not affected (`Size` scales the model).
+    /// `AA_FX_SPRITE=0.5` goes back.
+    pub sprite_half: f32,
     /// Multiplier on every particle's opacity (1 = as authored).
     pub alpha_scale: f32,
     /// A continuous emitter with a finite `EmitterLifeTime` emits `Count` over that life (otherwise `Count` per particle life).
@@ -107,6 +111,7 @@ impl Default for FxSettings {
             light: 0.8,
             emissive: 1.0,
             size_scale: 1.0,
+            sprite_half: std::env::var("AA_FX_SPRITE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
             alpha_scale: 1.0,
             count_over_life: std::env::var_os("AA_FX_COUNT_OLD").is_none(),
             quality: 2,
@@ -320,8 +325,23 @@ fn camera_view(cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>, mut 
         .map(|(_, gt)| View { pos: gt.translation(), right: gt.right().into(), up: gt.up().into(), forward: gt.forward().into() });
 }
 
+/// `AA_FX_ONLY=a,b` / `AA_FX_SKIP=a,b` (debugging): only effects whose name contains one of the words run / the ones that contain
+/// one of the words do not.
+fn debug_filter(name: &str) -> bool {
+    static FILTER: std::sync::OnceLock<(Vec<String>, Vec<String>)> = std::sync::OnceLock::new();
+    let (only, skip) = FILTER.get_or_init(|| {
+        let words = |var: &str| std::env::var(var).map(|v| v.split(',').map(|w| w.trim().to_ascii_lowercase()).filter(|w| !w.is_empty()).collect()).unwrap_or_default();
+        (words("AA_FX_ONLY"), words("AA_FX_SKIP"))
+    });
+    let name = name.to_ascii_lowercase();
+    (only.is_empty() || only.iter().any(|w| name.contains(w))) && !skip.iter().any(|w| name.contains(w))
+}
+
 fn register(mut libs: ResMut<FxLibraries>, mut pending: ResMut<FxPending>, new: Query<(Entity, &Effect), Added<Effect>>) {
     for (e, effect) in &new {
+        if !debug_filter(&effect.name) {
+            continue;
+        }
         match split_name(&effect.name) {
             Some((lib, _)) => {
                 libs.request(lib);
@@ -665,6 +685,7 @@ fn simulate(
             count_scale: effect.count_scale,
             lod: 1.0 - 0.6 * far,
             size_scale: settings.size_scale,
+            sprite_half: settings.sprite_half,
             count_over_life: settings.count_over_life,
             tint: effect.tint,
             sun: settings.sun,
