@@ -1,5 +1,6 @@
 //! Weapons and shields worn on the body (relaxed stance): hung on the attachment bones of the
-//! base skeleton, like the bow slung across the back in the real client's spawn view. While the
+//! base skeleton, like the bow slung across the back in the real client's spawn view (the shield is not shown at peace: it
+//! comes onto the arm with the sword). While the
 //! character fights ([`Drawn`], set by the combat code) the weapon it fights with moves to its hand: the bow for the bow
 //! clips, the sword (both swords for the dual wield clips, the two handed sword for the `twohand_` ones) for the weapon clips,
 //! the instrument for a song. [`Wield`] says which class of weapon the character holds, which the combat code needs to pick the
@@ -40,7 +41,8 @@ pub enum Grip {
     /// A lute, drum or pipe: in the hands for a song (out of sight otherwise). The value is the kind: 0 string, 1 percussion,
     /// 2 tube (the order of the `*_instrument_*_anim_id` columns).
     Instrument(usize),
-    /// A shield stays on the arm.
+    /// A shield: on the arm while a one handed weapon is out, out of sight otherwise (the real client shows none on a character at
+    /// peace, nor with a bow or an instrument in the hands).
     Shield,
 }
 
@@ -194,11 +196,22 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
             let Ok(loaded) = cry.load_model(&item.path, &options) else { continue };
             let model = spawn_loaded(&mut commands, &item.path, &loaded, &options);
             commands.entity(model).insert((item.transform, ChildOf(bone)));
-            // an instrument is only there while it is played
-            if matches!(item.grip, Grip::Instrument(_)) {
+            // an instrument is only there while it is played, a shield while the sword is out
+            if matches!(item.grip, Grip::Instrument(_) | Grip::Shield) {
                 commands.entity(model).insert(Visibility::Hidden);
             }
-            if let Some(hand) = item.hand_bone.and_then(bone_of) {
+            if item.grip == Grip::Shield {
+                commands.entity(model).insert(HeldWeapon {
+                    owner: entity,
+                    grip: item.grip,
+                    offhand: false,
+                    sheath: bone,
+                    hand: None,
+                    sheath_transform: item.transform,
+                    hand_transform: item.transform,
+                    in_hand: false,
+                });
+            } else if let Some(hand) = item.hand_bone.and_then(bone_of) {
                 commands.entity(model).insert(HeldWeapon {
                     owner: entity,
                     grip: item.grip,
@@ -221,7 +234,7 @@ pub fn hold_weapons(time: Res<Time>, mut commands: Commands, owners: Query<&Draw
     for (entity, mut weapon) in &mut weapons {
         let drawn = owners.get(weapon.owner).ok().filter(|d| now < d.until).map(|d| d.out);
         let want = match (weapon.grip, drawn) {
-            (Grip::Bow, Some(Out::Bow)) | (Grip::Instrument(_), Some(Out::Instrument)) => true,
+            (Grip::Bow, Some(Out::Bow)) | (Grip::Instrument(_), Some(Out::Instrument)) | (Grip::Shield, Some(Out::Blade { .. })) => true,
             // the second sword only comes out for the dual wield clips
             (Grip::Blade, Some(Out::Blade { dual })) => dual || !weapon.offhand,
             _ => false,
@@ -235,7 +248,7 @@ pub fn hold_weapons(time: Res<Time>, mut commands: Commands, owners: Query<&Draw
             _ => (weapon.sheath, weapon.sheath_transform),
         };
         commands.entity(entity).insert((transform, ChildOf(bone)));
-        if matches!(weapon.grip, Grip::Instrument(_)) {
+        if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) {
             commands.entity(entity).insert(if want { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
