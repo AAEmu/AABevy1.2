@@ -38,6 +38,9 @@ pub struct SlotSnap {
     pub grade: u8,
     /// Skills: when the cooldown ends (HUD clock, ms) and how long it is.
     pub cooldown: Option<(u64, u32)>,
+    /// Items: description and level requirement (tooltips).
+    pub desc: String,
+    pub level: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -88,6 +91,9 @@ pub struct Panels {
     pub actions_known: bool,
     pub bag: Vec<Option<SlotSnap>>,
     pub bag_slots: u32,
+    /// Worn items by aa-net slot index (`model::slot`, the scripts' `ES_*` minus one); body parts
+    /// are not items to the window.
+    pub equipment: Vec<Option<SlotSnap>>,
     pub buffs: BuffLists,
     pub target: Option<TargetSnap>,
 }
@@ -108,6 +114,8 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
         stack: info.is_some_and(|i| i.max_stack > 1),
         grade: if grade > 0 { grade } else { info.map_or(0, |i| i.fixed_grade.clamp(0, 12) as u8) },
         cooldown: None,
+        desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
+        level: info.map_or(0, |i| i.level),
     }
 }
 
@@ -128,6 +136,8 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
         stack: false,
         grade: 0,
         cooldown,
+        desc: String::new(),
+        level: 0,
     }
 }
 
@@ -205,6 +215,13 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     if let Some(inv) = inventory {
         p.bag_slots = inv.bag_slots;
         p.bag = inv.bag.iter().map(|it| it.as_ref().map(|it| item_slot(game, it.template_id, i64::from(it.count), it.grade))).collect();
+        p.equipment = inv
+            .equipment
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(i, it)| it.as_ref().filter(|_| !aa_net::model::slot::is_body_part(i)).map(|it| item_slot(game, it.template_id, 1, it.grade)))
+            .collect();
     }
     if let Some(buffs) = world.get_resource::<Buffs>() {
         p.buffs = buff_lists(game, buffs.of(own_obj_id), start);
@@ -258,6 +275,8 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("count", s.count)?;
     t.raw_set("stack", s.stack)?;
     t.raw_set("grade", i64::from(s.grade))?;
+    t.raw_set("desc", s.desc.as_str())?;
+    t.raw_set("level", s.level)?;
     if let Some((end, total)) = s.cooldown {
         t.raw_set("cd_end", end as f64)?;
         t.raw_set("cd_total", i64::from(total))?;
@@ -310,6 +329,10 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
         c.slots = true;
         c.bag = true;
     }
+    if old.is_none_or(|o| o.equipment != new.equipment) {
+        hud.raw_set("equipment", slots_table(lua, &new.equipment)?)?;
+        c.equipment = true;
+    }
     if old.is_none_or(|o| o.buffs != new.buffs) {
         hud.raw_set("buffs", buffs_table(lua, &new.buffs)?)?;
         c.buffs = true;
@@ -350,6 +373,7 @@ pub struct Changed {
     /// Action bar or bag: the slot widgets should ask again.
     pub slots: bool,
     pub bag: bool,
+    pub equipment: bool,
     pub buffs: bool,
     pub target: bool,
 }

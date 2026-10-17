@@ -123,6 +123,8 @@ pub fn leave(how: i64, net: &mut MessageWriter<NetCommand>) {
 pub struct ScriptedSession {
     disconnect: Option<f32>,
     clicks: Vec<(f32, Vec2)>,
+    /// `--hud-open ACTION T`: a key binding action (`toggle_character`, `toggle_bag`, ...) at T seconds.
+    opens: Vec<(f32, String)>,
     started: Option<f32>,
     release: bool,
 }
@@ -135,6 +137,11 @@ impl ScriptedSession {
         for (i, a) in args.iter().enumerate() {
             match a.as_str() {
                 "--hud-disconnect" => s.disconnect = num(i + 1),
+                "--hud-open" => {
+                    if let (Some(action), Some(t)) = (args.get(i + 1), num(i + 2)) {
+                        s.opens.push((t, action.clone()));
+                    }
+                }
                 "--hud-click" => {
                     if let (Some(x), Some(y), Some(t)) = (num(i + 1), num(i + 2), num(i + 3)) {
                         s.clicks.push((t, Vec2::new(x, y)));
@@ -144,6 +151,7 @@ impl ScriptedSession {
             }
         }
         s.clicks.sort_by(|a, b| b.0.total_cmp(&a.0)); // pop from the end
+        s.opens.sort_by(|a, b| b.0.total_cmp(&a.0));
         s
     }
 }
@@ -167,6 +175,12 @@ pub fn scripted_session(
         script.disconnect = None;
         bridge.0.borrow_mut().disconnected = true;
         rt.fire_event("DISCONNECTED_BY_WORLD", ("Disconnected", "The connection to the server was lost."));
+    }
+    while script.opens.last().is_some_and(|o| t >= o.0) {
+        let (_, action) = script.opens.pop().unwrap();
+        if let Err(e) = rt.hotkey(&action) {
+            warn!("hud: --hud-open {action}: {e}");
+        }
     }
     if script.clicks.last().is_some_and(|c| t >= c.0) {
         let (_, at) = script.clicks.pop().unwrap();

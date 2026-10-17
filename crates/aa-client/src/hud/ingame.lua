@@ -223,22 +223,111 @@ AAUI.ItemContent = function(itemType, grade)
   return { type = "item", id = itemType, icon = icon, grade = grade or fixedGrade }
 end
 
+-- Items for the bag and character windows -----------------------------------------------------------------
+-- The windows read item data through X2Bag / X2Equipment / X2Item rather than the slot hooks. Real when the
+-- server has sent the bag (HUD.bag_slots > 0), the fake of fake_bag.lua / fake_character.lua until then.
+local GRADE_NAMES = { [0] = "poor", "common", "uncommon", "rare", "ancient", "heroic", "unique", "artifact",
+                      "wonder", "epic", "legendary", "mythic" }
+local function gradeFrame(grade)
+  local name = GRADE_NAMES[grade]
+  if name == nil then return nil end
+  return string.format("ui/icon/item_grade_%d%s.dds", grade, name)
+end
+local function realInfo(s)
+  return {
+    itemType = s.id, lookType = s.id, itemGrade = s.grade, name = s.name, description = s.desc, stack = s.count,
+    level_requirement = s.level, price = 0, refund = 0, sellable = false,
+  }
+end
+local function bagKnown() return HUD.bag_slots ~= 0 end
 local function bagCount()
   local n = 0
   for _ in pairs(HUD.bag) do n = n + 1 end
   return n
 end
-local fakeCapacity, fakeEmpty, fakeCount = X2Bag.Capacity, X2Bag.CountEmptyBagSlots, X2Bag.CountItems
-X2Bag.Capacity = function(self) if HUD.bag_slots == 0 then return fakeCapacity(self) end return HUD.bag_slots end
-X2Bag.CountItems = function(self) if HUD.bag_slots == 0 then return fakeCount(self) end return bagCount() end
+local fake = {}
+for _, name in ipairs({ "Capacity", "CountEmptyBagSlots", "CountItems", "IsInvalidSlot", "SlotByIdx", "GetBagItemInfo",
+                        "ItemIdentifier", "ItemStack", "GetBagNumSlots", "Slots", "CurrentTabIdx" }) do
+  fake[name] = X2Bag[name]
+end
+X2Bag.Capacity = function(self) if not bagKnown() then return fake.Capacity(self) end return HUD.bag_slots end
+X2Bag.GetBagNumSlots = function(self, id) if not bagKnown() then return fake.GetBagNumSlots(self, id) end return HUD.bag_slots end
+X2Bag.Slots = function(self) if not bagKnown() then return fake.Slots(self) end return HUD.bag_slots end
+X2Bag.CountItems = function(self) if not bagKnown() then return fake.CountItems(self) end return bagCount() end
 X2Bag.CountEmptyBagSlots = function(self)
-  if HUD.bag_slots == 0 then return fakeEmpty(self) end
+  if not bagKnown() then return fake.CountEmptyBagSlots(self) end
   return HUD.bag_slots - bagCount()
 end
-X2Bag.IsInvalidSlot = function(self, virtualSlotIdx)
-  local n = HUD.bag_slots
-  if n == 0 then n = fakeCapacity(self) end
-  return virtualSlotIdx < 1 or virtualSlotIdx > n
+X2Bag.IsInvalidSlot = function(self, v)
+  if not bagKnown() then return fake.IsInvalidSlot(self, v) end
+  return v < 1 or v > HUD.bag_slots
+end
+-- the All tab: the slot as it is; the other tabs are not sorted by group yet
+X2Bag.SlotByIdx = function(self, v)
+  if not bagKnown() then return fake.SlotByIdx(self, v) end
+  if fake.CurrentTabIdx(self) == 1 and HUD.bag[v] ~= nil then return v end
+  return nil
+end
+X2Bag.GetBagItemInfo = function(self, bagId, slot, needInfo)
+  if not bagKnown() then return fake.GetBagItemInfo(self, bagId, slot, needInfo) end
+  local s = HUD.bag[slot]
+  if s == nil then return nil end
+  return realInfo(s)
+end
+X2Bag.ItemIdentifier = function(self, slot)
+  if not bagKnown() then return fake.ItemIdentifier(self, slot) end
+  local s = HUD.bag[slot]
+  if s == nil then return 0, 0 end
+  return s.id, s.grade
+end
+X2Bag.ItemStack = function(self, slot)
+  if not bagKnown() then return fake.ItemStack(self, slot) end
+  local s = HUD.bag[slot]
+  return s and s.count or 0
+end
+
+local fakeIconSet, fakeStackable, fakeLevel = X2Item.GetItemIconSet, X2Item.IsStackable, X2Item.GetLevelRequirement
+X2Item.GetItemIconSet = function(self, itemType, grade)
+  local name, icon, maxStack, fixedGrade = HUD.item_info(itemType)
+  if icon == nil or icon == "" then return fakeIconSet(self, itemType, grade) end
+  return { itemIcon = icon, frameIcon = gradeFrame(grade or fixedGrade) }
+end
+X2Item.IsStackable = function(self, itemType)
+  local name, icon, maxStack = HUD.item_info(itemType)
+  if maxStack == nil then return fakeStackable(self, itemType) end
+  return maxStack > 1
+end
+X2Item.GetLevelRequirement = function(self, itemType)
+  local name, icon, maxStack, fixedGrade, level = HUD.item_info(itemType)
+  if level == nil then return fakeLevel(self, itemType) end
+  return level
+end
+
+-- Worn items: HUD.equipment[ES_*].
+local fakeEquipText, fakeEquipInfo, fakeEquipId = X2Equipment.GetEquippedItemTooltipText, X2Equipment.GetEquippedItemTooltipInfo,
+  X2Equipment.ItemIdentifier
+local function equippedInfo(slot)
+  local s = HUD.equipment[slot]
+  if s == nil then return { itemType = 0, lookType = 0, itemGrade = 0 } end
+  local info = realInfo(s)
+  info.durability = 100
+  info.maxDurability = 100
+  info.equip = true
+  return info
+end
+X2Equipment.GetEquippedItemTooltipText = function(self, unit, slot)
+  if not bagKnown() then return fakeEquipText(self, unit, slot) end
+  return equippedInfo(slot)
+end
+X2Equipment.GetEquippedItemTooltipInfo = function(self, slot, flags)
+  if not bagKnown() then return fakeEquipInfo(self, slot, flags) end
+  return equippedInfo(slot)
+end
+X2Equipment.ItemIdentifier = function(self, slot)
+  if not bagKnown() then return fakeEquipId(self, slot) end
+  local s = HUD.equipment[slot]
+  if s == nil then return 0, 0 end
+  return s.id, s.grade
 end
 
 -- Leaving ------------------------------------------------------------------------------------------------

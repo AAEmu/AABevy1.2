@@ -28,6 +28,8 @@ pub struct ItemInfo {
     pub fixed_grade: i64,
     /// `items.use_skill_id`: the skill using the item casts (0 = not usable).
     pub use_skill: u32,
+    /// `items.description`.
+    pub desc: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -227,7 +229,7 @@ impl GameData {
             let mut q = conn.prepare(
                 "SELECT tbl_name, idx, en_us, tbl_column_name FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
                  (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones') AND tbl_column_name = 'name') OR \
-                 (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR \
+                 (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR                  (tbl_name = 'items' AND tbl_column_name = 'description') OR \
                  (tbl_name = 'zone_groups' AND tbl_column_name = 'display_text'))",
             )?;
             let mut rows = q.query([])?;
@@ -237,6 +239,7 @@ impl GameData {
                 let column: String = r.get(3)?;
                 let table = match table.as_str() {
                     "buffs" if column == "desc" => "buffs_desc",
+                    "items" if column == "description" => "items_desc",
                     "skills" => "skills",
                     "items" => "items",
                     "buffs" => "buffs",
@@ -287,6 +290,7 @@ impl GameData {
                         level: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                         fixed_grade: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                         use_skill: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
+                        desc: name("items_desc", id, None),
                     },
                 );
             }

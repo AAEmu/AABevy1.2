@@ -34,11 +34,13 @@ const BAR_W: f32 = 69.0;
 const BAR_H: f32 = 6.0;
 /// Metres between the head and the bar.
 const HEAD_GAP: f32 = 0.3;
+/// A character's height for the plate, metres: the plate sits over the head, not over the bow.
+const CHARACTER_HEIGHT: f32 = 1.85;
 /// Name sizes: NPCs, other characters (the client draws player names much larger).
 const NPC_FONT_PX: f32 = 11.0;
 const PLAYER_FONT_PX: f32 = 26.0;
-/// Show the player's own plate (off in the client's default settings, as in the capture).
-const SHOW_OWN: bool = false;
+/// Show the player's own plate (the capture has it: "Refone" over the character).
+const SHOW_OWN: bool = true;
 /// The font the client draws English UI text with.
 const FONT_PATH: &str = "ui/font/flareserif_821_roman.ttf";
 
@@ -136,10 +138,7 @@ fn srgb(c: (u8, u8, u8)) -> Color {
 }
 
 /// Bar and name colours by how the unit stands to the player.
-fn colors(relation: &str, own: bool) -> ((u8, u8, u8), (u8, u8, u8)) {
-    if own {
-        return ((255, 255, 255), (255, 255, 255));
-    }
+fn colors(relation: &str) -> ((u8, u8, u8), (u8, u8, u8)) {
     match relation {
         "hostile" => ((160, 32, 26), (230, 70, 50)),
         "friendly" => ((70, 126, 31), (115, 210, 51)),
@@ -244,7 +243,8 @@ pub fn update_plates(
         // name, bar, colours
         let is_character = own_plate || w.unit.is_some_and(|u| matches!(u.kind, UnitKind::Character { .. }));
         let (name, fraction, bar, relation, scale, net_pos) = if own_plate {
-            (spawn.name().to_string(), 1.0, false, "friendly", 1.0, None)
+            let snap = &data.snapshot;
+            (spawn.name().to_string(), (snap.hp as f32 / snap.max_hp.max(1) as f32).clamp(0.0, 1.0), true, "friendly", 1.0, None)
         } else {
             let u = w.unit.unwrap();
             let template = u.kind.template_id();
@@ -283,16 +283,23 @@ pub fn update_plates(
             },
         };
         // how tall it is
+        // measured from the meshes' bounds, which arrive part by part while the model loads: keep the
+        // tallest result of the first few seconds
         let height = {
+            let frame = state.scan_in;
             let entry = state.heights.entry(w.id).or_insert((0.0, 0));
-            if entry.0 <= 0.0 && entry.1 < 60 {
+            if entry.1 < 40 && (entry.0 <= 0.0 || frame % 10 == 0) {
                 entry.1 += 1;
                 if let Some(h) = entity.and_then(|e| measure(e, &children, &bounds, root_pos.y)) {
-                    entry.0 = h;
-                    debug!("hud: plate height of unit {} ({}): {:.2} m (scale {:.2})", w.id, name, h, scale);
+                    if h > entry.0 {
+                        entry.0 = h;
+                        debug!("hud: plate height of unit {} ({}): {:.2} m (scale {:.2})", w.id, name, h, scale);
+                    }
                 }
             }
-            if entry.0 > 0.0 { entry.0 } else { 1.8 * scale.max(0.3) }
+            let height = if entry.0 > 0.0 { entry.0 } else { 1.8 * scale.max(0.3) };
+            // a character's bounds take in the bow and the hair: the client puts the plate over the head
+            if is_character { height.min(CHARACTER_HEIGHT * scale.max(0.3)) } else { height }
         };
         let Ok(screen) = camera.world_to_viewport(&camera_global, root_pos + Vec3::Y * (height + HEAD_GAP)) else { continue };
         if screen.x < -100.0 || screen.y < -50.0 || screen.x > viewport.x + 100.0 || screen.y > viewport.y + 50.0 {
@@ -301,7 +308,7 @@ pub fn update_plates(
         // to the plate camera's space: origin in the middle, y up; whole pixels keep the bar crisp
         let x = (screen.x - viewport.x / 2.0).round();
         let y = (viewport.y / 2.0 - screen.y).round();
-        let (bar_color, text_color) = colors(relation, own_plate);
+        let (bar_color, text_color) = colors(relation);
         seen.push(w.id);
 
         // a plate whose entities went away with the last game
