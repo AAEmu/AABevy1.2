@@ -14,6 +14,7 @@
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
 pub mod buff;
+pub mod bank;
 pub mod game;
 pub mod interaction;
 pub mod items;
@@ -25,6 +26,7 @@ pub mod party;
 pub mod quest;
 pub mod session;
 pub mod skill;
+pub mod shop;
 pub mod state;
 pub mod stream;
 pub mod unit_msg;

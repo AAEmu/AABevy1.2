@@ -73,6 +73,11 @@ impl Inventory {
         self.bag.iter().enumerate().filter_map(|(i, it)| it.as_ref().map(|it| (i, it)))
     }
 
+    /// The bank's items with zero-based slot indices, loaded at login like the bag.
+    pub fn bank_items(&self) -> impl Iterator<Item = (usize, &Item)> {
+        self.bank.iter().enumerate().filter_map(|(i, it)| it.as_ref().map(|it| (i, it)))
+    }
+
     /// Total count of a template in the bag (the number shown on a potion slot).
     pub fn count_of(&self, template_id: u32) -> i64 {
         self.bag_items()
@@ -311,6 +316,10 @@ impl Inventory {
     /// The first empty slot of the bag.
     pub fn first_free_bag_slot(&self) -> Option<usize> {
         self.bag.iter().position(Option::is_none)
+    }
+
+    pub fn first_free_bank_slot(&self) -> Option<usize> {
+        self.bank.iter().position(Option::is_none)
     }
 
     /// The `CSSwapItems` block that moves what is in `from` onto `to` (and what is there back): bag to bag, bag to bank,

@@ -181,7 +181,7 @@ impl InvenChunk {
         let start_chunk = r.u8()?;
         let mut items = Vec::new();
         let mut truncated = false;
-        while !r.is_empty() {
+        while items.len() < usize::from(chunks) * Self::SLOTS_PER_CHUNK {
             match Item::read(r) {
                 Ok(item) => items.push(item),
                 Err(e) => {

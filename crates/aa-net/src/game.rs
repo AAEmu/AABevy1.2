@@ -117,6 +117,8 @@ pub enum ClientMsg {
     SwapAbility { obj_id: u32, old: u8, ability: u8 },
     /// Talking to NPCs and the quest requests (`CSInteractNPC`, `CSStartQuestContext` ...), see [`crate::interaction`].
     Interact(crate::interaction::Interact),
+    Shop(crate::shop::ShopCommand),
+    Bank(crate::bank::BankCommand),
     /// Party command plus the local character name used by `CSReplyToJoinTeam`.
     Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
@@ -164,6 +166,8 @@ impl ClientMsg {
             Self::ResetSkills { .. } => cs::CSResetSkillsPacket,
             Self::SwapAbility { .. } => cs::CSSwapAbilityPacket,
             Self::Interact(m) => m.opcode(),
+            Self::Shop(m) => m.opcode(),
+            Self::Bank(m) => m.opcode(),
             Self::Party { command, .. } => command.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
@@ -251,6 +255,8 @@ impl ClientMsg {
                 w.bc(*obj_id).u8(*old).u8(*ability).bool(false); // auap
             }
             Self::Interact(m) => m.write(&mut w),
+            Self::Shop(m) => m.write(&mut w),
+            Self::Bank(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -463,6 +469,7 @@ pub enum ServerMsg {
     Compressed { count: u16 },
     /// NPC function lists, doodad quest offers, NPC chat ... (see [`crate::interaction`]).
     Interaction(crate::interaction::InteractEvent),
+    Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
     Unhandled { level: u8, opcode: u16, len: usize },
 }
@@ -564,6 +571,7 @@ impl ServerMsg {
             Self::LeaveWorldCanceled => "SCLeaveWorldCanceled",
             Self::Batch(_) | Self::Compressed { .. } => "CompressedGamePackets",
             Self::Interaction(e) => e.name(),
+            Self::Shop(e) => e.name(),
             Self::Party(e) => e.name(),
             Self::Unhandled { .. } => "unhandled",
         }
@@ -853,8 +861,17 @@ impl ServerMsg {
             sc::SCTargetChangedPacket => Self::TargetChanged { obj_id: r.bc()?, target_obj_id: r.bc()? },
             sc::SCActionSlotsPacket => Self::ActionSlots(crate::items::read_action_slots(r)?),
             sc::SCCharacterInvenInitPacket => Self::InvenInit { bag_slots: r.u32()?, bank_slots: r.u32()? },
-            sc::SCCharacterInvenContentsPacket => Self::InvenContents(InvenChunk::read(r)?),
-            sc::SCItemTaskSuccessPacket => Self::ItemTasks(ItemTasks::read(r)?),
+            sc::SCCharacterInvenContentsPacket => {
+                let chunk = InvenChunk::read(r)?;
+                if chunk.truncated { return Err(WireError::Invalid("truncated inventory chunk".into())); }
+                Self::InvenContents(chunk)
+            }
+            sc::SCItemTaskSuccessPacket => {
+                let tasks = ItemTasks::read(r)?;
+                if tasks.truncated { return Err(WireError::Invalid("truncated item tasks".into())); }
+                r.u32()?; // type(id), present even when there are no tasks / forced removals
+                Self::ItemTasks(tasks)
+            }
             sc::SCUnitEquipmentsChangedPacket => {
                 let obj_id = r.bc()?;
                 let n = r.u8()?;
@@ -961,6 +978,7 @@ impl ServerMsg {
             sc::SCLeaveWorldGrantedPacket => Self::LeaveWorldGranted { target: r.u8()? },
             sc::SCLeaveWorldCanceledPacket => Self::LeaveWorldCanceled,
             opcode if crate::interaction::InteractEvent::handles(opcode) => Self::Interaction(crate::interaction::InteractEvent::read(opcode, r)?),
+            opcode if crate::shop::ShopEvent::handles(opcode) => Self::Shop(crate::shop::ShopEvent::read(r)?),
             opcode if crate::party::PartyEvent::handles(opcode) => Self::Party(crate::party::PartyEvent::read(opcode, r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_GAME,
