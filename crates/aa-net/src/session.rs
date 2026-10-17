@@ -250,6 +250,8 @@ pub enum Command {
     /// Talk to an NPC, accept / hand in / drop a quest, report a talk objective
     /// ([`crate::interaction::Interact`]); the answers are quest events and `Interaction`.
     Interact(crate::interaction::Interact),
+    /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
+    Party(crate::party::PartyCommand),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
     /// shrine). Answered by `Resurrected` and `UnitPoints`.
     Resurrect { in_place: bool },
@@ -468,6 +470,7 @@ pub enum Event {
     QuestReset { quest_id: u32, block: CompletedBlock },
     /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
     Interaction(crate::interaction::InteractEvent),
+    Party(crate::party::PartyEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -874,6 +877,17 @@ impl Session {
             Command::Interact(m) => {
                 self.send_game(game::ClientMsg::Interact(m)).await;
             }
+            Command::Party(m) => {
+                let replied = match &m {
+                    crate::party::PartyCommand::Reply { invite, .. } => Some(invite.sender_id),
+                    _ => None,
+                };
+                if self.send_game(game::ClientMsg::Party(m)).await {
+                    if let Some(sender_id) = replied {
+                        self.emit(Event::Party(crate::party::PartyEvent::Replied { sender_id }));
+                    }
+                }
+            }
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
@@ -1225,6 +1239,7 @@ impl Session {
             M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
             M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
             M::Interaction(e) => self.emit(Event::Interaction(e)),
+            M::Party(e) => self.emit(Event::Party(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
             M::SkillsReset { obj_id, ability } => self.emit(Event::SkillsReset { obj_id, ability }),

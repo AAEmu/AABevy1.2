@@ -31,6 +31,7 @@ pub use quests::Quests;
 pub use skills::{Casting, KnownSkill, SkillFailure, Skills};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
 pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT};
+pub use crate::party::Party;
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -298,6 +299,7 @@ pub struct WorldState {
     pub skills: Skills,
     pub quests: Quests,
     pub loot: Loot,
+    pub party: Party,
 }
 
 impl WorldState {
@@ -318,6 +320,8 @@ impl WorldState {
         self.skills.apply(e);
         self.quests.apply(e);
         self.loot.apply(e);
+        self.party.apply(e);
+        self.party.seed_visible(e, &self.player, &self.units);
     }
 }
 

@@ -668,12 +668,52 @@ Verified on 2026-10-17: 111 library tests and 2 scripted login-session tests pas
 passed on the bevy lane in 10.39 s, including a clean logout, with a fresh timestamped account
 (the shared `bevytest` account was not used).
 
+## Parties and raids (2026-10-17)
+
+`Command::Party(PartyCommand)` sends `Invite { team_id, is_party, target_name }`,
+`Reply { invite, accept }`, `Leave { team_id, character_id }`,
+`Kick { team_id, member_id }`, `Dismiss { team_id }`, and
+`MakeOwner { team_id, member_id }`. A new invitation uses `team_id: 0, is_party: true`.
+Replies retain the complete `PartyInvite` received in `PartyEvent::Invited`; `accept: false`
+rejects it. A successful send emits local `PartyEvent::Replied` to close that prompt; only
+the server's `Joined` changes membership. The server's direct `CSLeaveTeam`,
+`CSKickTeamMember` and `CSDismissTeam` handlers only log, so the commands use the functional
+`CSAskRiskyTeamAction` with action 0, 1, or 2 instead.
+
+`Party` is a `NetPlugin` resource and `WorldState::party`. `id == 0` means no membership.
+`owner_id`, `PartyMember::id` and invitation `sender_id` are **character IDs**, while
+`PartyMember::obj_id` is the current unit used for targeting. The member list is ordered by
+`slot` (0..49, groups of five for a raid). It tracks names, race/gender, roles, online state,
+level, abilities, zone/instance, positions, and HP/MP including their real maxima when the
+server sends the 50-byte remote status (`has_status`). Initial nearby vitals and positions
+are seeded from the existing `Units`/`Player` snapshots, then updated by unit packets or
+remote-member status. Before a remote status, maxima have the same highest-seen limitation
+as `Units`. The local player's own HUD should continue using `PlayerStats` and the app's
+current movement position. Logout/disconnect clears party state; login reannounces it.
+
+All twenty server party packet types are decoded, including offline/reconnect snapshots,
+member/leader/role changes, raid conversion and slot moves, loot rules, markers and map pings.
+The joined packet's ten group counts must match its fifty fixed slots; there is no separate
+member count after the loot rule. Negative, over-fifty and truncated remote-member counts
+are rejected. A test places each packet before a second opcode in a `DD04` batch and checks
+both decode, preventing a partially consumed record from corrupting later combat packets.
+
+`cargo test -p aa-net --test live_party -- --ignored --nocapture` creates two fresh timestamped
+accounts and characters on the bevy lane. Passed in 10.32 s: reject an invitation; invite and
+accept; compare both rosters and leader; move the second player and receive position/vitals
+(720/720 HP, 670/670 MP); send party chat; transfer leadership twice; kick with pair
+auto-disband; reform, leave voluntarily and receive auto-disband; cleanly log out both clients.
+The shared user account was not touched. Library tests: 119 pass; the Bevy/examples check passes.
+Offline/reconnect and raid transitions have protocol/state coverage but were not exercised live
+in this two-person test. The API does not yet send raid conversion, slot/role/loot-rule edits,
+markers, or pings; those incoming changes are exposed for the HUD.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): mail, houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  parties, trading, shops, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
+  trading, shops, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
   (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
   layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
@@ -681,7 +721,7 @@ passed on the bevy lane in 10.39 s, including a clean logout, with a fresh times
   that is not decoded ends that batch.
 * Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and the quest
   requests, item moves (swap, split, destroy; not yet the bank, trade or mail windows' own packets); no shops
-  or other NPC functions (`CSStartInteraction` is encoded, nothing uses it yet) or party packets yet.
+  or other NPC functions (`CSStartInteraction` is encoded, nothing uses it yet).
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
