@@ -16,6 +16,7 @@ use aa_ui::render::UiCamera;
 use aa_world::{TerrainQuery, cry_to_bevy};
 use bevy::camera::{Hdr, RenderTarget};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::pbr::{ScreenSpaceTransmission, ScreenSpaceTransmissionQuality};
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -49,9 +50,23 @@ impl Default for OrbitCamera {
     }
 }
 
+/// Screen space transmission, which aa-fx's refraction particles read the scene through. aa-fx puts it on every camera the first time
+/// a refraction effect shows up (`ensure_transmission`), and the component is part of what a render pipeline is keyed on (the view
+/// layout), so a camera that got it in the middle of the game would make every material compile again. The cameras that draw the
+/// world (this one and the prewarm camera) have it from the start, exactly as aa-fx would give it; without a transmissive item it
+/// costs nothing (no copy of the scene, no texture).
+pub fn transmission() -> ScreenSpaceTransmission {
+    ScreenSpaceTransmission { steps: 1, quality: ScreenSpaceTransmissionQuality::Low }
+}
+
 /// The in-game camera's lens (also the prewarm camera's, `prewarm`).
 pub fn projection() -> Projection {
-    Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 0.2, far: 20000.0, ..default() })
+    projection_fov(FOV_DEG)
+}
+
+/// The lens with another vertical field of view (degrees): `--cam-fov`, to line a shot up with a capture of the real client's `cl_fov`.
+fn projection_fov(degrees: f32) -> Projection {
+    Projection::Perspective(PerspectiveProjection { fov: degrees.to_radians(), near: 0.2, far: 20000.0, ..default() })
 }
 
 /// The world camera still draws into an image behind the loading screen ([`show_world`] puts it on the window).
@@ -82,7 +97,8 @@ pub fn spawn_camera(
     let mut camera = commands.spawn((
         Name::new("camera"),
         Camera3d::default(),
-        projection(),
+        dev.cam_fov.map_or_else(projection, projection_fov),
+        transmission(),
         transform,
         orbit,
     ));
@@ -258,15 +274,36 @@ impl CameraShake {
     }
 }
 
+/// Dev: `AA_COMBAT_CHASE=1` puts the camera behind the projectile in flight (the combat code sets the pose), to look at the arrow
+/// or the spell from a few metres without guessing where the fight will be.
+#[derive(Resource, Default)]
+pub struct Chase(pub Option<Transform>);
+
+/// Dev: `AA_COMBAT_CAM_REL=-147` keeps the camera at that heading from the way the player faces (degrees, level; the real client's
+/// `right_camera` is -90 until the character turns to its target), to line a fight up with a capture of the real client.
+#[derive(Resource)]
+pub struct CamRel(pub f32);
+
 /// Puts the camera on its orbit around the player; keeps it above the ground.
 pub fn follow_player(
     time: Res<Time>,
     mut shake: ResMut<CameraShake>,
+    chase: Option<Res<Chase>>,
+    rel: Option<Res<CamRel>>,
     player: Query<&Mover, With<LocalPlayer>>,
-    mut camera: Query<(&OrbitCamera, &mut Transform)>,
+    mut camera: Query<(&mut OrbitCamera, &mut Transform)>,
     terrain: Res<TerrainQuery>,
 ) {
-    let (Ok(mover), Ok((orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
+    let (Ok(mover), Ok((mut orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
+    if let Some(pose) = chase.and_then(|c| c.0) {
+        *transform = pose;
+        return;
+    }
+    if let Some(rel) = rel {
+        orbit.yaw = mover.facing + rel.0.to_radians();
+        orbit.pitch = 0.0;
+    }
+    let orbit = &*orbit;
     let mut t = camera_transform(orbit, mover.pos);
     // not below the terrain (bevy y = game z)
     let ground = height_or(&terrain, t.translation.x, -t.translation.z, mover.pos.z) + 0.35;

@@ -5,7 +5,7 @@
 //! character list does it ahead of time: once it has settled, the real world is streamed in at a small footprint around the
 //! selected character (terrain, objects, vegetation, water, sky, the particle effects) and drawn by a camera that renders into
 //! a tiny image. The camera is the in-game camera in everything that decides a pipeline (the lens, `Post` and with it HDR, MSAA,
-//! the prepasses, SSAO, bloom, tonemapping), the one character stands where the player will, and the loaders are the real ones, so the
+//! the prepasses, SSAO, bloom, tonemapping, the screen space transmission of the particle refraction), the one character stands where the player will, and the loaders are the real ones, so the
 //! variants compiled are the ones the game asks for. It ends when the pipelines have settled ([`PipelineStatus`]), or at once
 //! when the player leaves the list; whatever compiled so far stays in the pipeline cache.
 //!
@@ -29,7 +29,7 @@ use aa_world::{TerrainQuery, WorldConfig, cry_to_bevy};
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 
-use super::camera::{OrbitCamera, camera_transform, projection};
+use super::camera::{OrbitCamera, camera_transform, projection, transmission};
 use super::data::Db;
 use super::dev::DevOptions;
 use super::player::{height_or, placement};
@@ -176,6 +176,8 @@ fn start(
             // the post pass is what makes the in-game camera HDR, MSAA-free, prepassed and SSAO'd (aa-world's `setup_post_cameras`)
             aa_world::post::Post::default(),
             environment,
+            // the view layout of the game's camera has the transmission texture binding (see `camera::transmission`)
+            transmission(),
         ))
         .id();
 
