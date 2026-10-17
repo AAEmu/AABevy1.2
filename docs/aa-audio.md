@@ -11,7 +11,8 @@ commands.spawn((Camera3d::default(), aa_audio::SpatialListener));
 commands.spawn((Transform::from_xyz(3.0, 0.0, -5.0), aa_audio::Sound::event("sounds/x2skills:wild:fire_arrow_form")));
 ```
 
-Not wired into `aa-client` (the orchestrator does that).
+Wired into `aa-client` by `crates/aa-client/src/sound/` (`docs/aa-client-sound.md`): login and zone music, UI sounds, the sound
+options, and with `aa-world` the placed ambience.
 
 ## Status in numbers
 
@@ -286,4 +287,6 @@ event is simple and 2D). Run them with `cargo test -p aa-audio -- --include-igno
   nothing. `x2voice_machinima` root FEV differs from the language ones (more banks), only the language one is used when
   `Settings::language` is set.
 * Only music streams; every other sound, ambience loops included, is decoded whole into the cache (the longest are about a minute).
-* No volume ducking between categories, no `PlayUISound` Lua binding (the orchestrator maps Lua names with `SoundPacks::ui`).
+* No volume ducking between categories. The Lua `PlayUISound` / `PlayMusic` names are mapped by `aa-client` (`SoundPacks::ui`).
+* What `aa-client` would still like (`docs/aa-client-sound.md`): a music-ended notification or query (it reads the event length from
+  the FEV instead), `Engine::is_playing(voice)`, reverb.

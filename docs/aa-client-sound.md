@@ -1,0 +1,124 @@
+# aa-client: sound
+
+`crates/aa-client/src/sound/` wires `aa-audio` into the screens, the Lua UI and the game world. The audio engine is
+`aa_audio::AaAudioPlugin` (added in `main.rs`), `sound::SoundPlugin` is the client's part. Research and data:
+`docs/research/audio.md`; the placed sounds of the world are `aa-world`'s (`docs/aa-world.md`, "Placed sounds").
+
+## Silence in unattended runs
+
+`--shot`, `--exit-after`, `--mute` and `AA_MUTE=1` leave the engine muted (it opens no device and reads no sound); `--sound`
+overrides that. In a muted run the client does not even read the sound database (the `sound-db` thread starts only when
+something is audible or `AA_AUDIO_LOG` is set). Dev switches:
+
+| | |
+|---|---|
+| `--sound` | play in an unattended run (`--exit-after N`) |
+| `AA_VOLUME=0.05` | start the master slider at 5 % (quiet checks on a shared machine); the Options window moves it later |
+| `AA_AUDIO_LOG=1` | one `audio:` log line per sound started (path and position), music changes, the zone pack, reverb, the placed sound counts and the cost of their evaluation; also reads the sound database in a muted run |
+| `AA_NO_SOUND_ENTITIES=1` | no ambient / random / spot / reverb entities from the cells |
+
+## What plays where
+
+| Where | What | How |
+|---|---|---|
+| world select | `login_stage_music_before_login` = `x2music:screen:login_2013_07` | the screen's default (the script plays nothing of its own) |
+| character list | `login_stage_music_character_select` = `login_cbt4_character` | the script's `PlayMusic` (and the same default) |
+| character create | `login_stage_music_creator` = `login_creator_oblivion` | the screen's default (the original scripts call it only in the credits window) |
+| loading screen | silence (the music fades out in 1 s) | the screen |
+| in game | the zone's `soundmood_*` pack: `music_01..08`, `combat`, `death` | `music.rs`, see below |
+| every screen | UI sounds: `X2Sound:PlayUISound(name)` (global pack), widget `SetSounds` sets (`window`, `button`, `global` packs) | `ui.rs` |
+| in game | ambient volumes, random sounds, sound spots (reverb is read only) | `aa-world` `objects/sounds.rs`, 3D on the listener |
+
+The login music crossfades (2 s in, 1.5 s out). `--enter-world` skips the login music (the app goes through the screens in a
+second).
+
+### The listener
+
+`assign_listener` puts `SpatialListener` on the in-game orbit camera (`ingame::camera::OrbitCamera`), else on the login stage
+camera (`login::stage3d::StageCamera`) and takes it off every other entity. World select has no 3D camera.
+
+### UI sounds (`ui.rs`)
+
+`sound::bind(lua)` installs the hooks on the `AAUI` table of every UI Lua state: the login stage (`login/gameapi.rs`
+`install`, which the HUD's api install calls first) and the create screens (`login/create/base.rs`). It does nothing before the
+plugin has set the process-wide `BINDING` (headless tests, examples).
+
+* `AAUI.PlaySound(name, dup)`: the item `name` of the `global` pack (`SoundPacks::ui`), played 2D on the UI category through
+  `Engine::play_with`; returns the voice id (0: the name has no sound); `AAUI.StopSound(id, mode)` stops it (a fade unless
+  `mode` is given).
+* `AAUI.PlayMusic(name)` / `AAUI.StopMusic()`: the request goes to the music director, which crossfades it. The request is
+  dropped when a new screen comes up (its scripts run again).
+* `AAUI.WidgetSound(set, event)`: `<set>_<event>` is looked up in the `window` (`bag_show`), `button` (`default_left_up`) and
+  `global` packs in that order. The sounds are off while a screen's UI is being built (its scripts show and hide windows) and on
+  the loading screen: the gate opens one second after a screen came up.
+* `AAUI.OptionValue(id)` / `AAUI.OptionChanged(id, value)`: the sound sliders of the Options window (`OPTION_ITEM_*`:
+  35 master, 36 BGM, 37 SFX, 38 use combat sound, 39 cinema). Master goes to `Volumes::master`, BGM to `Volumes::music`, SFX to
+  effects, ambience, voice and UI; "use combat sound" switches the combat music; cinema is kept and not used yet. The HUD's
+  Options window gets these through the toolkit fakes (`crates/aa-ui/examples/fake/fake_ingame.lua`,
+  `fake_options.lua`, which the HUD includes), so `hud/` did not change. The values are not saved to disk.
+
+### In game music (`music.rs`, `zone.rs`)
+
+* Which pack: `ZoneData::pack_at(x, y, zone_key, group)`. The sub zone (the smallest `AreaShape` polygon of the pak's
+  `worlds/main_world/level_design/zone/*/client/subzone_area.xml` around the player, 920 outlines, read once on a thread in
+  about 0.5 s) wins, going up its parents until one has `sub_zones.sound_pack_id`; else the pack of the zone group
+  (`zones.zone_key` -> `zone_groups.sound_pack_id`). That the sub zone beats the zone is a guess (the data does not say).
+  At the Nuian spawn that is `soundmood_w_solzreed`.
+* Which track: a random `music_01..08` of the pack when the pack changes. The tracks are one-shot events of about two minutes:
+  the length is read from the FEV on a thread (`event_length`, the longest wave), and after it a pause of 20 to 60 s (a guess
+  of mine; the original's repeat logic is not recorded) another one is picked. A pack change crossfades (3 s in, 3 s out).
+* Moods: `combat` while `PlayerStats.in_combat` (and 8 s after, `OPTION_ITEM_USE_COMBAT_SOUND` permitting; 1.5 s in), `death`
+  while dead. The other 14 moods of the pack (`underwater`, `gliding`, `falling`, `low_health`, `indoor`, ...) are not used;
+  the mood priorities and per-category mixes of `soundmoods.xml` are not applied.
+
+## Checks (muted engine unless `--sound`)
+
+```
+cargo run -p aa-client -- --sound --exit-after 20                      # world select: login_2013_07
+cargo run -p aa-client -- --sound --exit-after 25 --goto character-select --account bevycreate
+cargo run -p aa-client -- --sound --exit-after 50 --enter-world --account bevycreate --hud-open toggle_bag 24
+```
+(prefix `AA_AUDIO_LOG=1 AA_VOLUME=0.05`; copy `target/debug/aa-client.exe` aside for repeated runs).
+
+Log of world select, character list, create and the spawn, abridged:
+
+```
+audio: music sounds/x2music:screen:login_2013_07 (screen WorldSelect, fade in 2000 ms)
+audio: ui sound login_stage_world_select -> sounds/x2interface:login_stage:button_server
+audio: music sounds/x2music:screen:login_cbt4_character (screen CharacterSelect, fade in 2000 ms)
+audio: music sounds/x2music:screen:login_creator_oblivion (screen CharacterCreate, fade in 2000 ms)
+audio: zone sound pack None -> Some("soundmood_w_solzreed")
+audio: music sounds/x2music:group_001:03 (screen InGame, fade in 3000 ms)
+audio: ambient start Sounds/x2ambience:world2_object:pond_big at (15579.6, 15385.8, 128.0) volume=1.00 daylight=0.33
+audio: widget sound window/bag_show -> sounds/x2interface:bag:show
+audio: placed sound evaluation, 100 ticks of 0.1 s: mean 42 us, worst 121 us
+```
+
+At the exact spawn of `bevycreate` (15578.0, 15382.1, 126.2), once the cells around it are in: 50 ambient volumes loaded, **3
+playing** (`pond_big`, `field_day2`, `forest_night2`; the two beach `sea06` / `sea_night2` volumes are 40 to 60 m outside their
+area and 40 m radius, silent), 66 random volumes loaded, **7 inside** their area (the first voice of each comes `MinWaitTime`
+10 to 30 s after entering: `sparrow01`, `cricket_random`, `bird_random`, `wind_field`, `bird01`), 10 sound spots loaded and
+0 within 100 m, 19 reverb volumes loaded, the strongest `x2_outdoor_1` at weight 1.0 (read, not applied).
+
+Frame cost: `update_sounds` runs every 0.1 s (mean 40 to 60 us, worst 120 us, one 1.6 ms tick while the cells were coming in), so
+about 0.5 us per frame on the main thread; the music director and the option sync are a few atomic / mutex reads per frame. The
+frame time of the in-game run is the same with and without (13 ms, the renderer).
+
+## Not done
+
+* The create screens' ambience (`worlds/login2` cells 000_001 and 001_000: 8 ambient volumes and 4 reverb volumes each, the
+  `login_stage:*` winds): the create scenery (`login/create/scenery.rs`, not mine) loads `login2` itself; its owner calls
+  `aa_world::objects::sounds::spawn_cell(&mut commands, cell, &objects.sounds)` (`objects` is the `CellObjects` it already has)
+  and despawns the returned entities with the scenery. The character list's stage has no placed sounds.
+* Reverb: only read (`ListenerReverb`); `aa-audio` has no reverb.
+* Moods other than default / combat / death; `OutdoorOnly` (the client has no indoor test); an ambient volume with no area is
+  played as a point of its `OuterRadius`; `IsPlaying` always answers false; the volume sliders are not persisted.
+* Zone changes and the combat crossfade follow the data but were not walked through end to end (no scripted movement); the
+  pack lookup has unit tests (`sound::zone`).
+
+## What `aa-audio` lacks for this
+
+* A music-ended notification or query (the director reads the event length from the FEV instead and keeps its own clock).
+* `Engine::is_playing(voice)` (for `X2Sound:IsPlaying`).
+* Reverb (the 49 presets of `libs/reverbpresets`), per-category low-pass and the mood mixes of `soundmoods.xml`.
+* Event lookups parse the FEV project on first use (a few ms; the client starts one thread for the lengths).

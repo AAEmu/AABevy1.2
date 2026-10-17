@@ -102,6 +102,7 @@ pub fn install(ui: &mut UiRuntime, shared: &SharedRef) -> anyhow::Result<()> {
             next += 1;
         }
     }
+    crate::sound::bind(lua);
     api::install(lua, shared).map_err(|e| anyhow::anyhow!("{e}"))?;
     ui.exec("@game_base.lua", include_str!("game_base.lua")).map_err(|e| anyhow::anyhow!("game_base.lua: {e}"))?;
     ui.exec("@game_create.lua", include_str!("game_create.lua")).map_err(|e| anyhow::anyhow!("game_create.lua: {e}"))?;

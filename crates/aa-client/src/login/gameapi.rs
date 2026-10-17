@@ -202,6 +202,8 @@ pub fn install(rt: &UiRuntime, shared: &Shared) -> mlua::Result<()> {
         }
     }
     g.raw_set("NET", net_table(lua, shared)?)?;
+    // sounds: `AAUI.PlaySound`, `PlayMusic`, `WidgetSound` ... (the HUD installs this first, too)
+    crate::sound::bind(lua);
     lua.load(include_str!("gameapi.lua")).set_name("@gameapi.lua").exec()
 }
 

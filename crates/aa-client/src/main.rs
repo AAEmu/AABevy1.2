@@ -6,10 +6,12 @@
 //!   Lua UI
 //! * [`ingame`]: world, player, units, camera, movement (`--enter-world` skips the login stage)
 //! * [`hud`]: the in-game Lua UI on real data, name plates
+//! * [`sound`]: `aa-audio` wired to the screens (music, UI sounds, zone music, volumes)
 
 mod hud;
 mod ingame;
 mod login;
+mod sound;
 
 use bevy::prelude::*;
 
@@ -27,6 +29,7 @@ fn main() {
     App::new()
         .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
         .add_plugins(aa_fx::FxPlugin)
+        .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .init_state::<Screen>()
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
         .run();

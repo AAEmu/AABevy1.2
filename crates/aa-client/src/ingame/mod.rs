@@ -28,7 +28,7 @@
 mod anim;
 mod bench;
 pub(crate) mod appearance;
-mod camera;
+pub(crate) mod camera;
 mod combat;
 mod creature;
 pub(crate) mod data;
