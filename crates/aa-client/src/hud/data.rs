@@ -63,8 +63,6 @@ pub struct GameData {
     pub zone_groups: HashMap<u32, ZoneGroup>,
     /// `system_factions.id` -> English name.
     pub factions: HashMap<u32, String>,
-    /// `levels.total_exp` by level (index = level).
-    pub level_exp: Vec<i64>,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -224,14 +222,6 @@ impl GameData {
                 data.factions.insert(id, name("system_factions", id, r.get(1)?));
             }
         }
-        {
-            let mut q = conn.prepare("SELECT id, total_exp FROM levels ORDER BY id")?;
-            let mut rows = q.query([])?;
-            data.level_exp.push(0);
-            while let Some(r) = rows.next()? {
-                data.level_exp.push(r.get::<_, Option<i64>>(1)?.unwrap_or(0));
-            }
-        }
         Ok(data)
     }
 
@@ -239,14 +229,6 @@ impl GameData {
     pub fn zone(&self, zone_key: u32) -> Option<(u32, &ZoneGroup, u32)> {
         let (group, faction) = *self.zones.get(&zone_key)?;
         Some((group, self.zone_groups.get(&group)?, faction))
-    }
-
-    /// `(exp of the level so far, exp the level needs)` for a character with `total` experience.
-    pub fn level_progress(&self, level: u8, total: i64) -> (i64, i64) {
-        let at = |l: usize| self.level_exp.get(l).copied().unwrap_or(i64::MAX / 2);
-        let l = level.max(1) as usize;
-        let (base, next) = (at(l), at(l + 1));
-        ((total - base).max(0), (next - base).max(1))
     }
 }
 
@@ -264,14 +246,19 @@ pub struct Snapshot {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    pub dead: bool,
+    pub in_combat: bool,
     /// Percent of the current level (0..100) and the exp of the level / needed for the next.
     pub exp_percent: f64,
     pub exp_cur: i64,
     pub exp_need: i64,
+    pub recoverable_exp: i32,
     pub labor: i32,
     pub max_labor: i32,
     pub money: i64,
     pub bm_point: i64,
+    pub honor: i32,
+    pub vocation: i32,
     pub zone: String,
     /// `zone_groups.id` / `.name` / map rectangle of the zone the player is in.
     pub zone_group: u32,

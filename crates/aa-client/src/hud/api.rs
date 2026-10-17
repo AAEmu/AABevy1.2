@@ -13,17 +13,21 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use aa_net::state::Player;
+use aa_net::state::{LABOR_MAX, Player, PlayerStats};
+use aa_net::{Command, NetCommand};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
-use mlua::{Lua, MultiValue, Table};
+use mlua::{Lua, MultiValue, Table, Value};
 
 use super::data::{SharedGameData, Snapshot};
 use crate::login::gameapi;
 
 /// What a script asked the app to do (queued by `HUD.request(kind, ...)`).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Request {}
+pub enum Request {
+    /// `HUD.request("chat", channel, message, target)`: a line typed into the chat input.
+    Chat { chat_type: i16, message: String, target: String },
+}
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
 #[derive(Default)]
@@ -110,9 +114,39 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
     let b = bridge.clone();
     hud.raw_set(
         "request",
-        lua.create_function(move |_, _args: MultiValue| {
-            let _ = &b;
+        lua.create_function(move |_, args: MultiValue| {
+            let text = |i: usize| match args.iter().nth(i) {
+                Some(Value::String(s)) => s.to_string_lossy(),
+                _ => String::new(),
+            };
+            let num = |i: usize| match args.iter().nth(i) {
+                Some(Value::Integer(n)) => *n,
+                Some(Value::Number(n)) => *n as i64,
+                _ => 0,
+            };
+            let request = match text(0).as_str() {
+                "chat" => Request::Chat { chat_type: num(1) as i16, message: text(2), target: text(3) },
+                other => {
+                    warn!("hud: unknown request {other:?}");
+                    return Ok(());
+                }
+            };
+            b.borrow_mut().requests.push(request);
             Ok(())
+        })?,
+    )?;
+    // the chat window widget (the scripts create it; `GetEntityByName` is a stub)
+    hud.raw_set(
+        "chat_window",
+        lua.create_function(|lua, ()| {
+            let id = {
+                let u = aa_ui::lua::ui(lua);
+                u.tree.objects.iter().enumerate().find(|(_, o)| o.alive && o.widget().is_some_and(|w| w.class == "chatwindow")).map(|(i, _)| i as aa_ui::tree::Id)
+            };
+            match id {
+                Some(id) => aa_ui::lua::object_table(lua, id),
+                None => Ok(None),
+            }
         })?,
     )?;
     Ok(())
@@ -131,6 +165,11 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("mp", s.mp as i64)?;
     t.raw_set("max_mp", s.max_mp as i64)?;
     t.raw_set("exp_percent", s.exp_percent)?;
+    t.raw_set("dead", s.dead)?;
+    t.raw_set("in_combat", s.in_combat)?;
+    t.raw_set("recoverable_exp", s.recoverable_exp as i64)?;
+    t.raw_set("honor", s.honor as i64)?;
+    t.raw_set("vocation", s.vocation as i64)?;
     t.raw_set("exp_cur", s.exp_cur.to_string())?;
     t.raw_set("exp_need", s.exp_need.to_string())?;
     t.raw_set("labor", s.labor as i64)?;
@@ -182,32 +221,36 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let character = spawn.character();
     let game = data.game.clone();
     let game = game.get();
-    let prev = &data.snapshot;
-    let level = character.level.max(1);
-    let (exp_cur, exp_need) = game.map_or((0, 1), |g| g.level_progress(level, spawn.state.experience as i64));
+    // the numbers the server keeps current (aa-net's PlayerStats), the spawn's values until it has them
+    let stats = world.get_resource::<PlayerStats>().filter(|s| s.obj_id != 0);
+    let level = stats.map_or(character.level, |s| s.level).max(1);
+    let (exp_cur, exp_need) = stats.map_or((0, 1), |s| s.exp_progress());
+    let exp_percent = if exp_need > 0 { 100.0 * exp_cur as f64 / exp_need as f64 } else { 100.0 };
     let faction_name = |g: &super::data::GameData, id: u32| g.factions.get(&id).cloned().filter(|f| !f.is_empty());
     let faction = game.and_then(|g| faction_name(g, character.faction_id)).unwrap_or_else(|| character.faction_name.clone());
     let zone = game.and_then(|g| g.zone(zone_key));
-    // the maxima are not on the wire yet: the highest seen so far, from the spawn values up
-    let max_hp = prev.max_hp.max(character.hp).max(1);
-    let max_mp = prev.max_mp.max(character.mp).max(1);
     let snapshot = Snapshot {
         unit_id: spawn.obj_id.to_string(),
         name: spawn.name().to_string(),
         level,
         race: character.race,
         gender: character.gender,
-        hp: character.hp,
-        max_hp,
-        mp: character.mp,
-        max_mp,
-        exp_percent: 100.0 * exp_cur as f64 / exp_need as f64,
+        hp: stats.map_or(character.hp, |s| s.hp),
+        max_hp: stats.map_or(character.hp, |s| s.max_hp).max(1),
+        mp: stats.map_or(character.mp, |s| s.mp),
+        max_mp: stats.map_or(character.mp, |s| s.max_mp).max(1),
+        dead: stats.is_some_and(|s| s.dead),
+        in_combat: stats.is_some_and(|s| s.in_combat),
+        exp_percent,
         exp_cur,
         exp_need,
-        labor: character.labor_power as i32,
-        max_labor: 5000,
-        money: character.money,
-        bm_point: character.bm_point,
+        recoverable_exp: stats.map_or(0, |s| s.recoverable_exp),
+        labor: stats.map_or(i32::from(character.labor_power), |s| s.labor),
+        max_labor: LABOR_MAX,
+        money: stats.map_or(character.money, |s| s.money),
+        bm_point: stats.map_or(character.bm_point, |s| s.loyalty),
+        honor: stats.map_or(0, |s| s.honor),
+        vocation: stats.map_or(0, |s| s.vocation),
         zone: zone.map_or_else(String::new, |(_, g, _)| g.text.clone()),
         zone_group: zone.map_or(0, |(id, _, _)| id),
         zone_key_name: zone.map_or_else(String::new, |(_, g, _)| g.key.clone()),
@@ -222,12 +265,26 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     data.snapshot = snapshot;
 }
 
-/// The events the client raises when the player has entered the world and the loading screen closed.
-pub fn enter_world(rt: &UiRuntime, bridge: &Shared) {
+/// The events the client raises when the player has entered the world and the loading screen closed,
+/// then the chat channels joined and the lines received so far.
+pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) {
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }
-    let _ = bridge;
+    let data = bridge.borrow();
+    super::chat::replay(rt, chat, data.game.get());
+}
+
+/// Carry out what the scripts asked for.
+pub fn handle_requests(bridge: NonSend<HudBridge>, mut net: MessageWriter<NetCommand>) {
+    let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
+    for request in requests {
+        match request {
+            Request::Chat { chat_type, message, target } => {
+                net.write(NetCommand(Command::Chat { chat_type, target, message }));
+            }
+        }
+    }
 }
 
 /// The stage was built from the current snapshot.
@@ -268,6 +325,12 @@ pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
     }
     if old.labor != new.labor {
         rt.fire_event("LABORPOWER_CHANGED", ((new.labor - old.labor) as i64, new.labor as i64));
+    }
+    if old.in_combat != new.in_combat {
+        rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (new.in_combat, id));
+    }
+    if old.recoverable_exp != new.recoverable_exp {
+        rt.fire_event("RECOVERABLE_EXP", (id, new.recoverable_exp as i64));
     }
     if old.money != new.money {
         rt.fire_event("PLAYER_MONEY", (new.money.to_string(), (new.money - old.money).to_string()));
