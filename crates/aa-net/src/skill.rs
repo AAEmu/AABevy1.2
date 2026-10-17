@@ -451,17 +451,23 @@ pub struct PlotEvent {
     /// Object ids of the source and target (0 when it is a position).
     pub caster_obj_id: u32,
     pub target_obj_id: u32,
+    /// The spot, when the source / target of this step is a position and not a unit (ground
+    /// targeted skills, area effects).
+    pub caster_pos: Option<Pos>,
+    pub target_pos: Option<Pos>,
     /// The next step's cast time, ms.
     pub casting_ms: u32,
 }
 
 impl PlotEvent {
-    fn plot_object(r: &mut Reader) -> Result<u32> {
+    /// A `PlotObject`: a unit (kind 1, object id) or a position (kind 2).
+    fn plot_object(r: &mut Reader) -> Result<(u32, Option<Pos>)> {
         match r.u8()? {
-            1 => r.bc(),
+            1 => Ok((r.bc()?, None)),
             _ => {
-                r.skip(9 + 3)?; // position, three rotation bytes
-                Ok(0)
+                let pos = r.position()?;
+                r.skip(3)?; // three rotation bytes
+                Ok((0, Some(pos)))
             }
         }
     }
@@ -470,8 +476,8 @@ impl PlotEvent {
         let tl = r.u16()?;
         let event_id = r.u32()?;
         let skill_id = r.u32()?;
-        let caster_obj_id = Self::plot_object(r)?;
-        let target_obj_id = Self::plot_object(r)?;
+        let (caster_obj_id, caster_pos) = Self::plot_object(r)?;
+        let (target_obj_id, target_pos) = Self::plot_object(r)?;
         r.skip(8 + 3)?; // item id, object id
         let casting_ms = u32::from(r.u16()?) * 10;
         r.skip(3 + 2)?;
@@ -481,7 +487,7 @@ impl PlotEvent {
         if (flag >> 3) & 1 == 1 {
             r.skip(13 * 4)?;
         }
-        Ok(Self { tl, event_id, skill_id, caster_obj_id, target_obj_id, casting_ms })
+        Ok(Self { tl, event_id, skill_id, caster_obj_id, target_obj_id, caster_pos, target_pos, casting_ms })
     }
 }
 
@@ -631,5 +637,8 @@ mod tests {
         let e = PlotEvent::read(&mut r).unwrap();
         assert!(r.is_empty(), "{} bytes left", r.remaining());
         assert_eq!((e.caster_obj_id, e.target_obj_id), (0x10, 0));
+        assert_eq!(e.caster_pos, None);
+        let p = e.target_pos.expect("a position target");
+        assert!((p.x - 10.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01 && (p.z - 30.0).abs() < 0.1, "{p:?}");
     }
 }
