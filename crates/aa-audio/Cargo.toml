@@ -1,0 +1,15 @@
+[package]
+name = "aa-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ArcheAge 1.2 sound: FSB5 banks (FMOD Vorbis), FEV events and playback in Bevy"
+
+[dependencies]
+aa-pak.workspace = true
+thiserror.workspace = true
+# Pure Rust Vorbis decoder, packet API only (the Ogg container reader is not needed: FSB5 stores bare packets).
+lewton = { version = "0.10", default-features = false }
+# MPEG audio decoder (the voice banks are MPEG layer II, some maybe layer III), pure Rust.
+symphonia-bundle-mp3 = { version = "0.6", default-features = false, features = ["mp1", "mp2", "mp3"] }
+symphonia-core = "0.6"
