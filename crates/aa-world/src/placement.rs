@@ -180,6 +180,58 @@ pub struct CellObjects {
     pub vegetation: Vec<Vegetation>,
     pub decals: Vec<Decal>,
     pub water: Vec<Water>,
+    /// The active `ParticleEffect` entities of `entities.xml`.
+    pub effects: Vec<PlacedEffect>,
+}
+
+/// A `ParticleEffect` entity of a cell's `entities.xml` (only the active ones, `bActive="1"`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedEffect {
+    /// `library.group.name`, e.g. `X2_EFFECTS.fire_smoke.torchlight_b`.
+    pub effect: String,
+    /// Cell-local position, cry space.
+    pub pos: Vec3,
+    /// Rotation, cry space (`Rotate="w,x,y,z"` in the file).
+    pub rot: Quat,
+    /// The entity's `Scale` times the `Scale` property of the effect.
+    pub scale: f32,
+    pub speed_scale: f32,
+    pub count_scale: f32,
+    pub prime: bool,
+}
+
+/// The `ParticleEffect` entities of an `entities.xml` (positions are cell-local).
+pub fn parse_effect_entities(xml: &str) -> Vec<PlacedEffect> {
+    let Ok(doc) = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')) else { return Vec::new() };
+    let floats = |s: Option<&str>| -> Vec<f32> { s.map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect()).unwrap_or_default() };
+    let mut out = Vec::new();
+    for e in doc.descendants().filter(|n| n.has_tag_name("Entity") && n.attribute("EntityClass") == Some("ParticleEffect")) {
+        let Some(props) = e.children().find(|c| c.has_tag_name("Properties")) else { continue };
+        let Some(effect) = props.attribute("ParticleEffect").map(str::trim).filter(|n| !n.is_empty()) else { continue };
+        if props.attribute("bActive").map(str::trim) == Some("0") {
+            continue;
+        }
+        let p = floats(e.attribute("Pos"));
+        if p.len() < 3 {
+            continue;
+        }
+        let rot = match floats(e.attribute("Rotate"))[..] {
+            [w, x, y, z] => Quat::from_xyzw(x, y, z, w).normalize(),
+            _ => Quat::IDENTITY,
+        };
+        let entity_scale = floats(e.attribute("Scale")).first().copied().unwrap_or(1.0);
+        let prop = |name: &str| props.attribute(name).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0);
+        out.push(PlacedEffect {
+            effect: effect.to_string(),
+            pos: Vec3::new(p[0], p[1], p[2]),
+            rot,
+            scale: entity_scale * prop("Scale"),
+            speed_scale: prop("SpeedScale"),
+            count_scale: prop("CountScale"),
+            prime: props.attribute("bPrime").map(str::trim) != Some("0"),
+        });
+    }
+    out
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -393,12 +445,46 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.decals = o.decals;
         objects.water = o.water;
     }
+    if let Some(xml) = read("entities.xml") {
+        objects.effects = parse_effect_entities(&String::from_utf8_lossy(&xml));
+    }
     objects
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_entities_are_parsed() {
+        let xml = r#"<Mission><Objects>
+          <Entity Name="a" Pos="1,2,3" Rotate="0.5,0.5,0.5,0.5" Scale="0.5,0.5,0.5" EntityClass="ParticleEffect"><Properties bActive="1" ParticleEffect="X2_EFFECTS.fire_smoke.torchlight_b" bPrime="1" Scale="2" SpeedScale="0.5"/></Entity>
+          <Entity Name="b" Pos="4,5,6" EntityClass="ParticleEffect"><Properties bActive="0" ParticleEffect="x.y.z"/></Entity>
+          <Entity Name="c" Pos="7,8,9" EntityClass="Light"><Properties/></Entity>
+        </Objects></Mission>"#;
+        let fx = parse_effect_entities(xml);
+        assert_eq!(fx.len(), 1);
+        assert_eq!(fx[0].effect, "X2_EFFECTS.fire_smoke.torchlight_b");
+        assert_eq!(fx[0].pos, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(fx[0].scale, 1.0);
+        assert_eq!(fx[0].speed_scale, 0.5);
+        assert_eq!(fx[0].count_scale, 1.0);
+        assert!(fx[0].prime);
+    }
+
+    #[test]
+    fn spawn_cell_effects_are_read() {
+        if !crate::pak_available() {
+            return;
+        }
+        // the login stage's training field: ground mist and leaves
+        let objects = load_cell_objects("login2", 0, 1);
+        assert!(objects.effects.iter().any(|e| e.effect.ends_with("flow_fog_01")), "{:?}", objects.effects.len());
+        assert!(objects.effects.iter().all(|e| e.pos.x > 0.0 && e.scale > 0.0));
+        // a town cell of the main world
+        let town = load_cell_objects("main_world", 10, 11);
+        assert!(town.effects.len() > 100, "{}", town.effects.len());
+    }
 
     #[test]
     fn login_cell_brushes_match_object_dat() {
