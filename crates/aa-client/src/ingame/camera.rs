@@ -7,6 +7,9 @@
 //! The default view (the real client's spawn camera, `reference/ingame/spawn/camera.json`) is 4 m
 //! behind the character, level with the pivot `PIVOT_HEIGHT` above its feet, vertical field of
 //! view 42.75 degrees.
+//!
+//! Blows and spells shake it: [`CameraShake`] holds the shakes of the effect data (`fx_shake_cameras`), `follow_player` adds
+//! their sum to the pose.
 
 use aa_ui::UiBackgroundCamera;
 use aa_ui::render::UiCamera;
@@ -159,8 +162,106 @@ pub fn orbit_input(
     }
 }
 
+/// How strong the shakes of the effect data are here: the data is made for a camera that sits in the head of the character,
+/// this one is 4 m behind it, so a full shake would throw the whole scene around.
+const SHAKE_SCALE: f32 = 0.5;
+/// The most a shake may move (m) or turn (degrees) the camera, whatever the data says.
+const SHAKE_MAX_SHIFT: f32 = 0.2;
+const SHAKE_MAX_ANGLE: f32 = 2.0;
+/// Shakes running at once; the oldest goes when there are more.
+const SHAKES: usize = 6;
+
+/// The camera shakes that are running. A shake is a wave that alternates every `step` seconds (the data's `frequency`) between
+/// two extremes, each a little off by `randomness`, and fades out linearly over `duration`.
+#[derive(Resource, Default)]
+pub struct CameraShake {
+    active: Vec<Running>,
+    /// Counts the shakes, so that two of them do not wobble alike.
+    count: u32,
+}
+
+struct Running {
+    ang: Vec3,
+    shift: Vec3,
+    step: f32,
+    randomness: f32,
+    duration: f32,
+    age: f32,
+    seed: u32,
+}
+
+/// A number in 0..1 from `x`.
+fn hash01(mut x: u32) -> f32 {
+    x = x.wrapping_mul(0x9E37_79B1) ^ (x >> 15);
+    x = x.wrapping_mul(0x85EB_CA6B) ^ (x >> 13);
+    x = x.wrapping_mul(0xC2B2_AE35) ^ (x >> 16);
+    (x & 0xFFFF) as f32 / 65535.0
+}
+
+impl Running {
+    /// The wave (-1..1) of one axis at the shake's age.
+    fn wave(&self, axis: u32) -> f32 {
+        let x = self.age / self.step;
+        let k = x.floor() as u32;
+        let sample = |k: u32| {
+            let sign = if (k + axis).is_multiple_of(2) { 1.0 } else { -1.0 };
+            sign * (1.0 - self.randomness * hash01(self.seed ^ k.wrapping_mul(31) ^ axis.wrapping_mul(0x51)))
+        };
+        let f = x - x.floor();
+        let smooth = f * f * (3.0 - 2.0 * f);
+        sample(k) + (sample(k + 1) - sample(k)) * smooth
+    }
+}
+
+impl CameraShake {
+    /// Starts a shake: `ang` in degrees and `shift` in metres (cry axes, the data's amplitudes), `frequency` the seconds
+    /// between the two extremes of the wave.
+    pub fn add(&mut self, ang: Vec3, shift: Vec3, frequency: f32, randomness: f32, duration: f32) {
+        if duration <= 0.0 {
+            return;
+        }
+        if self.active.len() >= SHAKES {
+            self.active.remove(0);
+        }
+        self.count = self.count.wrapping_add(1);
+        self.active.push(Running {
+            ang,
+            shift,
+            step: frequency.max(0.03),
+            randomness: randomness.clamp(0.0, 1.0),
+            duration,
+            age: 0.0,
+            seed: self.count.wrapping_mul(0x2545_F491),
+        });
+    }
+
+    /// Moves the shakes on by `dt` seconds; returns the camera's displacement in its own axes and the turn.
+    pub fn advance(&mut self, dt: f32) -> (Vec3, Quat) {
+        let mut shift = Vec3::ZERO;
+        let mut ang = Vec3::ZERO;
+        for s in &mut self.active {
+            s.age += dt;
+            let fade = (1.0 - s.age / s.duration).max(0.0);
+            let w = |axis| s.wave(axis) * fade * SHAKE_SCALE;
+            shift += Vec3::new(s.shift.x * w(0), s.shift.y * w(1), s.shift.z * w(2));
+            ang += Vec3::new(s.ang.x * w(3), s.ang.y * w(4), s.ang.z * w(5));
+        }
+        self.active.retain(|s| s.age < s.duration);
+        // cry x is right, y forward (into the screen), z up; a turn about x tilts, about y rolls, about z yaws
+        let shift = (Vec3::new(shift.x, shift.z, -shift.y)).clamp_length_max(SHAKE_MAX_SHIFT);
+        let ang = ang.clamp(Vec3::splat(-SHAKE_MAX_ANGLE), Vec3::splat(SHAKE_MAX_ANGLE)).map(f32::to_radians);
+        (shift, Quat::from_euler(EulerRot::YXZ, ang.z, ang.x, ang.y))
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.active.is_empty()
+    }
+}
+
 /// Puts the camera on its orbit around the player; keeps it above the ground.
 pub fn follow_player(
+    time: Res<Time>,
+    mut shake: ResMut<CameraShake>,
     player: Query<&Mover, With<LocalPlayer>>,
     mut camera: Query<(&OrbitCamera, &mut Transform)>,
     terrain: Res<TerrainQuery>,
@@ -175,5 +276,60 @@ pub fn follow_player(
         let pivot = cry_to_bevy(mover.pos + Vec3::Z * PIVOT_HEIGHT);
         t.look_at(pivot, Vec3::Y);
     }
+    if !shake.is_idle() {
+        let (shift, turn) = shake.advance(time.delta_secs());
+        t.translation += t.rotation * shift;
+        t.rotation *= turn;
+    }
     *transform = t;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shake_moves_the_camera_and_dies_out() {
+        let mut shake = CameraShake::default();
+        assert!(shake.is_idle());
+        shake.add(Vec3::new(2.0, 4.0, 2.0), Vec3::new(0.0, 0.2, 0.0), 0.01, 0.3, 1.3);
+        let mut moved = 0.0f32;
+        let mut t = 0.0;
+        while t < 1.0 {
+            let (shift, turn) = shake.advance(1.0 / 60.0);
+            assert!(shift.length() <= SHAKE_MAX_SHIFT + 1e-6);
+            assert!(turn.is_normalized());
+            moved = moved.max(shift.length()).max(turn.angle_between(Quat::IDENTITY));
+            t += 1.0 / 60.0;
+        }
+        assert!(moved > 0.001, "{moved}");
+        assert!(!shake.is_idle());
+        for _ in 0..30 {
+            shake.advance(1.0 / 60.0);
+        }
+        assert!(shake.is_idle());
+        assert_eq!(shake.advance(0.1), (Vec3::ZERO, Quat::IDENTITY));
+    }
+
+    #[test]
+    fn a_huge_shake_is_held_in() {
+        let mut shake = CameraShake::default();
+        shake.add(Vec3::splat(40.0), Vec3::splat(5.0), 0.05, 0.0, 2.0);
+        for _ in 0..60 {
+            let (shift, turn) = shake.advance(1.0 / 60.0);
+            assert!(shift.length() <= SHAKE_MAX_SHIFT + 1e-6);
+            assert!(turn.angle_between(Quat::IDENTITY) < 0.2);
+        }
+    }
+
+    #[test]
+    fn only_a_few_shakes_run_at_once() {
+        let mut shake = CameraShake::default();
+        for _ in 0..20 {
+            shake.add(Vec3::ONE, Vec3::ONE, 0.05, 0.1, 1.0);
+        }
+        assert_eq!(shake.active.len(), SHAKES);
+        shake.add(Vec3::ONE, Vec3::ONE, 0.05, 0.1, 0.0);
+        assert_eq!(shake.active.len(), SHAKES);
+    }
 }
