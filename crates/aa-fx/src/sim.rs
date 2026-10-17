@@ -827,8 +827,14 @@ impl EmitterState {
                 }
                 Facing::Free => {
                     let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
-                    let r = ctx.rot * c2b(q * Vec3::X);
-                    let u = ctx.rot * c2b(q * Vec3::Z);
+                    let mut rot = ctx.rot;
+                    if orient && let Some(dir) = frame.to_world_dir(p.vel).try_normalize() {
+                        // CryEngine aligns the texture's X axis before applying the particle's angles. Do not project
+                        // onto the camera or ignore small speeds: several authored rings move at only 0.001 m/s.
+                        rot = Mat3::from_quat(Quat::from_rotation_arc(rot.x_axis, dir)) * rot;
+                    }
+                    let r = rot * c2b(q * Vec3::X);
+                    let u = rot * c2b(q * Vec3::Z);
                     rx = inv.transform_vector3(r) * hx;
                     uy = inv.transform_vector3(u) * hy;
                     shift = Vec3::ZERO;
@@ -1461,6 +1467,56 @@ mod tests {
         // the camera looks along -z, so a camera facing ribbon is wide in the plane of x / y, not along z
         let cam = run("");
         assert!(cam.z < 0.05, "camera ribbon extent {cam:?}");
+    }
+
+    #[test]
+    fn a_free_sprite_orients_its_texture_x_axis_to_even_a_slow_velocity() {
+        let budget = AtomicI32::new(10_000);
+        for bound in [false, true] {
+            for speed in [0.001_f32, -0.001, 3.0] {
+                let mut s = sim(&format!(
+                    r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Free" OrientToVelocity="true" Speed="{speed}" FocusGravityDir="true" BindToEmitter="{bound}""#
+                ));
+                let mut c = ctx(&budget);
+                let rotation = Quat::from_rotation_z(0.7) * Quat::from_rotation_y(0.4);
+                c.rot = Mat3::from_quat(rotation);
+                c.global = Affine3A::from_scale_rotation_translation(Vec3::splat(2.0), rotation, Vec3::new(4.0, 2.0, -3.0));
+                s.step(&c);
+                let e = &s.emitters[0];
+                assert_eq!(e.units, 1);
+                let edge = c.global.transform_vector3(Vec3::from(e.pos[1]) - Vec3::from(e.pos[0])).normalize();
+                // FocusGravityDir emits vertically in world space, even on a rotated, bound emitter.
+                let expected = Vec3::Y * speed.signum();
+                assert!(edge.dot(expected) > 0.999, "bound={bound}, speed={speed}: {edge:?}");
+                let up = c.global.transform_vector3(Vec3::from(e.pos[3]) - Vec3::from(e.pos[0])).normalize();
+                assert!(edge.dot(up).abs() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn a_free_sprite_keeps_its_roll_after_velocity_alignment() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Free" OrientToVelocity="true" Speed="3" FocusGravityDir="true" InitAngles="90""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        let e = &s.emitters[0];
+        let right = (Vec3::from(e.pos[1]) - Vec3::from(e.pos[0])).normalize();
+        let up = (Vec3::from(e.pos[3]) - Vec3::from(e.pos[0])).normalize();
+        assert!(right.dot(Vec3::Y) > 0.999, "{right:?}");
+        assert!(up.dot(Vec3::Z) > 0.999, "the 90 degree roll turns the card's up into +Z: {up:?}");
+    }
+
+    #[test]
+    fn a_stationary_free_sprite_keeps_its_authored_orientation() {
+        let budget = AtomicI32::new(10_000);
+        let attrs = r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Free" Speed="0" InitAngles="30,70,20""#;
+        let mut plain = sim(attrs);
+        let mut oriented = sim(&format!(r#"{attrs} OrientToVelocity="true""#));
+        let c = ctx(&budget);
+        plain.step(&c);
+        oriented.step(&c);
+        assert_eq!(plain.emitters[0].pos, oriented.emitters[0].pos);
     }
 
     #[test]

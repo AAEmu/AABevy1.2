@@ -65,8 +65,9 @@ A continuous emitter emits its first particle at once when it starts (not one pe
 visible from its first frame). A non continuous emitter bursts `Count`; `PulsePeriod` restarts it; `EmitterLifeTime` ends it;
 `Enabled=false` emitters still hand their children to `SpawnIndirection` triggers (`ParentStart`, `ParentDeath`).
 The focus axis is the emitter's cry +Y (up with `FocusGravityDir`); `Acceleration` is in world space; a sprite's `Size` is its
-radius (the quad runs from -Size to +Size, see "Round 4"), a mesh's scales the model; with `OrientToVelocity` or `Stretch` the sprite's long axis follows the velocity (`Stretch` = seconds of travel), otherwise
-the quad faces the camera and spins with `RotationRate`.
+radius (the quad runs from -Size to +Size, see "Round 4"), a mesh's scales the model. A camera-facing sprite's long axis follows
+the velocity with `OrientToVelocity` or `Stretch` (`Stretch` = seconds of travel); otherwise it spins with `RotationRate`.
+Free sprites align their texture X axis with `OrientToVelocity` (see below).
 
 Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (tiles, first tile, variants, frame animation),
 `BlendType`, `Facing` (camera, free, flat for Bottom / Water / Decal / Horizontal / Terrain), `OrientToVelocity`, `Size`/`SizeX`/`SizeY`/`SizeZ` with age curves, `Stretch`,
@@ -233,9 +234,6 @@ Things that look odd and are, as far as the data goes, authored (not changed):
 * Thwart (`p_skill_will.sprit_charge_launch`): `dissonance_hit1` shoots ten `glow_big_velocity3` beams, `SizeY 5`, `Speed 25`; they overlap into bright white
   bars when five copies are stacked in a strip (one copy is a starburst), and `dissonance_hit2/3` are 20 m wide rings (`Size` 11 and 10).
 * `hill_attack_form` is made of tall box-like light pillars; `ground_restriction_hit` is a large crack burst with rocks.
-* `p_skill_love.resurrection_launch/p_skill_line03` (`Facing = Free` with `OrientToVelocity`): the sheets have random angles here
-  and are cut by the ground plane (diagonal edges at their feet). The engine probably aligns them with the velocity; only 38
-  emitters combine the two without a tail (provoke, hurbal_remedy, line03, ...), so it is not done.
 * `shock_form2` is a mesh particle that lives 0.03 s and is continuous with the default count, so it flickers (3 % of the time).
   `st1000b` / `st1000c`, the Shoot Arrow and Bow Attack effect, draw the mesh `fx_arrowhead_tehgin.cgf` with `fx_arrow_a1`
   (Illum, `Diffuse` black, fresnel only, texture `refract_tile_09`), so it shows nothing here; with a black diffuse the real
@@ -243,11 +241,34 @@ Things that look odd and are, as far as the data goes, authored (not changed):
 * No data defines a loot sparkle: no effect in the libraries or the database (`fx_items`, `doodad_*`, `skills`) is named for it
   (`x2_sounds.particles` has pickup sounds only), so it is the client's or the doodad's.
 
-Open question, not changed: the direction of `OrientToVelocity` sprites. This crate puts the texture's top (`v = 0`) in front, along
+Open question, not changed: the direction of camera-facing `OrientToVelocity` sprites. This crate puts the texture's top (`v = 0`) in front, along
 the velocity. Cloud, flame and dome textures (`cloud_type_f_velocity`, `fire_animated_06a_velocity`, `glow_big_velocity`, `sand_flowup`)
 have their content in the upper half of the sprite and fit that, while `ef_glowline01_r` (a comet with its bright head at the bottom)
 and the beam textures `glow_big_velocity2/3` would fit the opposite. A client capture of a velocity beam (Thwart) would decide
 (`data/extract/aa-fx/r5/velside.py` lists the textures).
+
+## Free sprite velocity alignment
+
+`Facing = Free` now honors `OrientToVelocity` for sprites without a tail. The emitter's texture X axis aligns to the world-space
+velocity, then `InitAngles`, `RandomAngles` and their rotation rates turn the particle within that frame. This follows the
+[CryEngine 3 Particle Reference](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1114113/pages/1048585), which
+specifies texture X alignment with the rotation parameters applied afterward. The card stays in 3D space as the camera moves.
+The `Facing = Camera` convention discussed above is unchanged.
+
+The velocity is converted out of the bound emitter frame first. Small nonzero velocities still align: Provoke and the housing
+construction effects use `Speed = 0.001` or `0.01`, below the camera sprite's 0.02 m/s threshold. Zero velocity preserves the
+authored free orientation. This corrects the ignored flag on resurrection's `p_skill_line03`, Provoke, construction light lines,
+and moving debris; it requires no client API change. The independently authored sword ribbons retain their blade-width axes.
+
+Regression tests cover slow upward and downward travel, rotated and bound emitters, the particle's roll after alignment, and
+stationary cards. All 27 crate tests pass. There is no real-client resurrection/Provoke capture in `reference/`; this behavior is
+checked against the engine documentation and particle-library data rather than a claimed visual match.
+
+Viewed example captures are in `shots/aa-fx/r7/`: `resurrection_free_before.png` / `resurrection_free_after.png` isolate
+`p_skill_line03` in five staggered copies (0.12 s apart). The formerly parallel columns now turn with each particle's travel.
+`provoke_free_before.png` / `provoke_free_after.png` check the slow ring emitters remain flat with their authored angles, and
+`resurrection_full.png` checks the complete effect at scale 0.35. The copied dev example logged 398 fps for the isolated
+resurrection strip (27 particles, simulation 0.029 ms, upload 0.003 ms), 389 fps for Provoke, and 362 fps for the complete effect.
 
 ## Coordinates
 
