@@ -329,10 +329,57 @@ of the visible texels (alpha >= 64) into the cut ones (8 texels) and rebuilds th
 alpha; the highlight map is multiplied by the colour map's coverage. A dark hair also needs a dark
 highlight: before it was a fixed strength and black hair turned silver (`PrimarySpecColor`).
 
-Not mapped (no `StandardMaterial` equivalent): the SSS map, `Environment` cube maps per
+Not mapped (no `StandardMaterial` equivalent): the skin SSS map, `Environment` cube maps per
 material (scene-level: use `stage::environment_light`), detail maps and blend layers (surveyed:
 they occur on terrain and a few props only; no character material uses them), vertex bending,
 Kajiya-Kay's strand direction (the streaks come from the strand map, not from a tangent).
+
+### Static UCC cloth (`shade/ucc.rs`)
+
+`Prep::convert` now bakes the static `Cloth` UCC colour composition in both shading modes.
+The original pak sources define the mapping:
+
+* `shaders/cloth.ext`: `%X2_UCC_MASK=0x100000`, `%X2_UCC_BACKGROUND_MASK=0x200000`,
+  `%X2_IGNORE_UCC_BACKGROUND_MASK=0x400000`; the galleon's remaining `0x40000000` is wind.
+* `shaders/hwscripts/cryfx/cloth.cfx:384–467`: default mask colours are the RGB basis, scale is
+  one, offsets zero. `532–539` transforms mesh UV by the SubSurface TexMod, then computes crest
+  UV `tc * uccScale - uccOffset` and background UV `(tc-uccAddOffset)/(1-uccAddOffset)`.
+* `cloth.cfx:735–753` remaps background channels to `saturate(r*red+g*green+b*blue)`, only when
+  both UCC/background flags are set and ignore-background is clear. It alpha blends the
+  SubSurface crest only at strict `0 < crestUV.x,y < 1`. Original Diffuse alpha survives both.
+* `cloth.cfx:90` and `FXSamplerDefs.cfi:4,14`: Custom and SubSurface have **no sRGB lookup**;
+  ordinary Diffuse does. The baked image is linear `Rgba8Unorm`, with linear colour mips and
+  each original Diffuse alpha mip. Base colour, normals, culling and opacity remain material data.
+
+The dock's `objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl`, submaterial 3 (`ucc`),
+uses `ucc_pattern04.dds`, red `(0.21568629,0.21568629,0.21568629)`, green/blue white, and
+SubSurface `ucc_logo32.dds` at scale `(3,3)`, offset `(1,1)`. This turns the raw rainbow into
+neutral patterned cloth with the authored crest in the middle third. All UCC triangles of
+`galleon_deco_sail01.cgf`, including its LODs, have UVs in 0..1 (verified from the pak).
+
+The native `$CustomMap` is a runtime binding whose default was **not recovered**. This static
+path uses an explicit material Custom texture when present, otherwise the authored Diffuse
+pattern; that fallback is supported here, not claimed as a recovered native default. Dynamic
+player crest download/binding is not implemented. The bake covers one UV square; repeated UVs
+outside it, animated TexMods, rotated SubSurface TexMods and nonidentity Diffuse TexMods need
+a shader path. Unsupported static transforms keep the existing material conversion. Cloth
+lighting, fuzz and wind remain separate from this colour composition.
+
+`cargo run -p aa-cry --example ucc_cloth -- --shot shots/aa-cry/ucc_cloth.png --shot-after 8`
+shows the original sail mesh with raw Diffuse/control and the composition side by side, plus the
+source mask, composed texture and crest. It uses white, unlit factors to isolate this operation.
+The installed `reference/ingame/spawn/real.png` contains no dock sail, so there is no matching
+real-client sail capture for a pixel comparison; `shots/aa-world/lights/on.png` is the previous
+Bevy dock control showing the raw rainbow. Focused tests cover the flags/defaults, linear
+palette, strict crest clipping/alpha, authored UV controls, alpha mips, cache/conversion and the
+real galleon recipe/UV domain.
+
+Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 59 tests, with one exhaustive
+material audit intentionally ignored; eight of the passing tests cover UCC. The fixture build
+passes, and the inspected 1920x1080 capture shows neutral braided cloth and the centered sun
+crest alongside the raw RGB control. `aa-dev` reports 356.7–379.4 FPS (2.66–2.82 ms) in this
+unlit diagnostic scene. The window exits after capture. No aa-client integration is required:
+world material preparation already uses this conversion path.
 
 ## Character back lights (`shade::backlight`)
 
@@ -455,7 +502,7 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
 
 ## Known gaps
 
-* The SSS map, per-material environment maps, detail and blend layers are not mapped (see above);
+* The skin SSS map, per-material environment maps, detail and blend layers are not mapped (see above);
   vegetation bending and wind are not applied. Eye iris colours are composed by aa-anim; a
   generic `IrisColor` bake is missing.
 * Silver armour is still duller than the captures (metal `F0` is `0.216 * texture`; a boost would
