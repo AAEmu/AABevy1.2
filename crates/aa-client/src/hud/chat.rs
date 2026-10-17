@@ -90,7 +90,7 @@ pub fn route_chat(
 }
 
 /// `--hud-key NAME T` / `--hud-type TEXT T`: scripted keyboard for unattended runs (`enter`,
-/// `escape`, `backspace`, `tab`, `slot3` ...; typed text), at T seconds after the HUD is up.
+/// `escape`, `backspace`, `tab`, `slot3`, `f` / `g` (loot) ...; typed text), at T seconds after the HUD is up.
 #[derive(Resource, Default)]
 pub struct ScriptedKeys {
     steps: Vec<(f32, String, bool)>,
@@ -99,6 +99,8 @@ pub struct ScriptedKeys {
     tab: bool,
     /// A scripted `slotN` (action bar slot N, 1 based) waits for `panels::action_keys`.
     slot: Option<usize>,
+    /// A scripted `f` (loot all, `Some(true)`) or `g` (open the loot) waits for `loot::loot_input`.
+    loot: Option<bool>,
 }
 
 impl ScriptedKeys {
@@ -108,6 +110,10 @@ impl ScriptedKeys {
 
     pub fn take_slot(&mut self) -> Option<usize> {
         self.slot.take()
+    }
+
+    pub fn take_loot(&mut self) -> Option<bool> {
+        self.loot.take()
     }
 
     pub fn from_args() -> ScriptedKeys {
@@ -122,7 +128,7 @@ impl ScriptedKeys {
         }
         steps.sort_by(|a, b| a.0.total_cmp(&b.0));
         steps.reverse(); // pop from the end
-        ScriptedKeys { steps, started: None, tab: false, slot: None }
+        ScriptedKeys { steps, started: None, tab: false, slot: None, loot: None }
     }
 }
 
@@ -178,6 +184,8 @@ pub fn chat_keys(
             rt.type_text(&v);
         } else if let Some(n) = v.strip_prefix("slot").and_then(|n| n.parse::<usize>().ok()) {
             script.slot = Some(n.saturating_sub(1));
+        } else if v == "f" || v == "g" {
+            script.loot = Some(v == "f");
         } else if let Some(k) = ui_key(&v) {
             if focus.0 || rt.focus().is_some() {
                 rt.key(&k);

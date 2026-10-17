@@ -133,6 +133,23 @@ X2Player.GetBmPoint = function(self) return S().bm_point end
 X2Util.GetMyMoneyString = function(self) return S().money end
 -- The cast bars (player, target) ask what a unit is casting: spell, total ms, ms so far (cast.rs).
 X2Unit.UnitCastingInfo = function(self, unit) return HUD.casting_info(unit) end
+
+-- The loot window (x2ui/loot): the rows are the items left in the corpse the player opened (loot.rs).
+X2Loot.GetNumLootItems = function(self) return HUD.loot_count() end
+X2Loot.GetLootingBagItemInfo = function(self, k)
+  local id, count, grade = HUD.loot_item(k)
+  if id == nil then return nil end
+  if id == 500 then return { money = count, itemType = 500, itemGrade = 0 } end
+  return { name = HUD.item_info(id), itemType = id, itemGrade = grade, stackSize = count }
+end
+X2Loot.GetLootingBagItemTooltipText = function(self, k)
+  local id, count, grade = HUD.loot_item(k)
+  if id == nil then return {} end
+  if id == 500 then return { isMoney = true } end
+  return HUD.item_tip(id, grade, count) or {}
+end
+X2Loot.LootItem = function(self, k) HUD.loot_take(k) end
+X2Loot.CloseLoot = function(self) HUD.loot_close() end
 -- Numbers as text: "1234567" -> "1,234,567" (the chat prints the XP gained so); decimal strings add as numbers
 -- (the gains of the floating "XP +N" text pile up while it shows).
 X2Util.MakeMarkedCiphersStr = function(self, text, ciphers)
