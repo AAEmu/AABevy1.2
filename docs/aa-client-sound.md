@@ -110,8 +110,7 @@ frame time of the in-game run is the same with and without (13 ms, the renderer)
   `login_stage:*` winds): the create scenery (`login/create/scenery.rs`, not mine) loads `login2` itself; its owner calls
   `aa_world::objects::sounds::spawn_cell(&mut commands, cell, &objects.sounds)` (`objects` is the `CellObjects` it already has)
   and despawns the returned entities with the scenery. The character list's stage has no placed sounds.
-* Reverb: only read (`ListenerReverb`); `aa-audio` has no reverb.
-* Moods other than default / combat / death; `OutdoorOnly` (the client has no indoor test); an ambient volume with no area is
+* Moods other than default / combat / death / underwater / indoor; an ambient volume with no area is
   played as a point of its `OuterRadius`; `IsPlaying` always answers false; the volume sliders are not persisted.
 * Zone changes and the combat crossfade follow the data but were not walked through end to end (no scripted movement); the
   pack lookup has unit tests (`sound::zone`).
@@ -120,5 +119,9 @@ frame time of the in-game run is the same with and without (13 ms, the renderer)
 
 * A music-ended notification or query (the director reads the event length from the FEV instead and keeps its own clock).
 * `Engine::is_playing(voice)` (for `X2Sound:IsPlaying`).
-* Reverb (the 49 presets of `libs/reverbpresets`), per-category low-pass and the mood mixes of `soundmoods.xml`.
 * Event lookups parse the FEV project on first use (a few ms; the client starts one thread for the lengths).
+
+Area reverb is now applied through `sound/reverb.rs` and `Engine::set_reverb`. `sound/moods.rs` applies the original
+default/combat/death/underwater/indoor mixes and category low-pass settings; indoor state follows hall/room/cave
+reverb volumes. This replaces the earlier read-only reverb status above. Missing volume-slider persistence and
+the additional mood triggers remain open.

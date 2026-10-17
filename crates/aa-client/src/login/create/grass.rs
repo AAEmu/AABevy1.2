@@ -50,7 +50,7 @@ impl From<&GrassExt> for GrassData {
 
 impl MaterialExtension for GrassExt {
     fn fragment_shader() -> ShaderRef {
-        "embedded://aa_client/login/create/grass.wesl".into()
+        ShaderRef::Path(bevy::asset::AssetPath::from(format!("embedded://{}/login/create/grass.wesl", env!("CARGO_CRATE_NAME"))))
     }
 }
 
