@@ -87,14 +87,10 @@ fn grade_id(order: i64) -> i32 {
 }
 
 /// The info of an item as `X2Bag:GetBagItemInfo` returns it: `grade` is the number the server and the icons
-/// use (1 basic, 2 grand ...; 0 takes the item's fixed grade or basic), `count` the stack.
+/// use for display (0 crude, 1 basic, 2 grand ...); absent grade uses the item's fixed grade or basic.
 pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Option<i64>, count: Option<i64>, instance: Instance) -> mlua::Result<Option<Table>> {
     let Some(info) = game.items.get(&id) else { return Ok(None) };
-    let grade = match grade.unwrap_or(0) {
-        0 if info.fixed_grade > 0 => info.fixed_grade,
-        0 => 1,
-        g => g,
-    };
+    let grade = grade.unwrap_or_else(|| i64::from(super::store::ui_grade(info.fixed_grade.max(0) as u8)));
     let t = lua.create_table()?;
     t.raw_set("itemType", id)?;
     t.raw_set("lookType", id)?;
@@ -124,8 +120,8 @@ pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Op
     t.raw_set("level_requirement", info.level)?;
     t.raw_set("level_limit", info.level_limit)?;
     t.raw_set("price", info.price)?;
-    t.raw_set("refund", if info.refund > 0 { info.refund } else { info.price })?;
-    t.raw_set("sellable", info.sellable && info.price > 0)?;
+    t.raw_set("refund", game.stores.refund(info.refund, grade_id(grade).clamp(0,255) as u8))?;
+    t.raw_set("sellable", info.sellable)?;
     equipment_stats(lua, game, state, &t, id, grade_id(grade), instance)?;
     Ok(Some(t))
 }

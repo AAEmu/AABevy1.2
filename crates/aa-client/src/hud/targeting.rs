@@ -120,7 +120,7 @@ pub fn escape_key(
 ) {
     let Some(rt) = rt else { return };
     let escape = script.take_escape() || keys.just_pressed(KeyCode::Escape);
-    if focus.0 || rt.focus().is_some() || !escape {
+    if focus.0 || rt.keyboard_captured() || !escape {
         return;
     }
     if rt.holding() {

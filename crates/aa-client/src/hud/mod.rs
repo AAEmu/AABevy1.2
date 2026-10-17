@@ -55,6 +55,7 @@ mod ring;
 mod session;
 mod skillbook;
 mod stats;
+mod store;
 mod targeting;
 mod tipcalc;
 mod tipitem;
@@ -74,6 +75,10 @@ use crate::login::host;
 /// action bar hotkeys, ...) must not fire. Updated every frame after the UI processed its input.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HudKeyboardFocus(pub bool);
+
+/// UI key capture and consumption are current before any gameplay input runs.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HudInputReady;
 
 pub use input::HudPointerOverUi;
 
@@ -268,6 +273,7 @@ impl Plugin for HudPlugin {
         markers::plugin(app);
         drag::plugin(app);
         party::plugin(app);
+        store::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
@@ -297,6 +303,7 @@ impl Plugin for HudPlugin {
                     .after(bevy::input::InputSystems)
                     .run_if(in_state(Screen::InGame)),
             )
+            .add_systems(Update, (mirror_keyboard_focus, input::swallow_keys).chain().after(aa_ui::UiInput).in_set(HudInputReady).run_if(in_state(Screen::InGame)))
             .add_systems(
                 Update,
                 (
@@ -304,10 +311,10 @@ impl Plugin for HudPlugin {
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
                     (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::talk_input, dialog::handle_dialog).chain(), chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
-                    mirror_keyboard_focus,
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )
+                    .after(HudInputReady)
                     .chain()
                     .run_if(in_state(Screen::InGame)),
             );

@@ -563,3 +563,54 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
   `HudPointerOverUi.0` (done in round 2).
 * aa-ui: the roadmap markers in `AAUI.RoadMap` still take the image
   fraction (`markers.lua` knows the image frames); a window fraction would save that.
+
+
+## Commerce and keyboard integration (2026-10-17)
+
+`hud/store.rs` loads original merchant packs/goods from the read-only database, keeping the native
+first-item-wins catalog order and stock grade IDs. Native currency mapping treats siege packs as
+honor stores. The original purchase/cart/sell/buyback windows call real aa-net shop commands;
+inventory and money follow server item tasks. The buyback list is refreshed after STORE_SELL=53
+and STORE_BUY=54. Local and server state are not optimistically changed.
+
+Grade IDs on the wire are database IDs (0 Basic, 1 Crude). Lua/icon/tooltips use grade_order
+(0 Crude, 1 Basic); bag, equipment, action items, loot, commerce and item chat now convert at that
+boundary. Explicit display grade zero stays Crude. Refund uses the actual grade multiplier and
+per-unit truncation; zero refund is retained even for a priced item.
+
+`hud/bank.lua` feeds the original lazy bank window with server slots/items, balances and money
+requests. Bag/bank clicks, right-click transfer and partial-stack dragging share inventory move
+planning and real item identity. Bank filter tabs are independent of bag tabs and are saved in the
+same account-local settings file. Bank capacity/items are pushed separately; original BANK_UPDATE
+and PLAYER_BANK_MONEY events refresh their widgets. NPC context ends on target, range, logout or
+window close. Remaining: sorting, expansion dialog/certificate flow, full lock/new-item behavior,
+merchant service choice for NPCs that also offer quests, and unsupported AA-cash services.
+
+Original PLAYER_MONEY receives `(numeric_delta, decimal_delta_string)`; the balance is read via
+GetMyMoneyString. A real sell/buyback exposed the former balance-string argument error; the new
+regression checks both money events and current state. Native keyboard/modifier hooks are restored
+after fallback scripts. `HudInputReady` follows aa-ui's input set and consumes UI-owned keys before
+camera, movement and HUD bindings, including the release frame and keys held after capture ends.
+Actual account-backed key rebinding and gameplay action maps remain a following milestone.
+
+Validation: client 103 passed, 13 intentional data/timing probes ignored; live commerce
+through original submit/rebuy handlers confirmed 33-copper sale, same-item buyback and a 25-copper
+purchase. `merchant-final_09.png` and `bank-final2_04.png` were inspected at 1920?1080. The original money
+edits/deposit/withdraw handlers confirmed 8?3?8 bag copper and 0?5?0 bank copper. The paid seed
+moved bag slot4?bank slot0?bag slot4 with UID16777730 throughout. Bank tab Stored was saved
+separately from the bag. Logs have zero Lua handler errors; representative in-game FPS was
+70?87 on this shared machine. The catalog/rebuy flow remains the original Lua with live data.
+
+The original bank injector calls native `X2Bank:MoveToEmptyBagSlot`, now implemented explicitly;
+replacing a similarly named Lua helper before stage load is insufficient because the stage defines
+its own helper. Sale cart locks retain the exact instance ID as a decimal string. The queued sale
+refuses an item that replaced the marked slot; clearing UI locks after Submit cannot erase the
+queued identity. Captured UID is never passed through a floating-point Lua number.
+
+
+A second real session checked cart lock/unlock and same-UID buyback with two sold entries, selecting
+the matching original rebuy row rather than assuming list chronology. Closing the window ended
+its NPC context. A later `--enter-world` cold run opened the bank with the saved sixth Stored tab,
+zero script/handler errors and 79?84 FPS (`cold-bank.png`). Full-flow and direct world entry both
+work with actual spawned data. The earlier empty-data `run_stage(World)` unit probe hang was not
+reproduced by this actual cold path; it is not counted as a client-flow failure.

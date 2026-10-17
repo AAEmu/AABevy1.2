@@ -172,71 +172,78 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
             Ok(())
         })?,
     )?;
-    let s = store.clone();
-    net.raw_set(
-        "bag_tabs",
-        lua.create_function(move |lua, ()| {
-            let s = s.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(bag) = s.data.get("bag") else {
-                return Ok(None);
-            };
-            let out = lua.create_table()?;
-            let tabs = lua.create_table()?;
-            if let Some(items) = bag.get("tabs").and_then(Json::as_array) {
-                for tab in items.iter().take(32) {
-                    let Some(name) = tab.get("name").and_then(Json::as_str) else {
-                        continue;
-                    };
-                    let t = lua.create_table()?;
-                    t.set("name", name)?;
-                    t.set("icon", tab.get("icon").and_then(Json::as_i64).unwrap_or(1))?;
-                    let groups = lua.create_table()?;
-                    if let Some(items) = tab.get("groups").and_then(Json::as_array) {
-                        for group in items.iter().take(256).filter_map(Json::as_i64) {
-                            groups.raw_push(group)?;
+    for (namespace, get_name, save_name) in [
+        ("bag", "bag_tabs", "save_bag_tabs"),
+        ("bank", "bank_tabs", "save_bank_tabs"),
+    ] {
+        let s = store.clone();
+        net.raw_set(
+            get_name,
+            lua.create_function(move |lua, ()| {
+                let s = s.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(bag) = s.data.get(namespace) else {
+                    return Ok(None);
+                };
+                let out = lua.create_table()?;
+                let tabs = lua.create_table()?;
+                if let Some(items) = bag.get("tabs").and_then(Json::as_array) {
+                    for tab in items.iter().take(32) {
+                        let Some(name) = tab.get("name").and_then(Json::as_str) else {
+                            continue;
+                        };
+                        let t = lua.create_table()?;
+                        t.set("name", name)?;
+                        t.set("icon", tab.get("icon").and_then(Json::as_i64).unwrap_or(1))?;
+                        let groups = lua.create_table()?;
+                        if let Some(items) = tab.get("groups").and_then(Json::as_array) {
+                            for group in items.iter().take(256).filter_map(Json::as_i64) {
+                                groups.raw_push(group)?;
+                            }
                         }
+                        t.set("groups", groups)?;
+                        tabs.raw_push(t)?;
                     }
-                    t.set("groups", groups)?;
-                    tabs.raw_push(t)?;
                 }
-            }
-            out.set("tabs", tabs)?;
-            out.set(
-                "selected",
-                bag.get("selected").and_then(Json::as_i64).unwrap_or(1),
-            )?;
-            Ok(Some(out))
-        })?,
-    )?;
-    net.raw_set(
-        "save_bag_tabs",
-        lua.create_function(move |_, (tabs, selected): (Table, u32)| {
-            let mut items = Vec::new();
-            for t in tabs.sequence_values::<Table>().take(32) {
-                let t = t?;
-                let name: String = t.get("name")?;
-                if name.len() > 256 {
-                    continue;
+                out.set("tabs", tabs)?;
+                out.set(
+                    "selected",
+                    bag.get("selected").and_then(Json::as_i64).unwrap_or(1),
+                )?;
+                Ok(Some(out))
+            })?,
+        )?;
+        let s = store.clone();
+        net.raw_set(
+            save_name,
+            lua.create_function(move |_, (tabs, selected): (Table, u32)| {
+                let mut items = Vec::new();
+                for t in tabs.sequence_values::<Table>().take(32) {
+                    let t = t?;
+                    let name: String = t.get("name")?;
+                    if name.len() > 256 {
+                        continue;
+                    }
+                    let groups: Table = t.get("groups")?;
+                    let groups = groups
+                        .sequence_values::<i64>()
+                        .take(256)
+                        .collect::<mlua::Result<Vec<_>>>()?;
+                    items.push(json!({"name":name,"icon":t.get::<i64>("icon")?,"groups":groups}));
                 }
-                let groups: Table = t.get("groups")?;
-                let groups = groups
-                    .sequence_values::<i64>()
-                    .take(256)
-                    .collect::<mlua::Result<Vec<_>>>()?;
-                items.push(json!({"name":name,"icon":t.get::<i64>("icon")?,"groups":groups}));
-            }
-            let bag = json!({"selected":selected.clamp(1, items.len() as u32 + 1),"tabs":items});
-            let mut s = store.lock().unwrap_or_else(|e| e.into_inner());
-            if s.data.get("bag") != Some(&bag) {
-                s.data.insert("bag".into(), bag);
-                s.dirty = true;
-            }
-            if let Err(e) = s.save() {
-                bevy::log::warn!("settings: bag save: {e:#}");
-            }
-            Ok(())
-        })?,
-    )?;
+                let bag =
+                    json!({"selected":selected.clamp(1, items.len() as u32 + 1),"tabs":items});
+                let mut s = s.lock().unwrap_or_else(|e| e.into_inner());
+                if s.data.get(namespace) != Some(&bag) {
+                    s.data.insert(namespace.into(), bag);
+                    s.dirty = true;
+                }
+                if let Err(e) = s.save() {
+                    bevy::log::warn!("settings: inventory tab save: {e:#}");
+                }
+                Ok(())
+            })?,
+        )?;
+    }
     Ok(())
 }
 
@@ -273,9 +280,12 @@ mod tests {
         lua.load("NET.option_set(35, 0.25); NET.option_set('35', 'named'); NET.save_settings()")
             .exec()?;
         lua.load("NET.option_set(35, 0.5); NET.save_settings(); NET.option_set(35, 0.9); NET.save_bag_tabs({{name='Supplies',icon=3,groups={1,7}}}, 2)").exec()?;
+        lua.load("NET.save_bank_tabs({{name='Stored',icon=4,groups={8}}},2)")
+            .exec()?;
         drop(lua);
         let lua = bind(Arc::new(Mutex::new(Store::open(path.clone()))))?;
         lua.load("assert(NET.option_get(35) == 0.5); assert(NET.option_get('35') == 'named'); local b=NET.bag_tabs(); assert(b.selected==2 and b.tabs[1].name=='Supplies' and b.tabs[1].groups[2]==7)").exec()?;
+        lua.load("local b=NET.bank_tabs(); assert(b.selected==2 and b.tabs[1].name=='Stored'); assert(NET.bag_tabs().tabs[1].name=='Supplies')").exec()?;
         // Use the actual bag/filter wrappers in a fresh HUD, as a stage switch/restart does.
         let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0)?;
         let bridge = std::rc::Rc::new(std::cell::RefCell::new(crate::hud::api::HudData::default()));

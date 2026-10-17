@@ -97,6 +97,7 @@ pub struct HudData {
     pub party: aa_net::Party,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
+    pub store: super::store::View,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -135,6 +136,7 @@ impl Default for HudData {
             party: Default::default(),
             party_pushed: None,
             character_id: 0,
+            store: Default::default(),
         }
     }
 }
@@ -198,6 +200,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     }
     // The fallback has its own option store. Restore the account-backed methods after it.
     crate::settings::install_options(lua)?;
+    aa_ui::lua::keyboard::install_input(lua)?;
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
@@ -209,6 +212,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::skillbook::install(lua, &hud, bridge)?;
     super::markers::install(lua, &hud)?;
     super::party::install(lua, &hud, bridge)?;
+    super::store::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
@@ -220,6 +224,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::skillbook::load_script(lua)?;
     super::dialog::load_script(lua)?;
     super::party::load_script(lua)?;
+    super::store::load_script(lua)?;
     crate::settings::install_hud(lua)
 }
 
@@ -328,7 +333,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 info.map(|i| i.named.name.clone()),
                 info.map(|i| i.named.icon.clone()),
                 info.map(|i| i.max_stack),
-                info.map(|i| i.fixed_grade),
+                info.map(|i| i64::from(super::store::ui_grade(i.fixed_grade.max(0) as u8))),
                 info.map(|i| i.level),
             ))
         })?,
@@ -427,6 +432,7 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("labor", s.labor as i64)?;
     t.raw_set("max_labor", s.max_labor as i64)?;
     t.raw_set("money", s.money.to_string())?;
+    t.raw_set("bank_money", s.bank_money.to_string())?;
     t.raw_set("bm_point", s.bm_point.to_string())?;
     t.raw_set("zone", s.zone.as_str())?;
     t.raw_set("zone_group", s.zone_group as i64)?;
@@ -554,6 +560,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         labor_log: stats.map_or_else(Vec::new, |s| s.labor_log.clone()),
         labor_seq: stats.map_or(0, |s| s.labor_seq),
         money: stats.map_or(character.money, |s| s.money),
+        bank_money: stats.map_or(character.money2, |s| s.bank_money),
         bm_point: stats.map_or(character.bm_point, |s| s.loyalty),
         honor: stats.map_or(0, |s| s.honor),
         vocation: stats.map_or(0, |s| s.vocation),
@@ -764,6 +771,9 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     {
         warn!("hud: refresh slots: {e}");
     }
+    if changed.bank {
+        rt.fire_event("BANK_UPDATE", (-1i64, -1i64));
+    }
     let id = |t: &Option<panels::TargetSnap>| t.as_ref().map(|t| t.obj_id);
     if id(&old.target) != id(&new.target) {
         match &new.target {
@@ -827,14 +837,39 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     if old.sub_zone != new.sub_zone && !new.sub_zone.is_empty() {
         rt.fire_event("ENTERED_SUBZONE", (0i64, new.sub_zone.as_str()));
     }
+    if old.bank_money != new.bank_money {
+        rt.fire_event("PLAYER_BANK_MONEY", (new.bank_money - old.bank_money, (new.bank_money - old.bank_money).to_string()));
+    }
     if old.money != new.money {
-        rt.fire_event("PLAYER_MONEY", (new.money.to_string(), (new.money - old.money).to_string()));
+        rt.fire_event("PLAYER_MONEY", (new.money - old.money, (new.money - old.money).to_string()));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn money_events_use_numeric_delta_and_decimal_delta_string() {
+        let mut rt=UiRuntime::new("en_us",1280.0,720.0).unwrap();
+        let bridge=Rc::new(RefCell::new(HudData::default()));
+        bridge.borrow_mut().snapshot.money=33;
+        install(&mut rt,&bridge).unwrap();
+        mark_pushed(&bridge);
+        rt.lua.load(r#"
+            moneyProbe=UIParent:CreateWidget('emptywidget','moneyProbe','UIParent')
+            moneyProbe:Show(true)
+            moneyProbe:RegisterEvent('PLAYER_MONEY'); moneyProbe:RegisterEvent('PLAYER_BANK_MONEY')
+            moneyEvents={}
+            moneyProbe:SetHandler('OnEvent',function(self,event,delta,text)
+                assert(type(delta)=='number' and type(text)=='string')
+                moneyEvents[event]={delta,text}
+            end)
+        "#).exec().unwrap();
+        { let mut d=bridge.borrow_mut(); d.snapshot.money=28; d.snapshot.bank_money=5; }
+        push_changes(&rt,&bridge);
+        rt.lua.load("assert(moneyEvents.PLAYER_MONEY[1]==-5 and moneyEvents.PLAYER_MONEY[2]=='-5'); assert(moneyEvents.PLAYER_BANK_MONEY[1]==5); assert(HUD.state.money=='28' and HUD.state.bank_money=='5')").exec().unwrap();
+    }
 
     #[test]
     fn automatic_resurrection_uses_the_native_five_minute_deadline() {

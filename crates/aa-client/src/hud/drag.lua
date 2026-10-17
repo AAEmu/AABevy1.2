@@ -78,6 +78,7 @@ X2Bag.HandleClick = function(self, virtual)
   if not bagKnown() then return end
   local real = realSlot(virtual)
   if real == nil then return end
+  if X2Bag:IsLocked(real) then return end
   local h = held()
   if h == nil then
     local s = HUD.bag[real]
@@ -168,9 +169,6 @@ X2Equipment.IsInventoriable = function(self, es) return true end
 X2Equipment.UnequipItem = function(self, es)
   if HUD.equipment[es] ~= nil then HUD.drag_unequip(es) end
 end
-
--- X2Input ----------------------------------------------------------------------------------------------------
-X2Input.IsShiftKeyDown = function(self) return HUD.shift_down() end
 
 -- The slot widgets (action bars, skill window) --------------------------------------------------------------
 -- A bound slot was dragged: the content of an action bar slot (unless the bar is locked: Shift unlocks it for a
