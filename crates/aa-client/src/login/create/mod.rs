@@ -39,6 +39,7 @@
 
 mod api;
 mod base;
+mod grass;
 mod look;
 mod poses;
 mod preview;
@@ -67,6 +68,7 @@ const CAMERA_SECONDS: f32 = 0.9;
 const REBUILD_SECONDS: f32 = 0.08;
 
 pub fn plugin(app: &mut App) {
+    grass::plugin(app);
     app.insert_resource(Options::from_args())
         .add_systems(OnEnter(Screen::CharacterSelect), redirect_to_create)
         .add_systems(OnEnter(Screen::CharacterCreate), enter)

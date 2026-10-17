@@ -32,11 +32,18 @@
 //! captured ground, so the terrain tint and the grass / rock materials are dimmed per race ([`mood`]),
 //! and a linear [`DistanceFog`] in the colour of the lit far ground brings the ridge up to the
 //! captured brightness. The sky is the painted `step3_<race>` background, drawn with +0.92 EV and no
-//! tone curve ([`SKY_GRADE`]); the captures show it that much brighter than the raw texture. The
-//! values were fitted on the mean colours of regions of the eight captures (sky, haze, ridge, near and
-//! mid grass), `AA_FIELD=ground,grass,fr,fg,fb,start,end` and `AA_BG_GRADE=tonemapping,ev,saturation`
-//! override them for another fit, `AA_CREATE_NO_FIELD=1` leaves the field out, `AA_DUMMY_YAW=deg`
-//! turns the dummies.
+//! tone curve ([`SKY_GRADE`]); the captures show it that much brighter than the raw texture.
+//!
+//! The grass (`Kind::Grass`: the plants and bushes of the vegetation, not the flowers) also gets a tone curve
+//! ([`super::grass`]): the captured near grass is far more contrasty than the stage's lighting makes it (its dark
+//! quarter is black, its sunlit blades golden), about a power of 2 - 5 of the radiance the stage gives, the engine's
+//! HDR sun and film curve. The curve (exponent, reference radiance, linear part, saturation) and a colour factor per
+//! race are fitted on the luminance quantiles, bright and dark tails of the near and mid grass of the captures.
+//!
+//! The values were fitted on the eight captures (the fog, terrain and rocks on mean colours of regions: sky, haze,
+//! ridge; the grass as above). `AA_FIELD=ground,grass,fr,fg,fb,start,end[,gamma,reference,floor,saturation[,gr,gg,gb]]` and
+//! `AA_BG_GRADE=tonemapping,ev,saturation` override them for another fit, `AA_CREATE_NO_FIELD=1` leaves the field
+//! out, `AA_DUMMY_YAW=deg` turns the dummies.
 //!
 //! The dummy model (`learning_ob01_c.cgf`) is a static bind pose with two arm logs and a painted
 //! shield (material `skill_df`) that the game poses away or shows only for a skill demonstration; the
@@ -63,6 +70,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 
+use super::grass::{GrassExt, GrassMaterial};
 use super::{CreateScreen, lock, poses};
 use crate::login::stage3d::{BackgroundGrade, Grade, STAGE_LAYER, STAGE_ORIGIN};
 
@@ -107,7 +115,8 @@ const SPAWN_BUDGET_MS: f32 = 6.0;
 /// The painted sky behind the field.
 const SKY_GRADE: Grade = Grade { tonemapping: bevy::core_pipeline::tonemapping::Tonemapping::Linear, exposure: 0.92, saturation: 1.0 };
 
-/// What a race's time of day does to the stage: the fog and a factor on the terrain colour.
+/// What a race's time of day does to the stage: the fog, factors on the terrain, grass and rock colours, and the tone
+/// curve of the grass.
 struct Mood {
     fog: Color,
     fog_start: f32,
@@ -115,22 +124,46 @@ struct Mood {
     /// Linear factors on the colour of the terrain and of the grass (the field is lit like the figure,
     /// which is far brighter than the captured ground).
     ground: f32,
-    grass: f32,
+    grass: Vec3,
+    /// Factor on the colour of the rocks and bushes (`Kind::Brush`).
+    brush: f32,
+    /// The tone curve of the grass (exponent, reference radiance, linear part, saturation), see `grass.rs`.
+    curve: Vec4,
 }
 
-/// `AA_FIELD=ground,grass,fr,fg,fb,start,end` overrides the mood of every race (fitting against captures).
+/// `AA_FIELD=ground,grass,fr,fg,fb,start,end[,gamma,reference,floor,saturation[,gr,gg,gb]]` overrides the mood of every race
+/// (fitting against captures); the last three are colour factors on `grass`.
 fn mood(race: Race) -> Mood {
     if let Some(v) = std::env::var("AA_FIELD").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()) {
-        if v.len() == 7 {
-            return Mood { fog: Color::srgb(v[2], v[3], v[4]), fog_start: v[5], fog_end: v[6], ground: v[0], grass: v[1] };
+        if v.len() >= 7 {
+            let get = |i: usize, default: f32| v.get(i).copied().unwrap_or(default);
+            return Mood {
+                fog: Color::srgb(v[2], v[3], v[4]),
+                fog_start: v[5],
+                fog_end: v[6],
+                ground: v[0],
+                grass: Vec3::new(get(11, 1.0), get(12, 1.0), get(13, 1.0)) * v[1],
+                brush: v[1] * 2.5,
+                curve: Vec4::new(get(7, 1.0), get(8, 0.03), get(9, 0.0), get(10, 1.0)),
+            };
         }
     }
-    // fitted on the mean colours of regions of the captures (sky, haze, ridge, near / mid grass)
+    // fitted on the captures: the fog, the terrain and rocks on the mean colours of regions (sky, haze, ridge), the grass
+    // on the luminance quantiles and bright and dark tails of the near and mid grass (`docs/aa-client-create.md`)
+    let m = |fog: [f32; 3], ground: f32, grass: [f32; 3], brush: f32, curve: [f32; 4]| Mood {
+        fog: Color::srgb(fog[0], fog[1], fog[2]),
+        fog_start: 10.0,
+        fog_end: 70.0,
+        ground,
+        grass: Vec3::from(grass),
+        brush,
+        curve: Vec4::from(curve),
+    };
     match race {
-        Race::Nuian => Mood { fog: Color::srgb(0.65, 0.62, 0.12), fog_start: 10.0, fog_end: 70.0, ground: 0.35, grass: 0.12 },
-        Race::Elf => Mood { fog: Color::srgb(0.55, 0.60, 0.66), fog_start: 10.0, fog_end: 70.0, ground: 0.35, grass: 0.18 },
-        Race::Hariharan => Mood { fog: Color::srgb(0.65, 0.55, 0.10), fog_start: 10.0, fog_end: 70.0, ground: 0.35, grass: 0.12 },
-        Race::Ferre => Mood { fog: Color::srgb(0.88, 0.86, 0.20), fog_start: 10.0, fog_end: 70.0, ground: 0.35, grass: 0.10 },
+        Race::Nuian => m([0.65, 0.62, 0.12], 0.25, [0.113, 0.133, 0.12], 0.30, [3.87, 0.0234, 0.10, 1.0]),
+        Race::Elf => m([0.55, 0.60, 0.66], 0.35, [0.18, 0.18, 0.25], 0.45, [2.75, 0.0304, 0.0, 0.3]),
+        Race::Hariharan => m([0.65, 0.55, 0.10], 0.35, [0.102, 0.125, 0.13], 0.30, [2.77, 0.0200, 0.14, 1.0]),
+        Race::Ferre => m([0.88, 0.86, 0.20], 0.25, [0.095, 0.111, 0.10], 0.25, [5.25, 0.0237, 0.19, 1.0]),
     }
 }
 
@@ -224,7 +257,10 @@ struct Field {
 enum Kind {
     Dummy,
     Brush,
+    /// Grass and bushes (they get the tone curve of `grass.rs`).
     Grass,
+    /// Flowers: coloured like the grass, without the curve.
+    Flower,
 }
 
 /// One thing to spawn.
@@ -242,7 +278,17 @@ struct Shown {
     items: Vec<Item>,
     next: usize,
     terrain: Handle<TerrainMaterial>,
-    grass: f32,
+    look: Look,
+    /// The grass material made for each of the models' materials.
+    grass: HashMap<AssetId<StandardMaterial>, Handle<GrassMaterial>>,
+}
+
+/// What the race's mood does to the grass and rocks (the terrain's is set on its material).
+#[derive(Clone)]
+struct Look {
+    grass: Vec3,
+    brush: f32,
+    curve: Vec4,
 }
 
 #[derive(Resource)]
@@ -266,8 +312,8 @@ struct Models {
 }
 
 impl Models {
-    /// The model of a field item, loaded on first use. `grass` is the race's factor on the grass colour.
-    fn get(&mut self, cry: &mut CryAssets, path: &str, material: &Option<String>, kind: Kind, grass: f32) -> Option<Arc<LoadedModel>> {
+    /// The model of a field item, loaded on first use. `look` is the race's mood for the grass and the rocks.
+    fn get(&mut self, cry: &mut CryAssets, path: &str, material: &Option<String>, kind: Kind, look: &Look) -> Option<Arc<LoadedModel>> {
         if self.failed.contains(path) {
             return None;
         }
@@ -280,8 +326,8 @@ impl Models {
             cry_space: true,
             material_hook: match kind {
                 Kind::Dummy => Some(skill_prop_hook()),
-                Kind::Grass => Some(dim_hook(grass)),
-                Kind::Brush => Some(dim_hook(grass * 2.5)),
+                Kind::Grass | Kind::Flower => Some(tint_hook(look.grass)),
+                Kind::Brush => Some(tint_hook(Vec3::splat(look.brush))),
             },
             vertex_hook: (kind == Kind::Dummy).then(without_arm_logs),
             ..default()
@@ -374,22 +420,25 @@ fn plan(field: &Field, race: Race) -> Vec<Item> {
         }
         let Some(g) = field.groups.groups.get(&v.group) else { continue };
         let material = (!g.material.is_empty()).then(|| format!("{}.mtl", g.material));
-        veg.push((d, Item::Model { path: g.model.clone(), material, matrix: v.mat4(), shadows: false, kind: Kind::Grass }));
+        let kind = if g.model.contains("flower") { Kind::Flower } else { Kind::Grass };
+        veg.push((d, Item::Model { path: g.model.clone(), material, matrix: v.mat4(), shadows: false, kind }));
     }
     veg.sort_by(|a, b| a.0.total_cmp(&b.0));
     items.extend(veg.into_iter().map(|b| b.1));
     items
 }
 
-/// The dummy model carries a second part (arms and a painted shield, material `skill_df`) that the game
-/// shows only while it demonstrates a skill: the captures show the bare straw doll.
-fn dim_hook(k: f32) -> MaterialHook {
+/// Multiplies the colour of a material by `k` (the field's lights are those of the figure, far brighter than the
+/// captured ground).
+fn tint_hook(k: Vec3) -> MaterialHook {
     MaterialHook::new(move |_, out| {
         let c = out.base_color.to_linear();
-        out.base_color = Color::linear_rgba(c.red * k, c.green * k, c.blue * k, c.alpha);
+        out.base_color = Color::linear_rgba(c.red * k.x, c.green * k.y, c.blue * k.z, c.alpha);
     })
 }
 
+/// The dummy model carries a second part (arms and a painted shield, material `skill_df`) that the game
+/// shows only while it demonstrates a skill: the captures show the bare straw doll.
 fn skill_prop_hook() -> MaterialHook {
     MaterialHook::new(|m, out| {
         if m.name == "skill_df" {
@@ -458,6 +507,7 @@ pub fn update(
     screen: Option<Res<CreateScreen>>,
     scenery: Option<ResMut<Scenery>>,
     mut terrain_materials: ResMut<Assets<TerrainMaterial>>,
+    mut grass_materials: ResMut<Assets<GrassMaterial>>,
     mut grade: ResMut<BackgroundGrade>,
 ) {
     let (Some(screen), Some(mut scenery)) = (screen, scenery) else { return };
@@ -528,7 +578,8 @@ pub fn update(
         let mut material = field.material.clone();
         material.extension.params.tint = Vec3::splat(m.ground).extend(DETAIL_DISTANCE);
         let terrain = terrain_materials.add(material);
-        scenery.shown = Some(Shown { race, root, items: plan(field, race), next: 0, terrain, grass: m.grass });
+        let look = Look { grass: m.grass, brush: m.brush, curve: m.curve };
+        scenery.shown = Some(Shown { race, root, items: plan(field, race), next: 0, terrain, look, grass: HashMap::new() });
         // models loaded ahead for another race are dimmed for that race
         if scenery.warm.as_ref().is_none_or(|w| w.0 != race) {
             scenery.models.forget_dimmed();
@@ -550,13 +601,14 @@ pub fn update(
                 }
                 scenery.warm = Some((race, unique, 0));
             }
-            let grass = mood(race).grass;
+            let m = mood(race);
+            let look = Look { grass: m.grass, brush: m.brush, curve: m.curve };
             let start = Instant::now();
             if let Some((_, list, next)) = scenery.warm.as_mut() {
                 while *next < list.len() && start.elapsed().as_secs_f32() * 1000.0 <= SPAWN_BUDGET_MS {
                     let (path, material, kind) = &list[*next];
                     *next += 1;
-                    scenery.models.get(&mut cry, path, material, *kind, grass);
+                    scenery.models.get(&mut cry, path, material, *kind, &look);
                 }
             }
         }
@@ -613,21 +665,33 @@ pub fn update(
                 ));
             }
             Item::Model { path, material, matrix, shadows, kind } => {
-                let Some(loaded) = scenery.models.get(&mut cry, path, material, *kind, shown.grass) else { continue };
+                let Some(loaded) = scenery.models.get(&mut cry, path, material, *kind, &shown.look) else { continue };
                 for (node, parts) in &loaded.parts {
                     let full = frame * *matrix * Mat4::from(render_transform(&loaded.model, *node));
                     if !full.is_finite() || full.determinant().abs() < 1e-9 {
                         continue;
                     }
                     for part in parts {
-                        let mut e = commands.spawn((
-                            Mesh3d(part.mesh.clone()),
-                            MeshMaterial3d(part.material.clone()),
-                            Transform::from_matrix(full),
-                            part.aabb,
-                            layers(),
-                            ChildOf(shown.root),
-                        ));
+                        let mut e = if *kind == Kind::Grass {
+                            let material = shown
+                                .grass
+                                .entry(part.material.id())
+                                .or_insert_with(|| {
+                                    let base = cry.materials.get(&part.material).cloned().unwrap_or_default();
+                                    grass_materials.add(GrassMaterial { base, extension: GrassExt { gamma: shown.look.curve.x, reference: shown.look.curve.y, floor: shown.look.curve.z, saturation: shown.look.curve.w } })
+                                })
+                                .clone();
+                            commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material), Transform::from_matrix(full), part.aabb, layers(), ChildOf(shown.root)))
+                        } else {
+                            commands.spawn((
+                                Mesh3d(part.mesh.clone()),
+                                MeshMaterial3d(part.material.clone()),
+                                Transform::from_matrix(full),
+                                part.aabb,
+                                layers(),
+                                ChildOf(shown.root),
+                            ))
+                        };
                         if !*shadows {
                             e.insert(NotShadowCaster);
                         }
