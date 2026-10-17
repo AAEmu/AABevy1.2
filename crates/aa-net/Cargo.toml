@@ -19,6 +19,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 anyhow.workspace = true
+rusqlite.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[example]]

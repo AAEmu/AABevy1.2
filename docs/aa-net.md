@@ -738,20 +738,88 @@ The packet handlers and `393077xx` onward in the native client confirm the membe
 the original `x2ui/unitframe/party.lua` and `raidteammanager/manager.lua` consume them. A generic
 roster refresh alone loses the original localized notices and specific offline/unit-ID handling.
 
+## NPC shops and banks (2026-10-17)
+
+`Command::Shop(ShopCommand)` exposes `ListSold { npc_obj_id }`,
+`Sell { npc_obj_id, items: Vec<SellEntry { container, slot, item_id }> }`, and
+`Buy { npc_obj_id, doodad_obj_id, buy: Vec<BuyEntry { item_id, grade, count, currency }>,
+buy_back: Vec<i32>, use_aa_point }`. A sale moves the entire stack; split beforehand for a
+partial sale. Buyback entries are zero-based positions in the latest sold list. Batch counts
+are bytes (at most 255); non-positive purchase counts, invalid buyback slots, duplicate
+sale/buyback entries and invalid containers are rejected locally before sending.
+`Event::Shop(ShopEvent::RequestRejected(message))` reports that local failure.
+
+`Shop` is installed by `NetPlugin` and lives at `WorldState::shop`. `sold: Vec<Item>` is the
+server's `SCSoldItemList` response, limited to twelve real items; negative, over-twelve and
+truncated counts are rejected. `loaded` distinguishes an empty response from no response;
+`dirty` becomes true after store item tasks (reason 52 buy / 53 sell), so request `ListSold`
+again. `Event::Shop(ShopEvent::SoldItems(items))` replaces that list and clears `dirty`.
+Transactions update `Inventory` and `PlayerStats` only through the server's existing item tasks.
+
+The catalog is not a server packet. Resolve the NPC template through `merchants` to
+`merchant_packs`, then `merchant_goods` (encounter/id order; first duplicate item ID wins).
+`merchant_packs.kind_id` maps to the original Lua/checkout currency as 0 -> gold(0),
+1/2 -> honor(1), 3 -> vocation(2). Native `GetStoreCurrency` (VA `394ae1d0`, helper `39572470`)
+confirms that siege kind2 also spends honor. Buy prices use `items.price`, `honor_price` or
+`living_point_price` times quantity, without a grade multiplier or NPC discount in the lane.
+`merchant_price_ratios` exists but the server checkout never reads it. The requested catalog
+grade is parsed but currently ignored by the server's item acquisition; show the received grade.
+
+Both wire `Item.grade` and `merchant_goods.grade_id` are raw `item_grades.id` values.
+Lua display order is a separate `grade_order` (raw ID0 = order1 Basic; raw ID1 = order0 Crude).
+The refund lookup uses raw ID: per-unit refund is `items.refund * refund_multiplier / 100f32`,
+truncated to an integer, then multiplied by stack count. A zero refund remains zero; there is
+no fallback to the purchase price. Buyback charges this same refund. Native
+`GetSellItemsMaxCount` returns 16 (method `394ae840`, float constant `3999f964`), making the
+original cart ten cells (`16 - 6`) and sell list sixteen.
+
+`Command::Bank(BankCommand)` provides `DepositMoney { amount, aa_point }`,
+`WithdrawMoney { amount, aa_point }`, and `Expand { container, auto_use_aa_point }` (2 bag,
+3 bank). Negative amounts and invalid containers are refused locally. Bank slots and contents
+already arrive at login in `Inventory.bank_slots` / `bank`; read them with `bank_items()` /
+`first_free_bank_slot()`. Moves and splits use the existing `plan_move` and `SwapItems` /
+`SplitItem` commands with container3. Balances are `PlayerStats.money` / `bank_money`, updated
+by the money tasks; expansion is acknowledged by `InventoryExpanded` and preserves slot items.
+
+Opening services uses `Interact::Npc`, then `Interact::Start`: its `SkillList` contains 12087
+for a merchant or 13238 for a banker. Original `ShowInteraction` categories are STORE_NPC=3,
+BANKER_NPC=10. `SelectNpcInteraction(category,0)` is a native no-op (method `3947da30` only
+returns from the script handler), so no learned skill cast is needed. There is no bank-open
+or bank-list packet. Buy enforces merchant/catalog and three metres; sell/list enforce a
+merchant. The lane bank handlers currently do not enforce an interaction object. AA-point
+fields and auto-AA expansion are parsed but ignored. Expansion deducts its configured money
+price without emitting the corresponding MoneyChange task (an explicit C# carry-over in
+`inventory::expand_slot`); the capacity is confirmed but wire balance stays stale until refreshed.
+
+`SCItemTaskSuccess` now consumes its trailing `u32 type(id)` and refuses a partial transaction
+with unknown item tasks. `SCCharacterInvenContents` reads exactly `numChunks * 10` slots;
+reading to end-of-frame previously consumed the next packet inside `DD04`. Boundary tests
+place sold lists, money/empty tasks and bank chunks before another opcode and verify alignment.
+
+`cargo test -p aa-net --test live_shop_bank -- --ignored --nocapture` uses a fresh account,
+no grants and only its own starter equipment. Verified merchant12547 at
+(14366.27,15504.10,152.86171), pack171, and banker12544 fifteen metres away at
+(14365.36,15519.09,152.86171): service12087/13238; sell starter item23387 for33 copper;
+list and buy back the same item ID/count for33; deposit/withdraw5 copper restoring both balances;
+move the item into bank and back preserving identity; sell it again and buy item15659 for25
+copper with a confirmed +1 item / -25 copper. Both bank and normal inventory start at50 slots.
+Expansion success was not live-tested because this fresh character has no expansion certificate;
+capacity decoding/reduction is already covered by the inventory tests.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): mail, houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  trading, shops, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
+  trading, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
   (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
   layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
   that is not decoded ends that batch.
-* Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and the quest
-  requests, item moves (swap, split, destroy; not yet the bank, trade or mail windows' own packets); no shops
-  or other NPC functions (`CSStartInteraction` is encoded, nothing uses it yet).
+* Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
+  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy). Trade, mail,
+  coin/doodad shops, priest buffs, repair and the other NPC functions still need their own requests.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
