@@ -201,10 +201,21 @@ and the detail map's tiling. The shader reads the four surrounding nibbles (bili
 normal gives the projection weights, and each layer is sampled with explicit gradients (`textureSampleGrad`, the loops are not uniform
 control flow): up to about 4 types x 1 to 2 axes x 3 fetches, usually 3. No per-frame CPU work, no extra draw calls (the draw count is the
 cover texture's, one material per cell). `WorldConfig::terrain_detail = false` (`fly --no-terrain-detail`) shades the decoded cover colour only.
-`WorldConfig::terrain_tint` (linear 1.2, 1.2, 1.3, was 0.30 / 0.32 / 0.45 for the wrongly read cover) scales the result: the engine's exposure and
-film curve are not reproduced, this brings the ground to the real client's brightness (sunlit rock and hill grass of
-`reference/ingame/spawn/real.png`; the real picture's cooler grade is not reproduced, SSAO is opt-in). Re-tune it when the lighting
-calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
+The material's own `Diffuse` colour (`MatDifColor`, linear, 1 / 1 / 1 for 251 of the 306 layer materials, 0.24 to 0.97 for rock layers) multiplies
+the lit layer, as `frag_custom_end` of `terrain.cfx` does for objects too (the court yard's `tr_af_pavingstone_001b` is 0.82 / 0.82 / 0.78); it is
+packed into the free slots of the table entry, the faded-out far terrain (cover colour only) is not multiplied.
+`WorldConfig::terrain_tint` (linear 1.75, 1.75, 1.65; 1.2 / 1.2 / 1.3 before the Royal Palace fit, 0.30 / 0.32 / 0.45 for the wrongly read cover)
+scales the result: the engine's exposure and film curve are not reproduced, so the tint brings the ground to the real client's brightness.
+It is a least squares fit of display values over the shaded and sunlit ground of three captures at the time of the capture (`fly --camera-json`,
+`--hour 9.563 / 9.998 / 9.987` for the palace views, mean ratio real / ours per channel 1.00 / 1.00 / 0.99 over 13 regions): palace floor
+(shade) 30 / 31 / 29 against 28 / 30 / 28 (real / ours luma, first view, turned, wide), sunlit patch 83 against 72, spawn rock 87 / 63 against
+83 / 64, hill grass 75 against 68, dirt path 82 against 85. The grass in the shade at the spawn (24 / 38 / 17 against 34 / 57 / 24) is mostly
+vegetation objects and does not follow the terrain. The sunlit patch stays 15 % (display) low: it asks for a stronger sun relative to the
+ambient, which is the sun / ambient calibration's job (`sun_lux_scale`). The engine does not darken the cover colour or clamp it to a
+minimum: `tex2DTerrain` (see the cover texel encoding) is the whole decode, the layer pass adds `cover + (diffuse - 0.5) * strength`
+(0.27 for the cobbles, so the cobbles' look is the cover's) and the lighting adds the vertex ambient occlusion (`Color.a`, only dimming).
+A very dark cover (luma 0.11 to 0.16 in the court yard, decoded) is right: the floor looks pale in the capture because of the lighting.
+Re-fit the tint when the lighting calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
