@@ -6,7 +6,7 @@
 //! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:27237] [--user bevytest]
 //!     [--password-file PATH] [--world ID] [--character NAME] [--watch-secs 10] [--roundtrip] [--delete-test]
 //!     [--move-secs N] [--move-hz 10] [--scenario circle|far|underground|jump|fall] [--no-ping] [--ping-interval-ms 3000] [--first-ping-delay-ms N]
-//!     [--cmd "/add_labor 10"]...
+//!     [--cmd "/add_labor 10"]... [--target-nearest]
 //! ```
 //!
 //! `--roundtrip` additionally goes back to the character list, then to the world list, and enters
@@ -15,6 +15,9 @@
 //! `--cmd TEXT` (repeatable) sends the text as chat once the player is in the world (server GM
 //! commands such as `/add_labor 10` or `/add_xp 500` start with a slash) and prints the events
 //! that follow, then the player state again.
+//!
+//! `--target-nearest` selects the nearest unit in view (`Command::Target`) and prints what the
+//! server answers.
 //!
 //! `--delete-test` creates a second character, deletes it and shows what the server answers.
 //!
@@ -51,6 +54,7 @@ struct Args {
     ping_interval_ms: u64,
     first_ping_delay_ms: u64,
     cmds: Vec<String>,
+    target_nearest: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -70,6 +74,7 @@ fn parse_args() -> Result<Args> {
         ping_interval_ms: 3000,
         first_ping_delay_ms: 0,
         cmds: Vec::new(),
+        target_nearest: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -90,6 +95,7 @@ fn parse_args() -> Result<Args> {
             "--ping-interval-ms" => a.ping_interval_ms = value()?.parse()?,
             "--first-ping-delay-ms" => a.first_ping_delay_ms = value()?.parse()?,
             "--cmd" => a.cmds.push(value()?),
+            "--target-nearest" => a.target_nearest = true,
             other => bail!("unknown argument {other}"),
         }
     }
@@ -339,7 +345,12 @@ async fn main() -> Result<()> {
             Event::UnitSpawned(_) => spawned += 1,
             Event::UnitMoved { .. } => moved += 1,
             Event::UnitsRemoved(ids) => removed += ids.len(),
-            Event::Chat(c) => println!("  chat [{}] {}: {}", c.chat_type, c.sender, c.message),
+            Event::Chat(c) => println!("  chat [{}/{}] {}: {}", c.chat_type, c.sub_type, c.sender, c.message),
+            Event::ChatChannelJoined { .. }
+            | Event::ChatChannelLeft { .. }
+            | Event::TimeOfDay { .. }
+            | Event::Snow(_)
+            | Event::TargetChanged { .. } => println!("  {e:?}"),
             Event::Disconnected { message } => bail!("{} disconnected while watching: {message}", stamp()),
             _ => {}
         }
@@ -364,7 +375,7 @@ async fn main() -> Result<()> {
         kinds,
         state.doodads.by_id.len()
     );
-    let here = spawn.position();
+    let mut here = spawn.position();
     let mut nearest: Vec<_> = state.units.iter().collect();
     nearest.sort_by(|a, b| a.pos.distance(here).total_cmp(&b.pos.distance(here)));
     for u in nearest.iter().take(5) {
@@ -391,6 +402,9 @@ async fn main() -> Result<()> {
             let end = Instant::now() + Duration::from_millis(2500);
             while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
                 state.apply(&e);
+                if let Event::Teleported { pos } = &e {
+                    here = *pos;
+                }
                 if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_)) {
                     continue;
                 }
@@ -399,6 +413,35 @@ async fn main() -> Result<()> {
             }
         }
         print_player_state(&state);
+    }
+
+    if args.target_nearest {
+        println!("== target");
+        let own = state.stats.obj_id;
+        let mut nearest: Vec<_> = state.units.iter().collect();
+        nearest.sort_by(|a, b| a.pos.distance(here).total_cmp(&b.pos.distance(here)));
+        println!("  {} units in view", nearest.len());
+        match nearest.first() {
+            Some(u) => {
+                println!("  selecting {} (obj {}) {:?}", u.name, u.obj_id, u.kind);
+                client.send(Command::Target { obj_id: u.obj_id });
+            }
+            None => println!("  no unit in view; clearing the target"),
+        }
+        let end = Instant::now() + Duration::from_millis(1500);
+        while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+            state.apply(&e);
+            if let Event::TargetChanged { obj_id, target_obj_id } = e {
+                println!("  TargetChanged obj {obj_id} (own {own}) -> {target_obj_id}");
+            }
+        }
+        print_world_state(&state);
+        client.send(Command::Target { obj_id: 0 });
+        let end = Instant::now() + Duration::from_millis(1000);
+        while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+            state.apply(&e);
+        }
+        println!("  after clearing: target {:?}", state.target.obj_id);
     }
 
     // 6. Move and chat.
@@ -451,10 +494,39 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Zone, clock, chat channels and target.
+fn print_world_state(state: &WorldState) {
+    let w = &state.world;
+    println!(
+        "  zone key {} group {:?} instance {} time {:?} (now {:?}) snow {}",
+        w.zone_key,
+        w.zone_group_id,
+        w.instance_id,
+        w.time.map(|t| (t.hour, t.speed)),
+        w.hour_now(),
+        w.snow
+    );
+    let channels: Vec<String> = state
+        .chat
+        .channels
+        .iter()
+        .map(|c| format!("{}({}/{} faction {} '{}')", aa_net::model::chat_type::name(c.chat_type), c.chat_type, c.sub_type, c.faction_id, c.name))
+        .collect();
+    println!("  chat channels: {}; log {} lines", channels.join(", "), state.chat.log.len());
+    match state.target.obj_id {
+        Some(id) => match state.target.unit(&state.units) {
+            Some(u) => println!("  target {id}: {} {:?} lvl {} hp {}/{} faction {}", u.name, u.kind, u.level, u.hp, u.max_hp, u.faction_id),
+            None => println!("  target {id} (not in view)"),
+        },
+        None => println!("  no target"),
+    }
+}
+
 /// What the HUD would read from the state tables.
 fn print_player_state(state: &WorldState) {
     let s = &state.stats;
     println!("== player state");
+    print_world_state(state);
     let (earned, needed) = s.exp_progress();
     let (gold, silver, copper) = s.money_parts();
     println!(
@@ -517,6 +589,16 @@ fn print_player_state(state: &WorldState) {
     let with_buffs = state.units.iter().filter(|u| !state.buffs.of(u.obj_id).is_empty()).count();
     let with_faction = state.units.iter().filter(|u| u.faction_id != 0).count();
     println!("  units with buffs {with_buffs}, with a faction {with_faction} of {}", state.units.by_id.len());
+    let mut sample: Vec<_> = state.units.iter().filter(|u| !u.buffs.is_empty()).collect();
+    sample.sort_by_key(|u| u.obj_id);
+    for u in sample.iter().take(4) {
+        let ids: Vec<String> = u
+            .buffs
+            .iter()
+            .map(|b| format!("{}({:?} {} ms{})", b.buff_id, b.kind, b.duration_ms, if b.stacks > 1 { format!(" x{}", b.stacks) } else { String::new() }))
+            .collect();
+        println!("    npc obj {} faction {} lvl {} hp {}/{} buffs {}", u.obj_id, u.faction_id, u.level, u.hp, u.max_hp, ids.join(" "));
+    }
 }
 
 /// Walks a circle around `centre` at about 4 m/s for `secs` seconds, one movement packet every

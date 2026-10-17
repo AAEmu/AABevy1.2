@@ -21,8 +21,10 @@ macro_rules! resource {
 
 mod gear;
 mod stats;
+mod world;
 pub use gear::{ActionBar, Inventory};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
+pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT};
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -252,6 +254,9 @@ pub struct WorldState {
     pub buffs: Buffs,
     pub actions: ActionBar,
     pub inventory: Inventory,
+    pub world: WorldInfo,
+    pub chat: Chat,
+    pub target: Target,
 }
 
 impl WorldState {
@@ -266,6 +271,9 @@ impl WorldState {
         self.buffs.apply(e);
         self.actions.apply(e);
         self.inventory.apply(e);
+        self.world.apply(e);
+        self.chat.apply(e);
+        self.target.apply(e);
     }
 }
 

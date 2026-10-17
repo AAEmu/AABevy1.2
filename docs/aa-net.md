@@ -264,6 +264,60 @@ unit frame shows the first four `Good` and `Bad` ones.
 `ItemTasks::reason` is the server's `ItemTaskType` (9 loot, 13 skill source consumed, 53 sold ...)
 for chat lines such as "You acquired ...". Containers: `items::container::{EQUIPMENT 1, INVENTORY 2, BANK 3}`.
 
+**World: `WorldInfo`** (zone, game clock, weather)
+
+| packet | event | state |
+|---|---|---|
+| `SCCharacterState` | `CharacterSelected` | `zone_key` (`character.zone_id`, = `zones.zone_key`), `instance_id` |
+| `SCJoinedChatChannel` for Shout (type 1) | `ChatChannelJoined { chat_type: 1, sub_type, .. }` | `zone_group_id = Some(sub_type)` (= `zones.group_id` = `zone_groups.id`) |
+| `SCLeavedChatChannel` for Shout | `ChatChannelLeft` | `zone_group_id = None` if it was the current one |
+| `SCDetailedTimeOfDay` | `TimeOfDay { hour, speed: Some }` | `time = TimeOfDay { hour, speed, received }` |
+| `SCTimeOfDay` | `TimeOfDay { hour, speed: None }` | `time` (keeps the speed) |
+| `SCOnOffSnow` | `Snow(on)` | `snow` |
+
+The clock: `hour` is 0..24 game hours, `speed` is game hours per real second (the server sends
+0.0016666: 6 game seconds per real second, a day lasts 4 real hours). `WorldInfo::hour_now() ->
+Option<f32>` is the hour now (extrapolated from the packet). That is the `WorldClock { hour, speed }`
+of aa-world. The server sends the detailed time once at spawn and a plain `SCTimeOfDay` again after
+every teleport. The zone name of the minimap header: `zones.zone_key = zone_key` gives `group_id`;
+`zone_group_id` (from the zone channel) tells the same after a zone border crossing, when the
+character state's `zone_key` is stale; `zone_groups.display_text` is the name ("Solzreed Peninsula").
+The server does **not** send the sub zone ("Desiree Peak"): resolve it on the client from the player
+position against the `sub_zones` rectangles (`x`, `y`, `w`, `h` in metres, `linked_zone_group_id`,
+`parent_sub_zone_id`).
+
+**Chat: `Chat`**
+
+| packet | event | state |
+|---|---|---|
+| `SCJoinedChatChannel` | `ChatChannelJoined { chat_type, sub_type, faction_id, name }` | `channels` |
+| `SCLeavedChatChannel` | `ChatChannelLeft { chat_type, sub_type, faction_id }` | `channels` |
+| `SCChatMessage` | `Chat(ChatMessage)` | `log` (the last `CHAT_LOG_LIMIT` = 500 lines, oldest first) |
+| `CSSendChatMessage` | `Command::Chat { chat_type, target, message }` | |
+
+At spawn the server joins the player to Shout (1, sub type = the zone group id), Nation (6, faction
+148) and Ally (14, faction 148); the client prints "Entering Chat: 1.Shout.Solzreed Peninsula" for
+each (the zone name comes from `zone_groups`). `ChatMessage { chat_type, sub_type, channel_faction,
+sender, message, .. }` carries the channel it came through; `model::chat_type` has the ids (-2 system
+text such as the "Welcome to AAEmu!" the server sends after entering, -1 notice, 0 say, 1 shout ...)
+and `chat_type::name(id)`. Game messages such as "Gained 10 Labor Point(s)" are not chat lines on the
+wire: the client builds them from `LaborChanged`, `ItemsChanged` (loot), `ExpChanged` and so on.
+A GM command is a chat line that starts with `/` (`Insufficient privileges.` comes back as a
+type -2 line for accounts without GM rights).
+
+**Target: `Target`**
+
+| packet | event | state |
+|---|---|---|
+| `CSChangeTarget` (`Command::Target { obj_id }`, 0 clears) | | |
+| `SCTargetChanged` (also echoed to the sender) | `TargetChanged { obj_id, target_obj_id }` | `Target::obj_id` when `obj_id` is the player |
+| `SCUnitsRemoved` | `UnitsRemoved` | cleared when the target left the view |
+
+`Target::unit(&Units) -> Option<&Unit>` gives the unit for the target frame (`name`, `level`, `hp` /
+`max_hp`, `faction_id`, `buffs`). NPC names are empty on the wire: show the template id from
+`Unit::kind` (`Npc { template_id, .. }`, `npcs.name` in the game database). `Event::TargetChanged`
+for other units is event only.
+
 ## What the UI scripts need
 
 The login-stage scripts (`x2ui/loginstage/world_select`, `character_select`, `character_create`) call:
