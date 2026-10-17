@@ -50,14 +50,14 @@ pub struct Post {
     pub fog: bool,
     /// Exposure compensation in stops on top of the time of day's.
     pub exposure_ev: f32,
-    /// Screen space ambient occlusion (Bevy's GTAO: needs the normal prepass and switches MSAA off for SMAA). Off by default:
-    /// the normal prepass without MSAA turns the anisotropic hair material white (`AA_TUNE=ssao=1` also enables it).
+    /// Screen space ambient occlusion (Bevy's GTAO: needs the normal prepass and switches MSAA off for SMAA), about
+    /// 8–10% of frame time. On by default since the hair material is prepass-safe (aa-cry `9751975`).
     pub ssao: bool,
 }
 
 impl Default for Post {
     fn default() -> Self {
-        Post { bloom: 0.1, fog: true, exposure_ev: 0.0, ssao: false }
+        Post { bloom: 0.1, fog: true, exposure_ev: 0.0, ssao: true }
     }
 }
 

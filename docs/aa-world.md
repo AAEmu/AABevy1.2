@@ -285,11 +285,9 @@ usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. O
 * the engine's **film curve** (`postprocess.cfx`: `x (a 6.2 x + b 0.5) / (x (a 6.2 x + 1.7) + c 0.06)` with shoulder / midtones / toe scales from the
   data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input`.
 
-**SSAO** is opt-in: `Post.ssao = true` or `AA_TUNE=ssao=1` adds Bevy's `ScreenSpaceAmbientOcclusion` (low quality, radius 1.2 m, thickness 0.25), which
-needs `Msaa::Off` (SMAA High replaces it) and a normal prepass. It deepens the shade under bushes and trees the way the capture shows, for about
-8 to 10 % of the frame time. It is off by default because the normal prepass with `Msaa::Off` turns the hair of aa-cry's anisotropic hair material
-(`shade.rs`, `anisotropy_strength`) white, and it persists with `AlphaMode::Mask`; once aa-cry's hair material is fixed it can be switched on
-by default.
+**SSAO** is on by default (`Post.ssao`; set it to `false` to turn it off): Bevy's `ScreenSpaceAmbientOcclusion` (low quality, radius 1.2 m,
+thickness 0.25), which needs `Msaa::Off` (SMAA High replaces it) and a normal prepass. It deepens the shade under bushes and trees the way the
+capture shows, for about 8 to 10 % of the frame time. It was opt-in until aa-cry's hair material became prepass-safe (`9751975`).
 
 `aa_world::post::{Post, PostUniform}` is the reusable setup; a second camera only needs the `Post` component. `--no-post` / `post: false`
 leaves the camera alone (Bevy tone mapping, no fog, the water falls back to a constant thickness and no reflections).
