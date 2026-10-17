@@ -30,7 +30,9 @@ local function grade_frame(grade)
   return string.format("ui/icon/item_grade_%d%s.dds", grade, name)
 end
 
--- id -> { name, icon (file under ui/icon), grade, maxStack, group (item_groups id), level, price, desc }.
+-- id -> { name, icon (file under ui/icon), grade, maxStack, group (item_groups id), level, price, refund, desc,
+-- category (item_categories name), impl (the client's item_impl: "portal", ...), soulBound, sellable,
+-- useSkill (items.use_skill_id: the tooltip's "Use" text is its description) }. From the game database.
 local function item(id, t)
   t.id = id
   t.grade = t.grade or 1
@@ -39,15 +41,24 @@ local function item(id, t)
   ITEMS[id] = t
 end
 FAKE.add_item = item
-item(4045, { name = "Teleport Book", icon = "icon_item_teleport.dds", group = 10, price = 3000,
+item(4045, { name = "Teleport Book", icon = "icon_item_teleport.dds", group = 10, price = 3000, refund = 2700,
+             category = "Book", impl = "portal", soulBound = true, sellable = false, useSkill = 11216,
              desc = "Requires 1 or 3 Hereafter Stones.\nA Teleport Scroll utilizes the power stored in a Hereafter Stone "
-               .. "to open a Worldgate. Jump through the gate to travel to a recorded location." })
-item(18791, { name = "Heart's Beat", icon = "icon_item_0392.dds", group = 5, maxStack = 100, price = 10,
-              desc = "A healing potion for novice adventurers." })
-item(18792, { name = "Mind's Edge", icon = "icon_item_0397.dds", group = 5, maxStack = 100, price = 10,
-              desc = "A Mana Potion for novice adventurers." })
+               .. "to open a Worldgate. Jump through the gate to travel to a recorded location.\n\nOne Hereafter Stone "
+               .. "contains enough power to send you anywhere on your current continent. Three stones can send you to a "
+               .. "different continent." })
+item(18791, { name = "Heart's Beat", icon = "icon_item_0392.dds", group = 5, maxStack = 100, price = 10, refund = 1,
+              category = "Potion", soulBound = true, desc = "A healing potion for novice adventurers." })
+item(18792, { name = "Mind's Edge", icon = "icon_item_0397.dds", group = 5, maxStack = 100, price = 10, refund = 1,
+              category = "Potion", soulBound = true, desc = "A Mana Potion for novice adventurers." })
 item(417, { name = "Bound Hereafter Stone", icon = "icon_item_0418.dds", group = 5, maxStack = 100, price = 0,
+            category = "Contraption", soulBound = true, sellable = false,
             desc = "Hereafter Stones contain enough power to send you anywhere on your current continent." })
+-- Descriptions of the items' use skills (X2Skill:GetSkillTooltip(skill, item, SIK_DESCRIPTION)).
+FAKE.skill_descs = FAKE.skill_descs or {}
+FAKE.skill_descs[11216] = "Jump into the Worldgate to teleport. Worldgates remain open for 30 seconds (or 60 seconds "
+  .. "for characters Lv20+ in Occultism)."
+
 
 -- Real bag slot -> { id, stack } (slots are 1-based; gaps are empty slots).
 local BAG_CAPACITY = 50
@@ -126,13 +137,22 @@ function FAKE.item_info(id, stack)
     itemType = id,
     lookType = id,
     itemGrade = it.grade,
+    -- The grade's name and colour (item_grades: "Basic", FFBA976D for the common grade): the name is drawn in it.
+    grade = "Basic",
+    gradeColor = "FFBA976D",
     name = it.name,
+    category = it.category,
+    item_impl = it.impl or "etc",
+    soul_bound = it.soulBound and 1 or nil,
+    skillType = it.useSkill,
     description = it.desc,
     stack = stack or 1,
+    isStackable = it.maxStack > 1,
     level_requirement = it.level,
+    level_limit = 0,
     price = it.price,
-    refund = it.price,
-    sellable = it.price > 0,
+    refund = it.refund or it.price,
+    sellable = it.sellable ~= false and it.price > 0,
   }
 end
 

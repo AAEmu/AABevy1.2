@@ -76,6 +76,7 @@ impl UiRuntime {
             frame_ms: 16.0,
             stub_calls: Default::default(),
             hover: None,
+            entered: Vec::new(),
             focus: None,
             caret_visible: false,
             caret_t0: 0.0,

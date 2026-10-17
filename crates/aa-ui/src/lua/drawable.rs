@@ -289,7 +289,39 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
             "SetStartEffect",
             method(lua, |lua, id, a| {
                 let on = a.b(1, true);
-                with(lua, id, |d| d.effect = Some(on));
+                // Starting shows the drawable (the action bar's background effect starts hidden,
+                // reference/ingame/tooltip_skill lists it shown); there is no animation, so it
+                // takes the colour the last phase ends in.
+                with(lua, id, |d| {
+                    d.effect = Some(on);
+                    if let (true, false, Some((_, c))) = (on, d.effect_loop, d.effect_final) {
+                        d.color = c;
+                    }
+                });
+                if on {
+                    ui(lua).tree.get_mut(id).shown = true;
+                }
+                none()
+            })?,
+        )?;
+        def(
+            "SetRepeatCount",
+            method(lua, |lua, id, a| {
+                let n = a.f(1) as i64;
+                with(lua, id, |d| d.effect_loop = n == 0);
+                none()
+            })?,
+        )?;
+        def(
+            "SetEffectFinalColor",
+            method(lua, |lua, id, a| {
+                let phase = a.f(1) as i64;
+                let c = [a.f(2), a.f(3), a.f(4), a.f(5)];
+                with(lua, id, |d| {
+                    if d.effect_final.is_none_or(|(p, _)| phase >= p) {
+                        d.effect_final = Some((phase, c));
+                    }
+                });
                 none()
             })?,
         )?;

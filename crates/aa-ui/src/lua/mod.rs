@@ -27,6 +27,7 @@ pub mod slot;
 pub mod statusbar;
 mod stubs;
 pub mod tab;
+pub mod tooltip;
 pub(crate) mod widget;
 pub mod worldmap;
 
@@ -63,6 +64,9 @@ pub struct Ui {
     pub stub_calls: BTreeMap<String, u32>,
     /// Widget under the mouse, keyboard focus.
     pub hover: Option<Id>,
+    /// The widget under the mouse and its ancestors under the cursor (outermost first): the
+    /// client's mouse-over chain, each of them got `OnEnter`.
+    pub entered: Vec<Id>,
     pub focus: Option<Id>,
     /// Caret blink state of the focused edit box and the time its phase started.
     pub caret_visible: bool,

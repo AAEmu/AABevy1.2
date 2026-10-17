@@ -471,6 +471,8 @@ pub struct Widget {
     /// A running cooldown sweep (a `slot` bound to a cooling skill or item, `SetCoolDown` of the
     /// cooldown buttons): `crate::lua::slot`.
     pub cooldown: Option<crate::lua::slot::Cooldown>,
+    /// `gametooltip` lines (`AddLine`, ...): `crate::lua::tooltip`.
+    pub tip: Option<crate::lua::tooltip::TooltipData>,
     /// A second text style without its own text (`slot.cooltime_style`, `listbox.childStyle`,
     /// `damagedisplay.extraStyle`, `editbox.prefixStyle`).
     pub aux_style: Option<TextBlock>,
@@ -508,6 +510,10 @@ pub struct Drawable {
     /// Effect drawables (`CreateEffectDrawable`): drawn only while the effect runs
     /// (`SetStartEffect(true)`), with no animation.
     pub effect: Option<bool>,
+    /// `SetEffectFinalColor(phase, r, g, b, a)` of the last phase: the colour the effect ends in.
+    pub effect_final: Option<(i64, [f32; 4])>,
+    /// `SetRepeatCount(0)`: the effect loops (no end colour to show).
+    pub effect_loop: bool,
     /// `SetRotation(r)`: radians, clockwise on screen, about the centre of the rect (image
     /// drawables; the roadmap's player cursor turns with the player's heading).
     pub rotation: f32,
@@ -858,12 +864,36 @@ impl Tree {
         if self.get(id).anchors.contains(&a) {
             return;
         }
+        // Like the client, an anchor that would make the object depend on itself is refused (the
+        // old one stays): the tooltip scripts' `ResetSetctions` anchors every section below the
+        // second last one, itself included, and the client keeps the chain `PushSection` built
+        // (reference/ingame/tooltip_item).
+        if self.anchored_to(a.target, id) {
+            return;
+        }
         let o = self.get_mut(id);
         if let Some(old) = o.anchors.iter_mut().find(|o| o.point == a.point) {
             *old = a;
         } else {
             o.anchors.push(a);
         }
+    }
+
+    /// Whether `from` is `on` or is placed (through its anchors' targets, transitively) by it.
+    fn anchored_to(&self, from: Id, on: Id) -> bool {
+        let mut stack = vec![from];
+        let mut seen: Vec<Id> = Vec::new();
+        while let Some(x) = stack.pop() {
+            if x == on {
+                return true;
+            }
+            if seen.contains(&x) || x as usize >= self.objects.len() {
+                continue;
+            }
+            seen.push(x);
+            stack.extend(self.get(x).anchors.iter().map(|a| a.target));
+        }
+        false
     }
 
     /// Effective visibility: shown and every ancestor shown.
@@ -1200,6 +1230,7 @@ impl Widget {
             clip: false,
             scroll: [0.0; 2],
             cooldown: None,
+            tip: None,
             aux_style: None,
             modal: false,
             close_on_escape: false,

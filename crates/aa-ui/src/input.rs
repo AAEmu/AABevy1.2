@@ -89,6 +89,24 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
     None
 }
 
+/// `id` and its ancestors whose rectangle holds the cursor, outermost first (not the root).
+fn mouse_chain(lua: &Lua, id: Id, x: f32, y: f32) -> Vec<Id> {
+    let u = ui(lua);
+    let mut chain = vec![id];
+    let mut t = u.tree.get(id).parent;
+    while let Some(p) = t {
+        if p == ROOT {
+            break;
+        }
+        if u.tree.rect(p).contains(x, y) {
+            chain.push(p);
+        }
+        t = u.tree.get(p).parent;
+    }
+    chain.reverse();
+    chain
+}
+
 /// The list control row (list, row index) that contains `id`, if any.
 fn list_row(lua: &Lua, mut id: Id) -> Option<(Id, usize)> {
     let u = ui(lua);
@@ -133,11 +151,24 @@ pub fn update(
             u.hover = hover;
             u.tree.touch();
         }
-        if let Some(o) = old {
-            call_handler(lua, o, "OnLeave", vec![]);
+        // The client's mouse over is the hovered widget and its ancestors under the cursor
+        // (reference/ingame/tooltip_*: the action bar window is "mouse over" with its slot, so
+        // its OnEnter shows the lock and page buttons): OnLeave for those left (innermost
+        // first), OnEnter for those entered (outermost first).
+        let new_chain = match (hover, cursor) {
+            (Some(h), Some((x, y))) => mouse_chain(lua, h, x, y),
+            _ => Vec::new(),
+        };
+        let old_chain = std::mem::replace(&mut ui(lua).entered, new_chain.clone());
+        for &o in old_chain.iter().rev() {
+            if !new_chain.contains(&o) {
+                call_handler(lua, o, "OnLeave", vec![]);
+            }
         }
-        if let Some(n) = hover {
-            call_handler(lua, n, "OnEnter", vec![]);
+        for &n in &new_chain {
+            if !old_chain.contains(&n) {
+                call_handler(lua, n, "OnEnter", vec![]);
+            }
         }
         update_list_hover(lua, old, hover);
     }

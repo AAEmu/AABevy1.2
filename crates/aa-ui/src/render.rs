@@ -125,6 +125,10 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 let c = t.style.color;
                 text_quads(u, &t, rect, c, alpha, scale, &mut out);
             }
+        } else if crate::lua::tooltip::has_lines(&w) {
+            // Tooltips: their `AddLine` lines.
+            let rect = u.tree.rect(id);
+            crate::lua::tooltip::quads(u, id, rect, alpha, scale, &mut out);
         } else if let Some(t) = w.text.as_ref() {
             // Widget text above background/artwork, below overlay.
             let edit = crate::lua::edit::is_edit(&w.ty);
