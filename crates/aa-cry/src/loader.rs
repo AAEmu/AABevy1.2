@@ -518,7 +518,7 @@ impl<'a> Prep<'a> {
                 ..default()
             },
         };
-        (hook.0)(&cry.unwrap_or_default(), &mut sm);
+        apply_material_hook(&cry.unwrap_or_default(), &mut sm, hook);
         let handle = new_handle(&self.loader.shared.materials);
         self.push(Shared::Material(handle.clone(), slot(sm)));
         Some(handle)
@@ -528,6 +528,20 @@ impl<'a> Prep<'a> {
         let handle = new_handle(&self.loader.shared.meshes);
         self.pending.push(Pending::Mesh(handle.clone(), mesh));
         handle
+    }
+}
+
+/// Eye emissive represents extra ambient multiplied by the same albedo as the base colour.
+/// A custom face hook often replaces only the base texture. Follow that replacement when the
+/// inherited emissive texture was linked to albedo and the hook did not explicitly change it.
+fn apply_material_hook(m: &CryMaterial, sm: &mut StandardMaterial, hook: &MaterialHook) {
+    let inherited = sm.base_color_texture.clone();
+    let follow = m.shader.eq_ignore_ascii_case("eye")
+        && inherited.is_some()
+        && sm.emissive_texture == inherited;
+    (hook.0)(m, sm);
+    if follow && sm.base_color_texture != inherited && sm.emissive_texture == inherited {
+        sm.emissive_texture = sm.base_color_texture.clone();
     }
 }
 
@@ -685,6 +699,49 @@ impl CryLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eye_hooks_follow_albedo_but_keep_explicit_emissive_overrides() {
+        let mut images = Assets::<Image>::default();
+        let old = images.add(Image::default());
+        let custom = images.add(Image::default());
+        let explicit = images.add(Image::default());
+        let m = CryMaterial {
+            shader: "Eye".into(),
+            ..default()
+        };
+        let material = StandardMaterial {
+            base_color_texture: Some(old.clone()),
+            emissive_texture: Some(old.clone()),
+            ..default()
+        };
+        let mut unchanged = material.clone();
+        apply_material_hook(&m, &mut unchanged, &MaterialHook::new(|_, _| {}));
+        assert_eq!(unchanged.emissive_texture, Some(old.clone()));
+        let face = custom.clone();
+        let mut changed = material.clone();
+        apply_material_hook(&m, &mut changed, &MaterialHook::new(move |_, out| {
+            out.base_color_texture = Some(face.clone());
+        }));
+        assert_eq!(changed.emissive_texture, Some(custom.clone()));
+        let face = custom.clone();
+        let emission = explicit.clone();
+        let mut overridden = material.clone();
+        apply_material_hook(&m, &mut overridden, &MaterialHook::new(move |_, out| {
+            out.base_color_texture = Some(face.clone());
+            out.emissive_texture = Some(emission.clone());
+        }));
+        assert_eq!(overridden.emissive_texture, Some(explicit));
+        let other = CryMaterial {
+            shader: "Illum".into(),
+            ..default()
+        };
+        let mut independent = material;
+        apply_material_hook(&other, &mut independent, &MaterialHook::new(move |_, out| {
+            out.base_color_texture = Some(custom.clone());
+        }));
+        assert_eq!(independent.emissive_texture, Some(old));
+    }
 
     #[test]
     fn loader_is_send_and_sync() {
