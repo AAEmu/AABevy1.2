@@ -20,6 +20,7 @@ aa-cry.workspace = true
 bevy.workspace = true
 tracing.workspace = true
 rusqlite.workspace = true
+roxmltree.workspace = true
 
 [dev-dependencies]
 aa-dev.workspace = true

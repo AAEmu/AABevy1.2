@@ -24,12 +24,15 @@ use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
 use kira::sound::{EndPosition, PlaybackPosition, Region};
-use kira::track::{SpatialTrackBuilder, SpatialTrackHandle, TrackBuilder, TrackHandle};
-use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Tween};
+use kira::track::{SendTrackBuilder, SendTrackHandle, SpatialTrackBuilder, SpatialTrackHandle, TrackBuilder, TrackHandle};
+use kira::{AudioManager, AudioManagerSettings, Capacities, Decibels, DefaultBackend, Tween};
 
 use crate::cache::{Key, Sample, SampleCache};
 use crate::fev::Body;
 use crate::fsb5::{Codec, Error};
+use crate::mood::{Mix, MoodTable};
+use crate::muffle::{MuffleBuilder, MuffleHandle};
+use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
 use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, initial_values, layer_gain, plan, set_value, start_part};
 use crate::stream::StreamDecoder;
 use crate::vorbis;
@@ -176,6 +179,13 @@ pub struct Stats {
     pub decoded_seconds: f64,
     pub decode_wall_seconds: f64,
     pub decode_failures: u64,
+    /// The reverb preset in effect (`None`: off) and its weight, as last set with [`Engine::set_reverb`] and found.
+    pub reverb_preset: Option<String>,
+    pub reverb_weight: f32,
+    /// Mixer tracks in use (groups, reverb buses and the spatial tracks of playing sounds).
+    pub reverb_buses: usize,
+    /// The mood in force (`None`: no moods asked for).
+    pub mood: Option<String>,
 }
 
 struct Shared {
@@ -196,6 +206,8 @@ enum Cmd {
     StopAll,
     Listener { position: Vec3, rotation: Quat },
     Volumes(Volumes),
+    Reverb { preset: Option<String>, weight: f32 },
+    Moods(Vec<String>),
     Music { path: String, fade_in: Duration, fade_out: Duration },
     StopMusic { fade: Duration },
     Decoded { key: Key, result: Result<Arc<Sample>, String>, seconds: f64, took: Duration },
@@ -210,6 +222,9 @@ struct Prepared {
     looping: Option<Option<(u32, u32)>>,
     gain: f32,
     rate: f32,
+    /// Reverb wet level of the event, dB.
+    wet_db: f32,
+    leaf: String,
 }
 
 /// Handle to the player thread. Cloning shares the thread; the thread ends when the last handle drops.
@@ -309,6 +324,19 @@ impl Engine {
         self.send(Cmd::Volumes(volumes));
     }
 
+    /// Sets the area reverb: a preset of `libs/reverbpresets/reverbpresets.xml` (`x2_cave_1`, `x2_outdoor_1` ...) at a
+    /// weight from 0 (none) to 1 (fully in the volume), or `None` for no reverb. Every sound sends to it by its event's
+    /// reverb wet level; the effect glides to the new values in about a second.
+    pub fn set_reverb(&self, preset: Option<&str>, weight: f32) {
+        self.send(Cmd::Reverb { preset: preset.map(str::to_string), weight });
+    }
+
+    /// Sets which sound moods are active (`combat`, `underwater`, `death`, `indoor`, `low_health` ...; see [`crate::mood`]).
+    /// The one with the highest priority is the mix, `default` when none is named. Sounds fade to the mix in about a second.
+    pub fn set_moods(&self, moods: &[&str]) {
+        self.send(Cmd::Moods(moods.iter().map(|m| m.to_string()).collect()));
+    }
+
     /// Starts a music event, crossfading from the current track. The same track again is ignored.
     pub fn play_music(&self, path: &str, fade_in: Duration, fade_out: Duration) {
         self.send(Cmd::Music { path: path.to_string(), fade_in, fade_out });
@@ -352,6 +380,15 @@ fn tween_ms(ms: u32) -> Tween {
     Tween { duration: Duration::from_millis(ms.max(1) as u64), ..Tween::default() }
 }
 
+/// Event reverb wet levels at or below this (dB) send nothing: the project files use -60, FMOD's "off".
+const WET_OFF: f32 = -45.0;
+
+/// What a sound sends to the reverb: the event's wet level times its group's volume (the send leaves the track after the
+/// group, so the group's fader has to be applied by hand).
+fn send_db(wet_db: f32, group_volume: f32) -> Decibels {
+    Decibels(wet_db + db(group_volume).0)
+}
+
 struct Audio {
     manager: AudioManager<DefaultBackend>,
     listener: ListenerHandle,
@@ -360,6 +397,13 @@ struct Audio {
     ambience: TrackHandle,
     voice: TrackHandle,
     ui: TrackHandle,
+    /// The reverb: a send track whose only effect is the area reverb, and its control.
+    reverb_send: SendTrackHandle,
+    reverb: ReverbHandle,
+    /// Sub tracks of a group that send to the reverb at a wet level (whole dB), for sounds on no spatial track of their own.
+    buses: HashMap<(Category, i16), TrackHandle>,
+    /// The low-pass filters of the groups (all but the UI).
+    muffles: HashMap<Category, MuffleHandle>,
 }
 
 impl Audio {
@@ -373,10 +417,35 @@ impl Audio {
         }
     }
 
+    /// The track a flat (2D) sound of this group and reverb wet level (dB) plays on: the group's own track when it sends
+    /// nothing, else a sub track that sends to the reverb.
+    fn bus(&mut self, c: Category, wet_db: f32, volumes: &Volumes) -> &mut TrackHandle {
+        if wet_db <= WET_OFF {
+            return self.track(c);
+        }
+        let key = (c, wet_db.round() as i16);
+        if !self.buses.contains_key(&key) {
+            let builder = TrackBuilder::new().with_send(&self.reverb_send, send_db(f32::from(key.1), volumes.get(c)));
+            match self.track(c).add_sub_track(builder) {
+                Ok(t) => {
+                    self.buses.insert(key, t);
+                }
+                Err(e) => {
+                    tracing::debug!("aa-audio: no track for a reverb bus: {e}");
+                    return self.track(c);
+                }
+            }
+        }
+        self.buses.get_mut(&key).expect("just inserted")
+    }
+
     fn apply(&mut self, v: &Volumes) {
         self.manager.main_track().set_volume(db(v.master), Tween::default());
         for c in [Category::Music, Category::Sfx, Category::Ambience, Category::Voice, Category::Ui] {
             self.track(c).set_volume(db(v.get(c)), Tween::default());
+        }
+        for ((c, wet), bus) in self.buses.iter_mut() {
+            let _ = bus.set_send(&self.reverb_send, send_db(f32::from(*wet), v.get(*c)), Tween::default());
         }
     }
 }
@@ -403,12 +472,18 @@ struct Part {
     handle: Option<StaticSoundHandle>,
     track: Option<SpatialTrackHandle>,
     last_db: f32,
+    /// Reverb wet level of the part's event, dB.
+    wet_db: f32,
 }
 
 struct ActiveVoice {
     id: Voice,
     event: EventRef,
     category: Category,
+    /// The last part of the event's mixer category (`footsteps`): what the mood mixes it by.
+    leaf: String,
+    /// The mood's gain for the voice, gliding.
+    mood: f32,
     /// `Some` for a 3D event at a place.
     at: Option<Vec3>,
     moved: bool,
@@ -436,7 +511,7 @@ impl ActiveVoice {
     fn target_gain(&self, part: &Part, listener: Vec3) -> f32 {
         let Some(p) = &part.planned else { return 0.0 };
         let ev = self.event.event();
-        let mut g = p.gain * self.volume * layer_gain(ev, &self.values, p.layer);
+        let mut g = p.gain * self.volume * self.mood * layer_gain(ev, &self.values, p.layer);
         if let Some(at) = self.at {
             g *= distance_gain(ev, at.distance(listener));
         }
@@ -447,6 +522,10 @@ impl ActiveVoice {
 struct CurrentMusic {
     path: String,
     handle: StreamingSoundHandle<Error>,
+    /// The event's own gain and mixer category leaf; the mood's gain is applied on top.
+    gain: f32,
+    leaf: String,
+    last_db: f32,
 }
 
 struct Player {
@@ -467,6 +546,16 @@ struct Player {
     music_request: Option<(String, Duration, Duration)>,
     unknown: HashSet<String>,
     stats: Stats,
+    /// The area reverb that was asked for: preset name and weight; the table of presets is read when it is first needed.
+    reverb_want: (Option<String>, f32),
+    presets: Option<Presets>,
+    /// The moods that are active, the table they come from (read on first use) and the mix they make.
+    moods: Vec<String>,
+    mood_table: Option<MoodTable>,
+    mix: Mix,
+    /// The gain the mix has reached for each category leaf (it glides to the mix's).
+    mood_cur: HashMap<String, f32>,
+    last_update: Instant,
 }
 
 impl Player {
@@ -493,6 +582,13 @@ impl Player {
             music_token: 0,
             music_request: None,
             unknown: HashSet::new(),
+            reverb_want: (None, 0.0),
+            presets: None,
+            moods: Vec::new(),
+            mood_table: None,
+            mix: Mix::default(),
+            mood_cur: HashMap::new(),
+            last_update: Instant::now(),
         }
     }
 
@@ -578,7 +674,22 @@ impl Player {
                 self.volumes = v;
                 if let Some(a) = &mut self.audio {
                     a.apply(&v);
+                    for voice in self.voices.values_mut() {
+                        for part in voice.parts.iter_mut().filter(|p| p.wet_db > WET_OFF) {
+                            if let Some(t) = &mut part.track {
+                                let _ = t.set_send(&a.reverb_send, send_db(part.wet_db, v.get(voice.category)), Tween::default());
+                            }
+                        }
+                    }
                 }
+            }
+            Cmd::Reverb { preset, weight } => {
+                self.reverb_want = (preset, weight);
+                self.apply_reverb();
+            }
+            Cmd::Moods(moods) => {
+                self.moods = moods;
+                self.apply_moods();
             }
             Cmd::Music { path, fade_in, fade_out } => self.play_music(path, fade_in, fade_out),
             Cmd::StopMusic { fade } => {
@@ -604,20 +715,34 @@ impl Player {
             return true;
         }
         let built = (|| -> Result<Audio, String> {
-            let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()).map_err(|e| e.to_string())?;
+            // every 3D sound of an event with several layers has a spatial track of its own: the default 128 tracks are few
+            let settings = AudioManagerSettings { capacities: Capacities { sub_track_capacity: 512, ..Capacities::default() }, ..AudioManagerSettings::default() };
+            let mut manager = AudioManager::<DefaultBackend>::new(settings).map_err(|e| e.to_string())?;
             let listener = manager.add_listener(self.listener.0, self.listener.1).map_err(|e| e.to_string())?;
-            let group = |manager: &mut AudioManager<DefaultBackend>| manager.add_sub_track(TrackBuilder::new()).map_err(|e| e.to_string());
-            let music = group(&mut manager)?;
-            let sfx = group(&mut manager)?;
-            let ambience = group(&mut manager)?;
-            let voice = group(&mut manager)?;
-            let ui = group(&mut manager)?;
-            Ok(Audio { manager, listener, music, sfx, ambience, voice, ui })
+            let mut muffles = HashMap::new();
+            let mut group = |manager: &mut AudioManager<DefaultBackend>, c: Category| {
+                let mut builder = TrackBuilder::new();
+                if c != Category::Ui {
+                    muffles.insert(c, builder.add_effect(MuffleBuilder));
+                }
+                manager.add_sub_track(builder).map_err(|e| e.to_string())
+            };
+            let music = group(&mut manager, Category::Music)?;
+            let sfx = group(&mut manager, Category::Sfx)?;
+            let ambience = group(&mut manager, Category::Ambience)?;
+            let voice = group(&mut manager, Category::Voice)?;
+            let ui = group(&mut manager, Category::Ui)?;
+            let mut send = SendTrackBuilder::new();
+            let reverb = send.add_effect(ReverbBuilder);
+            let reverb_send = manager.add_send_track(send).map_err(|e| e.to_string())?;
+            Ok(Audio { manager, listener, music, sfx, ambience, voice, ui, reverb_send, reverb, buses: HashMap::new(), muffles })
         })();
         match built {
             Ok(mut a) => {
                 a.apply(&self.volumes);
                 self.audio = Some(a);
+                self.apply_reverb();
+                self.apply_mix_filters();
                 true
             }
             Err(e) => {
@@ -626,6 +751,70 @@ impl Player {
                 self.device_failed = true;
                 false
             }
+        }
+    }
+
+    /// Gives the reverb effect the wanted preset at its weight (once the mixer is open and the presets are read).
+    fn apply_reverb(&mut self) {
+        if !self.settings.audible {
+            return;
+        }
+        let Some(audio) = &self.audio else { return };
+        let (name, weight) = (&self.reverb_want.0, self.reverb_want.1);
+        let params = match name {
+            Some(n) => {
+                let presets = self.presets.get_or_insert_with(|| Presets::load(Library::global().pak()));
+                match presets.get(n) {
+                    Some(p) => ReverbParams::of(p, weight),
+                    None => {
+                        tracing::debug!("aa-audio: no reverb preset {n}");
+                        ReverbParams::OFF
+                    }
+                }
+            }
+            None => ReverbParams::OFF,
+        };
+        audio.reverb.set(params);
+        self.stats.reverb_preset = name.clone().filter(|_| params.audible());
+        self.stats.reverb_weight = if params.audible() { weight } else { 0.0 };
+    }
+
+    /// Works out the mix of the active moods (reading the mood file on first use).
+    fn apply_moods(&mut self) {
+        if !self.settings.audible {
+            return;
+        }
+        if self.moods.is_empty() {
+            self.mix = Mix::default();
+            self.stats.mood = None;
+        } else {
+            let table = self.mood_table.get_or_insert_with(|| MoodTable::load(Library::global().pak()));
+            self.mix = table.winner(&self.moods).map(Mix::of).unwrap_or_default();
+            self.stats.mood = Some(self.mix.name.clone());
+        }
+        self.apply_mix_filters();
+    }
+
+    /// Sets the groups' low-pass filters to the mix's.
+    fn apply_mix_filters(&mut self) {
+        let Some(audio) = &self.audio else { return };
+        for (group, filter) in &audio.muffles {
+            filter.set(self.mix.lowpass(*group));
+        }
+    }
+
+    /// The gain the mood gives sounds of the mixer category `leaf` now (gliding to the mix's).
+    fn mood_gain(&mut self, leaf: &str) -> f32 {
+        let target = self.mix.gain(leaf);
+        *self.mood_cur.entry(leaf.to_string()).or_insert(target)
+    }
+
+    /// Moves the gains towards the mix's, `dt` seconds on.
+    fn glide_mood(&mut self, dt: f32) {
+        let k = 1.0 - (-dt / 0.5).exp();
+        for (leaf, cur) in self.mood_cur.iter_mut() {
+            let target = self.mix.gain(leaf);
+            *cur = if (target - *cur).abs() < 0.002 { target } else { *cur + (target - *cur) * k };
         }
     }
 
@@ -705,14 +894,17 @@ impl Player {
             Body::Complex { layers, .. } => layers.iter().enumerate().flat_map(|(l, layer)| (0..layer.instances.len()).map(move |i| (l, i))).collect(),
         }
         .into_iter()
-        .map(|(layer, inst)| Part { layer, inst, state: PartState::Idle, planned: None, key: None, sample: None, handle: None, track: None, last_db: 0.0 })
+        .map(|(layer, inst)| Part { layer, inst, state: PartState::Idle, planned: None, key: None, sample: None, handle: None, track: None, last_db: 0.0, wet_db: ev.reverb_wet })
         .collect();
+        let leaf = ev.category.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
         let distance_params = distance_parameters(ev);
         let persistent = !ev.one_shot() && matches!(&ev.body, Body::Complex { parameters, .. } if (0..parameters.len()).any(|i| !distance_params.contains(&i)));
         let mut voice = ActiveVoice {
             id,
             event: event.clone(),
             category: opts.category.unwrap_or_else(|| Category::of_mixer(&ev.category)),
+            leaf: leaf.clone(),
+            mood: self.mood_gain(&leaf),
             at: if is_3d { at } else { None },
             moved: false,
             volume: opts.volume,
@@ -787,10 +979,11 @@ impl Player {
             }
         }
         let listener = self.listener.0;
+        let volumes = self.volumes;
         let Some(audio) = &mut self.audio else { return };
         for i in 0..voice.parts.len() {
             if voice.parts[i].state == PartState::Loading && voice.parts[i].sample.is_some() {
-                begin_part(audio, voice, i, listener);
+                begin_part(audio, voice, i, listener, &volumes);
             }
         }
     }
@@ -867,6 +1060,10 @@ impl Player {
     }
 
     fn update(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_update).as_secs_f32().min(0.5);
+        self.last_update = now;
+        self.glide_mood(dt);
         let ids: Vec<Voice> = self.voices.keys().copied().collect();
         let listener = self.listener.0;
         for id in ids {
@@ -880,6 +1077,16 @@ impl Player {
         }
         if self.music.as_ref().is_some_and(|m| m.handle.state() == PlaybackState::Stopped) {
             self.music = None;
+        }
+        if let Some(leaf) = self.music.as_ref().map(|m| m.leaf.clone()) {
+            let mood = self.mood_gain(&leaf);
+            if let Some(m) = &mut self.music {
+                let new_db = db(m.gain * mood).0;
+                if (new_db - m.last_db).abs() > 0.2 {
+                    m.handle.set_volume(Decibels(new_db), tween_ms(100));
+                    m.last_db = new_db;
+                }
+            }
         }
     }
 
@@ -926,6 +1133,7 @@ impl Player {
             }
             self.try_start(voice);
         }
+        voice.mood = self.mood_gain(&voice.leaf);
         let moved = std::mem::take(&mut voice.moved);
         for i in 0..voice.parts.len() {
             if voice.parts[i].state != PartState::Playing {
@@ -980,6 +1188,8 @@ impl Player {
         let project = event.project.clone();
         // FMOD plays a music event through: the track repeats when its instance loops.
         let looping = p.looping;
+        let wet_db = event.event().reverb_wet;
+        let leaf = event.event().category.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
         aa_cry::workers::Workers::global().spawn(-1000.0, move || {
             let result = (|| -> Result<Prepared, Error> {
                 let lib = Library::global();
@@ -990,7 +1200,7 @@ impl Player {
                 let sub = bank.fsb.subsounds.get(p.index as usize).ok_or(Error::NoSubsound(p.index as usize))?;
                 let data = lib.read_subsound(&bank, p.index as usize)?;
                 let stream = vorbis::Stream::new(sub, data)?;
-                Ok(Prepared { stream, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate })
+                Ok(Prepared { stream, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf })
             })()
             .map_err(|e| e.to_string());
             let _ = tx.send(Cmd::MusicReady { token, result });
@@ -1006,22 +1216,26 @@ impl Player {
                 return;
             }
         };
+        if self.audio.is_none() {
+            return;
+        }
+        let mood = self.mood_gain(&prepared.leaf);
         let Some(audio) = &mut self.audio else { return };
         if let Some(old) = self.music.take() {
             let mut h = old.handle;
             h.stop(Tween { duration: fade_out.max(Duration::from_millis(1)), ..Tween::default() });
         }
-        let mut data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.stream)).volume(db(prepared.gain)).playback_rate(prepared.rate as f64);
+        let mut data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.stream)).volume(db(prepared.gain * mood)).playback_rate(prepared.rate as f64);
         if let Some(points) = prepared.looping {
             data = data.loop_region(loop_region(points));
         }
         if !fade_in.is_zero() {
             data = data.fade_in_tween(Tween { duration: fade_in, ..Tween::default() });
         }
-        match audio.music.play(data) {
+        match audio.bus(Category::Music, prepared.wet_db, &self.volumes).play(data) {
             Ok(handle) => {
                 self.stats.started += 1;
-                self.music = Some(CurrentMusic { path, handle });
+                self.music = Some(CurrentMusic { path, handle, gain: prepared.gain, leaf: prepared.leaf.clone(), last_db: db(prepared.gain * mood).0 });
             }
             Err(e) => tracing::debug!("aa-audio: cannot play music {path}: {e}"),
         }
@@ -1036,14 +1250,16 @@ fn loop_region(points: Option<(u32, u32)>) -> Region {
     }
 }
 
-/// Starts the sound of part `i`: on a spatial track for a 3D voice, on its group's track otherwise.
-fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: Vec3) {
+/// Starts the sound of part `i`: on a spatial track for a 3D voice, on its group's track (or the reverb bus of its wet level)
+/// otherwise. Both send to the reverb by the event's wet level.
+fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: Vec3, volumes: &Volumes) {
     let gain = voice.target_gain(&voice.parts[i], listener);
     let ev = voice.event.event();
     let pan = ev.pan_level.clamp(0.0, 1.0).max(0.2);
     let category = voice.category;
     let at = voice.at;
     let part = &mut voice.parts[i];
+    let wet_db = part.wet_db;
     let (Some(sample), Some(p)) = (part.sample.clone(), part.planned.clone()) else {
         part.state = PartState::Done;
         return;
@@ -1059,7 +1275,10 @@ fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: Ve
     part.last_db = db(gain).0;
     let result = match at {
         Some(at) => {
-            let builder = SpatialTrackBuilder::new().attenuation_function(None).spatialization_strength(pan).persist_until_sounds_finish(true);
+            let mut builder = SpatialTrackBuilder::new().attenuation_function(None).spatialization_strength(pan).persist_until_sounds_finish(true);
+            if wet_db > WET_OFF {
+                builder = builder.with_send(&audio.reverb_send, send_db(wet_db, volumes.get(category)));
+            }
             let listener_id = audio.listener.id();
             match audio.track(category).add_spatial_sub_track(listener_id, at, builder) {
                 Ok(mut track) => {
@@ -1070,7 +1289,7 @@ fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: Ve
                 Err(e) => Err(e.to_string()),
             }
         }
-        None => audio.track(category).play(data).map_err(|e| e.to_string()),
+        None => audio.bus(category, wet_db, volumes).play(data).map_err(|e| e.to_string()),
     };
     match result {
         Ok(h) => {
