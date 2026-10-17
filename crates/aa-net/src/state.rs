@@ -35,6 +35,7 @@ pub use crate::party::Party;
 pub use crate::shop::Shop;
 pub use crate::friend::Friends;
 pub use crate::repair::Repair;
+pub use crate::mail::Mailbox;
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -306,6 +307,7 @@ pub struct WorldState {
     pub shop: Shop,
     pub friends: Friends,
     pub repair: Repair,
+    pub mailbox: Mailbox,
 }
 
 impl WorldState {
@@ -331,6 +333,7 @@ impl WorldState {
         self.shop.apply(e);
         self.friends.apply(e);
         self.repair.apply(e);
+        self.mailbox.apply(e);
     }
 }
 

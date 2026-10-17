@@ -95,7 +95,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (mail, houses, guilds, trading, looting windows ...) is decoded as
+Everything else the server sends (houses, guilds, trading, looting windows ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
 
@@ -984,10 +984,111 @@ live; no item/grant fixture was injected. Unit coverage checks full repair detai
 separate money tasks before the next DD04 opcode, empty reports, wear/pending behavior and
 certificate/money/capacity preflight. The test account logged out cleanly.
 
+## Mailbox protocol and state
+
+`Command::Mail(MailCommand)` and `Event::Mail(MailEvent)` expose the original mailbox
+lane. `Mailbox` is both `WorldState.mailbox` and a Bevy resource. It owns `received`/`sent`
+header vectors, `bodies: Vec<CachedMailBody { is_sent, body }>`, `unread: UnreadMail`
+(sent/received/mia_received/commercial_received), `unread_loaded`, `loaded`, `listing`,
+`dirty`, the last snapshot's `total_headers`/`total_bodies`, `pending`, and `last_error`.
+Use `header(is_sent,id)`, `headers(is_sent)` and `body(is_sent,id)` for lookup. IDs and
+Unix timestamps are i64; original Lua mail IDs are decimal strings. All mail categories
+remain available; regular/commercial/MIA filtering belongs to the original UI.
+
+Commands are `List`, `ListContinue`, `Read { is_sent, mail_id }`,
+`Delete { is_sent, mail_id }`, `Send(SendMail)`, `TakeMoney { mail_id }`,
+`TakeItem { mail_id, attachment: MailAttachment }`, `TakeAll { mail_id }`,
+`TakeAllAndDelete { mail_id }`, and `PayHousingTax { mail_id, auto_use_aa_point }`.
+Read writes bool then i64; Delete writes i64 then bool. The list snapshot arrives in
+multiple `MailEvent::List` chunks, independently marking sent/received; append/upsert
+until `ListEnd`. Only locally sending `List` clears old headers/bodies. An empty completed
+snapshot is meaningful. ListContinue is currently a lane log-only handler; List sends
+all headers. Login's unread packet survives PlayerSpawn; character selection, leave and
+disconnect clear the resource. Requested means the request was sent, never success.
+
+`SendMail { mail_type, receiver, title, text, money, items:Vec<MailSlot>, doodad_obj_id }`
+accepts normal1/express2/registered3. `money` is copper, `MailSlot { container:2, slot }`
+is a zero-based physical bag address. The entire stack is attached; split first for a
+partial stack. At most ten item attachments; the first item or money attachment is free.
+`postage()` mirrors lane50c+(additional attachments)*30c for normal/registered,
+100c+additional*80c for express. Normal delivery is delayed1800s; registered and express
+are immediate. Native normal UI uses type strings `mail_normal` / `mail_express`.
+Sending requires a real doodad within5m2D whose current funcs include
+DoodadFuncNaviOpenMailbox. List/read/claim have no mailbox gate. General SCErrorMsg155
+is MAIL_SUCCESS after the Sent ACK;176 means mailbox missing/out of range and has no
+MailFailed ACK. The existing `Event::ServerError` also carries these informational codes.
+
+Headers preserve type, status0unread/1read/2unpaid, sender/receiver, attachment count
+(including money/billing), open date, returned and extra. Bodies preserve receiver,
+title/text, three money fields, send/receive/open dates, and exactly ten optional item
+slots. `MailAttachment.item` is the normal parsed Item; its private original Item.Write
+bytes preserve skipped detail types for an exact native claim. Clone the chosen cached
+attachment into TakeItem. Native3948d150 converts Lua1-based index to0-based;
+393cc6e0 builds opcode09d via397ae5f0 and397c5390 serializes full Item.Write, followed by
+two zero target address bytes. The lane shortened reader ignores every description field
+after the item ID, so full equipment details still work (verified live). No metadata is
+invented. Claims update inventory only through authoritative reason47 item tasks;
+mail-finalization Remove may already name container5(MAIL), so the inventory reducer
+removes that exact unique ID from visible containers. Money is reason83, separately.
+
+Every inbound mail packet115..11f/121..123 is decoded. Failed and Sent contain exactly
+ten slot-address pairs, without a count. Body contains ten full Item.Write records,
+without a count. AttachmentTaken contains a count0..10 plus **ten** fixed ID/address
+records; nonempty padding, duplicate IDs and invalid counts are rejected. Deleted always
+contains unread counts even when its modified flag is false. All shapes have strict
+DD04 next-opcode boundary coverage, including full equipment and skipped detail bytes.
+
+`AttachmentTaken` can arrive once for money and once per item. Its money flag may be
+true again on item ACKs; cached body values, not repeated subtraction, determine the
+remaining count. Item locations are the old mail-escrow address, not the new bag slot.
+With no cached body, the resource marks `dirty` and retains an unresolved claim until a
+refresh; it does not invent the remaining attachments or a success. Load/read a body
+before driving the native sequential claim UI. TakeAll claims without deletion;
+TakeAllAndDelete uses opcode139 and waits for the authoritative Deleted ACK. Direct
+Delete silently refuses sent mail and nonempty incoming mail in the lane. Return's
+server opcodefff does not exist in1.2; there is no fake return command. PayHousingTax is
+housing-tax payment only; generic COD and commercial/MIA sending are not implemented.
+ReceiverOpened is decoded but unused by this lane; sent read status requires a list/detail
+refresh rather than an invented live notification. Subject/text result codes are exposed,
+but lane does not currently enforce their limits;
+wire/string/frame sizes and malformed local requests are validated here. Silent refusal,
+bag-full partial claims and general server errors need a UI timeout/retry; pending does
+not fabricate a failed/successful response. `mail::result` exports raw codes0..30.
+
+Original Lua contracts: TOGGLE_MAIL(doodadId,receiver_bool),
+MAIL_INBOX_UPDATE(read,mailListKind), MAIL_SENTBOX_UPDATE(read,mailListKind),
+MAIL_SENT_SUCCESS(), MAIL_RETURNED(), MAIL_INBOX_ITEM_TAKEN(index1..10),
+MAIL_INBOX_MONEY_TAKEN(), MAIL_INBOX_ATTACHMENT_TAKEN_ALL(mailId),
+MAIL_INBOX_TAX_PAID(). `X2Mail:SendMail` takes a table containing receiver/title/text,
+gold/silver/copper strings, doodadId decimal string, type string, withReceiver string0/1.
+Title-info tables use mail_id/mail_type/title/sender/receiver/is_read/hasItem/extra;
+current-body adds text/sendDate/recvDate and synthesizes sender/extra from its header.
+Physical attachment indices are one-based in Lua. List end is native MAIL_LIST_END3,
+continue2; read native registration394914xx before adding other list-kind constants.
+
+`cargo test -p aa-net --test live_mail -- --ignored --nocapture` passed32.40s with fresh
+owned chars43/44 only. Sender sold its own starter gear for165c, paid exactly135c to send
+5c and two real equipment attachments. Verified failures15/1 leave money/state intact,
+registered immediate delivery, inbox/outbox list+detail, unread updates, individual full
+native equipment claim, sequential claim-only, direct delete, claim-and-delete, and
+recipient reconnect persistence both before and after claims. Both peers logged out.
+A real mailbox fixture is template320 at(14367.94,15517.02,152.8604), beside merchant12547.
+No grants, server/database writes outside normal gameplay, or existing accounts were used.
+Normal delayed delivery, express100c, paid housing tax, commercial/MIA/system mail claims
+and full-bag partial delivery remain source/unit audited rather than live exercised.
+
+Native ping placement research (read-only follow-up): worldmap392d7a54 and roadmap392c0680
+call392ac150?392ac030. Rect X is origin+u*extent, Y origin+(1-v)*extent; subtract origin
+cell coordinates<<10 before local engine queries. Z is max(two engine height queries)+2;
+the engine calls are vtable0x110(pos,0,0.0,0) and0x108(pos,FLT_MAX), likely surface/terrain
+but exact symbols are unproven.392ac150 then transforms through world-service vtable0x28.
+Worldmap uses own current instance only when the displayed map level/id matches own map
+context, otherwise0; roadmap always uses own instance. Native does not use player Z.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
-* Server → client packets not decoded (skipped): mail, houses in the character list
+* Server → client packets not decoded (skipped): houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
   trading, loot dice (`SCLootDice*`, rolls for group loot), the mount owner's packets
   (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
@@ -996,7 +1097,7 @@ certificate/money/capacity preflight. The test account logged out cleanly.
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
   that is not decoded ends that batch.
 * Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
-  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy). Trade, mail,
+  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy). Trade,
   coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the

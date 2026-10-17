@@ -254,6 +254,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
+    Mail(crate::mail::MailCommand),
     Friend(crate::friend::FriendCommand),
     Repair(crate::repair::RepairCommand),
     /// Stand up after dying: `in_place` where the character fell, else at the return point (a
@@ -476,6 +477,7 @@ pub enum Event {
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
+    Mail(crate::mail::MailEvent),
     Friend(crate::friend::FriendEvent),
     Repair(crate::repair::RepairEvent),
     SkillLearned { skill_id: u32, level: u8 },
@@ -924,6 +926,13 @@ impl Session {
                     self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
                 }
             }
+            Command::Mail(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Mail(crate::mail::MailEvent::RequestRejected { command, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::Mail(command.clone())).await {
+                    self.emit(Event::Mail(crate::mail::MailEvent::Requested(command)));
+                }
+            }
             Command::Repair(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: message.into() }));
@@ -1284,6 +1293,7 @@ impl Session {
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
+            M::Mail(e) => self.emit(Event::Mail(e)),
             M::Friend(e) => self.emit(Event::Friend(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
             M::SkillUpgraded { skill_id, level } => self.emit(Event::SkillUpgraded { skill_id, level }),
