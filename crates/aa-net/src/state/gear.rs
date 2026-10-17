@@ -1,6 +1,6 @@
 //! The hotbar, the bag and bank, and the equipment of the local player.
 
-use crate::items::{container, ActionSlot, ItemTask, ACTION_SLOTS};
+use crate::items::{container, ActionSlot, ItemMove, ItemTask, ACTION_SLOTS};
 use crate::model::{Equipment, Item, slot};
 use crate::session::Event;
 
@@ -168,10 +168,13 @@ impl Inventory {
             ItemTask::RemoveCrafting { item_id } => return self.remove_by_id(*item_id),
             ItemTask::Move { from_container, from_slot, from_item_id, to_container, to_slot, to_item_id } => {
                 // Take both ends first, then put them back crossed: handles empty targets,
-                // swaps and moves between the bag, bank and equipment alike.
-                let from = self
-                    .locate(*from_container, usize::from(*from_slot), *from_item_id)
-                    .and_then(Option::take);
+                // swaps and moves between the bag, bank and equipment alike. An end with item id 0 is an
+                // empty slot (do not look for it: the body parts worn have id 0 too).
+                let from = if *from_item_id == 0 {
+                    None
+                } else {
+                    self.locate(*from_container, usize::from(*from_slot), *from_item_id).and_then(Option::take)
+                };
                 let to = if *to_item_id == 0 {
                     None
                 } else {
@@ -283,6 +286,77 @@ impl Inventory {
     pub fn worn(&self, equip_slot: usize) -> Option<&Item> {
         debug_assert!(equip_slot < slot::COUNT);
         self.equipment.get(equip_slot)
+    }
+
+    /// The item in a slot of the bag, bank or equipment (`container` as in [`container`]).
+    pub fn item_at(&self, container: u8, index: usize) -> Option<&Item> {
+        match container {
+            container::INVENTORY => self.bag.get(index),
+            container::BANK => self.bank.get(index),
+            container::EQUIPMENT => self.equipment.slots.get(index),
+            _ => None,
+        }?
+        .as_ref()
+    }
+
+    fn has_slot(&self, container: u8, index: usize) -> bool {
+        match container {
+            container::INVENTORY => index < self.bag.len(),
+            container::BANK => index < self.bank.len(),
+            container::EQUIPMENT => index < self.equipment.slots.len(),
+            _ => false,
+        }
+    }
+
+    /// The first empty slot of the bag.
+    pub fn first_free_bag_slot(&self) -> Option<usize> {
+        self.bag.iter().position(Option::is_none)
+    }
+
+    /// The `CSSwapItems` block that moves what is in `from` onto `to` (and what is there back): bag to bag, bag to bank,
+    /// worn to bag. Nothing when both slots are empty or either is not a real slot.
+    pub fn plan_move(&self, from: (u8, usize), to: (u8, usize)) -> Option<ItemMove> {
+        if !self.has_slot(from.0, from.1) || !self.has_slot(to.0, to.1) {
+            return None;
+        }
+        let slot = |(c, i): (u8, usize)| (c, u8::try_from(i).ok());
+        let ((fc, fs), (tc, ts)) = (slot(from), slot(to));
+        let (fs, ts) = (fs?, ts?);
+        let (a, b) = (self.item_at(fc, from.1), self.item_at(tc, to.1));
+        if a.is_none() && b.is_none() || from == to {
+            return None;
+        }
+        Some(ItemMove {
+            from_item_id: a.map_or(0, |i| i.id),
+            to_item_id: b.map_or(0, |i| i.id),
+            from_container: fc,
+            from_slot: fs,
+            to_container: tc,
+            to_slot: ts,
+        })
+    }
+
+    /// Wear the bag item in `bag_slot` in the worn slot `equip_slot` (a `model::slot`), swapping with what is worn there.
+    /// The real client sends it from the worn slot (its item id 0 when empty) to the bag item.
+    pub fn plan_equip(&self, bag_slot: usize, equip_slot: usize) -> Option<ItemMove> {
+        if !self.has_slot(container::EQUIPMENT, equip_slot) {
+            return None;
+        }
+        let item = self.item_at(container::INVENTORY, bag_slot)?;
+        Some(ItemMove {
+            from_item_id: self.item_at(container::EQUIPMENT, equip_slot).map_or(0, |i| i.id),
+            to_item_id: item.id,
+            from_container: container::EQUIPMENT,
+            from_slot: u8::try_from(equip_slot).ok()?,
+            to_container: container::INVENTORY,
+            to_slot: u8::try_from(bag_slot).ok()?,
+        })
+    }
+
+    /// Take the worn item in `equip_slot` off into the bag slot `bag_slot` (swapping with the item there when it fits).
+    pub fn plan_unequip(&self, equip_slot: usize, bag_slot: usize) -> Option<ItemMove> {
+        self.item_at(container::EQUIPMENT, equip_slot)?;
+        self.plan_move((container::EQUIPMENT, equip_slot), (container::INVENTORY, bag_slot))
     }
 }
 
@@ -422,6 +496,52 @@ mod tests {
     }
 
     #[test]
+    fn item_moves_name_the_items_in_both_slots() {
+        let mut inv = Inventory::default();
+        inv.apply(&selected(10));
+        inv.apply(&tasks(9, vec![
+            ItemTask::Add { action: action::CREATE, container: 2, slot: 1, item: item(8001, 55, 20) },
+            ItemTask::Add { action: action::CREATE, container: 2, slot: 4, item: item(77, 66, 1) },
+        ]));
+        assert_eq!(inv.first_free_bag_slot(), Some(0));
+        assert_eq!(inv.item_at(container::INVENTORY, 1).map(|i| i.id), Some(55));
+        assert_eq!(inv.item_at(container::EQUIPMENT, slot::MAINHAND).map(|i| i.id), Some(900));
+        // bag to an empty bag slot, onto another item, from and to nothing
+        let m = inv.plan_move((container::INVENTORY, 1), (container::INVENTORY, 7)).unwrap();
+        assert_eq!((m.from_item_id, m.to_item_id, m.from_slot, m.to_slot), (55, 0, 1, 7));
+        let m = inv.plan_move((container::INVENTORY, 1), (container::INVENTORY, 4)).unwrap();
+        assert_eq!((m.from_item_id, m.to_item_id), (55, 66));
+        assert!(inv.plan_move((container::INVENTORY, 2), (container::INVENTORY, 3)).is_none());
+        assert!(inv.plan_move((container::INVENTORY, 1), (container::INVENTORY, 1)).is_none());
+        // wearing the item in bag slot 4 on the empty head slot: from the empty worn slot to the bag item
+        let m = inv.plan_equip(4, slot::HEAD).unwrap();
+        assert_eq!((m.from_item_id, m.to_item_id, m.from_container, m.from_slot, m.to_container, m.to_slot), (0, 66, 1, 0, 2, 4));
+        // on the main hand it swaps with the weapon worn there
+        assert_eq!(inv.plan_equip(4, slot::MAINHAND).unwrap().from_item_id, 900);
+        // taking the weapon off into a free slot
+        let m = inv.plan_unequip(slot::MAINHAND, 7).unwrap();
+        assert_eq!((m.from_item_id, m.to_item_id, m.from_container, m.from_slot, m.to_slot), (900, 0, 1, 15, 7));
+        assert!(inv.plan_unequip(slot::HEAD, 7).is_none());
+        assert!(inv.plan_equip(9, slot::HEAD).is_none());
+        // the server's answer to the unequip is the usual swap task
+        assert!(inv.apply(&tasks(5, vec![ItemTask::Move {
+            from_container: 1, from_slot: 15, from_item_id: 900, to_container: 2, to_slot: 7, to_item_id: 0,
+        }])));
+        assert!(inv.worn(slot::MAINHAND).is_none());
+        assert_eq!(inv.bag[7].as_ref().unwrap().id, 900);
+        // and to the equip (the empty worn slot moves to the bag item's slot); the body parts, which have no item id
+        // either, stay where they are
+        inv.equipment.slots[slot::HAIR] = Item::template_only(5);
+        assert!(inv.apply(&tasks(5, vec![ItemTask::Move {
+            from_container: 1, from_slot: 0, from_item_id: 0, to_container: 2, to_slot: 4, to_item_id: 66,
+        }])));
+        assert_eq!(inv.worn(slot::HEAD).unwrap().id, 66);
+        assert!(inv.bag[4].is_none());
+        assert_eq!(inv.worn(slot::HAIR).map(|i| i.template_id), Some(5));
+        assert_eq!(inv.bag.iter().flatten().count(), 2);
+    }
+
+    #[test]
     fn money_changes_reach_the_stats() {
         use crate::state::PlayerStats;
         let mut stats = PlayerStats::default();
@@ -431,6 +551,22 @@ mod tests {
         assert!(stats.apply(&tasks(53, vec![ItemTask::Money(-100), ItemTask::BankMoney(40)])));
         assert_eq!((stats.money, stats.bank_money), (1_150, 40));
         assert!(!stats.apply(&tasks(9, vec![ItemTask::AaPoint(1)])));
+    }
+
+    #[test]
+    fn item_moves_reject_unknown_containers_and_slots_outside_capacity() {
+        let mut inv = Inventory::default();
+        inv.apply(&selected(10));
+        inv.bag[4] = Some(item(77, 66, 1));
+        let source = (container::INVENTORY, 4);
+        for invalid in [(container::INVENTORY, 10), (container::BANK, 20), (container::EQUIPMENT, slot::COUNT), (99, 0)] {
+            assert!(inv.plan_move(source, invalid).is_none(), "target {invalid:?}");
+            assert!(inv.plan_move(invalid, source).is_none(), "source {invalid:?}");
+        }
+        assert!(inv.plan_equip(4, slot::COUNT).is_none());
+        assert!(inv.plan_unequip(slot::MAINHAND, 10).is_none());
+        assert!(inv.plan_move(source, (container::INVENTORY, 9)).is_some());
+        assert!(inv.plan_move(source, (container::BANK, 19)).is_some());
     }
 
     #[test]

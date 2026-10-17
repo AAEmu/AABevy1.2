@@ -130,6 +130,36 @@ pub fn read_action_slots(r: &mut Reader) -> Result<Vec<ActionSlot>> {
     Ok(slots)
 }
 
+/// The block `CSSwapItems` and `CSSplitBagItem` start with: the item in one slot and what is in the other.
+///
+/// Both slots are named by container and index, with the ids of the items in them (0 for an empty one). Moving to an
+/// empty slot, swapping, merging stacks and wearing or taking off gear are all the same packet:
+///
+/// * bag to bag: `from` the bag item, `to` the bag item there (or 0 with the slot);
+/// * wear an item: `from` the **empty** equipment slot (item 0, container [`container::EQUIPMENT`]) `to` the bag item; when
+///   something is worn there already, `from` the worn item and `to` the bag item swaps them;
+/// * take off: `from` the worn item, `to` the bag slot (item 0 when it is empty).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemMove {
+    pub from_item_id: u64,
+    pub to_item_id: u64,
+    pub from_container: u8,
+    pub from_slot: u8,
+    pub to_container: u8,
+    pub to_slot: u8,
+}
+
+impl ItemMove {
+    pub fn write(&self, w: &mut crate::wire::Writer) {
+        w.u64(self.from_item_id)
+            .u64(self.to_item_id)
+            .u8(self.from_container)
+            .u8(self.from_slot)
+            .u8(self.to_container)
+            .u8(self.to_slot);
+    }
+}
+
 /// One chunk of `SCCharacterInvenContents`: up to 10 consecutive slots of a container.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InvenChunk {

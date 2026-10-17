@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::login::{AccountInfo, WorldList, WorldQueue};
-use crate::model::{Character, Doodad, Unit};
+use crate::model::{Attachment, Character, Doodad, Unit};
 use crate::session::{Event, Phase, PlayerSpawn};
 
 macro_rules! resource {
@@ -126,12 +126,28 @@ impl Units {
                 self.by_id.insert(u.obj_id, (**u).clone());
             }
             Event::UnitMoved { obj_id, movement } => {
-                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
-                u.pos = movement.pos;
-                if movement.move_type <= 1 {
-                    u.rotation[2] = movement.yaw();
+                // Ship requests carry only throttle and steering. Keep the last transform and
+                // movement report; replacing either with this request would put a ship at (0, 0, 0).
+                if movement.move_type == 4 {
+                    return false;
                 }
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                // a unit standing on an object (a deck, a vehicle) reports where it is relative to it, and in the world as well
+                u.pos = movement.support.as_ref().and_then(|s| s.world).map_or(movement.pos, |(world, _)| world);
+                u.rotation[2] = movement.yaw();
                 u.movement = Some(movement.clone());
+            }
+            Event::UnitAttached { obj_id, mount, point, .. } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.attached_to = Some(Attachment { obj_id: *mount, point: *point });
+            }
+            Event::UnitDetached { obj_id, .. } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.attached_to = None;
+            }
+            Event::UnitPosture { obj_id, kind, anim_action, activate } => {
+                let Some(u) = self.by_id.get_mut(obj_id) else { return false };
+                u.anim_action = if *kind == 4 && *activate { *anim_action } else { 0 };
             }
             Event::UnitsRemoved(ids) => {
                 for id in ids {
@@ -150,10 +166,15 @@ impl Units {
             Event::UnitDeath { obj_id } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 (u.dead, u.hp) = (true, 0);
+                u.movement = None;
             }
-            Event::Resurrected { obj_id, .. } => {
+            Event::Resurrected { obj_id, pos, yaw } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.dead = false;
+                u.pos = *pos;
+                u.rotation[2] = *yaw;
+                u.movement = None;
+                u.attached_to = None;
             }
             Event::LevelChanged { obj_id, level } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
@@ -332,6 +353,8 @@ mod tests {
             ability_exp: Vec::new(),
             active_abilities: Vec::new(),
             buffs: Vec::new(),
+            anim_action: 0,
+            attached_to: None,
             max_hp: 10,
             max_mp: 0,
             dead: false,
@@ -371,6 +394,71 @@ mod tests {
             obj_id: 99,
             movement: Movement::unit(Pos::default(), 0.0, 1),
         }));
+    }
+
+    #[test]
+    fn units_follow_mounting_poses_and_what_they_stand_on() {
+        use crate::model::{actor_flags, Attachment, MoveSupport};
+        let mut units = Units::default();
+        units.apply(&Event::UnitSpawned(Box::new(unit(5))));
+        assert!(units.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }));
+        assert_eq!(units.get(5).unwrap().attached_to, Some(Attachment { obj_id: 9, point: 1 }));
+        assert!(units.apply(&Event::UnitDetached { obj_id: 5, reason: 4 }));
+        assert_eq!(units.get(5).unwrap().attached_to, None);
+        assert!(!units.apply(&Event::UnitDetached { obj_id: 99, reason: 4 }));
+        // an NPC takes a pose, and leaves it (the packet repeats the animation action)
+        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: true }));
+        assert_eq!(units.get(5).unwrap().anim_action, 104);
+        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: false }));
+        assert_eq!(units.get(5).unwrap().anim_action, 0);
+        // standing on a deck: the unit is where its world position says, not at the deck-relative one
+        let mut movement = Movement::unit(Pos::new(1.0, 2.0, 0.5), 0.0, 1);
+        movement.actor_flags = actor_flags::STANDING_ON_OBJECT;
+        movement.support = Some(MoveSupport { obj_id: 9, world: Some((Pos::new(500.0, 600.0, 7.0), [0; 3])), ..MoveSupport::default() });
+        units.apply(&Event::UnitMoved { obj_id: 5, movement });
+        let pos = units.get(5).unwrap().pos;
+        assert_eq!((pos.x, pos.y), (500.0, 600.0));
+        // a vehicle reports its facing as a rotation, not a direction byte
+        let mut cart = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 2);
+        (cart.move_type, cart.vehicle_yaw) = (2, Some(1.5));
+        units.apply(&Event::UnitMoved { obj_id: 5, movement: cart });
+        assert!((units.get(5).unwrap().yaw() - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ship_requests_keep_the_last_position_and_movement() {
+        let mut units = Units::default();
+        units.apply(&Event::UnitSpawned(Box::new(unit(5))));
+        let mut ship = Movement::unit(Pos::new(500.0, 600.0, 7.0), 0.0, 1);
+        (ship.move_type, ship.vehicle_yaw) = (3, Some(1.5));
+        units.apply(&Event::UnitMoved { obj_id: 5, movement: ship.clone() });
+        // This is what Movement::read_typed(4) returns: no transform on the wire.
+        let mut request = Movement::unit(Pos::default(), 0.0, 2);
+        request.move_type = 4;
+        assert!(!units.apply(&Event::UnitMoved { obj_id: 5, movement: request }));
+        let ship_unit = units.get(5).unwrap();
+        assert_eq!(ship_unit.pos, ship.pos);
+        assert_eq!(ship_unit.yaw(), 1.5);
+        assert_eq!(ship_unit.movement.as_ref(), Some(&ship));
+    }
+
+    #[test]
+    fn resurrection_replaces_the_corpses_transform_and_old_motion() {
+        let mut units = Units::default();
+        let mut rider = unit(5);
+        rider.attached_to = Some(crate::model::Attachment { obj_id: 9, point: 1 });
+        units.apply(&Event::UnitSpawned(Box::new(rider)));
+        units.apply(&Event::UnitMoved { obj_id: 5, movement: Movement::unit(Pos::new(9.0, 8.0, 7.0), 0.5, 1) });
+        units.apply(&Event::UnitDeath { obj_id: 5 });
+        assert!(units.get(5).unwrap().movement.is_none());
+        let pos = Pos::new(500.0, 600.0, 7.0);
+        assert!(units.apply(&Event::Resurrected { obj_id: 5, pos, yaw: -1.25 }));
+        let revived = units.get(5).unwrap();
+        assert!(!revived.dead);
+        assert_eq!(revived.pos, pos);
+        assert_eq!(revived.yaw(), -1.25);
+        assert!(revived.movement.is_none());
+        assert!(revived.attached_to.is_none());
     }
 
     #[test]

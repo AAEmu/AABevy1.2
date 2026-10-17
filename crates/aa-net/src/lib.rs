@@ -15,6 +15,7 @@
 
 pub mod buff;
 pub mod game;
+pub mod interaction;
 pub mod items;
 pub mod login;
 pub mod model;
@@ -25,6 +26,7 @@ pub mod session;
 pub mod skill;
 pub mod state;
 pub mod stream;
+pub mod unit_msg;
 pub mod wire;
 
 #[cfg(feature = "bevy")]

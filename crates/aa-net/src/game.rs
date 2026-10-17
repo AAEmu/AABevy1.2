@@ -6,13 +6,14 @@
 //! compressed otherwise, and the server verifies neither `hash` nor `count`.
 
 use crate::buff::Buff;
-use crate::items::{ActionSlot, InvenChunk, ItemTasks};
+use crate::items::{ActionSlot, InvenChunk, ItemMove, ItemTasks};
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit,
 };
 use crate::opcodes::{cs, pp, sc};
 use crate::quest::{self, CompletedBlock, Quest};
 use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
+use crate::unit_msg::{self, AggroEntry, Posture};
 use crate::wire::{Pos, Reader, Result, WireError, Writer};
 
 pub const MAGIC: u8 = 0xDD;
@@ -84,6 +85,13 @@ pub enum ClientMsg {
     ChangeTarget { obj_id: u32 },
     /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
     UpdateActionSlot { slot: u8, action: ActionSlot },
+    /// `CSSwapItems`: moves the item of one slot to another, swaps it with the item there, or merges two stacks of one
+    /// kind; equipping and unequipping are swaps with the equipment container.
+    SwapItems(ItemMove),
+    /// `CSSplitBagItem`: moves `count` of a stack to another slot (a new stack, or onto a stack of the same kind).
+    SplitItem { mv: ItemMove, count: i32 },
+    /// `CSDestroyItem`: throws `count` of the item in `container` / `slot` away.
+    DestroyItem { item_id: u64, container: u8, slot: u8, count: i32 },
     /// `CSResurrectCharacter`: stand up where the character died (`in_place`) or at the return
     /// point; the character must be dead.
     Resurrect { in_place: bool },
@@ -99,6 +107,16 @@ pub enum ClientMsg {
     LootItem { item_index: u16, owner_type: u16, owner_obj_id: u32 },
     /// `CSLootCloseBag`: the loot window of `owner_obj_id` was closed.
     LootCloseBag { owner_type: u16, owner_obj_id: u32 },
+    /// `CSLearnSkill`: spend skill points on a skill of one of the active abilities (answered by `SCSkillLearned`).
+    LearnSkill { skill_id: u32 },
+    /// `CSLearnBuff`: learn a passive buff, by its `passive_buffs` id (answered by `SCBuffLearned`).
+    LearnBuff { passive_id: u32 },
+    /// `CSResetSkills`: give back every skill point spent in `ability` (answered by `SCSkillsReset`).
+    ResetSkills { ability: u8 },
+    /// `CSSwapAbility`: replace the active ability `old` (11: an empty slot) by `ability` (answered by `SCAbilitySwapped`).
+    SwapAbility { obj_id: u32, old: u8, ability: u8 },
+    /// Talking to NPCs and the quest requests (`CSInteractNPC`, `CSStartQuestContext` ...), see [`crate::interaction`].
+    Interact(crate::interaction::Interact),
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -130,12 +148,20 @@ impl ClientMsg {
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
             Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
+            Self::SwapItems(_) => cs::CSSwapItemsPacket,
+            Self::SplitItem { .. } => cs::CSSplitBagItemPacket,
+            Self::DestroyItem { .. } => cs::CSDestroyItemPacket,
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
             Self::LootOpenBag { .. } => cs::CSLootOpenBagPacket,
             Self::LootItem { .. } => cs::CSLootItemPacket,
             Self::LootCloseBag { .. } => cs::CSLootCloseBagPacket,
+            Self::LearnSkill { .. } => cs::CSLearnSkillPacket,
+            Self::LearnBuff { .. } => cs::CSLearnBuffPacket,
+            Self::ResetSkills { .. } => cs::CSResetSkillsPacket,
+            Self::SwapAbility { .. } => cs::CSSwapAbilityPacket,
+            Self::Interact(m) => m.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -182,6 +208,14 @@ impl ClientMsg {
                 w.u8(*slot);
                 action.write(&mut w);
             }
+            Self::SwapItems(mv) => mv.write(&mut w),
+            Self::SplitItem { mv, count } => {
+                mv.write(&mut w);
+                w.i32(*count);
+            }
+            Self::DestroyItem { item_id, container, slot, count } => {
+                w.u64(*item_id).u8(*container).u8(*slot).i32(*count);
+            }
             Self::Resurrect { in_place } => {
                 w.bool(*in_place);
             }
@@ -201,6 +235,19 @@ impl ClientMsg {
             Self::LootCloseBag { owner_type, owner_obj_id } => {
                 w.u16(0).u16(*owner_type).bc(*owner_obj_id).u8(0);
             }
+            Self::LearnSkill { skill_id } => {
+                w.u32(*skill_id);
+            }
+            Self::LearnBuff { passive_id } => {
+                w.u32(*passive_id);
+            }
+            Self::ResetSkills { ability } => {
+                w.u8(*ability).bool(false); // ausp
+            }
+            Self::SwapAbility { obj_id, old, ability } => {
+                w.bc(*obj_id).u8(*old).u8(*ability).bool(false); // auap
+            }
+            Self::Interact(m) => m.write(&mut w),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
             }
@@ -282,6 +329,8 @@ pub enum ServerMsg {
     UnitState(Box<Unit>),
     UnitsRemoved(Vec<u32>),
     UnitMoved { obj_id: u32, movement: Movement },
+    /// `SCUnitMovements`: several units moved at once (read as unit movements, see [`unit_msg::read_unit_movements`]).
+    UnitMovements(Vec<(u32, Movement)>),
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     UnitDeath {
         obj_id: u32,
@@ -324,6 +373,16 @@ pub enum ServerMsg {
     BmPoint(i64),
     CombatEngaged { obj_id: u32 },
     CombatCleared { obj_id: u32 },
+    /// `SCCombatFirstHit`: `hitter` struck `victim` first (`hit_type` is the `SCUnitDamaged` hit type).
+    CombatFirstHit { victim: u32, hitter: u32, hit_type: u32 },
+    /// `SCAiAggro`: the hostile units on an NPC's aggro list (empty: the list was cleared).
+    AiAggro { npc: u32, hostiles: Vec<AggroEntry> },
+    /// `SCUnitAttached`: `obj_id` sits on `mount` (a mate, a vehicle, a ship) at attach point `point`.
+    UnitAttached { obj_id: u32, mount: u32, point: u8, reason: u8 },
+    /// `SCUnitDetached`: `obj_id` got off whatever it sat on.
+    UnitDetached { obj_id: u32, reason: u8 },
+    /// `SCUnitModelPostureChanged`: an NPC changed its idle pose.
+    UnitPosture { obj_id: u32, posture: Posture },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
     // -- world: clock, weather, chat channels, targets
     /// The game clock in hours (0..24); `speed` (game hours per real second) comes with the
@@ -396,6 +455,8 @@ pub enum ServerMsg {
     Batch(Vec<ServerMsg>),
     /// A compressed batch that could not be inflated (only stored deflate blocks are supported).
     Compressed { count: u16 },
+    /// NPC function lists, doodad quest offers, NPC chat ... (see [`crate::interaction`]).
+    Interaction(crate::interaction::InteractEvent),
     Unhandled { level: u8, opcode: u16, len: usize },
 }
 
@@ -420,6 +481,7 @@ impl ServerMsg {
             Self::UnitState(_) => "SCUnitState",
             Self::UnitsRemoved(_) => "SCUnitsRemoved",
             Self::UnitMoved { .. } => "SCOneUnitMovement",
+            Self::UnitMovements(_) => "SCUnitMovements",
             Self::UnitPoints { .. } => "SCUnitPoints",
             Self::UnitDeath { .. } => "SCUnitDeath",
             Self::CharacterResurrected { .. } => "SCCharacterResurrected",
@@ -439,6 +501,11 @@ impl ServerMsg {
             Self::BmPoint(_) => "SCBmPoint",
             Self::CombatEngaged { .. } => "SCCombatEngaged",
             Self::CombatCleared { .. } => "SCCombatCleared",
+            Self::CombatFirstHit { .. } => "SCCombatFirstHit",
+            Self::AiAggro { .. } => "SCAiAggro",
+            Self::UnitAttached { .. } => "SCUnitAttached",
+            Self::UnitDetached { .. } => "SCUnitDetached",
+            Self::UnitPosture { .. } => "SCUnitModelPostureChanged",
             Self::UnitFactionChanged { .. } => "SCUnitFactionChanged",
             Self::TimeOfDay { speed: None, .. } => "SCTimeOfDay",
             Self::TimeOfDay { .. } => "SCDetailedTimeOfDay",
@@ -488,6 +555,7 @@ impl ServerMsg {
             Self::LeaveWorldGranted { .. } => "SCLeaveWorldGranted",
             Self::LeaveWorldCanceled => "SCLeaveWorldCanceled",
             Self::Batch(_) | Self::Compressed { .. } => "CompressedGamePackets",
+            Self::Interaction(e) => e.name(),
             Self::Unhandled { .. } => "unhandled",
         }
     }
@@ -633,6 +701,19 @@ impl ServerMsg {
                 obj_id: r.bc()?,
                 movement: Movement::read(r)?,
             },
+            sc::SCUnitMovementsPacket => Self::UnitMovements(unit_msg::read_unit_movements(r)?),
+            sc::SCCombatFirstHitPacket => Self::CombatFirstHit { victim: r.bc()?, hitter: r.bc()?, hit_type: r.u32()? },
+            sc::SCAiAggroPacket => {
+                let (npc, hostiles) = unit_msg::read_ai_aggro(r)?;
+                Self::AiAggro { npc, hostiles }
+            }
+            sc::SCUnitAttachedPacket => {
+                let obj_id = r.bc()?;
+                let point = r.u8()?;
+                Self::UnitAttached { obj_id, point, mount: r.bc()?, reason: r.u8()? }
+            }
+            sc::SCUnitDetachedPacket => Self::UnitDetached { obj_id: r.bc()?, reason: r.u8()? },
+            sc::SCUnitModelPostureChangedPacket => Self::UnitPosture { obj_id: r.bc()?, posture: Posture::read(r)? },
             sc::SCUnitPointsPacket => Self::UnitPoints {
                 obj_id: r.bc()?,
                 hp: r.i32()? / 100,
@@ -776,8 +857,8 @@ impl ServerMsg {
             sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
             sc::SCQuestsPacket => Self::Quests(quest::read_quests(r)?),
             sc::SCCompletedQuestsPacket => Self::CompletedQuests(quest::read_completed(r)?),
-            sc::SCQuestContextStartedPacket => Self::QuestStarted(Quest::read(r)?),
-            sc::SCQuestContextUpdatedPacket => Self::QuestUpdated(Quest::read(r)?),
+            sc::SCQuestContextStartedPacket => Self::QuestStarted(quest::read_context(r)?),
+            sc::SCQuestContextUpdatedPacket => Self::QuestUpdated(quest::read_context(r)?),
             sc::SCQuestContextCompletedPacket | sc::SCQuestContextResetPacket => {
                 let quest_id = r.u32()?;
                 let bytes: [u8; 8] = r.bytes(8)?.try_into().expect("8 bytes");
@@ -869,6 +950,7 @@ impl ServerMsg {
             },
             sc::SCLeaveWorldGrantedPacket => Self::LeaveWorldGranted { target: r.u8()? },
             sc::SCLeaveWorldCanceledPacket => Self::LeaveWorldCanceled,
+            opcode if crate::interaction::InteractEvent::handles(opcode) => Self::Interaction(crate::interaction::InteractEvent::read(opcode, r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_GAME,
                 opcode,
@@ -1168,6 +1250,25 @@ mod tests {
     }
 
     #[test]
+    fn client_item_move_bytes() {
+        // CSSwapItems: from item id, to item id (u64 each), then from container, slot, to container, slot. Equipping into
+        // an empty worn slot is "from the empty equipment slot (item 0) to the bag item".
+        let equip = ItemMove { from_item_id: 0, to_item_id: 0x0102, from_container: 1, from_slot: 15, to_container: 2, to_slot: 3 };
+        let swap = ClientMsg::SwapItems(equip);
+        assert_eq!(swap.encode_body(), [0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 1, 15, 2, 3]);
+        assert_eq!(swap.opcode(), 0x03a);
+        // CSSplitBagItem: the same block and a count (i32).
+        let split = ClientMsg::SplitItem { mv: equip, count: 2 };
+        assert_eq!(&split.encode_body()[..20], &swap.encode_body()[..]);
+        assert_eq!(&split.encode_body()[20..], [2, 0, 0, 0]);
+        assert_eq!(split.opcode(), 0x039);
+        // CSDestroyItem: item id (u64), container, slot, count (i32).
+        let destroy = ClientMsg::DestroyItem { item_id: 7, container: 2, slot: 9, count: 3 };
+        assert_eq!(destroy.encode_body(), [7, 0, 0, 0, 0, 0, 0, 0, 2, 9, 3, 0, 0, 0]);
+        assert_eq!(destroy.opcode(), 0x038);
+    }
+
+    #[test]
     fn unit_death_with_and_without_a_killer() {
         // SCUnitDeath: bc obj, kill reason, resurrect wait, lost exp, durability loss, bc killer
         // (0 = none) and for a killer game type, kill streak, three flags and the name.
@@ -1389,6 +1490,13 @@ mod tests {
         // CSResurrectCharacter: one bool, in place or at the return point.
         assert_eq!(ClientMsg::Resurrect { in_place: true }.encode(2), [0xDD, 0x01, 0, 2, 0x4E, 0x00, 1]);
         assert_eq!(ClientMsg::Resurrect { in_place: false }.encode_body(), [0]);
+        // The skill book: CSLearnSkill / CSLearnBuff (one id), CSResetSkills (ability, ausp), CSSwapAbility (unit, old, new, auap).
+        assert_eq!(ClientMsg::LearnSkill { skill_id: 0x0102_0304 }.encode(4), [0xDD, 0x01, 0, 4, 0x92, 0x00, 4, 3, 2, 1]);
+        assert_eq!(ClientMsg::LearnBuff { passive_id: 7 }.encode_body(), [7, 0, 0, 0]);
+        assert_eq!(ClientMsg::ResetSkills { ability: 6 }.encode_body(), [6, 0]);
+        assert_eq!(ClientMsg::ResetSkills { ability: 6 }.opcode(), 0x094);
+        assert_eq!(ClientMsg::SwapAbility { obj_id: 0x0102, old: 11, ability: 6 }.encode_body(), [2, 1, 0, 11, 6, 0]);
+        assert_eq!(ClientMsg::SwapAbility { obj_id: 1, old: 11, ability: 6 }.opcode(), 0x096);
     }
 
     #[test]

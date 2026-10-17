@@ -62,6 +62,20 @@ impl Quest {
     }
 }
 
+/// The quest of `SCQuestContextStarted` / `SCQuestContextUpdated`: the quest, then the component it is
+/// at (`Updated` adds four parameters, skipped). `Quest.Write` only fills its own component field for a
+/// quest with a time limit, so the trailing one is the step the quest is at.
+pub fn read_context(r: &mut Reader) -> Result<Quest> {
+    let mut q = Quest::read(r)?;
+    if r.remaining() >= 4 {
+        let component = r.u32()?;
+        if component != 0 {
+            q.component_id = component;
+        }
+    }
+    Ok(q)
+}
+
 /// 64 completed-quest flags: block `id` holds the quests `id * 64 ..= id * 64 + 63` (bit `n` of
 /// `bits`, the first byte of the packet being the lowest).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -142,6 +156,17 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], q);
         assert_eq!(list[1].template_id, 331);
+    }
+
+    #[test]
+    fn started_and_updated_carry_the_component() {
+        let q = Quest { id: 1, template_id: 330, status: status::PROGRESS, time_left_ms: -1, ..Quest::default() };
+        let mut w = Writer::new();
+        write_quest(&mut w, &q);
+        w.u32(1521).i32(0).i32(0).i32(0).i32(0);
+        let bytes = w.finish();
+        let read = read_context(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!((read.template_id, read.component_id), (330, 1521));
     }
 
     #[test]
