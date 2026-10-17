@@ -296,7 +296,7 @@ pass does the film curve). `AtmosphereTuning` is the calibration against the cap
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
 exposure water_body water_lit water_absorb water_refl water_sun water_foam water_env water_ssr ssr refraction water_rough sea_body sea_absorb
 sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
-sky_phase sky_hue sky_mie sky_green sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
+sky_phase sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
@@ -395,7 +395,31 @@ the cost is 4 draws. The clouds are subtle against the capture's sky (`cloud_gai
 
 `Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
 `WorldConfig::post`; aa-client's camera needs nothing) makes it an HDR camera (`Hdr`, `Tonemapping::None`, `DepthPrepass` with `TEXTURE_BINDING`
-usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. One fullscreen pass after the bloom replaces the tone mapping:
+usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`post_pass`
+after `bloom_passes`, both before the tone mapping slot) are:
+
+* **bloom** (`post_bloom.rs`, `post_bloom.wesl`, `bright_fragment` of `post.wesl`): the engine's `HDRBrightPassFilterPS` + `FilmicMapping`
+  (`postprocess.cfx`, `r_HDRRendering 3`), with the 1.2 renderer's cvar defaults (read from `cryrenderd3d10.dll`): `v = c x r_HDRBrightLevel / 0.18 -
+  r_HDRBrightThreshold` (1.25 / 6, `c` the exposed scene colour), `max(v, 0)`, `v / (r_HDRBrightOffset 5 + v)`: a knee that saturates, so the sun disc and
+  white-hot particles bloom like a white wall and a lit wall does not. It runs on the fogged scene (the same `scene_color` as the final pass) at half
+  resolution (the mean of the 4 pixels of a block), into a 4 level `Rg11b10Ufloat` chain (1/2 .. 1/16, 13 tap downsample, 3x3 tent upsample added back
+  up to level 0; the engine blurs three levels of its own and sums them). The final pass adds level 0 times `BloomColor x BloomMul x gain` to the exposed
+  scene before contrast and film curve, as `FilmicMapping` does (`exposure x scene + bloom x 0.5`). The colour is the world's `env.xml` `<HDRSetup>`
+  (`env::HdrSetup`: main_world `BloomColor="204,244,255" BloomMul="1.8"`, login2 white / 1.5; `FlaresMul` 0, `StreaksMul` 0, login2 flares 0.1: no flares or
+  streaks to draw) and `bloom_gain` 0.3 (`r_HDRBloomMul` 0.2 x 3 x 0.5), so the strength is about 0.43 / 0.52 / 0.54 on the main world. One deviation: the
+  threshold acts on the **luminance** and keeps the pixel's hue (the engine thresholds every channel; the blue channel of a sky is far above the threshold
+  while its luminance is not, and painted a blue fringe round the foliage). Cost (1080p, RTX class GPU, the `aa-dev` pass timers): `aa_bloom` 0.17 ms +
+  `aa_post` 0.10 ms, against Bevy's bloom 0.27 + 0.06 before. Tuning keys `bloom_level`, `bloom_threshold`, `bloom_offset`, `bloom_gain`.
+  The bloom is not visible in the spawn and combat captures (the sun is off screen and nothing there reaches the threshold), as in the real ones; it shows
+  with the sun in view (a halo that thickens towards the disc), on the sun's glitter on water and on HDR particles.
+  What is **not** here: the engine's **glow buffer** (`r_Glow 1`): glow-flagged materials (`GlowAmount` is set in 2682 of the 67885 materials, nearly all
+  effects and particles) write `GlowParams x diffuse x MatDifColor` into a separate target, which the engine blurs (3 levels, weights 2.0 / 1.15 / 0.45)
+  and adds. That needs a pass in the material shaders (aa-cry's, aa-fx's); the cheap substitute is for those materials to emit HDR (colour x
+  `GlowAmount`) so that the bright pass above finds them. The real Return orb (a white-hot disc with a violet halo about 55 px across) and the blade of
+  Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. Sun shafts (`sunshafts.cfx`, 8 tap radial
+  blur of the sky mask towards the sun, `Sun shafts visibility` about 0.83 in the day, the strength set from C++) are not done.
+
+One fullscreen pass then replaces the tone mapping:
 
 * **fog** from the depth buffer: height exponential layer (`Fog height (bottom / top)`, densities, optical depth integrated along the ray), starting
   at `Volumetric fog: Ramp start`, extinction `fog_ext` (0.04 / m at density 1) x `Global density` x layer density, colour from the layer colours
@@ -670,6 +694,7 @@ window is forced to 1 physical pixel per pixel):
 | `--cinema <name> [--t s] [--play]` | camera of `cinemas/<name>.xml` (default for login2: `01_world_select_e1`) |
 | `--hour h` `--speed h/s` `--zone id` `--layer 0/1` | time of day: `h` is the game hour as the server sends it (default 10, layer 0); the splines are read at `spline_hour(h)` |
 | `--sun-scale` `--ambient-scale` `--terrain-tint r,g,b` `--fog-visibility m` `--tree-distance m` | calibration |
+| `--fx lib.group.name [--fx-dist m] [--fx-drop m] [--fx-scale x]` | an `aa-fx` effect in front of the camera (e.g. `abillity_skill_table_m.system_skill.return_skill_form`, the Return orb) |
 | `--radius m` `--no-objects` `--no-shadows` `--no-env` `--no-post` `--no-terrain-detail` | |
 | env `AA_TUNE="key=value,.."` | `AtmosphereTuning` overrides, see Environment |
 | `--bench s [--bench-speed m/s]` | fly forward and print frame statistics, scene sizes and slow frames, then exit |
@@ -898,7 +923,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
   the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
-  real picture has more, brighter clouds), sun shafts, the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
