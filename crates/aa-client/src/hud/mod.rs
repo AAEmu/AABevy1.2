@@ -30,6 +30,7 @@ mod chat;
 mod data;
 mod input;
 mod panels;
+mod session;
 mod targeting;
 
 use aa_net::state::Player;
@@ -73,6 +74,7 @@ impl Plugin for HudPlugin {
             .init_resource::<HudBuilt>()
             .init_resource::<HudPointerOverUi>()
             .insert_resource(chat::ScriptedKeys::from_args())
+            .insert_resource(session::ScriptedSession::from_args())
             .insert_non_send(api::HudBridge::default())
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
             // after the OS events became `ButtonInput`, before the game's systems read it
@@ -87,6 +89,8 @@ impl Plugin for HudPlugin {
                 Update,
                 (
                     build_hud.run_if(hud_wanted),
+                    session::route_session,
+                    session::scripted_session.run_if(hud_up),
                     (sync_hud, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
@@ -110,6 +114,11 @@ fn hud_up(built: Res<HudBuilt>) -> bool {
 /// events of entering the world.
 fn build_hud(world: &mut World) {
     let bridge = world.non_send::<api::HudBridge>().0.clone();
+    {
+        let mut d = bridge.borrow_mut();
+        d.leaving = None;
+        d.disconnected = false;
+    }
     let chat_state = world.resource::<aa_net::state::Chat>().clone();
     // the scripts read the data while they load: bring the snapshot up to date first
     api::refresh_snapshot(world, &bridge);

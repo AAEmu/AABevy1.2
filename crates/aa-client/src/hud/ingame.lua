@@ -240,6 +240,18 @@ X2Bag.IsInvalidSlot = function(self, virtualSlotIdx)
   return virtualSlotIdx < 1 or virtualSlotIdx > n
 end
 
+-- Leaving ------------------------------------------------------------------------------------------------
+-- The system menu and the disconnect dialog leave the game through X2World:LeaveWorld(EXIT_*): the server
+-- counts down (LEAVING_WORLD_STARTED opens the frame) and lets go; with the connection lost the same call
+-- returns to the server list.
+X2World.LeaveWorld = function(self, how)
+  HUD.request("leave", how)
+  return true
+end
+X2World.CancelLeaveWorld = function(self) HUD.request("leave_cancel") end
+-- The frame's OK button after the countdown: the server lets go on its own.
+X2World.LeaveGame = function(self) end
+
 -- Entering the world ------------------------------------------------------------------------------------
 -- What the client raises when the character has spawned and the loading screen closed: the world is
 -- entered (the chat channels and lines follow from aa-net's state, chat.rs), the new character's
@@ -247,6 +259,7 @@ end
 HUD.enter_world = function()
   FAKE.fire_now("ENTERED_WORLD", true)
   FAKE.fire_now("LEFT_LOADING")
+  if S().sub_zone ~= "" then FAKE.fire_now("ENTERED_SUBZONE", 0, S().sub_zone) end
   -- FALLBACK: the tutorial of a brand new character (id 2584, two pages)
   if S().level <= 1 then
     FAKE.fire_now("TUTORIAL_EVENT", 2584, {

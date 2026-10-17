@@ -255,7 +255,8 @@ fn route_events(
                 error!("login: {message}");
                 exit.write(AppExit::error());
             }
-            (Event::Disconnected { message } | Event::Kicked { message, .. }, screen) if screen != Screen::WorldSelect => {
+            // in game the HUD shows the disconnect dialog (`hud::session`)
+            (Event::Disconnected { message } | Event::Kicked { message, .. }, screen) if screen != Screen::WorldSelect && screen != Screen::InGame => {
                 error!("login: {message}");
                 exit.write(AppExit::error());
             }
