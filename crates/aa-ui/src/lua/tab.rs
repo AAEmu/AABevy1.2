@@ -37,14 +37,15 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut TabData) -> R) -> Option<R> {
     Some(f(td))
 }
 
-/// Show the selected tab's window and button, the other tabs' unselected buttons.
+/// Show the selected tab's window and button, the other tabs' unselected buttons, tab by tab:
+/// a window shared by several tabs (`AddNewTab`) ends up as the last of them left it, so the
+/// bag's `commonInvenTab.tabWindow` (one window for the "All" tab and the four custom tabs, the
+/// first selected) is hidden, as in `reference/ingame/bag`; only its anchors matter.
 fn apply_selection(lua: &Lua, id: Id) {
     let Some(td) = with(lua, id, |t| t.clone()) else { return };
-    // Tabs may share one window: it shows when any tab using it is the selected one.
-    let selected_win = td.tabs.get(td.selected.wrapping_sub(1)).map(|t| t.0);
     for (i, &(win, sel, unsel)) in td.tabs.iter().enumerate() {
         let on = i + 1 == td.selected;
-        show(lua, win, Some(win) == selected_win, None);
+        show(lua, win, on, None);
         show(lua, sel, on, None);
         show(lua, unsel, !on, None);
     }

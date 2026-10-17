@@ -424,9 +424,15 @@ pub struct SliderData {
     pub max: f32,
     pub value: f32,
     pub step: f32,
+    /// `SetPageStep`: the visible part of the range (scroll windows pass their height).
     pub page_step: f32,
     pub vertical: bool,
     pub thumb: Option<Id>,
+    /// `SetFixedThumb(true)`: the thumb keeps its own size.
+    pub fixed_thumb: bool,
+    /// `SetMinThumbLength`: with it (and no fixed thumb) the thumb's length along the track is
+    /// `track * page / (range + page)`, at least this (the whole track while nothing scrolls).
+    pub min_thumb: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -842,6 +848,13 @@ impl Tree {
         } else {
             let (mut l, mut r, mut cx) = (None, None, None);
             let (mut t, mut b, mut cy) = (None, None, None);
+            // Two anchors that set the same edge: the one whose point comes first in
+            // TOPLEFT, TOP, TOPRIGHT, LEFT, CENTER, RIGHT, BOTTOMLEFT, BOTTOM, BOTTOMRIGHT order
+            // wins, whatever order they were added in (reference/ingame/bag: the tab line's
+            // TOPLEFT y 410 beats its TOPRIGHT y 415; the slot grid's later TOPLEFT beats the
+            // LEFT it was created with).
+            let mut anchors = anchors;
+            anchors.sort_by_key(|a| a.point as u8);
             for a in &anchors {
                 let tr = self.resolve(a.target, cache, visiting);
                 let mut px = tr.x + tr.w * a.rel.fx() + a.x;
@@ -854,21 +867,23 @@ impl Tree {
                     }
                 }
                 match a.point.fx() {
-                    f if f == 0.0 => l = Some(px),
-                    f if f == 1.0 => r = Some(px),
-                    _ => cx = Some(px),
+                    f if f == 0.0 => l = l.or(Some(px)),
+                    f if f == 1.0 => r = r.or(Some(px)),
+                    _ => cx = cx.or(Some(px)),
                 }
                 match a.point.fy() {
-                    f if f == 0.0 => t = Some(py),
-                    f if f == 1.0 => b = Some(py),
-                    _ => cy = Some(py),
+                    f if f == 0.0 => t = t.or(Some(py)),
+                    f if f == 1.0 => b = b.or(Some(py)),
+                    _ => cy = cy.or(Some(py)),
                 }
             }
             let (x, w) = axis(l, r, cx, o.width);
             let (y, h) = axis(t, b, cy, o.height);
             Rect { x, y, w, h }
         };
-        // A slider's thumb sits where the value is: along the track, centred across it.
+        // A slider's thumb sits where the value is: along the track, centred across it; a
+        // scroll bar's thumb is as long as the visible part of the range (reference/ingame/
+        // options_keybinds: a 412 track, page 435 of 825 -> 217.2; nothing to scroll -> 437 of 437).
         let r = match self
             .widget(owner)
             .and_then(|p| p.slider.as_ref())
@@ -876,6 +891,22 @@ impl Tree {
         {
             Some(s) => {
                 let pr = self.resolve(owner, cache, visiting);
+                let mut r = r;
+                if !s.fixed_thumb && s.min_thumb > 0.0 {
+                    let track = if s.vertical { pr.h } else { pr.w };
+                    let range = (s.max - s.min).max(0.0);
+                    let len = if s.page_step > 0.0 {
+                        track * s.page_step / (range + s.page_step)
+                    } else {
+                        0.0
+                    };
+                    let len = len.max(s.min_thumb).min(track.max(s.min_thumb));
+                    if s.vertical {
+                        r.h = len;
+                    } else {
+                        r.w = len;
+                    }
+                }
                 let f = if s.max > s.min {
                     ((s.value - s.min) / (s.max - s.min)).clamp(0.0, 1.0)
                 } else {
@@ -1017,7 +1048,7 @@ impl Widget {
         });
         let slider = matches!(ty, WidgetType::Slider).then(|| SliderData {
             step: 1.0,
-            page_step: 1.0,
+            page_step: 0.0,
             vertical: true,
             ..Default::default()
         });

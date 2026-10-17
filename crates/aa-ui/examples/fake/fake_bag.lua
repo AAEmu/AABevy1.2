@@ -1,9 +1,9 @@
 -- Fake game data for the bag window (see fake_ingame.lua for the pattern).
 --
--- A fresh level 1 character's bag: the three items of the default action bar (Teleport Book, Heart's
--- Beat, Mind's Edge) and the letter of the first quest, names / icons / prices from the game database
--- (items, icons, localized_texts), in the four default inventory tabs of the database
--- (default_inventory_tabs / default_inventory_tab_groups).
+-- A fresh level 1 character's bag as in reference/ingame/bag: the starter supplies of the game database
+-- (character_supplies: Teleport Book, 3 Heart's Beat, 3 Mind's Edge, 3 Bound Hereafter Stones), names /
+-- icons / prices from the game database (items, icons, localized_texts), in the four default inventory
+-- tabs of the database (default_inventory_tabs / default_inventory_tab_groups). The purse is empty.
 --
 -- The bag scripts (inventory/sort_bag.lua, sort_inventory.lua) do not go through slot:EstablishSlot:
 -- every slot is a cooldowninventorybutton the script fills with
@@ -45,8 +45,8 @@ item(18791, { name = "Heart's Beat", icon = "icon_item_0392.dds", group = 5, max
               desc = "A healing potion for novice adventurers." })
 item(18792, { name = "Mind's Edge", icon = "icon_item_0397.dds", group = 5, maxStack = 100, price = 10,
               desc = "A Mana Potion for novice adventurers." })
-item(24570, { name = "Apprentice's Introduction", icon = "quest/icon_item_quest023.dds", group = 7, price = 0,
-              desc = "This message was written by Atalantia's apprentice." })
+item(417, { name = "Bound Hereafter Stone", icon = "icon_item_0418.dds", group = 5, maxStack = 100, price = 0,
+            desc = "Hereafter Stones contain enough power to send you anywhere on your current continent." })
 
 -- Real bag slot -> { id, stack } (slots are 1-based; gaps are empty slots).
 local BAG_CAPACITY = 50
@@ -55,7 +55,7 @@ local bag = {
   [1] = { id = 4045, stack = 1 },
   [2] = { id = 18791, stack = 3 },
   [3] = { id = 18792, stack = 3 },
-  [4] = { id = 24570, stack = 1 },
+  [4] = { id = 417, stack = 3 },
 }
 
 -- Tabs: [1] is "All" (implicit), the others come from default_inventory_tabs.
@@ -93,8 +93,8 @@ local function count_items()
   return n
 end
 
--- Purse: 1 gold 27 silver 40 copper (copper amount string, as fake_ingame.lua's money).
-X2Util.GetMyMoneyString = function(self) return "12740" end
+-- Purse: empty (copper amount string, as fake_ingame.lua's money).
+X2Util.GetMyMoneyString = function(self) return "0" end
 
 -- X2Item ----------------------------------------------------------------------------------------------
 X2Item.GetItemIconSet = function(self, itemType, grade)
@@ -176,9 +176,10 @@ end
 X2Bag.ItemDurability = function(self, realSlot, checkRepairable) return nil end -- no durability: nil
 X2Bag.ItemRequireLevel = function(self, realSlot) return 0 end
 X2Bag.IsLocked = function(self, realSlot) return false end
--- false marks the slot "new" (the corner flag) until the bag is closed (Confirm): the letter of the
--- first quest arrived after the others.
-local unconfirmed = { [4] = true }
+-- false marks the slot "new" (the corner flag) until the bag is closed (Confirm); the starter supplies
+-- are all confirmed. FAKE.bag_new(realSlot) flags one.
+local unconfirmed = {}
+FAKE.bag_new = function(realSlot) unconfirmed[realSlot] = true end
 X2Bag.IsConfirmedSlot = function(self, virtualSlot)
   local real = X2Bag:SlotByIdx(virtualSlot)
   return not (real and unconfirmed[real])

@@ -36,6 +36,10 @@ pub struct EditData {
     /// focused edit box, so this is a guess).
     pub cursor_height: Option<f32>,
     pub cursor_offset: f32,
+    /// `SetPrefixText`: drawn in `prefixStyle` before the text (the chat input's whisper target),
+    /// `SetPrefixInset(left, top, right, bottom)` around it; the text starts after it.
+    pub prefix: String,
+    pub prefix_inset: [f32; 4],
 }
 
 /// A key for the focused widget (see [`crate::UiRuntime::key`]).
@@ -185,14 +189,19 @@ pub fn key(lua: &Lua, k: &UiKey) -> bool {
         _ => false,
     };
     if changed {
+        // The chat input takes its slash commands (`/s `, `/w name `) out of the text.
+        super::chat_input::text_changed(lua, id);
         call_handler(lua, id, "OnTextChanged", vec![]);
     }
     match k {
         UiKey::Enter if !multiline => {
-            call_handler(lua, id, "OnEnterPressed", vec![]);
-            let clear = with(lua, id, |e| e.clear_on_enter).unwrap_or(false);
-            if clear && set_text(lua, id, String::new()) {
-                call_handler(lua, id, "OnTextChanged", vec![]);
+            // The chat input sends natively unless a script took Enter.
+            if !super::chat_input::enter(lua, id) {
+                call_handler(lua, id, "OnEnterPressed", vec![]);
+                let clear = with(lua, id, |e| e.clear_on_enter).unwrap_or(false);
+                if clear && set_text(lua, id, String::new()) {
+                    call_handler(lua, id, "OnTextChanged", vec![]);
+                }
             }
         }
         UiKey::Escape => {
@@ -209,7 +218,7 @@ pub fn key(lua: &Lua, k: &UiKey) -> bool {
 }
 
 /// Replace the text, caret at the end. Returns whether it changed.
-fn set_text(lua: &Lua, id: Id, s: String) -> bool {
+pub(crate) fn set_text(lua: &Lua, id: Id, s: String) -> bool {
     let mut u = ui(lua);
     let n = s.chars().count();
     let Some(w) = u.tree.widget_mut(id) else { return false };
@@ -419,6 +428,24 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, a| {
             let o = a.f(1);
             with(lua, id, |e| e.cursor_offset = o);
+            none()
+        })?,
+    )?;
+    def(
+        "SetPrefixText",
+        method(lua, |lua, id, a| {
+            let t = a.s(1).unwrap_or_default();
+            with(lua, id, |e| e.prefix = t);
+            ui(lua).tree.touch();
+            none()
+        })?,
+    )?;
+    def(
+        "SetPrefixInset",
+        method(lua, |lua, id, a| {
+            let i = [a.f(1), a.f(2), a.f(3), a.f(4)];
+            with(lua, id, |e| e.prefix_inset = i);
+            ui(lua).tree.touch();
             none()
         })?,
     )?;

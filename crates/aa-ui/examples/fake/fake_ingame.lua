@@ -479,6 +479,17 @@ AAUI.ChatTabs = function(windowId)
     { id = 3, name = "Trade", filters = filters("CMF_TRADE", "CMF_TRADE_STORE_MSG", "CMF_FIND_PARTY") },
   }
 end
+-- AAUI.ChatSend(channel, text, target): a line typed into the chat input (the slash command already
+-- taken off; channel CHAT_SAY 0, CHAT_ZONE 1, ..., whisper -3 with the target's name). The server would
+-- echo it as CHAT_MESSAGE; the fake does at once.
+AAUI.ChatSend = function(channel, text, target)
+  FAKE.fire_now("CHAT_MESSAGE", channel, "player", false, P.name, text, false, target ~= "" and target or nil)
+end
+-- AAUI.UseSlot(slotType, slotIdx, button), UseSkill(skillType, button), UseItem(itemType, grade, button):
+-- a click on a slot. The game would cast or use; the fake only logs.
+AAUI.UseSlot = function(slotType, slotIdx, button) UIParent:Log(string.format("use slot %d:%d %s", slotType, slotIdx, button)) end
+AAUI.UseSkill = function(skillType, button) UIParent:Log(string.format("use skill %d %s", skillType, button)) end
+AAUI.UseItem = function(itemType, grade, button) UIParent:Log(string.format("use item %d %s", itemType, button)) end
 
 -- AAUI.RoadMap(): the zone map overlay (top right). level is the one the scripts register their maps
 -- with (`roadmap:SaveMapData(RMS_ZONE + 1, ...)`: 2 = zone maps, 3 = city maps; the anchor handler
@@ -599,7 +610,8 @@ X2Unit.GetUnitId = function(self, unit) if isPlayer(unit) then return P.unitId e
 X2Unit.GetTargetUnitId = function(self, unit) return nil end
 X2Unit.GetUnitType = function(self, unit) if isPlayer(unit) then return "character" end return nil end
 X2Unit.GetUnitTypeString = function(self, unit) if isPlayer(unit) then return "character" end return nil end
-X2Unit.GetFactionName = function(self, unit) if isPlayer(unit) then return "Nuia Alliance" end return nil end
+-- The player's faction as the character window shows it (reference/ingame/character_info).
+X2Unit.GetFactionName = function(self, unit) if isPlayer(unit) then return "Crescent Throne" end return nil end
 X2Unit.IsReporter = function(self, unit) return false end
 X2Unit.UnitTeamAuthority = function(self, unit) return nil end
 X2Unit.UnitInGroup = function(self, unit) return false end
@@ -728,11 +740,12 @@ X2Craft.IsWorkingCraft = function(self) return false end
 X2Ability.GetRaceBuffCount = function(self, race, gender) return 0 end
 
 -- X2Player ----------------------------------------------------------------------------------------------------------------
--- Features of this server: no second password, achievements and ranking on.
+-- Features of this server: no second password, achievements and ranking on, no item lock (the bag has no
+-- lock button in reference/ingame/bag).
 X2Player.GetFeatureSet = function(self)
   return { dwarfWarborn = false, customsaveload = true, beautyshopBypass = true, achievement = true,
            ranking = true, premium = false, secondpass = false, ingameshopSecondpass = false,
-           ingamecashshop = true, hudAuctionButton = true, siege = true, itemSecure = true,
+           ingamecashshop = true, hudAuctionButton = true, siege = true, itemSecure = false,
            taxItem = false, backpackProfitShare = false, sensitiveOpeartion = false,
            levelLimit = false, mateLevelLimit = false }
 end
@@ -757,6 +770,8 @@ X2Player.GetGamePoints = function(self)
 end
 X2Player.GetMyCash = function(self) return "0" end
 X2Player.GetCrimeInfo = function(self) return { crimePoint = 0, crimeRecord = 0 } end
+-- Trial (jury) points: none, so the character window has no "Trials Served" row.
+X2Player.GetJuryPoint = function(self) return 0 end
 
 X2Time.GetGameTime = function(self) return gameTime.isAm, gameTime.hour, gameTime.minute end
 
@@ -934,26 +949,28 @@ X2Util.UTF8StringLimit = function(self, s, limit)
   return s
 end
 
--- Character stats (the character window): a level 1 Nuian Battlerage character ---------------------------------------------------------------------
+-- Character stats (the character window): a level 1 Nuian Battlerage character in its starter clothes, the
+-- values of reference/ingame/character_info ---------------------------------------------------------------------
 local STATS = {
-  str = 23, dex = 21, sta = 22, int = 20, spi = 20,
-  melee_min_dps = 6, melee_max_dps = 10, melee_dps = 8, mainhand_melee_speed = 100, offhand_melee_speed = 100,
+  str = 10, dex = 10, sta = 10, int = 10, spi = 10,
+  melee_min_dps = 17, melee_max_dps = 22, melee_dps = 19.42, mainhand_melee_speed = 100, offhand_melee_speed = 100,
   melee_success_rate = 100, melee_critical_rate = 5, melee_critical_bonus = 150, melee_damage_mul = 100,
-  melee_parry_rate = 0, ranged_min_dps = 6, ranged_max_dps = 10, ranged_dps = 8, ranged_speed = 100,
+  melee_parry_rate = 0, ranged_min_dps = 15, ranged_max_dps = 19, ranged_dps = 16.81, ranged_speed = 100,
   ranged_success_rate = 100, ranged_critical_rate = 5, ranged_critical_bonus = 150, ranged_damage_mul = 100,
-  spell_dps = 5, spell_success_rate = 100, spell_critical_rate = 5, spell_critical_bonus = 150, spell_damage_mul = 100,
-  heal_dps = 5, heal_critical_rate = 5, heal_critical_bonus = 150,
-  armor = 24, armor_percentage = 2, magic_resist = 20, magic_resist_percentage = 2,
+  spell_dps = 2, spell_success_rate = 100, spell_critical_rate = 5, spell_critical_bonus = 150, spell_damage_mul = 100,
+  heal_dps = 2, heal_critical_rate = 5, heal_critical_bonus = 150,
+  armor = 269, armor_percentage = 4.83, magic_resist = 377, magic_resist_percentage = 6.64,
   dodge_rate = 3, block_rate = 0, battle_resist = 0, bulls_eye = 0, flexibility = 0,
-  casting_time = 100, global_cooldown_mul = 100, move_speed = 100,
+  casting_time = 100, global_cooldown_mul = 100, move_speed = 5.4,
   health_regen = 5, persistent_health_regen = 5, mana_regen = 4, persistent_mana_regen = 4,
 }
 X2Unit.UnitInfo = function(self, unit)
   if isPlayer(unit) then return STATS end
   return nil
 end
--- Modifiers (buffs, gear): none, every attribute reads 0.
-local NO_MODIFIERS = setmetatable({}, { __index = function() return 0 end })
+-- Modifiers (buffs, gear): the clothes' armor and magic resistance (the window shows those two green), every
+-- other attribute reads 0.
+local NO_MODIFIERS = setmetatable({ armor = 245, magic_resist = 357 }, { __index = function() return 0 end })
 X2Unit.UnitModifierInfo = function(self, unit)
   if isPlayer(unit) then return NO_MODIFIERS end
   return nil

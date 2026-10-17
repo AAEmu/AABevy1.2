@@ -7,9 +7,9 @@ lays the widgets out, draws them with Bevy and feeds mouse and keyboard input ba
 scripts.
 
 Status: world select, character select, the 2D layer of character create (all three steps,
-every race and gender) and the in-game HUD after spawning run from the original scripts with no
-script errors. The layout tree matches the real client's capture (`reference/*/ui.json`) by
-object path (class, offset, extent, visibility):
+every race and gender), the in-game HUD after spawning and the in-game windows run from the
+original scripts with no script errors. The layout tree matches the real client's capture
+(`reference/*/ui.json`) by object path (class, offset, extent, visibility):
 
 | screen | reference | match |
 |---|---|---|
@@ -20,27 +20,38 @@ object path (class, offset, extent, visibility):
 | character create step 2, 8 race/gender combinations | `reference/character_create/step2_*` | 139 of 139 each |
 | character create step 3, 8 race/gender combinations | `reference/character_create/step3_*` | 44 of 44 each |
 | character create step 3, skillset picked and a name entered | `step3_nuian_male/ui_ability_name.json` | 52 of 52 |
-| in-game HUD after spawning (fake game data like the capture) | `reference/ingame/spawn/ui.json` | 271 of 277 (**) |
+| in-game HUD after spawning (fake game data like the capture) | `reference/ingame/spawn/ui.json` | 274 of 277 (**) |
+| character info (C), objects not visible at spawn | `reference/ingame/character_info` | 182 of 182 |
+| bag (I), 4 of 50 slots used | `reference/ingame/bag` | 331 of 331 |
+| world map (M): zone / continent (one right click) / world (two) | `reference/ingame/worldmap_*` | 88 of 88, 86 of 86 (+5), 86 of 86 |
+| options, Game Keybinds page | `reference/ingame/options_keybinds` | 180 of 182 (***) |
 
 (*) The one left is `step1.content.congestionTip_bg`, a drawable of a hidden tooltip that the
 capture reports by its own visible flag; not drawn by either.
 
-(**) Of the 6 left, 2 are the same objects under a path through a table keyed by the widget's
-runtime id (`exp_bar_set.1105.exp_bar...`; ours has `6075`), and 4 are within 1 px: two text
-widths, the roadmap cursor's sub-pixel offset and `notifyWindow`'s height (the client had run
-`systemLayerParent`'s `OnScale` handler, which sets it to the line height + 1; aa-ui fires
-`OnScale` only when the screen size changes).
+(**) The 3 left are within 1 px: a text width, the roadmap cursor's sub-pixel offset and
+`notifyWindow`'s height (the client had run `systemLayerParent`'s `OnScale` handler, which sets
+it to the line height + 1; aa-ui fires `OnScale` only when the screen size changes). The window
+captures count only the objects not also visible at spawn: the rest of their screens is the HUD
+at another moment (the clock's sun, a buff that ran out).
 
-In-game windows (no real captures; laid out by the original scripts, fake data in
-`examples/fake/fake_<window>.lua`, opened with `--open ACTION T` or the keys, no script errors):
+(***) The 2 left are state backgrounds of disabled buttons that the client reports hidden: the
+menu list's scroll thumb and `releaseHotkeyBtn` (disabled before its skin is applied); ours
+draws them and the pixels are the same. (+5): the continent's conflict circles
+(`MAP_LIST[3][i].conflictImg`, shown by the scripts) are drawn in `real.png` (same place and
+colour as ours) but the capture's walk does not list them.
+
+In-game windows (laid out by the original scripts, fake data in
+`examples/fake/fake_<window>.lua` (the captured ones as in the capture), opened with
+`--open ACTION T` or the keys, no script errors):
 
 | window | opened by | state |
 |---|---|---|
 | bag | `toggle_bag` (I, B) | tabs (All + the DB's default tabs, add-tab button), items with icons, counts, grades, the new-item mark, purse with coin icons, filtering by tab |
-| character info | `toggle_character` (C) | stats panel, equipment slots with the starter gear; the model between the slot columns is the engine's (no frame there by design) |
+| character info | `toggle_character` (C) | stats panel (the level in the `characterInfo` bitmap font, honor and vocation icons), equipment slots with the starter gear; the model between the slot columns is the engine's (no frame there by design) |
 | skills | `toggle_spellbook` (K) | the five tabs: Battlerage's skills and passives from the DB (learned / not yet), skill points, the locked skillset columns; basic skills, emotes, vocations with points, languages |
 | quest journal | `toggle_quest` (L) | three DB quests in category folders (open / close), selecting one fills the detail panel (summary, objectives, rewards, the giver's lines); ticking one adds it to the HUD tracker (empty at start, as in the spawn capture) |
-| world map | `toggle_worldmap` (M) | zone / continent / world maps from `ui/map`, hover highlights and click zoom by the colour masks, wheel zoom and panning (the scripts'), player cursor with heading, My Location, the filter panel |
+| world map | `toggle_worldmap` (M) | zone / continent / world maps from `ui/map`, hover highlights and click zoom by the colour masks, wheel zoom and panning (the scripts'), player cursor with heading on every level, the zone's climate, the continent's conflict zones, My Location, the filter panel |
 | system menu | Escape, `open_config` | Options, Select Character, Exit Game |
 | options | system menu -> Options, `toggle_option` | every page builds (screen, quality, sound, game, key bindings with the default keys) |
 | target frame | `TARGET_CHANGED(unitId, "npc")` | name, level, health and mana, distance (`FAKE.set_target()`) |
@@ -88,9 +99,15 @@ edit boxes. FPS, quads and draw calls are logged every few seconds.
 Reference checks (tools in `data/extract/aa-ui/tools/`, not committed):
 `check_all.sh` runs every reproducible capture and compares the dumps with
 `cmp_tree.py <reference ui.json> <our dump>` (by object path: class, offset, extent,
-visibility); `check_windows.sh` opens every in-game window and counts script warnings;
-`imgdiff.py` and `crops.py` compare screenshots. Both scripts build the examples once and run
-copies of the exes, so repeated runs do not hold the shared cargo build lock.
+visibility); `check_ingame.sh` opens the captured in-game windows like the captures
+(`reference/ingame/*`) and compares each with the whole screen and inside the window only
+(`--new-vs` the spawn dumps: objects also visible at spawn do not count), plus the window's
+pixels with `imgdiff.py`; `check_windows.sh` opens every in-game window and counts script
+warnings; `imgdiff.py` and `crops.py` compare screenshots. The scripts build the examples once
+and run copies of the exes (`--nobuild` reuses them), so repeated runs do not hold the shared
+cargo build lock. `cmp_tree.py` drops the runtime ids that tables are keyed by from paths
+(the client's `exp_bar_set.10df.exp_bar` and ours `exp_bar_set.6075.exp_bar` both compare as
+`exp_bar_set.exp_bar`).
 
 ## Architecture
 
@@ -119,6 +136,7 @@ copies of the exes, so repeated runs do not hold the shared cargo build lock.
 | `lua/grid.rs` | `grid` cells, rows and selection (the quest list and the quest tracker) |
 | `lua/bounds.rs` | `OnBoundChanged` after layout changes |
 | `lua/chat.rs` | `message` frames and the tabbed `chatwindow`, `X2Chat:DispatchChatMessage` |
+| `lua/chat_input.rs` | the chat input's slash commands (`/s`, `/p`, `/w Name`, ...), channel and whisper target, sending through `AAUI.ChatSend` |
 | `lua/roadmap.rs` | the `roadmap` zone map overlay (player cursor, markers); `listbox` tree images |
 | `lua/worldmap.rs` | the `worldmap` window: map levels, colour-mask hit testing (`ui/map/image_map.tga`), zoom by click, player cursor |
 | `content.rs` | key binding actions and Escape (`UiRuntime::hotkey`, `escape`, `toggle_content`) |
@@ -130,7 +148,7 @@ copies of the exes, so repeated runs do not hold the shared cargo build lock.
 | `texture.rs` | texture path resolution (locale copies), sizes, `.g` texture info (`GetTextureData`) |
 | `render.rs` | tree to quads, batching, atlas upload, state backgrounds, caret, diagram polygons |
 | `input.rs` | hit testing, mouse handlers, native button / check button / list / tab / focus behaviour |
-| `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues, walked in Lua) |
+| `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues, walked in Lua 10 steps deep like `reference/tools/lib.lua`) |
 
 ### Objects
 
@@ -153,7 +171,11 @@ Coordinates are UI units, origin top-left, y down; 1 unit is 1 pixel at UI scale
 client uses for both 1920x1080 and 1600x900 (0.85 below 1280x864). Widgets do not scale with
 the resolution: they are anchored (`AddAnchor(point, target, relPoint, x, y)`, nine points),
 and a widget with two anchors on opposite sides stretches. `tree.rs` resolves anchors to
-rectangles lazily and caches them per tree generation.
+rectangles lazily and caches them per tree generation. Re-adding a point replaces its anchor;
+when two different points set the same edge (TOPLEFT and TOPRIGHT both set the top), the point
+first in the order TOPLEFT, TOP, TOPRIGHT, LEFT, CENTER, RIGHT, BOTTOMLEFT, BOTTOM, BOTTOMRIGHT
+wins, whatever the order they were added in (`reference/ingame/bag`: the tab line's TOPLEFT
+beats its TOPRIGHT, the slot grid's later TOPLEFT beats the LEFT it was created with).
 
 Drawing order: top-level widgets by UI layer (`SetUILayer`: background, game, hud, normal,
 dialog, tooltip, system), then creation / `Raise` order; children above their parent; inside a
@@ -176,15 +198,27 @@ panels come out visibly too light.
 
 Fonts come from the pak through `fonts/fonts.g` (a primary font plus fallbacks for Unicode
 ranges, per locale), rasterised with `swash` at integer sizes with hinting; advances are whole
-pixels, so measured widths (`GetTextWidth`) and drawn text agree. Line height is the font's
-ascent + descent rounded (yd_ygo540: 13 px -> 16, 15 -> 18, 18 -> 22), a text's height is
+pixels, so measured widths (`GetTextWidth`) and drawn text agree. The font's `kern` pairs
+apply as FreeType's default kerning does (scaled, times `ppem / 25` below 25 px, rounded to
+whole pixels: "Vo" is 1 px tighter at 13 px). Line height is the font's ascent + descent
+rounded (yd_ygo540: 13 px -> 16, 15 -> 18, 18 -> 22); the baseline is the ascent rounded up
+(LibreBaskerville, the window titles' font, at 18 px: 17.46 -> 18). A text's height is
 `n * lineHeight + (n - 1) * lineSpace`, and a trailing line break does not add a line, as in the
 client. Inline codes: `|cAARRGGBB ... |r` colour; value codes `|,N;` (thousands separators),
-`|mN;` (money with gold / silver / copper coin icons), `|bN;` (loyalty token icon).
+`|mN;` (money with gold / silver / copper coin icons), `|bN;` (loyalty token icon), `|hN;`
+(honor medal), `|lN;` (vocation badge); the icons come from `ui/common/money_window.dds`,
+1 px after the value, centred on the line.
 Alignment without `SetAlign`: centred for buttons, labels and `textbox` (world select's
 warning line, which never sets one, is centred in `real.png`), top left for game tooltips,
 left for the rest.
 `GetLineCount()` is the wrapped line count of the widget's text.
+Image fonts: font names that are not files (`style:SetFont("characterInfo", 37)` for the
+character window's level, `actionBar` for the menu bar badges, `combat`, `arrest`) are the
+bitmap fonts of `ui/image_text.g` (`infomation` blocks: `size`, cell `width` / `height`, one
+`glyph ( key K, x, y, insetLeft, insetRight)` per character in `ui/image_text.dds`); a glyph
+advances `width - insetLeft - insetRight` (the level "1" is 15 px, as in
+`reference/ingame/character_info`), is drawn in the texture's colours and scales with
+`size / font size`.
 
 ### Handlers and events
 
@@ -218,7 +252,12 @@ chat tab, chat frames show their scroll buttons (up, down, to the bottom) while 
 their view when lines arrive while scrolled back. Sliders: a press on the track or the thumb sets the value so the thumb centre is
 under the cursor, dragging keeps updating it (captured until release, also outside the widget),
 clamped and snapped to `SetValueStep`; each change fires `OnSliderChanged(self, value)`. The
-thumb (`SetThumbButtonWidget`) is placed natively along the track by the value.
+thumb (`SetThumbButtonWidget`) is placed natively along the track by the value; with
+`SetMinThumbLength(n)` and no `SetFixedThumb(true)` (the scripts' scroll bars) its length is
+`track * page / (range + page)` (`SetPageStep`: the scroll windows pass their height), at
+least `n`, the whole track when nothing scrolls (`reference/ingame/options_keybinds`: 217.2 of
+412, and 437 of 437). A click on a bound `slot` uses it through the app (`AAUI.UseSlot`, below)
+after the script's `OnClick`.
 
 Keyboard: one widget has the focus (`SetFocus`, or a press on an edit box; `ClearFocus`, Escape
 or a press elsewhere drops it; `OnAcceptFocus` on gain). Keys go to it: edit boxes insert typed
@@ -228,7 +267,22 @@ End edit and move the caret; Enter fires `OnEnterPressed` (multi-line boxes inse
 break, `ClearTextOnEnter` empties the box), Escape `OnEscapePressed`, Tab `OnTabPressed`; every
 key also fires `OnKeyDown` / `OnKeyUp(self, name)` with lower-case names (`"enter"`). `SetText`
 does not fire `OnTextChanged` (the money edits call `SetText` from that handler). The caret
-blinks every 530 ms.
+blinks every 530 ms. `SetPrefixText` draws a prefix in `prefixStyle` before the text
+(`SetPrefixInset` around it).
+
+The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
+natively, like the client: a command followed by a space leaves the text and sets the input's
+channel (`/s`, `/local` say, `/shout` `/y` zone, `/p` `/party`, `/raid`, `/guild` `/g`, `/n`
+`/nation`, `/a` `/ally`, `/trade`, `/w Name` `/whisper Name` `/t` `/tell` whisper, and the
+channel numbers `/1` shout, `/2` trade, `/3` party search, `/4` party, `/5` raid, `/6` nation,
+`/7` guild, `/11` trial, `/14` alliance; the locale's own `locale.chatChannel.parse_chat_*`
+first); the method selector (`GetChatMethodSelector()`) shows the channel's name
+(`locale.chatChannel`: "General", "Shout", "Party", ...) and gets
+`OnContentUpdated(self, "chat_method_changed")` (the scripts resize it), a whisper target is
+the edit's prefix. Unknown commands stay in the text. Enter, when no script set
+`OnEnterPressed` on the edit, sends the line through `AAUI.ChatSend(channel, text, target)`
+(below), empties the edit, drops the focus and hides the edit; a bare `/p` + Enter only
+switches. The channel stays for the next line.
 
 ## App integration
 
@@ -306,7 +360,11 @@ App::new()
   | `AAUI.SlotContent(slotType, slotIdx)` | `slot:EstablishSlot` (action bars: `ISLOT_ACTION`, 1..) | nil, or `{ type = "skill"\|"item"\|..., id, icon = "ui/icon/x.dds", stack, grade, canUse, tooltip, extraInfo, cooldown = { remain = ms, total = ms } }` (`cooldown` optional: the sweep and the time left, counted down natively; `refresh_slots` restarts it from `remain`, a result without it clears it) |
   | `AAUI.SkillContent(skillType)`, `AAUI.ItemContent(itemType, grade)` | `slot:EstablishSkill` / `EstablishItem` (the skill window) | the same, plus for skills `learned` (default true), `canLearn`, `reqPoints`, `skillLevel` (sent as `OnContentUpdated` states) |
   | `AAUI.SlotHotKey(slotType, slotIdx)` | `slot:GetHotKey` (keybinding labels) | `"1"`, `"SHIFT-1"`, `"MINUS"`, ... or nil |
-  | `AAUI.WorldMap()` | the `worldmap` window (every frame while shown) | nil, or `{ level = 2\|3, zone = <zone_groups id>, player = { u, v, angle } }` on the zone (or city) map image; without it the `RoadMap` result is used |
+  | `AAUI.WorldMap()` | the `worldmap` window (every frame while shown) | nil, or `{ level = 2\|3, zone = <zone_groups id>, player = { u, v, angle }, maps = { { level = 1, id = 3, u, v }, { level = 0, id = 2, u, v } } }`: the place on the zone (or city) map image and, optional, on the maps above (`world_groups` ids: 3 west, 4 east, 5 origin continent, 2 world); `u = (x - X) / W`, `v = 1 - (y - Y) / H` from the global position and the map's `zone_groups` / `world_groups` rectangle, exact against `reference/ingame/worldmap_*`; without `maps` the upper maps' place is estimated from the masks, without the hook the `RoadMap` result is used |
+  | `AAUI.MapClimate(zoneGroupId)` | the world map's climate display (`GetClimateInfo`) | nil, or `{ climateId, ... }` (`climates.id`: 2 temperate, 3 tropical, 4 subarctic, 5 arid) |
+  | `AAUI.UseSlot(slotType, slotIdx, button)`, `AAUI.UseSkill(skillType, button)`, `AAUI.UseItem(itemType, grade, button)` | a click on a bound, enabled `slot` (`EstablishSlot` / `EstablishSkill` / `EstablishItem`), after the script's `OnClick` | nothing; `button` is `"LeftButton"` or `"RightButton"`. Run what the slot's hotkey runs (the action bar scripts' `OnClick` only hides the tooltip; the client uses the slot natively). The app decides by `slotType` and `button` (a left click on a bag slot picks the item up in the client, a right click uses it) |
+  | `AAUI.ChatSend(channel, text, target)` | Enter in the chat input when no script set `OnEnterPressed` on it | nothing; `channel` `CHAT_SAY` 0, `CHAT_ZONE` 1, `CHAT_TRADE` 2, `CHAT_FIND_PARTY` 3, `CHAT_PARTY` 4, `CHAT_RAID` 5, `CHAT_FACTION` 6, `CHAT_EXPEDITION` 7, `CHAT_TRIAL` 11, `CHAT_RACE` 14, `CHAT_WHISPER` -3; `target` the whisper name or `""`; the slash command is already stripped |
+  | `AAUI.Entity(name)` | `UIParent:GetEntityByName(name)` | nil (no such entity), or `{ pos = { x, y, z }, angles = { x, y, z } }` (or `{ 1, 2, 3 }` arrays); the scripts get an object with `GetName`, `GetPos` / `GetWorldPos`, `GetAngles` / `GetWorldAngles` (read from the table at each call, so the app may update it) and `IsValid` |
   | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
   | `AAUI.ChatColor(filter)` | `X2Chat:DispatchChatMessage` | `{ r, g, b }` or nil (a default per filter) |
   | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 2, zone = 5, player = { u, v, angle }, markers = { { u, v, kind, icon, coords, tooltip }, ... } }` (level as the scripts register maps: 2 zone, 3 city; `u, v` on the map image, 0..1; `angle` the heading in radians, 0 north, clockwise, `-yaw` of the engine; `kind` a lower-case `M_*` name of `map/common.lua` such as `"quest_zone_gives"` (yellow !) or `"quest_main_gives"`, icons from `ui/map/icon/npc_icon.dds` unless `icon` / `coords` are given; `npc_*` kinds show with the map's NPC option) |
@@ -377,11 +435,18 @@ App::new()
 | natives return real numbers (no proxies) | all natives |
 | `X2Locale:GetLocale()` returns `"en_us"` (the configured locale) | `globals.rs` |
 | `IsVisible()` is the object's own flag, not its ancestors' (the system menu counts its buttons before it shows) | `widget.rs` |
-| `AddNewTab(text, selectedBtn, unselectedBtn, window)` uses the script's widgets (several tabs may share a window); `RemoveAllTabs` leaves script-made widgets alive | `lua/tab.rs` |
+| `AddNewTab(text, selectedBtn, unselectedBtn, window)` uses the script's widgets (several tabs may share a window, which each tab shows when selected and hides otherwise, in tab order: the bag's shared `tabWindow` is hidden); `RemoveAllTabs` leaves script-made widgets alive | `lua/tab.rs` |
 | `gametooltip:AddLine` returns the new line's 0-based index | `widget.rs` |
 | `SetCloseOnEscape(true)` windows are what `UiRuntime::escape` hides | `content.rs` |
 | `EnableScroll(true)` clips the children and the picking to the widget; `ChangeChildAnchorByScrollValue(dir, v)` offsets the anchors that target it | `tree.rs`, `widget.rs` |
-| folders place their title button by `SetTitleButtonWidget` / `SetInset` | `lua/folder.rs` |
+| folders place their title button by `SetTitleButtonWidget` / `SetInset` (the right value moves the right edge: negative is inward; the world map's filter folders are 130 px wide) | `lua/folder.rs` |
+| two anchors setting the same edge: the point first in TOPLEFT .. BOTTOMRIGHT order wins, not the later one | `tree.rs` |
+| slider thumbs size to the visible part (`SetMinThumbLength`, unless `SetFixedThumb(true)`); the page step defaults to 0 | `tree.rs`, `widget.rs` |
+| fonts named in `ui/image_text.g` (`characterInfo`, `actionBar`, `combat`, `arrest`) are bitmap fonts | `text.rs` |
+| `SetPrefixText` / `SetPrefixInset` draw a prefix before an edit's text; the chat input handles slash commands and sends through `AAUI.ChatSend` | `lua/edit.rs`, `lua/chat_input.rs` |
+| a click on a bound slot uses it (`AAUI.UseSlot` / `UseSkill` / `UseItem`) | `lua/slot.rs`, `input.rs` |
+| `UIParent:GetEntityByName(name)` asks `AAUI.Entity(name)` | `globals.rs` |
+| `worldmap:SetPlayerDrawable` leaves the drawable shown (the scripts copy its visibility to the cursor effect); `GetClimateInfo` asks `AAUI.MapClimate` | `lua/worldmap.rs` |
 | `grid:SetItem(widget, row, col, makeIfNotExist, value, withoutExtent)` puts (and shows) a widget in a cell, sized to it unless `withoutExtent`; rows grow with their tallest widget; `SetRowHeight(height, row)`, `GetAdjustRowHeight()` the summed heights; `RemoveAllItems` hides the widgets (the scripts pool them) | `lua/grid.rs` |
 
 mlua's `send` feature is not needed: the runtime is a non-send resource and errors are
@@ -404,14 +469,16 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   `AddGivenQuestInfo`, `UpdateNpcInfo`, ..., are stubs), at 24 px at every map size. Chat
   scrolls by messages, not wrapped lines (`GetMessageLines`, `SetScrollPos` are stubs). The idle
   chat window fades its tab backgrounds out and its unselected tabs to 60 % (measured by eye on
-  the capture). Named fonts the scripts ask for (`actionBar`, `characterInfo`) are not in
-  `fonts.g` and fall back to the default font (logged once).
+  the capture).
 * In-game windows: item and skill tooltips lay out roughly and have no background (the
-  `gametooltip` section natives are stubs); the world map draws no conflict, climate, NPC,
-  doodad, quest or ship markers and no zone-name tooltips, and on the continent and world maps
-  the player cursor sits at the colour of the player's zone in the mask; the quest list's tree
-  lines and zebra rows (`SetDrawLineType`, `SetLineBackGround`) are not drawn; long key
-  binding titles wrap into the next row (the client may fit them in 170 px).
+  `gametooltip` section natives are stubs; no capture shows one yet); the world map draws no
+  NPC, doodad, quest or ship markers and no zone-name tooltips (the zone capture's quest marker
+  and route are missing), and without the `WorldMap` hook's `maps` the player cursor on the
+  continent and world maps is estimated from the masks; the quest list's tree lines and zebra
+  rows (`SetDrawLineType`, `SetLineBackGround`) are not drawn. Pixels inside the captured
+  windows (`check_ingame.sh`): mean absolute error 1.8 (bag, character info) to 4.1 of 255
+  (continent map), mostly the 3D world that shows through the windows' translucent
+  backgrounds in the client.
 * Many natives are stubs (table below): mostly in-game widgets (model view, the chat window's
   options, map markers fed by game data) and rarely used setters.
 

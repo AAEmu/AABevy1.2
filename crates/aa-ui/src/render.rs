@@ -128,14 +128,26 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         } else if let Some(t) = w.text.as_ref() {
         // Widget text above background/artwork, below overlay.
             let edit = crate::lua::edit::is_edit(&w.ty);
+            let rect = u.tree.rect(id);
             let shown = if edit {
                 let mut d = t.clone();
                 d.text = crate::lua::edit::display_text(&t.text, w.edit.as_ref());
+                // `SetPrefixText`: the prefix in `prefixStyle` first, the text after it.
+                if let Some(e) = w.edit.as_ref().filter(|e| !e.prefix.is_empty()) {
+                    let mut p = w.aux_style.clone().unwrap_or_default();
+                    p.text = e.prefix.clone();
+                    let pi = e.prefix_inset;
+                    p.inset = [t.inset[0] + pi[0], t.inset[1] + pi[1], t.inset[2], t.inset[3] + pi[3]];
+                    p.style.align = crate::tree::Align::Left;
+                    let pw = u.fonts.measure(&p.style.font, p.style.size, &p.text);
+                    let c = p.style.color;
+                    text_quads(u, &p, rect, c, alpha, scale, &mut out);
+                    d.inset[0] += pi[0] + pw + pi[2];
+                }
                 std::borrow::Cow::Owned(d)
             } else {
                 std::borrow::Cow::Borrowed(t)
             };
-            let rect = u.tree.rect(id);
             if !shown.text.is_empty() {
                 let color = w
                     .button
@@ -546,6 +558,26 @@ pub(crate) fn text_quads(
             .map(|gc| [gc[0], gc[1], gc[2], gc[3] * a])
             .unwrap_or([color[0], color[1], color[2], a]);
         emit(g, 0.0, 0.0, c, lx);
+    }
+    // Image font glyphs, in the texture's own colours.
+    if let (false, Some(path)) = (lo.images.is_empty(), lo.image_texture.as_deref()) {
+        if let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path))
+        {
+            let (tw, th) = (tw as f32, th as f32);
+            for im in &lo.images {
+                let lx = line_offsets.get(im.line as usize).copied().unwrap_or(0.0);
+                let [sx, sy, sw, sh] = im.src;
+                let (x, y) = (ox + lx + im.x, oy + im.y);
+                out.push(Quad {
+                    tex: Tex::Image(resolved.clone()),
+                    pos: [x, y, x + im.w, y + im.h],
+                    uv: [sx / tw, sy / th, (sx + sw) / tw, (sy + sh) / th],
+                    color: [1.0, 1.0, 1.0, a],
+                    corners: None,
+                    vcolors: None,
+                });
+            }
+        }
     }
     // Inline icons (coins, loyalty token).
     if !lo.icons.is_empty() {

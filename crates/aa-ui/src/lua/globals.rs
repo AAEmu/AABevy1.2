@@ -5,6 +5,24 @@ use mlua::{Lua, MultiValue, Table, Value};
 
 use super::{Args, method, none, reg, ret, ui};
 
+/// The entity object of `GetEntityByName` (see there).
+const ENTITY_LUA: &str = r#"
+return function(name, info)
+  local function vec(v)
+    v = v or {}
+    return { x = v.x or v[1] or 0, y = v.y or v[2] or 0, z = v.z or v[3] or 0 }
+  end
+  local e = {}
+  e.GetName = function(self) return name end
+  e.GetPos = function(self) return vec(info.pos) end
+  e.GetWorldPos = e.GetPos
+  e.GetAngles = function(self) return vec(info.angles) end
+  e.GetWorldAngles = e.GetAngles
+  e.IsValid = function(self) return true end
+  return e
+end
+"#;
+
 /// Constants the reference dump does not list (scripts may still read them).
 const EXTRA_CONSTANTS: &[(&str, i64)] = &[("VERTICAL", 0), ("HORIZONTAL", 1)];
 
@@ -71,6 +89,34 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
+    // `UIParent:GetEntityByName(name)`: an entity of the level (the login stage reads the
+    // `login_camera` entity's place for its camera). The app answers through
+    // `AAUI.Entity(name) -> nil | { pos = {x, y, z}, angles = {x, y, z} }` (fields `x`/`y`/`z`
+    // or 1..3); the result has `GetName`, `GetPos` / `GetWorldPos`, `GetAngles` /
+    // `GetWorldAngles` (fresh `{x, y, z}` tables read from the hook's table at each call) and
+    // `IsValid`. Without the hook, or for an unknown name, nil (the scripts then warn).
+    def(
+        "GetEntityByName",
+        method(lua, |lua, _, a| {
+            let name = a.s(1).unwrap_or_default();
+            let Ok(aaui) = lua.globals().raw_get::<Table>("AAUI") else {
+                return none();
+            };
+            let Ok(Some(f)) = aaui.raw_get::<Option<mlua::Function>>("Entity") else {
+                return none();
+            };
+            let info = match f.call::<Value>(name.as_str()) {
+                Ok(Value::Table(t)) => t,
+                Ok(_) => return none(),
+                Err(e) => {
+                    bevy::log::warn!("aa-ui: AAUI.Entity({name}): {e}");
+                    return none();
+                }
+            };
+            let make: mlua::Function = lua.load(ENTITY_LUA).set_name("@aa-ui/entity").eval()?;
+            ret(lua, make.call::<Table>((name, info))?)
+        })?,
+    )?;
     def(
         "GetFrameTime",
         method(lua, |lua, _, _| ret(lua, ui(lua).frame_ms / 1000.0))?,

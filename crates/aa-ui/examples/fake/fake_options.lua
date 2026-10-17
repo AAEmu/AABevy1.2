@@ -47,10 +47,11 @@ X2Input.IsAltKeyDown = function(self) return false end
 X2Input.IsControlKeyDown = function(self) return false end
 X2Input.IsShiftKeyDown = function(self) return false end
 
--- Key binding page: every action can be rebound; buttons show the bound key (X2Hotkey:GetBinding
--- in fake_ingame.lua) or nothing.
+-- Key binding page: every action can be rebound; only the status-sensitive shortcut slots (mode action bar)
+-- take an override binding (their buttons have the blue OPTION_KEY_OVERRIDABLE skin, the others the plain one;
+-- reference/ingame/options_keybinds). Buttons show the bound key (X2Hotkey:GetOptionBinding below) or nothing.
 X2Hotkey.IsValidActionName = function(self, action) return true end
-X2Hotkey.IsOverridableAction = function(self, action) return true end
+X2Hotkey.IsOverridableAction = function(self, action) return action == "mode_action_bar_button" end
 X2Hotkey.GetOptionBindingButton = function(self, action, index) return nil end
 X2Hotkey.InitOptionHotKey = function(self) end
 X2Hotkey.EnableHotkey = function(self, on) end
@@ -75,20 +76,30 @@ do
 end
 
 -- The client's default key bindings, as the key binding page shows them
--- (X2Hotkey:GetOptionBinding(action, manager, ...): the primary manager's key, none secondary).
+-- (X2Hotkey:GetOptionBinding(action, manager, ...): the primary manager's key, none secondary; actions with a
+-- count (mode_action_bar_button 1..10, team_target 1..4, ...) pass the index as the last argument, 0 otherwise).
 do
   local primary = {
     moveforward = "W", moveback = "S", moveleft = "A", moveright = "D", jump = "SPACE",
     turnleft = "Q", turnright = "E", autorun = "NUMLOCK", toggle_walk = "NUMPADDIVIDE",
     do_interaction_1 = "F", do_interaction_2 = "G", do_interaction_3 = "H", do_interaction_4 = "J",
-    cycle_hostile_forward = "TAB", cycle_friendly_forward = "SHIFT-TAB",
-    team_target = "F1", screenshotmode = "SHIFT-PRINT", toggle_nametag = "SHIFT-Z",
+    round_target = "F1",
+    cycle_hostile_forward = "TAB", cycle_hostile_backward = "SHIFT-TAB",
+    cycle_friendly_forward = "CTRL-TAB", cycle_friendly_backward = "CTRL-SHIFT-TAB",
+    toggle_force_attack = "CTRL-F",
+    screenshotmode = "SHIFT-PRINT", toggle_nametag = "SHIFT-Z",
     zoom_in = "WHEELUP", zoom_out = "WHEELDOWN",
     toggle_character = "C", toggle_bag = "I", toggle_quest = "L", toggle_spellbook = "K",
     toggle_worldmap = "M", toggle_achievement = "Y", open_config = "ESCAPE",
   }
-  X2Hotkey.GetOptionBinding = function(self, action, manager, ...)
+  local indexed = {
+    mode_action_bar_button = { "R", "T", "Y", "U" },
+    team_target = { "F2", "F3", "F4", "F5" },
+  }
+  local SECOND_HOTKEY_MANAGER = 2 -- a local of option/key_binding_option.lua
+  X2Hotkey.GetOptionBinding = function(self, action, manager, withModifier, index)
     if manager == SECOND_HOTKEY_MANAGER then return nil end
+    if indexed[action] then return indexed[action][index or 0] end
     return primary[action]
   end
 end

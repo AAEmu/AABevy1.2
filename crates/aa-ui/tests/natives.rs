@@ -327,3 +327,177 @@ fn is_visible_is_the_own_flag() {
     assert!(!eval::<bool>(&ui, "hiddenChild:IsVisible()"));
     assert!(!eval::<bool>(&ui, "frame:IsVisible()"));
 }
+
+#[test]
+fn scroll_thumb_follows_the_visible_part() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        vs = UIParent:CreateWidget("slider", "testScroll", "UIParent")
+        vs:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        vs:SetExtent(18, 412)
+        thumb = vs:CreateChildWidget("button", "thumb", 0, true)
+        thumb:SetExtent(17, 41)
+        vs:SetThumbButtonWidget(thumb)
+        vs:SetMinThumbLength(50)
+        vs:Show(true)
+        vs:SetMinMaxValues(0, 390)
+        vs:SetPageStep(435)
+        "#,
+    )
+    .unwrap();
+    // reference/ingame/options_keybinds: 412 * 435 / (390 + 435) = 217.2.
+    let h = eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h");
+    assert!((h - 217.236).abs() < 0.01, "{h}");
+    // Nothing to scroll: the whole track; a long list: the minimum.
+    ui.exec("@fit", "vs:SetMinMaxValues(0, 0)").unwrap();
+    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 412.0);
+    ui.exec("@long", "vs:SetMinMaxValues(0, 100000)").unwrap();
+    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 50.0);
+    // A fixed thumb keeps its size.
+    ui.exec("@fixed", "vs:SetFixedThumb(true)").unwrap();
+    assert_eq!(eval::<f64>(&ui, "local _, h = thumb:GetEffectiveExtent() return h"), 41.0);
+}
+
+#[test]
+fn anchors_on_one_edge_go_by_point_order() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        a = UIParent:CreateWidget("emptywidget", "a", "UIParent")
+        a:SetExtent(40, 30)
+        a:AddAnchor("TOPLEFT", "UIParent", 1400, 385)
+        b = UIParent:CreateWidget("emptywidget", "b", "UIParent")
+        b:SetExtent(470, 265)
+        b:AddAnchor("TOPLEFT", "UIParent", 1400, 415)
+        line = UIParent:CreateWidget("emptywidget", "line", "UIParent")
+        line:SetHeight(5)
+        line:AddAnchor("TOPLEFT", a, "BOTTOMRIGHT", 0, -5)
+        line:AddAnchor("TOPRIGHT", b, 11, 0)
+        grid = UIParent:CreateWidget("emptywidget", "grid", "UIParent")
+        grid:SetExtent(470, 600)
+        grid:AddAnchor("LEFT", "UIParent", 0, 0)
+        grid:AddAnchor("TOPLEFT", b, 0, 0)
+        "#,
+    )
+    .unwrap();
+    // reference/ingame/bag: the tab line sits at the TOPLEFT anchor's y (410, not 415).
+    let r: Vec<f64> = eval(&ui, "local x, y = line:GetEffectiveOffset() return {x, y, (line:GetEffectiveExtent())}");
+    assert_eq!(r, [1440.0, 410.0, 441.0]);
+    // The slot grid: TOPLEFT beats the LEFT it was created with.
+    let r: Vec<f64> = eval(&ui, "return {grid:GetEffectiveOffset()}");
+    assert_eq!(r, [1400.0, 415.0]);
+}
+
+#[test]
+fn image_font_label() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        lbl = UIParent:CreateWidget("label", "level", "UIParent")
+        lbl:SetAutoResize(true)
+        lbl.style:SetFont("characterInfo", 37)
+        lbl:SetText("1")
+        lbl:Show(true)
+        "#,
+    )
+    .unwrap();
+    // ui/image_text.g: "1" is 29 - 14 = 15 wide (reference/ingame/character_info).
+    assert_eq!(eval::<f64>(&ui, "return lbl:GetWidth()"), 15.0);
+    assert_eq!(eval::<f64>(&ui, "return lbl.style:GetTextWidth('10')"), 15.0 + 29.0);
+}
+
+#[test]
+fn slot_click_uses_the_slot() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        used = {}
+        AAUI.SlotContent = function(t, i) return { type = "skill", id = 100 + i, icon = "ui/icon/x.dds" } end
+        AAUI.UseSlot = function(t, i, button) used[#used + 1] = t .. ":" .. i .. ":" .. button end
+        s = UIParent:CreateWidget("slot", "testSlot", "UIParent")
+        s:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        s:SetExtent(42, 42)
+        s:Show(true)
+        s:EstablishSlot(ISLOT_ACTION, 3)
+        clicks = 0
+        s:SetHandler("OnClick", function() clicks = clicks + 1 end)
+        "#,
+    )
+    .unwrap();
+    let mut mouse = aa_ui::input::MouseState::default();
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((120.0, 120.0)), true, false, false, 0.0);
+    aa_ui::input::update(&ui.lua, &mut mouse, Some((120.0, 120.0)), false, true, false, 0.0);
+    assert_eq!(eval::<i64>(&ui, "clicks"), 1);
+    let first: String = eval(&ui, "return used[1]");
+    assert_eq!(first, format!("{}:3:LeftButton", eval::<i64>(&ui, "return ISLOT_ACTION")));
+}
+
+#[test]
+fn entity_by_name() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        AAUI.Entity = function(name)
+          if name == "login_camera" then return { pos = { 1, 2, 3 }, angles = { x = 0, y = 0, z = 90 } } end
+        end
+        cam = UIParent:GetEntityByName("login_camera")
+        none = UIParent:GetEntityByName("nothing")
+        "#,
+    )
+    .unwrap();
+    assert!(eval::<bool>(&ui, "return none == nil"));
+    assert_eq!(eval::<f64>(&ui, "return cam:GetPos().z"), 3.0);
+    assert_eq!(eval::<f64>(&ui, "return cam:GetAngles().z"), 90.0);
+    assert_eq!(eval::<String>(&ui, "return cam:GetName()"), "login_camera");
+}
+
+#[test]
+fn chat_input_slash_commands() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        sent, updates = {}, 0
+        AAUI.ChatSend = function(ch, text, target) sent[#sent + 1] = { ch, text, target } end
+        win = UIParent:CreateWidget("chatwindow", "chatWindow[1]", "UIParent")
+        win:AddAnchor("BOTTOMLEFT", "UIParent", 0, -145)
+        win:SetExtent(430, 350)
+        win:SetChatWindowId(0)
+        win:Show(true)
+        edit = win:GetChatEdit()
+        sel = win:GetChatMethodSelector()
+        sel:SetHandler("OnContentUpdated", function() updates = updates + 1 end)
+        edit:Show(true)
+        edit:SetFocus()
+        "#,
+    )
+    .unwrap();
+    ui.type_text("/p");
+    assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "/p");
+    ui.type_text(" ");
+    assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "");
+    assert_eq!(eval::<String>(&ui, "return sel:GetText()"), "Party");
+    assert!(eval::<i64>(&ui, "return updates") >= 1);
+    ui.type_text("hello");
+    ui.key(&UiKey::Enter);
+    assert_eq!(eval::<String>(&ui, "return sent[1][2]"), "hello");
+    assert_eq!(eval::<i64>(&ui, "return sent[1][1]"), eval::<i64>(&ui, "return CHAT_PARTY or 4"));
+    assert!(!eval::<bool>(&ui, "return edit:IsVisible()"));
+    // Whisper: the name is the prefix, the channel stays for the next line.
+    ui.exec("@again", "edit:Show(true) edit:SetFocus()").unwrap();
+    ui.type_text("/w Maude hi");
+    assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "hi");
+    ui.key(&UiKey::Enter);
+    assert_eq!(eval::<String>(&ui, "return sent[2][3]"), "Maude");
+    assert_eq!(eval::<i64>(&ui, "return sent[2][1]"), -3);
+    // Unknown commands stay in the text.
+    ui.exec("@again", "edit:Show(true) edit:SetFocus()").unwrap();
+    ui.type_text("/dance ");
+    assert_eq!(eval::<String>(&ui, "return edit:GetText()"), "/dance ");
+}

@@ -298,6 +298,10 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         lua::widget::set_checked(lua, id, !checked, true);
         lua::flush(lua);
     }
+    // A slot uses what it holds (`AAUI.UseSlot` / `UseSkill` / `UseItem`).
+    if lua::slot::clicked(lua, target, button) {
+        lua::flush(lua);
+    }
     // A row of a grid (quest list) that was clicked becomes its selected row.
     if button == "LeftButton" {
         lua::grid::clicked(lua, target);
