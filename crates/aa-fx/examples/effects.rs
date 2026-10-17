@@ -9,7 +9,7 @@
 //! Flags (plus the aa-dev ones `--shot --shot-after --exit-after --size`):
 //!
 //! * `--effect <lib.group.name>`  repeatable; default: torch, campfire, candle, smoke, waterfall mist, magic glow
-//! * `--grid <n>`                 `n` copies of the first effect in a grid (a cost test); labels off
+//! * `--grid <n>`                 `n` copies in a grid, cycling through the `--effect` list (a cost test); labels off
 //! * `--spacing <m>`              distance between the effects (default 3.2)
 //! * `--dist <m>` `--height <m>` `--yaw <deg>` `--orbit <deg/s>`   the camera (orbit defaults to 12 deg/s, 0 with `--shot`)
 //! * `--gain <x>` `--light <x>` `--size-scale <x>` `--alpha-scale <x>` `--no-soft` `--max-particles <n>`   `FxSettings`
@@ -18,12 +18,12 @@
 //! * `--day`                      a brighter ground (default: dark, so that additive glows show)
 //! * `--loop`                     start every effect again when it has finished (skill effects are one shots)
 //! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
-//!                                effect in a single shot; add `--loop` and `--no-prime`)
+//!   effect in a single shot; add `--loop` and `--no-prime`)
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
-//!                                `ParentCollide` children (`Effect::ground_y`)
+//!   `ParentCollide` children (`Effect::ground_y`)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
 //! mesh upload passes.
@@ -207,7 +207,7 @@ fn setup(
         for i in 0..spawn.grid {
             let (x, z) = ((i % side) as f32, (i / side) as f32);
             positions.push((
-                spawn.effects[0].clone(),
+                spawn.effects[i % spawn.effects.len()].clone(),
                 Vec3::new((x - (side as f32 - 1.0) * 0.5) * spawn.spacing, 0.0, (z - (side as f32 - 1.0) * 0.5) * spawn.spacing),
             ));
         }

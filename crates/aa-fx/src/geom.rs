@@ -40,7 +40,7 @@ impl Osc {
         match self.kind {
             1 => self.rate,
             2 => self.rate * t,
-            3 | 4 | 5 | 6 => self.amp * (std::f32::consts::TAU * (self.rate * t + self.phase)).sin(),
+            3..=6 => self.amp * (std::f32::consts::TAU * (self.rate * t + self.phase)).sin(),
             _ => 0.0,
         }
     }
@@ -402,7 +402,7 @@ mod tests {
         }
         let key = GeomKey { path: "objects/effects/lightning.cgf".into(), material: "objects/effects/lightning_magic1b.mtl".into(), texture: String::new(), blend: None };
         let g = Geom::load(&key).expect("lightning");
-        assert!(g.tmpl.idx.len() >= 3 && g.tmpl.idx.len() % 3 == 0);
+        assert!(g.tmpl.idx.len() >= 3 && g.tmpl.idx.len().is_multiple_of(3));
         assert_eq!(g.tmpl.pos.len(), g.tmpl.nrm.len());
         assert!(g.mtl.texture.contains("lightnig_flash"), "{:?}", g.mtl);
         assert!(!g.mtl.opacity_map.is_empty());

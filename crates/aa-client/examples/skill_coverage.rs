@@ -13,7 +13,7 @@
 //! * **Effects**: every `fx_items.asset_name` of the skill's group, its projectile's group, its plot steps and its per level visual
 //!   groups, looked up in the particle libraries with aa-fx's own loader (`Library::load` / `get`). The raw emitter XML of every
 //!   effect that exists is scanned for what aa-fx does not do: an attribute `EmitterDef::from_attributes` never reads (found by
-//!   feeding it test values), a `Geometry` model, a refraction material (`RefrBumpScale` in the `.mtl`).
+//!   feeding it test values: what aa-fx supports is read from its parser), and a collision (the ground has to be known: `GROUND_WIRED`).
 //! * **Not particles**: sounds, voices, camera shakes, material flashes and the like in the effect groups.
 //!
 //! ```text
@@ -49,6 +49,11 @@ const MOB_LEVEL: i64 = 12;
 /// decal). The others (a light, a sound, a rendering hint) leave the sprites as they are.
 const MAJOR: &[&str] = &["geometry", "refraction", "tail", "rotate", "collision", "attach", "decal"];
 
+/// Whether the client gives aa-fx a ground height (`FxSettings::ground`): until it does, particles that bounce on the ground (and the
+/// emitters that start where they land) are reported as an unsupported `collision`. Meshes (`Geometry`), tails, orbits, refraction
+/// materials and emission from the body are drawn by aa-fx itself and are not listed any more.
+const GROUND_WIRED: bool = false;
+
 /// Attributes that only hint at cost or visibility; the effect is not degraded by an engine that ignores them.
 const HINTS: &[&str] = &[
     "FillRateCost",
@@ -58,6 +63,10 @@ const HINTS: &[&str] = &[
     "ViewDistanceAdjust",
     "DrawNear",
     "CameraMinDistance",
+    // bouncing off objects and characters: the ground is enough for the look, and a particle's first hit is all that is reported
+    "MaxCollisionEvents",
+    "CollideStaticObjects",
+    "CollideDynamicObjects",
     "CameraMinBorder",
     "CameraMaxBorder",
     "VisibleIndoors",
@@ -153,7 +162,7 @@ struct FxInfo {
     drawn: usize,
     /// Emitters that are switched on (`Enabled`): an effect whose emitters are all off is empty in the real client too.
     enabled: usize,
-    /// Unsupported features: geometry, tail, refraction, light, collision, rotate, sound, decal, attach, `other:<Attribute>`.
+    /// Unsupported features: collision (no ground), light, sound, decal, geometry (`GeometryInPieces`), `other:<Attribute>`.
     features: BTreeSet<String>,
     /// How many enabled emitters carry each feature.
     feature_emitters: BTreeMap<String, usize>,
@@ -192,7 +201,6 @@ struct LibData {
 struct Libs {
     libs: HashMap<String, Option<LibData>>,
     handled: HashMap<String, bool>,
-    refraction: HashMap<String, bool>,
     checked: HashMap<String, Arc<FxInfo>>,
 }
 
@@ -222,7 +230,7 @@ impl Libs {
         if let Some(h) = self.handled.get(attr) {
             return *h;
         }
-        const VALUES: &[&str] = &["1", "2,3", "0.5", "true", "false", "Additive", "ParentStart", "Free", "Velocity", "Medium", "textures/x.dds", "materials/x", "(0,1;1,2)", "1,2,3", "x.cgf"];
+        const VALUES: &[&str] = &["1", "2,3", "0.5", "true", "false", "Additive", "ParentStart", "Free", "Velocity", "Medium", "Physics", "Volume", "SimpleCollision", "textures/x.dds", "materials/x", "(0,1;1,2)", "1,2,3", "x.cgf"];
         let build = |value: Option<&str>| {
             let xml = match value {
                 Some(v) => format!("<P {attr}=\"{v}\"/>"),
@@ -237,13 +245,6 @@ impl Libs {
         h
     }
 
-    /// Whether the `.mtl` is a refraction material (`RefrBumpScale`).
-    fn refraction(&mut self, mtl: &str) -> bool {
-        *self.refraction.entry(mtl.to_string()).or_insert_with(|| {
-            aa_pak::Pak::global().read_string(mtl).is_ok_and(|t| t.contains("RefrBumpScale") || t.to_ascii_lowercase().contains("refraction"))
-        })
-    }
-
     /// The unsupported features of one emitter and the ones below it.
     fn walk(&mut self, el: roxmltree::Node<'static, 'static>, info: &mut FxInfo) {
         if let Some(params) = el.children().find(|c| c.has_tag_name("Params")) {
@@ -251,13 +252,7 @@ impl Libs {
             if def.enabled {
                 info.enabled += 1;
                 let mut mine: BTreeSet<String> = BTreeSet::new();
-                if def.has_geometry {
-                    mine.insert("geometry".into());
-                }
-                if !def.material.is_empty() && self.refraction(&def.material) {
-                    mine.insert("refraction".into());
-                }
-                if matches!(def.spawn, Spawn::ParentCollide) {
+                if !GROUND_WIRED && (def.collides() || matches!(def.spawn, Spawn::ParentCollide)) {
                     mine.insert("collision".into());
                 }
                 for a in params.attributes() {
@@ -1040,7 +1035,7 @@ fn main() {
     }
     let (emitters, lost): (usize, usize) = fx_skills.keys().filter(|e| fx[**e].found).fold((0, 0), |(a, l), e| (a + fx[*e].enabled, l + fx[*e].major_emitters));
     println!("enabled emitters in the {found} effects found: {emitters}, of which {lost} carry a feature that changes the look ({}%); the other {} draw as authored (a light, a sound or a rendering detail aside)", lost * 100 / emitters.max(1), emitters - lost);
-    println!("geometry: {} skills in projectile groups (the client draws the arrow-like mesh through EffectDef::geometry), {} skills in other groups", geometry_flying.len(), geometry_other.len());
+    println!("geometry (GeometryInPieces, which aa-fx draws whole): {} skills in projectile groups, {} skills in other groups", geometry_flying.len(), geometry_other.len());
     let mut hints: Vec<(&String, usize)> = hint_skills.iter().map(|(f, s)| (f, s.len())).collect();
     hints.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     println!("\n== ignored cost / visibility hints (not counted as unsupported; skills)");

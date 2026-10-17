@@ -10,18 +10,22 @@ commands.spawn((aa_fx::Effect::new("X2_EFFECTS.fire_smoke.torchlight_b"), Transf
 
 ## API
 
-* `Effect { name, scale, speed_scale, count_scale, alpha_scale, brightness, tint, prime, looping, despawn_when_finished }`
+* `Effect { name, scale, speed_scale, count_scale, alpha_scale, brightness, tint, ground_y, prime, looping, despawn_when_finished }`
   (`Effect::new(name).with_scale(s)`). `name` is `library.group.name`, case does not matter; the library is everything
   before the first dot (`X2_EFFECTS`, `abillity_skill_table_m`, ...). The entity's transform places, rotates and scales it
   (the average of the global scale axes multiplies `Effect::scale`). Put it under another entity (`ChildOf`) to attach it.
   `RenderLayers` of the effect entity are copied to its meshes. `alpha_scale` multiplies the opacity of this effect, `brightness`
-  and `tint` (a colour) the light on its particles (on top of `FxSettings::light`).
+  and `tint` (a colour) the light on its particles (on top of `FxSettings::light`). `ground_y` is the height of a flat ground
+  for this effect (collisions, see below).
 * `FxSettings` (resource): `max_particles` (20000, the hard global budget), `max_distance` (160 m activation radius cap),
   `gain` (colour multiplier; a world with pre-exposed HDR colours sets `radiance * exposure`, aa-world does), `light`
   (0.8, how much of `DiffuseLighting` shows), `emissive`, `size_scale`, `alpha_scale`, `quality` (0..3, `ConfigMin/Max`),
   `count_over_life`, `soft_distance` (0.6 m, needs `DepthPrepass` on the camera, otherwise particles are not softened),
-  `activations_per_frame`, `wind`, `enabled`.
-* `FxStats` (resource): effects, active, emitters, particles, quads, `sim_ms`, `upload_ms`, `manage_ms`.
+  `activations_per_frame`, `wind`, `sun` (world direction to the sun, shades opaque mesh particles), `refraction` (distort the
+  scene behind refraction materials, default on, `AA_FX_NO_REFRACTION=1` switches it off), `ground` (`Some(Ground(Arc<dyn Fn(Vec3)
+  -> Option<f32>>))`: ground height below a world position, for collisions), `enabled`.
+* `FxStats` (resource): effects, active, emitters, particles, `load` (budget use: a mesh particle counts its vertices / 4), quads
+  (sprites, ribbon segments and mesh copies drawn), `sim_ms`, `upload_ms`, `manage_ms`.
 * `library::Library` / `EffectDef` / `params::EmitterDef`: the parsed data, usable without Bevy
   (`Library::load("x2_effects")`, `lib.get("fire_smoke.torchlight_b")`).
 * Env: `AA_FX_LOG=1` logs the counters every 2 s (`=2` also lists every active emitter with its bounds); `AA_NO_FX=1` leaves
@@ -39,7 +43,8 @@ test), activate/deactivate (a few per frame), simulate (`par_iter_mut`), upload 
 * On activation an effect is primed (about 10 coarse steps) so that it looks established at once; `prime=false` skips it.
 * The budget is an atomic counter: spawning stops when it is used up, so a crowd cannot run away.
 * Meshes are children of the effect entity with the quads in effect-local space (no per-frame transform work), `Aabb` from the
-  quad bounds, `NotShadowCaster`, depth tested, no depth write, transparent phase.
+  quad bounds, `NotShadowCaster`, depth tested, no depth write, transparent phase (refraction materials: transmissive phase).
+  One dynamic mesh per drawing emitter, whatever it draws (sprites, ribbons, mesh copies).
 * `FxMaterial`: unlit, texture x vertex colour x gain, additive (`rgb*a`, alpha 0), alpha, premultiplied (`ColorBased`) and
   multiply modes, optional soft fade against the depth prepass, `DrawLast` as a depth bias.
 
@@ -61,20 +66,81 @@ with `OrientToVelocity` or `Stretch` the sprite's long axis follows the velocity
 the quad faces the camera and spins with `RotationRate`.
 
 Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (tiles, first tile, variants, frame animation),
-`BlendType`, `Facing` (camera, free, bottom, flat), `OrientToVelocity`, `Size`/`SizeX`/`SizeY` with age curves, `Stretch`,
-`StretchOffsetRatio`, `Alpha`, `Color` (with curves), `DiffuseLighting`, `DiffuseBacklighting`, `EmissiveLighting`, `Count`,
-`Continuous`, `EmitterLifeTime`, `SpawnDelay`, `PulsePeriod`, `ParticleLifeTime`, `PositionOffset`, `RandomOffset`,
-`PosRandomOffset`, `Speed`, `AirResistance`, `GravityScale`, `Acceleration`, `WindInfluence`, `EmitAngle`, `FocusAngle`,
-`FocusAzimuth`, `FocusGravityDir`, `InitAngles`, `RandomAngles`, `RotationRate`, `RandomRotationRate`, `Turbulence3DSpeed`,
-`TurbulenceSize`, `TurbulenceSpeed`, `SpawnIndirection`, `SoftParticle`, `DrawLast`, `SortOldestFirst`, `CameraMaxDistance`,
-`ConfigMin`/`ConfigMax`, `MoveRelEmitter`/`BindToEmitter`.
+`BlendType`, `Facing` (camera, free, bottom, flat), `OrientToVelocity`, `Size`/`SizeX`/`SizeY`/`SizeZ` with age curves, `Stretch`,
+`StretchOffsetRatio`, `Alpha`, `AlphaTest`, `Color` (with curves), `DiffuseLighting`, `DiffuseBacklighting`, `EmissiveLighting`,
+`Count`, `Continuous`, `EmitterLifeTime`, `SpawnDelay`, `PulsePeriod`, `ParticleLifeTime`, `PositionOffset`, `RandomOffset`,
+`PosRandomOffset`, `Speed`, `AirResistance`, `GravityScale`, `Acceleration`, `WindInfluence`, `InheritVelocity`, `EmitAngle`,
+`FocusAngle`, `FocusAzimuth`, `FocusGravityDir`, `InitAngles`, `RandomAngles`, `RotationRate`, `RandomRotationRate`,
+`Turbulence3DSpeed`, `TurbulenceSize`, `TurbulenceSpeed`, `SpawnIndirection` (`ParentStart`, `ParentDeath`, `ParentCollide`),
+`SoftParticle`, `DrawLast`, `SortOldestFirst`, `CameraMaxDistance`, `ConfigMin`/`ConfigMax`, `MoveRelEmitter`/`BindToEmitter`,
+and the round 3 features below: `Geometry` (mesh particles) with `NoOffset`/`NoMaterialAlpha`/`IndependentUVTimer`, `Rotate*`
+(orbiting), `Tail*`, refraction materials, `AttachType`/`AttachForm`, ground collisions (`PhysicsType`, `CollideTerrain`,
+`Bounciness`, `DynamicFriction`).
 
-Not supported (ignored): collisions and everything that depends on them (`Bounciness`, `MaxCollisionEvents`, spawn on
-collision), geometry particles (`Geometry`; `EffectDef::geometry()` returns the model and material an effect names so that an
-application can draw it: the combat code draws the arrow body of `st1000b` that way), tails/trails, `Rotate*` (orbiting), lights (`LightSource*`), sounds, refraction
-materials, `BindEmitterToCamera`/`SpaceLoop`, `AttachType`/`AttachForm` emission shapes, `ViewDistRatio`, `CameraMinDistance`
-(the data has values like 270 that would hide the quest beams), `VisibleUnderwater`/`VisibleIndoors`, per frame texture
-blending, terrain-facing nuances, `FillRateCost`.
+Not supported (ignored): lights (`LightSource*`, `LightHDR*`), sounds, decals (`Decal*`), collisions with objects and entities
+(`CollideStaticObjects`, `CollideDynamicObjects`; only the ground is hit), `MaxCollisionEvents` (a particle reports its first
+ground hit only), `GeometryInPieces`, `ForceGeneration`, `ERotateMode`/local rotation modes and `VirtualAge`,
+`BindEmitterToCamera`/`SpaceLoop`, `ViewDistRatio`, `CameraMinDistance` (the data has values like 270 that would hide the
+quest beams), `VisibleUnderwater`/`VisibleIndoors`, per frame texture blending, terrain-facing nuances, `FillRateCost`.
+
+## Round 3: what the player skills need
+
+Each feature was checked on real player-skill effects (`data/extract/combat/skill_coverage.tsv`, `cargo run -p aa-client
+--example skill_coverage`) with the effects example (`--loop --no-prime`, one shot of a single effect, plus `--stagger` film
+strips, `--sweep` for moving effects, `--backdrop` for refraction, `--ground` for collisions).
+
+* **Mesh particles** (`Geometry`, `geom.rs`). The `.cgf` loads on an async task through `aa_cry::mesh::Model::load` (LOD0 nodes,
+  `aa_cry::scene::render_transform`, vertices in Bevy axes; the sub-material the most triangles use). Until it arrives the
+  emitter draws nothing. The material is the emitter's `Material` `.mtl` (empty: the model's own): diffuse and opacity-map
+  textures, `Diffuse` tint, `Opacity`, `Emissive`; blend = `ADDITIVE` flag: additive, opacity < 1 or an opacity map or `Glass`:
+  alpha, otherwise opaque with the alpha-test cutoff. `TexMod` UV animation of the `.mtl` runs (tile/offset, constant scroll,
+  sine waves, flip books at 10 fps by default; the clock is the effect's). One dynamic mesh per emitter holds every copy: the
+  template is transformed per particle on the CPU (scale `SizeX`, `SizeZ`, `SizeY` times `Size`, rotation from
+  `InitAngles`/`RandomAngles`/`RotationRate` or `OrientToVelocity`, centred on the bounding box unless `NoOffset`), size, alpha
+  and colour curves apply as for sprites. Opaque debris is shaded per vertex by `FxSettings::sun`. A mesh particle counts its
+  vertices / 4 against the particle budget. The effect's forward is -Z in Bevy: a model that points along cry +Y flies along
+  -Z, so a projectile effect moves its entity along its own -Z (see "What the client should do"). Glass and ice materials look
+  pale (no fresnel, no environment reflection).
+* **Orbiting** (`Rotate*`, simulation only). A particle with `RotateLength` circles on a path about `RotatePosition` (the axis,
+  cry axes, default up; the emitter's rotation turns it unless `RotateWorld`): radius = `RotateLength` x its age curve, angle =
+  `RotateInitAngle` + the integral of `RotateSpeed` (radians per second, times its age curve). The orbit offset is added to the
+  stored path, so tails and child emitters follow the visible position.
+* **Tails** (`TailLength`, `TailSteps`). A particle with a tail keeps a ring of its past world positions (at most 48 samples, one
+  per `min(TailLength, life) / steps` seconds, never finer than 1/90 s); it draws as a camera-facing quad strip along that
+  path, tapering and fading towards the old end, texture u along the length (the sword and arrow trails of the skills). The
+  sprite size is the ribbon's width; the particle's own quad is not drawn.
+* **Refraction** (`.mtl` with `RefrBumpScale` and a normal map). Such sprites were plain glow blobs; now they draw as a distortion:
+  the material reads the scene behind it (`ScreenSpaceTransmission`, which the plugin adds to the camera when a refraction
+  material shows up; Bevy copies the opaque scene once and the sprites draw in the transmissive phase) and shifts the lookup
+  by the normal map times `RefrBumpScale` times the sprite's alpha (`REFRACTION_SCALE` = 0.2 of the viewport height per unit).
+  The strength was tuned by eye on the heat shimmer and the shock rings (checker backdrop), there is no reference capture.
+  `FxSettings::refraction = false` (`AA_FX_NO_REFRACTION=1`) does not draw them at all.
+* **Emission from the body** (`AttachType` `BoundingBox`/`Physics`/`Render`, `AttachForm` `Surface`/`Edges`/`Vertices`/`Volume`).
+  The effect does not know the mesh of the entity it is on, so the shape is generic: a 0.3 m radius capsule, ankle to above
+  the head, for `Physics`/`Render`, a 0.8 x 0.6 x 1.8 m box for `BoundingBox`; particles with a speed leave the surface along
+  its normal. Edges and vertices fall back to the surface.
+* **`InheritVelocity`**: a new particle adds that fraction of the effect entity's velocity (from its world position, smoothed,
+  teleports clamped at 40 m/s), unless it is bound to the emitter.
+* **`AlphaTest`**: a sprite with a (curved) alpha test dissolves: the texture's alpha has to exceed the particle's threshold,
+  soft edge 0.08. It is carried per vertex in the second UV set.
+* **Collisions.** `CollideTerrain` with a `PhysicsType` other than `None` (the data has `CollideTerrain=true` on 500 emitters
+  without a `PhysicsType`; as far as known CryEngine ignores it there, so do we): the particle is put on the ground when its
+  path crosses `FxSettings::ground(pos)` (or `Effect::ground_y` when the settings have none; neither: nothing collides), the
+  vertical speed is reflected times `Bounciness` (never above 1; below 0 the particle dies on impact; a bounce below 0.3 m/s
+  stops), the horizontal speed slows with `DynamicFriction`. The first hit of a particle starts the emitters under it with
+  `SpawnIndirection=ParentCollide` at that point. Not done: bouncing off objects and characters.
+
+### What the client should do
+
+* Projectiles: spawn the projectile effect as an `aa_fx::Effect` (`prime: false`, `looping: false`) and move/rotate its entity
+  along the flight; the mesh is drawn with its own `.mtl` (the combat code's `EffectDef::geometry()` special case for the arrow
+  of `st1000b` is no longer needed; `EffectDef::geometry()` stays for anyone who wants the model alone). The effect's forward
+  is Bevy -Z.
+* `FxSettings::sun`: the direction to the sun, for the debris shading (aa-world knows it).
+* `FxSettings::ground`: a terrain (and floor) height query; without it only effects with `Effect::ground_y` collide.
+* Effects that follow a bone (the weapon): put the effect entity under the bone, tails and `InheritVelocity` follow its world
+  motion.
+* The camera needs nothing else: `ScreenSpaceTransmission` is added by the plugin.
 
 ## Coordinates
 
@@ -97,14 +163,27 @@ scale = entity `Scale` x `Properties Scale`; `bActive=0` effects are not spawned
 ```
 cargo run -p aa-fx --example effects -- --shot shots/aa-fx/effects.png
 cargo run -p aa-fx --example effects -- --effect X2_EFFECTS.fire_smoke.torchlight_b --effect X2_EFFECTS.e_effect.smoke
-cargo run -p aa-fx --release --example effects -- --grid 100 --exit-after 14     # 100 torches, logs the cost
+cargo run -p aa-fx --release --example effects -- --effect X2_EFFECTS.fire_smoke.torchlight_b --grid 100 --exit-after 14   # 100 torches, logs the cost
+cargo run -p aa-fx --example effects -- --effect abillity_skill_table_m.fight.slash_trail_level1 --loop --no-prime --sweep 3 --shot shots/aa-fx/x.png
 ```
 
-Flags: `--effect` (repeatable), `--grid n`, `--spacing`, `--dist --height --yaw --orbit`, `--gain --light --size-scale
---alpha-scale --no-soft --max-particles`, `--scale`, `--fx-yaw`, `--day`.
+Flags: `--effect` (repeatable), `--grid n` (n copies, cycling through the `--effect` list), `--spacing`, `--dist --height --yaw
+--orbit`, `--gain --light --size-scale --alpha-scale --no-soft --max-particles`, `--scale`, `--fx-yaw`, `--day`, and for skill
+effects (they are one shots that start from nothing): `--loop`, `--no-prime`, `--stagger s` (a film strip of one effect),
+`--sweep r` (the effect moves on a circle: tails, `InheritVelocity`), `--backdrop` (a checker wall: refraction), `--ground`
+(collisions). A single shot of a skill effect needs `--shot-after 4` or more (the models and textures load on tasks).
 
 Release, 100 torches (600 emitters, ~2350 quads, 1080p): simulation 0.15-0.27 ms, mesh upload 0.10-0.15 ms, management
 0.01-0.13 ms on the main thread (about 0.3-0.5 ms together), ~100 fps on the dev box with everything else idle.
+
+After round 3 (same machine, but with other builds running, so the numbers jump around by 2x; compared back to back with the
+build before round 3 the torches cost the same: simulation 0.2-0.3 ms, upload 0.2-0.4 ms for both). Per particle the cost is
+about 60-90 ns simulation + 15-25 ns upload, for sprites, ribbons and mesh copies alike. 100 *skill* effects alive at once are
+much heavier than 100 torches because a skill effect has 80-180 particles, not 23: a mixed set of 12 player-skill effects
+(ice arrow, slash and trail, hammer, judge spear, ice wall, ...) x 100 copies, all running (980 emitters, ~8000 particles):
+simulation 0.56-0.74 ms + upload 0.19-0.22 ms; the worst single ones, 100 x `judge_spear_form` (17,700 particles) 1.3-1.5 + 0.3
+ms, 100 x `icearrow_proj` (13,900 particles) 0.8 + 0.15 ms. In a fight there are 10-20 skill effects on screen, which is
+0.1-0.2 ms. 12 effects moving on a circle (`--sweep`) with tails and meshes: 0.11-0.15 + 0.02 ms (1000 particles).
 
 ## Step 3 mist (fit on the captures)
 
