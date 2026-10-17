@@ -275,8 +275,9 @@ water materials. The sun follows `env::sun_direction` (see Sun path below); at n
 All HDR colours are `data value x AtmosphereTuning::radiance (540) x the view's exposure` (the material shaders output pre-exposed colours, the post
 pass does the film curve). `AtmosphereTuning` is the calibration against the capture; every field can be overridden for experiments with
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
-exposure water_body water_absorb water_refl water_sun ssr refraction water_rough sea_body ssao cloud_gain ambient_env ambient_gain ambient_sat
-ambient_dome ambient_spec ambient_height sky_tau sky_phase sky_hue sky_mie sky_green sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
+exposure water_body water_lit water_absorb water_refl water_sun water_foam water_env water_ssr ssr refraction water_rough sea_body sea_absorb
+sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
+sky_phase sky_hue sky_mie sky_green sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
@@ -313,6 +314,17 @@ intensity`, plus the `Mie scattering` term (`sky_mie` 0.5, green boosted by `sky
 data's `Night sky` colours give a nearly white sky (blue over red 1.14 at the palace, the capture has 1.3 to 1.75). The shader blends horizon to
 zenith by `exp(-elevation / sky_tau)` (16.5 degrees; the old blend was an exponent of the cosine) and brightens towards the sun by the Rayleigh
 phase, `1 + sky_phase x ((1 + cos^2 g) / 1.03 - 1)` (`sky_phase` 2); the sun disc fades out below the horizon with the time of day's `day`.
+
+**Dusk** (zone 179, `fly --pos 15578,15382,128.5 --yaw 263 --pitch 12 --fov 70 --hour 17.3`): the scattering hue is the calibration of the noon
+captures (a bluish sun intensity colour); at 17.3 h the same variable is orange (and the gradient colours are orange at the horizon, lilac at the
+zenith), so forcing it on the whole dome made a flat tan wall, at 18.6 h (the gradient is deep blue, the sky light's `Sun intensity multiplier`
+has dropped from 10 to 1) a maroon one. The hue weight (`sky_hue`) is therefore scaled by `smoothstep(20, 40, sun elevation in degrees)`: full
+at the palace and spawn calibration hours (the sun at 42 to 44 degrees), none below 20 degrees, where the zone's own gradient takes over (17.3 h:
+orange red horizon blending to lilac, 18 h purple, 18.6 h deep blue). The sun's glow and disc (and the fog glow of the post pass) are shown
+by `sun_shine`: the `day` factor or, for the warm colours of a sunset (red above blue in the linear `Sun color`), the colour itself; a sunset
+sun has a low sRGB luminance, which `day` alone read as night (the disc and glow were hidden at 17.3 h). The blue "sun colour" after 18 h is the
+moon: it keeps the dome's disc dim (`day` 0.2). Shots: `shots/water/dk_c16.png`, `dk_c173.png`, `dk_c18.png`, `dk_c186.png` (before:
+`shots/gallery/24b_spawn_golden_hour.png`).
 
 **Ambient light** (`update_ambient` in `sky.rs`): the data's flat ambient (a constant `GlobalAmbientLight`) left the shade too dark and too
 saturated, so the camera carries a hemispherical `EnvironmentMapLight` instead (`GlobalAmbientLight.brightness` is 0; `AA_TUNE=ambient_env=0`
@@ -353,6 +365,18 @@ usage, Bevy `Bloom::NATURAL` at `bloom` intensity 0.1) and adds `PostUniform`. O
   at `Volumetric fog: Ramp start`, extinction `fog_ext` (0.04 / m at density 1) x `Global density` x layer density, colour from the layer colours
   (`Fog color`, `Fog color (top)`, mixed 60 % towards the sky horizon colour: the data fog colour is more saturated than the real haze) plus a
   sun glow; skipped beyond 0.9 `sky_radius` (the dome has its own haze),
+* **under water**, instead of the fog, when the camera is below the surface of the sea or of a water volume (`update_post` asks
+  `WaterQuery::body_at` for the camera position each frame; `PostUniform::under` / `under_color`): the engine's `OceanOutof` /
+  `WaterVolumeOutof` fog. Along the view ray the scene is dimmed by `exp(-k (path + depth of the thing seen))` and the water's own colour is
+  scattered towards the eye, `colour x exp(-k depth of the eye) x (exp(kt path) - 1) / kt x k`, `kt = k (dir.y - 1)`, so the light dims with
+  the depth and the sky above looks brighter. A ray that reaches the surface before the scene sees what is above only inside Snell's window
+  (`dir.y` above 0.62 to 0.72, 49 degrees around the vertical: the sky through a bright soft edged disc), outside it the surface is a mirror of
+  the water below (the pure water colour, as at the horizon). `k` is the zone's `Ocean fog density under water` (0.043, base 2) for the sea, the
+  volume's `density x water_absorb` for ponds (lake_tank: murky green within a few metres); the colour is the one the surface shows from above
+  (`sea_color` / `volume_color`). The water shader does not draw the surface from below (`discard`). Knobs `under_absorb` (extinction
+  multiplier), `under_scatter` (gain of the water colour). Not done: light shafts, caustics on the bed, refraction of the window, red absorbed
+  first, the transition at the surface line (the engine fades through the surface). Shots: `shots/water/uw1_0.png` (sea floor, 53 m deep),
+  `uw1_35.png` (looking up), `uw1_s.png` (8 m deep), `uw2_a.png` and `uw2_b.png` (the Nuian pond), `cli_uw.png` (the client on the sea floor).
 * **grade**: exposure, contrast around 0.18, colour balance, saturation (data `Saturation` x 0.85),
 * the engine's **film curve** (`postprocess.cfx`: `x (a 6.2 x + b 0.5) / (x (a 6.2 x + 1.7) + c 0.06)` with shoulder / midtones / toe scales from the
   data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input` (in 0..255 as in the engine's `AdjustLevels`, so the data's 0.07 is a black point of 0.07 / 255, not 7 % of the range).
@@ -364,26 +388,67 @@ capture shows, for about 8 to 10 % of the frame time. It was opt-in until aa-cry
 `aa_world::post::{Post, PostUniform}` is the reusable setup; a second camera only needs the `Post` component. `--no-post` / `post: false`
 leaves the camera alone (Bevy tone mapping, no fog, the water falls back to a constant thickness and no reflections).
 
-### Water (`water.rs`, `water_material.rs`, `water.wesl`)
+### Water (`water.rs`, `water_material.rs`, `water.wesl`, `water_query.rs`)
 
 A `WaterMaterial` per style (material path + fog): constants from the `.mtl` public params (see object.dat), environment part refreshed each frame
 by `update_water`. The shader runs in the transmissive phase (`reads_view_transmission_texture`: the frame's opaque colour is copied once) and
-reads the depth prepass:
+reads the depth prepass. It follows the engine's own two shaders, `watersurface.cfx` and `watervolume.cfx` (read from the pak,
+`game/shaders/hwscripts/cryfx/`), for ponds, lakes and rivers:
 
 * normal: the four layers of the bump map the engine adds (big waves x2 and x4, small waves x8 and x16 tiles, drifting at `WavesSpeed`), world
   space coordinates, `BumpScale`, flattened beyond 60 to 260 m,
-* body: `mix(water colour, refracted scene, exp(-absorption x thickness))`; thickness is the depth prepass minus the surface depth along the view
-  ray (`SoftIntersectionFactor` makes the shore transparent), water colour = volume fog colour x `water_body` x light, absorption = volume density
-  x `water_absorb`; refraction offsets the lookup by the bump, rejected where the sample is in front of the surface,
-* reflection: Schlick Fresnel (reflectance `FresnelBias x 0.25`, x `water_refl`) of a screen space ray march (2 rays spread vertically by
-  `water_rough`, 16 steps growing 1.3x + 0.3 m, thin object test, one refinement step, within 160 m, fades at the screen edge) against the depth
-  prepass, colour from the transmission copy; the analytic sky (horizon / zenith gradient + glow) where nothing is hit,
-* sun glint `pow(dot(reflect, sun), SunShinePow) x sun colour x SunMultiplier`.
+* **volume fog** (`WaterVolumeInto`): `mix(fog colour, refracted scene, T)` with `T = exp(-k thickness)`, `k = density x water_absorb` and
+  `water_absorb` = ln 2 (the engine's `exp2(-density x depth)`); thickness is the depth prepass minus the surface depth along the view ray. The
+  old absorption was `water_absorb` 6, nine times the engine's: legs, the rat and the bed vanished a metre down (lake_tank: density 0.6, 0.66
+  per metre). Refraction offsets the lookup by the bump, rejected where the sample is in front of the surface. The fog colour of the data is
+  tiny (lake_tank 0.002 / 0.005 / 0.004), the real pond is far brighter: it is lit by `sky + water_lit (0.25) x sun` and scaled by
+  `water_body` (6, fitted),
+* **surface** (`WaterSurfacePS`): `final = lerp(refract, ReflectionAmount x reflect, TransparencyRatio x fresnel)`, `fresnel = bias + (1 - bias)
+  (1 - N.V)^5` with `bias` = `FresnelBias`, the normal flattened as the engine does (bump x 0.15); `TransparencyRatio` is weighted by
+  `water_refl` (1). The reflected colour is the material's **environment cube map** (`Environment` texture of the `.mtl`, nearly always
+  `textures/cubemaps/camera_river_cubemap.dds`: a dark overcast panorama with trees, rock and a sun, sampled with the Cry space reflection
+  vector, +Z is up) times the engine's `sun + sky` colour, and `water_env` (0.08, fitted) for the unit conversion. There are no screen space
+  reflections on ponds by default (the engine has none; `water_ssr=1` brings the two ray march back on top of the cube map),
+* sun glint `pow(dot(reflect(unclamped normal), sun), SunShinePow) x sun colour x SunMultiplier x water_sun`,
+* **foam** (`FOAM`): `textures/defaults/water_foam.dds` (256 x 256 DXT5, linear, wrapping) sampled twice, `world.xy x 0.3197 - a` and
+  `world.yx x 0.2797 + a` with `a = fract(time x 0.025 x WavesSpeed)` plus the bump x 0.075, `lum = saturate((rgb1 + rgb2 summed over channels
+  x 0.333) - 1)`; `foam = 1 - saturate(FoamIntersectionFactor x (0.2 / lum) x depth)`, masked by `smoothstep(0.2, 0.7, soft x foam)`, added as
+  `foam x lum x (sun + sky) x FoamMultiplier x water_foam (0.7)`. These are the white flecks of the real frames: sparse over shallow water,
+  dense where the water is thin (around legs and plants, at the shore).
 
-The sea is the same material (style `<sea>`, bigger and faster waves) on a plane at `ocean_level` following the camera; its colour is the zone's
-`<Ocean FogColor>` x `sea_body`. Not done: foam (`FoamMultiplier`, no foam texture used), flow along rivers, caustics, waterfalls (`WATERFALL` flag),
-underwater view. The engine's own shader (`watersurface.cfx`) mixes `refractColor` with only `ReflectionAmount x TransparencyRatio x fresnel` of the
-reflection (about 6 %); the real picture shows stronger reflections than that (probably planar reflection render targets), so `water_refl` is a fudge.
+**Fit** to the real combat frames (`reference/ingame/combat_triple_slash/real_05.png`, `combat_return/real_10.png`, the Nuian pond; `fly
+--camera-json cam_c05.json --shift 11264,11264,0 --hour 10` with `AA_TUNE=sun_az=290,sun_el=15`, the sun behind the camera as the real
+picture's, see "Known gaps" for the clock): mean colour of 12 water regions (near / mid / far, left / right, both frames), mean abs error over
+R, G, B in display values: 38.5 before, 6.8 after (the real region means are all within (38..50, 51..60, 33..47), a luminance of 47 to
+56 that varies little with distance: the fog colour dominates beyond two metres, the dim cube map reflection gives the green hue). The
+standard deviation of the regions (ripples, flecks) is 3 to 14 against the real 2 to 14. Fleck coverage above luma 85: 4.4 % against 3.8 %
+(c05 bottom right), 7.4 against 7.9, 4.8 against 5.4. The player's legs are seen through the surface in the client
+(`shots/water/cli_m1.png`, before: `cli_base.png`, `cli_a1.png`). The body and the cube map scale (`water_body`, `water_env`) trade against each
+other (the fit is flat along the line body 4 / env 0.12 to body 8 / env 0.06); the fitted pair keeps the near and far regions both within a few
+display values.
+
+**Sea**: the same material (style `<sea>`, bigger and faster waves) on a plane at `ocean_level` following the camera; its colour is the zone's
+`<Ocean FogColor>` x `sea_body`, its own knobs (`sea_absorb` 6, `sea_refl` 0.5, `sea_sun` 3) keep it exactly as before the pond fit (the
+analytic sky and the screen space reflections, no foam; mean abs pixel difference of `fly --pos 15000,10000,200` before / after: 0.007).
+
+**Water queries** (`water_query.rs`): `aa_world::WaterQuery` (a `Resource` the plugin inserts next to `TerrainQuery`, a clonable `Arc` handle
+like it, `&self`, `Send + Sync`) answers "is there water here":
+
+```rust
+let water = WaterQuery::new("main_world");                          // or Res<WaterQuery>
+water.water_at(Vec3::new(x, y, z))   // Option<(f32, WaterKind)>: surface height (m) and Sea / Lake / River, game coordinates
+water.body_at(pos)                   // Option<WaterBody { height, kind, fog_color, fog_density }>, the volume's own fog too
+```
+
+A volume (`object.dat` type 11: outline, surface, depth) applies when the outline contains `(x, y)` (even-odd test of the same ring the mesh is
+built from) and `z` is not below its floor (`surface - depth`); the highest surface wins, a volume beats the sea. The sea is the plane at the
+world's `oceanLevel` (100; none in login2) wherever the terrain is lower (a cell without terrain inside the map is open sea). `z` may be above
+the surface (a jump, a bridge: compare it with the height to see whether the feet are wet). Cells (`object.dat`, a few ms) are parsed on first
+use and cached (64, least recently used). `None` on dry land and outside the map. Examples (tests): the Nuian pond `(15577.3, 15379.9, 126.25)`
+-> `(127.0, Lake)`, a river in cell (9, 12), the map corner `(100, 100)` -> `(100.0, Sea)`.
+
+Not done: flow along rivers, caustics, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
+`Foam`-less materials (gen mask bits are not read: every volume with foam parameters gets foam), `TransparencyRatio` above 1.
 
 ### Streaming (`stream.rs`)
 
@@ -408,13 +473,13 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
   applied sample, `ocean_fog`), `AtmosphereTuning` (`AA_TUNE`), `WaterStyles` (materials by style), `TodCache`,
   `WorldInfo(Arc<World>)`, `Streamer::loaded_cells()`, `ObjectState` (`stats`), `WorldTimings` (per frame main thread ms
   of the streaming systems), `pipelines::PipelineStatus` (render pipelines waiting / requested, frames of the render world; for loading screens), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
-  `TerrainQuery` (ground queries, see below). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
+  `TerrainQuery` (ground queries, see below), `WaterQuery` (water height and kind, see Water). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
 * Parsers (no Bevy world needed, all tested against the pak): `heightmap::CellHeights::parse`, `cover::Cover::parse` (+ `atlas`),
   `placement::{parse_brush_dat, parse_vegetation_dat, parse_vegetation_sector, parse_object_dat, parse_water, load_cell_objects}`,
   `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay (parse, parse_layer), Lighting, sun_direction, EnvSample::lerp}`, `sky_material::{ZoneSky, load_sky_box}`, `sky_clouds::{parse_clouds, CloudDef, CloudMaterial}`, `post::{Post, PostUniform}`,
-  `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, water_meshes, WaterStyle, triangulate}`, `water_material::{WaterMaterial, WaterStyles}`,
+  `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, water_meshes, WaterStyle, triangulate}`, `water_material::{WaterMaterial, WaterStyles}`, `water_query::{WaterQuery, WaterBody, WaterKind}`,
   `terrain_layers::{LayerLibrary::build, parse_surface_types, TerrainMaterial}`.
 
 ### Ground queries (`terrain_query.rs`)
@@ -441,7 +506,7 @@ terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. 
 * Cost: a cell is loaded on first use (2.6 ms: pak read + parse; the very first query of a process also opens the pak, 0.3 s if nothing else
   did), then a query is about 0.1 microseconds. At most `TerrainQuery::DEFAULT_CACHE_CELLS` (48, 1.3 MB each) parsed cells are kept (least
   recently used dropped; `with_capacity`); concurrent first queries of a cell load it once. Missing cells are remembered as `None`.
-* Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (`World::ocean_level`, `placement::parse_water`),
+* Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (use `WaterQuery`, see Water),
   and the surface type (the nibble is in `CellHeights::surface`, its meaning in the cell's `leveldata.xml`, see `terrain_layers::parse_surface_types`).
 
 **Collision with brushes (buildings, rocks, bridges): how it would be exposed** (not implemented). The pieces exist: `placement::parse_brush_dat`
@@ -684,11 +749,13 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
   over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; the roads and decals of `object.dat`
   (types 13 and 9, `aa_terrain/roads`, `aa_terrain/decals`) are not drawn; `terrain_tint` is a fudge for the missing exposure.
-* Water, differences to `reference/ingame/spawn/real.png`: no foam at the shore and around the player, no flow along rivers, the reflection is a
-  two ray screen space march (no reflection of things outside the screen, grainy ripples where the foliage depth has holes, bank trees only
-  where they are on screen), the body colour and reflection strength are fudged (`water_body`, `water_refl`), the real pond is a little darker
-  and greener in the middle, the real surface has bigger soft ripples near the camera. Caustics, waterfalls and the underwater view are not done.
-  The sea has no foam / white caps or beach gradient; its colour is the zone's `Ocean FogColor` x `sea_body` and it is hazy at distance.
+* Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
+  at one hour with the sun pinned behind the camera; other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
+  (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
+  owner's (the cover colour is a flat teal where the real bed is darker and greener), no flow along rivers, the sun glint of the real frames
+  is not visible (the sun is behind the camera there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
+  FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
+  below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: object.dat decals (type 9) and roads (13), types 6 and 14, `entities.xml` (lights, particle effects, `GeomEntity` props,
   the login stage's training dummies and grass, `CameraSource` positions), cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
