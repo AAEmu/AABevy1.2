@@ -215,7 +215,7 @@ Every server packet below is decoded in `game::ServerMsg`, forwarded by the sess
 | `SCLevelChanged` | `LevelChanged { obj_id, level }` | `level` (and the unit's level in `Units`) |
 | `SCAbilityExpChanged` | `AbilityExpChanged { obj_id, ability, exp }` | `ability_exp[ability]` |
 | `SCAbilitySwapped` | `AbilitySwapped` | `active_abilities` |
-| `SCCharacterLaborPowerChanged` | `LaborChanged { amount, action, point, step }` | `labor += amount`. "Gained 10 Labor Point(s)" is the client's text for `amount = 10` |
+| `SCCharacterLaborPowerChanged` | `LaborChanged { amount, action, point, step }` | `labor += amount`; `labor_log` keeps `(amount, labor after)` of the session's changes (last 16, cleared with the stats) for the chat line "Gained 10 Labor Point(s). (Total LP: 105)" the client prints, also for the ones that came while the screen was loading |
 | `SCCharacterGamePoints`, `SCGamePointChanged` | `GamePoints`, `GamePointChanged { kind, amount }` | `honor`, `vocation` |
 | `SCBmPoint` | `LoyaltyChanged { bm_point }` | `loyalty` (loyalty tokens) |
 | `SCCombatEngaged` / `SCCombatCleared` | `CombatChanged { obj_id, engaged }` | `in_combat` |
@@ -306,14 +306,20 @@ time; `walkthrough --cmd "/teleport ..."` does it).
 
 | packet | event | state |
 |---|---|---|
-| `SCJoinedChatChannel` | `ChatChannelJoined { chat_type, sub_type, faction_id, name }` | `channels` |
-| `SCLeavedChatChannel` | `ChatChannelLeft { chat_type, sub_type, faction_id }` | `channels` |
+| `SCJoinedChatChannel` | `ChatChannelJoined { chat_type, sub_type, faction_id, name }` (the zone channel, type 1, as three events: types 1, 2 and 3) | `channels` |
+| `SCLeavedChatChannel` | `ChatChannelLeft { chat_type, sub_type, faction_id }` (also three for the zone channel) | `channels` |
 | `SCChatMessage` | `Chat(ChatMessage)` | `log` (the last `CHAT_LOG_LIMIT` = 500 lines, oldest first) |
 | `CSSendChatMessage` | `Command::Chat { chat_type, target, message }` | |
 
 At spawn the server joins the player to Shout (1, sub type = the zone group id), Nation (6, faction
-148) and Ally (14, faction 148); the client prints "Entering Chat: 1.Shout.Solzreed Peninsula" for
-each (the zone name comes from `zone_groups`). `ChatMessage { chat_type, sub_type, channel_faction,
+148) and Ally (14, faction 148). The zone channel carries shout, trade (2) and party search (3) lines
+(the server routes `chat_type` 1 / 2 / 3 messages through it with the same sub type), and the real client
+announces all three when it joins ("Entering Chat: 1.Shout.Solzreed Peninsula", "2.Trade.Solzreed
+Peninsula", "3.Party Search.Solzreed Peninsula", then 6 and 14: `reference/ingame/spawn`,
+`royal_palace`), in the city as in the field. aa-net does the same: one `SCJoinedChatChannel` /
+`SCLeavedChatChannel` of type 1 raises `ChatChannelJoined` / `ChatChannelLeft` for types 1, 2 and 3
+(`session::channel_types`), so `Chat.channels` lists all three and the zone name comes from
+`zone_groups` for each. `ChatMessage { chat_type, sub_type, channel_faction,
 sender, message, .. }` carries the channel it came through; `model::chat_type` has the ids (-2 system
 text such as the "Welcome to AAEmu!" the server sends after entering, -1 notice, 0 say, 1 shout ...)
 and `chat_type::name(id)`. Game messages such as "Gained 10 Labor Point(s)" are not chat lines on the

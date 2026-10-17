@@ -28,6 +28,16 @@ use crate::net::{self, GameConn, LoginConn, NetError, StreamConn};
 use crate::stream;
 use crate::wire::Pos;
 
+/// The channels one `SCJoinedChatChannel` / `SCLeavedChatChannel` stands for. The server has one channel
+/// per zone group (type shout, sub type the zone group id) and routes shout, trade and party search
+/// lines through it (`chat_type::TRADE` / `GROUP_FIND` messages carry the same sub type). The client
+/// announces all three when it joins ("Entering Chat: 1.Shout.Two Crowns", "2.Trade.Two Crowns",
+/// "3.Party Search.Two Crowns", checked in `reference/ingame/spawn` and `royal_palace`) and so do we.
+fn channel_types(chat_type: i16) -> Vec<i16> {
+    use crate::model::chat_type as t;
+    if chat_type == t::SHOUT { vec![t::SHOUT, t::TRADE, t::GROUP_FIND] } else { vec![chat_type] }
+}
+
 /// How long a request may stay unanswered before the session reports a failure.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// Default interval of the keep-alive ping.
@@ -355,7 +365,8 @@ pub enum Event {
     /// Snow switched on or off.
     Snow(bool),
     /// A chat channel was joined: `chat_type` (see `model::chat_type`), `sub_type` (the zone group
-    /// id for zone channels), `faction_id` and the channel's name (empty for zone channels).
+    /// id for zone channels), `faction_id` and the channel's name (empty for zone channels). The
+    /// server's zone channel is reported as three: shout, trade and party search (as the client does).
     ChatChannelJoined { chat_type: i16, sub_type: i16, faction_id: u32, name: String },
     ChatChannelLeft { chat_type: i16, sub_type: i16, faction_id: u32 },
     /// A unit selected (or dropped, `target_obj_id` 0) a target. For the local player this is the
@@ -1059,10 +1070,14 @@ impl Session {
             M::TimeOfDay { hour, speed } => self.emit(Event::TimeOfDay { hour, speed }),
             M::Snow(on) => self.emit(Event::Snow(on)),
             M::ChatJoined { chat_type, sub_type, faction_id, name } => {
-                self.emit(Event::ChatChannelJoined { chat_type, sub_type, faction_id, name });
+                for chat_type in channel_types(chat_type) {
+                    self.emit(Event::ChatChannelJoined { chat_type, sub_type, faction_id, name: name.clone() });
+                }
             }
             M::ChatLeft { chat_type, sub_type, faction_id } => {
-                self.emit(Event::ChatChannelLeft { chat_type, sub_type, faction_id });
+                for chat_type in channel_types(chat_type) {
+                    self.emit(Event::ChatChannelLeft { chat_type, sub_type, faction_id });
+                }
             }
             M::TargetChanged { obj_id, target_obj_id } => self.emit(Event::TargetChanged { obj_id, target_obj_id }),
             M::ActionSlots(slots) => self.emit(Event::ActionSlots(slots)),
@@ -1268,6 +1283,13 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[test]
+    fn the_zone_channel_is_shout_trade_and_party_search() {
+        assert_eq!(channel_types(1), vec![1, 2, 3]);
+        assert_eq!(channel_types(6), vec![6]);
+        assert_eq!(channel_types(14), vec![14]);
+    }
     use crate::opcodes::pp;
     use std::net::SocketAddrV4;
     use tokio::io::AsyncReadExt;

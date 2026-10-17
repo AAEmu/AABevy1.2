@@ -12,6 +12,8 @@ use crate::session::Event;
 /// The labor cap of a normal account (premium accounts get [`LABOR_MAX_PREMIUM`]).
 pub const LABOR_MAX: i32 = 2000;
 pub const LABOR_MAX_PREMIUM: i32 = 5000;
+/// How many labor changes [`PlayerStats::labor_log`] keeps.
+pub const LABOR_LOG_LIMIT: usize = 16;
 
 resource! {
     /// The numbers the HUD shows for the local player. Filled when the character is selected,
@@ -41,6 +43,12 @@ resource! {
         /// online, up to [`LABOR_MAX`].
         pub labor: i32,
         pub labor_updated: i64,
+        /// The labor changes the server announced this session, oldest first, as `(amount, labor
+        /// after)`: the client prints "Gained 10 Labor Point(s). (Total LP: 105)" for each, also for
+        /// the ones that came while the screen was still loading (the last [`LABOR_LOG_LIMIT`]).
+        pub labor_log: Vec<(i32, i32)>,
+        /// How many labor changes the server announced this session (`labor_log` keeps the last few of them).
+        pub labor_seq: u32,
         /// Copper in the bag (1 gold = 10000 copper) and in the bank.
         pub money: i64,
         pub bank_money: i64,
@@ -160,6 +168,11 @@ impl PlayerStats {
             Event::LaborChanged { amount, .. } => {
                 self.labor = (self.labor + amount).max(0);
                 self.labor_updated = unix_now();
+                if self.labor_log.len() >= LABOR_LOG_LIMIT {
+                    self.labor_log.remove(0);
+                }
+                self.labor_log.push((*amount, self.labor));
+                self.labor_seq += 1;
             }
             Event::GamePoints { honor, vocation, .. } => (self.honor, self.vocation) = (*honor, *vocation),
             Event::GamePointChanged { kind, amount } => match kind {
@@ -348,6 +361,8 @@ mod tests {
         assert_eq!(s.labor, 1850);
         assert!(s.apply(&Event::LaborChanged { amount: 10, action: 0, point: 0, step: 0 }));
         assert_eq!(s.labor, 1860);
+        assert_eq!(s.labor_log, vec![(-50, 1850), (10, 1860)]);
+        assert_eq!(s.labor_seq, 2);
         assert!(s.apply(&Event::GamePoints { honor: 5, vocation: 6, other: [0; 8] }));
         assert!(s.apply(&Event::GamePointChanged { kind: 1, amount: 4 }));
         assert_eq!((s.honor, s.vocation), (5, 10));
