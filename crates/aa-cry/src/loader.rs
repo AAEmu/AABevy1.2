@@ -115,7 +115,7 @@ struct Inner {
     textures: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
     cubes: Mutex<HashMap<String, Option<ImageEntry>>>,
     baked: Mutex<HashMap<String, Option<ImageEntry>>>,
-    materials_cache: Mutex<HashMap<(String, usize, Shading), Option<MaterialEntry>>>,
+    materials_cache: Mutex<HashMap<(String, usize, Shading, bool), Option<MaterialEntry>>>,
     default_material: OnceLock<MaterialEntry>,
     raw_models: Mutex<HashMap<String, Arc<Model>>>,
     models: Mutex<HashMap<ModelKey, Arc<LoadedModel>>>,
@@ -407,9 +407,10 @@ impl<'a> Prep<'a> {
         handle
     }
 
-    /// Converts one sub-material (no cache): `None` for materials that are not drawn.
+    /// Converts one sub-material for UVs in 0..1 (no cache): `None` for materials that are not
+    /// drawn. Model preparation validates each referenced subset before enabling static UCC.
     pub fn convert(&mut self, m: &CryMaterial) -> Option<StandardMaterial> {
-        crate::shade::convert_material(self, m)
+        crate::shade::convert_material(self, m, true)
     }
 
     fn default_material(&mut self) -> Handle<StandardMaterial> {
@@ -425,9 +426,28 @@ impl<'a> Prep<'a> {
     }
 
     /// The Bevy material for sub-material `sub` of a `.mtl` (cached). `None` when the
-    /// sub-material is not drawn (NoDraw, Cut, proxies).
-    pub fn material(&mut self, mtl_path: Option<&str>, sub: usize) -> Option<Handle<StandardMaterial>> {
-        let key = (mtl_path.map(aa_pak::normalize).unwrap_or_default(), sub, self.shading);
+    /// sub-material is not drawn (NoDraw, Cut, proxies). Direct callers provide UVs in 0..1;
+    /// model preparation keeps the original material for unsupported UCC domains.
+    pub fn material(
+        &mut self,
+        mtl_path: Option<&str>,
+        sub: usize,
+    ) -> Option<Handle<StandardMaterial>> {
+        self.material_for_domain(mtl_path, sub, true)
+    }
+
+    fn material_for_domain(
+        &mut self,
+        mtl_path: Option<&str>,
+        sub: usize,
+        ucc_uv_square: bool,
+    ) -> Option<Handle<StandardMaterial>> {
+        let key = (
+            mtl_path.map(aa_pak::normalize).unwrap_or_default(),
+            sub,
+            self.shading,
+            ucc_uv_square,
+        );
         if let Some(entry) = lock(&self.loader.shared.materials_cache).get(&key).cloned() {
             return entry.map(|e| self.use_material(&e));
         }
@@ -436,10 +456,16 @@ impl<'a> Prep<'a> {
         let entry = match mtl.as_deref().and_then(|m| m.sub(sub).or(Some(m))) {
             Some(m) => {
                 let mark = self.pending.len();
-                let converted = self.convert(m);
+                let converted = crate::shade::convert_material(self, m, ucc_uv_square);
                 let deps: Vec<Shared> = self.pending[mark..]
                     .iter()
-                    .filter_map(|p| if let Pending::Shared(s) = p { Some(s.clone()) } else { None })
+                    .filter_map(|p| {
+                        if let Pending::Shared(s) = p {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
                 converted.map(|sm| MaterialEntry {
                     handle: new_handle(&self.loader.shared.materials),
@@ -449,7 +475,10 @@ impl<'a> Prep<'a> {
             }
             None => return Some(self.default_material()),
         };
-        let entry = lock(&self.loader.shared.materials_cache).entry(key).or_insert(entry).clone();
+        let entry = lock(&self.loader.shared.materials_cache)
+            .entry(key)
+            .or_insert(entry)
+            .clone();
         entry.map(|e| self.use_material(&e))
     }
 
@@ -462,13 +491,32 @@ impl<'a> Prep<'a> {
     }
 
     /// A fresh (uncached) material for a sub-material with the caller's tweaks applied.
-    pub fn material_with(&mut self, mtl_path: Option<&str>, sub: usize, hook: &MaterialHook) -> Option<Handle<StandardMaterial>> {
+    pub fn material_with(
+        &mut self,
+        mtl_path: Option<&str>,
+        sub: usize,
+        hook: &MaterialHook,
+    ) -> Option<Handle<StandardMaterial>> {
+        self.material_with_domain(mtl_path, sub, hook, true)
+    }
+
+    fn material_with_domain(
+        &mut self,
+        mtl_path: Option<&str>,
+        sub: usize,
+        hook: &MaterialHook,
+        ucc_uv_square: bool,
+    ) -> Option<Handle<StandardMaterial>> {
         let _t = crate::prof::scope("cry.material_with");
         let mtl = mtl_path.and_then(|p| self.loader.mtl(p));
         let cry = mtl.as_deref().and_then(|m| m.sub(sub).or(Some(m))).cloned();
         let mut sm = match &cry {
-            Some(m) => self.convert(m)?,
-            None => StandardMaterial { base_color: Color::srgb(0.6, 0.6, 0.6), perceptual_roughness: 0.8, ..default() },
+            Some(m) => crate::shade::convert_material(self, m, ucc_uv_square)?,
+            None => StandardMaterial {
+                base_color: Color::srgb(0.6, 0.6, 0.6),
+                perceptual_roughness: 0.8,
+                ..default()
+            },
         };
         (hook.0)(&cry.unwrap_or_default(), &mut sm);
         let handle = new_handle(&self.loader.shared.materials);
@@ -556,6 +604,7 @@ impl CryLoader {
             None => None,
         };
         let material_path = options.material.clone().or_else(|| find_mtl(&file_path, &model));
+        let material_data = material_path.as_deref().and_then(|p| self.mtl(p));
         let usage = if options.keep_cpu_mesh {
             RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD
         } else {
@@ -585,9 +634,16 @@ impl CryLoader {
             let data = edited.as_ref().unwrap_or(mesh);
             let mut node_parts = Vec::new();
             for subset in &mesh.subsets {
+                let is_ucc = material_data
+                    .as_deref()
+                    .and_then(|m| m.sub(subset.material_id as usize).or(Some(m)))
+                    .is_some_and(|m| {
+                        m.shader.eq_ignore_ascii_case("cloth") && m.gen_mask & 0x10_0000 != 0
+                    });
+                let ucc_uv_square = !is_ucc || data.subset_uvs_in_unit_square(subset);
                 let material = match &options.material_hook {
-                    Some(hook) => prep.material_with(material_path.as_deref(), subset.material_id as usize, hook),
-                    None => prep.material(material_path.as_deref(), subset.material_id as usize),
+                    Some(hook) => prep.material_with_domain(material_path.as_deref(), subset.material_id as usize, hook, ucc_uv_square),
+                    None => prep.material_for_domain(material_path.as_deref(), subset.material_id as usize, ucc_uv_square),
                 };
                 let Some(material) = material else { continue };
                 let t_mesh = crate::prof::scope("cry.mesh");
@@ -635,5 +691,75 @@ mod tests {
         fn is<T: Send + Sync>() {}
         is::<CryLoader>();
         is::<PreparedModel>();
+    }
+
+    #[test]
+    fn ucc_material_cache_and_model_preparation_separate_uv_domains() {
+        if !crate::pak_available() {
+            return;
+        }
+        for first_domain in [false, true] {
+            let images = Assets::<Image>::default();
+            let meshes = Assets::<Mesh>::default();
+            let materials = Assets::<StandardMaterial>::default();
+            let binds = Assets::<SkinnedMeshInverseBindposes>::default();
+            let loader = CryLoader::new(
+                images.get_handle_provider(),
+                meshes.get_handle_provider(),
+                materials.get_handle_provider(),
+                binds.get_handle_provider(),
+                false,
+            );
+            let mtl = "objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl";
+            let mut prep = Prep::new(&loader);
+            let first = prep
+                .material_for_domain(Some(mtl), 3, first_domain)
+                .unwrap();
+            let second = prep
+                .material_for_domain(Some(mtl), 3, !first_domain)
+                .unwrap();
+            assert_ne!(
+                first, second,
+                "material cache includes bake eligibility in either load order"
+            );
+            let safe = if first_domain { &first } else { &second };
+            let unsafe_domain = if first_domain { &second } else { &first };
+            let path = "objects/env/06_unit/01_ship/galleon/galleon_deco_sail01.cgf";
+            let options = ModelOptions {
+                material: Some(mtl.into()),
+                ..default()
+            };
+            let good = loader.prepare_model(path, &options).unwrap();
+            assert!(
+                good.loaded
+                    .parts
+                    .iter()
+                    .flat_map(|(_, parts)| parts)
+                    .any(|p| p.material == *safe)
+            );
+            let options = ModelOptions {
+                vertex_hook: Some(crate::scene::VertexHook::new(|mesh| {
+                    for uv in &mut mesh.uvs {
+                        uv.x += 2.0;
+                    }
+                })),
+                ..options
+            };
+            let bad = loader.prepare_model(path, &options).unwrap();
+            assert!(
+                bad.loaded
+                    .parts
+                    .iter()
+                    .flat_map(|(_, parts)| parts)
+                    .any(|p| p.material == *unsafe_domain)
+            );
+            assert!(
+                !bad.loaded
+                    .parts
+                    .iter()
+                    .flat_map(|(_, parts)| parts)
+                    .any(|p| p.material == *safe)
+            );
+        }
     }
 }

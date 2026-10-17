@@ -32,7 +32,7 @@ pub mod backlight;
 mod ucc;
 
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
-pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial) -> Option<StandardMaterial> {
+pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, ucc_uv_square: bool) -> Option<StandardMaterial> {
     let mut out = to_standard_material(m, |path, srgb| prep.texture(path, srgb))?;
     // `AlphaTest` is set on nearly every costume `Illum` material, whose diffuse maps have no
     // alpha at all (BC1): testing them only costs a prepass and risks holes.
@@ -47,7 +47,9 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         }
     }
     bake_hair_colour(prep, m, &mut out);
-    ucc::bake(prep, m, &mut out);
+    if ucc_uv_square {
+        ucc::bake(prep, m, &mut out);
+    }
     bake_terrain_blend(prep, m, &mut out);
     if prep.shading == Shading::Full {
         // characters get the `Char BackLight` term when `backlight::CharLightPlugin` is on

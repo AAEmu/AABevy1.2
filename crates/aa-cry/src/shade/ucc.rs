@@ -43,7 +43,7 @@ impl Recipe {
         }
         let logo = m.texture(&TextureMap::SubSurface)?;
         let tex_mod = logo.tex_mod.clone().unwrap_or_default();
-        if tex_mod.rotate_w != 0.0 {
+        if tex_mod.rotate_w != 0.0 || !tex_mod.unhandled.is_empty() {
             return None;
         }
         let param = |name, fallback| {
@@ -291,6 +291,15 @@ mod tests {
             ..default()
         });
         assert!(Recipe::from_material(&m).is_none());
+        m.textures[0].tex_mod = None;
+        m.textures[1].tex_mod = Some(TexMod {
+            unhandled: vec![("TexMod_UOscillatorType".into(), "2".into())],
+            ..default()
+        });
+        assert!(
+            Recipe::from_material(&m).is_none(),
+            "an animated crest cannot be baked statically"
+        );
     }
 
     #[test]
@@ -429,6 +438,17 @@ mod tests {
         assert_eq!(r.logo, "objects/env/07_ucc/ucc_logo32.dds");
         assert_eq!(r.scale, Vec2::splat(3.0));
         assert_eq!(r.offset, Vec2::ONE);
+        let authored_custom =
+            Material::load("objects/env/06_unit/01_ship/galleon/galleon_01.mtl").unwrap();
+        let custom = Recipe::from_material(authored_custom.sub(3).unwrap()).unwrap();
+        assert_eq!(
+            custom.mask.as_deref(),
+            Some("objects/env/07_ucc/ucc_pattern02.dds")
+        );
+        assert_eq!(
+            custom.diffuse, "objects/env/06_unit/01_ship/galleon/galleon_sail_df.dds",
+            "authored Custom never aliases the separate Diffuse/opacity source"
+        );
         let model =
             crate::Model::load("objects/env/06_unit/01_ship/galleon/galleon_deco_sail01.cgf")
                 .unwrap();

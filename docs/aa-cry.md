@@ -336,7 +336,11 @@ Kajiya-Kay's strand direction (the streaks come from the strand map, not from a 
 
 ### Static UCC cloth (`shade/ucc.rs`)
 
-`Prep::convert` now bakes the static `Cloth` UCC colour composition in both shading modes.
+`Prep::convert` bakes the static `Cloth` UCC colour composition in both shading modes for a
+UV square. Model preparation checks each UCC subset's referenced vertices after vertex hooks;
+missing/nonfinite/out-of-range UVs retain the original material. The material cache key includes
+this eligibility, so an unsafe subset cannot reuse a composed material loaded for a safe one.
+Direct `CryAssets::material` / `Prep::convert` callers supply UVs in 0..1.
 The original pak sources define the mapping:
 
 * `shaders/cloth.ext`: `%X2_UCC_MASK=0x100000`, `%X2_UCC_BACKGROUND_MASK=0x200000`,
@@ -362,8 +366,42 @@ path uses an explicit material Custom texture when present, otherwise the author
 pattern; that fallback is supported here, not claimed as a recovered native default. Dynamic
 player crest download/binding is not implemented. The bake covers one UV square; repeated UVs
 outside it, animated TexMods, rotated SubSurface TexMods and nonidentity Diffuse TexMods need
-a shader path. Unsupported static transforms keep the existing material conversion. Cloth
+a shader path. Unhandled TexMod attributes are retained as `TexMod::unhandled` and reject the
+static bake, as do missing Diffuse/SubSurface inputs. Unsupported static transforms keep the existing material conversion. Cloth
 lighting, fuzz and wind remain separate from this colour composition.
+
+Native probe: `D:/aa-re/client12/x2game_unpacked.dll`, `sub_390E3ED0`, changes the
+`%X2_UCC_BACKGROUND_MASK` flag depending on whether a background texture was supplied
+(`0x390E4074–0x390E41A0`), writes that texture to copied resource-array entry 10
+(`0x390E4085–0x390E40C6`; array starts at frame `-0x424`, stride `0x3c`, entry at `-0x1cc`),
+and supplies the crest to texture slot 9 (`0x390E4391–0x390E43B3`, non-HumanSkin case).
+These are disassembly observations of dynamic UCC replacement, not evidence of the renderer's
+absent-Custom default. The bounded `D:/aa-re` inventory contains only the dedicated-server
+`cry3dengine` binary and no client renderer, so that default remains unresolved.
+
+`cargo run -p aa-cry --example ucc_audit -- data/extract/aa-cry/ucc/audit` writes material and
+source-linked geometry TSVs. The installed pak has 38,294 MTL files / 67,885 material slots,
+622 Cloth materials, and 218 UCC materials (184 character cloaks, 34 environment):
+
+| GenMask | UCC materials |
+|---|---:|
+| `100000` | 184 |
+| `300000` | 5 |
+| `700000` | 9 |
+| `40100000` | 3 |
+| `40104000` | 1 |
+| `40300000` | 12 |
+| `40340000` | 4 |
+
+Twenty-one enable background remapping; nine explicitly ignore it. Seventeen provide Custom
+(eleven with active background remapping); the authored Custom is used, with separate Diffuse
+opacity. Nine omit Diffuse and remain unsupported; all 218 authored TexMods are empty.
+The audit checks 1,340 same-directory model candidates plus explicit cloak CDF bindings and the
+dock override: 479 source-linked bindings / 302 models, with no parse/load failures. It links
+198 UCC materials to 247 UV-square subsets and 16 out-of-range subsets. The latter have small
+authored overshoots: flag minimum `(-0.0020723,-0.0006968)` and siege meshes minimum U
+`-0.0000079`; the strict gate conservatively bypasses them. Twenty materials have no proven
+model binding in this bounded audit; this does not establish their absence from world overrides.
 
 `cargo run -p aa-cry --example ucc_cloth -- --shot shots/aa-cry/ucc_cloth.png --shot-after 8`
 shows the original sail mesh with raw Diffuse/control and the composition side by side, plus the
@@ -374,8 +412,15 @@ Bevy dock control showing the raw rainbow. Focused tests cover the flags/default
 palette, strict crest clipping/alpha, authored UV controls, alpha mips, cache/conversion and the
 real galleon recipe/UV domain.
 
-Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 59 tests, with one exhaustive
-material audit intentionally ignored; eight of the passing tests cover UCC. The fixture build
+Add `--assembled --shot shots/aa-cry/ucc_assembled.png` for the original fourteen-part dock
+galleon, including hull, sails, masts, six cannons, helm/rudder and anchor hinge. The diagnostic
+reads the original cell `(18,7)` brush/model/material tables through aa-pak and preserves each
+part's relative matrix, centered and rotated together for comparison. The inspected image shows
+both authored sails corrected on the complete brush assembly; aa-dev reports 279.8–353.9 FPS
+(2.85–3.59 ms) at 1920x1080 while the independent CPU audit was also running.
+
+Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 61 tests, with one exhaustive
+material audit intentionally ignored; ten of the passing tests cover UCC/domain handling. The fixture build
 passes, and the inspected 1920x1080 capture shows neutral braided cloth and the centered sun
 crest alongside the raw RGB control. `aa-dev` reports 356.7–379.4 FPS (2.66–2.82 ms) in this
 unlit diagnostic scene. The window exits after capture. No aa-client integration is required:

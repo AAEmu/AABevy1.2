@@ -1,9 +1,13 @@
 //! Static sail composition/control fixture. `--shot shots/aa-cry/ucc_cloth.png --shot-after 8`.
 //! Unlit, white material factors isolate texture composition from cloth lighting and wind.
+//! `--assembled` uses all fourteen original co-placed dock galleon brush parts.
 
 use aa_cry::{CryAssets, CryPlugin, MaterialHook, ModelOptions};
-use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::prelude::*;
+
+#[path = "ucc_cloth/dock.rs"]
+mod dock;
 
 const MODEL: &str = "objects/env/06_unit/01_ship/galleon/galleon_deco_sail01.cgf";
 const MATERIAL: &str = "objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl";
@@ -33,39 +37,84 @@ fn setup(mut commands: Commands, mut cry: CryAssets) {
         .base_color_texture
         .clone()
         .unwrap();
+    let assembled = std::env::args().any(|a| a == "--assembled");
+    let source_parts = if assembled {
+        dock::parts()
+    } else {
+        vec![dock::Part {
+            model: MODEL.into(),
+            material: MATERIAL.into(),
+            local: Mat4::IDENTITY,
+        }]
+    };
+    let rotation = Quat::from_rotation_y(if assembled { 0.9 } else { 0.0 }) * aa_cry::CRY_TO_BEVY;
     let mut bounds = None;
     for (i, raw_texture) in [Some(raw.clone()), None].into_iter().enumerate() {
-        let options = ModelOptions {
-            material: Some(MATERIAL.into()),
-            material_hook: Some(MaterialHook::new(move |m, out| {
-                out.unlit = true;
-                out.base_color = Color::WHITE;
-                if m.name == "ucc" {
-                    if let Some(texture) = &raw_texture {
-                        out.base_color_texture = Some(texture.clone());
+        let assembly = commands
+            .spawn((Transform::from_rotation(rotation), Visibility::default()))
+            .id();
+        let mut lo = Vec3::splat(f32::MAX);
+        let mut hi = Vec3::splat(f32::MIN);
+        for source in &source_parts {
+            let raw_texture = if raw_texture.is_some() {
+                let diffuse = cry.mtl(&source.material).and_then(|m| {
+                    m.sub_materials
+                        .iter()
+                        .chain(std::iter::once(m.as_ref()))
+                        .find(|m| {
+                            m.shader.eq_ignore_ascii_case("cloth") && m.gen_mask & 0x10_0000 != 0
+                        })
+                        .and_then(|m| m.texture(&aa_cry::material::TextureMap::Diffuse))
+                        .map(|t| t.pak_path())
+                });
+                diffuse.and_then(|p| cry.texture(&p, true))
+            } else {
+                None
+            };
+            let options = ModelOptions {
+                material: Some(source.material.clone()),
+                cry_space: true,
+                material_hook: Some(MaterialHook::new(move |m, out| {
+                    out.unlit = true;
+                    out.base_color = Color::WHITE;
+                    if m.name == "ucc" {
+                        if let Some(texture) = &raw_texture {
+                            out.base_color_texture = Some(texture.clone());
+                        }
+                    }
+                })),
+                ..default()
+            };
+            let loaded = cry.load_model(&source.model, &options).unwrap();
+            let (a, b) = loaded.model.bounds().unwrap();
+            for x in [a.x, b.x] {
+                for y in [a.y, b.y] {
+                    for z in [a.z, b.z] {
+                        let p = rotation * source.local.transform_point3(Vec3::new(x, y, z));
+                        lo = lo.min(p);
+                        hi = hi.max(p);
                     }
                 }
-            })),
-            ..default()
-        };
-        let loaded = cry.load_model(MODEL, &options).unwrap();
-        let (lo, hi) = loaded.model.bounds().unwrap();
-        let a = Vec3::new(lo.x, lo.z, -hi.y);
-        let b = Vec3::new(hi.x, hi.z, -lo.y);
+            }
+            let spawned = cry
+                .spawn_model_full(&mut commands, &source.model, &options)
+                .unwrap();
+            commands
+                .entity(spawned.root)
+                .insert((Transform::from_matrix(source.local), ChildOf(assembly)));
+        }
+        let (a, b) = (lo, hi);
         let centre = (a + b) * 0.5;
         let span = b - a;
         let spacing = span.x.max(span.z) * 0.7;
-        let spawned = cry
-            .spawn_model_full(&mut commands, MODEL, &options)
-            .unwrap();
         let offset = Vec3::X * if i == 0 { -spacing } else { spacing } - centre;
         commands
-            .entity(spawned.root)
-            .insert(Transform::from_translation(offset).with_rotation(aa_cry::CRY_TO_BEVY));
+            .entity(assembly)
+            .insert(Transform::from_translation(offset).with_rotation(rotation));
         bounds = Some((span, spacing));
         info!(
-            "ucc_cloth: {i}: span={span:?}, material={:?}",
-            loaded.material_path
+            "ucc_cloth: {i}: span={span:?}, authored parts={}",
+            source_parts.len()
         );
     }
     let (span, spacing) = bounds.unwrap();
@@ -74,6 +123,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets) {
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
+        DebandDither::Disabled,
         Transform::from_translation(target + Vec3::new(radius * 0.12, radius * 0.05, radius * 2.0))
             .looking_at(target, Vec3::Y),
     ));

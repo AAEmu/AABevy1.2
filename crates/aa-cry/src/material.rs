@@ -79,11 +79,21 @@ pub struct TexMod {
     pub offset_v: f32,
     /// Rotation around W in degrees (`RotateW`).
     pub rotate_w: f32,
+    /// TexMod attributes whose coordinate generation/animation is not implemented. Retained so
+    /// static texture composition can decline them instead of silently baking the wrong UVs.
+    pub unhandled: Vec<(String, String)>,
 }
 
 impl Default for TexMod {
     fn default() -> Self {
-        TexMod { tile_u: 1.0, tile_v: 1.0, offset_u: 0.0, offset_v: 0.0, rotate_w: 0.0 }
+        TexMod {
+            tile_u: 1.0,
+            tile_v: 1.0,
+            offset_u: 0.0,
+            offset_v: 0.0,
+            rotate_w: 0.0,
+            unhandled: Vec::new(),
+        }
     }
 }
 
@@ -410,18 +420,20 @@ fn parse_texture_map(v: &str) -> TextureMap {
     }
 }
 
-/// `None` when every value is the default (the oscillator / animation attributes are ignored).
+/// `None` when every value is the default and no unhandled attributes are present.
 fn tex_mod(node: Node) -> Option<TexMod> {
     let mut t = TexMod::default();
     for a in node.attributes() {
-        let Some(v) = parse_f32(a.value()) else { continue };
-        match a.name().to_ascii_lowercase().as_str() {
-            "tileu" => t.tile_u = v,
-            "tilev" => t.tile_v = v,
-            "offsetu" => t.offset_u = v,
-            "offsetv" => t.offset_v = v,
-            "rotatew" => t.rotate_w = v,
-            _ => {}
+        match (a.name().to_ascii_lowercase().as_str(), parse_f32(a.value())) {
+            ("tileu", Some(v)) => t.tile_u = v,
+            ("tilev", Some(v)) => t.tile_v = v,
+            ("offsetu", Some(v)) => t.offset_u = v,
+            ("offsetv", Some(v)) => t.offset_v = v,
+            ("rotatew", Some(v)) => t.rotate_w = v,
+            ("tileu" | "tilev" | "offsetu" | "offsetv" | "rotatew", None) => {}
+            _ => t
+                .unhandled
+                .push((a.name().to_string(), a.value().to_string())),
         }
     }
     (t != TexMod::default()).then_some(t)
@@ -949,13 +961,39 @@ mod tests {
         let t = &m.textures;
         assert_eq!(
             t[0].tex_mod,
-            Some(TexMod { tile_u: 0.5, tile_v: 2.0, offset_u: 0.25, offset_v: -0.1, rotate_w: 90.0 })
+            Some(TexMod {
+                tile_u: 0.5,
+                tile_v: 2.0,
+                offset_u: 0.25,
+                offset_v: -0.1,
+                rotate_w: 90.0,
+                unhandled: vec![("TexMod_UOscillatorType".into(), "2".into())]
+            })
         );
-        assert_eq!(t[1].tex_mod, None, "oscillators only: nothing the renderer uses");
-        assert_eq!(t[2].tex_mod, Some(TexMod { tile_v: 4.0, ..TexMod::default() }));
+        assert_eq!(
+            t[1].tex_mod,
+            Some(TexMod {
+                unhandled: vec![("TexMod_UOscillatorType".into(), "2".into())],
+                ..TexMod::default()
+            })
+        );
+        assert_eq!(
+            t[2].tex_mod,
+            Some(TexMod {
+                tile_v: 4.0,
+                ..TexMod::default()
+            })
+        );
         assert_eq!(t[3].tex_mod, None);
         assert_eq!(t[4].tex_mod, None);
-        assert_eq!(t[5].tex_mod, Some(TexMod { offset_v: 0.5, ..TexMod::default() }));
+        assert_eq!(
+            t[5].tex_mod,
+            Some(TexMod {
+                offset_v: 0.5,
+                unhandled: vec![("RotateU".into(), "45".into())],
+                ..TexMod::default()
+            })
+        );
     }
 
     #[test]
