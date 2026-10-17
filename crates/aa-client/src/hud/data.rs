@@ -26,6 +26,24 @@ pub struct ItemInfo {
     /// `items.level_requirement`.
     pub level: i64,
     pub fixed_grade: i64,
+    /// `items.use_skill_id`: the skill using the item casts (0 = not usable).
+    pub use_skill: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SkillInfo {
+    pub named: Named,
+    /// `skills.cooldown_time` (ms) and `cooldown_tag_id`.
+    pub cooldown_ms: u32,
+    pub tag: u32,
+}
+
+/// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
+#[derive(Clone, Debug, Default)]
+pub struct BuffInfo {
+    pub named: Named,
+    pub desc: String,
+    pub kind: i64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -53,9 +71,9 @@ pub struct ZoneGroup {
 /// The static game data the HUD queries.
 #[derive(Default)]
 pub struct GameData {
-    pub skills: HashMap<u32, Named>,
+    pub skills: HashMap<u32, SkillInfo>,
     pub items: HashMap<u32, ItemInfo>,
-    pub buffs: HashMap<u32, Named>,
+    pub buffs: HashMap<u32, BuffInfo>,
     pub npcs: HashMap<u32, NpcInfo>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
@@ -63,6 +81,8 @@ pub struct GameData {
     pub zone_groups: HashMap<u32, ZoneGroup>,
     /// `system_factions.id` -> English name.
     pub factions: HashMap<u32, String>,
+    /// `system_faction_relations`: (faction, other faction) -> 1 friendly, 2 neutral, 3 hostile.
+    pub relations: HashMap<(u32, u32), u8>,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -103,6 +123,17 @@ impl SharedGameData {
     }
 }
 
+/// A column the table declares as text or integer, whichever the row holds (0 for null).
+fn any_int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
+    use rusqlite::types::Value;
+    Ok(match r.get::<_, Value>(i)? {
+        Value::Integer(n) => n,
+        Value::Real(f) => f as i64,
+        Value::Text(t) => t.trim().parse().unwrap_or(0),
+        _ => 0,
+    })
+}
+
 impl GameData {
     pub fn load(path: &str) -> rusqlite::Result<GameData> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
@@ -110,15 +141,18 @@ impl GameData {
         let mut text: HashMap<(&'static str, u32), String> = HashMap::new();
         {
             let mut q = conn.prepare(
-                "SELECT tbl_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
+                "SELECT tbl_name, idx, en_us, tbl_column_name FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
                  (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones') AND tbl_column_name = 'name') OR \
+                 (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR \
                  (tbl_name = 'zone_groups' AND tbl_column_name = 'display_text'))",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let table: String = r.get(0)?;
                 let idx: i64 = r.get(1)?;
+                let column: String = r.get(3)?;
                 let table = match table.as_str() {
+                    "buffs" if column == "desc" => "buffs_desc",
                     "skills" => "skills",
                     "items" => "items",
                     "buffs" => "buffs",
@@ -142,15 +176,22 @@ impl GameData {
         let icon = |id: Option<i64>| id.and_then(|i| icons.get(&i)).map(|f| format!("ui/icon/{}", f.replace('\\', "/").to_ascii_lowercase())).unwrap_or_default();
         let mut data = GameData::default();
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id FROM skills")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
-                data.skills.insert(id, Named { name: name("skills", id, r.get(1)?), icon: icon(r.get(2)?) });
+                data.skills.insert(
+                    id,
+                    SkillInfo {
+                        named: Named { name: name("skills", id, r.get(1)?), icon: icon(r.get(2)?) },
+                        cooldown_ms: any_int(r, 3)?.max(0) as u32,
+                        tag: any_int(r, 4)?.max(0) as u32,
+                    },
+                );
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id, max_stack_size, level_requirement, fixed_grade FROM items")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, max_stack_size, level_requirement, fixed_grade, use_skill_id FROM items")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -161,16 +202,24 @@ impl GameData {
                         max_stack: r.get::<_, Option<i64>>(3)?.unwrap_or(1),
                         level: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                         fixed_grade: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                        use_skill: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
                     },
                 );
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id FROM buffs")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, desc, kind_id FROM buffs")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
-                data.buffs.insert(id, Named { name: name("buffs", id, r.get(1)?), icon: icon(r.get(2)?) });
+                data.buffs.insert(
+                    id,
+                    BuffInfo {
+                        named: Named { name: name("buffs", id, r.get(1)?), icon: icon(r.get(2)?) },
+                        desc: name("buffs_desc", id, r.get(3)?),
+                        kind: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
+                    },
+                );
             }
         }
         {
@@ -222,7 +271,41 @@ impl GameData {
                 data.factions.insert(id, name("system_factions", id, r.get(1)?));
             }
         }
+        {
+            let mut q = conn.prepare("SELECT faction1_id, faction2_id, state_id FROM system_faction_relations")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.relations.insert((r.get(0)?, r.get(1)?), r.get::<_, i64>(2)? as u8);
+            }
+        }
         Ok(data)
+    }
+
+    /// How a unit of faction `other` looks to a unit of faction `own`: what the unit frames and
+    /// name plates colour by (`"friendly"`, `"neutral"`, `"hostile"`).
+    pub fn relation(&self, own: u32, other: u32) -> &'static str {
+        if own == other {
+            return "friendly";
+        }
+        match self.relations.get(&(own, other)).or_else(|| self.relations.get(&(other, own))) {
+            Some(1) => "friendly",
+            Some(3) => "hostile",
+            _ => "neutral",
+        }
+    }
+
+    /// `npcs.npc_grade_id` as the scripts name the grade (`GetUnitGradeColor`, the target frame's
+    /// ornaments). The table that names them is not in the database: 1 is most NPCs (normal),
+    /// the rest follow the order of strength; a guess.
+    pub fn grade_name(grade_id: i64) -> &'static str {
+        match grade_id {
+            2 => "strong",
+            3 => "elite",
+            4 => "boss_c",
+            5 => "boss_b",
+            8 => "boss_s",
+            _ => "normal",
+        }
     }
 
     /// Zone group of a `zones.zone_key` ("Solzreed Peninsula") and the faction protecting the zone.

@@ -25,20 +25,93 @@ end
 X2Dominion.GetPeaceTaxMoney = function(self, zoneId) return "" end
 X2Dominion.GetPeaceTaxAAPoint = function(self, zoneId) return "" end
 
--- The player ------------------------------------------------------------------------------------
-X2Unit.UnitName = function(self, unit) if isPlayer(unit) then return S().name end return nil end
-X2Unit.UnitLevel = function(self, unit) if isPlayer(unit) then return S().level end return nil end
-X2Unit.UnitHealth = function(self, unit) if isPlayer(unit) then return S().hp end return nil end
-X2Unit.UnitMaxHealth = function(self, unit) if isPlayer(unit) then return S().max_hp end return nil end
-X2Unit.UnitMana = function(self, unit) if isPlayer(unit) then return S().mp end return nil end
-X2Unit.UnitMaxMana = function(self, unit) if isPlayer(unit) then return S().max_mp end return nil end
-X2Unit.UnitRace = function(self, unit) if isPlayer(unit) then return S().race end return nil end
-X2Unit.UnitGender = function(self, unit) if isPlayer(unit) then return S().gender end return nil end
-X2Unit.GetUnitId = function(self, unit) if isPlayer(unit) then return S().unit_id end return nil end
-X2Unit.GetFactionName = function(self, unit) if isPlayer(unit) then return S().faction end return nil end
+-- Units --------------------------------------------------------------------------------------------------
+-- The data of a unit the scripts ask about: the player (HUD.state) or the target (HUD.target).
+local function U(unit)
+  if isPlayer(unit) then return S() end
+  local t = HUD.target
+  if t ~= nil and (unit == "target" or unit == t.unit_id) then return t end
+  return nil
+end
+local function field(key, default)
+  return function(self, unit)
+    local u = U(unit)
+    if u == nil then return default end
+    return u[key]
+  end
+end
+X2Unit.UnitName = field("name", nil)
+X2Unit.UnitLevel = field("level", nil)
+X2Unit.UnitHealth = field("hp", nil)
+X2Unit.UnitMaxHealth = field("max_hp", nil)
+X2Unit.UnitMana = field("mp", nil)
+X2Unit.UnitMaxMana = field("max_mp", nil)
+X2Unit.UnitRace = field("race", nil)
+X2Unit.UnitGender = field("gender", nil)
+X2Unit.GetUnitId = function(self, unit)
+  local u = U(unit)
+  if u == nil then return nil end
+  return u.unit_id
+end
+X2Unit.GetFactionName = field("faction", nil)
+X2Unit.UnitIsDead = field("dead", false)
+X2Unit.UnitCombatState = field("in_combat", false)
 
-X2Unit.UnitIsDead = function(self, unit) if isPlayer(unit) then return S().dead end return false end
-X2Unit.UnitCombatState = function(self, unit) if isPlayer(unit) then return S().in_combat end return false end
+-- What kind of unit: ("character" | "npc", detail "character" | "npc" | "slave" | "housing" ...).
+X2Unit.GetUnitTypeString = function(self, unit)
+  if isPlayer(unit) then return "character", "character" end
+  local t = U(unit)
+  if t == nil then return nil end
+  return t.unit_type, t.detail
+end
+X2Unit.GetUnitType = X2Unit.GetUnitTypeString
+X2Unit.GetUnitGradeById = function(self, id)
+  local t = HUD.target
+  if t ~= nil and id == t.unit_id then return t.grade end
+  return "normal"
+end
+X2Unit.GetCombatRelationshipStr = function(self, unit)
+  if isPlayer(unit) then return "friendly" end
+  local t = U(unit)
+  if t == nil then return "neutral" end
+  return t.relation
+end
+-- Metres to the target.
+X2Unit.UnitDistance = function(self, unit)
+  if unit == "target" and HUD.target ~= nil then return HUD.target_distance() end
+  return nil
+end
+-- The id of what a unit targets (the player: the target frame's unit).
+X2Unit.GetTargetUnitId = function(self, unit)
+  if (unit == nil or isPlayer(unit)) and HUD.target ~= nil then return HUD.target.unit_id end
+  return nil
+end
+
+-- Buffs: the lists of HUD.buffs / HUD.target.buffs; timeLeft counts down on the HUD clock.
+local function buffList(unit, good)
+  local u = U(unit)
+  if u == nil then return nil end
+  local lists = (u == S()) and HUD.buffs or u.buffs
+  if lists == nil then return nil end
+  if good then return lists.good end
+  return lists.bad
+end
+local function buffAt(unit, index, good)
+  local list = buffList(unit, good)
+  local b = list and list[index]
+  if b == nil then return nil end
+  local info = {
+    buff_id = b.buff_id, name = b.name, path = b.path, description = b.description, stack = b.stack,
+  }
+  if b.ends ~= nil then
+    info.timeLeft = math.max(0, b.ends - HUD.now_ms())
+  end
+  return info
+end
+X2Unit.UnitBuffCount = function(self, unit) local l = buffList(unit, true); return l and #l or 0 end
+X2Unit.UnitDeBuffCount = function(self, unit) local l = buffList(unit, false); return l and #l or 0 end
+X2Unit.UnitBuff = function(self, unit, index, flags) return buffAt(unit, index, true) end
+X2Unit.UnitDeBuff = function(self, unit, index, flags) return buffAt(unit, index, false) end
 
 -- Experience: percent of the level, exp of the level, exp for the next level.
 X2Player.GetExpInfo = function(self) return S().exp_percent, S().exp_cur, S().exp_need end
@@ -105,6 +178,66 @@ AAUI.RoadMap = function()
     v = 1 - (y - r[2]) / r[4]
   end
   return { level = 2, zone = s.zone_group, player = { u = u, v = v } }
+end
+
+-- Action bars and bag -----------------------------------------------------------------------------------
+-- Slot widgets ask these hooks (AAUI.SlotContent ...); the lists come from aa-net. FALLBACK to the fake
+-- of the capture while the server has not sent the action bars / the bag yet.
+local fakeSlotContent = AAUI.SlotContent
+local function slotContent(s)
+  local c = { type = s.kind, id = s.id, icon = s.icon, grade = s.grade }
+  if s.kind == "item" then
+    if s.stack then c.stack = s.count end
+    c.canUse = s.count > 0
+  end
+  if s.cd_end ~= nil then
+    local remain = s.cd_end - HUD.now_ms()
+    if remain > 0 then c.cooldown = { remain = remain, total = math.max(s.cd_total, remain) } end
+  end
+  return c
+end
+AAUI.SlotContent = function(slotType, slotIdx)
+  if slotType == ISLOT_ACTION then
+    if not HUD.actions_known then return fakeSlotContent(slotType, slotIdx) end
+    local s = HUD.actions[slotIdx]
+    if s == nil then return nil end
+    return slotContent(s)
+  elseif slotType == ISLOT_BAG then
+    if HUD.bag_slots == 0 then return fakeSlotContent(slotType, slotIdx) end
+    local s = HUD.bag[slotIdx]
+    if s == nil then return nil end
+    return slotContent(s)
+  end
+  return nil
+end
+local fakeSkillContent, fakeItemContent = AAUI.SkillContent, AAUI.ItemContent
+AAUI.SkillContent = function(skillType)
+  local name, icon = HUD.skill_info(skillType)
+  if icon == nil then return fakeSkillContent(skillType) end
+  return { type = "skill", id = skillType, icon = icon }
+end
+AAUI.ItemContent = function(itemType, grade)
+  local name, icon, maxStack, fixedGrade = HUD.item_info(itemType)
+  if icon == nil then return fakeItemContent(itemType, grade) end
+  return { type = "item", id = itemType, icon = icon, grade = grade or fixedGrade }
+end
+
+local function bagCount()
+  local n = 0
+  for _ in pairs(HUD.bag) do n = n + 1 end
+  return n
+end
+local fakeCapacity, fakeEmpty, fakeCount = X2Bag.Capacity, X2Bag.CountEmptyBagSlots, X2Bag.CountItems
+X2Bag.Capacity = function(self) if HUD.bag_slots == 0 then return fakeCapacity(self) end return HUD.bag_slots end
+X2Bag.CountItems = function(self) if HUD.bag_slots == 0 then return fakeCount(self) end return bagCount() end
+X2Bag.CountEmptyBagSlots = function(self)
+  if HUD.bag_slots == 0 then return fakeEmpty(self) end
+  return HUD.bag_slots - bagCount()
+end
+X2Bag.IsInvalidSlot = function(self, virtualSlotIdx)
+  local n = HUD.bag_slots
+  if n == 0 then n = fakeCapacity(self) end
+  return virtualSlotIdx < 1 or virtualSlotIdx > n
 end
 
 -- Entering the world ------------------------------------------------------------------------------------
