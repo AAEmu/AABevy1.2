@@ -1,0 +1,199 @@
+{
+ "burst": {
+  "frames": [
+   {
+    "file": "real_01.png",
+    "t_done_s": -0.272,
+    "t_req_s": -0.522
+   },
+   {
+    "file": "real_02.png",
+    "t_done_s": 0.0,
+    "t_req_s": -0.272
+   },
+   {
+    "file": "real_03.png",
+    "t_done_s": 0.318,
+    "t_req_s": 0.034
+   },
+   {
+    "file": "real_04.png",
+    "t_done_s": 0.585,
+    "t_req_s": 0.318
+   },
+   {
+    "file": "real_05.png",
+    "t_done_s": 0.843,
+    "t_req_s": 0.585
+   },
+   {
+    "file": "real_06.png",
+    "t_done_s": 1.177,
+    "t_req_s": 0.843
+   },
+   {
+    "file": "real_07.png",
+    "t_done_s": 1.447,
+    "t_req_s": 1.177
+   },
+   {
+    "file": "real_08.png",
+    "t_done_s": 1.72,
+    "t_req_s": 1.447
+   },
+   {
+    "file": "real_09.png",
+    "t_done_s": 2.004,
+    "t_req_s": 1.72
+   },
+   {
+    "file": "real_10.png",
+    "t_done_s": 2.266,
+    "t_req_s": 2.004
+   },
+   {
+    "file": "real_11.png",
+    "t_done_s": 2.529,
+    "t_req_s": 2.266
+   },
+   {
+    "file": "real_12.png",
+    "t_done_s": 2.802,
+    "t_req_s": 2.529
+   },
+   {
+    "file": "real_13.png",
+    "t_done_s": 3.117,
+    "t_req_s": 2.802
+   },
+   {
+    "file": "real_14.png",
+    "t_done_s": 3.464,
+    "t_req_s": 3.117
+   },
+   {
+    "file": "real_15.png",
+    "t_done_s": 3.998,
+    "t_req_s": 3.464
+   }
+  ],
+  "key_press_returned_s": 0.034,
+  "key_press_sent_at_s": 0.0,
+  "trigger_result": "pressed (automatic release scheduled)"
+ },
+ "camera_after": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": -115.528862
+  },
+  "cam": {
+   "x": 4309.64844,
+   "y": 4117.60303,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 4.001,
+  "camera_yaw_minus_player_yaw_deg": -89.63,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": 0.60456425
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.33,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.47461,
+    "y": 4115.67578,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.29004,
+   "y": 4115.94531,
+   "z": 126.245697
+  },
+  "pyaw": -0.45200181,
+  "tod": 2.8185699
+ },
+ "camera_before": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": -115.528885
+  },
+  "cam": {
+   "x": 4309.67773,
+   "y": 4117.66406,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 4.0,
+  "camera_yaw_minus_player_yaw_deg": -90.0,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": 2.67159104
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.83,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.65039,
+    "y": 4116.6875,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.29004,
+   "y": 4115.94531,
+   "z": 126.245697
+  },
+  "pyaw": -0.445563227,
+  "tod": 2.80975842
+ },
+ "captured": "2026-10-17 08:59:19",
+ "key": "1",
+ "name": "triple_slash",
+ "note": "Triple Slash (Battlerage, skill 18132, action bar slot 1, key 1) on an Angry Rat; cl_fov 75",
+ "prepare": {
+  "attempt": 8,
+  "facing_error_deg": -0.4,
+  "unit_distance_m": 0.83
+ },
+ "server_log": [
+  "08:59:19 [INFO] handlers - StartSkill: Id 18132, flag 0, caster=22524, target=9345"
+ ],
+ "skill_id": 18132,
+ "units_after": {
+  "player": {
+   "health": 690,
+   "max_health": 720
+  },
+  "target": {
+   "distance_m": 0.331481695,
+   "health": 65,
+   "max_health": 148,
+   "name": "Angry Rat",
+   "present": true
+  }
+ },
+ "units_before": {
+  "player": {
+   "health": 720,
+   "max_health": 720
+  },
+  "target": {
+   "distance_m": 0.82695967,
+   "health": 148,
+   "max_health": 148,
+   "name": "Angry Rat",
+   "present": true
+  }
+ }
+}

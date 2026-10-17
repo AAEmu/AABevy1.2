@@ -1,0 +1,78 @@
+{
+ "after_burst": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": 32.4311981
+  },
+  "cam": {
+   "x": 4315.76953,
+   "y": 4113.28809,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 3.995,
+  "camera_yaw_minus_player_yaw_deg": -147.2,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": -0.00636676187
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.84,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.61914,
+    "y": 4115.81445,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.62451,
+   "y": 4116.6582,
+   "z": 126.245697
+  },
+  "pyaw": 3.13522696,
+  "tod": 2.69262695
+ },
+ "before_burst": {
+  "ang": {
+   "x": 0,
+   "y": 0,
+   "z": 32.4311981
+  },
+  "cam": {
+   "x": 4315.76953,
+   "y": 4113.28809,
+   "z": 127.979904
+  },
+  "camera_height_above_player_feet": 1.734,
+  "camera_to_player_xy": 3.995,
+  "camera_yaw_minus_player_yaw_deg": -147.2,
+  "fov": 1.24354708,
+  "nearest_mob": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": -0.00636480097
+   },
+   "class": "npc_rat_black",
+   "dist_xy_to_player": 0.84,
+   "name": "Angry Rat",
+   "position": {
+    "x": 4313.61914,
+    "y": 4115.81445,
+    "z": 126.189423
+   }
+  },
+  "player": {
+   "x": 4313.62451,
+   "y": 4116.6582,
+   "z": 126.245697
+  },
+  "pyaw": 3.13522696,
+  "tod": 2.68280363
+ }
+}
