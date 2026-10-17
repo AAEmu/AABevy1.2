@@ -292,6 +292,10 @@ pub struct EmitterDef {
     pub turbulence_3d: f32,
     pub turbulence_size: f32,
     pub turbulence_speed: f32,
+    /// `TailLength`: seconds of its past path a particle draws as a ribbon (0 = a sprite).
+    pub tail_length: Var,
+    /// `TailSteps`: segments of the ribbon.
+    pub tail_steps: u32,
     /// `RotateSpeed`: radians per second of a particle about the axis (the particle orbits the emitter; the editor range is 0..10).
     pub rotate_speed: Var,
     /// `RotateLength`: radius of that orbit in metres.
@@ -371,6 +375,8 @@ impl Default for EmitterDef {
             turbulence_3d: 0.0,
             turbulence_size: 0.0,
             turbulence_speed: 0.0,
+            tail_length: Var::constant(0.0),
+            tail_steps: 8,
             rotate_speed: Var::constant(0.0),
             rotate_length: Var::constant(0.0),
             rotate_axis: Vec3::ZERO,
@@ -510,6 +516,8 @@ impl EmitterDef {
                 "Turbulence3DSpeed" => d.turbulence_3d = Var::parse(v, 0.0).base,
                 "TurbulenceSize" => d.turbulence_size = Var::parse(v, 0.0).base,
                 "TurbulenceSpeed" => d.turbulence_speed = Var::parse(v, 0.0).base,
+                "TailLength" => d.tail_length = Var::parse(v, 0.0),
+                "TailSteps" => d.tail_steps = num(v).map_or(8, |f| f.max(0.0) as u32),
                 "RotateSpeed" => d.rotate_speed = Var::parse(v, 0.0),
                 "RotateLength" => d.rotate_length = Var::parse(v, 0.0),
                 "RotatePosition" => d.rotate_axis = parse_vec3(v, 0.0),
@@ -543,6 +551,11 @@ impl EmitterDef {
     /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
         self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())
+    }
+
+    /// Whether the particles draw a ribbon of their past path (`TailLength`).
+    pub fn has_tail(&self) -> bool {
+        self.tail_length.base > 0.0 && self.tail_steps >= 2
     }
 
     /// Whether the particles orbit the emitter (`RotateLength`).

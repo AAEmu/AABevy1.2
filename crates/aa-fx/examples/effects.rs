@@ -19,6 +19,7 @@
 //! * `--loop`                     start every effect again when it has finished (skill effects are one shots)
 //! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
 //!                                effect in a single shot; add `--loop` and `--no-prime`)
+//! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
@@ -66,6 +67,20 @@ struct Orbit {
 
 #[derive(Component)]
 struct Label(Vec3);
+
+/// An effect moved on a circle about its place.
+#[derive(Component)]
+struct Sweep {
+    centre: Vec3,
+    radius: f32,
+}
+
+fn sweep(time: Res<Time>, mut q: Query<(&Sweep, &mut Transform)>) {
+    let a = time.elapsed_secs() * 8.0;
+    for (s, mut t) in &mut q {
+        t.translation = s.centre + Vec3::new(a.cos() * s.radius, 1.2, a.sin() * s.radius);
+    }
+}
 
 /// An effect that starts `at` seconds after the program.
 #[derive(Component)]
@@ -119,7 +134,7 @@ fn main() {
         .insert_resource(Spawn { effects, grid, spacing })
         .insert_resource(ClearColor(Color::srgb(0.01, 0.012, 0.02)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, labels, log_stats, start_later))
+        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep))
         .run();
 }
 
@@ -176,7 +191,9 @@ fn setup(
     for (i, (name, pos)) in positions.into_iter().enumerate() {
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
-        if stagger > 0.0 {
+        if num("--sweep", 0.0) > 0.0 {
+            commands.spawn((effect, place, Sweep { centre: pos, radius: num("--sweep", 0.0) }));
+        } else if stagger > 0.0 {
             // the copies start once the first one has loaded everything (an identical effect behind the camera loads it)
             if i == 0 {
                 commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));

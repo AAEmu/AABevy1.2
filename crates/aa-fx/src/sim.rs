@@ -24,6 +24,8 @@ pub fn c2b(v: Vec3) -> Vec3 {
 const GRAVITY: f32 = 9.81;
 /// Particles one emitter may hold.
 pub const MAX_PER_EMITTER: usize = 2048;
+/// Segments of a tail the emitter keeps (`TailSteps` is cut to this).
+const MAX_TAIL_STEPS: usize = 48;
 /// Vertices one mesh emitter may write.
 const MAX_MESH_VERTS: usize = 16_384;
 
@@ -140,6 +142,11 @@ pub struct Particle {
     spin: f32,
     spin_rate: f32,
     rlen: f32,
+    /// Tail: the particle's slot in the emitter's history, the next write position, the samples held, time since the last one.
+    slot: u32,
+    t_head: u16,
+    t_len: u16,
+    t_acc: f32,
     variant: u16,
     seed: f32,
 }
@@ -161,6 +168,11 @@ pub struct EmitterState {
     pub pending_geom: Option<GeomKey>,
     /// Particle budget one particle costs (a mesh counts its vertices in quads).
     cost: usize,
+    /// Past world positions of the particles with a tail: `tail_steps` per slot, a ring.
+    trail: Vec<Vec3>,
+    trail_free: Vec<u32>,
+    tail_steps: usize,
+    tail_dt: f32,
     rng: Rng,
     particles: Vec<Particle>,
     age: f32,
@@ -201,6 +213,10 @@ impl EmitterState {
             geom: None,
             pending_geom: None,
             cost: 1,
+            trail: Vec::new(),
+            trail_free: Vec::new(),
+            tail_steps: 0,
+            tail_dt: 0.0,
             rng: Rng::new(seed),
             particles: Vec::new(),
             age: 0.0,
@@ -272,6 +288,8 @@ impl EmitterState {
 
     fn reset(&mut self) {
         self.particles.clear();
+        self.trail.clear();
+        self.trail_free.clear();
         self.age = 0.0;
         self.delay = self.def.spawn_delay.base.max(0.0);
         self.spawn_acc = 0.0;
@@ -483,10 +501,17 @@ impl EmitterState {
             spin,
             spin_rate,
             rlen,
+            slot: u32::MAX,
+            t_head: 0,
+            t_len: 0,
+            t_acc: 0.0,
             variant,
             seed: r.next() * 100.0,
         };
         p.pos += p.vel * age0;
+        if def.has_tail() {
+            self.start_tail(&mut p, ctx);
+        }
         if self.want_births {
             let basis = self.orbit_basis(ctx);
             let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, 0.0, &basis);
@@ -517,6 +542,9 @@ impl EmitterState {
                     let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, 1.0, &basis);
                     self.deaths.push(at);
                 }
+                if p.slot != u32::MAX {
+                    self.trail_free.push(p.slot);
+                }
                 continue;
             }
             let a = p.age * p.inv_life;
@@ -538,10 +566,52 @@ impl EmitterState {
             if orbits {
                 p.spin += p.spin_rate * luts.rot_speed.at(a) * dt;
             }
+            if p.slot != u32::MAX {
+                p.t_acc += dt;
+                if p.t_acc >= self.tail_dt {
+                    p.t_acc = 0.0;
+                    let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, a, &basis);
+                    self.push_tail(&mut p, at);
+                }
+            }
             self.particles[w] = p;
             w += 1;
         }
         self.particles.truncate(w);
+    }
+
+    /// Gives a new particle its history ring and writes its first sample.
+    fn start_tail(&mut self, p: &mut Particle, ctx: &StepCtx) {
+        let def = self.def.clone();
+        if self.tail_steps == 0 {
+            self.tail_steps = (def.tail_steps as usize).clamp(2, MAX_TAIL_STEPS);
+            // seconds of past path: as long as the particle lives at most; a sample per frame at the finest
+            let span = if p.life.is_finite() { def.tail_length.base.min(p.life) } else { def.tail_length.base };
+            self.tail_dt = (span / self.tail_steps as f32).max(1.0 / 90.0);
+        }
+        p.slot = match self.trail_free.pop() {
+            Some(s) => s,
+            None => {
+                let s = (self.trail.len() / self.tail_steps) as u32;
+                self.trail.resize(self.trail.len() + self.tail_steps, Vec3::ZERO);
+                s
+            }
+        };
+        p.t_head = 0;
+        p.t_len = 0;
+        p.t_acc = 0.0;
+        let frame = self.frame(ctx);
+        let basis = self.orbit_basis(ctx);
+        let at = frame.to_world_point(p.pos) + self.orbit_offset(p, 0.0, &basis);
+        self.push_tail(p, at);
+    }
+
+    #[inline]
+    fn push_tail(&mut self, p: &mut Particle, at: Vec3) {
+        let n = self.tail_steps;
+        self.trail[p.slot as usize * n + p.t_head as usize] = at;
+        p.t_head = ((p.t_head as usize + 1) % n) as u16;
+        p.t_len = (p.t_len + 1).min(n as u16);
     }
 
     /// The two axes of the orbit plane in world space (`Rotate*`).
@@ -621,6 +691,13 @@ impl EmitterState {
             let colour = p.color * luts.color.at(a) * lit * ctx.tint;
 
             // frame in the texture atlas
+            if p.slot != u32::MAX {
+                let colour = [colour.x, colour.y, colour.z];
+                let strip = Strip { trail: &self.trail, steps: self.tail_steps, pos: &mut self.pos, uv: &mut self.uv, col: &mut self.col };
+                ribbon(strip, p, center, hx, alpha, colour, &inv, view, &mut min, &mut max);
+                continue;
+            }
+
             let mut f = tiling.first + p.variant as u32;
             if tiling.frames > 1 {
                 let t = if tiling.fps > 0.0 { p.age * tiling.fps } else { a * tiling.frames as f32 };
@@ -801,6 +878,62 @@ impl EmitterState {
             self.min = min;
             self.max = max;
         }
+    }
+}
+
+/// The output arrays of an emitter that a tail is written to.
+struct Strip<'a> {
+    trail: &'a [Vec3],
+    steps: usize,
+    pos: &'a mut Vec<[f32; 3]>,
+    uv: &'a mut Vec<[f32; 2]>,
+    col: &'a mut Vec<[f32; 4]>,
+}
+
+/// A particle's tail as a strip of camera facing quads from its head (the current position) back along its history; it
+/// tapers and fades towards the end. The texture runs along the ribbon.
+#[allow(clippy::too_many_arguments)]
+fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [f32; 3], inv: &Affine3A, view: View, min: &mut Vec3, max: &mut Vec3) {
+    // points: the head, then the samples that are not on top of it
+    let mut pts: [Vec3; MAX_TAIL_STEPS + 1] = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
+    let mut n = 1;
+    pts[0] = head;
+    let steps = out.steps;
+    for i in 0..p.t_len as usize {
+        let s = out.trail[p.slot as usize * steps + (p.t_head as usize + steps - 1 - i) % steps];
+        if n <= MAX_TAIL_STEPS && s.distance_squared(pts[n - 1]) > 1e-8 {
+            pts[n] = s;
+            n += 1;
+        }
+    }
+    if n < 2 {
+        return;
+    }
+    let mut side = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
+    let mut last = view.right;
+    for i in 0..n {
+        let dir = pts[i.saturating_sub(1)] - pts[(i + 1).min(n - 1)];
+        let s = dir.cross(view.forward);
+        last = if s.length_squared() > 1e-10 { s.normalize() } else { last };
+        side[i] = last;
+    }
+    for i in 0..n - 1 {
+        let (t0, t1) = (i as f32 / (n - 1) as f32, (i + 1) as f32 / (n - 1) as f32);
+        let (w0, w1) = (half * (1.0 - 0.8 * t0), half * (1.0 - 0.8 * t1));
+        let c = |t: f32| [colour[0], colour[1], colour[2], alpha * (1.0 - t).clamp(0.0, 1.0)];
+        let v = [
+            inv.transform_point3(pts[i] - side[i] * w0),
+            inv.transform_point3(pts[i] + side[i] * w0),
+            inv.transform_point3(pts[i + 1] + side[i + 1] * w1),
+            inv.transform_point3(pts[i + 1] - side[i + 1] * w1),
+        ];
+        for q in &v {
+            *min = min.min(*q);
+            *max = max.max(*q);
+        }
+        out.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
+        out.uv.extend_from_slice(&[[1.0 - t0, 0.0], [1.0 - t0, 1.0], [1.0 - t1, 1.0], [1.0 - t1, 0.0]]);
+        out.col.extend_from_slice(&[c(t0), c(t0), c(t1), c(t1)]);
     }
 }
 
@@ -1056,6 +1189,26 @@ mod tests {
         let p1 = centre(&s);
         assert!((p1.length() - 2.0).abs() < 0.05 && p1.y.abs() < 0.01, "{p1:?}");
         assert!(p0.dot(p1).abs() < 0.2, "{p0:?} {p1:?}");
+    }
+
+    #[test]
+    fn a_tail_draws_the_past_path_as_a_ribbon() {
+        let budget = AtomicI32::new(10_000);
+        // one particle flying along +X at 5 m/s (focus axis is up, so tilt it 90 degrees), tail of 1 s in 10 steps
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Size="0.2" Speed="5" FocusAngle="90" FocusAzimuth="0" TailLength="1" TailSteps="10""#);
+        let c = ctx(&budget);
+        for _ in 0..30 {
+            s.step(&c);
+        }
+        let e = &s.emitters[0];
+        // a ribbon of several quads, not one sprite
+        assert!(e.units >= 5, "{} quads", e.units);
+        let span = (Vec3::from(e.max) - Vec3::from(e.min)).max_element();
+        // 0.5 s at 5 m/s of flight, all of it within the 1 s tail
+        assert!((span - 2.5).abs() < 0.6, "span {span}");
+        // the ribbon fades towards its end
+        let heads: Vec<f32> = e.col.iter().map(|c| c[3]).collect();
+        assert!(heads[0] > heads[heads.len() - 1], "{heads:?}");
     }
 
     #[test]
