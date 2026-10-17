@@ -310,9 +310,12 @@ fn enter(mut commands: Commands, mut cry: CryAssets, opts: Res<Options>) {
     });
 }
 
-fn exit(mut commands: Commands, screen: Option<Res<CreateScreen>>, mut grade: ResMut<stage3d::BackgroundGrade>) {
+fn exit(mut commands: Commands, screen: Option<Res<CreateScreen>>, scenery: Option<Res<scenery::Scenery>>, mut grade: ResMut<stage3d::BackgroundGrade>) {
     // the painted sky of step 3 is graded (see `scenery`)
     grade.0 = None;
+    if let Some(scenery) = scenery {
+        scenery.despawn_sounds(&mut commands);
+    }
     if let Some(screen) = screen {
         commands.entity(screen.stage.root).despawn();
         commands.remove_resource::<CreateScreen>();
