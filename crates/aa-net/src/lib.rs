@@ -13,6 +13,7 @@
 //!
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
+pub mod actability;
 pub mod auction;
 pub mod buff;
 pub mod bank;
@@ -45,6 +46,7 @@ pub mod plugin;
 pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFailure, AuctioneerIds, AuctionLot, AuctionPurchaseMail, AuctionQuery, AuctionQuote, AuctionSearch};
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
+pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
 pub use login::Secret;
 pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};

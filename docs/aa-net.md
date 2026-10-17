@@ -1477,6 +1477,115 @@ scripted-session tests, with 9 opt-in live tests ignored. The Bevy/example check
 Natural-loot paired live QA remains **pending** while
 the lane is stalled; this milestone makes no new lane connections or claims.
 
+## Crafting and gathering proficiency
+
+`Command::Actability(ActabilityCommand)` supports `Upgrade { id, auto_use_aa_point }`,
+`Downgrade { id, auto_use_aa_point }` and `Expand`. `Event::Actability(ActabilityEvent)`
+reports `Snapshot { last, entries }`, `TierChanged { is_upgrade, id, step }`,
+`Expanded { count }`, successful local sends (`Requested`) and local validation failures
+(`RequestRejected`). `Actabilities` is both `WorldState.actabilities` and a Bevy resource;
+it exposes `entries`, `loaded`, `expanded_expert: Option<u8>`, `pending`, `last_error`,
+`get(id)` and `count_at_step(step)`. An entry has `id`, `point: Option<i32>` and `step`.
+This proficiency is separate from combat ability experience.
+
+Exact lane packets from `packets/world.rs`, `systems/services/expands.rs` and the active
+transactional expansion handler in `systems/economy/store.rs`:
+
+| Packet | Body |
+|---|---|
+| CS0ff UpgradeExpertLimit / CS100 DowngradeExpertLimit | u32 actabilityId, bool autoUseAAPoint |
+| CS101 ExpandExpert | empty |
+| SC136 Actability | bool last, u8 count, count rows of u32 id, i32 absolutePoint, u8 step |
+| SC1c0 ExpertLimitModified | bool isUpgrade, u32 id, u8 step |
+| SC1c1 ExpertExpanded | u8 expandedCount |
+
+Snapshots replace the old list on the first chunk, accumulate through `last=true` and
+mark `loaded` only then; an empty completed list clears old entries. Counts are bounded
+before allocation, zero/duplicate IDs within a packet fail decoding, and all signed
+points / u8 tiers are preserved without an invented maximum tier. New characters get
+one zero-point row per `actability_groups` entry (34 IDs in the supplied lane database).
+`CharacterState.expanded_expert` now exposes the previously skipped final byte and seeds
+the expansion count. Character selection, world leave and disconnect reset stale state.
+
+**`LaborChanged.point` is a delta**, not the new total. Active
+`economy/inventory.rs::change_labor` sends `a.point - previous` after the server caps the
+gain, with `action=actabilityId` and the current `step`. The resource adds it to a known
+snapshot base. A missing base stays unknown, rather than pretending a gain is a total.
+Normal labor regeneration (`action=0`) creates no proficiency row.
+
+Expert changes wait for matching authoritative ACKs; sending never changes tier, points,
+currency, inventory or expansion count. Upgrade preserves known points. Downgrade changes
+the tier but sets points to `None`: the lane resets them to
+`expert_limits ORDER BY up_limit ASC[newStep].up_limit` and **does not send that value**.
+A client with the matching game-data table can derive it; subsequent deltas alone cannot
+recover an unknown base. Generic/silent server errors leave requests pending, and the
+resource never assigns unrelated errors to a specific request. The wire's auto-use flag
+is preserved although the lane ignores it when regrading. The active expand handler
+requires vocation and any certificate but currently **adds** its vocation cost instead
+of subtracting it (inherited C# bug). Only the real game-point/item tasks update those
+resources; the expansion ACK changes only the returned count.
+
+Original Lua contracts are in `x2ui/skill/tab_actability.lua` and
+`actability_info_notify.lua`: `ACTABILITY_REFRESH_ALL()` after the snapshot completes,
+`ACTABILITY_EXPERT_CHANGED(id)` for point changes,
+`ACTABILITY_EXPERT_GRADE_CHANGED(id)` for regrading and
+`ACTABILITY_EXPERT_EXPANDED()` for capacity changes. `X2Ability:UpgradeExpert(id)` and
+`:DowngradeExpert(id)` take one Lua argument; native wrappers39438840/39438870 obtain
+the wire bool via settings getter397ccd50 (`+0xc340 == 1`), then call393101c0/39310080.
+`X2Ability:ExpandExpert()` takes no argument. Names/icons/categories and grade/cap/cost
+tables are client data (`actability_groups`, `actability_categories`, `expert_limits`,
+`expand_expert_limits`); they are not fabricated from these packets.
+
+Six new offline tests cover all three CS commands, all three SC responses followed by
+another DD04 opcode, every truncation, bad counts/IDs, chunk and empty snapshots,
+selection/logout reset, signed deltas, unknown downgraded totals, matching ACK correlation,
+silent errors and no optimistic currency/tier changes. The existing character-state test
+now verifies a nonzero expanded-expert byte. Full `cargo test -p aa-net` passed 183 library
+and 2 scripted-session tests, with 9 live tests ignored;
+`cargo check -p aa-net --features bevy --examples` passed. No live lane traffic was used.
+
+## Doodad, mailbox and recipe source audit
+
+Original `x2ui/interaction.lua` builds a local menu through
+`X2Interaction:GetInteractionSkillCount()`, `GetInteractionSkillId(k)` /
+`GetInteractionSkillName(k)` (Lua indices start at1), then
+`SelectInteraction(interactionId)` or `CancelInteraction()`. `INTERACTION_START()` and
+`INTERACTION_END()` take no arguments. The current session exposes skill casts for unit
+and position targets; the lower-level `SkillTarget` already supports doodad kind4, but
+an explicit session doodad-skill command and the native local menu planner remain gaps.
+Many gathering interactions run `CSStartSkill` against the doodad, then ordinary skill,
+labor, item, loot and phase packets; they do not use the NPC service-list request.
+Lane `CSStartInteraction068` only handles NPCs/mates. SC07e/07f world-interaction list /
+cancel exist only as opcode declarations here, with no lane writer to justify a guessed
+decoder or an invented successful doodad interaction ACK.
+
+Mailbox Lua `mailbox/mail/mailbox.lua` listens to `TOGGLE_MAIL(doodadId, receiver)` and
+stores `MAIL_DOODADID` / `MAIL_WITHRECEIVER`. Native local handler393b1040 supplies
+**numeric doodad object ID, boolean true** (not a receiver name): target+0x7c is converted
+to a Lua number; it calls393b7b10(4, objectId), emits event0xce via39424260 with those two
+arguments, then393ccdd0 cleans up the local action. There is no send in this handler.
+393b7b10 stores active interaction kind/object and ends a previous one if needed.
+The old-context end path393b7aa0 emits INTERACTION_END (event0xd2) with no arguments
+and clears the interaction manager's local selection.
+The complete dispatch-table index/skill path reaching this handler remains untraced.
+`INTERACTION_END()` clears both globals and closes the window. `write_mail.lua` serializes
+the bool as `withReceiver="1"` or `"0"`. This local UI context does not prove server-side
+send permission; existing mail send/claim commands remain authoritative. The lane's
+`DoodadFuncNaviOpenMailbox` and `CraftStart` belong to its logging-only TODO group.
+
+Recipe catalogs are static `crafts`, `craft_materials`, `craft_products` and related
+group/category tables, not a server recipe-list message. `economy/craft.rs` defines
+CSExecuteCraft0f8 as u32 craftId, bc doodadObjId, i32 count (11 bytes). The server casts
+the recipe's skill on the doodad; its CraftEffect consumes materials/produces items,
+charges labor through the skill system and schedules another cast while count remains.
+SCCraftFailed1bf has a writer (u32 id, i32 count, count u32 craftIds) but is never sent;
+there is no normal batch-completion ACK. Original Lua uses
+`CRAFTING_START(doodadId,count)`, `CRAFT_STARTED(leftCount)` and `CRAFT_ENDED(leftCount)`;
+these cannot be mapped to fabricated server completion events. Execute/batch/cancel state
+is deferred until a separate native cast audit; proficiency support does not grant or
+pretend a completed craft. Natural gathering/crafting and expert-change live QA remain
+pending while the lane is stalled.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
