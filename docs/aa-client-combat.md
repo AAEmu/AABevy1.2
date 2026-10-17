@@ -66,19 +66,42 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
 
 | Server event | Visual |
 |---|---|
-| `SkillStarted` with `cast_ms > 0` | the skill's `start_anim` loops on the caster (`Acting`), the local player turns to the target, FORM effects play on the caster (held until the skill fires or stops) |
+| `SkillStarted` with `cast_ms > 0` | the skill's `start_anim` (a song's: the clip of the instrument held) loops on the caster (`Acting`), the local player turns to the target, FORM effects play on the caster (held until the skill fires or stops) |
 | `SkillStarted` refused with `OUTOF_ANGLE` (0x10) | the local player turns to the target, sends a standing `Move` with the new facing and asks again once (the real client turns on its own) |
-| `SkillFired` | the one-shot fire clip (the id the server sends, else the skill's), the player turns to the target; THROW effects at once, LAUNCH effects and the projectile at the clip's release moment (anim events, else `effect_delay`); an instant skill also plays the START / FORM effects that were skipped (effects that die at LAUNCH are not shown) |
-| `PlotEvent` | the step's clip / effect group / projectile (a step that changes the clip ends the cast loop) |
-| `UnitDamaged` (kind 0 / 1) | HIT effects of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
+| `SkillFired` | the fire clip: a song's for the instrument held, else the server's id (replaced by the skill's own `twohand_*` / `dual_wield_*` clip when the character holds such a weapon and the server sent the skill's one hand clip), else the skill's (a dash or a leap: its controller's clip); a clip with `anims.loop` loops until the skill ends; the player turns to the target; THROW effects at once, LAUNCH effects and the projectile at the clip's release moment (anim events, else `effect_delay`); an instant skill also plays the START / FORM effects that were skipped (effects that die at LAUNCH are not shown); camera shakes start with their effect moment |
+| `PlotEvent` | the step's clip / effect group / projectile / camera shakes; a step that plays `all_co_sk_stop` ends the looping clip before it (alone it only ends it), a looping clip loops until the next step or the end |
+| `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
 | `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
-| `SkillEnded` / `CastingStopped` / `Plot*` | the effects held until END are released; an interrupted cast returns to locomotion |
+| `SkillEnded` / `CastingStopped` / `PlotEnded` / `PlotStopped` / `SkillStopped` | the effects held until END are released; the looping clip of that cast (cast pose, channel pose) ends and the unit returns to locomotion (an interrupted cast too); a one-shot clip runs its course |
 | a unit that spawns dead (`Unit::dead`) | lies on its last death frame at once |
 
 * **Locomotion** (`ingame/anim.rs`): `drive_locomotion` skips units that are `Acting` or `Dead` and restarts its clip when the
   action ends (`Locomotion::invalidate`). Rats and foxes use the same code: their `fist_co_attack_r` bite plays on `SkillFired`
   of skill 2 and the hit lands on the player at `combat_sync`.
+* **Loops and ends** (`play_clip`, `end_loop`): a clip is looped when it is the cast pose or its `anims.loop` is `t` (`SkillBook::clip_loops`:
+  every mage and healer cast / channel pose, 19 player skills). The clip belongs to the cast (timeline id) that started it
+  (`Combat::owner`): the next clip of the cast replaces it, a stop step, `SkillEnded`, `PlotEnded`, `PlotStopped`, `CastingStopped` or
+  `SkillStopped` of that cast ends it (`Acting` removed, `Locomotion::invalidate`), and a cast that is not the unit's current one
+  leaves the clip of the newer cast alone. The safety hold, for an end that never comes, is `channeling_ms + 2 s` (20 s for a plot
+  step). `channeling_anim_id` is a stop marker in every player skill: the channel pose is the fire clip or the plot step's clip.
+* **Weapon class** (`weapons.rs` `Wield`, inserted when the character's weapons are built): `two_handed` (`holdables.slot_type_id`
+  16), `dual` (a weapon in the off hand that is not a shield), `instrument` (string 0 / percussion 1 / tube 2). The skill's fire clip
+  is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
+  weapon comes out for the clip's prefix (`weapon_for_clip`: `bow_` the bow, `onehand_` / `twohand_` the main hand weapon (a two
+  handed one hangs on `item_back_c` and goes to the right hand), `twoswords_` both swords, `music_` the instrument, which is hidden
+  while it is not played), and goes back 4 s after the last action.
+* **Controller and instrument clips**: a skill that has no clip of its own plays its `skill_controllers.start_anim_id` when its first
+  step or fire comes (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...); a song plays `*_instrument_start_anim_id` (the cast loop) and
+  `*_instrument_fire_anim_id` of the instrument held, else the skill's own clips.
+* **Visual groups by level** (`skill_visual_groups`, 27 rows, 9 tree skills): `SkillVisual::look(level)` picks the last group at or
+  below the caster's level (the player's from `aa_net::state::Skills`, others' from `Unit.skills`, else 1) for the hit effects, the shakes and
+  the projectile; a skill without rows keeps its own group.
+* **Camera shakes** (`ingame/camera.rs` `CameraShake`, 22 player skills, 46 `FxShakeCamera` items; `fx_shake_cameras`): an item
+  starts at its effect moment on the caster (location 1) or the target (2); only the local player's camera shakes. The wave is the
+  data's: `ang_*` degrees and `shift_*` metres per axis (cry axes), alternating every `frequency` s (at least 0.03) with
+  `randomness`, fading out linearly over `duration`. Because this camera sits 4 m behind the character the amplitudes are halved
+  (`SHAKE_SCALE`) and capped at 0.2 m / 2 degrees, at most 6 at once; it is added in `follow_player` after the orbit pose.
 * **Effects** are aa-fx `Effect` entities (`prime: false`): held ones loop and follow their bone every frame (`follow_fx`, before
   transform propagation) until their END moment, short ones despawn themselves. A hit effect with axis 4 is turned towards the
   attacker and keeps that orientation. An effect that never finishes dies after 12 s.
@@ -88,7 +111,8 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   additive, unlit model, widened as the emitter's `SizeX` asks. When the arrow arrives, its glow fades out in 0.6 s.
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
-  weapon clip, and both go back to their sheath bones 4 s after the last action (`Drawn`). The shield stays on the arm. The
+  weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
+  clips), and all go back to their sheath bones 4 s after the last action (`Drawn { out }`). The shield stays on the arm. The
   `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
   (aa-anim's `Animator::play_layer` with `BoneMask::upper_body`, `docs/aa-anim.md`) while `drive_locomotion` keeps running the
@@ -97,13 +121,16 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   else `_ub` as is), else the clip itself through the mask. A standing unit plays the whole-body clip as before; a unit that stops
   mid-action keeps its upper body clip over the idle, one that starts moving mid-action keeps its whole-body clip. A one-shot
   layer ends by itself, a cast loop is released (`release_layers`, 0.12 s fade) when `Acting` ends or the fire clip replaces it,
-  and a layered action never invalidates the locomotion state (no restart of the run cycle). Hit reactions stay whole-body and
+  and a layered action never invalidates the locomotion state (no restart of the run cycle); an action that had the whole body
+  restarts locomotion when `Acting` is removed by an end event (`release_layers`). Hit reactions stay whole-body and
   never interrupt a run. `AA_COMBAT_FULLBODY=1` turns the layer off (to compare shots).
 * **Cost.** Skills are read from the database once and cached by id (`SkillBook`, plus the effect group, anim and plot step
   tables); a frame touches no database. Per frame: `follow_fx` / `fly_projectiles` iterate the live effect entities (a handful),
   `hold_weapons` the carried weapons (3 per character), `end_actions` the `Acting` units. Measured with `AA_FX_LOG=1` during a
   fight with arrows: aa-fx `sim_ms` about 0.03 ms, `upload_ms` 0.01, with the world's 7 ambient effects; the frame time with and
-  without the combat code is the same within the noise (about 80 to 110 fps in the dev build on this box, 10 to 12 ms).
+  without the combat code is the same within the noise (about 80 to 110 fps in the dev build on this box, 10 to 12 ms). With the
+  round 2 additions (clip loop lookups, `Wield`, shakes) a fight with arrows, three slashes and melee on the lane showed
+  `frame_ms` 11.3 to 14.8: a loop lookup is one cached map hit per clip, a shake a few multiplications per frame while it runs.
 
 Upper body layer frames (`shots/aa-anim/`, not committed; `--walk 9:12` runs the player from second 9 while slot 3 fires at 9.5,
 `--cam-dist 5 --cam-pitch -12`, `--cam-yaw 120` for the arrow pair and 40 for the casts): `walk_arrow_before.png` (`AA_COMBAT_FULLBODY=1`: the legs stand planted in the
@@ -122,6 +149,13 @@ slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all enviro
 * `AA_COMBAT_SLOWMO=0.3`: the game clock slows to that speed when the local player first fires (catches a flight on screen).
 * `AA_COMBAT_SHOT=<png>@<start|fire|fire2|plot|hit|death>+<s>`: screenshot that many game seconds after the first such event and
   exit; combine with `--hud-key tab T --hud-key slot3 T` (see `docs/aa-client-hud.md`).
+* `AA_DEV_MAINHAND=<item>` / `AA_DEV_OFFHAND=<item>` / `AA_DEV_MUSICAL=<item>` (0 for none): the item the character holds in that
+  slot instead of its own, to see the two handed (5660 is the first two handed sword), dual wield (5569 in both) and instrument (6177
+  the first lute) clips with the one handed test character.
+* `AA_COMBAT_FAKE="T:op:args;..."`: server events for the local player, `T` seconds after the first frame (the test character has
+  no channeled or two handed skills, and the lane does not interrupt a cast when the player walks): `start:TL:SKILL:CAST_MS`,
+  `fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `plot:TL:EVENT:SKILL[:CASTING_MS]`, `hit:TL:SKILL:DAMAGE`, `end:TL`, `stop:TL`,
+  `plotend:TL`, `plotstop:TL`. Start it at 14 s or later, before that the world is still streaming in.
 
 ```
 AA_COMBAT_SHOT=shots/combat/arrow.png@fire+0.5 AA_COMBAT_SLOWMO=0.3 aa-client --enter-world --hour 12 --pos 15514,15330 \
@@ -138,6 +172,11 @@ Frames (`shots/combat/`, not committed):
 | `swordr_0_0_0_0_0_0.png` | stage 1 of the 3-hit slash (`onehand_co_sk_streakattack_1`): the sword out of its sheath in the right hand, raised |
 | `corpse_c.png` | a fox lying on its side after `UnitDeath` (a second fox still stands at the top) |
 | `dead_a.png` | the Angry Rat of the pond died (`unit died` in the log); it lies under the water surface, so only its name plate shows |
+| `r2_invincibility.png` | 7 s into a 12 s channel of Invincibility (`AA_COMBAT_FAKE="3:fire:102:10372:0:12000;15:end:102"`): the 1.33 s clip `all_co_sk_buff_cast_defense` still loops, the charge-up glow on the hands |
+| `r2_return_stopped.png` | Return cast of 10 s, `CastingStopped` after 3 s (`start:130:10594:10000;stop:130`), shot 1 s later: idle again, bow and sword back on the body |
+| `r2_stop_before.png` / `r2_stop_after.png` | Absorb Lifeforce (plot, `plot:200:2499:11441;plot:200:2501:11441` 9 s apart): 8.5 s into step 2499 the 7 s clip `all_co_sk_spell_channel_sorb` has looped and the pose still holds (`_before`); step 2501 only plays `all_co_sk_stop` and ends it (`_after` is an earlier run, the stop 6 s in, 2 s later: idle) |
+| `r2_wallop_one.png` / `_two.png` / `_dual.png` | Wallop (12029) 0.3 s into the swing with a sword and shield (`onehand_co_sk_fastattack_1`), with the two handed sword (`AA_DEV_MAINHAND=5660`: `twohand_co_sk_fastattack_1`, the greatsword in the hands) and with a sword in each hand (`twoswords_co_sk_fastattack_1`, both out) |
+| `r2_song.png` | a song (11377) cast with the lute (`AA_DEV_MUSICAL=6177`): `music_co_sk_lute_cast`, the lute in the hands |
 
 Matched: the clip names and timing (launch 0.358 s into `bow_co_sk_launch`, bite sync 0.487 s), the effect bones (bow hand for the
 arrow, `Bip01 Hit` for the hit spark), flight time and hit moment from `SCSkillFired.delay_ms` (the hit reaction starts when the arrow
@@ -175,7 +214,7 @@ which the server picks per weapon), and for monsters `npcs`, `npc_spawner_npcs`,
   that uses the skill.
 
 **Clips** are `start_anim` (when the skill casts or is a plot), `fire_anim`, `twohand_*`, `dual_wield_*`, `channeling_anim`, every anim of every plot step, the weapon attack clips, and the
-instrument and skill controller anims (the last two are not played by the client yet). "Present" means: a `.cal` entry, the `.caf`
+instrument and skill controller anims. "Present" means: a `.cal` entry, the `.caf`
 in the pak, and it decodes and binds to the model's skeleton (`ClipLibrary::bound`). `all_co_sk_stop` and `all_ac_stop` are
 markers ("end the clip before"), not clips: no `.cal` has them.
 
@@ -255,55 +294,54 @@ Ignored cost and visibility hints, not counted: `IgnoreAttractor` 39 skills, `Vi
 `FillRateCost` 14, `DisableVisClipping` 3, `ViewDistanceAdjust` 2, `CastShadows` 1. By set, every ability tree has 11 to 22 skills that
 look different and at most 2 plain ones.
 
-**What the data says the client does not do yet** (counted over the player skills):
+**What the client does with them** (counted over the player skills; the `client handling` block of the example is computed by the code
+the client runs; "shown" = the shown tree skills):
 
-* **Stop markers.** 17 plot steps play two anims, `all_co_sk_stop` first and then the clip; 4 steps play a stop only (it means
-  "end the clip that loops"). The two anims were a bug (see below); the stop-only steps still do nothing, so a cast loop that a
-  plot ends with a stop keeps looping until its hold time runs out.
-* **Looping clips are played once.** 16 clips of the fire / plot steps have `anims.loop` (every mage and healer cast and channel pose:
-  `all_co_sk_spell_cast_fireball`, `_flash`, `_spear`, `_cure`, `all_co_sk_spell_channel_cure`, `_sorb`, `_tug`, `_pray`,
-  `all_co_sk_pull_cast`, `bow_co_sk_high_cast`, `onehand_co_sk_weapon_blunt_3_cast`, ...) and the client plays plot clips once; 19
-  player skills, 16 of the 110 shown tree skills. Channeling is part of it: every `channeling_anim_id` of the player skills is a stop
-  marker, so the 12 channeling skills channel with their `fire_anim` (6: Invincibility, Protective Wings, Meditate, Summon Wraith,
-  Telekinesis, Twilight), a plot step (3: Lasso, Crippling Mire, Absorb Lifeforce) or no clip (3: Play Dead, `/bow`, `/kneel`), and the
-  pose plays once while the channel lasts 4 to 60 s.
-* **Weapon class.** 25 player skills have a `twohand_*` clip and 10 a `dual_wield_*` clip (9 and 3 shown tree skills); the client plays the one hand
-  clip. All of them exist on all models.
-* **Controller and instrument anims** (5 and 5 skills: Charge, Overwhelm, Drop Back, the music skills) are not played; 9 shown tree
-  skills have no clip anywhere in the data (passives and buffs: Stealth, Freerunner, Play Dead, ...).
-* **Per level visuals** (`skill_visual_groups`: 27 rows for 9 tree skills) are not used.
+| item | skills | shown | what the client does |
+|---|---:|---:|---|
+| a plot step that only plays `all_co_sk_stop` (4 steps: Lasso, Crippling Mire, Absorb Lifeforce, Searing Rain) | 4 | 4 | ends the cast loop of that timeline instead of letting it run to the hold time |
+| 17 steps (not skills) play a stop and then the clip | - | - | the clip (and the stop ends the loop before it) |
+| a fire / weapon variant / plot step clip with `anims.loop` (`all_co_sk_spell_cast_fireball`, `_flash`, `_spear`, `_cure`, `all_co_sk_spell_channel_cure`, `_sorb`, `_tug`, `_pray`, `all_co_sk_buff_cast_defense`, `_mental`, `bow_co_sk_high_cast`, ...) | 19 | 16 | loops until the next step or the end event |
+| ... of them the channeling skills with a pose (9 of the 12: Invincibility, Protective Wings, Meditate, Summon Wraith, Telekinesis, Twilight, Lasso, Crippling Mire, Absorb Lifeforce; the other 3, Play Dead, `/bow` and `/kneel`, have no clip in the skill data) | 9 | 8 | the pose for the channeling time |
+| `twohand_*` (23) / `dual_wield_*` (10) fire clips | 23 | 8 | by the weapon held (and the weapon model in the hand); the plot skills' variants are the server's choice per event |
+| controller clip only (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...) | 5 | 3 | the controller's `start_anim` |
+| instrument clips (the music skills) | 5 | 5 | the start and fire clip of the instrument held |
+| per level visual groups (`skill_visual_groups`: 27 rows) | 9 | 8 | the group of the caster's level |
+| camera shake (46 items; 3 skills have it in the projectile's group) | 22 | 11 | the player's camera, see above |
+
+9 shown tree skills have no clip anywhere in the data (passives and buffs: Stealth, Freerunner, Play Dead, ...).
+
 * **Anim events.** 112 player skills time launch effects or a projectile by a clip; 7 of them (6 tree skills: Sunder Earth, Lasso,
   Freezing Arrow, Arc Lightning, Flamebolt, Skewer) use a looping cast clip that has no `launch` / `combat_sync` event, which is
   right: the effects start with the clip (release 0). Every other launch timed clip has a `launch` event on all 8 models.
 
 **Build next**, in order of skills fixed per effort:
 
-1. **Plot step clips in aa-client** (0.5 day): end the loop on a stop marker, loop `anims.loop` clips until the next step or
-   `PlotEnded` / `PlotStopped`, pick the `twohand_` / `dual_` clip by the equipped weapon, play the controller and instrument
-   anims. 16 shown tree skills' casting and channeling poses, 9 + 3 weapon variants.
-2. **Geometry emitters in aa-fx** (2 to 3 days): mesh particles (size from `Size` / `SizeX` / `SizeY` / `SizeZ`, material from the
+1. **Geometry emitters in aa-fx** (2 to 3 days): mesh particles (size from `Size` / `SizeX` / `SizeY` / `SizeZ`, material from the
    `.mtl`, aa-cry's `MaterialHook` for the additive look; the arrow is done by hand in `combat.rs`). 78 skills, 49 tree skills, and the
    main shape of the slash, lightning and shock effects; 9 effects draw nothing without it.
-3. **`Rotate*` orbiting in aa-fx** (0.5 to 1 day, simulation only): 57 skills, 37 tree skills.
-4. **Refraction** (0.25 day to stop drawing them as plain glow sprites if the frames show blobs, then 1 to 2 days for a screen space
+2. **`Rotate*` orbiting in aa-fx** (0.5 to 1 day, simulation only): 57 skills, 37 tree skills.
+3. **Refraction** (0.25 day to stop drawing them as plain glow sprites if the frames show blobs, then 1 to 2 days for a screen space
    distortion pass): 98 skills, 57 tree skills; the largest group after the light.
-5. **Tails** (0.5 day as `Stretch` streaks, 1.5 days as ribbons): 68 skills, 34 tree skills.
-6. **Lights** (1 day: a budgeted `PointLight` per effect): 157 skills, 96 tree skills, but only 15 % of the emitters.
-7. **Camera shakes** (0.5 day, `fx_shake_cameras`: 22 skills, 46 items), **decals** on terrain (1 day, 31 skills: ground rings),
-   **material flashes** (1 day, 24 skills), **per level visual groups** (0.5 day).
-8. **Collisions** (1 day, terrain only: sparks that bounce, 62 skills) and **emission shapes** (1 to 2 days, 37 skills) last.
-9. **Sounds and voices** (168 skills with a sound, 137 with a voice) need a sound system first (`Sounds/x2skills:...` names); a
+4. **Tails** (0.5 day as `Stretch` streaks, 1.5 days as ribbons): 68 skills, 34 tree skills.
+5. **Lights** (1 day: a budgeted `PointLight` per effect): 157 skills, 96 tree skills, but only 15 % of the emitters.
+6. **Decals** on terrain (1 day, 31 skills: ground rings) and **material flashes** (1 day, 24 skills).
+7. **Collisions** (1 day, terrain only: sparks that bounce, 62 skills) and **emission shapes** (1 to 2 days, 37 skills) last.
+8. **Sounds and voices** (168 skills with a sound, 137 with a voice) need a sound system first (`Sounds/x2skills:...` names); a
    separate project.
 
 ## Not done
 
-* Channeling skills (`channeling_anim_id`, `channeling_time`): the channel clip is not played. Looping clips of plot steps and fire
-  clips (`anims.loop`) play once, stop markers do not end a cast loop, and the controller and instrument anims are unused; see
-  "Coverage" for the counts.
-* Two-handed / dual wield clip choice for plot steps is whatever the step names; the weapon in the hand is a single sword
-  (`Grip::Blade` puts the main hand weapon in the right hand, an off-hand weapon in the left).
+* Channel poses of the skills that have none in the skill data (Play Dead, `/bow`, `/kneel`: 3 of the 12 channeling skills).
+* The client never sends `CSStopCastingPacket`: a player that walks during a cast keeps casting (the real client cancels it), so
+  `CastingStopped` only arrives when the server interrupts (a hit, a stun). The visuals for it are tested with `AA_COMBAT_FAKE`.
+* The two handed sword is tied to the right hand bone (the clip's pose holds it with both hands only because the grip is
+  close); a dual wielder's second sword sits on `item_hand_l`. The instruments are placed by their `attachment_offset` of the
+  right hand only (no frame of a real capture to compare).
+* Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
+  starts at HIT plays when the damage lands (a miss does not shake).
 * Mounted, swimming and flying casters, doodad and ship cannon projectiles.
-* Sounds and voices (`FxSound`, `FxVoice`), camera shakes and decals of the effect groups, `FxMaterial` flashes on the hit.
+* Sounds and voices (`FxSound`, `FxVoice`), decals of the effect groups, `FxMaterial` flashes on the hit.
 * Particle features aa-fx lacks (refraction materials, geometry particles, trails) show as their plain emitters: the
   `skill_refraction_*` distortions of the cast and hit effects are missing.
 * A dead rat in a pond lies below the water surface (the corpse is not lifted).
