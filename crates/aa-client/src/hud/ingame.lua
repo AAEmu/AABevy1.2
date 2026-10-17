@@ -382,37 +382,13 @@ HUD.enter_world = function()
 end
 
 -- Chat input ----------------------------------------------------------------------------------------------
--- Enter (or "/") opens the chat window's own edit box; Enter again sends the line to the channel of the
--- last slash command (say at first); Escape closes it. "/w name text" whispers, "/1" shouts, "/p" party.
-local chat = { channel = 0, target = "" }
-local SLASH = {
-  s = "SAY", say = "SAY", ["1"] = "ZONE", y = "ZONE", shout = "ZONE", ["2"] = "TRADE", trade = "TRADE",
-  ["3"] = "FIND_PARTY", findparty = "FIND_PARTY", p = "PARTY", party = "PARTY", r = "RAID", raid = "RAID",
-  n = "FACTION", nation = "FACTION", faction = "FACTION", e = "EXPEDITION", ex = "EXPEDITION",
-  f = "FAMILY", family = "FAMILY", a = "RACE", ally = "RACE", alliance = "RACE",
-}
-local CHANNEL_LABEL = {
-  SAY = "Say", ZONE = "Shout", TRADE = "Trade", FIND_PARTY = "Party Search", PARTY = "Party", RAID = "Raid",
-  FACTION = "Nation", EXPEDITION = "Guild", FAMILY = "Family", RACE = "Alliance",
-}
-
+-- Enter (or "/") opens the chat window's own edit box; the toolkit parses the slash commands natively
+-- (`/s`, `/p`, `/1`, `/w Name ...`), keeps the channel for the next line and, on Enter, hands the line to
+-- AAUI.ChatSend, which asks the app to send it. Escape closes the box.
 local function chatEdit()
   local w = HUD.chat_window()
   if w == nil then return nil end
   return w:GetChatEdit()
-end
-
-local function channelValue(name) return _G["CHAT_" .. name] end
-
-local function showChannel(edit)
-  local label = "Say"
-  for name, text in pairs(CHANNEL_LABEL) do
-    if channelValue(name) == chat.channel then label = text end
-  end
-  if chat.target ~= "" then label = "To " .. chat.target end
-  local w = HUD.chat_window()
-  local selector = w and w:GetChatMethodSelector()
-  if selector ~= nil and selector.SetText ~= nil then selector:SetText(label) end
 end
 
 HUD.chat_open = function(prefill)
@@ -420,7 +396,6 @@ HUD.chat_open = function(prefill)
   if edit == nil then return end
   edit:Show(true)
   edit:SetText(prefill or "")
-  showChannel(edit)
   edit:SetFocus()
 end
 
@@ -432,37 +407,25 @@ HUD.chat_close = function()
   edit:Show(false)
 end
 
--- Send what was typed: a slash command picks the channel (and keeps it for the next line).
-HUD.chat_submit = function(text)
-  text = text or ""
-  local cmd, rest = string.match(text, "^/(%S+)%s*(.*)$")
-  if cmd ~= nil then
-    cmd = string.lower(cmd)
-    if cmd == "w" or cmd == "whisper" or cmd == "t" or cmd == "tell" then
-      local name, msg = string.match(rest, "^(%S+)%s*(.*)$")
-      if name ~= nil then
-        chat.channel, chat.target = CHAT_WHISPER, name
-        text = msg
-      else
-        text = ""
-      end
-    elseif SLASH[cmd] ~= nil then
-      chat.channel, chat.target = channelValue(SLASH[cmd]), ""
-      text = rest
-    end
+AAUI.ChatSend = function(channel, text, target)
+  text = string.gsub(text or "", "^%s+", "")
+  if text ~= "" then HUD.request("chat", channel, text, target or "") end
+end
+
+-- A click on a bound slot (after the script's own OnClick): the action bar slot is used like its number
+-- key; a right click on a bag item uses it (the bag window passes the real slot through X2Bag:SlotByIdx).
+AAUI.UseSlot = function(slotType, slotIdx, button)
+  if slotType == ISLOT_ACTION then
+    HUD.request("use_action", slotIdx)
+  elseif slotType == ISLOT_BAG and button == "RightButton" then
+    HUD.request("use_bag", slotIdx)
   end
-  text = string.gsub(text, "^%s+", "")
-  if text ~= "" then
-    HUD.request("chat", chat.channel, text, chat.target)
-  end
-  HUD.chat_close()
 end
 
 HUD.setup_chat = function()
   chat.channel = CHAT_SAY
   local edit = chatEdit()
   if edit == nil then return end
-  edit:SetHandler("OnEnterPressed", function(self) HUD.chat_submit(self:GetText()) end)
   edit:SetHandler("OnEscapePressed", function(self) HUD.chat_close() end)
   edit:Show(false)
 end

@@ -123,6 +123,8 @@ pub fn leave(how: i64, net: &mut MessageWriter<NetCommand>) {
 pub struct ScriptedSession {
     disconnect: Option<f32>,
     clicks: Vec<(f32, Vec2)>,
+    /// `--hud-rclick X Y T`: a right click.
+    rclicks: Vec<(f32, Vec2)>,
     /// `--hud-open ACTION T`: a key binding action (`toggle_character`, `toggle_bag`, ...) at T seconds.
     opens: Vec<(f32, String)>,
     started: Option<f32>,
@@ -147,10 +149,16 @@ impl ScriptedSession {
                         s.clicks.push((t, Vec2::new(x, y)));
                     }
                 }
+                "--hud-rclick" => {
+                    if let (Some(x), Some(y), Some(t)) = (num(i + 1), num(i + 2), num(i + 3)) {
+                        s.rclicks.push((t, Vec2::new(x, y)));
+                    }
+                }
                 _ => {}
             }
         }
         s.clicks.sort_by(|a, b| b.0.total_cmp(&a.0)); // pop from the end
+        s.rclicks.sort_by(|a, b| b.0.total_cmp(&a.0));
         s.opens.sort_by(|a, b| b.0.total_cmp(&a.0));
         s
     }
@@ -181,6 +189,10 @@ pub fn scripted_session(
         if let Err(e) = rt.hotkey(&action) {
             warn!("hud: --hud-open {action}: {e}");
         }
+    }
+    if let Some((_, at)) = script.rclicks.pop_if(|c| t >= c.0) {
+        pointer.pos = Some(at);
+        pointer.right_release = true;
     }
     if let Some((_, at)) = script.clicks.pop_if(|c| t >= c.0) {
         pointer.pos = Some(at);
