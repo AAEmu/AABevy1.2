@@ -41,6 +41,7 @@ mod data;
 mod formula;
 mod input;
 mod items;
+mod loot;
 mod marks;
 mod panels;
 mod plates;
@@ -252,6 +253,7 @@ impl Plugin for HudPlugin {
         }
         plates::plugin(app);
         combat::plugin(app);
+        loot::plugin(app);
         ring::plugin(app);
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
@@ -283,7 +285,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
                     cameras::dev_fov,

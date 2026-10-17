@@ -70,6 +70,8 @@ pub struct HudData {
     pub local_combat: bool,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
+    /// The loot window's rows and what it asked for (`loot.rs`).
+    pub loot: super::loot::LootView,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
 }
@@ -99,6 +101,7 @@ impl Default for HudData {
             texts: Default::default(),
             local_combat: false,
             casts: Default::default(),
+            loot: Default::default(),
             afk: false,
         }
     }
@@ -166,6 +169,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     install_functions(lua, &hud, bridge)?;
     super::combat::install(lua, &hud, bridge)?;
     super::cast::install(lua, &hud, bridge)?;
+    super::loot::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;

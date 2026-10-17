@@ -61,7 +61,12 @@ fn tint(relation: &str, character: bool) -> (&'static str, Color) {
 }
 
 fn load_image() -> Option<Image> {
-    let bytes = aa_cry::read(TEXTURE).ok()?;
+    dds_image(TEXTURE)
+}
+
+/// A DDS of the pak as a texture (linear filtering).
+pub(super) fn dds_image(path: &str) -> Option<Image> {
+    let bytes = aa_cry::read(path).ok()?;
     let dds = aa_cry::texture::Dds::parse(&bytes).ok()?;
     let (w, h) = (dds.width, dds.height);
     let mut image = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, dds.decode_rgba8(0, 0), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
