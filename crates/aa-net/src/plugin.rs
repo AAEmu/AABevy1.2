@@ -19,7 +19,7 @@ use bevy::ecs::system::SystemParam;
 use crate::session::{Client, Command, Event};
 use crate::state::{
     ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
-    Skills, Status, Target, Units, WorldInfo, Worlds,
+    Skills, Status, Target, Trade, Units, WorldInfo, Worlds,
 };
 
 /// Ask the session to do something.
@@ -111,6 +111,9 @@ macro_rules! net_state {
                         self.$field.set_changed();
                     }
                 )*
+                if self.trade.bypass_change_detection().seed_inventory(event, &self.inventory) {
+                    self.trade.set_changed();
+                }
                 if self.party.bypass_change_detection().seed_visible(event, &self.player, &self.units) {
                     self.party.set_changed();
                 }
@@ -145,4 +148,5 @@ net_state! {
     friends: Friends,
     repair: Repair,
     mailbox: Mailbox,
+    trade: Trade,
 }

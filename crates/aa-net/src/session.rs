@@ -254,6 +254,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
+    Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
     Friend(crate::friend::FriendCommand),
     Repair(crate::repair::RepairCommand),
@@ -477,6 +478,7 @@ pub enum Event {
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
+    Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
     Friend(crate::friend::FriendEvent),
     Repair(crate::repair::RepairEvent),
@@ -926,6 +928,13 @@ impl Session {
                     self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
                 }
             }
+            Command::Trade(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Trade(crate::trade::TradeEvent::RequestRejected { command, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::Trade(command.clone())).await {
+                    self.emit(Event::Trade(crate::trade::TradeEvent::Requested(command)));
+                }
+            }
             Command::Mail(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Mail(crate::mail::MailEvent::RequestRejected { command, message: message.into() }));
@@ -1293,6 +1302,12 @@ impl Session {
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
+            M::Trade(e) => {
+                if let crate::trade::TradeEvent::Made(tasks) = &e {
+                    self.emit(Event::ItemsChanged(tasks.clone()));
+                }
+                self.emit(Event::Trade(e));
+            }
             M::Mail(e) => self.emit(Event::Mail(e)),
             M::Friend(e) => self.emit(Event::Friend(e)),
             M::SkillLearned { skill_id, level } => self.emit(Event::SkillLearned { skill_id, level }),
@@ -1483,6 +1498,18 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn trade_settlement_changes_items_before_the_completion_notification() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let tasks = crate::items::ItemTasks { reason: crate::trade::TRADE_TASK,
+            tasks: vec![crate::items::ItemTask::Money(5)], ..Default::default() };
+        session.game_one(game::ServerMsg::Trade(crate::trade::TradeEvent::Made(tasks.clone()))).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ItemsChanged(got)) if got == tasks));
+        assert!(matches!(events.try_recv(), Ok(Event::Trade(crate::trade::TradeEvent::Made(got))) if got == tasks));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn resurrection_offer_is_emitted_before_the_following_death_details() {
