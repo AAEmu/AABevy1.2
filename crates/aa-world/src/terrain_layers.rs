@@ -91,7 +91,8 @@ impl TerrainParams {
         let mut layers = [Vec4::ZERO; SURFACE_TYPES * PROJECTIONS * ENTRY];
         for entry in layers.chunks_mut(ENTRY) {
             entry[0] = Vec4::new(-1.0, -1.0, 0.0, 0.0);
-            entry[2] = Vec4::new(-1.0, 0.0, 0.0, 0.0);
+            entry[2] = Vec4::new(-1.0, 0.0, 0.0, 1.0);
+            entry[3] = Vec4::new(0.0, 0.0, 1.0, 1.0);
         }
         TerrainParams { tint: tint.extend(DETAIL_DISTANCE), layers }
     }
@@ -176,6 +177,8 @@ struct Projection {
     tile: [f32; 2],
     /// `DetailTextureStrength`.
     strength: f32,
+    /// The material's `Diffuse` colour (`MatDifColor`, linear), a factor of the lit layer.
+    color: [f32; 3],
     /// The detail normal map (`Detail` texture, `DETAIL_BUMP_MAPPING`), its tiling relative to the layer
     /// uv (`DetailBumpTillingU / V`) and `DetailBumpScale`.
     detail: Option<u16>,
@@ -332,6 +335,7 @@ impl LayerLibrary {
                                 normal_small: big.is_none() && small.is_some(),
                                 tile: pr.tile,
                                 strength: pr.strength,
+                                color: pr.color,
                                 detail: slot(2, &pr.detail),
                                 detail_tile: pr.detail_tile,
                                 detail_scale: pr.detail_scale,
@@ -400,6 +404,9 @@ impl LayerLibrary {
                     params.layers[i + 2] = Vec4::new(detail as f32, du, dv, 0.0);
                     params.layers[i + 3] = Vec4::new(doff[0], doff[1], 0.0, 0.0);
                 }
+                params.layers[i + 2].w = proj.color[0];
+                params.layers[i + 3].z = proj.color[1];
+                params.layers[i + 3].w = proj.color[2];
             }
         }
         Some(params)
@@ -481,6 +488,7 @@ struct RawProjection {
     normal: Option<String>,
     tile: [f32; 2],
     strength: f32,
+    color: [f32; 3],
     detail: Option<String>,
     detail_tile: [f32; 2],
     detail_scale: f32,
@@ -500,6 +508,7 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
             normal: normal.map(|t| t.pak_path()),
             tile,
             strength: param("DetailTextureStrength", 1.0),
+            color: m.diffuse.to_array(),
             detail: detail.map(|t| t.pak_path()),
             detail_tile: [param("DetailBumpTillingU", 1.0), param("DetailBumpTillingV", 1.0)],
             detail_scale: param("DetailBumpScale", 1.0),
@@ -776,6 +785,23 @@ mod tests {
         let small = "game/textures/aa_terrain/canyon/cliff_rock_b_ddn.dds";
         assert!(load_layer(small, Kind::Normal).is_none());
         assert_eq!(load_layer(small, Kind::Detail).unwrap().len(), Kind::Detail.layer_bytes());
+    }
+
+    /// The material's `Diffuse` colour reaches the table (the Royal Palace court yard is `tr_af_pavingstone_001b`,
+    /// 0.82 / 0.82 / 0.78), and a layer without one keeps a white factor.
+    #[test]
+    fn material_colour_in_the_table() {
+        if !crate::pak_available() {
+            return;
+        }
+        let built = LayerLibrary::build("main_world", [(13, 10)].into_iter()).unwrap();
+        let params = built.library.params((13, 10), Vec3::ONE).unwrap();
+        let entry = (13 * PROJECTIONS + 2) * ENTRY;
+        let colour = Vec3::new(params.layers[entry + 2].w, params.layers[entry + 3].z, params.layers[entry + 3].w);
+        assert!((colour - Vec3::new(0.819_963_8, 0.819_963_8, 0.781_750_8)).abs().max_element() < 1e-4, "{colour}");
+        // a projection the material does not have stays white
+        let unused = (13 * PROJECTIONS) * ENTRY;
+        assert_eq!((params.layers[unused + 2].w, params.layers[unused + 3].zw()), (1.0, Vec2::ONE));
     }
 
     #[test]
