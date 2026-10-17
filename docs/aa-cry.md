@@ -250,7 +250,10 @@ no Y flip; `perceptual_roughness` from `Shininess` (`(2/(n+2))^0.25`); `reflecta
 `min(luma(Specular) * SpecularModifierInHDR / 2, 0.5)` (0.35 above a gain of 3); `MtlFlags & 2`
 -> double sided; `Opacity < 1` -> blend; `AlphaTest > 0` -> mask, except when the diffuse map has
 no alpha (mean alpha of the smallest mip >= 0.98: costume materials all carry `AlphaTest 0.5` on
-BC1 maps); additive flag -> add; `TexMod` of the diffuse slot -> `uv_transform`.
+BC1 maps); additive flag -> add, but only for translucent materials and effect textures (`p_effects`,
+`sprites`, none): some 330 opaque `Illum` materials (costume skins, the Hariharan rail sets and
+detect machines, Nuian tents) carry the flag and are drawn opaque by the real client; added they
+were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_transform`.
 
 | shader | mapping |
 |---|---|
