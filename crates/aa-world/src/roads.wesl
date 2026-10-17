@@ -11,6 +11,7 @@ struct OpacityParams {
     mask: vec4<f32>,
     uv_x: vec4<f32>,
     uv_y: vec4<f32>,
+    attenuation: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> opacity: OpacityParams;
@@ -20,6 +21,10 @@ struct OpacityParams {
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
+    if opacity.attenuation.w > 0.0 {
+        let relative = (in.world_position.xyz - opacity.attenuation.xyz) * opacity.attenuation.w;
+        pbr_input.material.base_color.a *= saturate(1.0 - dot(relative, relative));
+    }
     if opacity.uv_x.w > 0.0 {
         let uv = vec2<f32>(dot(opacity.uv_x.xyz, vec3<f32>(in.uv, 1.0)), dot(opacity.uv_y.xyz, vec3<f32>(in.uv, 1.0)));
         let mask = saturate(dot(opacity.mask, textureSample(opacity_map, opacity_sampler, uv)));

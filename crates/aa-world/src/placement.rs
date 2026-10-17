@@ -96,10 +96,45 @@ impl Vegetation {
     }
 }
 
-/// A terrain decal (`SDecalChunk`, 111 B). Kept raw: position, size and material id.
+/// A static decal (`SDecalChunk`, 111 B), in cell-local cry space.
 #[derive(Clone, Debug)]
 pub struct Decal {
+    pub bbox: [f32; 6],
+    pub max_view_dist: f32,
+    /// 0 planar, 1 static receivers, 2 terrain, 3 both; 4..7 are deferred variants.
+    pub projection: u8,
+    pub deferred: bool,
+    /// Front/back projection depth as a fraction of radius (packed as `1 - byte / 255`).
+    pub depth: [f32; 2],
+    pub pos: Vec3,
+    /// Authoring normal, sometimes scaled by the decal radius.
+    pub normal: Vec3,
+    /// Right/up/front basis, stored row-major in the file.
+    pub basis: bevy::math::Mat3,
+    pub radius: f32,
+    pub material: u32,
+    pub sort_priority: u8,
+    /// Retained for the remaining deferred flags.
     pub raw: Vec<u8>,
+}
+
+fn read_decal(b: &[u8]) -> Decal {
+    let material = u32_at(b, 107);
+    let depth = |v: u8| 1.0 - if v == 255 { 254.0 } else { v as f32 } / 255.0;
+    Decal {
+        bbox: std::array::from_fn(|i| f32_at(b, i * 4)),
+        max_view_dist: f32_at(b, 28),
+        projection: b[39],
+        deferred: b[40] != 0,
+        depth: [depth(b[41]), depth(b[42])],
+        pos: Vec3::new(f32_at(b, 43), f32_at(b, 47), f32_at(b, 51)),
+        normal: Vec3::new(f32_at(b, 55), f32_at(b, 59), f32_at(b, 63)),
+        basis: bevy::math::Mat3::from_cols_array(&std::array::from_fn(|i| f32_at(b, 67 + i * 4))).transpose(),
+        radius: f32_at(b, 103),
+        material: material & 0x00ff_ffff,
+        sort_priority: (material >> 24) as u8,
+        raw: b.to_vec(),
+    }
 }
 
 /// A terrain road (`SRoadChunk_NEW`, 63 B followed by paired left/right spline edges).
@@ -414,7 +449,7 @@ fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
         match t {
             1 => out.brushes.push(read_brush(r.bytes(128).ok()?, Vec3::ZERO)),
             2 => out.vegetation.push(read_vegetation(r.bytes(64).ok()?, Vec3::ZERO)),
-            9 => out.decals.push(Decal { raw: r.bytes(111).ok()?.to_vec() }),
+            9 => out.decals.push(read_decal(r.bytes(111).ok()?)),
             13 => {
                 let head = r.bytes(63).ok()?;
                 let points = u32_at(head, 39) as usize;
@@ -501,6 +536,25 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decal_packed_fields_and_row_major_basis_match_native_layout() {
+        let mut b = [0u8; 111];
+        b[39..43].copy_from_slice(&[3, 1, 0, 255]);
+        b[103..107].copy_from_slice(&2.0f32.to_le_bytes());
+        b[107..111].copy_from_slice(&0x15000037u32.to_le_bytes());
+        let rotation = [0.0f32, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        for (i, value) in rotation.iter().enumerate() { b[67 + i * 4..71 + i * 4].copy_from_slice(&value.to_le_bytes()); }
+        let decal = read_decal(&b);
+        assert_eq!(decal.projection, 3);
+        assert!(decal.deferred);
+        assert_eq!(decal.material, 55);
+        assert_eq!(decal.sort_priority, 21);
+        assert_eq!(decal.basis.x_axis, Vec3::Y);
+        assert_eq!(decal.basis.y_axis, Vec3::NEG_X);
+        assert_eq!(decal.depth[0], 1.0);
+        assert!((decal.depth[1] - 1.0 / 255.0).abs() < 1e-6);
+    }
 
     #[test]
     fn road_count_is_bounded_by_its_octree_block() {

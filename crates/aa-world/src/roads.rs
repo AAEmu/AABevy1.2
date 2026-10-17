@@ -30,6 +30,8 @@ pub struct OpacityParams {
     /// Rows of the opacity map's own UV transform; `uv_x.w` enables the texture.
     uv_x: Vec4,
     uv_y: Vec4,
+    /// Static projected decals: world centre and inverse spherical fade radius. Roads use zero.
+    attenuation: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -64,7 +66,7 @@ type MaterialSlot = Arc<OnceLock<Option<MaterialData>>>;
 
 /// Shared by placement workers so neighbouring cells decode a road material once.
 #[derive(Clone, Default)]
-pub(crate) struct RoadAssets(Arc<Mutex<HashMap<String, MaterialSlot>>>);
+pub(crate) struct RoadAssets(Arc<Mutex<HashMap<(String, bool), MaterialSlot>>>);
 
 pub(crate) struct RoadMesh {
     pub mesh: Mesh,
@@ -72,13 +74,39 @@ pub(crate) struct RoadMesh {
     pub priority: u8,
     pub radius: f32,
     pub distance: f32,
+    pub attenuation: Vec4,
 }
 
 impl RoadAssets {
-    fn material(&self, loader: &CryLoader, path: &str) -> MaterialSlot {
-        let slot = self.0.lock().unwrap().entry(path.to_string()).or_default().clone();
-        slot.get_or_init(|| prepare_material(loader, path));
+    fn material(&self, loader: &CryLoader, path: &str, clamp: bool) -> MaterialSlot {
+        let slot = self.0.lock().unwrap().entry((path.to_string(), clamp)).or_default().clone();
+        slot.get_or_init(|| prepare_material(loader, path, clamp));
         slot
+    }
+
+    pub(crate) fn decal(
+        &self,
+        loader: &CryLoader,
+        path: &str,
+        mesh: Mesh,
+        priority: u8,
+        radius: f32,
+        distance: f32,
+        attenuation: Vec4,
+    ) -> Option<RoadMesh> {
+        if path.is_empty() {
+            return None;
+        }
+        let material = self.material(loader, path, true);
+        material.get()?.as_ref()?;
+        Some(RoadMesh {
+            mesh,
+            material,
+            priority,
+            radius,
+            distance,
+            attenuation,
+        })
     }
 }
 
@@ -87,7 +115,9 @@ impl RoadMesh {
     pub fn material(&self, cry: &mut CryAssets, materials: &mut Assets<RoadMaterial>) -> Option<Handle<RoadMaterial>> {
         let data = self.material.get()?.as_ref()?;
         let mut handles = data.handles.lock().unwrap();
-        if let Some(handle) = handles.get(&self.priority) {
+        if self.attenuation.w == 0.0
+            && let Some(handle) = handles.get(&self.priority)
+        {
             return Some(handle.clone());
         }
         let mut textures = data.textures.lock().unwrap();
@@ -98,23 +128,26 @@ impl RoadMesh {
             aa_cry::shade::to_standard_material(&data.source, |path, srgb| textures.get(&(texture_pak_path(path), srgb)).cloned())?;
         // Vertex alpha fades the true ends of a spline; the diffuse alpha and separate opacity
         // texture soften its banks. Masking this loses the original soft transition.
-        material.alpha_mode = AlphaMode::Blend;
+        if !matches!(material.alpha_mode, AlphaMode::Add) {
+            material.alpha_mode = AlphaMode::Blend;
+        }
         material.depth_bias = self.priority as f32;
         let opacity = data
             .source
             .texture(&TextureMap::Opacity)
             .and_then(|t| textures.get(&(t.pak_path(), false)).cloned());
-        let extension = RoadExtension {
-            params: opacity_params(&data.source, opacity.is_some()),
-            opacity,
-        };
+        let mut params = opacity_params(&data.source, opacity.is_some());
+        params.attenuation = self.attenuation;
+        let extension = RoadExtension { params, opacity };
         let handle = materials.add(ExtendedMaterial { base: material, extension });
-        handles.insert(self.priority, handle.clone());
+        if self.attenuation.w == 0.0 {
+            handles.insert(self.priority, handle.clone());
+        }
         Some(handle)
     }
 }
 
-fn prepare_material(loader: &CryLoader, path: &str) -> Option<MaterialData> {
+fn prepare_material(loader: &CryLoader, path: &str, clamp: bool) -> Option<MaterialData> {
     let path = if path.to_ascii_lowercase().ends_with(".mtl") {
         path.to_string()
     } else {
@@ -137,7 +170,13 @@ fn prepare_material(loader: &CryLoader, path: &str) -> Option<MaterialData> {
             .resolve_texture(&key)
             .and_then(|path| aa_pak::Pak::global().read(&path).ok())
             .and_then(|bytes| load_dds(&bytes, DdsOptions { srgb, ..default() }).ok());
-        if let Some(image) = image {
+        if let Some(mut image) = image {
+            if clamp {
+                let mut sampler = aa_cry::texture::repeat_sampler();
+                sampler.address_mode_u = bevy::image::ImageAddressMode::ClampToEdge;
+                sampler.address_mode_v = bevy::image::ImageAddressMode::ClampToEdge;
+                image.sampler = bevy::image::ImageSampler::Descriptor(sampler);
+            }
             images.insert((key, srgb), image);
         }
     }
@@ -177,6 +216,7 @@ fn opacity_params(source: &Material, enabled: bool) -> OpacityParams {
             enabled as u8 as f32,
         ),
         uv_y: Vec4::new(transform.matrix2.x_axis.y, transform.matrix2.y_axis.y, transform.translation.y, 0.0),
+        attenuation: Vec4::ZERO,
     }
 }
 
@@ -193,7 +233,7 @@ pub(crate) fn prepare_cell(
             continue;
         };
         let Some(mesh) = road_mesh(road, cell, terrain) else { continue };
-        let material = assets.material(loader, path);
+        let material = assets.material(loader, path, false);
         if material.get().is_none_or(|m| m.is_none()) {
             continue;
         }
@@ -205,6 +245,7 @@ pub(crate) fn prepare_cell(
             priority: road.sort_priority,
             radius: (max - min).length() * 0.5,
             distance: road.max_view_dist,
+            attenuation: Vec4::ZERO,
         });
     }
     out
