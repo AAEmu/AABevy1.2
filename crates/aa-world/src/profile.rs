@@ -98,6 +98,17 @@ impl Plugin for ProfilePlugin {
         }
         uncapped(app);
         aa_cry::prof::enable(true);
+        // `AA_SAMPLE="Render thread,main"` (optionally `AA_SAMPLE_AFTER=<s>`, `AA_SAMPLE_SECONDS=<s>`): a sampling profile of those threads
+        if let Ok(names) = std::env::var("AA_SAMPLE") {
+            let value = |name: &str, default: f32| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+            aa_cry::prof::sample_threads(
+                names.split(',').map(|n| n.trim().to_string()).collect(),
+                std::time::Duration::from_secs_f32(value("AA_SAMPLE_AFTER", 18.0)),
+                value("AA_SAMPLE_SECONDS", 8.0),
+                std::time::Duration::from_micros(700),
+                |line| info!("{line}"),
+            );
+        }
         if std::env::var_os("AA_OFFSCREEN").is_some() {
             app.add_systems(Update, offscreen);
         }

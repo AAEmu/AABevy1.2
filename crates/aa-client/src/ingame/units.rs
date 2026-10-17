@@ -19,6 +19,7 @@ use aa_net::model::Unit;
 use aa_net::state::{Doodads, Units};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion};
@@ -42,6 +43,21 @@ const MAX_JOBS: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;
+/// Characters beyond these distances (m) are animated at a lower rate (seconds between updates): 30 Hz, then 15 Hz. Sampling,
+/// bone transform propagation, skin extraction and the draw preparation all scale with the number of poses that change.
+const ANIMATION_LOD: [(f32, f32); 2] = [(25.0, 1.0 / 30.0), (45.0, 1.0 / 15.0)];
+/// Units farther than this (m) do not cast shadows: every shadow cascade draws every skinned part again.
+const SHADOW_RADIUS: f32 = 45.0;
+
+/// `AA_ANIM_LOD=0` / `AA_UNIT_SHADOW_RADIUS=<m>`: switches for performance experiments.
+fn tuning() -> (bool, f32) {
+    static T: std::sync::OnceLock<(bool, f32)> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        let lod = std::env::var("AA_ANIM_LOD").map_or(true, |v| v != "0");
+        let shadow = std::env::var("AA_UNIT_SHADOW_RADIUS").ok().and_then(|v| v.parse().ok()).unwrap_or(SHADOW_RADIUS);
+        (lod, shadow)
+    })
+}
 
 /// A spawned unit, smoothed towards the server's position.
 #[derive(Component)]
@@ -57,6 +73,8 @@ pub struct RemoteUnit {
     scale: f32,
     /// Measured ground speed, low-pass filtered (m/s).
     speed: f32,
+    /// Its meshes cast shadows (see [`SHADOW_RADIUS`]).
+    casting: bool,
 }
 
 #[derive(Component)]
@@ -386,6 +404,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             since_update: 1.0,
             scale,
             speed: 0.0,
+            casting: true,
         },
     ));
     // different idle phases, so a crowd does not breathe in step
@@ -470,7 +489,9 @@ pub struct Asleep(Animator);
 pub fn cull_units(
     mut commands: Commands,
     camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
-    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, Has<Animator>, Has<Asleep>), With<RemoteUnit>>,
+    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, Has<Asleep>)>,
+    children: Query<&Children>,
+    meshes: Query<(), With<Mesh3d>>,
     timers: Option<Res<aa_world::profile::Timers>>,
 ) {
     let _t = timers.as_deref().map(|t| t.time("units.cull"));
@@ -480,9 +501,10 @@ pub fn cull_units(
         Projection::Perspective(p) => (p.fov, p.aspect_ratio),
         _ => (0.75, 16.0 / 9.0),
     };
+    let (anim_lod, shadow_radius) = tuning();
     // half angle of the view cone's diagonal
     let half_diag = ((vfov * 0.5).tan() * (1.0 + aspect * aspect).sqrt()).atan();
-    for (entity, transform, mut visibility, awake, asleep) in &mut units {
+    for (entity, transform, mut visibility, mut unit, animator, asleep) in &mut units {
         let to = transform.translation() + Vec3::Y - cam_pos;
         let d = to.length();
         let in_view = d < 3.0 || (to / d).dot(forward).acos() < half_diag + (2.0 / d.max(2.0)).atan() + 0.1;
@@ -492,6 +514,7 @@ pub fn cull_units(
             *visibility = want;
         }
         let animate = show && d < ANIMATE_RADIUS;
+        let awake = animator.is_some();
         if animate && asleep {
             commands.queue(move |world: &mut World| {
                 if let Some(Asleep(a)) = world.entity_mut(entity).take::<Asleep>() {
@@ -504,6 +527,31 @@ pub fn cull_units(
                     world.entity_mut(entity).insert(Asleep(a));
                 }
             });
+        }
+        // the farther, the slower it animates
+        if let Some(mut a) = animator {
+            let wanted = if anim_lod { ANIMATION_LOD.iter().rev().find(|(from, _)| d > *from).map_or(0.0, |(_, interval)| *interval) } else { 0.0 };
+            if a.interval != wanted {
+                // stagger the updates of a crowd over the frames
+                if a.interval == 0.0 {
+                    a.accum = wanted * (entity.index_u32() % 7) as f32 / 7.0;
+                }
+                a.interval = wanted;
+            }
+        }
+        // shadows only near the camera
+        let casting = d < shadow_radius * if unit.casting { 1.1 } else { 0.9 };
+        if casting != unit.casting && show {
+            unit.casting = casting;
+            for e in children.iter_descendants(entity) {
+                if meshes.contains(e) {
+                    if casting {
+                        commands.entity(e).remove::<NotShadowCaster>();
+                    } else {
+                        commands.entity(e).insert(NotShadowCaster);
+                    }
+                }
+            }
         }
     }
 }
