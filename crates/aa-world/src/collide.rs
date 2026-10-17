@@ -1142,7 +1142,7 @@ mod tests {
                     let (from, to) = (pos + Vec3::Z, moved.pos + Vec3::Z);
                     let len = (to - from).length();
                     // (a start inside a model is pushed out by up to 1.2 m in one step: not a crossing)
-                    if len > 1e-4 && len < 0.5 && w.raycast_mask(from, to - from, len, Mask::STRUCTURES | Mask::PROPS).is_some_and(|h| h.normal.z.abs() < 0.5) {
+                    if (1e-4..0.5).contains(&len) && w.raycast_mask(from, to - from, len, Mask::STRUCTURES | Mask::PROPS).is_some_and(|h| h.normal.z.abs() < 0.5) {
                         crossed += 1;
                     }
                     let z = w.ground_below(moved.pos.x, moved.pos.y, pos.z, 0.5).map_or(pos.z, |g| g.height);
@@ -1275,7 +1275,7 @@ mod tests {
         }
         println!("{:.1} s: with physics {physics:?} (models, brushes), no physics but a visible mesh {visible:?}, nothing {none:?}, file missing {missing:?}, {} parse errors", t.elapsed().as_secs_f32(), errors.len());
         println!("physics triangles of all models: {tris_total}, biggest {max_tris:?}");
-        without.sort_by(|a, b| b.0.cmp(&a.0));
+        without.sort_by_key(|w| std::cmp::Reverse(w.0));
         for (n, p, size) in without.iter().take(30) {
             println!("  no physics: {n:5} x {p}  ({:.1} x {:.1} x {:.1} m)", size.x, size.y, size.z);
         }
