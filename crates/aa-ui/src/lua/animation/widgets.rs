@@ -34,17 +34,42 @@ impl WidgetSample {
     }
 }
 
-#[derive(Default)]
 pub(super) struct Widgets {
     states: HashMap<Id, State>,
     active: BTreeSet<Id>,
+    ui_scale: f32,
 }
 
-#[derive(Default)]
 struct State {
     alpha: Channel,
     scale: Channel,
     pivot: Option<Point>,
+    is_root: bool,
+    apply_ui_scale: bool,
+    explicit_scale: Option<f32>,
+}
+
+impl Default for Widgets {
+    fn default() -> Self {
+        Self {
+            states: Default::default(),
+            active: Default::default(),
+            ui_scale: 1.0,
+        }
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            alpha: Default::default(),
+            scale: Default::default(),
+            pivot: None,
+            is_root: false,
+            apply_ui_scale: true,
+            explicit_scale: None,
+        }
+    }
 }
 
 struct Channel {
@@ -117,15 +142,28 @@ impl Channel {
 }
 
 impl State {
-    fn sample(&self) -> WidgetSample {
+    fn raw_scale(&self, ui_scale: f32) -> f32 {
+        let baseline = if self.is_root && self.apply_ui_scale {
+            ui_scale
+        } else {
+            1.0
+        };
+        if self.scale.started {
+            self.scale.current * baseline
+        } else {
+            self.explicit_scale.unwrap_or(baseline)
+        }
+    }
+
+    fn sample(&self, ui_scale: f32) -> WidgetSample {
         WidgetSample {
             alpha: self.alpha.started.then_some(self.alpha.current),
-            scale: if self.scale.started {
-                self.scale.current
+            scale: self.raw_scale(ui_scale) / if self.is_root { ui_scale } else { 1.0 },
+            pivot: if self.scale.started {
+                self.pivot.unwrap_or(Point::Center)
             } else {
-                1.0
+                Point::Center
             },
-            pivot: self.pivot.unwrap_or(Point::Center),
         }
     }
     fn running(&self) -> bool {
@@ -137,7 +175,20 @@ impl Widgets {
     pub fn sample(&self, id: Id) -> WidgetSample {
         self.states
             .get(&id)
-            .map_or_else(Default::default, State::sample)
+            .map_or_else(Default::default, |s| s.sample(self.ui_scale))
+    }
+
+    pub fn set_ui_scale(&mut self, value: f32) {
+        if self.ui_scale != value {
+            self.ui_scale = value;
+            for s in self
+                .states
+                .values_mut()
+                .filter(|s| s.is_root && s.apply_ui_scale)
+            {
+                s.explicit_scale = None;
+            }
+        }
     }
 
     pub fn clear_alpha(&mut self, id: Id) {
@@ -151,13 +202,69 @@ impl Widgets {
     }
 }
 
+fn state(u: &mut Ui, id: Id) -> &mut State {
+    let is_root = u.tree.get(id).parent.is_none();
+    u.animations
+        .widgets
+        .states
+        .entry(id)
+        .or_insert_with(|| State {
+            is_root,
+            ..Default::default()
+        })
+}
+
 pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    m.set(
+        "SetScale",
+        method(lua, |lua, id, a| {
+            let mut u = ui(lua);
+            let ui_scale = u.animations.widgets.ui_scale;
+            let s = state(&mut u, id);
+            // Native 39265bd0 ignores SetScale while the scale animation is running.
+            if s.scale.running {
+                return none();
+            }
+            let before = s.sample(ui_scale);
+            s.scale.started = false;
+            let scale = a.f(1);
+            s.explicit_scale = Some(if scale.is_finite() { scale } else { 0.0 });
+            if s.sample(ui_scale) != before && u.tree.visible(id) {
+                u.tree.repaint();
+            }
+            // Native SetScale dispatches event 42 (OnScale), even for an identical value.
+            u.pending.push((id, "OnScale".into(), vec![]));
+            none()
+        })?,
+    )?;
+    m.set(
+        "ApplyUIScale",
+        method(lua, |lua, id, a| {
+            let mut u = ui(lua);
+            let ui_scale = u.animations.widgets.ui_scale;
+            let s = state(&mut u, id);
+            let raw = s.raw_scale(ui_scale);
+            s.apply_ui_scale = a.b(1, true);
+            // Freeze the current native scale when opting out of later global changes.
+            if s.scale.started {
+                let baseline = if s.is_root && s.apply_ui_scale {
+                    ui_scale
+                } else {
+                    1.0
+                };
+                s.scale.current = raw / baseline;
+            } else {
+                s.explicit_scale = Some(raw);
+            }
+            none()
+        })?,
+    )?;
     for (name, scale) in [("SetAlphaAnimation", false), ("SetScaleAnimation", true)] {
         m.set(
             name,
             method(lua, move |lua, id, a| {
                 let mut u = ui(lua);
-                let state = u.animations.widgets.states.entry(id).or_default();
+                let state = state(&mut u, id);
                 let timing = Timing {
                     velocity: positive(a.f(3)) * 1000.0,
                     acceleration: positive(a.f(4)) * 1000.0,
@@ -176,11 +283,13 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetStartAnimation",
         method(lua, |lua, id, a| {
             let mut u = ui(lua);
-            let state = u.animations.widgets.states.entry(id).or_default();
-            let before = state.sample();
+            let ui_scale = u.animations.widgets.ui_scale;
+            let state = state(&mut u, id);
+            let before = state.sample(ui_scale);
             state.alpha.start(a.b(1, false));
             state.scale.start(a.b(2, false));
-            let changed = state.sample() != before;
+            let scale_changed = state.sample(ui_scale).scale != before.scale;
+            let changed = state.sample(ui_scale) != before;
             if state.running() {
                 u.animations.widgets.active.insert(id);
             } else {
@@ -188,6 +297,9 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             }
             if changed && u.tree.visible(id) {
                 u.tree.repaint();
+            }
+            if scale_changed {
+                u.pending.push((id, "OnScale".into(), vec![]));
             }
             none()
         })?,
@@ -225,15 +337,19 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
             u.animations.widgets.active.remove(&id);
             continue;
         }
+        let ui_scale = u.animations.widgets.ui_scale;
         let state = u.animations.widgets.states.get_mut(&id).unwrap();
-        let before = state.sample();
+        let before = state.sample(ui_scale);
         if state.alpha.tick(positive(dt_ms) as f64) {
             ended.push((id, "OnAlphaAnimeEnd"));
         }
         if state.scale.tick(positive(dt_ms) as f64) {
             ended.push((id, "OnScaleAnimeEnd"));
         }
-        if before != state.sample() {
+        if before.scale != state.sample(ui_scale).scale {
+            ended.push((id, "OnScale"));
+        }
+        if before != state.sample(ui_scale) {
             repaint |= u.tree.visible(id);
         }
         if !state.running() {

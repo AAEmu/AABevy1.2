@@ -720,6 +720,7 @@ pub(crate) fn cooldown_quads(
             uv: crate::render::white_uv(),
             color,
             corners: Some([a, b, c, c]),
+            uvs: None,
             vcolors: None,
         });
     }

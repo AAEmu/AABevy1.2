@@ -18,6 +18,8 @@ use crate::lua::Ui;
 use crate::text::ATLAS_SIZE;
 use crate::tree::{ButtonState, DrawKind, Id, Kind, Rect, TextBlock, Tree, WidgetType};
 
+mod clip;
+
 /// Texture of a quad.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Tex {
@@ -39,6 +41,8 @@ pub struct Quad {
     /// Free vertex positions (top-left, top-right, bottom-right, bottom-left order) instead of
     /// the `pos` rectangle: triangles of the circle diagram.
     pub corners: Option<[[f32; 2]; 4]>,
+    /// UVs for clipped triangles; ordinary rectangles use `uv`.
+    pub uvs: Option<[[f32; 2]; 4]>,
     /// Per-vertex sRGB colours (same corner order) instead of `color`: gradients.
     pub vcolors: Option<[[f32; 4]; 4]>,
 }
@@ -213,7 +217,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         }
         // Clip after animation transforms, in the scaled ancestors' screen rectangles.
         if let Some(c) = u.animations.widget_clip_rect(&u.tree, id) {
-            clip_quads(&mut out[quads_start..], px(c, scale));
+            clip::quads(&mut out, quads_start, px(c, scale));
         }
     }
     let n = background_end.unwrap_or(out.len());
@@ -222,7 +226,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
 
 /// Cut quads to the pixel rectangle `c` (x0, y0, x1, y1), moving the texture coordinates with
 /// the cut edges; quads fully outside collapse to a point (zero area, draws nothing).
-fn clip_quads(quads: &mut [Quad], c: [f32; 4]) {
+fn clip_rectangles(quads: &mut [Quad], c: [f32; 4]) {
     for q in quads {
         if q.corners.is_some() {
             continue;
@@ -371,6 +375,7 @@ fn drawable_quads(
             uv: white_uv(),
             color,
             corners: None,
+            uvs: None,
             vcolors: None,
         }),
         DrawKind::Text => {
@@ -431,6 +436,7 @@ fn drawable_quads(
                                 uv: [sx[i] / tw, sy[j] / th, sx[i + 1] / tw, sy[j + 1] / th],
                                 color,
                                 corners: None,
+                                uvs: None,
                                 vcolors: None,
                             });
                         }
@@ -443,6 +449,7 @@ fn drawable_quads(
                         uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                         color,
                         corners: None,
+                        uvs: None,
                         vcolors: None,
                     });
                     // Icon image overlays (`AddTexture`), whole texture over the same rect.
@@ -454,6 +461,7 @@ fn drawable_quads(
                                 uv: [0.0, 0.0, 1.0, 1.0],
                                 color,
                                 corners: None,
+                                uvs: None,
                                 vcolors: None,
                             });
                         }
@@ -478,6 +486,11 @@ fn drawable_quads(
                 [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
             }));
         }
+    }
+    if animation.clip {
+        // Native 3928f877 saves this base rectangle before effect scale/rotation/movement;
+        // 3928fab9 clips to it for this phase, independently of ancestor scroll clipping.
+        clip::quads(out, first_quad, px(u.tree.rect(d), scale));
     }
 }
 
@@ -555,6 +568,7 @@ pub(crate) fn text_quads(
             ],
             color: c,
             corners: None,
+            uvs: None,
             vcolors: None,
         });
     };
@@ -607,6 +621,7 @@ pub(crate) fn text_quads(
                 uv: [sx / tw, sy / th, (sx + sw) / tw, (sy + sh) / th],
                 color: [1.0, 1.0, 1.0, a],
                 corners: None,
+                uvs: None,
                 vcolors: None,
             });
         }
@@ -633,6 +648,7 @@ pub(crate) fn text_quads(
                     ],
                     color: [1.0, 1.0, 1.0, a],
                     corners: None,
+                    uvs: None,
                     vcolors: None,
                 });
             }
@@ -669,6 +685,7 @@ fn picker_quads(
                 uv: white_uv(),
                 color: [1.0; 4],
                 corners: None,
+                uvs: None,
                 vcolors: Some(vc),
             });
         }
@@ -742,6 +759,7 @@ fn diagram_quads(
             uv: white_uv(),
             color,
             corners: Some([c, a, b, b]),
+            uvs: None,
             vcolors: None,
         });
     }
@@ -798,6 +816,7 @@ fn caret_quad(
         uv: white_uv(),
         color: [c[0], c[1], c[2], c[3] * alpha],
         corners: None,
+        uvs: None,
         vcolors: None,
     });
 }
@@ -846,13 +865,13 @@ pub fn held_quads(u: &mut Ui) -> Vec<Quad> {
         let Some(path) = h.icon.as_deref() else { return out };
         let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path)) else { return out };
         let r = Rect { x: h.offset[0], y: h.offset[1], w: tw as f32, h: th as f32 };
-        out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, vcolors: None });
+        out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, uvs: None, vcolors: None });
         return out;
     }
     let r = Rect { x: -HELD_ICON / 2.0, y: -HELD_ICON / 2.0, w: HELD_ICON, h: HELD_ICON };
     for path in [h.icon.as_deref(), h.frame.as_deref()].into_iter().flatten() {
         if let Some(resolved) = u.textures.resolve(path) {
-            out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, vcolors: None });
+            out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, uvs: None, vcolors: None });
         }
     }
     if h.count > 1 {
@@ -1016,7 +1035,7 @@ fn spawn_batches<M: Component>(
                     [x0, -y1, 0.0],
                 ]),
             }
-            uv.extend([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
+            uv.extend(q.uvs.unwrap_or([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]));
             let lin = |c: [f32; 4]| {
                 Color::srgba(c[0], c[1], c[2], c[3].clamp(0.0, 1.0))
                     .to_linear()

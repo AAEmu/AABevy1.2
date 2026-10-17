@@ -561,8 +561,9 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   run over elapsed time. `Animation(true, false)` plays once; `Animation(true, true)` repeats.
   Widget `SetStartAnimation(alpha, scale)` instead enables the two independent channels.
   Native velocity/acceleration timing and priority-controlled phase completion are
-  implemented, including `SetEffectScaleAxis` pivots. Effect clipping and arbitrary widget `SetScale` /
-  `SetAnimFrameInfo` timelines remain gaps.
+  implemented, including `SetEffectScaleAxis` pivots and per-phase `SetEffectClip` bounds.
+  Persistent widget `SetScale` and `ApplyUIScale` work with rendering, picking, clips and
+  effective geometry. The richer `damagedisplay:SetAnimFrameInfo` combat timeline remains a gap.
 * In-game HUD: what the 3D engine draws is not here (name plates over units, the world, the
   player model between the equipment slot columns). Cooldown sweeps: the direction and the
   time label format (`8`, `5m`, `2h`, `6d`) are guesses; no label on cooldowns of 1.5 s or less
@@ -753,6 +754,41 @@ binding on the secondary row. Its original `OnHide` ends capture. These are inpu
 the motion milestone above contains the associated UI rendering verification.
 Final regression check: `cargo test -p aa-ui --tests` — **88 passed, one font metrics test
 ignored**.
+
+## Native persistent scale and effect clipping
+
+`SetEffectClip(phase, enabled)` now clips to the drawable's original screen bounds before
+effect scale, rotation and movement. It is a phase property (native setter `39292070`, renderer
+`3928f877` / `3928fab9`); ancestor scroll clips are independent. Rotated quads and gradients
+are clipped as triangles with interpolated UVs and linear vertex colours, so rotating art
+also stays inside scroll windows. Normal rectangles keep the existing fast clipping path;
+no extra draw call or material is needed.
+
+Native `SetScale` (`39265bd0` / `3927d120`) sets a persistent local scale about the centre and
+ignores calls while a scale animation is running. Parent scale multiplies child scale
+(`3927b2f0`). Top-level UI windows use the global UI scale as their default, while explicit
+`SetScale` values are absolute; setting a tooltip to `UIParent:GetUIScale()` therefore avoids
+double scaling. `ApplyUIScale(false)` (`39265b90`) freezes its current scale across later
+global UI-scale changes. `GetEffectiveExtent` / `GetEffectiveOffset` report the rendered
+geometry, including ancestor animations/scales. Logical anchor geometry stays unchanged.
+Accepted `SetScale` calls and scale animation changes emit the native `OnScale` callback.
+
+Tests cover persistent parent/child scale, frozen and resumed global scale, manual-versus-
+animated scale ownership, original `tooltip_view.alb:SetInfo`, rotated effect clipping with
+affine UVs, and rotated child art clipped after parent scaling. The full regression suite
+passed 91 tests (one font metrics test ignored); the added scroll-clipping regression also
+passes, bringing the total to 92. Captures use the existing
+`ingame_hud` / `aa_dev` example; all windows closed and zero script errors:
+
+* `shots/aa-ui/animation/effect-clip.png`: original combo border at 2x scale and 45 degrees;
+  slot 3 clips to its base bounds while slot 5 shows the uncut diamond. 299 FPS active,
+  387–534 FPS before activation.
+* `shots/aa-ui/animation/bag-scale.png`: original bag at persistent 70% scale; panel art,
+  icons, text and controls scale together about its centre. Compared with
+  `reference/ingame/bag/real.png`. 393–473 FPS.
+* `shots/aa-ui/animation/tooltip-native-scale.png`: original skill tooltip at default scale,
+  compared with `reference/ingame/tooltip_skill/real.png`; panel, icon and text geometry
+  remain aligned. 442–521 FPS.
 
 `aa-client` needs to own these contracts (no client changes in this milestone):
 

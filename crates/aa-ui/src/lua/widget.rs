@@ -415,8 +415,8 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "GetEffectiveExtent",
         method(lua, |lua, id, _| {
             let u = ui(lua);
-            let (w, h) = u.tree.size(id);
-            ret(lua, (w * u.ui_scale, h * u.ui_scale))
+            let r = u.animations.widget_rect(&u.tree, id);
+            ret(lua, (r.w * u.ui_scale, r.h * u.ui_scale))
         })?,
     )?;
     def(
@@ -430,7 +430,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "GetEffectiveOffset",
         method(lua, |lua, id, _| {
             let u = ui(lua);
-            let r = u.tree.rect(id);
+            let r = u.animations.widget_rect(&u.tree, id);
             ret(lua, (r.x * u.ui_scale, r.y * u.ui_scale))
         })?,
     )?;
@@ -1031,7 +1031,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "UseDynamicDrawableState",
         "UseDynamicContentState",
         "SetMsgToParent",
-        "ApplyUIScale",
         "SetMaxTextLength",
         "SetNumberOnly",
         "SetLimitWidth",
@@ -1039,7 +1038,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "InheritAnimationData",
         "CheckOutOfScreen",
         "CorrectOffsetByScreen",
-        "SetScale",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
