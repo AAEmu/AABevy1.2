@@ -232,9 +232,9 @@ pub fn update_marks(
         let Ok((mut transform, mut visibility)) = marks.get_mut(placed.entity) else { continue };
         let root = plates.entities.get(id).and_then(|e| transforms.get(*e).ok()).map(|t| t.translation).or_else(|| units.get(*id).map(|u| aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z))));
         let Some(root) = root else { continue };
-        let scale = units.get(*id).map_or(1.0, |u| u.scale.max(0.3));
-        let height = plates.heights.get(id).map(|h| h.0).filter(|h| *h > 0.0).unwrap_or(1.8 * scale);
-        transform.translation = root + Vec3::Y * (height + super::plates::HEAD_GAP + GAP + BOB * (t * 3.0).sin());
+        let scale = units.get(*id).map_or(1.0, |u| u.scale);
+        let height = super::plates::unit_height(plates.heights.get(id).map(|h| h.0), scale, false);
+        transform.translation = root + Vec3::Y * (height + super::plates::head_gap(height, super::plates::HEAD_GAP) + GAP + BOB * (t * 3.0).sin());
         transform.rotation = Quat::from_rotation_y(t * SPIN);
         if *visibility != Visibility::Inherited {
             *visibility = Visibility::Inherited;

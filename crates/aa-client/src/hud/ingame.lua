@@ -131,6 +131,18 @@ X2Player.GetLaborPower = function(self) return S().labor end
 X2Player.GetMaxLaborPower = function(self) return S().max_labor end
 X2Player.GetBmPoint = function(self) return S().bm_point end
 X2Util.GetMyMoneyString = function(self) return S().money end
+-- Numbers as text: "1234567" -> "1,234,567" (the chat prints the XP gained so); decimal strings add as numbers
+-- (the gains of the floating "XP +N" text pile up while it shows).
+X2Util.MakeMarkedCiphersStr = function(self, text, ciphers)
+  text = tostring(text or "")
+  local sign, int, rest = string.match(text, "^([%-+]?)(%d+)(.*)$")
+  if not int then return text end
+  local marked = string.reverse((string.gsub(string.reverse(int), "(%d%d%d)", "%1,")))
+  return sign .. (string.gsub(marked, "^,", "")) .. rest
+end
+X2Util.StrNumericAdd = function(self, a, b)
+  return string.format("%d", (tonumber(a) or 0) + (tonumber(b) or 0))
+end
 
 -- World clock and zone -------------------------------------------------------------------------------
 -- Game time as (isAm, hour 1..12, minute).

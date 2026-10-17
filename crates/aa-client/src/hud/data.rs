@@ -67,6 +67,8 @@ pub struct SkillInfo {
     pub max_range: i64,
     /// `skills.desc` with the placeholders filled in as far as the database allows.
     pub desc: String,
+    /// `skills.weapon_slot_for_autoattack_id` is set: the auto attack (the combat text prints its hits white).
+    pub auto_attack: bool,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -198,7 +200,10 @@ pub struct GameData {
     pub world_rects: HashMap<u32, [f32; 4]>,
     /// `system_factions.id` -> English name.
     pub factions: HashMap<u32, String>,
-    /// `system_faction_relations`: (faction, other faction) -> 1 friendly, 2 neutral, 3 hostile.
+    /// `system_factions.mother_id` (0: none): the faction a faction belongs to; the root factions 1 (friendly to
+    /// all), 2 (neutral) and 3 (hostile) decide how everything under them looks to everyone.
+    pub faction_mother: HashMap<u32, u32>,
+    /// `system_faction_relations`: (faction, other faction) -> 1 hostile, 2 neutral, 3 friendly.
     pub relations: HashMap<(u32, u32), u8>,
     /// `sub_zones.id` -> English name.
     pub sub_zone_names: HashMap<u32, String>,
@@ -359,7 +364,7 @@ impl GameData {
                     multipliers.insert(r.get(0)?, (r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) * 100.0).round() as i64);
                 }
             }
-            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range FROM skills")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range, weapon_slot_for_autoattack_id FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -377,6 +382,7 @@ impl GameData {
                         channeling_ms: any_int(r, 11)?.max(0),
                         min_range: any_int(r, 12)?.max(0),
                         max_range: any_int(r, 13)?.max(0),
+                        auto_attack: any_int(r, 14)? > 0,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
                 );
@@ -482,11 +488,12 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name FROM system_factions")?;
+            let mut q = conn.prepare("SELECT id, name, mother_id FROM system_factions")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
                 data.factions.insert(id, name("system_factions", id, r.get(1)?));
+                data.faction_mother.insert(id, any_int(r, 2)?.max(0) as u32);
             }
         }
         {
@@ -573,13 +580,31 @@ impl GameData {
 
     /// How a unit of faction `other` looks to a unit of faction `own`: what the unit frames and
     /// name plates colour by (`"friendly"`, `"neutral"`, `"hostile"`).
+    ///
+    /// The server's rule (`SystemFaction.GetRelationState`): a faction under a root faction (`mother_id` 1, 2 or 3)
+    /// is friendly, neutral or hostile to everyone; otherwise the same group is friendly, and the stored
+    /// relation of the mother faction (or of the faction) decides: state 1 hostile, 2 neutral, 3 friendly.
     pub fn relation(&self, own: u32, other: u32) -> &'static str {
-        if own == other {
+        let (Some(_), Some(_)) = (self.factions.get(&own), self.factions.get(&other)) else { return "neutral" };
+        let mother = |f: u32| self.faction_mother.get(&f).copied().unwrap_or(0);
+        let group = |f: u32| if mother(f) != 0 { mother(f) } else { f };
+        let (mine, theirs) = (group(own), group(other));
+        for root in [mine, theirs] {
+            match root {
+                1 => return "friendly",
+                2 => return "neutral",
+                3 => return "hostile",
+                _ => {}
+            }
+        }
+        if mine == theirs {
             return "friendly";
         }
-        match self.relations.get(&(own, other)).or_else(|| self.relations.get(&(other, own))) {
-            Some(1) => "friendly",
-            Some(3) => "hostile",
+        let stored = |a: u32, b: u32| self.relations.get(&(a, b)).or_else(|| self.relations.get(&(b, a))).copied();
+        let state = if mother(own) != 0 && self.factions.contains_key(&mother(own)) { stored(mother(own), theirs).or(Some(3)) } else { stored(own, theirs) };
+        match state {
+            Some(1) => "hostile",
+            Some(3) => "friendly",
             _ => "neutral",
         }
     }

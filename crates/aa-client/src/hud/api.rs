@@ -63,6 +63,13 @@ pub struct HudData {
     pub yaw: f32,
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,
+    /// The floating combat texts that are playing (`combat.rs`).
+    pub texts: super::combat::Texts,
+    /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
+    /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
+    pub local_combat: bool,
+    /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
+    pub afk: bool,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -87,6 +94,9 @@ impl Default for HudData {
             pos: Vec3::ZERO,
             yaw: 0.0,
             skill_levels: Default::default(),
+            texts: Default::default(),
+            local_combat: false,
+            afk: false,
         }
     }
 }
@@ -112,6 +122,8 @@ const FAKE_INGAME: [(&str, &str); 8] = [
     ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
 ];
 const INGAME_LUA: &str = include_str!("ingame.lua");
+/// The native behaviour of the combat text widgets, run once the stage is built.
+const COMBAT_LUA: &str = include_str!("combat.lua");
 /// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
@@ -149,6 +161,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
+    super::combat::install(lua, &hud, bridge)?;
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
@@ -404,7 +417,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         mp,
         max_mp: max_mp.max(1),
         dead: stats.is_some_and(|s| s.dead),
-        in_combat: stats.is_some_and(|s| s.in_combat),
+        in_combat: stats.is_some_and(|s| s.in_combat) || data.local_combat,
         exp_percent,
         exp_cur,
         exp_need,
@@ -453,6 +466,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
 /// The events the client raises when the player has entered the world and the loading screen closed,
 /// then the chat channels joined and the lines received so far.
 pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) {
+    if let Err(e) = rt.exec("@combat.lua", COMBAT_LUA) {
+        warn!("hud: combat text widgets: {e}");
+    }
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }
@@ -587,9 +603,7 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     if old.level != new.level {
         rt.fire_event("LEVEL_CHANGED", (new.level as i64, id));
     }
-    if old.exp_cur != new.exp_cur || old.exp_need != new.exp_need {
-        rt.fire_event("EXP_CHANGED", (id, new.exp_cur, new.exp_cur.to_string()));
-    }
+    // EXP_CHANGED carries the amount gained: it comes with the server's event (`combat::route_combat`)
     // each labor change the server announced: the chat scripts print "Gained 10 Labor Point(s). (Total LP: 105)"
     // and the labor bar refreshes, both from the state pushed just now
     let fresh = new.labor_seq.saturating_sub(old.labor_seq) as usize;

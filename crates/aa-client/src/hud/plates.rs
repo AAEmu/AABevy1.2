@@ -14,6 +14,8 @@ use aa_net::state::{Player, Units};
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{CompositingSpace, Hdr};
+use bevy::ecs::system::SystemParam;
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::sprite::{Anchor, Text2dShadow};
@@ -120,6 +122,14 @@ struct Plate {
     text: Entity,
     fill: Entity,
     bar: Entity,
+    /// The dark inside of the framed bar of the selected target.
+    back: Entity,
+    /// Styled as the selected target (big name, framed bar), and as a corpse (grey name, empty bar).
+    targeted: bool,
+    dead: bool,
+    /// The "-Away-" line under the name of the player that is away from the keyboard.
+    status: Entity,
+    away: bool,
     has_bar: bool,
     name: String,
     fraction: f32,
@@ -133,7 +143,7 @@ pub struct PlateState {
     pub(super) entities: HashMap<u32, Entity>,
     scan_in: u32,
     /// Unit object id -> height of its model (metres) and the attempts spent measuring it.
-    pub(super) heights: HashMap<u32, (f32, u8)>,
+    pub(super) heights: HashMap<u32, (f32, u16)>,
     /// Unit object id -> maximum HP from the formulas and the frames until it is worked out again
     /// (the buffs and level it depends on change rarely).
     max_hp: HashMap<u32, (i32, u8)>,
@@ -146,33 +156,104 @@ fn srgb(c: (u8, u8, u8)) -> Color {
 /// Bar and name colours by how the unit stands to the player.
 fn colors(relation: &str) -> ((u8, u8, u8), (u8, u8, u8)) {
     match relation {
-        "hostile" => ((160, 32, 26), (230, 70, 50)),
+        // the Angry Rat of reference/ingame/combat_*: name (238, 107, 35), bar fill (146, 66, 21)
+        "hostile" => ((146, 66, 21), (238, 107, 35)),
         "friendly" => ((70, 126, 31), (115, 210, 51)),
         _ => ((155, 131, 0), (255, 216, 0)),
     }
 }
 
-/// The height of a unit's model above its root, from the bounds of its meshes.
-fn measure(root: Entity, children: &Query<&Children>, bounds: &Query<(&Aabb, &GlobalTransform)>, base_y: f32) -> Option<f32> {
-    let mut top: Option<f32> = None;
-    let mut stack = vec![root];
-    while let Some(e) = stack.pop() {
-        if let Ok((aabb, global)) = bounds.get(e) {
-            let (c, h) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
-            for sx in [-1.0, 1.0] {
-                for sy in [-1.0, 1.0] {
-                    for sz in [-1.0, 1.0] {
-                        let p = global.transform_point(c + h * Vec3::new(sx, sy, sz));
-                        top = Some(top.map_or(p.y, |t| t.max(p.y)));
+/// The faction a unit counts as: an NPC's is its template's, the packet's is the nation it was spawned for.
+fn unit_faction(game: Option<&super::data::GameData>, u: &aa_net::Unit) -> u32 {
+    let template = u.kind.template_id();
+    match game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0) {
+        Some(n) if n.faction_id != 0 => n.faction_id as u32,
+        _ => u.faction_id,
+    }
+}
+
+/// How a unit stands to the player (`"friendly"`, `"neutral"`, `"hostile"`): the plate's colours and the target ring's.
+pub(super) fn relation_of(game: Option<&super::data::GameData>, own_faction: u32, u: &aa_net::Unit) -> &'static str {
+    let faction = unit_faction(game, u);
+    let mut relation = game.map_or("neutral", |g| g.relation(own_faction, faction));
+    // the capture's villagers of the player's own faction (the newbie towns) are yellow, only players are green
+    if !matches!(u.kind, UnitKind::Character { .. }) && relation == "friendly" && faction == own_faction {
+        relation = "neutral";
+    }
+    relation
+}
+
+/// What measures a unit's model: the bounds of its static meshes and the joints of its skinned ones
+/// (skinned meshes carry no bounds: aa-cry draws them without frustum culling).
+#[derive(SystemParam)]
+pub(super) struct Measure<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
+    bounds: Query<'w, 's, (&'static Aabb, &'static GlobalTransform)>,
+    skins: Query<'w, 's, &'static SkinnedMesh>,
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    names: Query<'w, 's, &'static Name>,
+}
+
+/// A skeleton's top joint is in the head, the skin reaches a bit further (fraction of the height).
+const SKULL: f32 = 0.04;
+
+/// A unit's height for the plate, the quest mark and the floating texts: what was measured (a unit
+/// without a measure is as tall as a person), a character's limited to the height of a head.
+pub(super) fn unit_height(measured: Option<f32>, scale: f32, character: bool) -> f32 {
+    let scale = scale.max(0.3);
+    let height = measured.filter(|h| *h > 0.0).unwrap_or(1.8 * scale);
+    // a character's bounds take in the bow and the hair: the client puts the plate over the head
+    if character { height.min(CHARACTER_HEIGHT * scale) } else { height }
+}
+
+/// The part of a gap over the head a unit of this height gets: the plate of a rat sits close to the
+/// rat (the capture's bar is 0.24 m over its feet), the one of a person 0.3 m over the head.
+pub(super) fn head_gap(height: f32, gap: f32) -> f32 {
+    gap * (height / 1.8).clamp(0.0, 1.0).sqrt()
+}
+
+impl Measure<'_, '_> {
+    /// The height of a unit's model above its root, from the bounds of its meshes and joints.
+    fn height(&self, root: Entity, base_y: f32) -> Option<f32> {
+        // (the joints' global positions are of the last frame's propagation: measure from the root's)
+        let base_y = self.globals.get(root).map_or(base_y, |g| g.translation().y);
+        let mut top: Option<f32> = None;
+        let mut raise = |y: f32| top = Some(top.map_or(y, |t| t.max(y)));
+        let mut joint_top: Option<f32> = None;
+        let mut stack = vec![root];
+        while let Some(e) = stack.pop() {
+            if let Ok((aabb, global)) = self.bounds.get(e) {
+                let (c, h) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
+                for sx in [-1.0, 1.0] {
+                    for sy in [-1.0, 1.0] {
+                        for sz in [-1.0, 1.0] {
+                            raise(global.transform_point(c + h * Vec3::new(sx, sy, sz)).y);
+                        }
                     }
                 }
             }
+            if let Ok(skin) = self.skins.get(e) {
+                for j in &skin.joints {
+                    // (hair and cloth bones hang loose around the head)
+                    if self.names.get(*j).is_ok_and(|n| n.as_str().starts_with("rope")) {
+                        continue;
+                    }
+                    if let Ok(g) = self.globals.get(*j) {
+                        let y = g.translation().y;
+                        joint_top = Some(joint_top.map_or(y, |t| t.max(y)));
+                    }
+                }
+            }
+            if let Ok(kids) = self.children.get(e) {
+                stack.extend(kids.iter());
+            }
         }
-        if let Ok(kids) = children.get(e) {
-            stack.extend(kids.iter());
+        // (joints that are not posed yet sit at the origin: below the root)
+        if let Some(y) = joint_top.filter(|y| *y > base_y) {
+            raise(y + SKULL * (y - base_y));
         }
+        top.map(|t| (t - base_y).max(0.05))
     }
-    top.map(|t| (t - base_y).max(0.3))
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -184,11 +265,11 @@ pub fn update_plates(
     units: Res<Units>,
     buffs: Res<aa_net::state::Buffs>,
     player: Res<Player>,
+    target: Res<aa_net::state::Target>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>)>,
     named: Query<(Entity, &Name)>,
     transforms: Query<&Transform, Without<PlateRoot>>,
-    children: Query<&Children>,
-    bounds: Query<(&Aabb, &GlobalTransform)>,
+    measure: Measure,
     mut roots: Query<(&mut Transform, &mut Visibility), With<PlateRoot>>,
     mut texts: Query<(&mut Text2d, &mut TextColor), Without<Sprite>>,
     mut sprites: Query<&mut Sprite, Without<Text2d>>,
@@ -266,17 +347,8 @@ pub fn update_plates(
             if name.is_empty() {
                 continue;
             }
-            // an NPC's faction is its template's; the packet's is the nation it was spawned for
-            let faction = match npc {
-                Some(n) if n.faction_id != 0 => n.faction_id as u32,
-                _ => u.faction_id,
-            };
-            let is_character = matches!(u.kind, UnitKind::Character { .. });
-            let mut relation = game.map_or("neutral", |g| g.relation(spawn.character().faction_id, faction));
-            // the capture's villagers of the player's own faction (the newbie towns) are yellow, only players are green
-            if !is_character && relation == "friendly" && faction == spawn.character().faction_id {
-                relation = "neutral";
-            }
+            let relation = relation_of(game, spawn.character().faction_id, u);
+            let faction = unit_faction(game, u);
             if !state.plates.contains_key(&w.id) {
                 debug!("hud: plate {} {:?}: faction {} (unit {}) own {} -> {}, entity {:?}", w.id, name, faction, u.faction_id, spawn.character().faction_id, relation, state.entities.get(&w.id));
             }
@@ -292,6 +364,11 @@ pub fn update_plates(
             let fraction = (u.hp as f32 / max_hp.max(u.hp).max(1) as f32).clamp(0.0, 1.0);
             (name, fraction, true, relation, u.scale, Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
         };
+        // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
+        let targeted = target.obj_id == Some(w.id) && !own_plate;
+        let dead = w.unit.is_some_and(|u| u.dead);
+        let away = own_plate && data.afk;
+        let fraction = if dead { 0.0 } else { fraction };
         // where its feet are in the 3D scene
         let entity = state.entities.get(&w.id).copied();
         let root_pos = match entity.and_then(|e| transforms.get(e).ok()) {
@@ -307,27 +384,35 @@ pub fn update_plates(
         let height = {
             let frame = state.scan_in;
             let entry = state.heights.entry(w.id).or_insert((0.0, 0));
-            if entry.1 < 40 && (entry.0 <= 0.0 || frame.is_multiple_of(10)) {
+            // (a model that is still loading has no bounds yet: ask every few frames until it has, a few hundred times)
+            let due = if entry.0 <= 0.0 { frame.is_multiple_of(3) } else { frame.is_multiple_of(10) };
+            if entry.1 < 400 && due {
                 entry.1 += 1;
-                if let Some(h) = entity.and_then(|e| measure(e, &children, &bounds, root_pos.y))
+                if let Some(h) = entity.and_then(|e| measure.height(e, root_pos.y))
                     && h > entry.0
                 {
+                    // (the first result is the unit at rest: a few more tries take in the late parts, not what the
+                    // animations do later, a rat that rears up in the fight is not tall)
+                    if entry.0 <= 0.0 {
+                        entry.1 = entry.1.max(370);
+                    }
                     entry.0 = h;
                     debug!("hud: plate height of unit {} ({}): {:.2} m (scale {:.2})", w.id, name, h, scale);
                 }
+                if (entry.1 == 20 || entry.1 == 400) && entry.0 <= 0.0 {
+                    debug!("hud: no bounds for unit {} ({}), entity {:?}, scale {:.2}", w.id, name, entity, scale);
+                }
             }
-            let height = if entry.0 > 0.0 { entry.0 } else { 1.8 * scale.max(0.3) };
-            // a character's bounds take in the bow and the hair: the client puts the plate over the head
-            if is_character { height.min(CHARACTER_HEIGHT * scale.max(0.3)) } else { height }
+            unit_height(Some(entry.0), scale, is_character)
         };
-        let Ok(screen) = camera.world_to_viewport(&camera_global, root_pos + Vec3::Y * (height + HEAD_GAP)) else { continue };
+        let Ok(screen) = camera.world_to_viewport(&camera_global, root_pos + Vec3::Y * (height + head_gap(height, HEAD_GAP))) else { continue };
         if screen.x < -100.0 || screen.y < -50.0 || screen.x > viewport.x + 100.0 || screen.y > viewport.y + 50.0 {
             continue;
         }
         // to the plate camera's space: origin in the middle, y up; whole pixels keep the bar crisp
         let x = (screen.x - viewport.x / 2.0).round();
         let y = (viewport.y / 2.0 - screen.y).round();
-        let (bar_color, text_color) = colors(relation);
+        let (bar_color, text_color) = if dead { ((60, 64, 60), (149, 149, 149)) } else { colors(relation) };
         seen.push(w.id);
 
         // a plate whose entities went away with the last game
@@ -365,12 +450,20 @@ pub fn update_plates(
                     commands.entity(p.fill).insert(want);
                     p.has_bar = bar;
                 }
+                if p.targeted != targeted || p.dead != dead || p.away != away {
+                    restyle(&mut commands, &font, p, targeted, dead, away, is_character);
+                }
+                if p.color != text_color {
+                    commands.entity(p.status).insert(TextColor(srgb(text_color)));
+                }
             }
             None => {
                 let visibility = if bar { Visibility::Inherited } else { Visibility::Hidden };
                 let mut text = Entity::PLACEHOLDER;
                 let mut fill = Entity::PLACEHOLDER;
                 let mut rim = Entity::PLACEHOLDER;
+                let mut back = Entity::PLACEHOLDER;
+                let mut status = Entity::PLACEHOLDER;
                 let layers = RenderLayers::layer(LAYER);
                 let root = commands
                     .spawn((
@@ -391,12 +484,33 @@ pub fn update_plates(
                                 layers.clone(),
                             ))
                             .id();
+                        back = c
+                            .spawn((
+                                Sprite::from_color(Color::srgb_u8(20, 24, 22), Vec2::new(BAR_W + 8.0, BAR_H + 4.0)),
+                                Anchor::BOTTOM_CENTER,
+                                Transform::from_xyz(0.0, -2.0, 0.15),
+                                Visibility::Hidden,
+                                layers.clone(),
+                            ))
+                            .id();
                         fill = c
                             .spawn((
                                 Sprite::from_color(srgb(bar_color), Vec2::new((BAR_W * fraction).round(), BAR_H)),
                                 Anchor::BOTTOM_LEFT,
                                 Transform::from_xyz(-BAR_W / 2.0, 0.0, 0.2),
                                 visibility,
+                                layers.clone(),
+                            ))
+                            .id();
+                        status = c
+                            .spawn((
+                                Text2d::new("-Away-"),
+                                TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(PLAYER_FONT_PX), ..default() },
+                                TextColor(srgb(text_color)),
+                                Text2dShadow { offset: Vec2::new(1.0, -1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+                                Anchor::BOTTOM_CENTER,
+                                Transform::from_xyz(0.0, BAR_H + 14.0, 0.3),
+                                Visibility::Hidden,
                                 layers.clone(),
                             ))
                             .id();
@@ -414,7 +528,7 @@ pub fn update_plates(
                             .id();
                     })
                     .id();
-                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, has_bar: bar, name, fraction, color: bar_color });
+                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color });
             }
         }
     }
@@ -436,6 +550,65 @@ pub fn update_plates(
     }
 }
 
+/// Gives a plate the look of the selected target (the capture's: the name at the player's size, the bar in a yellow
+/// frame with a dark inside) or of a corpse (the frame goes, the bar is empty), or back to the plain one.
+fn restyle(commands: &mut Commands, font: &PlateFont, p: &mut Plate, targeted: bool, dead: bool, away: bool, is_character: bool) {
+    p.targeted = targeted;
+    p.dead = dead;
+    p.away = away;
+    commands.entity(p.status).insert(if away { Visibility::Inherited } else { Visibility::Hidden });
+    let framed = targeted && !dead;
+    let big = is_character || targeted;
+    let (rim_color, rim_size, rim_y) = if framed {
+        (Color::srgb_u8(212, 200, 74), Vec2::new(BAR_W + 12.0, BAR_H + 8.0), -4.0)
+    } else {
+        (Color::srgba(0.0, 0.0, 0.0, 0.75), Vec2::new(BAR_W + 2.0, BAR_H + 2.0), -1.0)
+    };
+    commands.entity(p.bar).insert((Sprite::from_color(rim_color, rim_size), Transform::from_xyz(0.0, rim_y, 0.1)));
+    commands.entity(p.back).insert(if framed { Visibility::Inherited } else { Visibility::Hidden });
+    let above_bar = if framed { BAR_H + 8.0 } else { BAR_H + 6.0 };
+    commands.entity(p.text).insert((
+        TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(if big { PLAYER_FONT_PX } else { NPC_FONT_PX }), ..default() },
+        // the status line takes the place over the bar, the name moves up by its height
+        Transform::from_xyz(0.0, if big { above_bar + 8.0 } else { above_bar } + if away { AWAY_LINE } else { 0.0 }, 0.3),
+    ));
+}
+
+/// Pixels the "-Away-" line takes between the name and the bar (the capture: 405 and 428).
+const AWAY_LINE: f32 = 23.0;
+
+/// Seconds without a key or mouse input after which the client marks the player away (an assumption: the
+/// captures show "-Away-" on a character that had stood idle; the server knows nothing of it).
+const AWAY_AFTER_SECS: f32 = 300.0;
+
+/// `--hud-afk`: away at once (for screenshots).
+fn forced_away() -> bool {
+    std::env::args().any(|a| a == "--hud-afk")
+}
+
+/// Tracks the idle time and keeps `HudData::afk`.
+#[allow(clippy::too_many_arguments)]
+pub fn track_idle(
+    time: Res<Time<Real>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    bridge: NonSend<HudBridge>,
+    mut idle: Local<f32>,
+) {
+    let active = keys.get_pressed().next().is_some() || mouse.get_pressed().next().is_some() || motion.delta != Vec2::ZERO;
+    if active {
+        *idle = 0.0;
+    } else {
+        *idle += time.delta_secs();
+    }
+    let away = forced_away() || *idle > AWAY_AFTER_SECS;
+    let mut d = bridge.0.borrow_mut();
+    if d.afk != away {
+        d.afk = away;
+    }
+}
+
 /// Not with `--no-hud`.
 fn wanted(options: Option<Res<super::HudOptions>>) -> bool {
     options.is_none_or(|o| o.enabled)
@@ -449,7 +622,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(Screen::InGame), (despawn, super::marks::despawn))
         .add_systems(
             PostUpdate,
-            (update_plates, super::marks::update_marks).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
+            (update_plates, super::marks::update_marks, super::combat::update_texts, super::ring::update_ring).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
-        .add_systems(Update, (ensure_camera, match_camera).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
+        .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
 }
