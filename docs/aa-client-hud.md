@@ -128,7 +128,11 @@ The player's quests are `aa_net::Quests` (`SCQuests`, `SCCompletedQuests`, start
 reset packets). A mark is the original's skinned model (`objects/ui/quest_mark/exclamation_mark_red.chr`
 and `question_mark_red.chr`, the yellow / grey materials of the `*_mul.mtl` files, unlit) loaded through
 `aa-cry`: twice the model's size, 0.72 m above the plate's anchor, turning at 1.2 rad/s and bobbing 5 cm.
-The look is the capture's (about 40 px tall, 4-5 px above the name). Marks are refreshed every 30 frames for
+The original's `Illum` material (diffuse 0.2, emissive 0.1, a strong orange specular and glow) comes out as a
+flat bright gold, (217, 214, 70) at the top and (211, 164, 54) below; the world's post pass (fog, grade, film
+curve) washes a plain unlit texture out to (238, 232, 145), so the yellow marks draw a small float gradient
+texture (`RAMP_TOP` / `RAMP_BOTTOM`, scene-linear, blue slightly negative) calibrated to come out of the post pass as the
+capture's colours within 3 %. The look is the capture's (about 40 px tall, 4-5 px above the name). Marks are refreshed every 30 frames for
 NPCs within 45 m. The white beams over Maude in the capture are a particle effect of the NPC, not drawn.
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
