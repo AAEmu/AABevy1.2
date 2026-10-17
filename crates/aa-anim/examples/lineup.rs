@@ -8,6 +8,8 @@
 //!     [--only N]         only character N (0..7: nuian m/f, elf m/f, hariharan m/f, ferre m/f), at the origin
 //!     [--env I | --no-env]   reflection cubemap intensity (default 1500)
 //!     [--cam x,y,z --look x,y,z --fov deg]   camera override (close-ups)
+//!     [--msaa off] [--prepass 1]   MSAA off / depth + normal prepass (to isolate what turns a material white)
+//!     [--ssao 1]         screen space ambient occlusion (normal prepass, no MSAA): checks the materials in the prepass path
 //! ```
 
 use aa_anim::{AnimPlugin, CharacterDesc, ClipLibrary, Costume, GameDb, Gender, Race, spawn_character};
@@ -109,6 +111,19 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         Projection::Perspective(PerspectiveProjection { fov: fov.to_radians(), ..default() }),
         Transform::from_translation(cam).looking_at(look, Vec3::Y),
     ));
+    if arg("--ssao").is_some() {
+        use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
+        camera.insert((
+            Msaa::Off,
+            ScreenSpaceAmbientOcclusion { quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Low, ..default() },
+        ));
+    }
+    if arg("--msaa").as_deref() == Some("off") {
+        camera.insert(Msaa::Off);
+    }
+    if arg("--prepass").is_some() {
+        camera.insert((bevy::core_pipeline::prepass::DepthPrepass, bevy::core_pipeline::prepass::NormalPrepass));
+    }
     // the costume materials reference the game's own beach cubemap for reflections
     if arg("--no-env").is_none() {
         let intensity: f32 = arg("--env").and_then(|v| v.parse().ok()).unwrap_or(1500.0) * light_scale();

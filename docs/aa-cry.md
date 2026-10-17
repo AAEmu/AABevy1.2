@@ -245,18 +245,19 @@ BC1 maps); additive flag -> add; `TexMod` of the diffuse slot -> `uv_transform`.
 
 | shader | mapping |
 |---|---|
-| `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`); with `Shading::Full` and a `Specular` map: metallic / roughness texture baked from the map (`metal = smoothstep(0.2, 0.75, luma(map) * min(Specular * modifier, 1.5)) * f(ReflectAmount)`, matte roughness from `Shininess`, shiny 0.6 x that) |
+| `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`); with `Shading::Full` and a `Specular` map, three images are baked from the map (`g = luma(map) * min(Specular * modifier, 1.2)`): metallic / roughness (`metal = smoothstep(0.2, 0.75, g) * f(ReflectAmount)`; matte roughness from `Shininess`, glossy dielectric texels down to `SHARP_ROUGHNESS` 0.42 = sharper leather highlights, metal 0.6 x matte) and Bevy's `specular_texture` (alpha = `sqrt(SPEC_STRENGTH * g)`, the highlight strength of the dielectric part, `reflectance` 2.0) and `specular_tint_texture` (the map's colour, `SPEC_TINT_AMOUNT` 0.3 of it, only for warm maps: gold, bronze, leather; the greenish maps of plate armour stay white because the plates are silver in the captures) |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5) |
-| `Hair` | double sided, alpha-to-coverage (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness 0.7, reflectance 0.2, no emissive |
+| `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness 0.45, reflectance 0.22, no emissive, **no anisotropy** (see below); with `Shading::Full` the highlight strength follows the strand pattern of the hair map (`specular_texture` baked from the `Specular` map, `bake_hair_specular`): streaks along the strands |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
-| `Eye` | roughness 0.12, reflectance 0.5 (aa-anim composes the iris colour into the texture) |
+| `Eye` | roughness 0.12, reflectance 0.2 (more mirrors the sky over the iris: grey eyes; aa-anim composes the iris colour into the texture) |
 | `Metal` | metallic 0.6 |
 | `Glass`, `Liquid`, `Ice` | blend, alpha min(opacity, 0.6), roughness 0.1 |
 | `Water*`, `Ocean*` | blend, dark blue-green, roughness 0.05 |
 | particles, `FX_*`, `Light*`, beams, `Sky*`, clouds, `SpecialEffects`, `Hologram` | unlit, additive, double sided |
 | `NoDraw`/`Nodraw` (or flag 0x400), `Cut` | not drawn |
 
-Calibration constants (in `shade.rs` / `stage.rs`, with the reason next to them): `SKIN_PINK`,
+Calibration constants (in `shade.rs` / `stage.rs`, with the reason next to them): `SHARP_ROUGHNESS`,
+`SPEC_STRENGTH`, `SPEC_TINT_AMOUNT`, `HAIR_SPEC_REFLECTANCE` (specular maps), `SKIN_PINK`,
 `SKIN_PINK_WEIGHT`, `SKIN_GAIN` (pale skins show pink in the captures whatever their
 `BSkinColor`), `HAIR_GAMMA`, `stage::LOGIN_EXPOSURE` (3: the client's HDR exposure; the nominal
 light values make costumes three times too dark) and `login_color_grading` (saturation 1.6,
@@ -264,16 +265,31 @@ contrast 1.2: the client's colour grading).
 
 Effects on callers (aa-world, aa-client): `Emissive` is now tinted by the albedo and small (it
 used to be an additive grey glow); `HumanSkin` is no longer a flat 0.22 grey but the skin colour;
-hair is alpha-to-coverage (soft strand ends) instead of a hard mask; `Illum` materials with
+hair is an alpha mask on the doubled alpha (not alpha-to-coverage, see below); `Illum` materials with
 `AlphaTest` on opaque (BC1) maps are no longer alpha tested; `Specular > 1` no longer makes
 metal. Costume `Diffuse` stays 0.2: show characters with `StageLighting` (engine units) or about
 3x the nominal sun, not with a plain 10,000 lux light.
 
-Not mapped (no `StandardMaterial` equivalent without extra Bevy features): the specular map's
-*tint* and strength per pixel (needs Bevy's `pbr_specular_textures`, not enabled: requested),
-anisotropic hair highlights (`pbr_anisotropy_texture`), the SSS map, `Environment` cube maps per
+Hair and the prepasses (Bevy 0.20). The world renders with a depth prepass and, with SSAO, a
+normal prepass without MSAA (`LOAD_PREPASS_NORMALS`). Two things break hair there, both tested
+with `cargo run -p aa-anim --example lineup -- --only 3 --ssao 1` (also `--prepass 1`,
+`--msaa off`) and the aa-client pond shot with `AA_TUNE=ssao=1`:
+
+* **Anisotropy turns the hair white.** `pbr_fragment` sets `anisotropy_strength`, `anisotropy_T`
+  and `anisotropy_B` only in the branch that computes the normal itself; with
+  `LOAD_PREPASS_NORMALS` they stay zero while the lighting still takes the anisotropic path
+  (`STANDARD_MATERIAL_ANISOTROPY`), whose GGX term (`D` with `ToH = BoH = 0`) explodes. It is not
+  about mesh tangents and not fixable from the material, so the hair has no `anisotropy_strength`;
+  `bake_hair_specular` gives the streaks instead.
+* **Alpha-to-coverage turns the transparent fringe of the hair mesh black** with any depth
+  prepass (the prepass treats it as opaque and writes the depth of the whole mesh, the main pass
+  covers nothing there and the head behind fails the depth test), so hair is `Mask(0.5)` on the
+  doubled alpha. The unit test `hair_is_safe_in_the_depth_and_normal_prepasses` keeps both.
+
+Not mapped (no `StandardMaterial` equivalent): the SSS map, `Environment` cube maps per
 material (scene-level: use `stage::environment_light`), detail maps and blend layers (surveyed:
-they occur on terrain and a few props only; no character material uses them), vertex bending.
+they occur on terrain and a few props only; no character material uses them), vertex bending,
+Kajiya-Kay's strand direction (the streaks come from the strand map, not from a tangent).
 
 ## Tests
 
@@ -312,14 +328,16 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
 
 ## Known gaps
 
-* Per-pixel specular tint / strength, anisotropic hair, the SSS map, per-material environment
-  maps, detail and blend layers are not mapped (see above); vegetation bending and wind are not
-  applied. Eye iris colours are composed by aa-anim; a generic `IrisColor` bake is missing.
+* The SSS map, per-material environment maps, detail and blend layers are not mapped (see above);
+  vegetation bending and wind are not applied. Eye iris colours are composed by aa-anim; a
+  generic `IrisColor` bake is missing.
+* Silver armour is still duller than the captures (metal `F0` is `0.216 * texture`; a boost would
+  fight the dye textures).
 * `Shading::Basic` cannot tell a wooden bow (`Specular 7.6` on a dark map) from a steel one: it
   stays a dielectric; use `Shading::Full` for characters, weapons and close-ups.
-* Skin colour is calibrated on the elf, nuian and ferre captures with one pink pull; nuian male
-  skin is a little too red and the hue differs per face texture (a per-texel bake of the SSS map
-  would remove the remaining differences).
+* Skin colour is one pink pull (`SKIN_PINK`) plus a per model multiplier fitted by aa-anim
+  (`aa_anim::skin_tune`, see `docs/aa-anim.md`); the hue still differs per face texture (a per-texel
+  bake of the SSS map would remove the remaining differences).
 * Character assembly (the `Cut` hulls, CDF/DB customisation colours for `HumanSkin` / `Hair`)
   belongs to aa-anim; some costume "skin" subsets use UVs that do not match `el_f_nude_df`, and
   use the costume's own skin texture in the game.
