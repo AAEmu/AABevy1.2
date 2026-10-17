@@ -13,6 +13,7 @@
 //!
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
+pub mod auction;
 pub mod buff;
 pub mod bank;
 pub mod friend;
@@ -39,6 +40,7 @@ pub mod wire;
 #[cfg(feature = "bevy")]
 pub mod plugin;
 
+pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFailure, AuctioneerIds, AuctionLot, AuctionPurchaseMail, AuctionQuery, AuctionQuote, AuctionSearch};
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use login::Secret;

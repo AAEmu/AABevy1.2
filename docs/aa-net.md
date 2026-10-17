@@ -1203,6 +1203,146 @@ and cleared the trade. Both clients logged out cleanly. Unit tests cover larger 
 force-remove/truncation, and explicit-unlock/OK quirk; full-bag/partial-failure settlement
 remains source-audited, without grant fixtures.
 
+## Auction protocol and escrow state
+
+`Command::Auction(AuctionCommand)` / `Event::Auction(AuctionEvent)` expose all six lane
+requests and five implemented responses. `Auction` is `WorldState.auction` and a Bevy
+resource. Requests: `Search { auctioneer, query: AuctionSearch }`,
+`Post { auctioneer, item_id, start_price, buyout_price, duration }`,
+`Bid { auctioneer, lot: AuctionLot, bid: AuctionBid }`,
+`Cancel { auctioneer, lot }`, `MyBids { auctioneer, page }`, and
+`LowestPrice { auctioneer, item_template_id, grade }`. `AuctioneerIds` has obj_id/obj_id2,
+both24-bit native object IDs; **every current lane handler ignores both IDs**, including
+range/service eligibility. Zero IDs are accepted here for that documented lane behavior.
+The app should still retain the actual active auctioneer context for the original UI.
+Money is copper. Post duration0/1/2/3 means6/12/24/48hours. Prices are whole-stack totals,
+not a per-item amount. Buyout0 disables direct purchase. No local inventory or money is
+changed by a request or auction ACK; regular item tasks remain authoritative.
+
+`AuctionSearch` preserves keyword/exact_match, raw grade, category_a/b/c, zero-based page,
+seller stored-character client_id(0all), filter, world_id, min/max item levels(0unbounded),
+sort_kind and sort_order. Sort kinds0default/1evaluated/2name/3level/4expiry/5bid/6buyout;
+order0ascending/1descending. Evaluated/name sorts1/2 currently retain default ID order in
+the lane (not implemented); expiry sort uses post_date. Search filter and
+world_id are read but ignored. Grade0 is the lane wildcard, so raw Basic0 cannot be
+specifically selected. LowestPrice also ignores grade while choosing its lot, merely
+returning the requested grade; a zero-buyout lot may yield a zero quote. These responses
+must not be presented as grade-specific or universally purchasable price guarantees.
+Own listings use Search.client_id = PlayerStats.character_id; MyBids filters own bidder ID.
+No other users' lots need to be bid on to exercise these APIs.
+
+`Auction` holds last page/reported_count/lots/loaded/server_time/query, dirty, quote cache,
+last_posted/last_bid/last_canceled, pending requests and last_error. Search and MyBids share
+one response opcode; pending query requests are correlated FIFO. The response's count is
+**the number of records in this page (0..9), not total matches or page count**. Empty results
+return page0 even for another requested page; an out-of-range nonempty query returns its
+requested page with count0. The raw header count remains reported_count even after later
+ACKs remove a cached lot; lots.len() gives the current cache length. Do not infer total
+matches. The reducer preserves the requested query separately from the returned page.
+Post marks a query dirty rather than appending a lot to an arbitrary filtered result.
+Normal bid ACK updates cached bidder fields only; cancellation removes the cached lot.
+Incoming auction mail types13..17 mark auction data dirty. Selection/leave/disconnect reset
+all auction state. No unsolicited bid-change broadcast exists; refresh for other players.
+
+An `AuctionLot` contains exact lot ID, full typed item, seller/bidder IDs/names/worlds,
+start/buyout/bid prices, duration, Unix-seconds post_date and extra. end_time() derives
+expiry from duration. It retains original Item.Write bytes privately, including skipped
+item details and reserved equipment bytes, so Bid/Cancel echo the **complete native lot**.
+Use a cached lot clone and lot.bid(amount,world_id,stored_character_id,name); do not rebuild
+an item from a template or discard details. from_wire() accepts a complete lot for recorded
+fixtures. Local validation rejects changed typed item data that disagrees with the retained
+wire bytes, invalid IDs/prices/durations/pages, mismatching bid lot ID, non-increasing bids,
+invalid sort/grade/level ranges, signed string limits and oversized native request frames.
+SC page counts, item descriptions and tails are decoded strictly, preserving DD04 alignment.
+Undefined SCAuctionMessage133 has no lane writer and remains unsupported; no guessed body.
+
+Post moves an owned, unbound physical bag stack into auction escrow(container6), task
+reason46(AUCTION), preserving its original item ID/details. The listing deposit is
+min(buyout * .01 * (duration+1),1000000), truncated to integer copper; listing_fee() exposes
+this exact lane calculation. Money changes use reason83(DEPOSIT_MONEY). A zero-buyout lot
+has zero deposit in this lane. Cancellation requires seller ownership and no bids; it sends
+received AUC_OFF_CANCEL13 mail containing the **original** escrow item, without refunding
+the deposit. Claim through the existing Mail commands; cancellation itself does not add it
+back to the bag. Regular bids escrow the full new amount, then refund the previous high bid
+by mail, including when a bidder increases its own bid. Canonical bidder identity is read
+from the active character by the server, never trusted from the request copy.
+
+A buyout charges the lot's actual buyout price, refunds any previous bid through received
+mail type15(AUC_OFF_FAIL, an inherited lane/C# naming quirk), sends the original item in
+AUC_BID_WIN16 mail, and sends the seller AUC_OFF_SUCCESS14 mail with floor(price*.9)copper.
+The listing deposit is **not** returned. Seller money claims also require one labor point.
+The lane sends no SCAuctionBid(is_buyout=true) ACK. `Auction.last_purchase_mail` records
+lot/mail/item IDs and clears the pending buyout only when a received win-mail **body**
+contains the exact pending escrow ItemID, uniquely identifying a pending lot. Multiple
+stale requests for different lots of the same relisted ItemID remain unresolved: the mail
+has no LotID and cannot distinguish them. A header, debit, empty search result or sent-mail
+body is not purchase confirmation. Actual possession still waits for authoritative mail
+claim item tasks. Unknown/general errors and silent refusals remain pending for UI timeout
+and refresh; they are never turned into invented success or attributed to an unrelated
+auction command. Expiry uses the server's periodic auction task and eventual mail; the
+client does not run an optimistic expiry settlement.
+
+Original `x2ui/auction` contracts and native x2game12 trace:
+
+* SearchAuctionArticle(page,minLevel,maxLevel,itemGrade,itemCategory,isMatchWord,itemName)
+  wrapper39449b20 subtracts1 from Lua page; manager394cec90 clamps negatives to0 and writes
+  grade=itemGrade-1. Original GetItemGrade() increments selector indices greater than1.
+  Categories split A=category/10000,B=(category/100)%100,C=category%100.
+* SearchAuctionArticleByPage39449bc0 / SearchMyAuctionArticles39449bf0 subtract1; managers
+ 394ceec0/394cedf0 clamp negative pages. The original initial SearchMyAuctionArticles(0)
+  resets and requests the first page. SearchMyBidList39449c20 likewise subtracts1.
+* Native GetSearchedItemPage returns wire page+1. GetSearchedItemCount3944a2b0 returns cached
+  record count. GetSearchedItemTotalCount3944a340 returns literal50.0(.rdata3999ddc8), the
+  native maximum-page bound also checked at394ce9ab; it is not a total from this lane.
+  common.lua derives navigation from that bound, current page and returned record count.
+* GetSearchedItemInfo(idx1based)3944a3c0 returns the normal item-tip table plus idx,
+  articleId(decimal u64 string), stackCount, seller, selWorldId, bidder, bidWorldId,
+  leftTime(seconds), bidPriceStr, depositStr, directPriceStr, extra.
+* BidAuctionArticle(articleIdStr,moneyStr)39449d80 parses the ID with39424890 and amount
+  with atoi, then394cfcb0 copies the complete cached lot and bid into397b0f30. DirectPurchase-
+  AuctionArticle39449dd0/394cff70 looks up that lot's buyout and calls the same bid path.
+  SetDuration39449cb0 converts Lua1..4 to wire0..3. Monetary UI fields are decimal strings.
+* AUCTION_ITEM_PUT_UP(itemName), AUCTION_ITEM_SEARCH(), AUCTION_ITEM_SEARCHED(),
+  AUCTION_BIDDED(itemName,moneyStr), AUCTION_CANCELED(itemName),
+  AUCTION_LOWEST_PRICE(itemType,grade,price). No lane-backed bought notification is
+  fabricated where its auction ACK is absent. The app can refresh mail on a win header,
+  then show completion after the exact body proof.
+
+Auction validation: seven source-backed unit tests cover all six CS requests, all five SC
+responses and every truncation in a DD04 sequence followed by another opcode, invalid page
+counts, exact equipment/reserved/skipped item-detail echoes, query FIFO/count semantics,
+local rejection, no optimistic escrow or purchase, wrong-item/outbox mail rejection and
+lifecycle reset. Full cargo test -p aa-net passed161 library and2 scripted-session tests,
+with9 opt-in live tests ignored; cargo check -p aa-net --features bevy --examples passed.
+The ignored live_auction test additionally requires the environment flag
+AA_NET_RUN_AUCTION_MONEY_CLAIMS=1; do not enable it before resolving the lane issue below.
+
+Partial live run (2026-10-17 19:18 EDT, fresh owned characters56/57,
+netauction1792279107856a/b) funded181c/207c solely by their starter gear. It verified listing,
+exact full equipment ItemID16777962/details, own/peer searches, lowest-price response,
+cancel ACK, full native cancellation-mail claim returning the same item and retaining the
+1c listing deposit, repost, normal10c bid ACK, my-bids bidder identity,100c buyout debit,
+win/refund mail delivery and refund body with10c. It then **timed out on the refund's
+TakeAllAndDelete request**, followed by both LeaveWorld ACK timeouts. TCP clients were
+dropped; reconnect of the first owned account was denied as still connected. Root's
+independent clients47/55 subsequently also timed out entering this lane. No further claims
+or fresh accounts were attempted; the recovery login issued no game commands. No server
+process was restarted or modified. Combined refund claim/delete, buyer win-item claim, seller90c claim,
+post-buyout search, saved balances/item identity and graceful final logout are **not live
+verified**. The complete ignored fixture retains those assertions for a later functional
+lane; no success is fabricated here.
+
+Read-only diagnosis: every claim starts ItemTxn::begin and takes economy System.ops, a
+lane-wide mutex (inventory.rs:67, economy/mod.rs:129), so a stuck operation can affect all
+economy work. SaveManager.capture_financial_snapshot takes auction/housing/economy locks,
+and timed_rewards::do_add_labor takes the save transaction lock before game entry. These
+paths explain a possible broader login/save cascade; they do not prove the exact held
+lock. WARN-level logs show the normal bid and buyout request but no refund-handler trace.
+The refund code has no obvious recursive lock in its straight-line claim/delete path.
+A read-only query of private MySQL3317 filtered to lane_bevy_* found no active/waiting SQL
+or InnoDB transaction. Exact runtime blocking call and current in-memory lot state remain
+unproven; no server fix, new risky probe, grant, alternate settlement or restart is hidden.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
@@ -1215,7 +1355,7 @@ remains source-audited, without grant fixtures.
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
   that is not decoded ends that batch.
 * Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
-  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy), player trade.
+  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy), player trade, auctions.
   Coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
