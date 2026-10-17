@@ -136,6 +136,10 @@ pub struct Particle {
     grav: f32,
     ang: Vec3,
     ang_rate: Vec3,
+    /// Orbit (`Rotate*`): angle in radians, radians per second, radius in metres.
+    spin: f32,
+    spin_rate: f32,
+    rlen: f32,
     variant: u16,
     seed: f32,
 }
@@ -451,6 +455,12 @@ impl EmitterState {
         let d2r = std::f32::consts::PI / 180.0;
         let ang = (def.init_angles + def.random_angles * Vec3::new(r.signed(), r.signed(), r.signed())) * d2r;
         let ang_rate = (def.rotation_rate + def.random_rotation_rate * Vec3::new(r.signed(), r.signed(), r.signed())) * d2r;
+        let (spin, spin_rate, rlen) = if def.orbits() {
+            let init = def.rotate_init.base * (1.0 - def.rotate_init.var * 2.0 * r.next());
+            (init.to_radians(), def.rotate_speed.spawn(r.next(), strength), def.rotate_length.spawn(r.next(), strength) * scale)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
         let variant = if def.tiling.variants > 1 { (r.next() * def.tiling.variants as f32) as u16 } else { 0 };
 
         let mut p = Particle {
@@ -470,12 +480,17 @@ impl EmitterState {
             grav: def.gravity.spawn(r.next(), strength),
             ang,
             ang_rate,
+            spin,
+            spin_rate,
+            rlen,
             variant,
             seed: r.next() * 100.0,
         };
         p.pos += p.vel * age0;
         if self.want_births {
-            self.births.push(frame.to_world_point(p.pos));
+            let basis = self.orbit_basis(ctx);
+            let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, 0.0, &basis);
+            self.births.push(at);
         }
         self.particles.push(p);
     }
@@ -491,13 +506,16 @@ impl EmitterState {
         let wind_k = def.wind.max(0.0);
         let turb = def.turbulence_3d * ctx.scale;
         let want_deaths = self.want_deaths;
+        let basis = self.orbit_basis(ctx);
+        let orbits = def.orbits();
         let mut w = 0;
         for i in 0..self.particles.len() {
             let mut p = self.particles[i];
             p.age += dt;
             if p.age >= p.life {
                 if want_deaths {
-                    self.deaths.push(frame.to_world_point(p.pos));
+                    let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, 1.0, &basis);
+                    self.deaths.push(at);
                 }
                 continue;
             }
@@ -517,10 +535,35 @@ impl EmitterState {
                 p.pos += Vec3::new(t.sin(), (t * 1.31 + 1.0).sin(), (t * 0.77 + 2.0).sin()) * turb * dt;
             }
             p.ang += p.ang_rate * dt;
+            if orbits {
+                p.spin += p.spin_rate * luts.rot_speed.at(a) * dt;
+            }
             self.particles[w] = p;
             w += 1;
         }
         self.particles.truncate(w);
+    }
+
+    /// The two axes of the orbit plane in world space (`Rotate*`).
+    fn orbit_basis(&self, ctx: &StepCtx) -> (Vec3, Vec3) {
+        let d = &self.def;
+        if !d.orbits() {
+            return (Vec3::X, Vec3::Z);
+        }
+        let axis = if d.rotate_axis == Vec3::ZERO { Vec3::Y } else { c2b(d.rotate_axis).normalize_or_zero() };
+        let axis = if d.rotate_world { axis } else { ctx.rot * axis };
+        perpendicular(axis)
+    }
+
+    /// Where a particle at `a` of its life is off its path because it orbits (world space).
+    #[inline]
+    fn orbit_offset(&self, p: &Particle, a: f32, basis: &(Vec3, Vec3)) -> Vec3 {
+        if p.rlen == 0.0 {
+            return Vec3::ZERO;
+        }
+        let r = p.rlen * self.def.luts().rot_len.at(a);
+        let (s, c) = p.spin.sin_cos();
+        (basis.0 * c + basis.1 * s) * r
     }
 
     /// Writes the quads of the live particles.
@@ -554,6 +597,7 @@ impl EmitterState {
         let has_stretch = def.stretch.base != 0.0;
         let orbit = def.turbulence_size * ctx.scale;
         let orbit_speed = def.turbulence_speed.to_radians();
+        let basis = self.orbit_basis(ctx);
         // camera axes in effect-local space (unit scale of world vectors)
         let ir = inv.transform_vector3(view.right);
         let iu = inv.transform_vector3(view.up);
@@ -569,7 +613,7 @@ impl EmitterState {
             }
             let hx = 0.5 * sz * p.sx * luts.size_x.at(a);
             let mut hy = 0.5 * sz * p.sy * luts.size_y.at(a) * aspect;
-            let mut center = frame.to_world_point(p.pos);
+            let mut center = frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis);
             if orbit > 0.0 {
                 let t = orbit_speed * p.age + p.seed;
                 center += (Vec3::X * t.cos() + Vec3::Z * t.sin()) * orbit;
@@ -698,6 +742,7 @@ impl EmitterState {
         let pivot = if def.no_offset { Vec3::ZERO } else { t.center };
         let alpha_k = if def.no_material_alpha { 1.0 } else { m.opacity };
         let lit = self.lit + m.emissive * 0.5;
+        let basis = self.orbit_basis(ctx);
         let to_local = inv3.x_axis.length().max(inv3.y_axis.length()).max(inv3.z_axis.length()).max(1.0);
         let mut min = Vec3::splat(f32::MAX);
         let mut max = Vec3::splat(f32::MIN);
@@ -722,7 +767,7 @@ impl EmitterState {
             } else {
                 ctx.rot * turn
             };
-            let center = inv.transform_point3(frame.to_world_point(p.pos));
+            let center = inv.transform_point3(frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis));
             let lin = inv3 * rot * Mat3::from_diagonal(scale);
             let shift = center - lin * pivot;
             let c = p.color * luts.color.at(a) * lit * ctx.tint * m.tint;
@@ -988,6 +1033,29 @@ mod tests {
         s.step(&c);
         let mid = (Vec3::from(s.emitters[0].pos[1]) + Vec3::from(s.emitters[0].pos[2])) * 0.5;
         assert!(mid.length() < 0.01, "{mid:?}");
+    }
+
+    #[test]
+    fn particles_orbit_the_emitter() {
+        let budget = AtomicI32::new(10_000);
+        // radius 2 about the vertical axis, a quarter turn per second, starting on +X
+        let mut s = sim(r#"Count="1" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0" Size="0.1" RotateLength="2" RotateSpeed="1.5707964" RotatePosition=",,1" RotateInitAngle="0""#);
+        let c = ctx(&budget);
+        let centre = |s: &EffectSim| {
+            let e = &s.emitters[0];
+            let q: Vec<Vec3> = e.pos[0..4].iter().map(|p| Vec3::from(*p)).collect();
+            (q[0] + q[2]) * 0.5
+        };
+        s.step(&c);
+        let p0 = centre(&s);
+        assert!((p0.length() - 2.0).abs() < 0.05 && p0.y.abs() < 0.01, "{p0:?}");
+        for _ in 0..60 {
+            s.step(&c);
+        }
+        // after one second a quarter turn: 90 degrees away, still at radius 2 in the horizontal plane
+        let p1 = centre(&s);
+        assert!((p1.length() - 2.0).abs() < 0.05 && p1.y.abs() < 0.01, "{p1:?}");
+        assert!(p0.dot(p1).abs() < 0.2, "{p0:?} {p1:?}");
     }
 
     #[test]

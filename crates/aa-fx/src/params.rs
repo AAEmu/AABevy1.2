@@ -292,6 +292,16 @@ pub struct EmitterDef {
     pub turbulence_3d: f32,
     pub turbulence_size: f32,
     pub turbulence_speed: f32,
+    /// `RotateSpeed`: radians per second of a particle about the axis (the particle orbits the emitter; the editor range is 0..10).
+    pub rotate_speed: Var,
+    /// `RotateLength`: radius of that orbit in metres.
+    pub rotate_length: Var,
+    /// `RotatePosition`: the axis of the orbit (CryEngine axes, zero = up).
+    pub rotate_axis: Vec3,
+    /// `RotateInitAngle`: where on the orbit a particle starts, in degrees.
+    pub rotate_init: Var,
+    /// `RotateWorldSpace`: the axis is a world axis, not the emitter's.
+    pub rotate_world: bool,
     pub bind_to_emitter: bool,
     pub spawn: Spawn,
     pub soft: bool,
@@ -361,6 +371,11 @@ impl Default for EmitterDef {
             turbulence_3d: 0.0,
             turbulence_size: 0.0,
             turbulence_speed: 0.0,
+            rotate_speed: Var::constant(0.0),
+            rotate_length: Var::constant(0.0),
+            rotate_axis: Vec3::ZERO,
+            rotate_init: Var::constant(0.0),
+            rotate_world: false,
             bind_to_emitter: false,
             spawn: Spawn::Direct,
             soft: false,
@@ -495,6 +510,11 @@ impl EmitterDef {
                 "Turbulence3DSpeed" => d.turbulence_3d = Var::parse(v, 0.0).base,
                 "TurbulenceSize" => d.turbulence_size = Var::parse(v, 0.0).base,
                 "TurbulenceSpeed" => d.turbulence_speed = Var::parse(v, 0.0).base,
+                "RotateSpeed" => d.rotate_speed = Var::parse(v, 0.0),
+                "RotateLength" => d.rotate_length = Var::parse(v, 0.0),
+                "RotatePosition" => d.rotate_axis = parse_vec3(v, 0.0),
+                "RotateInitAngle" => d.rotate_init = Var::parse(v, 0.0),
+                "RotateWorldSpace" => d.rotate_world = truth(v),
                 "BindToEmitter" | "MoveRelEmitter" => d.bind_to_emitter |= truth(v),
                 "SpawnIndirection" => {
                     d.spawn = match v {
@@ -523,6 +543,11 @@ impl EmitterDef {
     /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
         self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())
+    }
+
+    /// Whether the particles orbit the emitter (`RotateLength`).
+    pub fn orbits(&self) -> bool {
+        self.rotate_length.base != 0.0
     }
 
     /// Emitter life in seconds, 0 = endless.
@@ -590,6 +615,8 @@ pub struct Luts {
     pub size_x: Lut,
     pub size_y: Lut,
     pub size_z: Lut,
+    pub rot_speed: Lut,
+    pub rot_len: Lut,
     pub alpha: Lut,
     pub color: Lut3,
     pub air: Lut,
@@ -610,6 +637,8 @@ impl Luts {
             size_x: Lut::bake(d.size_x.age.as_ref()),
             size_y: Lut::bake(d.size_y.age.as_ref()),
             size_z: Lut::bake(d.size_z.age.as_ref()),
+            rot_speed: Lut::bake(d.rotate_speed.age.as_ref()),
+            rot_len: Lut::bake(d.rotate_length.age.as_ref()),
             alpha: Lut::bake(d.alpha.age.as_ref()),
             color: Lut3(color),
             air: Lut::bake(d.air_resistance.age.as_ref()),
