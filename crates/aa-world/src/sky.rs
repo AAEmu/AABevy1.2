@@ -107,15 +107,23 @@ pub struct AtmosphereTuning {
     pub ambient_height: f32,
     /// Ambient light: how much of the sky dome's colour (horizon / zenith, blue grey) replaces `Sky color` (green yellow in the data).
     pub ambient_dome: f32,
-    /// Water: multiplier of the volume's fog colour (the lit colour of the water body).
+    /// Water volumes: multiplier of the volume's fog colour (the engine's fog colour is constant and unlit).
     pub water_body: f32,
-    /// Water: absorption per metre = volume fog density x this.
+    /// Water volumes: how much of the sun's colour (next to the sky's) lights the fog colour.
+    pub water_lit: f32,
+    /// Water volumes: absorption per metre = volume fog density x this (the engine's `exp2` is ln 2 = 0.693).
     pub water_absorb: f32,
-    /// Water: reflection gain on the Fresnel term.
+    /// Water volumes: gain on the material's `TransparencyRatio` (the weight of the reflection in the surface colour).
     pub water_refl: f32,
-    /// Water: sun glint multiplier.
+    /// Water volumes: sun glint multiplier (on the material's `SunMultiplier`).
     pub water_sun: f32,
-    /// Water: screen space reflections on (1) or off (0).
+    /// Water volumes: multiplier of the material's `FoamMultiplier` (the white flecks).
+    pub water_foam: f32,
+    /// Water volumes: brightness of the reflected image (1 = the engine's: the material's cube map times `sun + sky`).
+    pub water_env: f32,
+    /// Water volumes: screen space reflections of the scene on top of the cube map (the engine has none): on (1) or off (0).
+    pub water_ssr: f32,
+    /// Sea: screen space reflections on (1) or off (0).
     pub ssr: f32,
     /// Water: refraction offset (fraction of the screen per unit of bump).
     pub refraction: f32,
@@ -123,6 +131,12 @@ pub struct AtmosphereTuning {
     pub water_rough: f32,
     /// Sea: multiplier of the zone's ocean fog colour.
     pub sea_body: f32,
+    /// Sea: absorption per metre = the sea's fog density x this.
+    pub sea_absorb: f32,
+    /// Sea: reflection gain on the Fresnel term.
+    pub sea_refl: f32,
+    /// Sea: sun glint multiplier.
+    pub sea_sun: f32,
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
@@ -157,14 +171,21 @@ impl Default for AtmosphereTuning {
             ambient_dome: 1.0,
             ambient_spec: 0.2,
             ambient_height: 1.0,
-            water_body: 20.0,
-            water_absorb: 6.0,
-            water_refl: 0.5,
-            water_sun: 3.0,
+            water_body: 6.0,
+            water_lit: 0.25,
+            water_absorb: std::f32::consts::LN_2,
+            water_refl: 1.0,
+            water_sun: 1.0,
+            water_foam: 0.7,
+            water_env: 0.08,
+            water_ssr: 0.0,
             ssr: 1.0,
             refraction: 0.012,
             water_rough: 0.06,
             sea_body: 2.5,
+            sea_absorb: 6.0,
+            sea_refl: 0.5,
+            sea_sun: 3.0,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
         }
@@ -205,13 +226,20 @@ impl AtmosphereTuning {
                 "ambient_spec" => t.ambient_spec = v,
                 "ambient_height" => t.ambient_height = v,
                 "water_body" => t.water_body = v,
+                "water_lit" => t.water_lit = v,
                 "water_absorb" => t.water_absorb = v,
                 "water_refl" => t.water_refl = v,
                 "water_sun" => t.water_sun = v,
+                "water_foam" => t.water_foam = v,
+                "water_env" => t.water_env = v,
+                "water_ssr" => t.water_ssr = v,
                 "ssr" => t.ssr = v,
                 "refraction" => t.refraction = v,
                 "water_rough" => t.water_rough = v,
                 "sea_body" => t.sea_body = v,
+                "sea_absorb" => t.sea_absorb = v,
+                "sea_refl" => t.sea_refl = v,
+                "sea_sun" => t.sea_sun = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
                 _ => {}
