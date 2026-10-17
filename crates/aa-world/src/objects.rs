@@ -603,7 +603,9 @@ pub fn stream_objects(
         }
     }
     let waiting: usize = state.sectors.values().map(|s| s.waiting.len()).sum();
-    let pending = state.models.states.iter().filter(|m| matches!(m, ModelState::Wanted | ModelState::Loading)).count() + state.model_queue.len();
+    // models on their way; a `Wanted` one that no sector waits for any more (its sector went out of range) is not pending, and
+    // the instances that do wait for one are `waiting`
+    let pending = state.models.states.iter().filter(|m| matches!(m, ModelState::Loading)).count() + state.model_queue.len();
     state.stats.sectors = state.sectors.len();
     state.stats.models_pending = pending;
     state.stats.models_failed = state.models.states.iter().filter(|m| matches!(m, ModelState::Failed)).count();
