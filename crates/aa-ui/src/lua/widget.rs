@@ -805,6 +805,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 .map(|w| w.drawables.clone())
                 .unwrap_or_default();
             for d in ds {
+                u.animations.remove(d);
                 u.tree.get_mut(d).alive = false;
             }
             if let Some(w) = u.tree.widget_mut(id) {

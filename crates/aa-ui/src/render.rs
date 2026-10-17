@@ -317,9 +317,10 @@ fn drawable_quads(
     if dr.effect == Some(false) {
         return;
     }
-    let mut rect = u.tree.rect(d);
+    let animation = u.animations.sample(d);
+    let mut rect = animation.rect(u.tree.rect(d));
     // Status bar fill: crop the rect and the texture rectangle alike.
-    let mut coords = dr.coords;
+    let mut coords = animation.coords.or(dr.coords);
     if let Some((f, vertical)) = dr.fill {
         if vertical {
             let h = rect.h * f;
@@ -337,11 +338,13 @@ fn drawable_quads(
             }
         }
     }
-    let a = alpha * o.alpha;
-    let color = [dr.color[0], dr.color[1], dr.color[2], dr.color[3] * a];
+    let a = alpha * o.alpha * animation.alpha;
+    let c = animation.color.unwrap_or(dr.color);
+    let color = [c[0], c[1], c[2], c[3] * a];
     if (color[3] <= 0.0 || rect.w == 0.0 || rect.h == 0.0) && dr.kind != DrawKind::Text {
         return;
     }
+    let first_quad = out.len();
     match dr.kind {
         DrawKind::Color => out.push(Quad {
             tex: Tex::Atlas,
@@ -420,7 +423,7 @@ fn drawable_quads(
                         pos: px(rect, scale),
                         uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                         color,
-                        corners: rotated_corners(px(rect, scale), dr.rotation),
+                        corners: None,
                         vcolors: None,
                     });
                     // Icon image overlays (`AddTexture`), whole texture over the same rect.
@@ -440,26 +443,25 @@ fn drawable_quads(
             }
         }
     }
+    let angle = dr.rotation + animation.rotation;
+    if angle != 0.0 {
+        let p = px(rect, scale);
+        let center = [(p[0] + p[2]) * 0.5, (p[1] + p[3]) * 0.5];
+        let (sin, cos) = angle.sin_cos();
+        for q in &mut out[first_quad..] {
+            let [x0, y0, x1, y1] = q.pos;
+            let corners = q.corners.unwrap_or([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+            q.corners = Some(corners.map(|[x, y]| {
+                let (x, y) = (x - center[0], y - center[1]);
+                [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
+            }));
+        }
+    }
 }
 
 pub(crate) fn white_uv() -> [f32; 4] {
     let t = 0.5 / ATLAS_SIZE as f32;
     [t, t, t, t]
-}
-
-/// The corners (top left, top right, bottom right, bottom left) of a pixel rect turned
-/// `angle` radians clockwise about its centre; `None` without rotation.
-fn rotated_corners(p: [f32; 4], angle: f32) -> Option<[[f32; 2]; 4]> {
-    if angle == 0.0 {
-        return None;
-    }
-    let (cx, cy) = ((p[0] + p[2]) / 2.0, (p[1] + p[3]) / 2.0);
-    let (hw, hh) = ((p[2] - p[0]) / 2.0, (p[3] - p[1]) / 2.0);
-    let (s, c) = angle.sin_cos();
-    Some(
-        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
-            .map(|(x, y)| [cx + x * c - y * s, cy + x * s + y * c]),
-    )
 }
 
 /// UI rect -> pixel rect, snapped to whole pixels.

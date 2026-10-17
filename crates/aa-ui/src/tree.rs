@@ -507,13 +507,9 @@ pub struct Drawable {
     /// Status bar fill: only this fraction of the rect (and of `coords`) is drawn, from the
     /// left (or the bottom when vertical).
     pub fill: Option<(f32, bool)>,
-    /// Effect drawables (`CreateEffectDrawable`): drawn only while the effect runs
-    /// (`SetStartEffect(true)`), with no animation.
+    /// Effect drawables (`CreateEffectDrawable`): visible after `SetStartEffect(true)`;
+    /// finite timelines retain their final sample until explicitly stopped.
     pub effect: Option<bool>,
-    /// `SetEffectFinalColor(phase, r, g, b, a)` of the last phase: the colour the effect ends in.
-    pub effect_final: Option<(i64, [f32; 4])>,
-    /// `SetRepeatCount(0)`: the effect loops (no end colour to show).
-    pub effect_loop: bool,
     /// `SetRotation(r)`: radians, clockwise on screen, about the centre of the rect (image
     /// drawables; the roadmap's player cursor turns with the player's heading).
     pub rotation: f32,
@@ -655,6 +651,11 @@ impl Tree {
             let at = std::panic::Location::caller();
             crate::prof::change(|| format!("touch {}:{}", at.file(), at.line()));
         }
+        self.dirty = true;
+    }
+
+    /// Visual-only change (a drawable animation sample): repaint without invalidating anchors.
+    pub fn repaint(&mut self) {
         self.dirty = true;
     }
 

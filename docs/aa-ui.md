@@ -531,7 +531,8 @@ App::new()
 | `gametooltip` lines, spaces and heights (`AddLine` returns the new line's 0-based index), the tooltip sizes itself to them | `lua/tooltip.rs` |
 | an anchor that would make an object depend on itself is refused | `tree.rs` |
 | `OnEnter` / `OnLeave` for the hovered widget's ancestors under the cursor too | `input.rs` |
-| `SetStartEffect(true)` shows an effect drawable, in the colour its last phase ends in unless it loops (`SetRepeatCount(0)`) | `lua/drawable.rs` |
+| `SetStartEffect(true)` starts timed colour/alpha, scale and rotation phases; finite repeats retain their final sample, `SetRepeatCount(0)` loops, stopping hides the effect | `lua/animation.rs` |
+| `SetAnimFrameInfo` animates atlas rectangles and `DAT_MOVE` / `DAT_LINEAR_ALPHA` / `DAT_LINEAR_SCALE` frames; `Animation(play, repeat)` shows, restarts or stops it | `lua/animation.rs` |
 | `SetCloseOnEscape(true)` windows are what `UiRuntime::escape` hides | `content.rs` |
 | `EnableScroll(true)` clips the children and the picking to the widget; `ChangeChildAnchorByScrollValue(dir, v)` offsets the anchors that target it | `tree.rs`, `widget.rs` |
 | folders place their title button by `SetTitleButtonWidget` / `SetInset` (the right value moves the right edge: negative is inward; the world map's filter folders are 130 px wide) | `lua/folder.rs` |
@@ -555,10 +556,13 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   post effect of the login stage's 3D scene or the gamma setting, not a UI element (not found in
   the scripts). The login background sits 1 px higher than in the capture.
 * 3D is not drawn: the character model view, the login stage scene behind the UI.
-* Fades and animations are simplified: `Show(visible, ms)` alpha fades work; `SetStartAnimation`,
-  `SetAlphaAnimation` and `SetScaleAnimation` are no-ops; effect drawables show while started
-  (`SetStartEffect(true)`) without their animation phases, in the colour of the last phase's
-  end (`SetEffectFinalColor`) unless they loop.
+* `Show(visible, ms)` alpha fades, drawable atlas/move/alpha/scale frame lists and effect
+  colour/scale/rotation phases run over elapsed time. `Animation(true, false)` plays once,
+  while `Animation(true, true)` repeats (the second argument is not visibility). The effect
+  phase duration and hold/delay are implemented, with linear interpolation; the original
+  `SetEffectPriority` priority/easing parameter, `SetEffectScaleAxis`, the separate
+  `SetMoveEffect*` circle/edge channels and widget-level `SetStartAnimation`,
+  `SetAlphaAnimation` / `SetScaleAnimation` remain unimplemented.
 * In-game HUD: what the 3D engine draws is not here (name plates over units, the world, the
   player model between the equipment slot columns). Cooldown sweeps: the direction and the
   time label format (`8`, `5m`, `2h`, `6d`) are guesses; no label on cooldowns of 1.5 s or less
@@ -635,5 +639,37 @@ animations), methods present as logging stubs, and the client's total. Generated
 get our natives plus a stub for every method name any class has. Toolkit stubs the login
 screens still call (with the fake game API): `listbox` item colours (`SetDefaultItemTextColor`,
 `SetOveredItemColor`, ...), `emptywidget:EnableScroll` / `ChangeChildAnchorByScrollValue`,
-`drawable:image:SetAnimFrameInfo` (frame animations), `button:IgnoreInputOnFading`, and the
+`button:IgnoreInputOnFading`, and the
 `gametooltip` section natives when a tooltip shows.
+
+## Drawable animation verification (2026-10-17)
+
+`lua/animation.rs` keeps configuration and samples outside the anchor tree. The tick visits
+only running drawable IDs, skips layout invalidation, and requests a repaint only when a
+visible sample changes. Atlas frames keep their mesh between frame boundaries; hidden loops
+advance time without repainting. Finite effects leave the last phase visible (the action-bar
+hover background needs this), finite image timelines hide on completion, and stop/clear/
+`RemoveAllDrawables` remove active work. No application hook is needed.
+
+The original `components/action_slot.alb` now pulses autoattack backgrounds, combo borders and
+toggle highlights through their configured alpha and scale phases. The original
+`baselib/common_texture.alb` attention arrow moves back and forth and fades out instead of
+being hidden by its `Animation(true, false)` call. Character-select arrows and timer icons
+cycle their configured atlas frames. The autoattack arrow's separate circular movement is
+still a `SetMoveEffect*` gap; its alpha phase works.
+
+Checked with `cargo test -p aa-ui --tests` (78 passed, one font metrics test ignored), including
+the renderer regression in `tests/animation.rs`. Those tests include the original action-slot
+and attention-arrow bytecode, phase boundaries, large time steps, repeats, stop/restart,
+clear/removal, no layout invalidation, hidden-loop repaint suppression, and rendered UVs,
+colour, scale and rotation.
+
+Visual captures use the existing `aa_dev` examples, which close after the capture:
+
+* `shots/aa-ui/animation/attention.png`: original HUD with autoattack and combo effects enabled
+  on slots 2 and 3 and `DrawArrowMoveAnim` on slot 1; zero Lua errors. The HUD example logged
+  167–236 FPS (4.3–6.0 ms) across the captured runs before/while the effects ran.
+* `shots/aa-ui/animation/character-select.png`: selected character's animated arrow, compared
+  with `reference/character_select/1_character/real.png`; UI geometry remains aligned (the
+  2D-only example omits the reference's character model). Zero Lua errors; 307–432 FPS
+  (2.4–3.7 ms).
