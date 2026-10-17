@@ -179,6 +179,9 @@ pub struct EmitterState {
     cost: usize,
     /// Past world positions of the particles with a tail: `tail_steps` per slot, a ring.
     trail: Vec<Vec3>,
+    /// The width axis of the ribbon at every sample of `trail` (a `Facing = Free` ribbon only): the particle's own axis in the
+    /// emitter's orientation at that moment, so a blade swept through the air leaves a sheet, not a camera facing strip.
+    trail_axis: Vec<Vec3>,
     trail_free: Vec<u32>,
     tail_steps: usize,
     tail_dt: f32,
@@ -227,6 +230,7 @@ impl EmitterState {
             pending_geom: None,
             cost: 1,
             trail: Vec::new(),
+            trail_axis: Vec::new(),
             trail_free: Vec::new(),
             tail_steps: 0,
             tail_dt: 0.0,
@@ -305,6 +309,7 @@ impl EmitterState {
     fn reset(&mut self) {
         self.particles.clear();
         self.trail.clear();
+        self.trail_axis.clear();
         self.trail_free.clear();
         self.age = 0.0;
         self.delay = self.def.spawn_delay.base.max(0.0);
@@ -644,7 +649,8 @@ impl EmitterState {
                 if p.t_acc >= self.tail_dt {
                     p.t_acc = 0.0;
                     let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, a, &basis);
-                    self.push_tail(&mut p, at);
+                    let axis = self.ribbon_axis(&p, ctx);
+                    self.push_tail(&mut p, at, axis);
                 }
             }
             self.particles[w] = p;
@@ -667,6 +673,9 @@ impl EmitterState {
             None => {
                 let s = (self.trail.len() / self.tail_steps) as u32;
                 self.trail.resize(self.trail.len() + self.tail_steps, Vec3::ZERO);
+                if def.facing == Facing::Free {
+                    self.trail_axis.resize(self.trail.len(), Vec3::ZERO);
+                }
                 s
             }
         };
@@ -676,12 +685,28 @@ impl EmitterState {
         let frame = self.frame(ctx);
         let basis = self.orbit_basis(ctx);
         let at = frame.to_world_point(p.pos) + self.orbit_offset(p, 0.0, &basis);
-        self.push_tail(p, at);
+        let axis = self.ribbon_axis(p, ctx);
+        self.push_tail(p, at, axis);
+    }
+
+    /// The width axis of a `Facing = Free` ribbon now (world space): the particle's cry +Y, which for a weapon bone is the blade
+    /// (the swords are modelled along +Y and the hand bone holds them as modelled), turned by the particle's own angles and the
+    /// effect's orientation. Zero for the other facings.
+    #[inline]
+    fn ribbon_axis(&self, p: &Particle, ctx: &StepCtx) -> Vec3 {
+        if self.def.facing != Facing::Free {
+            return Vec3::ZERO;
+        }
+        let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
+        (ctx.rot * c2b(q * Vec3::Y)).normalize_or_zero()
     }
 
     #[inline]
-    fn push_tail(&mut self, p: &mut Particle, at: Vec3) {
+    fn push_tail(&mut self, p: &mut Particle, at: Vec3, axis: Vec3) {
         let n = self.tail_steps;
+        if !self.trail_axis.is_empty() {
+            self.trail_axis[p.slot as usize * n + p.t_head as usize] = axis;
+        }
         self.trail[p.slot as usize * n + p.t_head as usize] = at;
         p.t_head = ((p.t_head as usize + 1) % n) as u16;
         p.t_len = (p.t_len + 1).min(n as u16);
@@ -768,9 +793,10 @@ impl EmitterState {
             // frame in the texture atlas
             if p.slot != u32::MAX {
                 let colour = [colour.x, colour.y, colour.z];
-                let strip = Strip { trail: &self.trail, steps: self.tail_steps, pos: &mut self.pos, uv: &mut self.uv, col: &mut self.col, uv1: &mut self.uv1 };
+                let head_axis = self.ribbon_axis(p, ctx);
+                let strip = Strip { trail: &self.trail, axes: &self.trail_axis, steps: self.tail_steps, pos: &mut self.pos, uv: &mut self.uv, col: &mut self.col, uv1: &mut self.uv1 };
                 let test = if with_test { Some(p.atest * luts.alpha_test.at(a)) } else { None };
-                ribbon(strip, p, center, hx, alpha, colour, test, &inv, view, &mut min, &mut max);
+                ribbon(strip, p, center, head_axis, hx, alpha, colour, test, &inv, view, &mut min, &mut max);
                 continue;
             }
 
@@ -796,7 +822,8 @@ impl EmitterState {
                     let u = frame.to_world_dir(Vec3::new(-s, 0.0, c));
                     rx = inv.transform_vector3(r) * hx;
                     uy = inv.transform_vector3(u) * hy;
-                    shift = Vec3::ZERO;
+                    // a hair above the surface it lies on (the engine projects these as decals; here they would z-fight)
+                    shift = inv.transform_vector3(Vec3::Y * 0.02);
                 }
                 Facing::Free => {
                     let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
@@ -805,13 +832,6 @@ impl EmitterState {
                     rx = inv.transform_vector3(r) * hx;
                     uy = inv.transform_vector3(u) * hy;
                     shift = Vec3::ZERO;
-                }
-                Facing::Bottom => {
-                    let r = view.forward.cross(Vec3::Y);
-                    let r = if r.length_squared() > 1e-4 { r.normalize() } else { view.right };
-                    rx = inv.transform_vector3(r) * hx;
-                    uy = inv.transform_vector3(Vec3::Y) * hy;
-                    shift = inv.transform_vector3(Vec3::Y) * hy;
                 }
                 Facing::Camera => {
                     let vel = frame.to_world_dir(p.vel);
@@ -963,6 +983,8 @@ impl EmitterState {
 /// The output arrays of an emitter that a tail is written to.
 struct Strip<'a> {
     trail: &'a [Vec3],
+    /// The width axis per sample (empty: the ribbon faces the camera).
+    axes: &'a [Vec3],
     steps: usize,
     pos: &'a mut Vec<[f32; 3]>,
     uv: &'a mut Vec<[f32; 2]>,
@@ -970,19 +992,29 @@ struct Strip<'a> {
     uv1: &'a mut Vec<[f32; 2]>,
 }
 
-/// A particle's tail as a strip of camera facing quads from its head (the current position) back along its history; it
-/// tapers and fades towards the end. The texture runs along the ribbon.
+/// A particle's tail as a strip of quads from its head (the current position) back along its history; it tapers and fades
+/// towards the end. The texture runs along the ribbon, `u = 0` at the head (the sword line textures are bright there) and
+/// `v = 0` on the `-side` edge. A `Facing = Free` ribbon (`head_axis` not zero) is as wide as the particle's axis says, which
+/// is the blade of a weapon: its `+axis` edge is `v = 0`, the edge the sword line textures are lit on, so the bright line
+/// follows the tip. The other ribbons face the camera.
 #[allow(clippy::too_many_arguments)]
-fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [f32; 3], test: Option<f32>, inv: &Affine3A, view: View, min: &mut Vec3, max: &mut Vec3) {
+fn ribbon(out: Strip, p: &Particle, head: Vec3, head_axis: Vec3, half: f32, alpha: f32, colour: [f32; 3], test: Option<f32>, inv: &Affine3A, view: View, min: &mut Vec3, max: &mut Vec3) {
     // points: the head, then the samples that are not on top of it
     let mut pts: [Vec3; MAX_TAIL_STEPS + 1] = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
+    let mut axes: [Vec3; MAX_TAIL_STEPS + 1] = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
     let mut n = 1;
     pts[0] = head;
+    axes[0] = head_axis;
     let steps = out.steps;
+    let free = !out.axes.is_empty();
     for i in 0..p.t_len as usize {
-        let s = out.trail[p.slot as usize * steps + (p.t_head as usize + steps - 1 - i) % steps];
+        let k = p.slot as usize * steps + (p.t_head as usize + steps - 1 - i) % steps;
+        let s = out.trail[k];
         if n <= MAX_TAIL_STEPS && s.distance_squared(pts[n - 1]) > 1e-8 {
             pts[n] = s;
+            if free {
+                axes[n] = out.axes[k];
+            }
             n += 1;
         }
     }
@@ -992,6 +1024,11 @@ fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [
     let mut side = [Vec3::ZERO; MAX_TAIL_STEPS + 1];
     let mut last = view.right;
     for i in 0..n {
+        if free && axes[i].length_squared() > 0.5 {
+            side[i] = -axes[i];
+            last = side[i];
+            continue;
+        }
         let dir = pts[i.saturating_sub(1)] - pts[(i + 1).min(n - 1)];
         let s = dir.cross(view.forward);
         last = if s.length_squared() > 1e-10 { s.normalize() } else { last };
@@ -999,7 +1036,9 @@ fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [
     }
     for i in 0..n - 1 {
         let (t0, t1) = (i as f32 / (n - 1) as f32, (i + 1) as f32 / (n - 1) as f32);
-        let (w0, w1) = (half * (1.0 - 0.8 * t0), half * (1.0 - 0.8 * t1));
+        // a camera facing ribbon tapers; a blade's sheet keeps the blade's length and only fades
+        let taper = if free { 0.0 } else { 0.8 };
+        let (w0, w1) = (half * (1.0 - taper * t0), half * (1.0 - taper * t1));
         let c = |t: f32| [colour[0], colour[1], colour[2], alpha * (1.0 - t).clamp(0.0, 1.0)];
         let v = [
             inv.transform_point3(pts[i] - side[i] * w0),
@@ -1012,7 +1051,7 @@ fn ribbon(out: Strip, p: &Particle, head: Vec3, half: f32, alpha: f32, colour: [
             *max = max.max(*q);
         }
         out.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
-        out.uv.extend_from_slice(&[[1.0 - t0, 0.0], [1.0 - t0, 1.0], [1.0 - t1, 1.0], [1.0 - t1, 0.0]]);
+        out.uv.extend_from_slice(&[[t0, 0.0], [t0, 1.0], [t1, 1.0], [t1, 0.0]]);
         out.col.extend_from_slice(&[c(t0), c(t0), c(t1), c(t1)]);
         if let Some(t) = test {
             out.uv1.extend_from_slice(&[[t, 0.0]; 4]);
@@ -1398,6 +1437,30 @@ mod tests {
         // the ribbon fades towards its end
         let heads: Vec<f32> = e.col.iter().map(|c| c[3]).collect();
         assert!(heads[0] > heads[heads.len() - 1], "{heads:?}");
+    }
+
+    /// A `Facing = Free` ribbon is as wide as the particle's +Y axis (cry; Bevy -Z) says, whatever the camera sees: the sheet a
+    /// blade sweeps. The other ribbons face the camera.
+    #[test]
+    fn a_free_ribbon_takes_its_width_from_the_emitter_axis() {
+        let budget = AtomicI32::new(10_000);
+        let attrs = r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Size="0.2" Speed="5" FocusAngle="90" FocusAzimuth="0" TailLength="1" TailSteps="10""#;
+        let run = |extra: &str| {
+            let mut s = sim(&format!("{attrs} {extra}"));
+            let c = ctx(&budget);
+            for _ in 0..30 {
+                s.step(&c);
+            }
+            let e = &s.emitters[0];
+            e.max - e.min
+        };
+        // the particle flies in the x / y plane (the focus axis is cry +Y = Bevy -Z, tilted by 90 degrees): the free ribbon is
+        // 0.4 m wide along z, the cry Y axis
+        let free = run(r#"Facing="Free""#);
+        assert!((free.z - 0.4).abs() < 0.05, "free ribbon extent {free:?}");
+        // the camera looks along -z, so a camera facing ribbon is wide in the plane of x / y, not along z
+        let cam = run("");
+        assert!(cam.z < 0.05, "camera ribbon extent {cam:?}");
     }
 
     #[test]

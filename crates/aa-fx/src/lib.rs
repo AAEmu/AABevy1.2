@@ -337,6 +337,16 @@ fn debug_filter(name: &str) -> bool {
     (only.is_empty() || only.iter().any(|w| name.contains(w))) && !skip.iter().any(|w| name.contains(w))
 }
 
+/// `AA_FX_EMITTER=a,b` (debugging): only the emitters whose name contains one of the words are drawn.
+fn emitter_filter(name: &str) -> bool {
+    static WORDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let words = WORDS.get_or_init(|| std::env::var("AA_FX_EMITTER").map(|v| v.split(',').map(|w| w.trim().to_ascii_lowercase()).filter(|w| !w.is_empty()).collect()).unwrap_or_default());
+    words.is_empty() || {
+        let name = name.to_ascii_lowercase();
+        words.iter().any(|w| name.contains(w))
+    }
+}
+
 fn register(mut libs: ResMut<FxLibraries>, mut pending: ResMut<FxPending>, new: Query<(Entity, &Effect), Added<Effect>>) {
     for (e, effect) in &new {
         if !debug_filter(&effect.name) {
@@ -501,7 +511,7 @@ fn apply(
         let mut handles = Vec::with_capacity(def.emitters.len());
         for (i, fe) in def.emitters.iter().enumerate() {
             let d = &fe.def;
-            let enabled = settings.quality >= d.config_min && settings.quality <= d.config_max;
+            let enabled = settings.quality >= d.config_min && settings.quality <= d.config_max && emitter_filter(&d.name);
             let mut material = 0;
             let mut mesh = Entity::PLACEHOLDER;
             let mut handle = None;
