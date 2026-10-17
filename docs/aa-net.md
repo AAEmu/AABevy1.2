@@ -20,7 +20,7 @@ cargo run -p aa-net --example walkthrough -- --roundtrip        # + back to char
 cargo run -p aa-net --example walkthrough -- --delete-test      # + create, delete and list a throw-away character
 cargo run -p aa-net --example walkthrough -- --move-secs 120    # + walk a circle for 2 minutes at 10 Hz (keep-alive soak test)
 cargo run -p aa-net --features bevy --example bevy_walkthrough  # same through NetPlugin in a headless Bevy app
-cargo test -p aa-net                                            # 43 unit tests + 2 scripted-server tests
+cargo test -p aa-net                                            # 82 unit tests + 2 scripted-server tests
 RUST_LOG=aa_net=debug cargo run -p aa-net --example walkthrough # protocol trace (trace = every game packet)
 ```
 
@@ -28,7 +28,12 @@ Options of `walkthrough`: `--login HOST:PORT`, `--user NAME` (default `bevytest`
 PATH`, `--world ID`, `--character NAME`, `--watch-secs N`, `--roundtrip`, `--delete-test`,
 `--move-secs N` / `--move-hz 10` / `--scenario circle|far|underground|jump|fall` (movement soak test),
 `--no-ping`, `--ping-interval-ms N`, `--first-ping-delay-ms N` (keep-alive experiments, see
-"Keep-alive and the server's dead connection sweep"). Use a throw-away account (`--user NAME
+"Keep-alive and the server's dead connection sweep"). HUD data: the walkthrough prints the whole player
+state (stats, buffs, abilities, action bar with potion counts, bag, gear, zone, clock, chat channels,
+target; `print_player_state`). `--cmd TEXT` (repeatable) sends chat / GM commands such as
+`/teleport cinderstone`, `--target-nearest` selects the nearest unit, `--skill ID` /
+`--skill-target self|nearest|hostile|OBJ` / `--item TEMPLATE:SKILL` cast skills and use items, and
+`--resurrect in-place|shrine` stands the character up; each prints the events that follow. Use a throw-away account (`--user NAME
 --character NAME`, created on first use) when another client is signed in as `bevytest`: the server
 refuses a second game connection for an account that is already online ("enter world denied (1)").
 
@@ -63,8 +68,9 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 * **Framing.** `[u16 length][payload]`, little endian. Login / stream payload: `[u16 opcode][body]`.
   Game payload: `[0xDD][level]…`; level 1 = `[hash][count][u16 opcode][body]` (the server verifies neither
   hash nor count; the client sends 0 and a counter), level 2 = the CryNetwork proxy channel
-  `[u16 opcode][body]`, level 4 = a compressed batch (only used for combat effects; reported as
-  `Compressed`, not interpreted). 1.2 traffic is not encrypted.
+  `[u16 opcode][body]`, level 4 = a compressed batch of skill results (`[u16 count][deflate
+  stream of [u16 0][u16 opcode][body]]`; the server writes stored blocks, which are unpacked into
+  `ServerMsg::Batch`). 1.2 traffic is not encrypted.
 * **Login = Trion ticket.** The simplest flow the server accepts, and what the launcher does: an XML
   ticket with `<username>` and `<password>` = hex SHA-256 of the password in `CARequestAuthTrion`
   (`login::trion_ticket`). The Korean challenge / OTP flows are not implemented.
@@ -85,11 +91,11 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 |---|---|
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
-| client → game | `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled` |
+| client → game | `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSStartSkill` (skills and items), `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (inventory, quests, buffs, skills, time of day ...) is decoded as
+Everything else the server sends (quests, mail, houses, guilds, trading, looting windows ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
 
@@ -169,8 +175,10 @@ instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experi
 
 `Worlds { list, queue, account }`, `Characters { list, race_congestion }` (a cancelled delete clears the
 delete timer of its character), `Player { spawn }`,
-`Units { by_id }`, `Doodads { by_id }`, `Status { phase, last_error }`; each has `apply(&Event) -> bool`,
-`WorldState` bundles them. They clear themselves on `LeftWorld` / `Disconnected`.
+`Units { by_id }`, `Doodads { by_id }`, `Status { phase, last_error }`, and for the HUD `PlayerStats`,
+`Buffs`, `ActionBar`, `Inventory`, `WorldInfo`, `Chat`, `Target`, `Skills` (see "In-game HUD data");
+each has `apply(&Event) -> bool`, `WorldState` bundles them. They clear themselves on `LeftWorld` /
+`Disconnected`.
 
 ### Bevy plugin (`--features bevy`, `aa_net::NetPlugin`)
 
@@ -178,7 +186,9 @@ delete timer of its character), `Player { spawn }`,
 app.add_plugins(aa_net::NetPlugin);
 // send:    MessageWriter<NetCommand>  -> out.write(NetCommand(Command::Login { .. }))
 // receive: MessageReader<NetEvent>    -> for NetEvent(event) in events.read() { .. }
-// state:   Res<Worlds>, Res<Characters>, Res<Player>, Res<Units>, Res<Doodads>, Res<Status>
+// state:   Res<Worlds>, Res<Characters>, Res<Player>, Res<Units>, Res<Doodads>, Res<Status>,
+//          Res<PlayerStats>, Res<Buffs>, Res<ActionBar>, Res<Inventory>, Res<WorldInfo>,
+//          Res<Chat>, Res<Target>, Res<Skills>
 ```
 
 The plugin starts the session thread in `build`, forwards `NetCommand` messages in `PreUpdate`, drains the
@@ -284,7 +294,11 @@ every teleport. The zone name of the minimap header: `zones.zone_key = zone_key`
 character state's `zone_key` is stale; `zone_groups.display_text` is the name ("Solzreed Peninsula").
 The server does **not** send the sub zone ("Desiree Peak"): resolve it on the client from the player
 position against the `sub_zones` rectangles (`x`, `y`, `w`, `h` in metres, `linked_zone_group_id`,
-`parent_sub_zone_id`).
+`parent_sub_zone_id`). `zone_key` is only read when the character is selected; after a teleport or a
+border crossing `zone_group_id` is the current zone. The server streams the surroundings of a new
+position (units, doodads, the zone chat channel switch) only after the client sends movement from
+there: after `Event::Teleported` send a `Command::Move` or two (the real client moves all the
+time; `walkthrough --cmd "/teleport ..."` does it).
 
 **Chat: `Chat`**
 
@@ -317,6 +331,56 @@ type -2 line for accounts without GM rights).
 `max_hp`, `faction_id`, `buffs`). NPC names are empty on the wire: show the template id from
 `Unit::kind` (`Npc { template_id, .. }`, `npcs.name` in the game database). `Event::TargetChanged`
 for other units is event only.
+
+**Skills: `Skills`** (`aa_net::state::Skills`)
+
+| packet | event | state |
+|---|---|---|
+| `SCUnitState` (own, spawn) | `PlayerSpawn` | `known` (`KnownSkill { id, level }`), `passive_buffs` |
+| `SCSkillLearned`, `SCSkillUpgraded` | `SkillLearned`, `SkillUpgraded { skill_id, level }` | `known` |
+| `SCSkillsReset` | `SkillsReset { obj_id, ability }` | event only (drop the skills of `skills.ability_id`) |
+| `SCBuffLearned` | `PassiveBuffLearned` | `passive_buffs` |
+| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` |
+| `SCSkillStarted` (`result` != 0, `tl` 0) | `SkillStarted` with `failed()` | `last_failure` (`skill::result::name`) |
+| `SCSkillFired` | `SkillFired` | `casting[caster].fired`; starts the skill when no `SkillStarted` came first |
+| `SCPlotEvent` | `PlotEvent { tl, skill_id, caster_obj_id, target_obj_id, casting_ms }` | the first step of a plot skill starts it (`casting`, `last_used`); steps with `casting_ms` > 0 set the cast time |
+| `SCSkillEnded`, `SCCastingStopped`, `SCSkillStopped`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped` | `SkillEnded`, `CastingStopped`, `SkillStopped`, `PlotEnded`, `PlotStopped` | `casting` entry removed |
+| `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags` |
+| `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, hit_type })` | event only (HP follows in `UnitPoints`) |
+| `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
+| `SCCombatText` | `CombatText { source, target, text_type }` | event only |
+
+The server sends no cooldown lengths or timers; the client times from the last use. The HUD
+reads `Skills::cooldown_left(skill_id, cooldown_tag_id, cooldown_ms)` (`skills.cooldown_time` and
+`cooldown_tag_id` come from the game database), `gcd_left(ms)`, `since_used(skill)` and
+`casting_of(obj_id) -> Option<&Casting>` (`progress()` is the cast bar, 0.0 to 1.0; the target frame
+shows the target's cast with the same call). `UnitDamage::action` says which skill (or buff tick,
+`kind` 2) dealt it; `hit_type` is `skill::hit_type::*` (`is_critical`, `is_miss`). The server's
+spell results are messages in `skill::result`.
+
+Skill results arrive in `DD04` batches (stored deflate blocks of `[u16 0][u16 opcode][body]`). The
+session unpacks them and reports every packet as if it had come alone, in order: `Event::UnitDamaged`
+after `PlotEvent`s and so on. A packet in a batch this client cannot decode ends the batch (the
+rest cannot be found: the bodies have no length); real Huffman compressed batches (the C# server)
+are reported as `ServerMsg::Compressed` and skipped.
+
+**Commands**
+
+| command | wire | answer |
+|---|---|---|
+| `Command::Target { obj_id }` (0 clears) | `CSChangeTarget` | `TargetChanged` |
+| `Command::UseSkill { skill_id, target_obj_id }` (0 = self) | `CSStartSkill`, unit caster | `SkillStarted` (refusal) or `PlotEvent` / `SkillFired`, `UnitDamaged`, `UnitPoints`, `BuffCreated` ... |
+| `Command::UseSkillAt { skill_id, pos }` | `CSStartSkill`, position target | as above |
+| `Command::UseItem { item_id, template_id, skill_id, target_obj_id }` | `CSStartSkill`, item caster | `SkillFired`, `UnitHealed`, `ItemsChanged` (`Count` delta -1), `SkillEnded` |
+| `Command::SetActionSlot { slot, action }` | `CSUpdateActionSlot` | `ActionSlotChanged` (raised by the session) |
+| `Command::Chat { chat_type, target, message }` | `CSSendChatMessage` | `Chat` echo |
+| `Command::Resurrect { in_place }` | `CSResurrectCharacter` | `Resurrected`, `UnitPoints`, weakening `BuffCreated`s |
+| `Command::LeaveWorld(LeaveTarget::Quit)` | `CSLeaveWorld` | `LeavePending`, `LeftWorld`, `Disconnected` |
+
+For `UseItem`, `item_id` is `Item::id` of the bag item, `skill_id` its `items.use_skill_id` (the
+server refuses any other skill for the item), `Inventory::find_template(template)` gives the item.
+The server only runs skills the character learned (`Skills::known`) or default skills (the melee
+auto attack, id 2). A refused skill comes back as `SkillStarted` with `result` != 0 and `tl` 0.
 
 ## What the UI scripts need
 
@@ -369,6 +433,29 @@ game:   name - AddCharacterName, Registered character name Bevytest (1)
 No `ERROR` lines caused by the client; the only warnings are the server's own tick timings. The saved
 position after the move survives the next login (`--roundtrip` spawns at the moved position).
 
+### HUD data on the lane server (`walkthrough`, account `aanet2`, character `Aanetwalker`)
+
+```text
+spawn      TimeOfDay 4.8 h speed 0.0016666 | ChatChannelJoined Shout 1/5 (zone group 5), Nation 6 faction 148,
+           Ally 14 faction 148 | Snow(false) | 5 own buffs (2423 logged on, 8000011/8000012 premium, 8298 and
+           8226 hidden / equipment) | 85 action slots, 4 bag items, 46 of 50 slots free
+Cross Plains  88 NPCs: faction 1 (16, lvl 33-50), 115 monsters (21, lvl 31), 162, 164 ...; 53 with buffs
+           (713 / 715 "wearing cloth / leather", hidden 7109), hp 18610 for a lvl 50, all via SCUnitState
+/teleport  Teleported + TimeOfDay; the new area arrives after the first movement packets; zone channel
+           Shout 1/5 left, 1/20 joined (group 5 -> 20)
+CSChangeTarget  TargetChanged { player, npc } echoed to the sender; cleared with 0
+potion     UseItem 18791:25202 -> SkillFired (item caster), UnitHealed 180, ItemsChanged Count -1 (bag 3 -> 2),
+           SkillEnded; no SkillStarted for an instant item skill
+melee      UseSkill 18132 at a lvl 1 monster: PlotEvent x n, UnitDamaged 27 / 28 / 33 per slash (hit_type 1,
+           critical 3), BuffCreated 3761 on the target, mp 484 -> 454 per cast, PlotEnded; the monster
+           answers with SkillFired 2 / SkillEnded; after 4 casts ExpChanged +95 (exp 95 / 400),
+           UnitDeath + DeathDetails { killer Aanetwalker }, CombatChanged; a cast at the corpse is
+           refused: SkillStarted { tl 0, result 4 "target died" }
+death      lvl 31 monsters killed the lvl 1 character; it spawns dead after a login (hp 0, dead);
+           Command::Resurrect { in_place: false } -> Resurrected, UnitPoints 10 %, BuffCreated 1128
+           (weakened body) and 2385 (respawn cooldown)
+```
+
 ## Keep-alive and the server's dead connection sweep
 
 The game server closes a game connection **silently** (trace level log only, no error) when its
@@ -405,12 +492,20 @@ sequences with a 25 m/s landing; the server's move verifier is off by default an
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
-* Server → client packets not decoded (skipped): inventory and equipment changes after spawn, skills and
-  combat (`DD04` batches included), quests, buffs, mail, houses in the character list
-  (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, time of day,
-  `SCUnitMovements` (batched, no per-entry type byte). Add a variant to `game::ServerMsg` + `Event` for
-  each as the UI needs it.
-* Client → server: no skills, interaction, inventory or party packets yet.
+* Server → client packets not decoded (skipped): quests, mail, houses in the character list
+  (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
+  parties, trading, shops, looting windows (`SCLootableState`), mounts, `SCBuffUpdated`,
+  `SCCombatFirstHit`, `SCAiAggro`, `SCUnitMovements` (batched, no per-entry type byte). Add a
+  variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
+  that is not decoded ends that batch.
+* Client → server: skills, items, target, action bar, resurrect, chat and logout only; no
+  interaction (NPC dialogs, shops), inventory moves, party or `CSStopCasting` packets yet.
+* No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
+  spawns dead or hurt shows too small a maximum until it has been at full health once).
+* The sub zone name of the minimap header is not sent: derive it from the position and the
+  `sub_zones` table. The zone group follows the zone chat channel (Shout).
+* `DD04` batches with real Huffman compression (the C# server) are skipped; the Rust server writes
+  stored blocks.
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
   template id. Slaves / transfers / shipyards only decode their core fields.
 * Movement: a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships, standing

@@ -6,7 +6,8 @@
 //! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:27237] [--user bevytest]
 //!     [--password-file PATH] [--world ID] [--character NAME] [--watch-secs 10] [--roundtrip] [--delete-test]
 //!     [--move-secs N] [--move-hz 10] [--scenario circle|far|underground|jump|fall] [--no-ping] [--ping-interval-ms 3000] [--first-ping-delay-ms N]
-//!     [--cmd "/add_labor 10"]... [--target-nearest]
+//!     [--cmd "/add_labor 10"]... [--target-nearest] [--skill ID]... [--skill-target self|nearest|hostile|OBJ]
+//!     [--item TEMPLATE:SKILL]... [--resurrect in-place|shrine]
 //! ```
 //!
 //! `--roundtrip` additionally goes back to the character list, then to the world list, and enters
@@ -18,6 +19,10 @@
 //!
 //! `--target-nearest` selects the nearest unit in view (`Command::Target`) and prints what the
 //! server answers.
+//!
+//! `--skill ID` (repeatable) casts a skill the character knows at `--skill-target` (default the
+//! nearest unit) and prints every event of the next 3 s; `--item TEMPLATE:SKILL` uses the bag
+//! item of that template (`SKILL` is `items.use_skill_id`).
 //!
 //! `--delete-test` creates a second character, deletes it and shows what the server answers.
 //!
@@ -55,6 +60,11 @@ struct Args {
     first_ping_delay_ms: u64,
     cmds: Vec<String>,
     target_nearest: bool,
+    skills: Vec<u32>,
+    skill_target: String,
+    items: Vec<(u32, u32)>,
+    resurrect: Option<bool>,
+    cmd_wait_ms: u64,
 }
 
 fn parse_args() -> Result<Args> {
@@ -75,6 +85,11 @@ fn parse_args() -> Result<Args> {
         first_ping_delay_ms: 0,
         cmds: Vec::new(),
         target_nearest: false,
+        skills: Vec::new(),
+        skill_target: "nearest".into(),
+        items: Vec::new(),
+        resurrect: None,
+        cmd_wait_ms: 2500,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -96,6 +111,15 @@ fn parse_args() -> Result<Args> {
             "--first-ping-delay-ms" => a.first_ping_delay_ms = value()?.parse()?,
             "--cmd" => a.cmds.push(value()?),
             "--target-nearest" => a.target_nearest = true,
+            "--skill" => a.skills.push(value()?.parse()?),
+            "--skill-target" => a.skill_target = value()?,
+            "--cmd-wait-ms" => a.cmd_wait_ms = value()?.parse()?,
+            "--resurrect" => a.resurrect = Some(value()? == "in-place"),
+            "--item" => {
+                let v = value()?;
+                let (t, s) = v.split_once(':').context("--item needs TEMPLATE:SKILL")?;
+                a.items.push((t.parse()?, s.parse()?));
+            }
             other => bail!("unknown argument {other}"),
         }
     }
@@ -391,6 +415,23 @@ async fn main() -> Result<()> {
     }
 
     print_player_state(&state);
+    if let Some(in_place) = args.resurrect {
+        println!("== resurrect (in place: {in_place}), dead: {}", state.stats.dead);
+        client.send(Command::Resurrect { in_place });
+        let end = Instant::now() + Duration::from_millis(3000);
+        while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+            state.apply(&e);
+            if let Event::Teleported { pos } = &e {
+                here = *pos;
+            }
+            if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_) | Event::UnitsRemoved(_) | Event::TargetChanged { .. }) {
+                continue;
+            }
+            let line = format!("{e:?}");
+            println!("  event {}", if line.len() > 300 { format!("{}...", &line[..300]) } else { line });
+        }
+        println!("  hp {}/{} dead {}", state.stats.hp, state.stats.max_hp, state.stats.dead);
+    }
     if !args.cmds.is_empty() {
         for text in &args.cmds {
             println!("== chat: {text}");
@@ -399,17 +440,32 @@ async fn main() -> Result<()> {
                 target: String::new(),
                 message: text.clone(),
             });
-            let end = Instant::now() + Duration::from_millis(2500);
+            let mut teleported = false;
+            let end = Instant::now() + Duration::from_millis(args.cmd_wait_ms);
             while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
                 state.apply(&e);
                 if let Event::Teleported { pos } = &e {
                     here = *pos;
+                    teleported = true;
                 }
                 if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_)) {
                     continue;
                 }
                 let line = format!("{e:?}");
                 println!("  event {}", if line.len() > 240 { format!("{}...", &line[..240]) } else { line });
+            }
+            if teleported {
+                // The server streams the new surroundings once the client moves.
+                println!("  moving to wake up the area at ({:.0}, {:.0})", here.x, here.y);
+                for _ in 0..3 {
+                    client.send(Command::Move(MoveCommand::new(here, 0.0)));
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+                let end = Instant::now() + Duration::from_millis(args.cmd_wait_ms);
+                while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+                    state.apply(&e);
+                }
+                println!("  {} units, {} doodads in view", state.units.by_id.len(), state.doodads.by_id.len());
             }
         }
         print_player_state(&state);
@@ -444,6 +500,84 @@ async fn main() -> Result<()> {
         println!("  after clearing: target {:?}", state.target.obj_id);
     }
 
+    if !args.skills.is_empty() || !args.items.is_empty() {
+        println!("== skills");
+        let mut uses: Vec<Command> = Vec::new();
+        let target_obj = match args.skill_target.as_str() {
+            "self" => 0,
+            // The nearest monster (faction 115): walk next to it first.
+            "hostile" => {
+                let mob = state
+                    .units
+                    .iter()
+                    .filter(|u| u.faction_id == 115)
+                    .min_by(|a, b| a.pos.distance(here).total_cmp(&b.pos.distance(here)))
+                    .map(|u| (u.obj_id, u.pos, u.name.clone(), u.level, u.hp));
+                match mob {
+                    Some((id, pos, name, level, hp)) => {
+                        println!("  hostile unit {id} {name:?} lvl {level} hp {hp} at {:.1} m", pos.distance(here));
+                        let near = Pos::new(pos.x - 1.5, pos.y, pos.z);
+                        for _ in 0..3 {
+                            client.send(Command::Move(MoveCommand::new(near, 0.0)));
+                            tokio::time::sleep(Duration::from_millis(150)).await;
+                        }
+                        here = near;
+                        id
+                    }
+                    None => 0,
+                }
+            }
+            "nearest" => state
+                .units
+                .iter()
+                .min_by(|a, b| a.pos.distance(here).total_cmp(&b.pos.distance(here)))
+                .map_or(0, |u| u.obj_id),
+            n => n.parse().context("--skill-target is self, nearest or an object id")?,
+        };
+        println!("  target object {target_obj} (0 = self); known skills {:?}", state.skills.known);
+        for &skill_id in &args.skills {
+            uses.push(Command::UseSkill { skill_id, target_obj_id: target_obj });
+        }
+        for &(template_id, skill_id) in &args.items {
+            match state.inventory.find_template(template_id) {
+                Some((slot, item)) => {
+                    println!("  item template {template_id} found in bag slot {slot} id {} x{}", item.id, item.count);
+                    uses.push(Command::UseItem { item_id: item.id, template_id, skill_id, target_obj_id: 0 });
+                }
+                None => println!("  no item of template {template_id} in the bag"),
+            }
+        }
+        if target_obj != 0 {
+            client.send(Command::Target { obj_id: target_obj });
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        for cmd in uses {
+            println!("  send {cmd:?}");
+            client.send(cmd);
+            let end = Instant::now() + Duration::from_millis(3000);
+            let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+            while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+                state.apply(&e);
+                let line = format!("{e:?}");
+                let name: String = line.chars().take_while(|c| c.is_alphanumeric()).collect();
+                *counts.entry(name).or_default() += 1;
+                if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_) | Event::TargetChanged { .. }) {
+                    continue;
+                }
+                println!("  event {}", if line.len() > 300 { format!("{}...", &line[..300]) } else { line });
+            }
+            println!("  event counts: {counts:?}");
+            let s = &state.skills;
+            println!(
+                "  skills: casting {:?} last_used {:?} failure {:?}",
+                s.casting_of(state.stats.obj_id).map(|c| (c.skill_id, c.tl, c.cast_ms)),
+                s.last_used.iter().map(|(k, v)| (*k, v.elapsed().as_millis())).collect::<Vec<_>>(),
+                s.last_failure.as_ref().map(|f| (f.skill_id, f.result, aa_net::skill::result::name(f.result)))
+            );
+        }
+        print_player_state(&state);
+    }
+
     // 6. Move and chat.
     println!("== move and chat");
     let mut pos = here;
@@ -468,6 +602,16 @@ async fn main() -> Result<()> {
     })
     .await?;
     println!("  echoed: {}: {}", echo.sender, echo.message);
+    // Keep listening a moment: after a teleport the units of the new area arrive with the first moves.
+    {
+        let end = Instant::now() + Duration::from_millis(args.cmd_wait_ms);
+        while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
+            state.apply(&e);
+        }
+        println!("  after moving: {} units, {} doodads in view", state.units.by_id.len(), state.doodads.by_id.len());
+        print_units_summary(&state);
+        print_world_state(&state);
+    }
 
     if args.move_secs > 0 {
         walk_circle(&mut client, &mut state, here, args.move_secs, args.move_hz, &args.scenario).await?;
@@ -492,6 +636,18 @@ async fn main() -> Result<()> {
     .await?;
     println!("  left the world; done");
     Ok(())
+}
+
+/// Units in view by faction.
+fn print_units_summary(state: &WorldState) {
+    let mut factions: BTreeMap<u32, (usize, u8, u8)> = BTreeMap::new();
+    for u in state.units.iter() {
+        let e = factions.entry(u.faction_id).or_insert((0, u.level, u.level));
+        e.0 += 1;
+        e.1 = e.1.min(u.level);
+        e.2 = e.2.max(u.level);
+    }
+    println!("  units by faction (count, min level, max level): {factions:?}");
 }
 
 /// Zone, clock, chat channels and target.
@@ -589,6 +745,7 @@ fn print_player_state(state: &WorldState) {
     let with_buffs = state.units.iter().filter(|u| !state.buffs.of(u.obj_id).is_empty()).count();
     let with_faction = state.units.iter().filter(|u| u.faction_id != 0).count();
     println!("  units with buffs {with_buffs}, with a faction {with_faction} of {}", state.units.by_id.len());
+    print_units_summary(state);
     let mut sample: Vec<_> = state.units.iter().filter(|u| !u.buffs.is_empty()).collect();
     sample.sort_by_key(|u| u.obj_id);
     for u in sample.iter().take(4) {

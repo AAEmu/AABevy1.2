@@ -11,6 +11,7 @@ use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit,
 };
 use crate::opcodes::{cs, pp, sc};
+use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
 use crate::wire::{Pos, Reader, Result, WireError, Writer};
 
 pub const MAGIC: u8 = 0xDD;
@@ -82,6 +83,11 @@ pub enum ClientMsg {
     ChangeTarget { obj_id: u32 },
     /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
     UpdateActionSlot { slot: u8, action: ActionSlot },
+    /// `CSResurrectCharacter`: stand up where the character died (`in_place`) or at the return
+    /// point; the character must be dead.
+    Resurrect { in_place: bool },
+    /// `CSStartSkill`: the player's unit (`self_obj_id`) or one of its items casts `skill_id`.
+    StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -113,6 +119,8 @@ impl ClientMsg {
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
             Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
+            Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
+            Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -158,6 +166,12 @@ impl ClientMsg {
             Self::UpdateActionSlot { slot, action } => {
                 w.u8(*slot);
                 action.write(&mut w);
+            }
+            Self::Resurrect { in_place } => {
+                w.bool(*in_place);
+            }
+            Self::StartSkill { skill_id, self_obj_id, caster, target } => {
+                crate::skill::write_start_skill(&mut w, *skill_id, *self_obj_id, *caster, target);
             }
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -295,6 +309,23 @@ pub enum ServerMsg {
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots`.
     InvenExpanded { container: u8, slots: u8 },
+    // -- skills and combat
+    SkillStarted(SkillStarted),
+    SkillFired(SkillFired),
+    SkillEnded { tl: u16 },
+    SkillStopped { obj_id: u32, skill_id: u32 },
+    CastingStopped { tl: u16, duration_ms: u32 },
+    SkillCooldownReset { obj_id: u32, skill_id: u32, tag_id: u32, gcd: bool },
+    SkillLearned { skill_id: u32, level: u8 },
+    SkillUpgraded { skill_id: u32, level: u8 },
+    SkillsReset { obj_id: u32, ability: u8 },
+    UnitDamaged(UnitDamage),
+    UnitHealed(UnitHeal),
+    CombatText { source: u32, target: u32, text_type: u8 },
+    PlotEvent(PlotEvent),
+    PlotEnded { tl: u16 },
+    /// `SCPlotCastingStopped` (`channeling` false) or `SCPlotChannelingStopped`.
+    PlotStopped { tl: u16, duration_ms: u32, last_event: u8, channeling: bool },
     // -- buffs
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
@@ -311,7 +342,10 @@ pub enum ServerMsg {
     LeaveWorldGranted { target: u8 },
     LeaveWorldCanceled,
     // -- anything else
-    /// A compressed batch (`DD04`) of server packets; not interpreted.
+    /// A compressed batch (`DD04`) of server packets (skill results), decoded one by one. The
+    /// session reports each as if it had arrived alone.
+    Batch(Vec<ServerMsg>),
+    /// A compressed batch that could not be inflated (only stored deflate blocks are supported).
     Compressed { count: u16 },
     Unhandled { level: u8, opcode: u16, len: usize },
 }
@@ -364,6 +398,22 @@ impl ServerMsg {
             Self::ItemTasks(_) => "SCItemTaskSuccess",
             Self::EquipmentChanged { .. } => "SCUnitEquipmentsChanged",
             Self::InvenExpanded { .. } => "SCInvenExpanded",
+            Self::SkillStarted(_) => "SCSkillStarted",
+            Self::SkillFired(_) => "SCSkillFired",
+            Self::SkillEnded { .. } => "SCSkillEnded",
+            Self::SkillStopped { .. } => "SCSkillStopped",
+            Self::CastingStopped { .. } => "SCCastingStopped",
+            Self::SkillCooldownReset { .. } => "SCSkillCooldownReset",
+            Self::SkillLearned { .. } => "SCSkillLearned",
+            Self::SkillUpgraded { .. } => "SCSkillUpgraded",
+            Self::SkillsReset { .. } => "SCSkillsReset",
+            Self::UnitDamaged(_) => "SCUnitDamaged",
+            Self::UnitHealed(_) => "SCUnitHealed",
+            Self::CombatText { .. } => "SCCombatText",
+            Self::PlotEvent(_) => "SCPlotEvent",
+            Self::PlotEnded { .. } => "SCPlotEnded",
+            Self::PlotStopped { channeling: false, .. } => "SCPlotCastingStopped",
+            Self::PlotStopped { .. } => "SCPlotChannelingStopped",
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffLearned { .. } => "SCBuffLearned",
@@ -377,7 +427,7 @@ impl ServerMsg {
             Self::PrepareLeaveWorld { .. } => "SCPrepareLeaveWorld",
             Self::LeaveWorldGranted { .. } => "SCLeaveWorldGranted",
             Self::LeaveWorldCanceled => "SCLeaveWorldCanceled",
-            Self::Compressed { .. } => "CompressedGamePackets",
+            Self::Batch(_) | Self::Compressed { .. } => "CompressedGamePackets",
             Self::Unhandled { .. } => "unhandled",
         }
     }
@@ -400,13 +450,45 @@ impl ServerMsg {
                 let opcode = r.u16()?;
                 Self::decode_proxy(opcode, &mut r)
             }
-            LEVEL_COMPRESSED => Ok(Self::Compressed { count: r.u16()? }),
+            LEVEL_COMPRESSED => {
+                let count = r.u16()?;
+                Ok(match inflate_stored(r.rest()) {
+                    Some(raw) => Self::Batch(Self::decode_batch(&raw, count)),
+                    None => Self::Compressed { count },
+                })
+            }
             level => Ok(Self::Unhandled {
                 level,
                 opcode: 0,
                 len: frame.len(),
             }),
         }
+    }
+
+    /// The packets of a `DD04` batch: `[u16 0][u16 opcode][body]` each. The bodies carry no length,
+    /// so a packet this client cannot decode ends the batch (reported as `Unhandled`).
+    fn decode_batch(raw: &[u8], count: u16) -> Vec<Self> {
+        fn entry(r: &mut Reader) -> Result<ServerMsg> {
+            r.skip(2)?;
+            let opcode = r.u16()?;
+            ServerMsg::decode_game(opcode, r)
+        }
+        let mut r = Reader::new(raw);
+        let mut out = Vec::with_capacity(usize::from(count));
+        while !r.is_empty() {
+            match entry(&mut r) {
+                Ok(Self::Unhandled { opcode, len, .. }) => {
+                    out.push(Self::Unhandled { level: LEVEL_COMPRESSED, opcode, len });
+                    break;
+                }
+                Ok(m) => out.push(m),
+                Err(e) => {
+                    tracing::warn!("undecodable packet in a batch of {count}: {e}");
+                    break;
+                }
+            }
+        }
+        out
     }
 
     fn decode_proxy(opcode: u16, r: &mut Reader) -> Result<Self> {
@@ -600,6 +682,31 @@ impl ServerMsg {
                 Self::EquipmentChanged { obj_id, items }
             }
             sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
+            sc::SCSkillStartedPacket => Self::SkillStarted(SkillStarted::read(r)?),
+            sc::SCSkillFiredPacket => Self::SkillFired(SkillFired::read(r)?),
+            sc::SCSkillEndedPacket => Self::SkillEnded { tl: r.u16()? },
+            sc::SCSkillStoppedPacket => Self::SkillStopped { obj_id: r.bc()?, skill_id: r.u32()? },
+            sc::SCCastingStoppedPacket => Self::CastingStopped { tl: r.u16()?, duration_ms: r.u32()? },
+            sc::SCSkillCooldownResetPacket => Self::SkillCooldownReset {
+                obj_id: r.bc()?,
+                skill_id: r.u32()?,
+                tag_id: r.u32()?,
+                gcd: r.bool()?,
+            },
+            sc::SCSkillLearnedPacket => Self::SkillLearned { skill_id: r.u32()?, level: r.u8()? },
+            sc::SCSkillUpgradedPacket => Self::SkillUpgraded { skill_id: r.u32()?, level: r.u8()? },
+            sc::SCSkillsResetPacket => Self::SkillsReset { obj_id: r.bc()?, ability: r.u8()? },
+            sc::SCUnitDamagedPacket => Self::UnitDamaged(UnitDamage::read(r)?),
+            sc::SCUnitHealedPacket => Self::UnitHealed(UnitHeal::read(r)?),
+            sc::SCCombatTextPacket => Self::CombatText { source: r.bc()?, target: r.bc()?, text_type: r.u8()? },
+            sc::SCPlotEventPacket => Self::PlotEvent(PlotEvent::read(r)?),
+            sc::SCPlotEndedPacket => Self::PlotEnded { tl: r.u16()? },
+            sc::SCPlotCastingStoppedPacket | sc::SCPlotChannelingStoppedPacket => Self::PlotStopped {
+                tl: r.u16()?,
+                duration_ms: r.u32()?,
+                last_event: r.u8()?,
+                channeling: opcode == sc::SCPlotChannelingStoppedPacket,
+            },
             sc::SCBuffCreatedPacket => {
                 let (obj_id, buff) = Buff::read_created(r)?;
                 Self::BuffCreated { obj_id, buff }
@@ -662,6 +769,29 @@ impl ServerMsg {
                 len: r.remaining(),
             },
         })
+    }
+}
+
+/// Inflates a deflate stream made of stored blocks (RFC 1951 BTYPE 00), which is what the server
+/// writes for `DD04` batches. `None` for compressed blocks or a damaged stream.
+pub fn inflate_stored(data: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    loop {
+        let header = *data.get(i)?;
+        if header & 0b110 != 0 {
+            return None;
+        }
+        let len = u16::from_le_bytes([*data.get(i + 1)?, *data.get(i + 2)?]);
+        let nlen = u16::from_le_bytes([*data.get(i + 3)?, *data.get(i + 4)?]);
+        if len != !nlen {
+            return None;
+        }
+        out.extend_from_slice(data.get(i + 5..i + 5 + usize::from(len))?);
+        i += 5 + usize::from(len);
+        if header & 1 == 1 {
+            return Some(out);
+        }
     }
 }
 
@@ -1039,6 +1169,117 @@ mod tests {
         );
         // CSChangeTarget: the bc target.
         assert_eq!(ClientMsg::ChangeTarget { obj_id: 0x0A0B0C }.encode_body().len(), 3);
+    }
+
+    /// A stored-block deflate stream as the server writes it (`deflate_stored`).
+    fn stored(data: &[u8], last: bool) -> Vec<u8> {
+        let len = data.len() as u16;
+        let mut out = vec![u8::from(last)];
+        out.extend(len.to_le_bytes());
+        out.extend((!len).to_le_bytes());
+        out.extend(data);
+        out
+    }
+
+    #[test]
+    fn skill_packets_golden_bytes() {
+        // SCSkillEnded(tl), SCCastingStopped(tl, duration), SCSkillStopped(obj, skill).
+        assert_eq!(decode(sc::SCSkillEndedPacket, &[7, 0]), ServerMsg::SkillEnded { tl: 7 });
+        assert_eq!(
+            decode(sc::SCCastingStoppedPacket, &[7, 0, 0xE8, 0x03, 0, 0]),
+            ServerMsg::CastingStopped { tl: 7, duration_ms: 1000 }
+        );
+        let mut w = Writer::new();
+        w.bc(0x0102).u32(18132);
+        assert_eq!(decode(sc::SCSkillStoppedPacket, &w.finish()), ServerMsg::SkillStopped { obj_id: 0x0102, skill_id: 18132 });
+        // SCSkillCooldownReset(obj, skill, tag, gcd).
+        let mut w = Writer::new();
+        w.bc(5).u32(18132).u32(77).bool(true);
+        assert_eq!(
+            decode(sc::SCSkillCooldownResetPacket, &w.finish()),
+            ServerMsg::SkillCooldownReset { obj_id: 5, skill_id: 18132, tag_id: 77, gcd: true }
+        );
+        // SCSkillLearned / SCSkillUpgraded(id, level), SCSkillsReset(obj, ability).
+        let mut w = Writer::new();
+        w.u32(16064).u8(2);
+        assert_eq!(decode(sc::SCSkillLearnedPacket, &w.finish()), ServerMsg::SkillLearned { skill_id: 16064, level: 2 });
+        let mut w = Writer::new();
+        w.u32(16064).u8(3);
+        assert_eq!(decode(sc::SCSkillUpgradedPacket, &w.finish()), ServerMsg::SkillUpgraded { skill_id: 16064, level: 3 });
+        let mut w = Writer::new();
+        w.bc(5).u8(4);
+        assert_eq!(decode(sc::SCSkillsResetPacket, &w.finish()), ServerMsg::SkillsReset { obj_id: 5, ability: 4 });
+        // SCCombatText(source, target, type).
+        let mut w = Writer::new();
+        w.bc(5).bc(6).u8(2);
+        assert_eq!(decode(sc::SCCombatTextPacket, &w.finish()), ServerMsg::CombatText { source: 5, target: 6, text_type: 2 });
+        // SCPlotEnded(tl), SCPlotCastingStopped / SCPlotChannelingStopped(tl, duration, last event).
+        assert_eq!(decode(sc::SCPlotEndedPacket, &[9, 0]), ServerMsg::PlotEnded { tl: 9 });
+        let body = [9, 0, 100, 0, 0, 0, 3];
+        assert_eq!(
+            decode(sc::SCPlotCastingStoppedPacket, &body),
+            ServerMsg::PlotStopped { tl: 9, duration_ms: 100, last_event: 3, channeling: false }
+        );
+        assert_eq!(
+            decode(sc::SCPlotChannelingStoppedPacket, &body),
+            ServerMsg::PlotStopped { tl: 9, duration_ms: 100, last_event: 3, channeling: true }
+        );
+        // CSStartSkill from the client: skill, unit caster, unit target, no skill object.
+        let m = ClientMsg::StartSkill {
+            skill_id: 18132,
+            self_obj_id: 0x0102,
+            caster: StartCaster::Unit,
+            target: SkillTarget::unit(0x0A0B0C),
+        };
+        assert_eq!(m.encode_body(), [0xD4, 0x46, 0, 0, 0, 0x02, 0x01, 0, 0, 0x0C, 0x0B, 0x0A, 0]);
+        assert_eq!(m.encode(1)[..6], [0xDD, 0x01, 0, 1, 0x52, 0x00]);
+        // CSResurrectCharacter: one bool, in place or at the return point.
+        assert_eq!(ClientMsg::Resurrect { in_place: true }.encode(2), [0xDD, 0x01, 0, 2, 0x4E, 0x00, 1]);
+        assert_eq!(ClientMsg::Resurrect { in_place: false }.encode_body(), [0]);
+    }
+
+    #[test]
+    fn compressed_batches_are_unpacked() {
+        // CompressedGamePackets: [dd][04][u16 count][deflate([u16 0][u16 opcode][body] ...)].
+        let mut raw = Writer::new();
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(7);
+        raw.u16(0).u16(sc::SCSkillCooldownResetPacket).bc(5).u32(18132).u32(0).bool(false);
+        // SCUnitHealed: cast action (skill 25202, tl 9), unit caster, bc target, type, hit, value, o, result.
+        raw.u16(0).u16(sc::SCUnitHealedPacket);
+        raw.u8(0).u32(25202).u16(9).u8(0).bc(5).bc(5).u8(0).u8(13).i32(300).i32(0).u8(1);
+        let raw = raw.finish();
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 3, 0];
+        frame.extend(stored(&raw, true));
+        let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0], ServerMsg::SkillEnded { tl: 7 });
+        assert!(matches!(list[1], ServerMsg::SkillCooldownReset { skill_id: 18132, .. }));
+        let ServerMsg::UnitHealed(h) = &list[2] else { panic!("not a heal") };
+        assert_eq!((h.target_obj_id, h.value), (5, 300));
+        assert_eq!(ServerMsg::Batch(list).name(), "CompressedGamePackets");
+
+        // The stream may span several stored blocks; a packet we cannot decode ends the batch.
+        let mut raw = Writer::new();
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(8);
+        raw.u16(0).u16(0x1ff).raw(&[1, 2, 3]);
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(9);
+        let raw = raw.finish();
+        let (a, b) = raw.split_at(5);
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 3, 0];
+        frame.extend(stored(a, false));
+        frame.extend(stored(b, true));
+        let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0], ServerMsg::SkillEnded { tl: 8 });
+        assert!(matches!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x1ff, .. }));
+
+        // Real compression (a Huffman block) is not supported and reported as such.
+        assert_eq!(
+            ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).unwrap(),
+            ServerMsg::Compressed { count: 2 }
+        );
+        assert_eq!(inflate_stored(&stored(&[1, 2, 3], true)), Some(vec![1, 2, 3]));
+        assert_eq!(inflate_stored(&[1, 3, 0, 0, 0, 1, 2, 3]), None, "length check");
     }
 
     #[test]

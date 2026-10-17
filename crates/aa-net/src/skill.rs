@@ -1,0 +1,635 @@
+//! Skills: who casts what at whom, and what came of it.
+//!
+//! Layouts follow the server's `systems/skills/packets.rs` and `types.rs` (`SCSkillStarted`,
+//! `SCSkillFired`, `SCUnitDamaged`, `SCUnitHealed`, `SCPlotEvent` ...) and the reader of
+//! `CSStartSkill`. Times on the wire are in units of 10 ms (some with an offset of 10); the types
+//! here are in milliseconds.
+
+use crate::buff::{caster_kind, BuffCaster};
+use crate::wire::{Pos, Reader, Result, Writer};
+
+/// `SkillCastTargetType`.
+pub mod target_kind {
+    pub const UNIT: u8 = 0;
+    pub const POSITION: u8 = 1;
+    pub const POSITION2: u8 = 2;
+    pub const ITEM: u8 = 3;
+    pub const DOODAD: u8 = 4;
+    pub const POSITION3: u8 = 5;
+}
+
+/// `SkillResult`: why a skill did not start (`SkillStarted::result`, 0 = it started).
+pub mod result {
+    pub const SUCCESS: u8 = 0x00;
+    pub const FAILURE: u8 = 0x01;
+    pub const SOURCE_DIED: u8 = 0x02;
+    pub const TARGET_DIED: u8 = 0x04;
+    pub const ON_CASTING: u8 = 0x07;
+    pub const COOLDOWN_TIME: u8 = 0x08;
+    pub const NO_TARGET: u8 = 0x09;
+    pub const LACK_HEALTH: u8 = 0x0A;
+    pub const LACK_MANA: u8 = 0x0B;
+    pub const OBSTACLE: u8 = 0x0C;
+    pub const TOO_CLOSE_RANGE: u8 = 0x0E;
+    pub const TOO_FAR_RANGE: u8 = 0x0F;
+    pub const OUTOF_ANGLE: u8 = 0x10;
+    pub const CANNOT_CAST_IN_COMBAT: u8 = 0x11;
+    pub const CANNOT_CAST_WHILE_MOVING: u8 = 0x12;
+    pub const CANNOT_CAST_IN_STUN: u8 = 0x13;
+    pub const SILENCE: u8 = 0x17;
+    pub const INVALID_SKILL: u8 = 0x1E;
+    pub const INACTIVE_ABILITY: u8 = 0x1F;
+    pub const NOT_ENOUGH_ABILITY_LEVEL: u8 = 0x20;
+    pub const INVALID_SOURCE: u8 = 0x21;
+    pub const INVALID_TARGET: u8 = 0x22;
+    pub const INVALID_LOCATION: u8 = 0x23;
+    pub const NEED_REAGENT: u8 = 0x24;
+    pub const NEED_MONEY: u8 = 0x26;
+    pub const NEED_LABOR_POWER: u8 = 0x27;
+    pub const NOT_NOW: u8 = 0x2C;
+    pub const NO_PERM: u8 = 0x2D;
+    pub const BAG_FULL: u8 = 0x2E;
+    pub const SKILL_REQ_FAIL: u8 = 0x32;
+
+    /// The server's name of a result, for logs (the UI has localized texts).
+    pub fn name(r: u8) -> &'static str {
+        match r {
+            SUCCESS => "success",
+            FAILURE => "failure",
+            SOURCE_DIED => "source died",
+            TARGET_DIED => "target died",
+            ON_CASTING => "already casting",
+            COOLDOWN_TIME => "cooldown",
+            NO_TARGET => "no target",
+            LACK_HEALTH => "not enough health",
+            LACK_MANA => "not enough mana",
+            OBSTACLE => "obstacle",
+            TOO_CLOSE_RANGE => "too close",
+            TOO_FAR_RANGE => "too far",
+            OUTOF_ANGLE => "out of angle",
+            CANNOT_CAST_IN_COMBAT => "not in combat",
+            CANNOT_CAST_WHILE_MOVING => "not while moving",
+            CANNOT_CAST_IN_STUN => "stunned",
+            SILENCE => "silenced",
+            INVALID_SKILL => "invalid skill",
+            INACTIVE_ABILITY => "ability not active",
+            NOT_ENOUGH_ABILITY_LEVEL => "ability level too low",
+            INVALID_SOURCE => "invalid source",
+            INVALID_TARGET => "invalid target",
+            INVALID_LOCATION => "invalid location",
+            NEED_REAGENT => "reagent missing",
+            NEED_MONEY => "not enough money",
+            NEED_LABOR_POWER => "not enough labor",
+            NOT_NOW => "not now",
+            NO_PERM => "not permitted",
+            BAG_FULL => "bag full",
+            SKILL_REQ_FAIL => "requirements not met",
+            _ => "?",
+        }
+    }
+}
+
+/// `SkillHitType`: how an attack landed (`UnitDamage::hit_type`).
+pub mod hit_type {
+    pub const INVALID: u8 = 0x00;
+    pub const MELEE_HIT: u8 = 0x01;
+    pub const MELEE_CRITICAL: u8 = 0x03;
+    pub const MELEE_MISS: u8 = 0x04;
+    pub const MELEE_DODGE: u8 = 0x05;
+    pub const MELEE_BLOCK: u8 = 0x06;
+    pub const MELEE_PARRY: u8 = 0x07;
+    pub const RANGED_HIT: u8 = 0x09;
+    pub const RANGED_MISS: u8 = 0x0A;
+    pub const RANGED_CRITICAL: u8 = 0x0B;
+    pub const SPELL_HIT: u8 = 0x0D;
+    pub const SPELL_MISS: u8 = 0x0E;
+    pub const SPELL_CRITICAL: u8 = 0x0F;
+    pub const RANGED_DODGE: u8 = 0x10;
+    pub const RANGED_BLOCK: u8 = 0x11;
+    pub const IMMUNE: u8 = 0x12;
+    pub const SPELL_RESIST: u8 = 0x13;
+    pub const RANGED_PARRY: u8 = 0x14;
+
+    pub fn is_critical(h: u8) -> bool {
+        matches!(h, MELEE_CRITICAL | RANGED_CRITICAL | SPELL_CRITICAL)
+    }
+
+    /// Dodged, blocked, parried, resisted, missed or immune: no damage was dealt.
+    pub fn is_miss(h: u8) -> bool {
+        matches!(
+            h,
+            MELEE_MISS
+                | MELEE_DODGE
+                | MELEE_BLOCK
+                | MELEE_PARRY
+                | RANGED_MISS
+                | RANGED_DODGE
+                | RANGED_BLOCK
+                | RANGED_PARRY
+                | SPELL_MISS
+                | SPELL_RESIST
+                | IMMUNE
+        )
+    }
+}
+
+/// What a skill is aimed at (`SkillCastTarget`): a unit, a doodad, a spot or an item.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SkillTarget {
+    /// See [`target_kind`].
+    pub kind: u8,
+    /// Object id for units and doodads (also the optional object of the other kinds).
+    pub obj_id: u32,
+    /// The spot, for the position kinds.
+    pub pos: Option<Pos>,
+}
+
+impl SkillTarget {
+    pub fn unit(obj_id: u32) -> Self {
+        Self { kind: target_kind::UNIT, obj_id, pos: None }
+    }
+
+    pub fn position(pos: Pos) -> Self {
+        Self { kind: target_kind::POSITION, obj_id: 0, pos: Some(pos) }
+    }
+
+    /// The target kind byte and its fields.
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let kind = r.u8()?;
+        Ok(match kind {
+            target_kind::UNIT | target_kind::DOODAD => Self { kind, obj_id: r.bc()?, pos: None },
+            target_kind::POSITION => {
+                let pos = r.long_position()?;
+                r.skip(4 + 3 + 3)?; // rotation, two object ids
+                Self { kind, obj_id: 0, pos: Some(pos) }
+            }
+            target_kind::POSITION2 => {
+                let pos = r.long_position()?;
+                r.skip(6 * 4)?; // end point and normal
+                Self { kind, obj_id: 0, pos: Some(pos) }
+            }
+            target_kind::ITEM => {
+                let obj_id = r.bc()?;
+                r.skip(8 + 4 + 1)?; // item id, two types
+                Self { kind, obj_id, pos: None }
+            }
+            target_kind::POSITION3 => {
+                let pos = r.long_position()?;
+                r.skip(4)?; // pitch
+                Self { kind, obj_id: 0, pos: Some(pos) }
+            }
+            other => return Err(crate::wire::WireError::Invalid(format!("skill target kind {other}"))),
+        })
+    }
+
+    /// Writes the kinds a client sends: unit, doodad and position.
+    pub fn write(&self, w: &mut Writer) {
+        w.u8(self.kind);
+        match (self.kind, self.pos) {
+            (target_kind::POSITION, Some(p)) => {
+                w.long_position(p).f32(0.0).bc(0).bc(0);
+            }
+            (target_kind::POSITION3, Some(p)) => {
+                w.long_position(p).f32(0.0);
+            }
+            (target_kind::POSITION2, Some(p)) => {
+                w.long_position(p);
+                for _ in 0..6 {
+                    w.f32(0.0);
+                }
+            }
+            (target_kind::ITEM, _) => {
+                w.bc(self.obj_id).u64(0).u32(0).u8(0);
+            }
+            _ => {
+                w.bc(self.obj_id);
+            }
+        }
+    }
+}
+
+/// Reads past a `SkillObject` (flag byte and its fields).
+fn skip_skill_object(r: &mut Reader) -> Result<()> {
+    match r.u8()? {
+        1 => r.skip(1 + 4 + 8 + 8 + 4),         // portal info
+        2 => r.skip(4).and_then(|()| r.string().map(|_| ())), // save portal info
+        3 | 6 => r.string().map(|_| ()),        // text
+        4 => r.skip(8 + 8 + 4),                 // position
+        5 => r.skip(4),
+        7 => r.skip(4 + 8 + 1),                 // enchanting support
+        _ => Ok(()),
+    }
+}
+
+/// The unit or item a client starts a skill with (`SkillCaster`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartCaster {
+    /// The player's own unit (object id filled in by the session).
+    Unit,
+    /// An item of the bag: `item_id` is its database id (`Item::id`), `template_id` the template;
+    /// the skill id must be the item's `use_skill_id`.
+    Item { item_id: u64, template_id: u32 },
+}
+
+/// `CSStartSkill`: `skill_id`, caster, target and no skill object.
+pub fn write_start_skill(w: &mut Writer, skill_id: u32, self_obj_id: u32, caster: StartCaster, target: &SkillTarget) {
+    w.u32(skill_id);
+    match caster {
+        StartCaster::Unit => {
+            w.u8(caster_kind::UNIT).bc(self_obj_id);
+        }
+        StartCaster::Item { item_id, template_id } => {
+            w.u8(caster_kind::ITEM).bc(self_obj_id).u64(item_id).u32(template_id).u8(0).u32(0);
+        }
+    }
+    target.write(w);
+    w.u8(0); // no skill object
+}
+
+/// `SCSkillStarted`: a unit begins casting, or (with a non zero `result`, `tl` 0) a skill the
+/// client asked for was refused.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillStarted {
+    pub skill_id: u32,
+    /// Timeline id: names this cast in `SkillFired`, `SkillEnded` and `CastingStopped`.
+    pub tl: u16,
+    pub caster: BuffCaster,
+    pub target: SkillTarget,
+    /// Cast time with haste, ms (0 = instant), and without.
+    pub cast_ms: u32,
+    pub base_cast_ms: u32,
+    pub synergy: u8,
+    /// `result::*`; 0 when the skill started.
+    pub result: u8,
+    /// Detail of a failure (for example the missing amount).
+    pub result_value: u32,
+}
+
+impl SkillStarted {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let skill_id = r.u32()?;
+        let tl = r.u16()?;
+        let caster = BuffCaster::read(r)?;
+        let target = SkillTarget::read(r)?;
+        skip_skill_object(r)?;
+        let cast_ms = u32::from(r.u16()?) * 10;
+        let base_cast_ms = u32::from(r.u16()?) * 10;
+        let synergy = r.u8()?;
+        let flags = r.u8()?;
+        let mut result = 0;
+        let mut result_value = 0;
+        if flags & 1 != 0 {
+            result = r.u8()?;
+        }
+        if flags & 2 != 0 {
+            result_value = u32::from(r.u16()?);
+        }
+        if flags & 4 != 0 {
+            result_value = r.u32()?;
+        }
+        Ok(Self { skill_id, tl, caster, target, cast_ms, base_cast_ms, synergy, result, result_value })
+    }
+
+    /// The skill did not start.
+    pub fn failed(&self) -> bool {
+        self.result != result::SUCCESS
+    }
+}
+
+/// `SCSkillFired`: the cast completed and the effect happens.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillFired {
+    pub skill_id: u32,
+    pub tl: u16,
+    pub caster: BuffCaster,
+    pub target: SkillTarget,
+    /// Delay until the effects land, ms.
+    pub delay_ms: i32,
+    /// Channeling time, ms (0 for plain skills).
+    pub channeling_ms: i32,
+    pub fire_anim_id: u32,
+}
+
+impl SkillFired {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let skill_id = r.u32()?;
+        let tl = r.u16()?;
+        let caster = BuffCaster::read(r)?;
+        let target = SkillTarget::read(r)?;
+        skip_skill_object(r)?;
+        let delay = i32::from(r.i16()?);
+        let channeling = i32::from(r.i16()?);
+        r.skip(1)?;
+        let fire_anim_id = r.u32()?;
+        r.skip(1)?;
+        Ok(Self {
+            skill_id,
+            tl,
+            caster,
+            target,
+            delay_ms: (delay - 10) * 10,
+            channeling_ms: (channeling - 10) * 10,
+            fire_anim_id,
+        })
+    }
+}
+
+/// `CastAction`: what caused a damage or heal: a skill, a plot of a skill, or a buff tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CastAction {
+    /// 0 skill, 1 plot, 2 buff, 3 and 4 other.
+    pub kind: u8,
+    pub skill_id: u32,
+    pub tl: u16,
+    /// The buff, for buff ticks (damage over time).
+    pub buff_id: u32,
+}
+
+impl CastAction {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let kind = r.u8()?;
+        let mut a = Self { kind, ..Self::default() };
+        match kind {
+            0 => {
+                a.skill_id = r.u32()?;
+                a.tl = r.u16()?;
+            }
+            1 => {
+                r.skip(4)?; // plot id
+                a.tl = r.u16()?;
+                r.skip(4)?; // event id
+                a.skill_id = r.u32()?;
+            }
+            2 => {
+                a.buff_id = r.u32()?;
+                r.skip(3 + 4 + 1 + 1)?; // owner, index, two flags
+            }
+            3 => r.skip(4 + 4 + 3)?,
+            4 => r.skip(4 + 3)?,
+            other => return Err(crate::wire::WireError::Invalid(format!("cast action {other}"))),
+        }
+        Ok(a)
+    }
+}
+
+/// `SCUnitDamaged`: a hit on `target_obj_id`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnitDamage {
+    pub action: CastAction,
+    pub caster: BuffCaster,
+    pub caster_obj_id: u32,
+    pub target_obj_id: u32,
+    pub damage: i32,
+    /// Damage absorbed by shields.
+    pub absorbed: i32,
+    pub mana_burn: i32,
+    /// `hit_type::*` (the low five bits of the wire value).
+    pub hit_type: u8,
+}
+
+impl UnitDamage {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let action = CastAction::read(r)?;
+        let caster = BuffCaster::read(r)?;
+        let caster_obj_id = r.bc()?;
+        let target_obj_id = r.bc()?;
+        r.skip(1)?; // crime state
+        let [damage, absorbed, ..] = r.pisc(3)?;
+        let mana_burn = r.pisc(3)?[2];
+        r.skip(1)?; // holdable
+        let hit = r.u16()?;
+        r.skip(2)?; // flag, result
+        Ok(Self {
+            action,
+            caster,
+            caster_obj_id,
+            target_obj_id,
+            damage: damage as i32,
+            absorbed: absorbed as i32,
+            mana_burn: mana_burn as i32,
+            hit_type: (hit & 0x1F) as u8,
+        })
+    }
+}
+
+/// `SCUnitHealed`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnitHeal {
+    pub action: CastAction,
+    pub caster: BuffCaster,
+    pub target_obj_id: u32,
+    /// 0 health, 1 mana.
+    pub heal_type: u8,
+    /// 11 critical heal, 13 plain heal.
+    pub hit_type: u8,
+    pub value: i32,
+}
+
+impl UnitHeal {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let action = CastAction::read(r)?;
+        let caster = BuffCaster::read(r)?;
+        let target_obj_id = r.bc()?;
+        let heal_type = r.u8()?;
+        let hit_type = r.u8()?;
+        let value = r.i32()?;
+        r.skip(4 + 1)?;
+        Ok(Self { action, caster, target_obj_id, heal_type, hit_type, value })
+    }
+
+    pub fn is_critical(&self) -> bool {
+        self.hit_type == 11
+    }
+}
+
+/// `SCPlotEvent`: a step of a plot skill (most player skills are plots).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlotEvent {
+    pub tl: u16,
+    pub event_id: u32,
+    pub skill_id: u32,
+    /// Object ids of the source and target (0 when it is a position).
+    pub caster_obj_id: u32,
+    pub target_obj_id: u32,
+    /// The next step's cast time, ms.
+    pub casting_ms: u32,
+}
+
+impl PlotEvent {
+    fn plot_object(r: &mut Reader) -> Result<u32> {
+        match r.u8()? {
+            1 => r.bc(),
+            _ => {
+                r.skip(9 + 3)?; // position, three rotation bytes
+                Ok(0)
+            }
+        }
+    }
+
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let tl = r.u16()?;
+        let event_id = r.u32()?;
+        let skill_id = r.u32()?;
+        let caster_obj_id = Self::plot_object(r)?;
+        let target_obj_id = Self::plot_object(r)?;
+        r.skip(8 + 3)?; // item id, object id
+        let casting_ms = u32::from(r.u16()?) * 10;
+        r.skip(3 + 2)?;
+        let n = r.u8()?;
+        r.skip(usize::from(n) * 3)?;
+        let flag = r.u8()?;
+        if (flag >> 3) & 1 == 1 {
+            r.skip(13 * 4)?;
+        }
+        Ok(Self { tl, event_id, skill_id, caster_obj_id, target_obj_id, casting_ms })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caster(w: &mut Writer, obj: u32) {
+        w.u8(caster_kind::UNIT).bc(obj);
+    }
+
+    #[test]
+    fn start_skill_bytes_follow_the_server_reader() {
+        // CSStartSkill: u32 skill, caster kind + bc, target kind + bc, flag.
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 18132, 0x0102, StartCaster::Unit, &SkillTarget::unit(0x0A0B0C));
+        assert_eq!(w.finish(), [0xD4, 0x46, 0, 0, 0, 0x02, 0x01, 0, 0, 0x0C, 0x0B, 0x0A, 0]);
+        // An item caster adds item id, template id, type 1 and type 2.
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 25202, 7, StartCaster::Item { item_id: 99, template_id: 18791 }, &SkillTarget::unit(7));
+        let bytes = w.finish();
+        assert_eq!(bytes.len(), 4 + 1 + 3 + 8 + 4 + 1 + 4 + 4 + 1);
+        assert_eq!(bytes[4], caster_kind::ITEM);
+        // The server's reader accepts it: read it back with ours.
+        let mut r = Reader::new(&bytes);
+        assert_eq!(r.u32().unwrap(), 25202);
+        assert_eq!(BuffCaster::read(&mut r).unwrap(), BuffCaster { kind: 2, obj_id: 7 });
+        assert_eq!(SkillTarget::read(&mut r).unwrap(), SkillTarget::unit(7));
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn position_targets_roundtrip() {
+        let t = SkillTarget::position(Pos::new(100.5, 200.25, 50.0));
+        let mut w = Writer::new();
+        t.write(&mut w);
+        let bytes = w.finish();
+        assert_eq!(bytes.len(), 1 + 8 + 8 + 4 + 4 + 3 + 3);
+        let back = SkillTarget::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(back.kind, target_kind::POSITION);
+        let p = back.pos.unwrap();
+        assert_eq!((p.x, p.y, p.z), (100.5, 200.25, 50.0));
+    }
+
+    #[test]
+    fn skill_started_decodes_the_server_layout() {
+        // The server's `skill_started_layout_with_error`: id 0x01020304, tl 0x0A0B, unit caster
+        // 0x112233, unit target 0x445566, no skill object, cast 150 / 150 (x10 ms), synergy 0,
+        // flags 5 (result byte + uint): result 0x0F, value 7.
+        let mut w = Writer::new();
+        w.u32(0x0102_0304).u16(0x0A0B).u8(0).bc(0x112233).u8(0).bc(0x445566).u8(0);
+        w.u16(150).u16(150).u8(0).u8(5).u8(0x0F).u32(7);
+        let s = SkillStarted::read(&mut Reader::new(&w.finish())).unwrap();
+        assert_eq!((s.skill_id, s.tl), (0x0102_0304, 0x0A0B));
+        assert_eq!(s.caster, BuffCaster { kind: 0, obj_id: 0x112233 });
+        assert_eq!(s.target, SkillTarget::unit(0x445566));
+        assert_eq!((s.cast_ms, s.base_cast_ms), (1500, 1500));
+        assert_eq!((s.result, s.result_value), (0x0F, 7));
+        assert!(s.failed());
+        assert_eq!(result::name(s.result), "too far");
+
+        // A cast that started has no result flags.
+        let mut w = Writer::new();
+        w.u32(18132).u16(3).u8(0).bc(1).u8(0).bc(2).u8(0).u16(0).u16(0).u8(0).u8(0);
+        let s = SkillStarted::read(&mut Reader::new(&w.finish())).unwrap();
+        assert!(!s.failed());
+        assert_eq!((s.tl, s.cast_ms), (3, 0));
+    }
+
+    #[test]
+    fn skill_fired_decodes_the_server_layout() {
+        // delay and channeling are written as value / 10 + 10.
+        let mut w = Writer::new();
+        w.u32(18132).u16(3).u8(0).bc(1).u8(0).bc(2).u8(0);
+        w.i16(30 + 10).i16(0 + 10).u8(0).u32(296).u8(0);
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let f = SkillFired::read(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!((f.skill_id, f.tl, f.delay_ms, f.channeling_ms, f.fire_anim_id), (18132, 3, 300, 0, 296));
+    }
+
+    #[test]
+    fn damage_and_heal_decode_the_server_layout() {
+        // SCUnitDamaged: CastAction::Skill, unit caster, bc caster, bc target, crime state,
+        // pisc(damage, absorbed, 0), pisc(0, 0, mana burn), holdable, u16 (288 | hit), flag, result.
+        let mut w = Writer::new();
+        w.u8(0).u32(18132).u16(3); // cast action
+        caster(&mut w, 0x10); // skill caster
+        w.bc(0x10).bc(0x20).u8(0);
+        w.pisc(&[1234, 5, 0]).pisc(&[0, 0, 9]);
+        w.u8(0).u16(288 | 0x03).u8(1).u8(1);
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let d = UnitDamage::read(&mut r).unwrap();
+        assert!(r.is_empty(), "{} bytes left", r.remaining());
+        assert_eq!((d.action.skill_id, d.action.tl, d.caster_obj_id, d.target_obj_id), (18132, 3, 0x10, 0x20));
+        assert_eq!((d.damage, d.absorbed, d.mana_burn), (1234, 5, 9));
+        assert_eq!(d.hit_type, hit_type::MELEE_CRITICAL);
+        assert!(hit_type::is_critical(d.hit_type) && !hit_type::is_miss(d.hit_type));
+
+        // A buff tick names the buff, not a skill.
+        let mut w = Writer::new();
+        w.u8(2).u32(555).bc(0x20).u32(4).bool(true).bool(false);
+        caster(&mut w, 0x10);
+        w.bc(0x10).bc(0x20).u8(0).pisc(&[7, 0, 0]).pisc(&[0, 0, 0]).u8(0).u16(288).u8(1).u8(1);
+        let d = UnitDamage::read(&mut Reader::new(&w.finish())).unwrap();
+        assert_eq!((d.action.kind, d.action.buff_id, d.action.skill_id, d.damage), (2, 555, 0, 7));
+
+        // SCUnitHealed: cast action, caster, bc target, type, hit, i32 value, i32, result.
+        let mut w = Writer::new();
+        w.u8(0).u32(25202).u16(9);
+        caster(&mut w, 0x20);
+        w.bc(0x20).u8(0).u8(13).i32(300).i32(0).u8(1);
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let h = UnitHeal::read(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!((h.target_obj_id, h.heal_type, h.value, h.is_critical()), (0x20, 0, 300, false));
+    }
+
+    #[test]
+    fn plot_event_decodes_the_server_layout() {
+        // SCPlotEvent: tl, event id, skill id, caster (1 + bc), target (1 + bc), item id, bc obj,
+        // u16 casting time, bc 0, i16 0, count, count x bc, flag (bit 3: 13 x i32).
+        let mut w = Writer::new();
+        w.u16(3).u32(77).u32(18132);
+        w.u8(1).bc(0x10).u8(1).bc(0x20);
+        w.u64(0).bc(0x10).u16(50).bc(0).i16(0).u8(2).bc(0x20).bc(0x20).u8(2);
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let e = PlotEvent::read(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!((e.tl, e.event_id, e.skill_id, e.caster_obj_id, e.target_obj_id, e.casting_ms), (3, 77, 18132, 0x10, 0x20, 500));
+
+        // A position target and the long flag form.
+        let mut w = Writer::new();
+        w.u16(3).u32(77).u32(18132);
+        w.u8(1).bc(0x10).u8(2).position(Pos::new(10.0, 20.0, 30.0)).i8(0).i8(0).i8(0);
+        w.u64(0).bc(0x10).u16(0).bc(0).i16(0).u8(0).u8(8);
+        for _ in 0..13 {
+            w.i32(0);
+        }
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let e = PlotEvent::read(&mut r).unwrap();
+        assert!(r.is_empty(), "{} bytes left", r.remaining());
+        assert_eq!((e.caster_obj_id, e.target_obj_id), (0x10, 0));
+    }
+}
