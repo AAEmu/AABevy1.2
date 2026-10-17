@@ -117,7 +117,8 @@ pub enum ClientMsg {
     SwapAbility { obj_id: u32, old: u8, ability: u8 },
     /// Talking to NPCs and the quest requests (`CSInteractNPC`, `CSStartQuestContext` ...), see [`crate::interaction`].
     Interact(crate::interaction::Interact),
-    Party(crate::party::PartyCommand),
+    /// Party command plus the local character name used by `CSReplyToJoinTeam`.
+    Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
     LeaveWorld(LeaveTarget),
@@ -163,7 +164,7 @@ impl ClientMsg {
             Self::ResetSkills { .. } => cs::CSResetSkillsPacket,
             Self::SwapAbility { .. } => cs::CSSwapAbilityPacket,
             Self::Interact(m) => m.opcode(),
-            Self::Party(m) => m.opcode(),
+            Self::Party { command, .. } => command.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
@@ -250,7 +251,7 @@ impl ClientMsg {
                 w.bc(*obj_id).u8(*old).u8(*ability).bool(false); // auap
             }
             Self::Interact(m) => m.write(&mut w),
-            Self::Party(m) => m.write(&mut w),
+            Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
             }

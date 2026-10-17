@@ -675,7 +675,8 @@ passed on the bevy lane in 10.39 s, including a clean logout, with a fresh times
 `Kick { team_id, member_id }`, `Dismiss { team_id }`, and
 `MakeOwner { team_id, member_id }`. A new invitation uses `team_id: 0, is_party: true`.
 Replies retain the complete `PartyInvite` received in `PartyEvent::Invited`; `accept: false`
-rejects it. A successful send emits local `PartyEvent::Replied` to close that prompt; only
+rejects it. The session fills the reply's character-name field with the local selected
+character (native join task `393075a0`, not the inviter's name). A successful send emits local `PartyEvent::Replied` to close that prompt; only
 the server's `Joined` changes membership. The server's direct `CSLeaveTeam`,
 `CSKickTeamMember` and `CSDismissTeam` handlers only log, so the commands use the functional
 `CSAskRiskyTeamAction` with action 0, 1, or 2 instead.
@@ -684,7 +685,7 @@ the server's `Joined` changes membership. The server's direct `CSLeaveTeam`,
 `owner_id`, `PartyMember::id` and invitation `sender_id` are **character IDs**, while
 `PartyMember::obj_id` is the current unit used for targeting. The member list is ordered by
 `slot` (0..49, groups of five for a raid). It tracks names, race/gender, roles, online state,
-level, abilities, zone/instance, positions, and HP/MP including their real maxima when the
+level, abilities, zone/instance, positions, death state, and HP/MP including their real maxima when the
 server sends the 50-byte remote status (`has_status`). Initial nearby vitals and positions
 are seeded from the existing `Units`/`Player` snapshots, then updated by unit packets or
 remote-member status. Before a remote status, maxima have the same highest-seen limitation
@@ -703,7 +704,7 @@ accounts and characters on the bevy lane. Passed in 10.32 s: reject an invitatio
 accept; compare both rosters and leader; move the second player and receive position/vitals
 (720/720 HP, 670/670 MP); send party chat; transfer leadership twice; kick with pair
 auto-disband; reform, leave voluntarily and receive auto-disband; cleanly log out both clients.
-The shared user account was not touched. Library tests: 119 pass; the Bevy/examples check passes.
+The shared user account was not touched. Library tests: 120 pass; the Bevy/examples check passes.
 Offline/reconnect and raid transitions have protocol/state coverage but were not exercised live
 in this two-person test. The API does not yet send raid conversion, slot/role/loot-rule edits,
 markers, or pings; those incoming changes are exposed for the HUD.

@@ -49,6 +49,7 @@ pub struct PartyMember {
     pub role: u8,
     pub obj_id: u32,
     pub online: bool,
+    pub dead: bool,
     /// 0..49, groups of five in a raid.
     pub slot: u8,
     /// True after the server sends the 50-byte remote status. Initial membership has no vitals.
@@ -96,12 +97,14 @@ impl PartyMember {
         m.abilities = [r.u8()?, r.u8()?, r.u8()?];
         r.skip(5)?;
         m.online = m.obj_id != 0;
+        m.dead = m.hp <= 0;
         Ok(m)
     }
 
     fn apply_status(&mut self, s: &Self) {
         self.obj_id = s.obj_id;
         self.online = s.online;
+        self.dead = s.dead;
         self.level = s.level;
         self.zone_id = s.zone_id;
         self.instance_id = s.instance_id;
@@ -166,6 +169,7 @@ impl Party {
             m.hp = u.hp;
             m.mp = u.mp;
             m.level = u.level;
+            m.dead = u.dead;
             m.max_hp = m.max_hp.max(u.max_hp);
             m.max_mp = m.max_mp.max(u.max_mp);
             for (to, from) in m.abilities.iter_mut().zip(&u.active_abilities) {
@@ -217,6 +221,13 @@ impl Party {
             }
             if let Some(level) = level {
                 m.level = level;
+            }
+            match event {
+                Event::UnitSpawned(u) => m.dead = u.dead,
+                Event::UnitDeath { .. } => m.dead = true,
+                Event::Resurrected { .. } => m.dead = false,
+                Event::UnitPoints { hp, .. } if *hp > 0 => m.dead = false,
+                _ => {}
             }
             if let Event::UnitSpawned(u) = event {
                 if !m.has_status {
@@ -341,7 +352,8 @@ impl PartyCommand {
         }
     }
 
-    pub fn write(&self, w: &mut Writer) {
+    /// `character_name` is the replying local character, not the inviter.
+    pub fn write(&self, w: &mut Writer, character_name: &str) {
         match self {
             Self::Invite { team_id, is_party, target_name } => {
                 w.u32(*team_id).bool(*is_party).string(target_name);
@@ -351,7 +363,7 @@ impl PartyCommand {
                     .bool(invite.is_party)
                     .u32(invite.sender_id)
                     .bool(!accept)
-                    .string(&invite.sender_name)
+                    .string(character_name)
                     .bool(invite.is_area);
             }
             Self::Leave { team_id, character_id } => {
@@ -677,12 +689,12 @@ mod tests {
             (
                 PartyCommand::Reply { invite: invite.clone(), accept: true },
                 0x07c,
-                vec![3, 0, 0, 0, 1, 7, 0, 0, 0, 0, 2, 0, b'A', b'l', 0],
+                vec![3, 0, 0, 0, 1, 7, 0, 0, 0, 0, 3, 0, b'B', b'o', b'b', 0],
             ),
             (
                 PartyCommand::Reply { invite, accept: false },
                 0x07c,
-                vec![3, 0, 0, 0, 1, 7, 0, 0, 0, 1, 2, 0, b'A', b'l', 0],
+                vec![3, 0, 0, 0, 1, 7, 0, 0, 0, 1, 3, 0, b'B', b'o', b'b', 0],
             ),
             (PartyCommand::Leave { team_id: 3, character_id: 7 }, 0x088, vec![3, 0, 0, 0, 7, 0, 0, 0, 0]),
             (PartyCommand::Kick { team_id: 3, member_id: 8 }, 0x088, vec![3, 0, 0, 0, 8, 0, 0, 0, 1]),
@@ -690,7 +702,7 @@ mod tests {
             (PartyCommand::MakeOwner { team_id: 3, member_id: 8 }, 0x07f, vec![3, 0, 0, 0, 8, 0, 0, 0]),
         ];
         for (command, opcode, body) in cases {
-            let packet = ClientMsg::Party(command);
+            let packet = ClientMsg::Party { command, character_name: "Bob".into() };
             assert_eq!(packet.opcode(), opcode);
             assert_eq!(packet.encode_body(), body);
         }
@@ -868,5 +880,16 @@ mod tests {
         assert!(party.pending_invite.is_none());
         party.apply(&Event::LeftWorld { target: 1 });
         assert_eq!(party, Party::default());
+    }
+
+    #[test]
+    fn nearby_death_and_resurrection_do_not_need_remote_status() {
+        let mut party = joined();
+        assert!(!party.member(7).unwrap().has_status);
+        party.apply(&Event::UnitDeath { obj_id: 107 });
+        assert!(party.member(7).unwrap().dead);
+        party.apply(&Event::Resurrected { obj_id: 107, pos: Pos::new(10.0, 20.0, 30.0), yaw: 0.0 });
+        assert!(!party.member(7).unwrap().dead);
+        assert_eq!(party.member(7).unwrap().pos, Pos::new(10.0, 20.0, 30.0));
     }
 }

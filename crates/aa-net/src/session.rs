@@ -882,7 +882,8 @@ impl Session {
                     crate::party::PartyCommand::Reply { invite, .. } => Some(invite.sender_id),
                     _ => None,
                 };
-                if self.send_game(game::ClientMsg::Party(m)).await {
+                let character_name = self.selected_state.as_ref().map(|s| s.character.name.clone()).unwrap_or_default();
+                if self.send_game(game::ClientMsg::Party { command: m, character_name }).await {
                     if let Some(sender_id) = replied {
                         self.emit(Event::Party(crate::party::PartyEvent::Replied { sender_id }));
                     }
