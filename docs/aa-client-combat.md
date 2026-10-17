@@ -88,11 +88,26 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip, and both go back to their sheath bones 4 s after the last action (`Drawn`). The shield stays on the arm. The
   `drawn_scale` of `item_weapons` applies in the hand.
+* **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
+  (aa-anim's `Animator::play_layer` with `BoneMask::upper_body`, `docs/aa-anim.md`) while `drive_locomotion` keeps running the
+  8-way run / walk clips underneath (the layer ignores the run clip's playback speed). The clip is the `move_ub` variant of the
+  skill's `anims` row (`SkillBook::upper_clip`; `bow_co_sk_launch` -> `bow_co_sk_launch_ub` -> the model's `bow_co_sk_launch_mub`,
+  else `_ub` as is), else the clip itself through the mask. A standing unit plays the whole-body clip as before; a unit that stops
+  mid-action keeps its upper body clip over the idle, one that starts moving mid-action keeps its whole-body clip. A one-shot
+  layer ends by itself, a cast loop is released (`release_layers`, 0.12 s fade) when `Acting` ends or the fire clip replaces it,
+  and a layered action never invalidates the locomotion state (no restart of the run cycle). Hit reactions stay whole-body and
+  never interrupt a run. `AA_COMBAT_FULLBODY=1` turns the layer off (to compare shots).
 * **Cost.** Skills are read from the database once and cached by id (`SkillBook`, plus the effect group, anim and plot step
   tables); a frame touches no database. Per frame: `follow_fx` / `fly_projectiles` iterate the live effect entities (a handful),
   `hold_weapons` the carried weapons (3 per character), `end_actions` the `Acting` units. Measured with `AA_FX_LOG=1` during a
   fight with arrows: aa-fx `sim_ms` about 0.03 ms, `upload_ms` 0.01, with the world's 7 ambient effects; the frame time with and
   without the combat code is the same within the noise (about 80 to 110 fps in the dev build on this box, 10 to 12 ms).
+
+Upper body layer frames (`shots/aa-anim/`, not committed; `--walk 9:12` runs the player from second 9 while slot 3 fires at 9.5,
+`--cam-dist 5 --cam-pitch -12`, `--cam-yaw 120` for the arrow pair and 40 for the casts): `walk_arrow_before.png` (`AA_COMBAT_FULLBODY=1`: the legs stand planted in the
+shooting pose while the player slides forward) and `walk_arrow_after.png` (the arms draw the bow, the legs keep their run stride),
+`cast_standing.png` (Return from standing: whole-body cast, unchanged) and `cast_walking.png` (Return while running: the cast on
+the upper body, the legs running).
 
 ## What it was checked against
 
@@ -101,6 +116,7 @@ lane `bevy` (account `bevytest`, the character with Shoot Arrow on slot 3, the 3
 slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all environment variables, off by default):
 
 * `AA_COMBAT_LOG=1`: one line per combat event, clip, projectile and unit death.
+* `AA_COMBAT_FULLBODY=1`: moving units play action clips on the whole body (the behaviour before the upper body layer).
 * `AA_COMBAT_SLOWMO=0.3`: the game clock slows to that speed when the local player first fires (catches a flight on screen).
 * `AA_COMBAT_SHOT=<png>@<start|fire|fire2|plot|hit|death>+<s>`: screenshot that many game seconds after the first such event and
   exit; combine with `--hud-key tab T --hud-key slot3 T` (see `docs/aa-client-hud.md`).
@@ -130,9 +146,6 @@ pose of the bow.
 
 ## Not done
 
-* **Upper body layering.** The data has it (`anims.move_ub`, the `_ub` / `_mub` clips: shoot while walking) but the animator has
-  one clip at a time; a whole-body clip plays and locomotion resumes afterwards. Skills that need a standing caster (the server
-  refuses casts while moving) look right; a skill used while running shows the full-body clip.
 * Channeling skills (`channeling_anim_id`, `channeling_time`): the channel clip is not played.
 * Two-handed / dual wield clip choice for plot steps is whatever the step names; the weapon in the hand is a single sword
   (`Grip::Blade` puts the main hand weapon in the right hand, an off-hand weapon in the left).
@@ -145,8 +158,6 @@ pose of the bow.
 
 ## Needed from other crates
 
-* aa-anim: partial-body playback (play a clip on the bones above the pelvis only, layered over locomotion) would finish the
-  upper-body case; `Animator::play_once_then` with a mask would be enough.
 * aa-fx: `Geometry` emitters (`EffectDef::geometry` only finds the model, the application has to draw it); refraction materials
   (`skill_refraction_*`, `RefrBumpScale`) are on 385 effect emitters in `x2_effects.xml` alone.
 * aa-cry: `Shading` has no additive "particle" mode, the arrow mesh is restyled through a `MaterialHook`.
