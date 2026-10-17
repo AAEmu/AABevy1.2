@@ -16,6 +16,7 @@
 pub mod auction;
 pub mod buff;
 pub mod bank;
+mod compression;
 pub mod friend;
 pub mod game;
 pub mod interaction;

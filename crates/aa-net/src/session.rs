@@ -1369,7 +1369,7 @@ impl Session {
             }
             M::LeaveWorldGranted { target } => self.left_world(target).await,
             M::ReconnectAuth { token } => self.reconnect(token).await,
-            M::SlotCount(_) | M::AccountInfo { .. } | M::Pong | M::Compressed { .. } => {}
+            M::SlotCount(_) | M::AccountInfo { .. } | M::Pong => {}
             M::Unhandled { level, opcode, len } => {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");
             }
@@ -1518,6 +1518,51 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn independent_mixed_deflate_batch_reaches_world_state_in_wire_order() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut frame = vec![game::MAGIC, game::LEVEL_COMPRESSED];
+        frame.extend(260u16.to_le_bytes());
+        frame.extend_from_slice(include_bytes!("../tests/fixtures/deflate/mixed.deflate"));
+        session.game_msg(game::ServerMsg::decode(&frame).map_err(Into::into)).await;
+        let mut state = crate::state::WorldState::default();
+        state.stats.obj_id = 256;
+        let mut seen = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            state.apply(&event);
+            seen.push(event);
+        }
+        assert_eq!(seen.len(), 260);
+        assert!(matches!(seen[0], Event::UnitPoints { obj_id: 1, hp: 300, mp: 20 }));
+        assert!(matches!(seen[1], Event::Snow(true)));
+        assert!(matches!(seen[2], Event::UnitPoints { obj_id: 2, hp: 331, mp: 21 }));
+        for (i, event) in seen[3..259].iter().enumerate() {
+            assert!(matches!(event, Event::UnitPoints { obj_id, hp, mp }
+                if *obj_id == i as u32 + 1 && *hp == 300 + i as i32 * 31 && *mp == 20 + i as i32 % 71));
+        }
+        assert!(matches!(seen[259], Event::Snow(true)));
+        assert_eq!((state.stats.hp, state.stats.mp), (8205, 62));
+        assert!(state.world.snow);
+    }
+
+    #[tokio::test]
+    async fn invalid_compression_emits_no_partial_events_and_the_next_frame_still_decodes() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut frame = vec![game::MAGIC, game::LEVEL_COMPRESSED, 3, 0];
+        frame.extend_from_slice(include_bytes!("../tests/fixtures/deflate/fixed.deflate"));
+        frame.push(0); // Trailing data invalidates the complete stream, including its prefix.
+        session.game_msg(game::ServerMsg::decode(&frame).map_err(Into::into)).await;
+        assert!(events.try_recv().is_err());
+        frame.pop();
+        session.game_msg(game::ServerMsg::decode(&frame).map_err(Into::into)).await;
+        assert!(matches!(events.try_recv(), Ok(Event::UnitPoints { obj_id: 1, hp: 300, mp: 20 })));
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
+        assert!(matches!(events.try_recv(), Ok(Event::UnitPoints { obj_id: 2, hp: 331, mp: 21 })));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn trade_settlement_changes_items_before_the_completion_notification() {
