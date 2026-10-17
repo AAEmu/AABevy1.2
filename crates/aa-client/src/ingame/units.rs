@@ -93,6 +93,8 @@ pub struct Views {
     ready: Vec<Built>,
     /// Jobs on the workers.
     jobs: usize,
+    /// In range, wanted, and not started because the workers are busy (last sync).
+    waiting: usize,
     /// Counters for the log.
     pub spawned_units: u32,
     pub spawned_doodads: u32,
@@ -102,7 +104,7 @@ pub struct Views {
 impl Default for Views {
     fn default() -> Self {
         let (tx, rx) = channel();
-        Views { units: HashMap::new(), doodads: HashMap::new(), tx, rx: Mutex::new(rx), ready: Vec::new(), jobs: 0, spawned_units: 0, spawned_doodads: 0, failed: 0 }
+        Views { units: HashMap::new(), doodads: HashMap::new(), tx, rx: Mutex::new(rx), ready: Vec::new(), jobs: 0, waiting: 0, spawned_units: 0, spawned_doodads: 0, failed: 0 }
     }
 }
 
@@ -133,6 +135,11 @@ impl Views {
     /// Objects being prepared or waiting to be spawned.
     pub fn pending(&self) -> usize {
         self.jobs + self.ready.len()
+    }
+
+    /// [`Self::pending`] plus the ones in range that no worker has been given yet.
+    pub fn outstanding(&self) -> usize {
+        self.pending() + self.waiting
     }
 }
 
@@ -230,11 +237,13 @@ pub fn sync_views(
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let loader = cry.loader();
+    let mut waiting = wanted.len();
     for (priority, id) in wanted {
         if views.jobs >= MAX_JOBS {
             break;
         }
         let Some(unit) = units.by_id.get(&id) else { continue };
+        waiting -= 1;
         views.units.entry(id).or_default().preparing = true;
         views.jobs += 1;
         let (unit, db, loader, clips, tx) = (unit.clone(), db.clone(), loader.clone(), clips.clone(), views.tx.clone());
@@ -261,11 +270,13 @@ pub fn sync_views(
         }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    waiting += wanted.len();
     for (priority, id) in wanted {
         if views.jobs >= MAX_JOBS {
             break;
         }
         let Some(doodad) = doodads.by_id.get(&id) else { continue };
+        waiting -= 1;
         views.doodads.entry(id).or_default().preparing = true;
         views.jobs += 1;
         let (template, db, loader, tx) = (doodad.template_id, db.clone(), loader.clone(), views.tx.clone());
@@ -275,6 +286,8 @@ pub fn sync_views(
             let _ = tx.send(Built::Doodad(id, build));
         });
     }
+
+    views.waiting = waiting;
 
     // spawn what is ready, nearest first, while the frame can take it
     let mut ready = std::mem::take(&mut views.ready);

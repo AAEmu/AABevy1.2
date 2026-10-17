@@ -10,6 +10,8 @@
 //! * `--hide-part N`  hide the N-th part of the player character (0 = body, 1 = face, ...)
 //! * `--cam-yaw DEG`, `--cam-pitch DEG`, `--cam-dist M`  the starting camera orbit.
 //! * `--leave-after S`  go back to the character list S seconds after the player appeared (client side only).
+//! * `--leave-world S`  ask the server to go back to the character list S seconds after the game screen came up
+//!   (the real leave flow); `--again` presses Start when the list is back (see `flow`).
 
 use bevy::prelude::*;
 
@@ -26,6 +28,8 @@ pub struct DevOptions {
     pub hide_part: Option<usize>,
     pub hair_color: Option<u32>,
     pub leave_after: Option<f32>,
+    pub leave_world: Option<f32>,
+    pub again: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +80,8 @@ impl DevOptions {
             hide_part: num("--hide-part").map(|n| n as usize),
             hair_color: one("--hair-color").and_then(|v| v.parse().ok()),
             leave_after: num("--leave-after"),
+            leave_world: num("--leave-world"),
+            again: args.iter().any(|a| a == "--again"),
         }
     }
 

@@ -72,18 +72,29 @@ pub fn placement(pos: Vec3, yaw: f32, scale: f32) -> Transform {
     Transform { translation: cry_to_bevy(pos), rotation: Quat::from_rotation_y(yaw), scale: Vec3::splat(scale) }
 }
 
-/// Builds the player character from the server's spawn data (`OnEnter(Screen::InGame)`).
+/// The player character was built (or could not be) for the current spawn; reset when the game screen is left.
+#[derive(Resource, Default)]
+pub struct PlayerBuilt(pub bool);
+
+/// Builds the player character from the server's spawn data, once, as soon as the spawn is known: on the loading screen
+/// (the world is drawn behind it, see `camera::spawn_camera`), or on the game screen for `--enter-world`.
 pub fn spawn_player(
     mut commands: Commands,
     player: Res<Player>,
+    mut built: ResMut<PlayerBuilt>,
     db: Option<Res<Db>>,
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
     terrain: Res<TerrainQuery>,
     dev: Res<DevOptions>,
 ) {
-    let (Some(spawn), Some(db)) = (&player.spawn, db) else {
-        error!("in game without a player spawn or the game database");
+    let Some(spawn) = &player.spawn else { return };
+    if built.0 {
+        return;
+    }
+    built.0 = true;
+    let Some(db) = db else {
+        error!("the game database is missing: no player character");
         return;
     };
     let character = spawn.character();

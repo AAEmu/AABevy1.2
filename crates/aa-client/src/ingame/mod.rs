@@ -6,6 +6,22 @@
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
+//! * [`flow`], [`warm`]: the way in and out timed (`flow:` log lines), and what the world behind the loading screen has
+//!   got done
+//!
+//! ## Entering and leaving
+//!
+//! The world is built on the loading screen: as soon as the server's spawn is known `player::spawn_player` builds the
+//! character and `camera::spawn_camera` the world camera, which renders into an image of the window's size
+//! (`camera::BehindLoading`); the units near the spawn are prepared by `units`, and `login::loading` waits until the
+//! terrain, the objects, the units and the GPU pipelines (`aa_world::pipelines::PipelineStatus`) have settled. The first-use
+//! work of the renderer thus happens behind the loading UI. `Screen::InGame` then only turns the input on and
+//! `camera::show_world` puts the camera on the window once the UI cameras agree with it (HDR, MSAA).
+//! `--enter-world` has no loading screen: the camera goes straight to the window.
+//!
+//! Leaving (`OnExit(Screen::InGame)`, [`leave_game`]) removes the player, the units, the doodads and the camera, forgets
+//! the unit views, puts the UI cameras back to what the login screens need and gives the world its anchor back, so the
+//! cells unload. The character list is then built again by `login`.
 
 mod anim;
 mod bench;
@@ -15,9 +31,11 @@ mod creature;
 pub(crate) mod data;
 mod dev;
 pub(crate) mod enter;
+mod flow;
 mod player;
 mod prepare;
 mod units;
+pub(crate) mod warm;
 mod weapons;
 
 use aa_anim::AnimPlugin;
@@ -67,28 +85,43 @@ impl Plugin for InGamePlugin {
         app.insert_resource(dev)
             .init_resource::<units::Views>()
             .init_resource::<player::SendState>()
+            .init_resource::<player::PlayerBuilt>()
+            .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
+            .add_plugins(flow::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
-            .add_systems(OnEnter(Screen::InGame), player::spawn_player)
             .add_systems(OnExit(Screen::InGame), leave_game)
+            // the world is built on the loading screen (drawn into an image behind it) and played on the game screen
             .add_systems(
                 Update,
                 (
-                    camera::spawn_camera,
-                    (camera::orbit_input, player::follow_server, player::control_player, camera::follow_player).chain(),
+                    (player::spawn_player, camera::spawn_camera).chain(),
+                    (
+                        camera::orbit_input.run_if(in_state(Screen::InGame)),
+                        player::follow_server,
+                        player::control_player.run_if(in_state(Screen::InGame)),
+                        camera::follow_player,
+                    )
+                        .chain(),
                     (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
                     player::dev_hide_part,
                     weapons::attach_carried,
+                    warm::update,
                     log_chat,
                     report,
-                    leave_after,
                 )
-                    .run_if(in_state(Screen::InGame)),
-            );
+                    .run_if(world_screens),
+            )
+            .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)));
     }
+}
+
+/// The screens the world is up on: the loading screen (everything is built behind it) and the game.
+pub(crate) fn world_screens(screen: Res<State<Screen>>) -> bool {
+    matches!(screen.get(), Screen::Loading | Screen::InGame)
 }
 
 /// `OnExit(Screen::InGame)` (back to the character or server list): removes everything of the game screen, the world follows
@@ -99,6 +132,7 @@ fn leave_game(
     mut commands: Commands,
     doomed: Query<Entity, Or<(With<player::LocalPlayer>, With<units::RemoteUnit>, With<units::RemoteDoodad>, With<camera::OrbitCamera>)>>,
     anchor: Query<(), With<crate::login::WorldAnchor>>,
+    ui_cameras: Query<Entity, With<aa_ui::render::UiCamera>>,
 ) {
     let mut n = 0;
     for e in &doomed {
@@ -107,6 +141,13 @@ fn leave_game(
     }
     commands.insert_resource(units::Views::default());
     commands.insert_resource(player::SendState::default());
+    commands.insert_resource(player::PlayerBuilt::default());
+    commands.insert_resource(warm::Warm::default());
+    // the HUD made the UI cameras agree with the world camera (HDR, no MSAA, `hud::cameras`): the login stage camera
+    // below them does not, and a stack of cameras that disagree on the sample count is a validation error
+    for e in &ui_cameras {
+        commands.entity(e).remove::<bevy::camera::Hdr>().insert(bevy::render::view::Msaa::default());
+    }
     if anchor.is_empty() {
         commands.spawn((
             Name::new("world anchor"),
