@@ -616,6 +616,33 @@ pub fn prewarm_character_face(assets: &CharacterAssets) -> Result<bool> {
 /// more, e.g. one of the create screen's slider steps, is freed).
 static FACE_ASSETS: std::sync::Mutex<Option<HashMap<String, AssetId<Image>>>> = std::sync::Mutex::new(None);
 
+/// Weighted maps share one asset for equal path / strength while a character uses it. Store IDs
+/// so discarded create-screen slider steps do not keep textures alive.
+static FACE_NORMAL_ASSETS: std::sync::Mutex<Option<HashMap<(String, u32), AssetId<Image>>>> = std::sync::Mutex::new(None);
+
+fn face_normal_texture(cry: &mut CryAssets, path: &str, weight: f32) -> Option<Handle<Image>> {
+    let weight = crate::face_normal::strength(weight);
+    if weight == 1.0 {
+        return cry.texture(path, false);
+    }
+    let key = (norm(path).to_ascii_lowercase(), weight.to_bits());
+    let known = FACE_NORMAL_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key).copied());
+    if let Some(handle) = known.and_then(|id| cry.images.get_strong_handle(id)) {
+        return Some(handle);
+    }
+    match crate::face_normal::bake(path, weight) {
+        Ok(image) => {
+            let handle = cry.images.add(image);
+            FACE_NORMAL_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key, handle.id());
+            Some(handle)
+        }
+        Err(e) => {
+            warn!("aa-anim: weighted face normal {path}: {e}");
+            cry.texture(path, false)
+        }
+    }
+}
+
 /// Builds the face texture and normal map of the character for a face material. The composed
 /// texture is shared by every character with the same face inputs and may have been composed on a
 /// worker thread ([`prewarm_character_face`]).
@@ -623,8 +650,8 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
     let mut look = FaceLook::default();
     let Some(inputs) = face_inputs(assets, mtl, &loaded.model) else { return look };
     look.replaces = inputs.named.to_ascii_lowercase();
-    if let Some((path, _)) = &assets.face_normal {
-        look.normal = cry.texture(path, false);
+    if let Some((path, weight)) = &assets.face_normal {
+        look.normal = face_normal_texture(cry, path, *weight);
     }
     let Some(key) = inputs.key else { return look };
     let id = key.id();

@@ -16,6 +16,7 @@ pub mod cut;
 pub mod db;
 pub mod dye;
 pub mod face;
+mod face_normal;
 pub mod lmg;
 pub mod morph;
 pub mod pose;

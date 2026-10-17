@@ -9,6 +9,7 @@
 //!     [--decals "282:1:1,313:1,588:0.8"]   face decals `asset:weight[:scale]` replacing the preset's
 //!     [--nude 1]                 no costume (skin of face vs neck / chest)
 //!     [--normal ID[:WEIGHT]]     face normal map (`face_normal_maps.id`) instead of the preset's
+//!                               separate entries with `;` for one map / strength per face
 //!     [--colors "lip=ffbeb1ff,brow=ff3a4f5c,deco=ff483e60,pupil=ff4f39d8"]   `0xAABBGGRR` colours
 //!     [--fov DEG]                vertical field of view (zoom)
 //!     [--full 1]                 full body instead of the head close-up
@@ -99,7 +100,10 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
                 })
                 .collect();
         }
-        if let Some(v) = arg("--normal") {
+        if let Some(v) = arg("--normal").and_then(|v| {
+            let entries: Vec<_> = v.split(';').collect();
+            if entries.len() == 1 { entries.first().copied() } else { entries.get(i).copied() }.map(str::to_owned)
+        }) {
             let mut it = v.split(':');
             if let Some(id) = it.next().and_then(|v| v.parse().ok()) {
                 desc.customization.normal_map = id;
