@@ -277,6 +277,9 @@ pub enum Event {
     CharacterCreated(Box<Character>),
     CharacterCreateFailed { reason: u8 },
     CharacterDeleteResponse { id: u32, status: u8, delete_request_time: i64, delete_time: i64 },
+    /// Answer to `CancelDeleteCharacter`: `restored` is true when the pending delete was cancelled
+    /// (status 3); status 4 means the server does not know the character.
+    CharacterDeleteCancelled { character_id: u32, restored: bool },
     CharacterDeleted { id: u32, name: String },
     /// The server accepted `EnterGame`; the character is loading.
     CharacterSelected(Box<CharacterState>),
@@ -850,7 +853,9 @@ impl Session {
                 self.emit(Event::CharacterDeleteResponse { id, status, delete_request_time, delete_time });
                 self.command(Command::RefreshCharacters).await;
             }
-            M::CancelCharacterDeleteResponse { .. } => {
+            // status 3: the delete was cancelled; 4: no such character
+            M::CancelCharacterDeleteResponse { id, status } => {
+                self.emit(Event::CharacterDeleteCancelled { character_id: id, restored: status == 3 });
                 self.command(Command::RefreshCharacters).await;
             }
             M::CharacterDeleted { id, name } => self.emit(Event::CharacterDeleted { id, name }),
