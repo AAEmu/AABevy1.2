@@ -489,12 +489,18 @@ pub(crate) fn update(lua: &Lua) {
         if c.hovered == Some(inside) {
             continue;
         }
-        for t in &c.tabs {
+        // Away from the cursor the tab backgrounds go, the unselected tabs and the add button
+        // fade (the real client's idle chat window, `reference/ingame/spawn`).
+        const IDLE_ALPHA: f32 = 0.6;
+        for (i, t) in c.tabs.iter().enumerate() {
             let ds = u.tree.widget(t.button).map(|w| w.drawables.clone()).unwrap_or_default();
             for d in ds {
                 u.tree.get_mut(d).alpha = if inside { 1.0 } else { 0.0 };
             }
+            let selected = i == c.selected;
+            u.tree.get_mut(t.button).alpha = if inside || selected { 1.0 } else { IDLE_ALPHA };
         }
+        u.tree.get_mut(c.add_button).alpha = if inside { 1.0 } else { IDLE_ALPHA };
         if let Some(ch) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
             ch.hovered = Some(inside);
         }

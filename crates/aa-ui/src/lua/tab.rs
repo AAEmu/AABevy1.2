@@ -41,10 +41,14 @@ fn apply_selection(lua: &Lua, id: Id) {
 }
 
 pub(crate) fn select(lua: &Lua, id: Id, index: usize, fire: bool) {
+    // Out of range (`SelectTab(0)`, `SelectTab(X2Bag:TabCount())` past the tabs) keeps the
+    // selection: the inventory's `OnTabChanged` indexes per-tab tables by the new index.
     let changed = with(lua, id, |t| {
-        let idx = index.min(t.tabs.len());
-        let changed = idx != t.selected;
-        t.selected = idx;
+        if index < 1 || index > t.tabs.len() {
+            return false;
+        }
+        let changed = index != t.selected;
+        t.selected = index;
         changed
     })
     .unwrap_or(false);
