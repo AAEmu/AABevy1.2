@@ -26,6 +26,7 @@ pub enum Screen {
 fn main() {
     App::new()
         .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
+        .add_plugins(aa_fx::FxPlugin)
         .init_state::<Screen>()
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
         .run();
