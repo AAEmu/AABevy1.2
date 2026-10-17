@@ -7,14 +7,21 @@
 //!   scripts, the screen's default where the scripts are silent); in game the zone's `soundmood_*` pack decides.
 //! * [`zone`]: the sound pack of the zone and sub zone under the player.
 //! * the listener: the active 3D camera of a screen (the login stage camera, the in-game orbit camera).
-//! * placed sounds (ambient volumes, random sounds, spots, reverb) are `aa-world`'s (`objects::sounds`).
+//! * [`reverb`]: the preset of the `ReverbVolume` around the player goes to the engine's one global reverb.
+//! * [`moods`]: the sound mood (death, combat, underwater, indoor) the original's `soundmoods.xml` mixes by.
+//! * [`events`]: level up, quest jingles, target select, NPC greetings, item pickup / use sounds, coins.
+//! * placed sounds (ambient volumes, random sounds, spots, reverb volumes) are `aa-world`'s (`objects::sounds`).
 //!
 //! Everything is silent in unattended runs (`--shot`, `--exit-after`, `--mute`, `AA_MUTE=1`; `--sound` overrides):
 //! the engine opens no device then and the pak and the database are not read for sound. `AA_AUDIO_LOG=1` logs each
 //! sound that is started (and, with it, the sound database is read in muted runs too, so the logs name the events).
 //! `AA_VOLUME=0.1` starts the master volume at 10 %.
 
+mod events;
+mod moods;
 mod music;
+mod reverb;
+mod tables;
 mod ui;
 mod zone;
 
@@ -104,14 +111,49 @@ impl Plugin for SoundPlugin {
         // the databases are read only when something can be heard or logged
         let wanted = engine.stats().audible || log_enabled();
         let zones = zone::ZoneLoad::start(wanted, packs.clone());
+        let tables = tables::Tables::start(wanted);
         let _ = BINDING.set(Binding { engine: engine.clone(), packs: packs.clone(), shared: shared.clone() });
         let no_login = std::env::args().any(|a| a == "--enter-world");
         app.insert_resource(packs)
             .insert_resource(zones)
+            .insert_resource(tables)
             .insert_resource(ui::Gate(shared.clone()))
             .insert_resource(music::Director::new(shared, no_login))
-            .add_systems(Update, (ui::sync_options, ui::sync_gate, assign_listener, music::drive_music).chain());
+            .add_systems(
+                Update,
+                (ui::sync_options, ui::sync_gate, assign_listener, music::drive_music, reverb::drive_reverb, moods::drive_moods, events::game_sounds, log_stats).chain(),
+            );
     }
+}
+
+/// `AA_AUDIO_LOG=1`: what the engine holds, every 10 s while something is playing (voices, the decoded sound cache, the
+/// work the decoder did, mixer tracks, the reverb and the mood).
+fn log_stats(engine: Res<Engine>, time: Res<Time>, mut next: Local<f64>) {
+    let now = time.elapsed_secs_f64();
+    if !log_enabled() || now < *next {
+        return;
+    }
+    *next = now + 10.0;
+    let s = engine.stats();
+    if s.started == 0 {
+        return;
+    }
+    info!(
+        "audio: stats {} voices, {} started, cache {:.1} MiB in {} sounds ({} hits / {} misses), decoded {} sounds = {:.0} s of audio in {:.2} s, {} tracks, reverb {:?} {:.2}, mood {:?}",
+        s.active_voices,
+        s.started,
+        s.cache_bytes as f64 / 1048576.0,
+        s.cache_sounds,
+        s.cache_hits,
+        s.cache_misses,
+        s.decoded_sounds,
+        s.decoded_seconds,
+        s.decode_wall_seconds,
+        s.reverb_buses,
+        s.reverb_preset,
+        s.reverb_weight,
+        s.mood
+    );
 }
 
 /// The listener sits on the active 3D camera of the screen: the in-game orbit camera, else the login stage camera
