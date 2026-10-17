@@ -1,0 +1,55 @@
+{
+  "producer": "Python zlib",
+  "zlib_runtime": "1.2.13",
+  "format": "raw RFC1951, wbits=-15",
+  "fixtures": {
+    "fixed": {
+      "compressed_bytes": 33,
+      "raw_bytes": 35,
+      "compressed_sha256": "41ebb4097a09902709e5c64b90d23ba1e7b891f890857330e806ea7d8fd459c1",
+      "raw_sha256": "fd51c8258ccc3ca0eb031763e11b595e9695594ea2bf8128fe8d48c19b48058e"
+    },
+    "dynamic": {
+      "compressed_bytes": 1836,
+      "raw_bytes": 3845,
+      "compressed_sha256": "333cffd9460e6ec4da02bb4076016a18320bda2d99b68e2c949483e740295740",
+      "raw_sha256": "e76cf28e9c0ffa119995685064f433e76dfd0a14969e48f8b70d79d58c367cdf"
+    },
+    "mixed": {
+      "compressed_bytes": 1876,
+      "raw_bytes": 3880,
+      "compressed_sha256": "1dc0a6fc1484f4b2f96bc9437f5d8b414ff79ae12b93127b1bc55377e2b5821e",
+      "raw_sha256": "b005ccef115fb88861c050614b50b0ab368fdbc0b5304d69ba9b512287f8516c"
+    },
+    "unknown-opcode": {
+      "compressed_bytes": 28,
+      "raw_bytes": 27,
+      "compressed_sha256": "e0a94a50bbfa2fcd8c21c7e99a43cecbbe701bdeca57292b16e342a893abfbc6",
+      "raw_sha256": "083c165998ae169a8e667a1f4b70b259de3681a75665bea7fb02c5140b41cd0a"
+    },
+    "truncated-packet": {
+      "compressed_bytes": 19,
+      "raw_bytes": 19,
+      "compressed_sha256": "3076eeb9767d781fb4b443d092172839bf1217324e1f83f2971334dba7917f67",
+      "raw_sha256": "e883f5688a0c25d321274d739bb5745f0cc83d0ea6370e492c91033f56ad71dc"
+    },
+    "empty": {
+      "compressed_bytes": 2,
+      "raw_bytes": 0,
+      "compressed_sha256": "9b4fb24edd6d1d8830e272398263cdbf026b97392cc35387b991dc0248a628f9",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "at-limit": {
+      "compressed_bytes": 16310,
+      "raw_bytes": 16777216,
+      "compressed_sha256": "580d48bd275f035c808cbd08f777c42ceb909e6a1dad78c757e3c3ae60d44c39",
+      "raw_sha256": "080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"
+    },
+    "over-limit": {
+      "compressed_bytes": 16310,
+      "raw_bytes": 16777217,
+      "compressed_sha256": "d360c6965037e89ffd7bd8766f8dcd408df127b78ed4f5eb421d0f3bbbe23907",
+      "raw_sha256": "1003b1b5dc078189799a1216ce0f9fbcebb94e8b6b83c58c4b03345f07f94ced"
+    }
+  }
+}

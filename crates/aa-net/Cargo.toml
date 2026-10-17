@@ -16,6 +16,7 @@ thiserror.workspace = true
 tracing.workspace = true
 bevy = { workspace = true, optional = true }
 sha2 = "0.10"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 anyhow.workspace = true

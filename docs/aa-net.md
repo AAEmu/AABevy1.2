@@ -69,8 +69,8 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
   Game payload: `[0xDD][level]…`; level 1 = `[hash][count][u16 opcode][body]` (the server verifies neither
   hash nor count; the client sends 0 and a counter), level 2 = the CryNetwork proxy channel
   `[u16 opcode][body]`, level 4 = a compressed batch of skill results (`[u16 count][deflate
-  stream of [u16 0][u16 opcode][body]]`; the server writes stored blocks, which are unpacked into
-  `ServerMsg::Batch`). 1.2 traffic is not encrypted.
+  stream of [u16 0][u16 opcode][body]]`; stored, fixed Huffman and dynamic Huffman blocks are
+  unpacked into `ServerMsg::Batch`). 1.2 traffic is not encrypted.
 * **Login = Trion ticket.** The simplest flow the server accepts, and what the launcher does: an XML
   ticket with `<username>` and `<password>` = hex SHA-256 of the password in `CARequestAuthTrion`
   (`login::trion_ticket`). The Korean challenge / OTP flows are not implemented.
@@ -91,13 +91,55 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 |---|---|
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
-| client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
+| client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (houses, guilds, loot dice ...) is decoded as
+Everything else the server sends (houses, guilds, mount-owner packets ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
+
+## Compressed packet batches
+
+`DD04` carries a raw RFC 1951 DEFLATE stream without a zlib/gzip header or checksum.
+The lane writer in `systems/skills/packets.rs:874` uses stored blocks; its C# source
+contract uses `DeflateStream(Optimal)`. The decoder accepts stored, fixed-Huffman,
+dynamic-Huffman and mixed streams through `flate2`, then uses the same ordered game
+packet parser as before. No new application command or event is required.
+
+Inflation proceeds in 16 KiB chunks with a 16 MiB output budget, exposed as
+`game::MAX_INFLATED_BATCH_BYTES`. The budget is an application memory limit, **not** a
+protocol length or a verified native client limit; the native budget remains unknown.
+Exactly 16 MiB is accepted. Oversized output, malformed trees/blocks, bad stored lengths,
+missing final blocks, truncation, trailing bytes and concatenated streams return
+`WireError::Invalid` before **any** game packet from that frame is emitted. A stream
+must finish and consume every input byte. RFC-permitted unused bits in its final byte
+are not an additional byte stream. Empty final streams are accepted.
+
+The session logs a wire error and continues with the next length-delimited TCP frame.
+The old `ServerMsg::Compressed` skip variant and stored-only `game::inflate_stored`
+helper are removed. Once compression is valid, existing packet-body semantics remain:
+an unknown opcode reports `Unhandled` and ends that batch; a malformed packet body ends
+it after already decoded packets, because DD04 bodies have no individual lengths.
+The header's count is retained as a diagnostic hint rather than invented per-packet
+lengths or permission to scan past an unknown body.
+
+`crates/aa-net/tests/fixtures/deflate/generate.py` independently produces the checked-in
+goldens with Python zlib 1.2.13 (`wbits=-15`), validates them using zlib, and records
+compressed/raw lengths and SHA-256 in `metadata.json`. Fixtures include fixed, dynamic,
+mixed stored+dynamic, empty, unknown/truncated game bodies, exactly-at-budget output
+and output one byte over budget; no fixture is made with the Rust decoder's library.
+Regenerate offline with `python crates/aa-net/tests/fixtures/deflate/generate.py`.
+Native/C# captured compressed-packet QA remains pending; no lane connection is needed
+for these checks or made while the lane is stalled.
+
+Validation: six decoder tests plus two session tests cover all fixtures, every truncation,
+exact stream termination, the output boundary, packet order through the real session and
+WorldState, and recovery on the next frame after a compression error. Full
+`cargo test -p aa-net` passed 177 library and 2 scripted-session tests, with 9 live tests
+ignored. All six compression tests also passed with `--features flate2/zlib-rs`, covering
+the alternate backend selected when Bevy features are unified.
+`cargo check -p aa-net --features bevy --examples` also passed.
 
 ## API
 
@@ -386,11 +428,11 @@ shows the target's cast with the same call). `UnitDamage::action` says which ski
 `kind` 2) dealt it; `hit_type` is `skill::hit_type::*` (`is_critical`, `is_miss`). The server's
 spell results are messages in `skill::result`.
 
-Skill results arrive in `DD04` batches (stored deflate blocks of `[u16 0][u16 opcode][body]`). The
+Skill results arrive in `DD04` batches (raw DEFLATE blocks of `[u16 0][u16 opcode][body]`). The
 session unpacks them and reports every packet as if it had come alone, in order: `Event::UnitDamaged`
 after `PlotEvent`s and so on. A packet in a batch this client cannot decode ends the batch (the
-rest cannot be found: the bodies have no length); real Huffman compressed batches (the C# server)
-are reported as `ServerMsg::Compressed` and skipped.
+rest cannot be found: the bodies have no length). Stored and Huffman-compressed streams are
+supported with bounded inflation and complete-stream validation (see "Compressed packet batches").
 
 **Quests: `Quests`** (`aa_net::state::Quests`, `aa_net::quest`)
 
@@ -1457,8 +1499,6 @@ the lane is stalled; this milestone makes no new lane connections or claims.
   the game database.
 * The sub zone name of the minimap header is not sent: derive it from the position and the
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
-* `DD04` batches with real Huffman compression (the C# server) are skipped; the Rust server writes
-  stored blocks.
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
   template id. Slaves / transfers / shipyards only decode their core fields.
 * Movement: we only write a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships,

@@ -20,6 +20,7 @@ pub const MAGIC: u8 = 0xDD;
 pub const LEVEL_GAME: u8 = 1;
 pub const LEVEL_PROXY: u8 = 2;
 pub const LEVEL_COMPRESSED: u8 = 4;
+pub use crate::compression::MAX_INFLATED_BATCH_BYTES;
 
 /// Where `CSLeaveWorld` leads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,8 +484,6 @@ pub enum ServerMsg {
     /// A compressed batch (`DD04`) of server packets (skill results), decoded one by one. The
     /// session reports each as if it had arrived alone.
     Batch(Vec<ServerMsg>),
-    /// A compressed batch that could not be inflated (only stored deflate blocks are supported).
-    Compressed { count: u16 },
     /// NPC function lists, doodad quest offers, NPC chat ... (see [`crate::interaction`]).
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
@@ -592,7 +591,7 @@ impl ServerMsg {
             Self::PrepareLeaveWorld { .. } => "SCPrepareLeaveWorld",
             Self::LeaveWorldGranted { .. } => "SCLeaveWorldGranted",
             Self::LeaveWorldCanceled => "SCLeaveWorldCanceled",
-            Self::Batch(_) | Self::Compressed { .. } => "CompressedGamePackets",
+            Self::Batch(_) => "CompressedGamePackets",
             Self::Interaction(e) => e.name(),
             Self::Shop(e) => e.name(),
             Self::Party(e) => e.name(),
@@ -625,10 +624,8 @@ impl ServerMsg {
             }
             LEVEL_COMPRESSED => {
                 let count = r.u16()?;
-                Ok(match inflate_stored(r.rest()) {
-                    Some(raw) => Self::Batch(Self::decode_batch(&raw, count)),
-                    None => Self::Compressed { count },
-                })
+                let raw = crate::compression::inflate_batch(r.rest())?;
+                Ok(Self::Batch(Self::decode_batch(&raw, count)))
             }
             level => Ok(Self::Unhandled {
                 level,
@@ -1019,29 +1016,6 @@ impl ServerMsg {
                 len: r.remaining(),
             },
         })
-    }
-}
-
-/// Inflates a deflate stream made of stored blocks (RFC 1951 BTYPE 00), which is what the server
-/// writes for `DD04` batches. `None` for compressed blocks or a damaged stream.
-pub fn inflate_stored(data: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(data.len());
-    let mut i = 0;
-    loop {
-        let header = *data.get(i)?;
-        if header & 0b110 != 0 {
-            return None;
-        }
-        let len = u16::from_le_bytes([*data.get(i + 1)?, *data.get(i + 2)?]);
-        let nlen = u16::from_le_bytes([*data.get(i + 3)?, *data.get(i + 4)?]);
-        if len != !nlen {
-            return None;
-        }
-        out.extend_from_slice(data.get(i + 5..i + 5 + usize::from(len))?);
-        i += 5 + usize::from(len);
-        if header & 1 == 1 {
-            return Some(out);
-        }
     }
 }
 
@@ -1623,13 +1597,10 @@ mod tests {
         assert_eq!(list[0], ServerMsg::SkillEnded { tl: 8 });
         assert!(matches!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x1ff, .. }));
 
-        // Real compression (a Huffman block) is not supported and reported as such.
-        assert_eq!(
-            ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).unwrap(),
-            ServerMsg::Compressed { count: 2 }
-        );
-        assert_eq!(inflate_stored(&stored(&[1, 2, 3], true)), Some(vec![1, 2, 3]));
-        assert_eq!(inflate_stored(&[1, 3, 0, 0, 0, 1, 2, 3]), None, "length check");
+        // Truncated Huffman/stored blocks are invalid, rather than silently skipped batches.
+        assert!(ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).is_err());
+        assert_eq!(crate::compression::inflate_batch(&stored(&[1, 2, 3], true)).unwrap(), vec![1, 2, 3]);
+        assert!(crate::compression::inflate_batch(&[1, 3, 0, 0, 0, 1, 2, 3]).is_err(), "length check");
     }
 
     #[test]
