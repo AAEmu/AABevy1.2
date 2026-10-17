@@ -109,6 +109,8 @@ const FAKE_INGAME: [(&str, &str); 8] = [
     ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
 ];
 const INGAME_LUA: &str = include_str!("ingame.lua");
+/// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
+const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
 /// Install the game API into a fresh runtime, before the stage's scripts run.
 pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
@@ -147,6 +149,8 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     lua.globals().raw_set("HUD", hud.clone())?;
     push_snapshot(lua, &hud, &bridge.borrow().snapshot)?;
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
+    let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
+    lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()
 }
 
@@ -159,6 +163,13 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         lua.create_function(move |_, ()| {
             let d = b.borrow();
             Ok((d.pos.x as f64, d.pos.y as f64, d.pos.z as f64, d.yaw as f64))
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "world_rect",
+        lua.create_function(move |_, id: u32| {
+            Ok(b.borrow().game.get().and_then(|g| g.world_rects.get(&id).map(|r| r.iter().map(|v| *v as f64).collect::<Vec<f64>>())))
         })?,
     )?;
     let b = bridge.clone();
@@ -279,6 +290,8 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("zone_faction", s.zone_faction as i64)?;
     t.raw_set("zone_faction_name", s.zone_faction_name.as_str())?;
     t.raw_set("sub_zone", s.sub_zone.as_str())?;
+    t.raw_set("sub_map", s.sub_map as i64)?;
+    t.raw_set("sub_map_rect", lua.create_sequence_from(s.sub_map_rect.iter().map(|v| *v as f64))?)?;
     t.raw_set("faction", s.faction.as_str())?;
     t.raw_set("hour", s.hour as i64)?;
     t.raw_set("minute", s.minute as f64)?;
@@ -334,7 +347,12 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
             .or_else(|| net_group.and_then(|id| g.zone_by_group(id).map(|(z, f)| (id, z, f))))
             .or_else(|| g.zone(spawn.zone_id()))
     });
-    let sub_zone = game.and_then(|g| g.sub_zone_at(pos.x, pos.y)).unwrap_or_default().to_string();
+    let sub_root = game.and_then(|g| g.sub_zone_root_at(pos.x, pos.y));
+    let sub_zone = game.zip(sub_root).and_then(|(g, id)| g.sub_zone_names.get(&id)).cloned().unwrap_or_default();
+    let (sub_map, sub_map_rect) = game
+        .zip(sub_root)
+        .and_then(|(g, id)| g.sub_zone_rects.get(&id).map(|r| (id, *r)))
+        .unwrap_or((0, [0.0; 4]));
     // the maxima: the database's formulas over level, gear and buffs (the server sends none), the highest seen until it is read
     let own_buffs = world.get_resource::<aa_net::state::Buffs>().map_or(&[][..], |b| b.of(spawn.obj_id));
     let formula_max = game.zip(world.get_resource::<aa_net::state::Inventory>()).and_then(|(g, inv)| {
@@ -362,6 +380,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         recoverable_exp: stats.map_or(0, |s| s.recoverable_exp),
         labor: stats.map_or(i32::from(character.labor_power), |s| s.labor),
         max_labor: LABOR_MAX,
+        labor_log: stats.map_or_else(Vec::new, |s| s.labor_log.clone()),
+        labor_seq: stats.map_or(0, |s| s.labor_seq),
         money: stats.map_or(character.money, |s| s.money),
         bm_point: stats.map_or(character.bm_point, |s| s.loyalty),
         honor: stats.map_or(0, |s| s.honor),
@@ -373,6 +393,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         zone_faction: zone.map_or(0, |(_, _, f)| f),
         zone_faction_name: zone.and_then(|(_, _, f)| game.and_then(|g| faction_name(g, f))).unwrap_or_default(),
         sub_zone,
+        sub_map,
+        sub_map_rect,
         faction,
         hour: hour.floor() as u8 % 24,
         minute: (hour.fract() * 60.0).floor(),
@@ -403,8 +425,16 @@ pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) 
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }
-    let data = bridge.borrow();
-    super::chat::replay(rt, chat, data.game.get());
+    super::chat::replay(rt, chat, bridge.borrow().game.get());
+    // the labor gained so far prints as chat lines too ("Gained 10 Labor Point(s). (Total LP: 105)"): push the
+    // current state and let the difference against the stage's own say that all of the session's changes are new
+    {
+        let mut d = bridge.borrow_mut();
+        let mut base = d.pushed.take().unwrap_or_else(|| d.snapshot.clone());
+        base.labor_seq = d.snapshot.labor_seq.saturating_sub(d.snapshot.labor_log.len() as u32);
+        d.pushed = Some(base);
+    }
+    push_state(rt, bridge);
 }
 
 /// Carry out what the scripts asked for.
@@ -529,8 +559,11 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     if old.exp_cur != new.exp_cur || old.exp_need != new.exp_need {
         rt.fire_event("EXP_CHANGED", (id, new.exp_cur, new.exp_cur.to_string()));
     }
-    if old.labor != new.labor {
-        rt.fire_event("LABORPOWER_CHANGED", ((new.labor - old.labor) as i64, new.labor as i64));
+    // each labor change the server announced: the chat scripts print "Gained 10 Labor Point(s). (Total LP: 105)"
+    // and the labor bar refreshes, both from the state pushed just now
+    let fresh = new.labor_seq.saturating_sub(old.labor_seq) as usize;
+    for (amount, total) in &new.labor_log[new.labor_log.len().saturating_sub(fresh)..] {
+        rt.fire_event("LABORPOWER_CHANGED", (i64::from(*amount), i64::from(*total)));
     }
     if old.in_combat != new.in_combat {
         rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (new.in_combat, id));

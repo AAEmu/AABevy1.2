@@ -159,26 +159,72 @@ X2Faction.GetFactionInfo = function(self, id)
   return { name = name }
 end
 
--- The zone map overlay (top right): the zone the player is in and where on its map image.
--- The image shows the zone rectangle (west, south, width, height in metres) at the scale of its
--- height; `FORM_ROAD_MAP_LIST` (map/form.lua) has the size the scripts lay the image out at.
+-- The zone map overlay (top right): the zone (or city) the player is in and where on its map image.
+-- The roadmap window is 926 x 556 and the map rectangle (zone group / sub zone `x, y, w, h`, y up) covers all of
+-- it; the images of map/road_map_list.lua sit in it at their own offset and size (HUD_ROAD_FRAMES, road_frames.lua,
+-- or the script's FORM_ROAD_MAP_LIST for the zones whose numbers come from there). aa-ui wants the place on the
+-- image: (window pixel - offset) / size. Checked against reference/ingame/spawn: the Nuian spawn is at window pixel
+-- (703.2, 147.7) of the 926 x 556 window, where the real client puts the cursor.
+local function onRoadImage(level, id, formKey, uw, vw)
+  local f = HUD_ROAD_FRAMES[level] and HUD_ROAD_FRAMES[level][id]
+  local form = FORM_ROAD_MAP_LIST and FORM_ROAD_MAP_LIST[formKey]
+  if f == nil and form ~= nil then f = { form[1], form[2], form[5], form[6] } end
+  if f == nil then return uw, vw end
+  return (uw * 926 - f[1]) / f[3], (vw * 556 - f[2]) / f[4]
+end
+
 AAUI.RoadMap = function()
   local s = S()
   if s.zone_group == 0 then return nil end
   local x, y, _, yaw = HUD.player_pos()
+  -- the heading: radians, 0 north, clockwise (the engine's yaw turns left)
+  local angle = -yaw
+  -- in a city (Ezna ...) the overlay shows the city's own map: level 3, the sub zone's id, its rectangle
+  local c = s.sub_map_rect
+  if s.sub_map ~= 0 and HUD_ROAD_FRAMES[3][s.sub_map] ~= nil then
+    local u, v = onRoadImage(3, s.sub_map, "", (x - c[1]) / c[3], 1 - (y - c[2]) / c[4])
+    return { level = 3, zone = s.sub_map, player = { u = u, v = v, angle = angle } }
+  end
   local r = s.zone_rect
   local u, v = 0, 0
   if r[3] > 0 and r[4] > 0 then
-    local form = FORM_ROAD_MAP_LIST and FORM_ROAD_MAP_LIST[string.upper(s.zone_key_name) .. "_100"]
-    local scale = 1
-    if form ~= nil and form[5] ~= nil and form[6] ~= nil then
-      scale = (form[6] / r[4]) / (form[5] / r[3]) -- the image's own aspect against the rectangle's
-    end
-    u = (x - r[1]) / r[3] * scale
-    v = 1 - (y - r[2]) / r[4]
+    u, v = onRoadImage(2, s.zone_group, string.upper(s.zone_key_name) .. "_100", (x - r[1]) / r[3], 1 - (y - r[2]) / r[4])
   end
-  -- the heading: radians, 0 north, clockwise (the engine's yaw turns left)
-  return { level = 2, zone = s.zone_group, player = { u = u, v = v, angle = -yaw } }
+  return { level = 2, zone = s.zone_group, player = { u = u, v = v, angle = angle } }
+end
+
+-- The big map (M): the whole map image covers the rectangle of the map the player is on (zone group or sub zone
+-- `x, y, w, h`, y up), so the place is the plain fraction of it; the maps above (the zone, the continent, the
+-- world) get theirs from their rectangles (world_groups). Checked against reference/ingame/worldmap_*: the Nuian
+-- spawn is u 0.7594 v 0.2657 on Solzreed, 0.6952 / 0.3418 on the western continent, 0.4688 / 0.6054 on the world.
+local CONTINENT = { w = 3, e = 4, o = 5 } -- the zone group key's first letter -> world_groups.id
+
+AAUI.WorldMap = function()
+  local s = S()
+  if s.zone_group == 0 then return nil end
+  local x, y, _, yaw = HUD.player_pos()
+  local function on(r)
+    if r == nil or r[3] == nil or r[3] <= 0 then return nil end
+    return (x - r[1]) / r[3], 1 - (y - r[2]) / r[4]
+  end
+  local zr = s.zone_rect
+  local out = { level = 2, zone = s.zone_group, player = { angle = -yaw }, maps = {} }
+  out.player.u, out.player.v = on(zr)
+  if out.player.u == nil then return nil end
+  local c = s.sub_map_rect
+  if s.sub_map ~= 0 and HUD_ROAD_FRAMES[3][s.sub_map] ~= nil then
+    -- in a city: its own map first, the zone's map is one of the maps above
+    out.level, out.zone = 3, s.sub_map
+    out.player.u, out.player.v = on(c)
+    local zu, zv = on(zr)
+    table.insert(out.maps, { level = 2, id = s.zone_group, u = zu, v = zv })
+  end
+  local continent = CONTINENT[string.sub(s.zone_key_name, 1, 1)]
+  local cu, cv = on(continent and HUD.world_rect(continent))
+  if cu ~= nil then table.insert(out.maps, { level = 1, id = continent, u = cu, v = cv }) end
+  local wu, wv = on(HUD.world_rect(2))
+  if wu ~= nil then table.insert(out.maps, { level = 0, id = 2, u = wu, v = wv }) end
+  return out
 end
 
 -- Action bars and bag -----------------------------------------------------------------------------------
@@ -423,7 +469,6 @@ AAUI.UseSlot = function(slotType, slotIdx, button)
 end
 
 HUD.setup_chat = function()
-  chat.channel = CHAT_SAY
   local edit = chatEdit()
   if edit == nil then return end
   edit:SetHandler("OnEscapePressed", function(self) HUD.chat_close() end)
