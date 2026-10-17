@@ -10,6 +10,7 @@ use aa_anim::Animator;
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_net::model::{Equipment, slot};
 use bevy::prelude::*;
+use bevy::ecs::entity::Entities;
 
 use super::data::Db;
 
@@ -224,14 +225,20 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                 });
             }
         }
-        commands.entity(entity).insert(Wield::of(&carried.0)).remove::<Carried>();
+        // the character can go in the same frame (a login stage closing while its model came in): no panic then
+        commands.entity(entity).try_insert(Wield::of(&carried.0)).try_remove::<Carried>();
     }
 }
 
 /// Moves the weapons between the sheath and the hand as their owners start and stop fighting.
-pub fn hold_weapons(time: Res<Time>, mut commands: Commands, owners: Query<&Drawn>, mut weapons: Query<(Entity, &mut HeldWeapon)>) {
+pub fn hold_weapons(time: Res<Time>, mut commands: Commands, entities: &Entities, owners: Query<&Drawn>, mut weapons: Query<(Entity, &mut HeldWeapon)>) {
     let now = time.elapsed_secs_f64();
     for (entity, mut weapon) in &mut weapons {
+        // a weapon whose owner went in the frame it was attached lost its bone: it goes too
+        if !entities.contains(weapon.owner) {
+            commands.entity(entity).despawn();
+            continue;
+        }
         let drawn = owners.get(weapon.owner).ok().filter(|d| now < d.until).map(|d| d.out);
         let want = match (weapon.grip, drawn) {
             (Grip::Bow, Some(Out::Bow)) | (Grip::Instrument(_), Some(Out::Instrument)) | (Grip::Shield, Some(Out::Blade { .. })) => true,
@@ -247,9 +254,9 @@ pub fn hold_weapons(time: Res<Time>, mut commands: Commands, owners: Query<&Draw
             (true, Some(hand)) => (hand, weapon.hand_transform),
             _ => (weapon.sheath, weapon.sheath_transform),
         };
-        commands.entity(entity).insert((transform, ChildOf(bone)));
+        commands.entity(entity).try_insert((transform, ChildOf(bone)));
         if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) {
-            commands.entity(entity).insert(if want { Visibility::Inherited } else { Visibility::Hidden });
+            commands.entity(entity).try_insert(if want { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
 }
