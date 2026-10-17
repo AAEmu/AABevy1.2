@@ -196,6 +196,7 @@ impl Plugin for AaWorldPlugin {
         crate::objects::sounds::build(app);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
+        crate::water_query::build(app, &self.config.world);
     }
 }
 
