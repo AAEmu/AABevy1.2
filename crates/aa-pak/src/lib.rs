@@ -89,7 +89,7 @@ impl Pak {
 
         let mut entries = HashMap::with_capacity(files as usize);
         let mut names = Vec::with_capacity(files as usize);
-        for (i, raw) in table.chunks_exact_mut(ENTRY_SIZE).enumerate() {
+        for (i, raw) in table.as_chunks_mut::<ENTRY_SIZE>().0.iter_mut().enumerate() {
             let is_file = if kind == 'B' { i >= extra as usize } else { i < files as usize };
             if !is_file {
                 continue;
@@ -174,8 +174,8 @@ pub fn normalize(path: &str) -> String {
 
 fn decrypt_cbc(cipher: &Aes128, data: &mut [u8]) {
     let mut prev = [0u8; 16];
-    for block in data.chunks_exact_mut(16) {
-        let ct: [u8; 16] = block.try_into().unwrap();
+    for block in data.as_chunks_mut::<16>().0 {
+        let ct = *block;
         cipher.decrypt_block(GenericArray::from_mut_slice(block));
         for (b, p) in block.iter_mut().zip(prev) {
             *b ^= p;
