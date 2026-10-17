@@ -22,6 +22,8 @@
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
+//! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
+//!                                `ParentCollide` children (`Effect::ground_y`)
 //!
 //! `aa-fx: ...` is logged every 2 s: effects, active effects, particles, quads and the main thread time of the simulation and
 //! mesh upload passes.
@@ -217,7 +219,7 @@ fn setup(
     }
     let stagger = num("--stagger", 0.0);
     for (i, (name, pos)) in positions.into_iter().enumerate() {
-        let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
+        let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * 0.12).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
         if num("--sweep", 0.0) > 0.0 {
             commands.spawn((effect, place, Sweep { centre: pos, radius: num("--sweep", 0.0) }));

@@ -81,7 +81,21 @@ pub struct FxSettings {
     /// Draw refraction particles (`RefrBumpScale` materials) as a distortion of the scene behind them; needs
     /// `ScreenSpaceTransmission` on the camera, which the plugin adds. Off: they are not drawn.
     pub refraction: bool,
+    /// Height of the ground below a world position (terrain, floor): the emitters with `CollideTerrain` bounce on it and the
+    /// ones that start on a collision (`SpawnIndirection=ParentCollide`) start there. `None`: nothing collides unless the effect
+    /// names a [`Effect::ground_y`].
+    pub ground: Option<Ground>,
     pub enabled: bool,
+}
+
+/// A ground height query, see [`FxSettings::ground`].
+#[derive(Clone)]
+pub struct Ground(pub Arc<dyn Fn(Vec3) -> Option<f32> + Send + Sync>);
+
+impl std::fmt::Debug for Ground {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Ground(..)")
+    }
 }
 
 impl Default for FxSettings {
@@ -101,6 +115,7 @@ impl Default for FxSettings {
             wind: Vec3::new(0.5, 0.0, 0.2),
             sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
             refraction: std::env::var_os("AA_FX_NO_REFRACTION").is_none(),
+            ground: None,
             enabled: true,
         }
     }
@@ -145,6 +160,8 @@ pub struct Effect {
     pub tint: Vec3,
     /// Run the effect ahead when it starts so that it already looks established (`bPrime`).
     pub prime: bool,
+    /// World height of a flat ground for this effect (when [`FxSettings::ground`] does not know): collisions use it.
+    pub ground_y: Option<f32>,
     /// Start again when every emitter has finished (a one shot effect plays once per activation otherwise).
     pub looping: bool,
     /// Despawn the entity when the effect has finished.
@@ -153,7 +170,7 @@ pub struct Effect {
 
 impl Effect {
     pub fn new(name: impl Into<String>) -> Effect {
-        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, prime: true, looping: false, despawn_when_finished: false }
+        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, ground_y: None, prime: true, looping: false, despawn_when_finished: false }
     }
 
     pub fn with_scale(mut self, scale: f32) -> Effect {
@@ -613,8 +630,16 @@ fn simulate(
     let settings = &*settings;
     let assets = &*assets;
 
+    let settings_ground = settings.ground.as_ref().map(|g| g.0.clone());
     q.par_iter_mut().for_each(|(entity, effect, gt, mut run)| {
         let run = &mut *run;
+        let flat = effect.ground_y.map(|y| move |_: Vec3| Some(y));
+        let global = settings_ground.as_ref().map(|g| move |p: Vec3| g(p));
+        let ground_fn: Option<&(dyn Fn(Vec3) -> Option<f32> + Send + Sync)> = match (&global, &flat) {
+            (Some(g), _) => Some(g),
+            (None, Some(f)) => Some(f),
+            _ => None,
+        };
         let Some(mut sim) = run.sim.take() else { return };
         let m = gt.affine().matrix3;
         let (lx, ly, lz) = (m.x_axis.length().max(1e-6), m.y_axis.length().max(1e-6), m.z_axis.length().max(1e-6));
@@ -644,6 +669,7 @@ fn simulate(
             tint: effect.tint,
             sun: settings.sun,
             emitter_vel: run.vel,
+            ground: ground_fn,
             wind: settings.wind,
             budget: &budget,
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,

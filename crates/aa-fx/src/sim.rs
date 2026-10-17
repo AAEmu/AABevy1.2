@@ -86,6 +86,8 @@ pub struct StepCtx<'a> {
     pub sun: Vec3,
     /// How the effect entity moves (m/s, world space), for `InheritVelocity`.
     pub emitter_vel: Vec3,
+    /// Height of the ground below a world position, for the emitters that collide (`CollideTerrain`).
+    pub ground: Option<&'a (dyn Fn(Vec3) -> Option<f32> + Send + Sync)>,
     pub wind: Vec3,
     pub budget: &'a AtomicI32,
     /// Alpha factor of the effect (distance fade).
@@ -150,6 +152,8 @@ pub struct Particle {
     t_head: u16,
     t_len: u16,
     t_acc: f32,
+    /// Hit the ground already (a child emitter starts once per particle).
+    hit: bool,
     variant: u16,
     seed: f32,
 }
@@ -186,8 +190,10 @@ pub struct EmitterState {
     off: bool,
     want_births: bool,
     want_deaths: bool,
+    want_collides: bool,
     births: Vec<Vec3>,
     deaths: Vec<Vec3>,
+    collides: Vec<Vec3>,
     lit: f32,
     // output, effect-local space
     pub pos: Vec<[f32; 3]>,
@@ -230,8 +236,10 @@ impl EmitterState {
             off: false,
             want_births: false,
             want_deaths: false,
+            want_collides: false,
             births: Vec::new(),
             deaths: Vec::new(),
+            collides: Vec::new(),
             lit: 1.0,
             pos: Vec::new(),
             uv: Vec::new(),
@@ -525,6 +533,7 @@ impl EmitterState {
             t_head: 0,
             t_len: 0,
             t_acc: 0.0,
+            hit: false,
             variant,
             seed: r.next() * 100.0,
         };
@@ -551,6 +560,8 @@ impl EmitterState {
         let wind_k = def.wind.max(0.0);
         let turb = def.turbulence_3d * ctx.scale;
         let want_deaths = self.want_deaths;
+        let want_collides = self.want_collides;
+        let collide = def.collide;
         let basis = self.orbit_basis(ctx);
         let orbits = def.orbits();
         let mut w = 0;
@@ -578,6 +589,35 @@ impl EmitterState {
                 p.vel *= 1.0 / (1.0 + air * dt);
             }
             p.pos += p.vel * dt;
+            if collide && let Some(ground) = ctx.ground {
+                let mut wp = frame.to_world_point(p.pos);
+                if let Some(gy) = ground(wp)
+                    && wp.y < gy
+                {
+                    wp.y = gy;
+                    let mut wv = frame.to_world_dir(p.vel);
+                    if def.bounciness < 0.0 {
+                        // dies on impact
+                        p.life = p.age;
+                    } else if wv.y < 0.0 {
+                        wv.y = -wv.y * def.bounciness;
+                        if wv.y < 0.3 {
+                            wv.y = 0.0;
+                        }
+                    }
+                    let slow = 1.0 / (1.0 + def.friction * dt * 0.5);
+                    wv.x *= slow;
+                    wv.z *= slow;
+                    p.pos = frame.point_from_world(wp);
+                    p.vel = frame.dir_from_world(wv);
+                    if !p.hit {
+                        p.hit = true;
+                        if want_collides {
+                            self.collides.push(wp);
+                        }
+                    }
+                }
+            }
             if turb > 0.0 {
                 let t = p.age * 1.7 + p.seed;
                 p.pos += Vec3::new(t.sin(), (t * 1.31 + 1.0).sin(), (t * 0.77 + 2.0).sin()) * turb * dt;
@@ -1030,6 +1070,7 @@ impl EffectSim {
                 match spawn {
                     Spawn::ParentStart => emitters[p].want_births = true,
                     Spawn::ParentDeath => emitters[p].want_deaths = true,
+                    Spawn::ParentCollide => emitters[p].want_collides = true,
                     _ => {}
                 }
             }
@@ -1064,6 +1105,7 @@ impl EffectSim {
         for e in &mut self.emitters {
             e.births.clear();
             e.deaths.clear();
+            e.collides.clear();
             e.emit(ctx, dt);
             e.update(ctx, dt);
         }
@@ -1074,6 +1116,7 @@ impl EffectSim {
             let events: Vec<Vec3> = match spawn {
                 Spawn::ParentStart => self.emitters[p].births.clone(),
                 Spawn::ParentDeath => self.emitters[p].deaths.clone(),
+                Spawn::ParentCollide => self.emitters[p].collides.clone(),
                 _ => continue,
             };
             for at in events {
@@ -1139,6 +1182,7 @@ mod tests {
             tint: Vec3::ONE,
             sun: Vec3::Y,
             emitter_vel: Vec3::ZERO,
+            ground: None,
             wind: Vec3::ZERO,
             budget,
             fade: 1.0,
@@ -1258,6 +1302,50 @@ mod tests {
         let p1 = centre(&s);
         assert!((p1.length() - 2.0).abs() < 0.05 && p1.y.abs() < 0.01, "{p1:?}");
         assert!(p0.dot(p1).abs() < 0.2, "{p0:?} {p1:?}");
+    }
+
+    #[test]
+    fn particles_bounce_on_the_ground_and_start_collision_children() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs>
+            <Particles Name="rock"><Params Count="1" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0" GravityScale="1" PositionOffset="0,0,1" CollideTerrain="true" Bounciness="0.5" Size="0.1"/>
+            <Childs><Particles Name="dust"><Params Count="3" ParticleLifeTime="1" Texture="textures/x.dds" Speed="0" SpawnIndirection="ParentCollide"/></Particles></Childs></Particles>
+            </Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let eff = lib.get("a").unwrap();
+        let em = eff.emitters.iter().enumerate().map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER)).collect();
+        let mut s = EffectSim::new(em, 0.8, 1.0);
+        assert_eq!(s.emitters.len(), 2);
+        let budget = AtomicI32::new(10_000);
+        let ground = |_: Vec3| Some(0.0f32);
+        let mut c = ctx(&budget);
+        c.ground = Some(&ground);
+        let (mut lowest, mut highest_after_hit, mut hit_at) = (f32::MAX, 0.0f32, None);
+        for i in 0..240 {
+            s.step(&c);
+            if let Some(p) = s.emitters[0].particles.first() {
+                lowest = lowest.min(p.pos.y);
+                if hit_at.is_some() {
+                    highest_after_hit = highest_after_hit.max(p.pos.y);
+                } else if s.emitters[1].alive() > 0 {
+                    hit_at = Some(i);
+                }
+            }
+        }
+        // it fell 1 m (about 0.45 s), never went below the ground, bounced up again and the child started once
+        assert!(lowest > -0.01, "went through the ground: {lowest}");
+        assert!(hit_at.is_some_and(|i| (20..40).contains(&i)), "first hit at {hit_at:?}");
+        assert!(highest_after_hit > 0.05, "no bounce: {highest_after_hit}");
+        assert!(s.emitters[1].alive() <= 3, "child started more than once: {}", s.emitters[1].alive());
+        // without a ground nothing happens
+        let mut s2 = {
+            let em = eff.emitters.iter().enumerate().map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER)).collect();
+            EffectSim::new(em, 0.8, 1.0)
+        };
+        let c = ctx(&budget);
+        for _ in 0..90 {
+            s2.step(&c);
+        }
+        assert_eq!(s2.emitters[1].alive(), 0);
     }
 
     #[test]
