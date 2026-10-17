@@ -711,7 +711,7 @@ fn tsv(rows: &[Row], fx: &Fx, tags: &[String]) -> String {
         let _ = write!(s, "\tmiss_{t}");
     }
     s.push_str("\tstops\tub_unresolved\tloops\tno_release\tno_launch\tno_sync\tfx_n\tfx_class\tfx_missing\tfx_major\tfx_features\tfx_hints\tfx_invisible");
-    s.push_str("\tsound\tparticle_sound\tvoice\tshake\tmaterial\tother\n");
+    s.push_str("\tsound\tparticle_sound\tvoice\tshake\tmaterial\tother\tfx_names\n");
     for r in rows {
         let join = |it: &mut dyn Iterator<Item = String>| it.collect::<Vec<_>>().join(";");
         let clip_list = join(&mut r.clips.iter().map(|(n, c)| format!("{n}[{}]", c.roles.iter().copied().collect::<Vec<_>>().join(","))));
@@ -736,7 +736,8 @@ fn tsv(rows: &[Row], fx: &Fx, tags: &[String]) -> String {
         let invisible = join(&mut r.fx.iter().filter(|e| fx[*e].invisible()).cloned());
         let _ = write!(s, "\t{stops}\t{ub}\t{loops}\t{no_release}\t{no_launch}\t{no_sync}\t{}\t{}\t{fx_missing}\t{major}\t{features}\t{hints}\t{invisible}", r.fx.len(), fx_class(r, fx).label());
         let e = r.extras;
-        let _ = writeln!(s, "\t{}\t{}\t{}\t{}\t{}\t{}", e.sound, e.particle_sound, e.voice, e.shake, e.material, e.other);
+        let names = join(&mut r.fx.iter().cloned());
+        let _ = writeln!(s, "\t{}\t{}\t{}\t{}\t{}\t{}\t{names}", e.sound, e.particle_sound, e.voice, e.shake, e.material, e.other);
     }
     s
 }
