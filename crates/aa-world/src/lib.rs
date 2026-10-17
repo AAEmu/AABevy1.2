@@ -13,6 +13,7 @@ pub mod objects;
 pub mod pipelines;
 pub mod placement;
 pub mod post;
+mod post_bloom;
 pub mod profile;
 pub mod reader;
 pub mod sky;

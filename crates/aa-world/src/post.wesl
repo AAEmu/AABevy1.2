@@ -1,7 +1,9 @@
-// Atmosphere fog + the engine's film curve, see `post.rs`.
+// Atmosphere fog + the engine's bloom and film curve, see `post.rs` and `post_bloom.rs`.
 //
-// Input: the HDR scene (already multiplied by the view exposure by the material shaders, bloom added) and the
-// main pass depth. Output: display linear colour (the render target does the sRGB encoding).
+// Input: the HDR scene (already multiplied by the view exposure by the material shaders) and the main pass depth.
+// Entry points: `bright_fragment` (the engine's bright pass at half resolution, run before the blur chain of
+// `post_bloom.wesl`) and `fragment` (fog, bloom, grade, film curve; output: display linear colour, the render
+// target does the sRGB encoding).
 
 import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 import bevy_render::view::View;
@@ -29,6 +31,10 @@ struct Post {
     under: vec4<f32>,
     // under water: rgb colour of the deep water at the surface (pre-exposed)
     under_color: vec4<f32>,
+    // bloom: x brightness scale (`r_HDRBrightLevel / 0.18`), y threshold, z offset (the engine's `HDRBrightPassFilterPS`)
+    bloom: vec4<f32>,
+    // bloom: rgb strength added to the exposed scene (`BloomColor x BloomMul x r_HDRBloomMul x 3 x 0.5` of `FilmicMapping`)
+    bloom_color: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -38,6 +44,9 @@ struct Post {
 @else
 @group(0) @binding(2) var depth_texture: texture_depth_2d;
 @group(0) @binding(3) var color_texture: texture_2d<f32>;
+// the blurred bright pass (mip 0 of the bloom chain), only the final pass binds it
+@group(0) @binding(4) var bloom_texture: texture_2d<f32>;
+@group(0) @binding(5) var bloom_sampler: sampler;
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -66,16 +75,15 @@ fn film_curve(x: vec3<f32>) -> vec3<f32> {
     return (num / den) / white;
 }
 
-@fragment
-fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let pixel = vec2<i32>(in.position.xy);
+// The scene colour of a full resolution pixel after the under water fog and the atmosphere fog (HDR, before the exposure).
+fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
     var color = textureLoad(color_texture, pixel, 0).rgb;
 
     // ---- under water: the engine's `OceanOutof` / `WaterVolumeOutof` fog ----
     let under_water = post.under.w > 0.5;
     if under_water {
         let depth = textureLoad(depth_texture, pixel, 0);
-        let ndc = vec3<f32>(in.uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
+        let ndc = vec3<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
         let wp = view.world_from_clip * vec4<f32>(ndc, 1.0);
         let world = wp.xyz / wp.w;
         let to = world - view.world_position;
@@ -109,7 +117,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // ---- fog ----
     if post.balance.w > 0.5 && !under_water {
         let depth = textureLoad(depth_texture, pixel, 0);
-        let ndc = vec3<f32>(in.uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
+        let ndc = vec3<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
         let wp = view.world_from_clip * vec4<f32>(ndc, 1.0);
         let world = wp.xyz / wp.w;
         let to = world - view.world_position;
@@ -138,10 +146,45 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             color = mix(color, fog_rgb, amount);
         }
     }
+    return color;
+}
 
-    // ---- grade and film curve ----
+// The engine's bright pass (`HDRBrightPassFilterPS`) of an exposed scene colour: `v = c x level / key - threshold`, then
+// `v / (offset + v)`, so the bloom of a pixel saturates (the sun disc blooms like a white wall).
+fn bright(c: vec3<f32>) -> vec3<f32> {
+    // The engine thresholds every channel; here the luminance decides and the colour of the pixel is kept (a blue sky has a blue
+    // channel above the threshold long before its luminance gets there, and would paint a blue fringe on the foliage in front)
+    let v = max(luminance(c) * post.bloom.x - post.bloom.y, 0.0);
+    let tint = c / max(max(c.r, max(c.g, c.b)), 1e-4);
+    return tint * (v / (post.bloom.z + v));
+}
+
+// Half resolution bright pass: the mean of the bright pass of the four full resolution pixels of a block (the engine's
+// merged variant: no fireflies from single pixels). The target is half the size of the view.
+@fragment
+fn bright_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let size = vec2<i32>(view.viewport.zw);
+    let base = vec2<i32>(in.position.xy) * 2;
+    var sum = vec3<f32>(0.0);
+    for (var i = 0; i < 4; i++) {
+        let pixel = min(base + vec2<i32>(i & 1, i >> 1), size - vec2<i32>(1));
+        let uv = (vec2<f32>(pixel) + vec2<f32>(0.5)) / view.viewport.zw;
+        let c = scene_color(pixel, uv) * post.grade.w;
+        sum += bright(min(c, vec3<f32>(1.0e4)));
+    }
+    return vec4<f32>(sum * 0.25, 1.0);
+}
+
+@fragment
+fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let pixel = vec2<i32>(in.position.xy);
+    let color = scene_color(pixel, in.uv);
+
+    // ---- bloom, grade and film curve ----
     let key = 0.18;
     var c = color * post.grade.w;
+    // the engine adds the bloom to the exposed scene before the grading (`exposure * scene + bloom * 0.5`)
+    c = c + textureSampleLevel(bloom_texture, bloom_sampler, in.uv, 0.0).rgb * post.bloom_color.rgb;
     c = vec3<f32>(key) + post.grade.y * (c - vec3<f32>(key));
     c = c * post.balance.rgb;
     let l = luminance(c);

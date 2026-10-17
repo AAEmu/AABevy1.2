@@ -167,6 +167,43 @@ impl Lighting {
     }
 }
 
+/// The `<HDRSetup>` node of a world's `env.xml` (the engine's `HDRSetup` of `cry3dengine.dll`): the colour and the multiplier of
+/// the bloom, which `FilmicMapping` adds to the exposed scene. The 1.2 main world has `BloomColor="204,244,255" BloomMul="1.8"` (a
+/// cool white), login2 `255,255,255` and 1.5; `FlaresMul` and `StreaksMul` are 0 (login2: flares 0.1), so there are no lens flares or
+/// streaks to draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HdrSetup {
+    /// `BloomColor`, 0..1 (the file has 0..255).
+    pub bloom_color: Vec3,
+    /// `BloomMul`, clamped to 0..10 like the engine does.
+    pub bloom_mul: f32,
+}
+
+impl Default for HdrSetup {
+    /// The engine's defaults for a file without the node.
+    fn default() -> Self {
+        HdrSetup { bloom_color: Vec3::ONE, bloom_mul: 1.0 }
+    }
+}
+
+impl HdrSetup {
+    pub fn parse(xml: &str) -> Option<HdrSetup> {
+        let doc = roxmltree::Document::parse(xml).ok()?;
+        let n = doc.descendants().find(|n| n.has_tag_name("HDRSetup"))?;
+        let mut h = HdrSetup::default();
+        if let Some(c) = n.attribute("BloomColor") {
+            let v: Vec<f32> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if v.len() == 3 {
+                h.bloom_color = Vec3::new(v[0], v[1], v[2]) / 255.0;
+            }
+        }
+        if let Some(m) = n.attribute("BloomMul").and_then(|m| m.trim().parse::<f32>().ok()) {
+            h.bloom_mul = m.clamp(0.0, 10.0);
+        }
+        Some(h)
+    }
+}
+
 /// One evaluated frame of the environment (linear colours, `Vec3` rgb).
 #[derive(Clone, Debug)]
 pub struct EnvSample {
@@ -565,6 +602,18 @@ mod tests {
         assert!((tt(19.17, login) - 19.17).abs() < 1e-3);
         // the sun path does not see the warp
         assert_eq!(t.sample(19.17, main).sun_dir, sun_direction(19.17, main));
+    }
+
+    #[test]
+    fn hdr_setup_is_the_worlds_bloom() {
+        let main = HdrSetup::parse(r#"<Environment><HDRSetup BloomColor="204,244,255" BloomMul="1.8" FlaresMul="0"/></Environment>"#).unwrap();
+        assert!((main.bloom_color - Vec3::new(0.8, 0.957, 1.0)).abs().max_element() < 1e-3 && (main.bloom_mul - 1.8).abs() < 1e-6);
+        assert_eq!(HdrSetup::parse(r#"<Environment><HDRSetup BloomMul="50"/></Environment>"#).unwrap(), HdrSetup { bloom_color: Vec3::ONE, bloom_mul: 10.0 });
+        assert!(HdrSetup::parse("<Environment/>").is_none());
+        if crate::pak_available() {
+            let xml = aa_pak::Pak::global().read_string("worlds/main_world/env.xml").unwrap();
+            assert!((HdrSetup::parse(&xml).unwrap().bloom_mul - 1.8).abs() < 1e-6);
+        }
     }
 
     #[test]
