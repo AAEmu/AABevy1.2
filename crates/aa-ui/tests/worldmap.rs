@@ -346,3 +346,103 @@ fn scroll_offset_moves_the_children_and_clips() {
     let c = tree_clip.expect("clipped");
     assert_eq!((c.x, c.y, c.w, c.h), (0.0, 0.0, 928.0, 556.0));
 }
+
+const PING: &str = r#"
+    ping = wm:CreateChildWidget('window', 'ping', 0, true)
+    ping:SetExtent(24, 24); ping:Show(false)
+    wm:SetPingWidget(ping)
+    requests, removes, pulses = {}, 0, 0
+    wm:RegisterEvent('SET_EFFECT_ICON_VISIBLE')
+    wm:SetHandler('OnEvent', function(self, ev, show, widget)
+        if ev == 'SET_EFFECT_ICON_VISIBLE' and show and widget == ping then pulses = pulses + 1 end
+    end)
+    echo = false
+    AAUI.WorldMap = function()
+        return {level=2, zone=5, player={u=.5,v=.25}, ping=echo}
+    end
+    AAUI.PlaceMapPing = function(level, id, u, v)
+        requests[#requests+1] = {level, id, u, v}; return true
+    end
+    AAUI.RemoveMapPing = function() removes = removes + 1; return true end
+"#;
+
+fn ping_pos(ui: &UiRuntime) -> (f64, f64) {
+    pair(ui, "local x,y = ping:GetOffset(); return {x+12,y+12}")
+}
+
+fn click(ui: &UiRuntime, x: f32, y: f32) {
+    let mut mouse = MouseState::default();
+    update(&ui.lua, &mut mouse, Some((x, y)), true, false, false, 0.0);
+    update(&ui.lua, &mut mouse, Some((x, y)), false, true, false, 0.0);
+}
+
+#[test]
+fn party_ping_requests_wait_for_authoritative_echo_and_clear() {
+    let ui = setup();
+    ui.exec("@ping", PING).unwrap();
+    tick(&ui);
+    ui.exec("@mode", "wm:SetPingBtn(true)").unwrap();
+    click(&ui, 232.0, 417.0);
+    assert!(!eval::<bool>(&ui, "ping:IsVisible()"));
+    assert_eq!(pair(&ui, "return {requests[1][1],requests[1][2]}"), (2., 5.));
+    near(pair(&ui, "return {requests[1][3],requests[1][4]}"), (0.25, 0.75), 0.0001);
+    {
+        let u = aa_ui::lua::ui(&ui.lua);
+        assert!(!u.tree.widget(u.tree.find("wm").unwrap()).unwrap().worldmap.as_ref().unwrap().ping_mode);
+    }
+    ui.exec("@echo", "echo={level=2,id=5,u=.6,v=.4,version=1}").unwrap();
+    tick(&ui);
+    assert!(eval::<bool>(&ui, "ping:IsVisible()"));
+    near(ping_pos(&ui), (557.0, 222.0), 0.01);
+    tick(&ui);
+    assert_eq!(eval::<i64>(&ui, "pulses"), 1);
+    let content = aa_ui::lua::ui(&ui.lua).tree.settle();
+    for _ in 0..8 { tick(&ui); }
+    assert_eq!(aa_ui::lua::ui(&ui.lua).tree.settle(), content);
+    ui.exec("@remove", "wm:RemovePing()").unwrap();
+    assert_eq!(eval::<i64>(&ui, "removes"), 1);
+    assert!(eval::<bool>(&ui, "ping:IsVisible()"));
+    ui.exec("@clear", "echo=false; wm:UpdatePingInfo()").unwrap();
+    assert!(!eval::<bool>(&ui, "ping:IsVisible()"));
+}
+
+#[test]
+fn ping_normalization_uses_displayed_map_after_zoom_pan_and_scale() {
+    let ui = setup();
+    ui.exec("@ping", PING).unwrap();
+    tick(&ui);
+    ui.exec("@transform", "wm:SetExtent(1856,1112); frame:EnableScroll(true); frame:ChangeChildAnchorByScrollValue('horz',100); frame:ChangeChildAnchorByScrollValue('vert',20); frame:SetScale(.5); wm:SetPingBtn(true)").unwrap();
+    let (x, y) = {
+        let u = aa_ui::lua::ui(&ui.lua);
+        let r = u.animations.widget_rect(&u.tree, u.tree.find("wm").unwrap());
+        (r.x + r.w * 0.25, r.y + r.h * 0.3)
+    };
+    click(&ui, x, y);
+    near(pair(&ui, "return {requests[1][3],requests[1][4]}"), (0.25, 0.3), 0.0001);
+    ui.exec("@echo", "echo={level=2,id=5,u=.25,v=.3,maps={{level=1,id=3,u=.7,v=.2}}}; wm:UpdatePingInfo()").unwrap();
+    ui.exec("@zoomout", "frame:SetScale(1); wm:SetExtent(928,556); frame:ChangeChildAnchorByScrollValue('horz',0); frame:ChangeChildAnchorByScrollValue('vert',0)").unwrap();
+    // Right click changes the map, and its exact coordinate comes from the server projection.
+    let mut mouse = MouseState::default();
+    update(&ui.lua, &mut mouse, Some((300.,300.)), false, false, true, 0.);
+    tick(&ui);
+    near(ping_pos(&ui), (650.0,111.0), 0.01);
+}
+
+#[test]
+fn absent_or_declined_ping_hooks_keep_local_fallback_but_failed_requests_do_not() {
+    let ui = setup();
+    ui.exec("@ping", PING).unwrap();
+    ui.exec("@local", "AAUI.WorldMap=function() return {level=2,zone=5} end; AAUI.PlaceMapPing=nil; AAUI.RemoveMapPing=nil").unwrap();
+    tick(&ui);
+    ui.exec("@mode", "wm:SetPingBtn(true)").unwrap();
+    click(&ui, 232.,417.);
+    assert!(eval::<bool>(&ui, "ping:IsVisible()"));
+    near(ping_pos(&ui), (232.,417.), 0.01);
+    ui.exec("@remove", "wm:RemovePing(); AAUI.PlaceMapPing=function() return false end; wm:SetPingBtn(true)").unwrap();
+    assert!(!eval::<bool>(&ui, "ping:IsVisible()"));
+    click(&ui, 100.,100.);
+    assert!(eval::<bool>(&ui, "ping:IsVisible()"));
+    ui.exec("@fail", "wm:RemovePing(); AAUI.PlaceMapPing=function() error('offline') end; wm:SetPingBtn(true)").unwrap();
+    click(&ui, 200.,200.);
+    assert!(!eval::<bool>(&ui, "ping:IsVisible()"));
+}

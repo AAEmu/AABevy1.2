@@ -37,6 +37,8 @@
 //!     { level = 0, id = 2, u = 0.469, v = 0.605 },   -- the world map
 //!   },
 //! }
+//! AAUI.PlaceMapPing(level, id, u, v) -> true   -- optional: app sends the request; await echo
+//! AAUI.RemoveMapPing() -> true               -- optional: app sends removal; await echo
 //! AAUI.MapClimate(zoneId) -> nil or { climateId, ... }   -- optional: the climates of a map's zones
 //! AAUI.ConflictZones(worldId) -> { zoneId, ... }          -- optional: a continent's conflict zones
 //! AAUI.ConflictState(zoneId) -> state, remainMs            -- optional: HPWS_TROUBLE_0 .. 4, HPWS_BATTLE,
@@ -61,6 +63,13 @@
 //! Without `AAUI.WorldMap` the hook `AAUI.RoadMap()` of the zone overlay is used (same `level`,
 //! `zone`, `player`). The map opens on the player's map, and follows it when the player changes
 //! maps.
+//! The hook result may also contain `ping = false` (authoritative removal), or
+//! `ping = { level, id, u, v, maps = { {level, id, u, v}, ... }, version = sequence }`.
+//! It places the original ping frame and starts its pulse on a new echo. `version` is optional
+//! and can distinguish repeated pings at the same point. Omit `ping` and the request callbacks
+//! to retain local placement/removal. A callback returning false/nil declines handling; errors
+//! log and consume the request, keeping the last confirmed marker. Coordinates are normalized
+//! on the displayed map, independent of zoom/pan/widget scale. RoadMap accepts the same `ping`.
 //!
 //! The icons of the map (quest "!" and "?", merchants, the warehouse, mailboxes, stables, portals,
 //! the gravesite ...) come from the app too, as `markers` of the hook's result, in the form of
@@ -82,6 +91,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use mlua::{Function, Lua, Table, Value};
 
 use super::roadmap::{Marker, marker_cell, parse_markers};
+use super::map_ping::{self, Ping};
 use super::{method, none, queue_ui_event, ret, ui, value_id};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
@@ -233,6 +243,7 @@ pub struct WorldMapData {
     /// `SetPingWidget(frame, image)` and the ping mode of the ping button.
     pub ping: Option<Id>,
     pub ping_mode: bool,
+    pub ping_place: Option<Ping>,
     /// `SetExpandRatio`: informational, the widget's size is what counts.
     pub ratio: f32,
     /// The shown map `(level, id)`.
@@ -270,6 +281,7 @@ impl Default for WorldMapData {
             common_farm: None,
             ping: None,
             ping_mode: false,
+            ping_place: None,
             ratio: 1.0,
             current: None,
             place: None,
@@ -393,6 +405,10 @@ impl WorldMapData {
     /// The player's place on the shown map, in map units at ratio 1.
     fn player_pos(&self) -> Option<(f32, f32)> {
         let place = self.place?;
+        self.place_pos(place)
+    }
+
+    fn place_pos(&self, place: Place) -> Option<(f32, f32)> {
         let cur = self.current?;
         let mine = (place.level, place.zone);
         let mut pos = (place.u * BASE.0, place.v * BASE.1);
@@ -661,6 +677,26 @@ fn sync(lua: &Lua, id: Id, place: Option<Place>, table: Option<&Table>) {
         with(lua, id, |x| x.hover = hover);
     }
     sync_markers(lua, id, table);
+    sync_ping(lua, id, table, false);
+}
+
+fn sync_ping(lua: &Lua, id: Id, table: Option<&Table>, restart: bool) {
+    let Some(mut d) = snapshot(lua, id) else { return };
+    let mut changed = false;
+    match map_ping::read(table) {
+        Ok(Some(point)) if point != d.ping_place => {
+            d.ping_place = point;
+            with(lua, id, |x| x.ping_place = point);
+            changed = true;
+        }
+        Err(e) => bevy::log::warn!("aa-ui: AAUI.WorldMap ping: {e}"),
+        _ => {}
+    }
+    let Some(frame) = d.ping else { return };
+    let uv = d.ping_place.and_then(|p| d.place_pos(Place {
+        level: p.level, zone: p.id, u: p.u, v: p.v, angle: 0.0, above: p.maps,
+    })).map(|(x, y)| (x / BASE.0, y / BASE.1));
+    map_ping::apply(lua, frame, id, uv, restart || changed);
 }
 
 /// Read the markers when the hook has a new list, and keep the drawables on the shown map's ones.
@@ -978,32 +1014,23 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
 
 /// Put the ping marker where the cursor is (the ping button's mode).
 fn place_ping(lua: &Lua, wm: Id, d: &WorldMapData, cursor: (f32, f32)) {
-    let Some(frame) = d.ping else { return };
-    let r = ui(lua).tree.rect(wm);
-    {
-        let mut u = ui(lua);
-        let (w, h) = (u.tree.get(frame).width, u.tree.get(frame).height);
-        let o = u.tree.get_mut(frame);
-        o.anchors = vec![Anchor {
-            point: Point::TopLeft,
-            target: wm,
-            rel: Point::TopLeft,
-            x: (cursor.0 - r.x - w / 2.0).round(),
-            y: (cursor.1 - r.y - h / 2.0).round(),
-        }];
+    let Some((level, id)) = d.current else { return };
+    let r = {
+        let u = ui(lua);
+        u.animations.widget_rect(&u.tree, wm)
+    };
+    if r.w <= 0.0 || r.h <= 0.0 { return }
+    let (u, v) = (((cursor.0 - r.x) / r.w).clamp(0.0, 1.0),
+                  ((cursor.1 - r.y) / r.h).clamp(0.0, 1.0));
+    if !map_ping::request(lua, "PlaceMapPing", (level, id, u, v)) {
+        with(lua, wm, |x| x.ping_place = Some(Ping {
+            level, id, u, v, maps: [None; 4], version: None,
+        }));
+        sync_ping(lua, wm, None, true);
     }
-    show_widget(lua, frame, true);
     // The ping mode ends with the ping (the button pops back up).
+    with(lua, wm, |x| x.ping_mode = false);
     queue_ui_event(lua, "SET_PING_MODE", vec![Value::Boolean(false)]);
-}
-
-/// `widget:Show(on)` through the script-visible method (fires `OnShow` / `OnHide`).
-fn show_widget(lua: &Lua, id: Id, on: bool) {
-    if let Ok(Some(t)) = super::object_table(lua, id)
-        && let Ok(f) = t.get::<Function>("Show")
-    {
-        let _ = f.call::<()>((t, on));
-    }
 }
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
@@ -1014,7 +1041,6 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "UpdateTransferTelescopeArea",
         "UpdateTelescopeInfo",
         "UpdateTelescopeArea",
-        "UpdatePingInfo",
         "UpdateNpcInfo",
         "UpdateMySlaveInfo",
         "UpdateHousingInfo",
@@ -1128,6 +1154,14 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?,
     )?;
     m.raw_set(
+        "UpdatePingInfo",
+        method(lua, |lua, id, _| {
+            let hook = read_hook(lua);
+            sync_ping(lua, id, hook.as_ref().map(|h| &h.1), false);
+            none()
+        })?,
+    )?;
+    m.raw_set(
         "SetPingBtn",
         method(lua, |lua, id, a| {
             let on = a.b(1, false);
@@ -1138,8 +1172,9 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "RemovePing",
         method(lua, |lua, id, _| {
-            if let Some(f) = snapshot(lua, id).and_then(|d| d.ping) {
-                show_widget(lua, f, false);
+            if !map_ping::request(lua, "RemoveMapPing", ()) {
+                with(lua, id, |d| d.ping_place = None);
+                sync_ping(lua, id, None, false);
             }
             none()
         })?,

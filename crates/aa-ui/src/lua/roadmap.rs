@@ -203,6 +203,8 @@ pub struct RoadMapData {
     /// (level, key, drawable) from `SaveMapData`.
     pub maps: Vec<(i64, String, Id)>,
     pub player: Option<Id>,
+    pub ping: Option<Id>,
+    pub ping_place: Option<super::map_ping::Ping>,
     /// The shown map (level, key).
     pub current: Option<(i64, String)>,
     /// Player position last applied (u, v).
@@ -228,6 +230,8 @@ impl Default for RoadMapData {
             map_size: 100,
             maps: Vec::new(),
             player: None,
+            ping: None,
+            ping_place: None,
             current: None,
             last_player: None,
             last_angle: 0.0,
@@ -578,14 +582,53 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
         }
     }
     place_player(lua, id, shown_map, player, angle);
+    sync_ping(lua, id, shown_map, r)?;
     sync_markers(lua, id, shown_map, markers);
     with(lua, id, |x| x.markers_version = version);
     update_tooltip(lua, id);
     Ok(())
 }
 
+fn sync_ping(lua: &Lua, id: Id, shown_map: Option<Id>, table: Option<&Table>) -> mlua::Result<()> {
+    let mut d = data(lua, id);
+    let mut changed = false;
+    if let Some(point) = super::map_ping::read(table)? && point != d.ping_place {
+        d.ping_place = point;
+        with(lua, id, |x| x.ping_place = point);
+        changed = true;
+    }
+    let Some(frame) = d.ping else { return Ok(()) };
+    let uv = table.and_then(|t| {
+        let level = t.raw_get::<Option<i64>>("level").ok().flatten().unwrap_or(1);
+        let zone = t.raw_get::<i64>("zone").ok()?;
+        d.ping_place?.on_map(level, zone)
+    });
+    super::map_ping::apply(lua, frame, shown_map.unwrap_or(id), uv.filter(|_| shown_map.is_some()), changed);
+    Ok(())
+}
+
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
+    def(
+        "SetPingWidget",
+        method(lua, |lua, id, a| {
+            let p = value_id(lua, &a.v(1));
+            with(lua, id, |d| d.ping = p);
+            none()
+        })?,
+    )?;
+    def(
+        "UpdatePingInfo",
+        method(lua, |lua, id, _| {
+            if let Some(f) = hook(lua) && let Ok(Value::Table(table)) = f.call::<Value>(()) {
+                let d = data(lua, id);
+                let shown = d.current.as_ref().and_then(|c| d.maps.iter()
+                    .find(|(level, key, _)| (*level, key) == (c.0, &c.1)).map(|m| m.2));
+                sync_ping(lua, id, shown, Some(&table))?;
+            }
+            none()
+        })?,
+    )?;
     def(
         "SetPlayerDrawable",
         method(lua, |lua, id, a| {
