@@ -166,7 +166,7 @@ pub fn sync_views(
     // build only when the frame rate can take it
     let may_build = time.delta_secs() < SPAWN_SLOW_FRAME || *last_spawn > SPAWN_MAX_WAIT;
     // units behind the camera can wait
-    let facing = camera.single().map(|c| flat_dir(c)).unwrap_or(Vec2::ZERO);
+    let facing = camera.single().map(flat_dir).unwrap_or(Vec2::ZERO);
 
     // what the workers finished
     {
@@ -181,18 +181,18 @@ pub fn sync_views(
     // units that are gone
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
     for id in gone {
-        if let Some(v) = views.units.remove(&id) {
-            if let Some(e) = v.entity {
-                commands.entity(e).despawn();
-            }
+        if let Some(v) = views.units.remove(&id)
+            && let Some(e) = v.entity
+        {
+            commands.entity(e).despawn();
         }
     }
     let gone: Vec<u32> = views.doodads.keys().filter(|id| !doodads.by_id.contains_key(id)).copied().collect();
     for id in gone {
-        if let Some(v) = views.doodads.remove(&id) {
-            if let Some(e) = v.entity {
-                commands.entity(e).despawn();
-            }
+        if let Some(v) = views.doodads.remove(&id)
+            && let Some(e) = v.entity
+        {
+            commands.entity(e).despawn();
         }
     }
 
@@ -412,10 +412,10 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
     // different idle phases, so a crowd does not breathe in step
     let obj_id = unit.obj_id;
     commands.queue(move |world: &mut World| {
-        if let Some(mut a) = world.get_mut::<Animator>(entity) {
-            if let Some(cur) = a.current.as_mut() {
-                cur.time = (unit_hash(obj_id) % 3000) as f32 / 1000.0;
-            }
+        if let Some(mut a) = world.get_mut::<Animator>(entity)
+            && let Some(cur) = a.current.as_mut()
+        {
+            cur.time = (unit_hash(obj_id) % 3000) as f32 / 1000.0;
         }
     });
     Some(entity)
