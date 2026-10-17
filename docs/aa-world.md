@@ -114,6 +114,13 @@ f32 m[12] @67 (row major 3 x 4: rotation*scale | translation), i32 materialId @1
 
 Matrix and box are sector-local in `brush.dat`, cell-local in `object.dat`. login2 has no `brush.dat`; its brushes only exist in `object.dat`.
 
+`materialId` of a `brush.dat` record indexes the material table of the cell's own `object.dat` (the octree stores the same brushes with
+the same indices), **not** `material_list.dat`, which is a different and longer list (749 entries against 149 in cell 10 / 14, in another order for 1808 of 2110
+brushes). `placement.rs` therefore takes the materials from `object.dat` and uses `material_list.dat` only for a cell without one. With the wrong
+table the Memoria vines (`gw_memo_etc_f02/f03/f04`) were drawn with `remain_divided_road`, whose physics `proxy` sub-material
+(`Shader=Illum GenMask 16777216`, pale green, opacity 0.3) is not drawn by the engine but showed up as flat pale green sheets, and the canal
+tiles got the stair material's untextured proxy slab (overexposed white under the sun). Test: `brush_materials_come_from_the_object_dat_table`.
+
 ### client/vegetation.dat, vegetation/NN_NN.dat
 
 `vegetation.dat`: `u32 version (1)`, `u32 offset[16]`, `u32 size[16]` (4 x 4 sectors of 256 m, `sx * 4 + sy`), 64 byte records:
