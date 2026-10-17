@@ -94,7 +94,55 @@ aa-world and aa-cry on the stage render layer, asking aa-world for nothing:
   field covers its lower half. Per race (`mood`): a fog colour for the far ground and linear factors
   on the terrain and on the grass / rocks (the stage lights are tuned for the figure and about eight
   times too bright for the captured ground). The values come from the mean colours of regions of the
-  captures (sky, haze, ridge, near / mid grass), within about 10 % on most regions.
+  captures (sky, haze, ridge), within about 10 % on most regions;
+* the grass and bushes (not the flowers) have a **tone curve** (`grass.rs`, below).
+
+### The grass tone curve
+
+The grass of the field is `common_plants_shine_fa03` (593 of the instances within 30 m of the camera; its material is
+`common_plants_shine_fa01`: `Vegetation` shader, `waterweed_b.dds`, `Diffuse` 0.50 / 0.40 / 0.11, `BackDiffuse` x 0.72,
+terrain blend 0.5), plus flowers and the other plants of the cell. With the stage's lights and only a factor per race it came out
+dull and flat: the means of the near region matched the captures, but its dark quarter was 25 / 255 against 9 and its
+sunlit tail 61 / 255 against 131. The quantile map of the near field of the captures against ours is, in every race, a
+power of about 2 - 2.6 (Nuian 2.3, Elf 2.6, Hariharan 2.0, Ferre 2.2) of the radiance: the captured grass is lit by an HDR
+sun (the `Vegetation` shader: front light `max(N.L, 0.5)` x sun, back light `BackDiffuse x BackDiffuseMultiplier x
+LeafShadingBack` x the opacity map, terrain blend, vertex AO, all multiplied up by the film curve) while the stage lights
+(key, fill and rim for the figure) give a narrow range. A brightness factor, ambient occlusion (a 1 x 1 occlusion map on
+the terrain and the grass), diffuse transmission, normals bent to the sky and an unlit grass were tried first; none of
+them widens the range (the darks stay lit by the stage's directional fill).
+
+So the grass is a bindless `ExtendedMaterial` (`grass.rs` + `grass.wesl`, like the character back lights, aa-cry
+`shade::backlight`) that applies `rgb' = rgb * (floor + (c / reference) ^ (gamma - 1))` to the lit colour before the fog,
+with `c` the channels or, to keep the hue (the elf leaves went neon green), their luminance (`saturation` 0.3 for the Elf).
+`mood` holds `[gamma, reference, floor, saturation]` and a colour factor per race, fitted on the luminance quantiles
+(tools: a quantile refit from a capture run, inverting the curve to the pre-curve radiance) and the bright / dark tails:
+
+| race | gamma | reference | floor | saturation | grass factor | terrain factor |
+|---|---|---|---|---|---|---|
+| Nuian | 3.87 | 0.0234 | 0.10 | 1 | 0.113 / 0.133 / 0.12 | 0.25 |
+| Elf | 2.75 | 0.0304 | 0 | 0.3 | 0.18 / 0.18 / 0.25 | 0.35 |
+| Hariharan | 2.77 | 0.0200 | 0.14 | 1 | 0.102 / 0.125 / 0.13 | 0.35 |
+| Ferre | 5.25 | 0.0237 | 0.19 | 1 | 0.095 / 0.111 / 0.10 | 0.25 |
+
+Measured on `step3_*` (male + female pooled, sRGB 0-255; regions `near` = 620..1250 x 830..1010, `mid` = 600..1250 x
+710..810, which avoid the figure and the mist patch; real / before / after): mean colour, the brightest 15 % of the pixels
+(the lit blades), the darkest 25 %, and the rms over 12 luminance quantiles (10 - 98 %) against the capture.
+
+| race | region | mean R G B | brightest 15 % | darkest 25 % | quantile rms |
+|---|---|---|---|---|---|
+| Nuian | near | 40 39 1 / 42 42 0 / 43 43 0 | 132 108 0 / 61 72 0 / 137 114 0 | 8 11 1 / 25 23 1 / 5 6 0 | 25.9 -> 8.5 |
+| Nuian | mid | 39 42 5 / 50 52 12 / 52 54 14 | 116 98 4 / 78 87 38 / 125 109 27 | 12 16 2 / 32 30 3 / 14 16 2 | 14.7 -> 14.1 |
+| Elf | near | 53 55 3 / 49 51 1 / 55 55 1 | 146 139 15 / 80 79 1 / 143 139 7 | 9 12 0 / 28 32 1 / 12 11 0 | 36.3 -> 4.4 |
+| Elf | mid | 89 93 34 / 58 60 11 / 69 72 17 | 157 157 41 / 98 101 42 / 150 161 38 | 50 56 21 / 32 33 2 / 15 17 1 | 38.6 -> 22.2 |
+| Hariharan | near | 46 29 6 / 44 32 17 / 43 31 9 | 92 65 28 / 66 49 30 / 91 69 26 | 19 8 0 / 25 17 10 / 11 8 4 | 12.0 -> 2.4 |
+| Hariharan | mid | 45 30 8 / 45 33 19 / 42 31 12 | 94 76 42 / 88 71 43 / 99 81 39 | 16 7 0 / 24 16 9 / 9 8 4 | 16.7 -> 13.6 |
+| Ferre | near | 48 32 0 / 49 38 1 / 46 36 0 | 118 91 0 / 91 61 1 / 129 97 2 | 15 10 0 / 25 23 1 / 7 7 0 | 20.5 -> 8.5 |
+| Ferre | mid | 66 52 14 / 60 51 13 / 57 50 15 | 136 123 51 / 122 111 65 / 137 126 55 | 26 15 0 / 27 25 2 / 9 9 0 | 12.2 -> 5.8 |
+
+What is left: the Elf and Nuian mid region (real mist and haze lift its dark quarter to 50, ours stays at 15: `elf_fog_01`
+is missing from the pak and the mist is aa-fx's), the near-left corner of Nuian (ours 1.5 x too bright), and the captures'
+near blades are still broader and the real grass sparser with larger gaps. The sky, the horizon and the ridge bands are
+unchanged to within 1 / 255 (the far ground band, rows 520-600, moves by at most 3 / 255 where the grass reaches it).
 
 The files are read on a task when the screen opens, the models of the race are loaded ahead while
 steps 1 and 2 are shown and the field is spawned (terrain at once, props within a 6 ms frame budget)
@@ -128,8 +176,7 @@ full `resolve`.
 
 ## Gaps and notes
 
-* Step 3 field: no wind, no dummy animation; the grass is the vegetation of the cell within 170 m
-  (the captures' near blades are bigger and brighter in the Elf scene). The ground mist is aa-fx
+* Step 3 field: no wind, no dummy animation; the grass is the vegetation of the cell within 170 m. The ground mist is aa-fx
   (`flow_fog_01`, `fog_01`, `leaf_01`; `elf_fog_01` is in no particle library of the pak). The
   Hariharan carcass is dark now and the flowers close to yellow (aa-cry `b538dc7`, `ef0bda6`: additive
   flag only for translucent materials, terrain colour blend of vegetation baked in).
