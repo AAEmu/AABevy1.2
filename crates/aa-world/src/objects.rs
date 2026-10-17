@@ -1,26 +1,30 @@
 //! Cell objects: brushes (`brush.dat`) and vegetation as meshes, spawned per 64 m sector near the camera.
 //!
 //! * placement files are parsed on background tasks and binned per sector;
+//! * models are prepared (parsed, textures decoded, materials and meshes built) on the worker threads of
+//!   [`aa_cry::workers`], nearest first, and only inserted into the asset collections on the main thread
+//!   ([`CryAssets::finish_model`]); an instance whose model is not ready yet waits in its sector and appears when the
+//!   model arrives, so walking into new country never stalls a frame on a file;
 //! * the main thread spawns sectors nearest first under a time budget per frame
-//!   ([`WorldConfig::object_budget_ms`]); model loading (aa-cry) is the expensive part, so a sector
-//!   fills in over a few frames instead of hitching;
+//!   ([`WorldConfig::object_budget_ms`]);
 //! * a sector is alive while the camera is within the largest view distance of its instances (capped by
 //!   [`WorldConfig::brush_distance`] / [`WorldConfig::vegetation_distance`]); every part also carries a
 //!   [`VisibilityRange`] for its own distance, so the renderer drops far instances without our help;
 //! * level of detail: a sector is spawned with the `_lodN` / `$lodN` level for its distance band and respawned
-//!   when the band changes;
+//!   when the band changes (the new sector is built hidden next to the old one and swapped in when complete);
 //! * water volumes (rivers, lakes, ponds) of a cell are merged into one flat mesh per water style (material and
 //!   fog), built on the task, drawn with `water_material::WaterMaterial`;
 //! * instancing: all parts of one model share mesh and material handles, which Bevy batches into instanced
 //!   draws. Parts are flattened (the node transform is baked) so an instance costs one entity per drawn part.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use aa_cry::{CryAssets, ModelOptions};
 use aa_cry::scene::LoadedModel;
+use aa_cry::workers::Workers;
+use aa_cry::{CryAssets, ModelOptions, PreparedModel};
 use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::math::Affine3A;
@@ -87,18 +91,90 @@ pub struct ObjectSector {
 
 struct SectorState {
     entity: Entity,
+    /// Where the sector's root is (Bevy space).
+    translation: Vec3,
     lod: u8,
     /// Next index into the sector's bin (spawning resumes here).
     next: usize,
     spawned: usize,
+    /// Instances (bin index, model) whose model is not ready yet.
+    waiting: Vec<(u32, u32)>,
+    /// The sector is built hidden (after a level of detail change) until it is complete.
+    hidden: bool,
+    /// Roots of the previous level of detail, dropped when this one is complete.
+    retired: Vec<Entity>,
 }
+
+impl SectorState {
+    fn complete(&self, bin_len: usize) -> bool {
+        self.next >= bin_len && self.waiting.is_empty()
+    }
+}
+
+/// What an instance needs from the model files: the model, its material file and the level of detail.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ModelKey {
+    path: String,
+    material: Option<String>,
+    lod: u8,
+}
+
+/// A model ready to be instanced: the loaded assets and the model space transform of each drawn node.
+struct Instanced {
+    loaded: Arc<LoadedModel>,
+    nodes: Vec<Mat4>,
+}
+
+enum ModelState {
+    /// Not asked for yet (the workers are busy).
+    Wanted,
+    /// Being prepared on a worker.
+    Loading,
+    Ready(Arc<Instanced>),
+    Failed,
+}
+
+/// Models by id; instances refer to them by id.
+#[derive(Default)]
+struct Models {
+    keys: Vec<ModelKey>,
+    states: Vec<ModelState>,
+    by_key: HashMap<ModelKey, u32>,
+    /// `(cell, brush?, model or group, material, lod)` -> id: the per instance lookup builds no strings.
+    fast: HashMap<(i32, i32, bool, u32, i32, u8), u32>,
+}
+
+impl Models {
+    fn id(&mut self, key: ModelKey) -> u32 {
+        if let Some(&id) = self.by_key.get(&key) {
+            return id;
+        }
+        let id = self.keys.len() as u32;
+        self.keys.push(key.clone());
+        self.states.push(ModelState::Wanted);
+        self.by_key.insert(key, id);
+        id
+    }
+}
+
+/// A model prepared by a worker.
+type ModelResult = (u32, Result<PreparedModel, aa_cry::Error>);
+
+/// Most model jobs queued on the workers at once; the rest wait their turn in `Wanted`, so the queue holds what is near.
+const MAX_QUEUED_MODELS: usize = 48;
+/// Main thread time per frame for inserting prepared models into the asset collections (ms).
+const FINISH_BUDGET_MS: f32 = 1.0;
 
 #[derive(Resource)]
 pub struct ObjectState {
     cells: HashMap<(i32, i32), Arc<CellObjectData>>,
     loading: HashSet<(i32, i32)>,
     sectors: HashMap<(i32, i32, u8, Kind), SectorState>,
-    failed_models: HashSet<String>,
+    models: Models,
+    model_tx: Sender<ModelResult>,
+    model_rx: Mutex<Receiver<ModelResult>>,
+    /// Prepared models not inserted yet (the per frame budget).
+    model_queue: VecDeque<ModelResult>,
     /// Loaded models (by `Arc` address) already checked for unusable textures.
     checked_models: HashSet<usize>,
     groups: Option<Arc<VegGroups>>,
@@ -109,6 +185,8 @@ pub struct ObjectState {
     /// The water mesh entities of each cell (one per water style).
     water: HashMap<(i32, i32), Vec<Entity>>,
     groups_tx: Sender<Option<VegGroups>>,
+    /// Counter for [`ObjectStats::entities`] while models are still being prepared.
+    busy_ticks: usize,
     /// Counters for diagnostics.
     pub stats: ObjectStats,
 }
@@ -119,7 +197,11 @@ type CellMessage = ((i32, i32), CellObjectData, Vec<(WaterStyle, Mesh)>);
 #[derive(Default, Clone, Debug)]
 pub struct ObjectStats {
     pub sectors: usize,
+    /// Entities spawned for objects. While models are still being prepared a counter that changes every frame is added,
+    /// so a loading screen that waits for this number to settle keeps waiting.
     pub entities: usize,
+    /// Models being prepared or waiting for a worker.
+    pub models_pending: usize,
     pub models_failed: usize,
     pub spawn_ms: f32,
     pub water_cells: usize,
@@ -129,11 +211,15 @@ impl ObjectState {
     pub fn new() -> Self {
         let (tx, rx) = channel();
         let (groups_tx, groups_rx) = channel();
+        let (model_tx, model_rx) = channel();
         ObjectState {
             cells: HashMap::new(),
             loading: HashSet::new(),
             sectors: HashMap::new(),
-            failed_models: HashSet::new(),
+            models: Models::default(),
+            model_tx,
+            model_rx: Mutex::new(model_rx),
+            model_queue: VecDeque::new(),
             checked_models: HashSet::new(),
             groups: None,
             groups_rx: Mutex::new(groups_rx),
@@ -142,6 +228,7 @@ impl ObjectState {
             rx: Mutex::new(rx),
             water: HashMap::new(),
             groups_tx,
+            busy_ticks: 0,
             stats: ObjectStats::default(),
         }
     }
@@ -205,6 +292,7 @@ pub fn stream_objects(
     mut water_materials: ResMut<Assets<WaterMaterial>>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
+    timers: Option<Res<crate::profile::Timers>>,
 ) {
     if !cfg.objects {
         return;
@@ -212,6 +300,7 @@ pub fn stream_objects(
     let Some(cam) = focus.iter().next().or_else(|| cameras.iter().next()) else { return };
     let p = bevy_to_cry(cam.translation());
     let state = &mut *state;
+    let _t = timers.as_deref().map(|t| t.time("objects.stream"));
     let pool = AsyncComputeTaskPool::get();
 
     // vegetation groups (world level)
@@ -300,6 +389,42 @@ pub fn stream_objects(
     state.stats.water_cells = state.water.len();
     let Some(groups) = state.groups.clone() else { return };
 
+    // models prepared by the workers: insert them (a few per frame)
+    {
+        let rx = state.model_rx.lock().unwrap();
+        let arrived: Vec<ModelResult> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        drop(rx);
+        state.model_queue.extend(arrived);
+    }
+    let finish_start = Instant::now();
+    while let Some((id, result)) = state.model_queue.pop_front() {
+        let key_path = state.models.keys[id as usize].path.clone();
+        state.models.states[id as usize] = match result {
+            Ok(prepared) => {
+                let loaded = cry.finish_model(prepared);
+                if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
+                    // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
+                    // that takes the whole app down, so such textures are dropped (aa-cry binds `Map="Environment"`
+                    // cube maps as the base colour of some materials)
+                    let stripped = strip_cube_textures(&mut cry, &loaded);
+                    if stripped > 0 {
+                        debug!("aa-world: {key_path}: dropped {stripped} cube map texture(s) bound to 2D slots");
+                    }
+                }
+                let nodes = loaded.parts.iter().map(|(ni, _)| Mat4::from(node_world(&loaded.model, *ni))).collect();
+                ModelState::Ready(Arc::new(Instanced { loaded, nodes }))
+            }
+            Err(e) => {
+                debug!("aa-world: model {key_path}: {e}");
+                ModelState::Failed
+            }
+        };
+        if finish_start.elapsed().as_secs_f32() * 1000.0 > FINISH_BUDGET_MS {
+            break;
+        }
+    }
+    let loader = cry.loader();
+
     // wanted sectors
     let mut wanted: Vec<(f32, (i32, i32), usize, Kind)> = Vec::new();
     let mut keep: HashSet<(i32, i32, u8, Kind)> = HashSet::new();
@@ -329,121 +454,231 @@ pub fn stream_objects(
             }
         }
     }
-    // despawn what is out of range, or whose level of detail changed
-    let stale: Vec<_> = state
-        .sectors
-        .iter()
-        .filter(|(k, s)| {
-            if !keep.contains(k) {
-                return true;
-            }
-            let d = sector_distance(p, (k.0, k.1), k.2 as usize);
-            object_lod(k.3, d, Some(s.lod)) != s.lod
-        })
-        .map(|(k, _)| *k)
-        .collect();
-    for k in stale {
+    // despawn what is out of range
+    let gone: Vec<_> = state.sectors.keys().filter(|k| !keep.contains(k)).copied().collect();
+    for k in gone {
         if let Some(s) = state.sectors.remove(&k) {
             commands.entity(s.entity).despawn();
+            for e in s.retired {
+                commands.entity(e).despawn();
+            }
         }
+    }
+    // a new level of detail: build the sector again next to the old one, swap when it is complete
+    let relod: Vec<_> = state
+        .sectors
+        .iter()
+        .filter_map(|(k, s)| {
+            let d = sector_distance(p, (k.0, k.1), k.2 as usize);
+            let lod = object_lod(k.3, d, Some(s.lod));
+            (lod != s.lod).then_some((*k, lod))
+        })
+        .collect();
+    for (k, lod) in relod {
+        let Some(s) = state.sectors.get_mut(&k) else { continue };
+        let root = commands
+            .spawn((ObjectSector { cell: (k.0, k.1), sector: k.2, kind: k.3 }, Transform::from_translation(s.translation), Visibility::Hidden))
+            .id();
+        s.retired.push(std::mem::replace(&mut s.entity, root));
+        s.hidden = true;
+        s.lod = lod;
+        s.next = 0;
+        s.spawned = 0;
+        s.waiting.clear();
     }
 
     // spawn, nearest first, within the time budget
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let start = Instant::now();
     let budget = cfg.object_budget_ms / 1000.0;
+    let workers = Workers::global();
+    let mut queued = workers.pending();
     for (d, c, sector, kind) in wanted {
         if start.elapsed().as_secs_f32() > budget {
             break;
         }
         let key = (c.0, c.1, sector as u8, kind);
         let data = state.cells[&c].clone();
-        if state.sectors.get(&key).is_some_and(|s| s.next >= bin_of(&data, kind, sector).len()) {
+        let bin = bin_of(&data, kind, sector);
+        if state.sectors.get(&key).is_some_and(|s| s.complete(bin.len()) && !s.hidden) {
             continue;
         }
-        let lod = state.sectors.get(&key).map_or_else(|| object_lod(kind, d, None), |s| s.lod);
         let sector_origin = Vec3::new((sector / 16) as f32 * SECTOR_SIZE, (sector % 16) as f32 * SECTOR_SIZE, 0.0);
+        let state = &mut *state;
         let entry = state.sectors.entry(key).or_insert_with(|| {
+            let translation = cry_to_bevy(cell_origin(c.0, c.1) + sector_origin);
             let root = commands
-                .spawn((
-                    ObjectSector { cell: c, sector: sector as u8, kind },
-                    Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1) + sector_origin)),
-                    Visibility::default(),
-                ))
+                .spawn((ObjectSector { cell: c, sector: sector as u8, kind }, Transform::from_translation(translation), Visibility::default()))
                 .id();
-            SectorState { entity: root, lod, next: 0, spawned: 0 }
+            SectorState { entity: root, translation, lod: object_lod(kind, d, None), next: 0, spawned: 0, waiting: Vec::new(), hidden: false, retired: Vec::new() }
         });
-        let bin = bin_of(&data, kind, sector);
+        let lod = entry.lod;
+        let models = &mut state.models;
+        let model_tx = &state.model_tx;
+
+        // asks for a model if it is not on its way yet
+        let mut request = |models: &mut Models, id: u32| {
+            if matches!(models.states[id as usize], ModelState::Wanted) && queued < MAX_QUEUED_MODELS {
+                models.states[id as usize] = ModelState::Loading;
+                queued += 1;
+                let tx = model_tx.clone();
+                let loader = loader.clone();
+                let key = models.keys[id as usize].clone();
+                workers.spawn(d, move || {
+                    let options = ModelOptions { lod: key.lod as u32, material: key.material.clone(), cry_space: true, ..default() };
+                    let result = loader.prepare_model(&key.path, &options);
+                    let _ = tx.send((id, result));
+                });
+            }
+        };
+
+        // instances that waited for their model
+        if !entry.waiting.is_empty() {
+            let waiting = std::mem::take(&mut entry.waiting);
+            let mut rest = waiting.into_iter();
+            for (idx, id) in rest.by_ref() {
+                match &models.states[id as usize] {
+                    ModelState::Ready(inst) => {
+                        let inst = inst.clone();
+                        spawn_instance(&mut commands, entry, &cfg, &data, kind, idx as usize, &inst, sector_origin);
+                    }
+                    ModelState::Failed => {}
+                    _ => {
+                        request(models, id);
+                        entry.waiting.push((idx, id));
+                    }
+                }
+                if start.elapsed().as_secs_f32() > budget {
+                    break;
+                }
+            }
+            entry.waiting.extend(rest);
+        }
         while entry.next < bin.len() && start.elapsed().as_secs_f32() <= budget {
-            let idx = bin[entry.next] as usize;
+            let idx = bin[entry.next];
             entry.next += 1;
-            let (path, material, matrix, view): (String, Option<String>, Mat4, f32) = match kind {
-                Kind::Brush => {
-                    let b = &data.objects.brushes[idx];
-                    let Some(model) = data.objects.models.get(b.model as usize) else { continue };
-                    let material = usize::try_from(b.material)
-                        .ok()
-                        .and_then(|i| data.objects.materials.get(i))
-                        .filter(|m| !m.is_empty())
-                        .map(|m| format!("{m}.mtl"));
-                    let view = if b.max_view_dist > 1.0 { b.max_view_dist } else { cfg.brush_distance };
-                    (model.clone(), material, b.mat4(), view.min(cfg.brush_distance))
-                }
-                Kind::Vegetation | Kind::Trees => {
-                    let v = &data.objects.vegetation[idx];
-                    let Some(g) = groups.groups.get(&v.group) else { continue };
-                    let material = (!g.material.is_empty()).then(|| format!("{}.mtl", g.material));
-                    let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
-                    let view = if v.max_view_dist > 1.0 { v.max_view_dist } else { cap };
-                    (g.model.clone(), material, v.mat4(), view.min(cap))
+            let Some((a, b)) = instance_model(&data, kind, idx as usize, &groups) else { continue };
+            let fast = (c.0, c.1, kind == Kind::Brush, a, b, lod);
+            let id = match models.fast.get(&fast) {
+                Some(&id) => id,
+                None => {
+                    let Some((path, material)) = model_names(&data, kind, a, b, &groups) else { continue };
+                    let id = models.id(ModelKey { path, material, lod });
+                    models.fast.insert(fast, id);
+                    id
                 }
             };
-            if state.failed_models.contains(&path) {
-                continue;
-            }
-            let options = ModelOptions { lod: entry.lod as u32, material, cry_space: true, ..default() };
-            let loaded: Arc<LoadedModel> = match cry.load_model(&path, &options) {
-                Ok(m) => m,
-                Err(e) => {
-                    debug!("aa-world: model {path}: {e}");
-                    state.failed_models.insert(path);
-                    state.stats.models_failed = state.failed_models.len();
-                    continue;
+            match &models.states[id as usize] {
+                ModelState::Ready(inst) => {
+                    let inst = inst.clone();
+                    spawn_instance(&mut commands, entry, &cfg, &data, kind, idx as usize, &inst, sector_origin);
                 }
-            };
-            if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
-                // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
-                // that takes the whole app down, so such textures are dropped (aa-cry binds `Map="Environment"`
-                // cube maps as the base colour of some materials)
-                let stripped = strip_cube_textures(&mut cry, &loaded);
-                if stripped > 0 {
-                    debug!("aa-world: {path}: dropped {stripped} cube map texture(s) bound to 2D slots");
+                ModelState::Failed => {}
+                _ => {
+                    request(models, id);
+                    entry.waiting.push((idx, id));
                 }
             }
-            let rel = Mat4::from_translation(-sector_origin) * matrix;
-            for (ni, parts) in &loaded.parts {
-                let full = Mat4::from_quat(CRY_TO_BEVY) * rel * Mat4::from(node_world(&loaded.model, *ni));
-                if !full.is_finite() || full.determinant().abs() < 1e-9 {
-                    continue;
-                }
-                let transform = Transform::from_matrix(full);
-                for part in parts {
-                    commands.spawn((
-                        Mesh3d(part.mesh.clone()),
-                        MeshMaterial3d(part.material.clone()),
-                        transform,
-                        part.aabb,
-                        VisibilityRange::abrupt(0.0, view),
-                        ChildOf(entry.entity),
-                    ));
-                    entry.spawned += 1;
-                }
+        }
+        if entry.hidden && entry.complete(bin.len()) {
+            entry.hidden = false;
+            commands.entity(entry.entity).insert(Visibility::Inherited);
+            for e in entry.retired.drain(..) {
+                commands.entity(e).despawn();
             }
         }
     }
+    let waiting: usize = state.sectors.values().map(|s| s.waiting.len()).sum();
+    let pending = state.models.states.iter().filter(|m| matches!(m, ModelState::Wanted | ModelState::Loading)).count() + state.model_queue.len();
     state.stats.sectors = state.sectors.len();
-    state.stats.entities = state.sectors.values().map(|s| s.spawned).sum();
+    state.stats.models_pending = pending;
+    state.stats.models_failed = state.models.states.iter().filter(|m| matches!(m, ModelState::Failed)).count();
+    let spawned: usize = state.sectors.values().map(|s| s.spawned).sum();
+    let busy = pending > 0 || waiting > 0;
+    if busy {
+        state.busy_ticks += 1;
+    }
+    state.stats.entities = spawned + if busy { state.busy_ticks } else { 0 };
     state.stats.spawn_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// The model of an instance as two numbers (brush: model and material index; vegetation: group), for the fast lookup.
+fn instance_model(data: &CellObjectData, kind: Kind, idx: usize, groups: &VegGroups) -> Option<(u32, i32)> {
+    match kind {
+        Kind::Brush => {
+            let b = data.objects.brushes.get(idx)?;
+            ((b.model as usize) < data.objects.models.len()).then_some((b.model, b.material))
+        }
+        Kind::Vegetation | Kind::Trees => {
+            let v = data.objects.vegetation.get(idx)?;
+            groups.groups.contains_key(&v.group).then_some((u32::from(v.group), -1))
+        }
+    }
+}
+
+/// File and material file for [`instance_model`]'s numbers.
+fn model_names(data: &CellObjectData, kind: Kind, a: u32, b: i32, groups: &VegGroups) -> Option<(String, Option<String>)> {
+    match kind {
+        Kind::Brush => {
+            let path = data.objects.models.get(a as usize)?.clone();
+            let material = usize::try_from(b)
+                .ok()
+                .and_then(|i| data.objects.materials.get(i))
+                .filter(|m| !m.is_empty())
+                .map(|m| format!("{m}.mtl"));
+            Some((path, material))
+        }
+        Kind::Vegetation | Kind::Trees => {
+            let g = groups.groups.get(&(a as u16))?;
+            Some((g.model.clone(), (!g.material.is_empty()).then(|| format!("{}.mtl", g.material))))
+        }
+    }
+}
+
+/// Spawns the parts of one instance under the sector's root.
+#[allow(clippy::too_many_arguments)]
+fn spawn_instance(
+    commands: &mut Commands,
+    entry: &mut SectorState,
+    cfg: &WorldConfig,
+    data: &CellObjectData,
+    kind: Kind,
+    idx: usize,
+    inst: &Instanced,
+    sector_origin: Vec3,
+) {
+    let (matrix, view) = match kind {
+        Kind::Brush => {
+            let b = &data.objects.brushes[idx];
+            let view = if b.max_view_dist > 1.0 { b.max_view_dist } else { cfg.brush_distance };
+            (b.mat4(), view.min(cfg.brush_distance))
+        }
+        Kind::Vegetation | Kind::Trees => {
+            let v = &data.objects.vegetation[idx];
+            let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
+            let view = if v.max_view_dist > 1.0 { v.max_view_dist } else { cap };
+            (v.mat4(), view.min(cap))
+        }
+    };
+    let pre = Mat4::from_quat(CRY_TO_BEVY) * Mat4::from_translation(-sector_origin) * matrix;
+    for ((_, parts), node) in inst.loaded.parts.iter().zip(&inst.nodes) {
+        let full = pre * *node;
+        if !full.is_finite() || full.determinant().abs() < 1e-9 {
+            continue;
+        }
+        let transform = Transform::from_matrix(full);
+        for part in parts {
+            commands.spawn((
+                Mesh3d(part.mesh.clone()),
+                MeshMaterial3d(part.material.clone()),
+                transform,
+                part.aabb,
+                VisibilityRange::abrupt(0.0, view),
+                ChildOf(entry.entity),
+            ));
+            entry.spawned += 1;
+        }
+    }
 }
 
 /// Removes cube map images from the 2D texture slots of the model's materials; returns how many.
