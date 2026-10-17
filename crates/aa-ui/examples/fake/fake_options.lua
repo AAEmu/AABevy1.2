@@ -3,12 +3,17 @@
 
 -- Sounds: PlayUISound returns a sound id the scripts later stop (tutorial OnHide compares it
 -- with 0).
+-- An app with the AAUI sound hooks (AAUI.PlaySound, AAUI.StopSound) gets the toolkit's natives, which call them.
 local soundSeq = 0
+local toolkitPlay, toolkitStop = X2Sound.PlayUISound, X2Sound.StopSound
 X2Sound.PlayUISound = function(self, name, duplicable)
+  if AAUI.PlaySound then return toolkitPlay(self, name, duplicable) end
   soundSeq = soundSeq + 1
   return soundSeq
 end
-X2Sound.StopSound = function(self, id, mode) end
+X2Sound.StopSound = function(self, id, mode)
+  if AAUI.StopSound then return toolkitStop(self, id, mode) end
+end
 
 -- System menu: not in a client-driven instance (the "skip" button stays hidden).
 X2.IsInClientDrivenZone = function(self) return false end

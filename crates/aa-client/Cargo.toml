@@ -13,6 +13,7 @@ aa-cry.workspace = true
 aa-anim.workspace = true
 aa-world.workspace = true
 aa-fx.workspace = true
+aa-audio.workspace = true
 aa-ui.workspace = true
 aa-lua.workspace = true
 aa-net = { workspace = true, features = ["bevy"] }

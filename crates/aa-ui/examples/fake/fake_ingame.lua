@@ -586,11 +586,19 @@ X2Option.GetOptionItemValue = function(self, id)
   if v ~= nil then return v end
   v = optById[id]
   if v ~= nil then return v end
+  -- the app's own value (the sound sliders: AAUI.OptionValue)
+  if AAUI.OptionValue then
+    v = AAUI.OptionValue(id)
+    if v ~= nil then return v end
+  end
   return 0
 end
 X2Option.SetItemFloatValueByName = function(self, name, v) optByName[name] = v end
 X2Option.SetItemStringValueByName = X2Option.SetItemFloatValueByName
-X2Option.SetItemFloatValue = function(self, id, v) optById[id] = v end
+X2Option.SetItemFloatValue = function(self, id, v)
+  optById[id] = v
+  if AAUI.OptionChanged then AAUI.OptionChanged(id, v) end
+end
 X2Option.SetItemStringValue = X2Option.SetItemFloatValue
 X2Option.SetItemFloatValueWithoutModify = X2Option.SetItemFloatValue
 X2Option.SetItemDefaultFloatValueByName = function(self, name, v) if optByName[name] == nil then optByName[name] = v end end
