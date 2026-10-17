@@ -80,10 +80,6 @@ pub fn route_chat(
             Event::ChatChannelLeft { chat_type, sub_type, faction_id } => {
                 rt.fire_event("CHAT_LEAVED_CHANNEL", (*chat_type as i64, channel_name(game, *chat_type, *sub_type, *faction_id, "")));
             }
-            Event::ServerError { code } => {
-                // the client prints refused actions as red chat lines ("CHAT_FAILED")
-                rt.fire_event("CHAT_FAILED", (format!("Server error {code}"), ""));
-            }
             _ => {}
         }
     }

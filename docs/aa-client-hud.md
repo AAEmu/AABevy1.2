@@ -36,6 +36,9 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | `--hud-fov DEG`, `--hud-side-cam` | the world camera's vertical field of view (the combat captures use 71.25), and the capture's side-on camera (yaw = the player's yaw - 90 degrees; add `--cam-dist 4 --cam-pitch 0`) |
 | `--hud-afk` | the "-Away-" state at once (else after 300 s without input) |
 | `--hud-fake-loot T` | the lane server's Angry Rat never drops anything: T seconds after the HUD is up the nearest unit is a lootable corpse (the F / G icons) and two seconds later the loot window opens on three made up items |
+| `--hud-fail NAME T` | the refusal `NAME` (`LACK_MANA`, `TOO_FAR_RANGE`, `NO_TARGET`, `URK_COMBAT` ... the skill result names of `usable.rs`) at T seconds: the red text in the middle of the screen and the voice, as for a real refusal |
+| `--hud-sim mp=N`, `--hud-sim dead` | the HUD pretends the player has at most N mana / is dead (screenshots of the dark bars and the death window without a fight; only the HUD's view, the server knows nothing of it) |
+| `--hud-ability-swap NEW OLD T` | raises `ABILITY_CHANGED` for the archetype ids NEW and OLD (1..10) at T seconds |
 
 ## What is wired
 
@@ -46,6 +49,9 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | buffs of the player and of the target (icon, remaining time, tooltip text) | `aa_net::Buffs` + the DB's buff table; remaining time is pushed as an end time on the HUD clock, so the countdown costs nothing per frame |
 | action bars: 2 x 12 slots, skill and item icons, item counts, grade frames, cooldown and global cooldown sweeps | `aa_net::ActionBar`, `Inventory`, `Skills.cooldown_left` / `gcd_left`; the DB for names, icons, descriptions, `custom_gcd` |
 | using a slot: keys 1..9, 0, -, = (Shift for the second bar) | `Command::UseSkill` / `UseItem` |
+| dark action bar slots: no target, out of range, no mana, wrong target, casting, dead, stunned, missing weapon, empty item stack | `usable.rs` over the DB and aa-net's state; see "Dark slots" |
+| refused uses: "Select a target.", "Target is too far.", "Insufficient mana to use this." ... and the character's voice line | `alerts.rs`: the client's own check before sending, the server's `SCSkillStarted` refusals and `SCErrorMsg`; see "Refusals" |
+| death window ("Hereafter Threshold": Revive Here / Respawn: Temple), `ABILITY_CHANGED` after an ability swap, the target frame's job icon for other characters | `alerts.rs` (`DeathDetails`, `Resurrected`, `AbilitySwapped`), `Command::Resurrect`; `Unit::active_abilities` |
 | target frame, Tab targeting (nearest unit within 40 m, cycles), left click on a unit, Escape clears | `aa_net::Target`, `Command::Target`; the pick is a ray-to-unit-centre distance (1.1 m, 6 px slop) and ignores clicks over UI |
 | chat: incoming (all channels, notices, system), sending with Enter, edit box focus | `aa_net::Chat`, `Command::Chat`; `HudKeyboardFocus`. A zone channel join is "1.Shout", "2.Trade", "3.Party Search" (aa-net raises all three, as the client does); labor changes print "Gained 10 Labor Point(s). (Total LP: 105)" (`PlayerStats::labor_log`, also those that arrived while loading) |
 | roadmap: zone name, sub zone, faction, heading, clock | zone from the DB (`WorldInfo` zone group, then position), sub zones from the pak's `subzone_area.xml` polygons (the DB's rectangles are mostly 0), the clock from `aa_world::WorldClock` (the server's, or `--hour`) |
@@ -216,6 +222,80 @@ Casting a skill starts the global cooldown of the skill that was cast: its `cust
 a skill that does not ignore it shows the later of its own cooldown and the global one. A cast the server
 refuses (a neutral target, for instance) starts nothing.
 
+### Dark slots: what can be used now
+
+The original decides in native code (`ActionAccessor::CanUseSkill`) and the scripts only hear the answer,
+`OnContentUpdated(slot, "can_use", bool)` in `x2ui/components/action_slot.alb`: `false` lays a black layer of 75 % over the icon
+and leaves the hotkey letter red. There is no separate "out of range" or "no mana" look, so every reason darkens the slot the same
+way (`SlotSnap.blocked` carries the reason, `ingame.lua`'s `slotContent` turns it into `canUse`). The captures show it: the whole
+bar is dark without a target or when the target dies, Recall and Dash are dark in a fight and lit again after "Battle
+End!" (`combat_death`), everything is dark while Recall is cast and only the teleport book being used stays lit (`combat_return`).
+
+`usable.rs` mirrors the server's `Skill.Use` checks over the 1.2 database (`skills`, `unit_reqs`, `buffs`, `item_weapons` with
+`holdables`), in the server's order, so the text of a refusal is the one the server would send:
+
+| # | rule | data |
+|---|---|---|
+| 1 | the caster is dead (`source_alive`), or alive for a skill meant for the dead (`source_dead`) | `PlayerStats` |
+| 2 | the skill's unit requirements (`unit_reqs`, `or_unit_reqs`): level, ability level, race, gender, a worn item in a slot (a sword in the main hand) or by template, an owned item, a learned skill, "not in combat" (Recall, Dash, the dances), a buff on me / on the target, a shield, a bow or an instrument. Quests, doodads, zones and factions count as met: the server decides | `Snapshot`, `Inventory`, `Skills`, `Buffs` |
+| 3 | buffs on the player: stun, sleep, knock down (every skill but those with `source_stun`), blank minded, silence (magic skills), crippled (melee and ranged) | `buffs` flags |
+| 4 | the player is casting (every other slot is dark, the skill being cast stays lit) or channeling; a cast whose end never came stops counting 2 s after it should have ended | `Skills.casting` |
+| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`) | `TargetSnap` |
+| 6 | range: the skill's `min_range` / `max_range`, or the reach of the weapon in the equipment slot `weapon_slot_for_range_id` names (fists 3 m, a sword 4); edge to edge, so 1 m is taken off the centre distance | both positions |
+| 7 | mana `((ability level - 1) * 1.6 + 8) * 3 / 3.65 * mana_level_md + mana_cost` (the skill's own ability level), labor points | `Snapshot.mp`, the ability exp |
+
+An item slot is dark when its stack is empty or its use skill is (a potion goes dark while Recall is cast). The own cooldown and the
+global cooldown are not reasons: their sweeps show them.
+
+Before it sends `UseSkill` / `UseItem`, `use_slot` / `use_bag_slot` ask the same rules (`Env::precheck`): a use that cannot work is
+not sent and says why. The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
+2 m beyond the reach is still sent (the server knows the size of the bodies), the global cooldown is not refused (the server holds it
+back quietly), the own cooldown is ("Can't be used right now."). The log has one line per change of the dark set:
+`hud: dark slots [(2, "TOO_FAR_RANGE"), (4, "TOO_FAR_RANGE")]; target Some("Solzreed Fox") at Some(11.7) m`.
+
+Checked on the lane server with account `bevyhud` (`shots/hud/r5/`): a fox 10.7 m away darkens Triple Slash, Melee Attack and Kick but not
+Shoot Arrow (range 20, bow worn) (`far.png`); the angry rat walking up lights them one by one (log); `--hud-sim mp=10` darkens only
+Triple Slash (30 mana) with the rat at 3 m and Kick (2 m) lit (`lowmana_03.png`); casting Recall darkens all but the Recall slot
+(`cast_02.png`); `--hud-sim dead` darkens everything (`dead2_02.png`). Assumed, not seen in a capture: range and mana darken the same
+way as the other reasons (no capture has a skill out of range or without mana).
+
+### Refusals: the red text and the voice
+
+Three things refuse an action and all of them end in the same alert (`alerts.rs`, `UseFailed`):
+
+* the client's own check before it asks (above);
+* the server's `SCSkillStarted` with a result and no timeline (`SkillStarted::failed`), for what the client cannot know;
+* the server's `SCErrorMsg` (`Event::ServerError`): `SYSMSG(text)` with the text of the error's name in the `ERROR_MSG` group
+  (`error_names.txt` is the server's `ErrorMessageType`: `BAG_FULL`, `NOT_ENOUGH_MONEY` ...). A code without a text keeps the red chat
+  line "Server error N".
+
+The scripts do the showing, as in the original (`center_message_manager.alb`): `SKILL_MSG(name, arg1, "")` with the skill result's name
+prints the text `skill_<name>` of the system texts through `formatSkillMessage`, red `XLARGE` text 180 px under the top edge
+(`systemAlertWindow:AddMessageRefresh`). `arg1` names the item or buff a requirement wants. Texts seen: `NO_TARGET` "Select a target.",
+`TOO_FAR_RANGE` "Target is too far.", `TOO_CLOSE_RANGE` "Target is too close.", `LACK_MANA` "Insufficient mana to use this.",
+`INVALID_TARGET` "Invalid target.", `SOURCE_DIED` "Can't be used while dead.", `SOURCE_ALIVE` "Can only be used while dead.",
+`URK_COMBAT` "Can't be used in combat.", `ON_CASTING` "Already performing an action.", `COOLDOWN_TIME` "Can't be used right now.".
+
+A refusal also speaks: the character's `<race>_<gender>_system_message` sound pack (86 to 98, `sound_packs`) has one voice line per
+result (`FAILURE`, `NO_TARGET`, `LACK_HEALTH`, `LACK_MANA`, `OBSTACLE`, `OUTOF_HEIGHT`, `TOO_CLOSE_RANGE`, `OUTOF_ANGLE`; all the
+packs hold the same eight). `TOO_FAR_RANGE` has none: the database leaves its sound out (sound 42, "do not use"), and so are all the
+results without an item of that name silent (an assumption: the native code is not read). The same line is not repeated within 1.2 s.
+The log says what was shown and played: `hud: client refused "LACK_MANA" (0) for skill 18132 "Triple Slash": Insufficient mana to use
+this.; voice sounds/x2voice_system:message:lack_mana` (needs `AA_AUDIO_LOG=1` for the voice path, else the sound packs are not read in a
+muted run).
+
+`AbilitySwapped` for the player raises `ABILITY_CHANGED(new, old)` with the archetype keys (`wild`, `fight`: the scripts' `abilityCategory`
+is keyed by name): the chat prints "The Battlerage skillset is now Archery." and the unit frames refresh their ability icon.
+
+### Death window
+
+When the server says the player died (`DeathDetails`) the original window comes up (`death_and_resurrection_window.alb`: "Hereafter
+Threshold", "Your last breath has escaped you.", the countdown, "Revive Here" / "Respawn: Temple"); `Resurrected` closes it.
+`X2Player:GetResurrectionCountdown` counts the server's wait down on the HUD clock, `X2Player:Resurrect(inPlace)` sends
+`Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target. Seen with `--hud-sim dead` only
+(`dead2_02.png`: all slots dark, "Revive Here" greyed by the script's own zone rule); a real death on the lane server and the
+server's answer to the buttons are not checked.
+
 ### Quest marks
 
 `quests.rs` decides who carries a mark, `marks.rs` draws it. Without anything from the server about who
@@ -294,6 +374,13 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 ## Not done
 
+* The skill window shows no skills: its slots are bound with `ISLOT_ABILITY_VIEW` (243), which nothing answers (the skill tree of an
+  ability, `X2Ability:GetAbilitySlotCount`, learned / learnable state). So the skill window's red "not learned" tint (`learned`,
+  `canLearn`, `reqPoints`, `skillLevel` of the slot content) is not fed yet.
+* The target frame's job icon for another character reads `Unit::active_abilities` (`GetTargetAbilityTemplates("target")`): the data path
+  is unit tested in aa-net, but no other character was in view on the lane server to see it.
+* Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
+  met range, mana, casting, target and combat. The unit requirement kinds that need quests, doodads, zones or factions count as met.
 * Roadmap markers (quest and NPC icons on the minimap, `AAUI.RoadMap().markers`).
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
 * Bag tabs the player creates are not saved; dragging bag items is not routed (aa-ui does not route a left click).

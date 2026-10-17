@@ -53,6 +53,14 @@ X2Unit.GetUnitId = function(self, unit)
   if u == nil then return nil end
   return u.unit_id
 end
+-- A unit's name by its id (the player's own, the target's): the death message prints the name of whoever died.
+X2Unit.GetUnitNameById = function(self, id)
+  if id == nil then return nil end
+  if isPlayer(id) then return S().name end
+  local t = HUD.target
+  if t ~= nil and t.unit_id == id then return t.name end
+  return nil
+end
 X2Unit.GetFactionName = field("faction", nil)
 X2Unit.UnitIsDead = field("dead", false)
 X2Unit.UnitCombatState = field("in_combat", false)
@@ -140,12 +148,26 @@ X2Ability.GetAllAbility = function(self)
   for i = 1, 10 do all[i] = { type = i, level = X2Ability:GetAbilityLevel(i) } end
   return all
 end
+-- (another character's: the ids its unit state carried, HUD.target.abilities; nothing for NPCs, which hides the job icon)
 X2Unit.GetTargetAbilityTemplates = function(self, unit)
-  if not isPlayer(unit) then return nil end
   local list = {}
-  for i, a in ipairs(activeAbilities()) do list[i] = { name = ABILITY_KEYS[a.type] } end
+  if isPlayer(unit) then
+    for i, a in ipairs(activeAbilities()) do list[i] = { name = ABILITY_KEYS[a.type] } end
+    return list
+  end
+  local t = U(unit)
+  if t == nil or t.unit_type ~= "character" or t.abilities == nil or #t.abilities == 0 then return nil end
+  for i, id in ipairs(t.abilities) do list[i] = { name = ABILITY_KEYS[id] } end
   return list
 end
+-- The death window (x2ui/messageboximpl/death_and_resurrection_window): the seconds until the player may stand up again
+-- (the server's wait counted down on the HUD clock; the second and third values are the two ways, in place and at the
+-- shrine, which wait the same) and the two buttons (`Resurrect(true)` in place, `Resurrect(false)` at the shrine).
+X2Player.GetResurrectionCountdown = function(self)
+  local left = HUD.death_wait()
+  return 0, left, left
+end
+X2Player.Resurrect = function(self, inPlace) HUD.request("resurrect", inPlace and 1 or 0) end
 -- Exp a resurrection at a shrine wins back: the amount and its percent of the level.
 X2Player.GetRecoverableExp = function(self)
   local need = tonumber(S().exp_need) or 0
@@ -297,9 +319,11 @@ local function slotContent(s)
   local c = { type = s.kind, id = s.id, icon = s.icon, grade = s.grade }
   if s.kind == "item" then
     if s.stack then c.stack = s.count end
-    c.canUse = s.count > 0
+    c.canUse = s.count > 0 and s.blocked == nil
     c.tooltip = HUD.item_tip(s.id, s.grade, s.count)
   elseif s.kind == "skill" then
+    -- dark and a red hotkey while the skill cannot be used now: no mana, too far, no target, dead ... (usable.rs)
+    c.canUse = s.blocked == nil
     c.tooltip = HUD.skill_tip(s.id)
   end
   if s.cd_end ~= nil then

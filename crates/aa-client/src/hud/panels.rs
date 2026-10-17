@@ -19,8 +19,10 @@ use bevy::prelude::*;
 use mlua::{Lua, Table};
 
 use super::HudKeyboardFocus;
+use super::alerts::UseFailed;
 use super::api::HudBridge;
-use super::data::GameData;
+use super::data::{GameData, Snapshot};
+use super::usable::Env;
 
 /// One action bar slot (or bag slot).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -43,6 +45,9 @@ pub struct SlotSnap {
     pub level: i64,
     /// Items: `item_groups.id` (bag tabs).
     pub group: u32,
+    /// Action bar slots that cannot be used now (the icon goes dark, the hotkey red): the skill result that refuses them
+    /// (`usable::code`), `None` when the slot is lit.
+    pub blocked: Option<u8>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -81,6 +86,9 @@ pub struct TargetSnap {
     pub grade: &'static str,
     pub race: u8,
     pub gender: u8,
+    /// The active abilities (1..=10) of a character target, as its unit state carried them (the target frame's job icon);
+    /// empty for NPCs and while the server has not said.
+    pub abilities: Vec<u8>,
     pub buffs: BuffLists,
 }
 
@@ -119,6 +127,7 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
         desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
         level: info.map_or(0, |i| i.level),
         group: info.map_or(0, |i| i.group),
+        blocked: None,
     }
 }
 
@@ -155,6 +164,7 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
         desc: String::new(),
         level: 0,
         group: 0,
+        blocked: None,
     }
 }
 
@@ -194,9 +204,9 @@ fn unit_race_gender(race_gender: u8) -> (u8, u8) {
     (race_gender & 0x0f, race_gender >> 4)
 }
 
-/// Compute the panels from aa-net's state. `own_faction` is the player's faction id; also returns
-/// the game position of the target.
-pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj_id: u32, start: Instant) -> (Panels, Option<Vec3>) {
+/// Compute the panels from aa-net's state. `own_faction` is the player's faction id, `me` and `pos` the player's numbers and
+/// game position (which action bar slots are dark depends on them); also returns the game position of the target.
+pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj_id: u32, start: Instant, me: &Snapshot, pos: Vec3) -> (Panels, Option<Vec3>) {
     let mut p = Panels::default();
     let skills = world.get_resource::<Skills>();
     let inventory = world.get_resource::<Inventory>();
@@ -279,9 +289,19 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
             race,
             gender,
+            abilities: u.active_abilities.iter().copied().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
             buffs: world.get_resource::<Buffs>().map(|b| buff_lists(game, b.of(u.obj_id), start)).unwrap_or_default(),
         });
         target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+    }
+    // the dark slots: what the original's `CanUseSkill` says about each (mana, range, target, state ...)
+    let own_buffs = world.get_resource::<Buffs>().map_or(&[][..], |b| b.of(own_obj_id));
+    let env = Env { game, me, pos, target: p.target.as_ref(), target_pos, skills, buffs: own_buffs, inventory };
+    let blocked: Vec<Option<u8>> = p.actions.iter().map(|s| s.as_ref().and_then(|s| env.slot_blocked(s))).collect();
+    for (slot, b) in p.actions.iter_mut().zip(blocked) {
+        if let Some(s) = slot {
+            s.blocked = b;
+        }
     }
     (p, target_pos)
 }
@@ -298,6 +318,9 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("desc", s.desc.as_str())?;
     t.raw_set("level", s.level)?;
     t.raw_set("group", i64::from(s.group))?;
+    if let Some(b) = s.blocked {
+        t.raw_set("blocked", i64::from(b))?;
+    }
     if let Some((end, total)) = s.cooldown {
         t.raw_set("cd_end", end as f64)?;
         t.raw_set("cd_total", i64::from(total))?;
@@ -379,6 +402,7 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
                 x.raw_set("grade", t.grade)?;
                 x.raw_set("race", i64::from(t.race))?;
                 x.raw_set("gender", i64::from(t.gender))?;
+                x.raw_set("abilities", lua.create_sequence_from(t.abilities.iter().map(|a| i64::from(*a)))?)?;
                 x.raw_set("buffs", buffs_table(lua, &t.buffs)?)?;
                 hud.raw_set("target", x)?;
             }
@@ -415,35 +439,48 @@ const SLOT_KEYS: [KeyCode; 12] = [
     KeyCode::Equal,
 ];
 
-/// Use what is in action bar slot `slot` (0 based): cast the skill, use the item.
-pub fn use_slot(slot: usize, game: Option<&GameData>, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>) {
+/// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
+/// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]).
+pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
     let Some(action) = bar.get(slot) else { return };
     let target_obj_id = target.obj_id.unwrap_or(0);
     match action.kind {
         ActionKind::Spell | ActionKind::RidePetSpell => {
-            net.write(NetCommand(Command::UseSkill { skill_id: action.id as u32, target_obj_id }));
+            let skill = action.id as u32;
+            if let Some(f) = env.precheck(skill) {
+                failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
+                return;
+            }
+            net.write(NetCommand(Command::UseSkill { skill_id: skill, target_obj_id }));
         }
         ActionKind::ItemType | ActionKind::ItemId => {
             let found = match action.item_template_id() {
                 Some(t) => inventory.find_template(t).map(|(_, it)| it),
                 None => inventory.find_by_id(action.id).map(|(_, _, it)| it),
             };
-            let Some(item) = found else { return };
-            use_item(item, game, target_obj_id, net);
+            let Some(item) = found else {
+                failed.write(UseFailed { skill: 0, result: super::usable::code::NEED_REAGENT, value: action.item_template_id().unwrap_or(0), server: false });
+                return;
+            };
+            use_item(item, env, target_obj_id, net, failed);
         }
         _ => {}
     }
 }
 
 /// Use a bag item (a right click in the bag window): its skill, on the target.
-pub fn use_bag_slot(slot: usize, game: Option<&GameData>, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>) {
+pub fn use_bag_slot(slot: usize, env: &Env, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
     if let Some(Some(item)) = inventory.bag.get(slot) {
-        use_item(item, game, target.obj_id.unwrap_or(0), net);
+        use_item(item, env, target.obj_id.unwrap_or(0), net, failed);
     }
 }
 
-fn use_item(item: &aa_net::model::Item, game: Option<&GameData>, target_obj_id: u32, net: &mut MessageWriter<NetCommand>) {
-    let skill_id = game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
+fn use_item(item: &aa_net::model::Item, env: &Env, target_obj_id: u32, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
+    if let Some((skill, f)) = env.precheck_item(item.template_id) {
+        failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
+        return;
+    }
+    let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
     net.write(NetCommand(Command::UseItem { item_id: item.id, template_id: item.template_id, skill_id, target_obj_id }));
 }
 
@@ -456,11 +493,16 @@ pub fn action_keys(
     bar: Res<ActionBar>,
     inventory: Res<Inventory>,
     target: Res<Target>,
+    skills: Res<Skills>,
+    buffs: Res<Buffs>,
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<NetCommand>,
+    mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {
-        use_slot(slot, bridge.0.borrow().game.get(), &bar, &inventory, &target, &mut net);
+        let data = bridge.0.borrow();
+        let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+        use_slot(slot, &env, &bar, &inventory, &target, &mut net, &mut failed);
     }
     if focus.0 {
         return;
@@ -469,7 +511,8 @@ pub fn action_keys(
     for (i, key) in SLOT_KEYS.iter().enumerate() {
         if keys.just_pressed(*key) {
             let data = bridge.0.borrow();
-            use_slot(i + if shift { 12 } else { 0 }, data.game.get(), &bar, &inventory, &target, &mut net);
+            let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+            use_slot(i + if shift { 12 } else { 0 }, &env, &bar, &inventory, &target, &mut net, &mut failed);
         }
     }
 }
