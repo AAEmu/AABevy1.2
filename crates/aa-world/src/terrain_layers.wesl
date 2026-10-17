@@ -18,8 +18,8 @@ struct TerrainParams {
     // four vectors per (surface type * 3 + projection):
     //   0: (diffuse slot, normal slot (+ 1000: in the detail array), uv scale u, uv scale v)
     //   1: (uv offset u, uv offset v, detail strength, detail bump scale)
-    //   2: (detail normal slot, detail uv scale u, v, unused)
-    //   3: (detail uv offset u, v, unused, unused)
+    //   2: (detail normal slot, detail uv scale u, v, material colour r)
+    //   3: (detail uv offset u, v, material colour g, b)
     layers: array<vec4<f32>, 192>,
 }
 
@@ -148,7 +148,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
                 // the layer colour is an offset of the cover in gamma space (terrain.cfx, frag_custom_begin)
                 let d = textureSampleGrad(diffuse_layers, diffuse_sampler, uv, i32(a.x), gx, gy).rgb;
-                let c = pow(saturate(cover_gamma + (d - 0.5) * b.z), vec3<f32>(2.2));
+                // the material's own diffuse colour multiplies the lit layer (`MatDifColor`, frag_custom_end)
+                let mat_color = vec3<f32>(terrain.layers[entry + 2u].w, terrain.layers[entry + 3u].z, terrain.layers[entry + 3u].w);
+                let c = pow(saturate(cover_gamma + (d - 0.5) * b.z), vec3<f32>(2.2)) * mat_color;
                 albedo = mix(albedo, c, w);
 
                 if a.y >= 0.0 {
