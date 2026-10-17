@@ -15,6 +15,7 @@
 
 pub mod buff;
 pub mod bank;
+pub mod friend;
 pub mod game;
 pub mod interaction;
 pub mod items;
@@ -35,6 +36,7 @@ pub mod wire;
 #[cfg(feature = "bevy")]
 pub mod plugin;
 
+pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use login::Secret;
 pub use model::{Character, CreateCharacter, Doodad, Unit};

@@ -33,6 +33,7 @@ pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
 pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT};
 pub use crate::party::Party;
 pub use crate::shop::Shop;
+pub use crate::friend::Friends;
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -302,6 +303,7 @@ pub struct WorldState {
     pub loot: Loot,
     pub party: Party,
     pub shop: Shop,
+    pub friends: Friends,
 }
 
 impl WorldState {
@@ -325,11 +327,12 @@ impl WorldState {
         self.party.apply(e);
         self.party.seed_visible(e, &self.player, &self.units);
         self.shop.apply(e);
+        self.friends.apply(e);
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::model::{Equipment, ModelParams, Movement, UnitKind};
     use crate::wire::Pos;
