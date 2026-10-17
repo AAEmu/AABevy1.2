@@ -165,10 +165,9 @@ pub fn route_casts(mut events: MessageReader<aa_net::NetEvent>, rt: Option<NonSe
                         fires.extend(c.token(id).map(Fire::Stop));
                     }
                 }
-                Event::SkillStopped { obj_id, .. } | Event::UnitDeath { obj_id } => {
-                    if c.casts.remove(obj_id).is_some() {
-                        fires.extend(c.token(*obj_id).map(Fire::Stop));
-                    }
+                // (the guard takes the cast out: an interrupted cast is a stop, a unit without one is nothing)
+                Event::SkillStopped { obj_id, .. } | Event::UnitDeath { obj_id } if c.casts.remove(obj_id).is_some() => {
+                    fires.extend(c.token(*obj_id).map(Fire::Stop));
                 }
                 _ => {}
             }
@@ -183,5 +182,47 @@ pub fn route_casts(mut events: MessageReader<aa_net::NetEvent>, rt: Option<NonSe
             Fire::Stop(token) => rt.fire_event("SPELLCAST_STOP", token),
             Fire::Succeeded(token) => rt.fire_event("SPELLCAST_SUCCEEDED", token),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn cast(cast_ms: u32, elapsed_ms: u64, fired_ms_ago: Option<u64>, channel_ms: u32) -> Cast {
+        let now = Instant::now();
+        Cast {
+            name: "Recall".into(),
+            tl: 1,
+            cast_ms,
+            started: now - Duration::from_millis(elapsed_ms),
+            fired: fired_ms_ago.map(|ms| now - Duration::from_millis(ms)),
+            channel_ms,
+        }
+    }
+
+    #[test]
+    fn a_cast_fills_and_a_channel_empties() {
+        let (total, current) = cast(10_000, 4_000, None, 0).times();
+        assert_eq!(total, 10_000);
+        assert!((3_900..4_300).contains(&current));
+        // past the cast time the bar stays full
+        assert_eq!(cast(1_000, 5_000, None, 0).times(), (1_000, 1_000));
+        // the channel counts down from its length
+        let (total, current) = cast(500, 3_000, Some(1_000), 5_000).times();
+        assert_eq!(total, 5_000);
+        assert!((3_900..4_100).contains(&current));
+    }
+
+    #[test]
+    fn units_are_known_by_the_bar_token() {
+        let mut c = Casts { own: 7, target: 9, ..Casts::default() };
+        c.casts.insert(9, cast(2_000, 500, None, 0));
+        assert_eq!(c.token(7), Some("player"));
+        assert_eq!(c.token(9), Some("target"));
+        assert_eq!(c.token(1), None);
+        assert_eq!(c.info("target").map(|i| (i.0, i.1)), Some(("Recall".to_string(), 2_000)));
+        assert!(c.info("player").is_none());
     }
 }
