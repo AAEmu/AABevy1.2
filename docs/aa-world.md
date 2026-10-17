@@ -651,7 +651,8 @@ walk from 21055.7, 10544.3 to 21126.3, 10558.1), the wooden bridges at 21015.3, 
 
 **Not done.** Vegetation (tree trunks block the player in the real client); terrain steepness as a wall in `push_out`; doors, gates and the
 moving brushes (ships, tram) which are not in `brush.dat`; the per-triangle physics material (`matId` of the blob, surface types for
-footsteps) and the `RAYCAST_PROXY` / `COLLISION_PROXY` material flags (a triangle that only rays or only bodies see); gaps wider than 0.7 m
+footsteps; the sub-materials the physics triangles of Lutesong Harbor's and Marianople's models point to are all the invisible `proxy` material, none has the
+`RAYCAST_PROXY`, `COLLISION_PROXY` or `NO_PHYSICALIZE` flag, so the flags are not read); gaps wider than 0.7 m
 between pieces drop the character (as they would a real capsule); proxies that are a solid hull keep the player out of buildings whose interior
 the real client lets you enter only through a separate interior model.
 
