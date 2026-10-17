@@ -45,6 +45,7 @@ mod quests;
 mod session;
 mod stats;
 mod targeting;
+mod tips;
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;

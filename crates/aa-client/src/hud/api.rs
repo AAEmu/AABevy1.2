@@ -61,6 +61,8 @@ pub struct HudData {
     pub player_entity: Option<Entity>,
     pub pos: Vec3,
     pub yaw: f32,
+    /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
+    pub skill_levels: std::collections::HashMap<u32, u8>,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -84,6 +86,7 @@ impl Default for HudData {
             player_entity: None,
             pos: Vec3::ZERO,
             yaw: 0.0,
+            skill_levels: Default::default(),
         }
     }
 }
@@ -242,6 +245,29 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
             ))
         })?,
     )?;
+    // the tooltip tables of items and skills (`tips.rs`), built when asked
+    let b = bridge.clone();
+    hud.raw_set(
+        "item_tip",
+        lua.create_function(move |lua, (id, grade, count): (u32, Option<i64>, Option<i64>)| {
+            let d = b.borrow();
+            match d.game.get() {
+                Some(g) => super::tips::item_tip(lua, g, id, grade, count),
+                None => Ok(None),
+            }
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "skill_tip",
+        lua.create_function(move |lua, id: u32| {
+            let d = b.borrow();
+            match d.game.get() {
+                Some(g) => super::tips::skill_tip(lua, g, id, d.skill_levels.get(&id).copied().unwrap_or(1)),
+                None => Ok(None),
+            }
+        })?,
+    )?;
     // the chat window widget (the scripts create it; `GetEntityByName` is a stub)
     hud.raw_set(
         "chat_window",
@@ -308,11 +334,13 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 /// Recompute the snapshot from the Bevy world.
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let Some(spawn) = world.resource::<Player>().spawn.clone() else { return };
-    // the server's clock (extrapolated from its last packet), else the world renderer's
+    // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
+    // clock shows the time the world is at), else the server's (extrapolated from its last packet)
     let net_world = world.get_resource::<aa_net::state::WorldInfo>();
-    let hour = net_world
-        .and_then(|w| w.hour_now())
-        .or_else(|| world.get_resource::<aa_world::WorldClock>().map(|c| c.hour))
+    let hour = world
+        .get_resource::<aa_world::WorldClock>()
+        .map(|c| c.hour)
+        .or_else(|| net_world.and_then(|w| w.hour_now()))
         .unwrap_or(12.0);
     let net_group = net_world.and_then(|w| w.zone_group_id);
     // where the player is (game coordinates), from its entity's transform
@@ -328,6 +356,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     // the zone under the player (the world's sector map), else the zone channel's group, else the spawn's
     let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
+    if let Some(skills) = world.get_resource::<aa_net::state::Skills>().filter(|s| s.known.len() != data.skill_levels.len() || s.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level))) {
+        data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
+    }
     data.player_entity = entity;
     data.pos = pos;
     data.yaw = yaw;

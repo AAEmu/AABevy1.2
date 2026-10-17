@@ -29,6 +29,8 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | `--hud-type TEXT T` | typed text (in Git Bash set `MSYS_NO_PATHCONV=1` before a text starting with `/`) |
 | `--hud-open ACTION T` | a key binding action: `toggle_bag`, `toggle_character`, `toggle_spellbook`, `toggle_quest`, `toggle_worldmap` |
 | `--hud-click X Y T` | a left click at physical pixel X, Y |
+| `--hud-rclick X Y T` | a right click at X, Y (a bag item: use it) |
+| `--hud-hover X Y T` | the pointer moves to X, Y and stays (tooltips; move it somewhere else first when a window was just opened, then onto the slot) |
 | `--hud-disconnect T` | the disconnect dialog, as if the server dropped the connection |
 
 ## What is wired
@@ -41,8 +43,11 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | action bars: 2 x 12 slots, skill and item icons, item counts, grade frames, cooldown and global cooldown sweeps | `aa_net::ActionBar`, `Inventory`, `Skills.cooldown_left` / `gcd_left`; the DB for names, icons, descriptions, `custom_gcd` |
 | using a slot: keys 1..9, 0, -, = (Shift for the second bar) | `Command::UseSkill` / `UseItem` |
 | target frame, Tab targeting (nearest unit within 40 m, cycles), left click on a unit, Escape clears | `aa_net::Target`, `Command::Target`; the pick is a ray-to-unit-centre distance (1.1 m, 6 px slop) and ignores clicks over UI |
-| chat: incoming (all channels, notices, system), sending with Enter, edit box focus | `aa_net::Chat`, `Command::Chat`; `HudKeyboardFocus` |
-| roadmap: zone name, sub zone, faction, heading, clock | zone from the DB (`WorldInfo` zone group, then position), sub zones from the pak's `subzone_area.xml` polygons (the DB's rectangles are mostly 0), in-game time from `WorldInfo` |
+| chat: incoming (all channels, notices, system), sending with Enter, edit box focus | `aa_net::Chat`, `Command::Chat`; `HudKeyboardFocus`. A zone channel join is "1.Shout", "2.Trade", "3.Party Search" (aa-net raises all three, as the client does); labor changes print "Gained 10 Labor Point(s). (Total LP: 105)" (`PlayerStats::labor_log`, also those that arrived while loading) |
+| roadmap: zone name, sub zone, faction, heading, clock | zone from the DB (`WorldInfo` zone group, then position), sub zones from the pak's `subzone_area.xml` polygons (the DB's rectangles are mostly 0), the clock from `aa_world::WorldClock` (the server's, or `--hour`) |
+| sub zone header and the city map | the header is the top of the sub zone's `parent_sub_zone_id` chain (the Royal Palace is in Ezna: "Ezna"). Where that sub zone has a road map of its own (cities, caves: `HUD_ROAD_FRAMES[3]`) the roadmap is that map (level 3, id = sub zone), placed from the sub zone's `x, y, w, h` and the image's frame in the 926 x 556 roadmap window (`road_frames.lua`, generated from the client's `map/road_map_list.lua`); the zone maps are placed the same way (checked on `reference/ingame/spawn`: window pixel 703.2, 147.7; and `royal_palace`: Ezna 770, 363) |
+| the big map (M) | `AAUI.WorldMap`: the player's place on the city or zone map (plain fraction of the rectangle) and on the continent and the world (`world_groups`) |
+| tooltips: bag items, action bar and use-skill, buffs, equipped items | `tips.rs`: `HUD.item_tip` / `HUD.skill_tip` fill the client's tooltip tables (`name`, `grade` / `gradeColor` from `item_grades`, `category`, `item_impl`, `soul_bound`, `skillType`, `description`, price, `tipType = "skill"` with ability, rank, mana, cast, range, cooldown) from the DB; `slot.tooltip`, `X2Bag:GetBagItemInfo`, `X2Skill:GetSkillTooltip`, `X2Unit:UnitBuff` (`tipType = "buff"`) return them |
 | bag window | `aa_net::Inventory`: items, counts, icons, grade frames, tooltips, "n/50"; the tabs filter by item group (below) |
 | max HP / MP of the player and of the target | the DB's unit formulas (below); the server sends none |
 | quest marks over NPCs | `aa_net::Quests` + the DB's quest tables (below) |
@@ -190,13 +195,14 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 ## Not done
 
-* Roadmap markers (quest and NPC icons on the minimap).
+* Roadmap markers (quest and NPC icons on the minimap, `AAUI.RoadMap().markers`).
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
-* The cooldown sweep of aa-ui shows a time label also for the 0.5-1.5 s global cooldown; the original shows
-  the dimming only (aa-ui).
-* Bag tabs the player creates are not saved; clicking, dragging and using bag items other than through the
-  action bar is not routed (aa-ui slot clicks).
-* `GetEntityByName` is a stub in aa-ui; `chatEdit` has no `/prefix` handling.
+* Bag tabs the player creates are not saved; dragging bag items is not routed (aa-ui does not route a left click).
+* Tooltips: the `#{...}` placeholders of skill, item and buff descriptions are filled in only for
+  `damage_multiplier` (the damage effect's DPS multiplier: Shoot Arrow's 120%); damage ranges and buff
+  durations (`#{avg_damage}`, `#{buff_duration}`, `#{duration}` ...) show `?`. Weapons and armour have no stat
+  sections (attack, defence, durability repair, set bonuses): they show the name, category, durability and price.
+* Quest, NPC and ship markers on the world map; `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
 * Quest marks ignore requirements the client cannot check (they hold), so an NPC may show a "!" for a quest
   the server then refuses.
 
@@ -204,4 +210,5 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 
 * ingame: skip key bindings while `HudKeyboardFocus.0` and camera orbit / click-to-move while
   `HudPointerOverUi.0` (done in round 2).
-* aa-ui: slot click routing, `GetEntityByName`, `/prefix` in `chatEdit`, no time label on a global cooldown.
+* aa-ui: left click routing of bag items (picking up), the roadmap markers in `AAUI.RoadMap` could take the window
+  fraction instead of the image fraction so the app need not know the image frames.

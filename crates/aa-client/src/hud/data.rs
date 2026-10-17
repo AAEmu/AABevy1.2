@@ -35,6 +35,16 @@ pub struct ItemInfo {
     pub desc: String,
     /// `item_groups.id` the item's category belongs to (the bag tabs filter by it), 0 when unknown.
     pub group: u32,
+    /// The item category's English name ("Book"), for the tooltip.
+    pub category: String,
+    /// `items.impl_id` (`ItemImplEnum`): the tooltip's `item_impl` ("portal", "weapon", ...).
+    pub impl_id: i64,
+    /// Bound to the character on pickup (`bind_id` 2): the tooltip says "Untradeable".
+    pub soul_bound: bool,
+    pub sellable: bool,
+    pub price: i64,
+    pub refund: i64,
+    pub level_limit: i64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -47,6 +57,16 @@ pub struct SkillInfo {
     pub gcd_ms: u32,
     /// `skills.ignore_global_cooldown`: the global cooldown does not hold it back.
     pub ignore_gcd: bool,
+    /// `skills.ability_id` (0 general, 1 fight ... 10 love: the tooltip's ability colour and name).
+    pub ability: u8,
+    pub mana: i64,
+    /// Casting and channeling time (ms), range (m): the tooltip's lines.
+    pub casting_ms: i64,
+    pub channeling_ms: i64,
+    pub min_range: i64,
+    pub max_range: i64,
+    /// `skills.desc` with the placeholders filled in as far as the database allows.
+    pub desc: String,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -171,6 +191,9 @@ pub struct GameData {
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
     pub zone_groups: HashMap<u32, ZoneGroup>,
+    /// Item grades by the number the server and the icons use (`item_grades.grade_order`): English name and
+    /// colour (`FFBA976D`).
+    pub grades: HashMap<i64, (String, String)>,
     /// `world_groups.id` -> map rectangle: 2 the world, 3 / 4 / 5 the western / eastern / origin continent.
     pub world_rects: HashMap<u32, [f32; 4]>,
     /// `system_factions.id` -> English name.
@@ -243,6 +266,26 @@ pub(super) fn any_int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
     })
 }
 
+/// A description with the client's `#{name}` placeholders filled in by `values`; the ones the database
+/// cannot work out (damage ranges: they depend on the player's gear) become `?`. CRLF becomes LF.
+fn fill_placeholders(text: &str, values: impl Fn(&str) -> Option<String>) -> String {
+    let text = text.replace("\r\n", "\n");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("#{") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let Some(end) = after.find('}') else {
+            rest = &rest[at..];
+            break;
+        };
+        out.push_str(&values(&after[..end]).unwrap_or_else(|| "?".into()));
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A boolean column the database stores as `'t'` / `'f'` text or as a number.
 pub(super) fn any_flag(r: &rusqlite::Row, i: usize) -> rusqlite::Result<bool> {
     use rusqlite::types::Value;
@@ -264,8 +307,8 @@ impl GameData {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, idx, en_us, tbl_column_name FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones') AND tbl_column_name = 'name') OR \
-                 (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR                  (tbl_name = 'items' AND tbl_column_name = 'description') OR \
+                 (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones','item_categories','item_grades') AND tbl_column_name = 'name') OR \
+                 (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR (tbl_name = 'skills' AND tbl_column_name = 'desc') OR                  (tbl_name = 'items' AND tbl_column_name = 'description') OR \
                  (tbl_name = 'zone_groups' AND tbl_column_name = 'display_text'))",
             )?;
             let mut rows = q.query([])?;
@@ -275,6 +318,9 @@ impl GameData {
                 let column: String = r.get(3)?;
                 let table = match table.as_str() {
                     "buffs" if column == "desc" => "buffs_desc",
+                    "skills" if column == "desc" => "skills_desc",
+                    "item_categories" => "item_categories",
+                    "item_grades" => "item_grades",
                     "items" if column == "description" => "items_desc",
                     "skills" => "skills",
                     "items" => "items",
@@ -299,7 +345,21 @@ impl GameData {
         let icon = |id: Option<i64>| id.and_then(|i| icons.get(&i)).map(|f| format!("ui/icon/{}", f.replace('\\', "/").to_ascii_lowercase())).unwrap_or_default();
         let mut data = GameData::default();
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown FROM skills")?;
+            // `#{damage_multiplier}` of a description: the damage effect's DPS multiplier in percent
+            let mut multipliers: HashMap<u32, i64> = HashMap::new();
+            let wanted: Vec<String> = text.iter().filter(|((t, _), d)| *t == "skills_desc" && d.contains("#{damage_multiplier}")).map(|((_, id), _)| id.to_string()).collect();
+            if !wanted.is_empty() {
+                let mut q = conn.prepare(&format!(
+                    "SELECT se.skill_id, d.dps_multiplier FROM skill_effects se JOIN effects e ON e.id = se.effect_id AND e.actual_type = 'DamageEffect' \
+                     JOIN damage_effects d ON d.id = e.actual_id WHERE se.skill_id IN ({}) ORDER BY se.id DESC",
+                    wanted.join(",")
+                ))?;
+                let mut rows = q.query([])?;
+                while let Some(r) = rows.next()? {
+                    multipliers.insert(r.get(0)?, (r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) * 100.0).round() as i64);
+                }
+            }
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -311,12 +371,19 @@ impl GameData {
                         tag: any_int(r, 4)?.max(0) as u32,
                         gcd_ms: if any_flag(r, 6)? { DEFAULT_GCD_MS } else { any_int(r, 5)?.max(0) as u32 },
                         ignore_gcd: any_flag(r, 7)?,
+                        ability: any_int(r, 8)?.clamp(0, 10) as u8,
+                        mana: any_int(r, 9)?.max(0),
+                        casting_ms: any_int(r, 10)?.max(0),
+                        channeling_ms: any_int(r, 11)?.max(0),
+                        min_range: any_int(r, 12)?.max(0),
+                        max_range: any_int(r, 13)?.max(0),
+                        desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
                 );
             }
         }
         {
-            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
+            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id, i.category_id, i.bind_id, i.sellable, i.price, i.refund, i.level_limit, i.impl_id FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -328,8 +395,15 @@ impl GameData {
                         level: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                         fixed_grade: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                         use_skill: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
-                        desc: name("items_desc", id, None),
+                        desc: fill_placeholders(&name("items_desc", id, None), |_| None),
                         group: r.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u32,
+                        category: name("item_categories", any_int(r, 8)?.max(0) as u32, None),
+                        impl_id: any_int(r, 14)?,
+                        soul_bound: any_int(r, 9)? == 2,
+                        sellable: any_flag(r, 10)?,
+                        price: any_int(r, 11)?,
+                        refund: any_int(r, 12)?,
+                        level_limit: any_int(r, 13)?,
                     },
                 );
             }
@@ -343,7 +417,7 @@ impl GameData {
                     id,
                     BuffInfo {
                         named: Named { name: name("buffs", id, r.get(1)?), icon: icon(r.get(2)?) },
-                        desc: name("buffs_desc", id, r.get(3)?),
+                        desc: fill_placeholders(&name("buffs_desc", id, r.get(3)?), |_| None),
                         kind: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
                     },
                 );
@@ -389,6 +463,14 @@ impl GameData {
                         rect: [f(3)?, f(4)?, f(5)?, f(6)?],
                     },
                 );
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT id, grade_order, color_argb FROM item_grades")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id: u32 = r.get(0)?;
+                data.grades.insert(any_int(r, 1)?, (name("item_grades", id, None), r.get::<_, Option<String>>(2)?.unwrap_or_default()));
             }
         }
         {
