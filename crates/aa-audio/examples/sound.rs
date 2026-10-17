@@ -7,6 +7,8 @@
 //! cargo run -p aa-audio --release --example sound -- --resolve data/extract/aa-audio/db_sound_paths.txt
 //! cargo run -p aa-audio --release --example sound -- --wav sounds/x2skills:wild:fire_arrow_form shots/aa-audio/skill_hit.wav [--seconds 8]
 //! cargo run -p aa-audio --release --example sound -- --wav sounds/x2skills/x2skills_bank571.fsb:0 out.wav
+//! cargo run -p aa-audio --release --example sound -- --wav sounds/x2skills:wild:fire_arrow_form out.wav --reverb x2_cave_1[:weight]
+//! cargo run -p aa-audio --release --example sound -- --reverbs
 //! cargo run -p aa-audio --release --example sound -- --event sounds/x2interface:interface:button_default --sound [--volume 0.3] [--seconds 4]
 //! ```
 //!
@@ -82,6 +84,10 @@ fn main() {
         }
     } else if has("--fevs") {
         fevs();
+    } else if has("--reverbs") {
+        reverbs();
+    } else if let Some(sub) = value("--users") {
+        users(&sub);
     } else if let Some(project) = value("--list") {
         list(&project, value("--filter").as_deref());
     } else if let Some(file) = value("--resolve") {
@@ -91,7 +97,11 @@ fn main() {
             return eprintln!("--wav <event or bank.fsb:index> <out.wav>");
         };
         let params = params(&args);
-        wav(what, out, value("--seconds").and_then(|s| s.parse().ok()), value("--distance").and_then(|s| s.parse().ok()), &params);
+        let reverb = value("--reverb").map(|r| match r.split_once(':') {
+            Some((n, w)) => (n.to_string(), w.parse().unwrap_or(1.0)),
+            None => (r, 1.0),
+        });
+        wav(what, out, value("--seconds").and_then(|s| s.parse().ok()), value("--distance").and_then(|s| s.parse().ok()), &params, reverb);
     } else if let Some(path) = value("--event") {
         event(&path, has("--sound"), value("--volume").and_then(|s| s.parse().ok()).unwrap_or(0.3), value("--seconds").and_then(|s| s.parse().ok()).unwrap_or(4.0), value("--at"), &params(&args));
     } else if let Some(path) = value("--music") {
@@ -276,6 +286,81 @@ fn fevs() {
         }
     }
     println!("{ok} FEV files parsed to their last byte: {events} events ({simple} simple), {defs} sound definitions, {waves} waves");
+}
+
+/// `--users <bank>:<index>`: the events whose sound definitions play that subsound (e.g. `x2weapons_sword_bank055:0`).
+fn users(sub: &str) {
+    let (bank, index) = sub.rsplit_once(':').expect("bank:index");
+    let bank = bank.trim_end_matches(".fsb").to_ascii_lowercase();
+    let index: u32 = index.parse().expect("index");
+    let pak = aa_pak::Pak::global();
+    let mut names: Vec<&str> = pak.list("sounds/").filter(|n| n.ends_with(".fev")).collect();
+    names.sort();
+    for name in names {
+        let f = Fev::parse(&pak.read(name).unwrap()).unwrap();
+        let defs: HashSet<usize> = f
+            .sound_defs
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.waves.iter().any(|w| matches!(w, Wave::Bank { bank: b, index: i, .. } if *i == index && f.banks[*b as usize].name.to_ascii_lowercase() == bank)))
+            .map(|(i, _)| i)
+            .collect();
+        for e in &f.events {
+            if e.instances().iter().any(|i| defs.contains(&i.sound_def)) {
+                println!("{name}: {} (category {}, {})", e.path(), e.category, if e.is_3d() { "3D" } else { "2D" });
+            }
+        }
+    }
+}
+
+/// `--reverbs`: the reverb definitions of the projects and how the events send to the reverb.
+fn reverbs() {
+    let pak = aa_pak::Pak::global();
+    let mut names: Vec<&str> = pak.list("sounds/").filter(|n| n.ends_with(".fev")).collect();
+    names.sort();
+    let mut hist: BTreeMap<(String, String), (usize, String)> = BTreeMap::new();
+    let mut env: BTreeMap<u32, (usize, usize, String)> = BTreeMap::new();
+    let mut dsps: BTreeMap<(u32, String), (usize, String)> = BTreeMap::new();
+    for name in names {
+        let f = Fev::parse(&pak.read(name).unwrap()).unwrap();
+        for (i, r) in f.reverbs.iter().enumerate() {
+            println!("{name}: reverb {i} {r:?}");
+        }
+        for e in &f.events {
+            let cat = e.category.rsplit('/').next().unwrap_or("").to_string();
+            let key = (cat, format!("dry {:.3} wet {:.3}", e.reverb_dry, e.reverb_wet));
+            let r = hist.entry(key).or_insert((0, e.path()));
+            r.0 += 1;
+            if let Body::Complex { layers, parameters, .. } = &e.body {
+                let mut seen = HashSet::new();
+                for l in layers {
+                    for en in &l.envelopes {
+                        let bits = en.flags & !0x8;
+                        if bits != 0 && seen.insert(en.flags) {
+                            let on_dist = parameters.get(en.parameter as usize).is_some_and(|p| p.name.contains("distance"));
+                            let r = env.entry(en.flags).or_insert((0, 0, e.path()));
+                            r.0 += 1;
+                            r.1 += usize::from(on_dist);
+                            let d = dsps.entry((en.flags, en.dsp.clone())).or_insert((0, String::new()));
+                            d.0 += 1;
+                            if d.1.is_empty() {
+                                d.1 = format!("{} points {:?} param {}", e.path(), en.points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>(), parameters.get(en.parameter as usize).map_or("?", |p| p.name.as_str()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for ((flags, dsp), (n, ex)) in dsps {
+        println!("envelope {flags:#x} dsp {dsp:?}: {n} e.g. {ex}");
+    }
+    for (flags, (n, on_distance, ex)) in env {
+        println!("envelope flags {flags:#x}: {n} events ({on_distance} on a distance parameter) e.g. {ex}");
+    }
+    for ((cat, v), (n, ex)) in hist {
+        println!("{cat:22} {v:26} {n:6} e.g. {ex}");
+    }
 }
 
 /// `--list <project> [--filter text]`: dump the events.
@@ -468,11 +553,38 @@ fn mix(parts: &[(Pcm, f32, f32, bool)], seconds: f32) -> Pcm {
     Pcm { rate: RATE, channels: 2, samples: out.iter().map(|v| (v * scale * 32767.0) as i16).collect(), loop_points: None }
 }
 
-fn wav(what: &str, out: &str, seconds: Option<f32>, distance: Option<f32>, params: &[(String, f32)]) {
+/// The sound through the area reverb `name` at `weight`, sent at the event's wet level (what the engine does live), plus
+/// the tail.
+fn with_reverb(dry: Pcm, name: &str, weight: f32, wet_db: f32) -> Pcm {
+    use aa_audio::reverb::{Params, Presets, ReverbCore};
+    let presets = Presets::load(aa_pak::Pak::global());
+    let preset = presets.get(name).unwrap_or_else(|| panic!("no reverb preset {name}"));
+    let params = Params::of(preset, weight);
+    println!("reverb {name} x{weight}: decay {:.2} s, hf ratio {:.2}, late {:.3}, early {:.3}, send {wet_db} dB", params.decay, params.hf_ratio, params.late, params.early);
+    let mut core = ReverbCore::new(dry.rate);
+    core.set_target(params);
+    core.snap();
+    let send = 10f32.powf(wet_db / 20.0);
+    let tail = (params.decay.min(6.0) * dry.rate as f32) as usize;
+    let frames = dry.frames() + tail;
+    let mut out = Vec::with_capacity(frames * 2);
+    for i in 0..frames {
+        let (l, r) = if i < dry.frames() { (dry.samples[i * 2] as f32 / 32768.0, dry.samples[i * 2 + 1] as f32 / 32768.0) } else { (0.0, 0.0) };
+        let w = core.tick(kira::Frame::new(l * send, r * send));
+        out.push(l + w.left);
+        out.push(r + w.right);
+    }
+    let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
+    let scale = if peak > 1.0 { 1.0 / peak } else { 1.0 };
+    Pcm { rate: dry.rate, channels: 2, samples: out.iter().map(|v| (v * scale * 32767.0) as i16).collect(), loop_points: None }
+}
+
+fn wav(what: &str, out: &str, seconds: Option<f32>, distance: Option<f32>, params: &[(String, f32)], reverb: Option<(String, f32)>) {
     let lib = Library::global();
     if let Some(parent) = std::path::Path::new(out).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    let mut wet_db = -8.0;
     let pcm = if let Some((bank, index)) = what.rsplit_once(':').filter(|(b, _)| b.ends_with(".fsb")) {
         let bytes = aa_pak::Pak::global().read(bank).unwrap_or_else(|e| panic!("{bank}: {e}"));
         let fsb = Fsb5::parse(&bytes).unwrap();
@@ -484,6 +596,7 @@ fn wav(what: &str, out: &str, seconds: Option<f32>, distance: Option<f32>, param
     } else {
         let event = lib.event(what).unwrap_or_else(|| panic!("no event {what}"));
         let ev = event.event();
+        wet_db = ev.reverb_wet;
         let distance = ev.is_3d().then_some(distance.unwrap_or(1.0));
         let values = initial_values(ev, distance, params);
         let planned = plan(&event, &values, &mut PickState::default(), &mut Rng::new(1));
@@ -511,6 +624,10 @@ fn wav(what: &str, out: &str, seconds: Option<f32>, distance: Option<f32>, param
         let seconds = seconds.unwrap_or(if looping { (length * 2.0).min(30.0) } else { length });
         println!("{what}: {} sounds, {seconds:.2} s{}", parts.len(), if looping { " (looped twice)" } else { "" });
         mix(&parts, seconds)
+    };
+    let pcm = match &reverb {
+        Some((name, weight)) => with_reverb(pcm, name, *weight, wet_db),
+        None => pcm,
     };
     std::fs::write(out, pcm.to_wav()).unwrap();
     println!("wrote {out}: {:.2} s, {} Hz, {} ch, rms {:.4}", pcm.seconds(), pcm.rate, pcm.channels, pcm.rms());

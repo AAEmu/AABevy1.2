@@ -4,6 +4,8 @@
 //! * [`fev`]: the event projects (events, sound definitions, parameters, envelopes).
 //! * [`library`]: projects and banks out of the pak, event paths, what an event plays.
 //! * [`engine`]: the player thread (kira), volume groups, music streaming.
+//! * [`reverb`]: the area reverb presets and the reverb effect. [`mood`]: the sound moods (mixer snapshots) and [`muffle`], the
+//!   low-pass filter they use.
 //! * [`packs`]: [`SoundPacks`], the pack item name to event path table of the game database.
 //! * [`plugin`]: [`AaAudioPlugin`], [`Sound`], [`SpatialListener`].
 //!
@@ -24,9 +26,12 @@ pub mod engine;
 pub mod fev;
 pub mod fsb5;
 pub mod library;
+pub mod mood;
 pub mod mpeg;
+pub mod muffle;
 pub mod packs;
 pub mod plugin;
+pub mod reverb;
 pub mod stream;
 pub mod vorbis;
 
