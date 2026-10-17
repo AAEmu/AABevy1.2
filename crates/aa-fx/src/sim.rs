@@ -34,6 +34,7 @@ impl Rng {
     }
 
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f32 {
         self.0 ^= self.0 >> 12;
         self.0 ^= self.0 << 25;
@@ -88,12 +89,12 @@ struct Frame {
 
 impl Frame {
     #[inline]
-    fn to_world_point(&self, p: Vec3) -> Vec3 {
+    fn to_world_point(self, p: Vec3) -> Vec3 {
         if self.bound { self.origin + self.rot * p } else { p }
     }
 
     #[inline]
-    fn to_world_dir(&self, v: Vec3) -> Vec3 {
+    fn to_world_dir(self, v: Vec3) -> Vec3 {
         if self.bound { self.rot * v } else { v }
     }
 
@@ -617,9 +618,9 @@ pub struct EffectSim {
 
 impl EffectSim {
     pub fn new(mut emitters: Vec<EmitterState>, light: f32, emissive: f32) -> EffectSim {
-        for i in 0..emitters.len() {
-            let d = &emitters[i].def;
-            emitters[i].lit = d.diffuse * light + d.backlight * light * 0.5 + d.emissive * emissive;
+        for e in emitters.iter_mut() {
+            let d = &e.def;
+            e.lit = d.diffuse * light + d.backlight * light * 0.5 + d.emissive * emissive;
         }
         let triggers: Vec<(Option<usize>, Spawn)> = emitters.iter().map(|e| (e.parent, e.def.spawn)).collect();
         for (parent, spawn) in triggers {

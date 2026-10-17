@@ -28,7 +28,7 @@ use std::time::Instant;
 
 use bevy::asset::embedded_asset;
 use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::VisibilitySystems;
+use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::MaterialPlugin;
@@ -59,6 +59,8 @@ pub struct FxSettings {
     pub emissive: f32,
     /// Multiplier on every particle size.
     pub size_scale: f32,
+    /// Multiplier on every particle's opacity (1 = as authored).
+    pub alpha_scale: f32,
     /// Quality level of the data: 0 low, 1 medium, 2 high, 3 very high (emitters outside their `ConfigMin`/`ConfigMax` are off).
     pub quality: u8,
     /// Soft particle distance in metres (0 = off); needs a `DepthPrepass` on the camera.
@@ -79,6 +81,7 @@ impl Default for FxSettings {
             light: 0.8,
             emissive: 1.0,
             size_scale: 1.0,
+            alpha_scale: 1.0,
             quality: 2,
             soft_distance: 0.6,
             activations_per_frame: 6,
@@ -117,6 +120,10 @@ pub struct Effect {
     pub speed_scale: f32,
     /// Multiplier on every emitter's particle count.
     pub count_scale: f32,
+    /// Multiplier on the opacity of this effect's particles.
+    pub alpha_scale: f32,
+    /// Multiplier on the colour of this effect's particles (the light that falls on them).
+    pub brightness: f32,
     /// Run the effect ahead when it starts so that it already looks established (`bPrime`).
     pub prime: bool,
     /// Start again when every emitter has finished (a one shot effect plays once per activation otherwise).
@@ -127,7 +134,7 @@ pub struct Effect {
 
 impl Effect {
     pub fn new(name: impl Into<String>) -> Effect {
-        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, prime: true, looping: false, despawn_when_finished: false }
+        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, prime: true, looping: false, despawn_when_finished: false }
     }
 
     pub fn with_scale(mut self, scale: f32) -> Effect {
@@ -223,6 +230,34 @@ impl Plugin for FxPlugin {
                     .after(bevy::transform::TransformSystems::Propagate)
                     .before(VisibilitySystems::CheckVisibility),
             );
+        if std::env::var_os("AA_FX_LOG").is_some() {
+            app.add_systems(Update, log_stats);
+        }
+    }
+}
+
+/// `AA_FX_LOG=1`: the counters every 2 seconds.
+fn log_stats(time: Res<Time>, stats: Res<FxStats>, view: Res<FxView>, mut since: Local<f32>, active: Query<(&Effect, &GlobalTransform, &FxRun), With<FxActive>>) {
+    *since += time.delta_secs();
+    if *since < 2.0 {
+        return;
+    }
+    *since = 0.0;
+    info!(
+        "aa-fx: effects={} active={} emitters={} particles={} quads={} sim_ms={:.3} upload_ms={:.3} manage_ms={:.3} camera={:?}",
+        stats.effects, stats.active, stats.emitters, stats.particles, stats.quads, stats.sim_ms, stats.upload_ms, stats.manage_ms,
+        view.0.map(|v| v.pos)
+    );
+    if std::env::var("AA_FX_LOG").is_ok_and(|v| v == "2") {
+        for (effect, gt, run) in &active {
+            let Some(sim) = run.sim.as_ref() else { continue };
+            for e in &sim.emitters {
+                info!(
+                    "aa-fx:   {} at {:?}: {} particles, {} quads, bounds {:?}..{:?}, drawn {}",
+                    effect.name, gt.translation(), e.alive(), e.quads, e.min, e.max, e.draws
+                );
+            }
+        }
     }
 }
 
@@ -315,10 +350,10 @@ fn classify(view: Res<FxView>, queue: Res<FxQueue>, mut stats: ResMut<FxStats>, 
         }
         let d = gt.translation().distance(view.pos);
         let active = run.sim.is_some();
-        if (!active && !run.finished && d < run.radius) || (active || run.finished) && d > run.radius * 1.15 {
-            if let Ok(mut v) = queue.0.lock() {
-                v.push((d, e, !active && !run.finished));
-            }
+        if ((!active && !run.finished && d < run.radius) || (active || run.finished) && d > run.radius * 1.15)
+            && let Ok(mut v) = queue.0.lock()
+        {
+            v.push((d, e, !active && !run.finished));
         }
     });
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
@@ -342,7 +377,7 @@ fn apply(
     mut assets: ResMut<FxAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FxMaterial>>,
-    mut q: Query<(&Effect, &mut FxRun)>,
+    mut q: Query<(&Effect, &mut FxRun, Option<&RenderLayers>)>,
 ) {
     let t0 = Instant::now();
     let mut list = std::mem::take(&mut *queue.0.lock().unwrap_or_else(|e| e.into_inner()));
@@ -352,7 +387,7 @@ fn apply(
     list.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut started = 0;
     for (_, entity, activate) in list {
-        let Ok((effect, mut run)) = q.get_mut(entity) else { continue };
+        let Ok((effect, mut run, layers)) = q.get_mut(entity) else { continue };
         if !activate {
             for (m, _) in run.meshes.drain(..).flatten() {
                 commands.entity(m).despawn();
@@ -385,8 +420,7 @@ fn apply(
                     settings.soft_distance,
                 );
                 let mesh_handle = meshes.add(new_mesh());
-                mesh = commands
-                    .spawn((
+                let mut spawned = commands.spawn((
                         FxMesh,
                         Mesh3d(mesh_handle.clone()),
                         MeshMaterial3d(assets.slots[material as usize].handle.clone()),
@@ -396,8 +430,12 @@ fn apply(
                         NotShadowCaster,
                         NotShadowReceiver,
                         ChildOf(entity),
-                    ))
-                    .id();
+                    ));
+                // render layers are not inherited: the mesh is drawn for the cameras that see the effect
+                if let Some(layers) = layers {
+                    spawned.insert(layers.clone());
+                }
+                mesh = spawned.id();
                 handle = Some((mesh, mesh_handle));
             }
             let mut st = EmitterState::new(fe.def.clone(), fe.parent, material, 1.0, hash_seed(entity, i), mesh);
@@ -408,12 +446,11 @@ fn apply(
             states.push(st);
             handles.push(handle);
         }
-        run.sim = Some(EffectSim::new(states, settings.light, settings.emissive));
+        run.sim = Some(EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness));
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
         run.uploaded_quads = vec![1; def.emitters.len()];
-        let _ = effect;
         commands.entity(entity).insert(FxActive);
     }
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
@@ -471,7 +508,7 @@ fn simulate(
             size_scale: settings.size_scale,
             wind: settings.wind,
             budget: &budget,
-            fade: 1.0 - smoothstep(0.8, 1.0, near),
+            fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,
         };
 
         if !sim.primed {
