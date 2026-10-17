@@ -26,6 +26,9 @@
 //! * `--terrain-tint r,g,b`, `--fog-visibility <m>`, `--tree-distance <m>`
 //! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
 //!                         time statistics (average, 1 % low, worst frame, frames over 20 ms), then exit
+//! * `--fx <lib.group.name>`  a particle effect (`aa-fx`, e.g. `abillity_skill_table_m.system_skill.return_skill_form`, the Return
+//!                         orb) in front of the camera: `--fx-dist <m>` (default 3), `--fx-drop <m>` below the view axis
+//!                         (default 0.3), `--fx-scale <x>` (default 1)
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-post` (no HDR / fog / film curve camera setup), `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
@@ -298,6 +301,11 @@ fn setup(mut commands: Commands, start: Res<Start>) {
         Projection::Perspective(PerspectiveProjection { fov: start.fov.to_radians(), near: 0.3, far: 20000.0, ..default() }),
         transform,
     ));
+    if let Some(name) = arg("--fx") {
+        let num = |flag: &str, default: f32| arg(flag).and_then(|v| v.parse().ok()).unwrap_or(default);
+        let at = pos + *transform.forward() * num("--fx-dist", 3.0) - Vec3::Y * num("--fx-drop", 0.3);
+        commands.spawn((aa_fx::Effect::new(name).with_scale(num("--fx-scale", 1.0)), Transform::from_translation(at)));
+    }
 }
 
 fn play_cinema(

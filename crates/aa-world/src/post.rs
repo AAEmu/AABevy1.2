@@ -1,14 +1,16 @@
-//! Camera post processing: an HDR camera, atmosphere (height) fog and the engine's film curve.
+//! Camera post processing: an HDR camera, atmosphere (height) fog, the engine's bloom and film curve.
 //!
-//! * [`Post`] on a `Camera3d` turns the camera into an HDR one with a depth prepass, bloom and our own tone mapping
-//!   pass. The world's focus camera gets it automatically ([`crate::WorldConfig::post`]); an application that
+//! * [`Post`] on a `Camera3d` turns the camera into an HDR one with a depth prepass, our own bloom and our own tone
+//!   mapping pass. The world's focus camera gets it automatically ([`crate::WorldConfig::post`]); an application that
 //!   spawns other cameras can add `Post::default()` itself.
-//! * [`PostUniform`] carries the time of day parameters of the frame (fog, film curve, grading); `sky.rs` fills
-//!   it each frame.
-//! * The pass (`post.wesl`) runs after Bevy's bloom and before its tone mapping (which is switched off): it
-//!   reads the HDR colour and the main pass depth, applies the height fog and maps the result with the
-//!   `Filmic` curve of `postprocess.cfx` (`Film curve *`, `Saturation`, `Contrast`, `Levels` of the zone's
-//!   time of day), writing display linear colour.
+//! * [`PostUniform`] carries the time of day parameters of the frame (fog, film curve, grading, bloom); `sky.rs`
+//!   fills it each frame.
+//! * The bloom (`post_bloom.rs`) is the engine's: a half resolution bright pass of the fogged scene (`v = c x level /
+//!   key - threshold`, `v / (offset + v)`, so it saturates), a blur chain, and the sum added to the exposed scene before the
+//!   grading.
+//! * The pass (`post.wesl`) runs before Bevy's tone mapping (which is switched off): it reads the HDR colour and the main
+//!   pass depth, applies the height fog and the bloom and maps the result with the `Filmic` curve of `postprocess.cfx`
+//!   (`Film curve *`, `Saturation`, `Contrast`, `Levels` of the zone's time of day), writing display linear colour.
 
 use bevy::asset::{embedded_asset, load_embedded_asset};
 use bevy::camera::{Camera3d, Camera3dDepthTextureUsage, Hdr};
@@ -18,7 +20,6 @@ use bevy::core_pipeline::schedule::Core3d;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping, tonemapping};
 use bevy::core_pipeline::{Core3dSystems, FullscreenShader};
 use bevy::math::{Vec3, Vec4};
-use bevy::post_process::bloom::{Bloom, bloom};
 use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
@@ -26,17 +27,22 @@ use bevy::render::diagnostic::RecordDiagnostics;
 use bevy::render::extract_component::{
     ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin,
 };
-use bevy::render::render_resource::binding_types::{texture_2d, texture_depth_2d, texture_depth_2d_multisampled, uniform_buffer};
-use bevy::render::render_resource::{
-    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState, ColorWrites,
-    FragmentState, LoadOp, Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
-    RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
-    SpecializedRenderPipelines, StoreOp, TextureFormat, TextureSampleType, TextureUsages,
+use bevy::render::render_resource::binding_types::{
+    sampler, texture_2d, texture_depth_2d, texture_depth_2d_multisampled, uniform_buffer,
 };
-use bevy::render::renderer::{RenderContext, ViewQuery};
+use bevy::render::render_resource::{
+    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState,
+    CachedRenderPipelineId, ColorTargetState, ColorWrites, FilterMode, FragmentState, LoadOp, Operations, PipelineCache,
+    RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
+    ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp, TextureFormat, TextureSampleType,
+    TextureUsages,
+};
+use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
 use bevy::render::view::{ExtractedView, Msaa, ViewDepthStencilTexture, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
+
+use crate::post_bloom::{self, BLOOM_FORMAT, BloomTextures};
 
 /// Sample radius of the ambient occlusion in metres: deeper shade under bushes needs more than Bevy's 0.73.
 const SSAO_RADIUS: f32 = 1.2;
@@ -44,7 +50,7 @@ const SSAO_RADIUS: f32 = 1.2;
 /// Marks a camera for the world's post processing (see the module docs). Adding it sets up the camera.
 #[derive(Component, Clone, Debug)]
 pub struct Post {
-    /// Bloom intensity (0 turns it off).
+    /// Gain of the bloom on top of the engine's (`AtmosphereTuning::bloom_gain`): 1 = as the engine, 0 turns it off.
     pub bloom: f32,
     /// Apply the atmosphere fog in the post pass (the camera's `DistanceFog` is removed).
     pub fog: bool,
@@ -57,7 +63,7 @@ pub struct Post {
 
 impl Default for Post {
     fn default() -> Self {
-        Post { bloom: 0.1, fog: true, exposure_ev: 0.0, ssao: true }
+        Post { bloom: 1.0, fog: true, exposure_ev: 0.0, ssao: true }
     }
 }
 
@@ -82,6 +88,10 @@ pub struct PostUniform {
     pub under: Vec4,
     /// Under water: rgb colour of the deep water at the surface (pre-exposed), a: unused.
     pub under_color: Vec4,
+    /// Bloom: x brightness scale (`r_HDRBrightLevel / 0.18`), y threshold, z offset.
+    pub bloom: Vec4,
+    /// Bloom: rgb strength per channel added to the exposed scene (the world's bloom colour x multiplier x gain; 0 = off).
+    pub bloom_color: Vec4,
 }
 
 impl Default for PostUniform {
@@ -98,6 +108,8 @@ impl Default for PostUniform {
             balance: Vec4::new(1.0, 1.0, 1.0, 0.0),
             under: Vec4::ZERO,
             under_color: Vec4::ZERO,
+            bloom: Vec4::new(1.25 / 0.18, 6.0, 5.0, 0.0),
+            bloom_color: Vec4::ZERO,
         }
     }
 }
@@ -116,14 +128,24 @@ impl PostUniform {
 
 pub(crate) fn build(app: &mut App) {
     embedded_asset!(app, "post.wesl");
+    embedded_asset!(app, "post_bloom.wesl");
     app.add_plugins((ExtractComponentPlugin::<PostUniform>::default(), UniformComponentPlugin::<PostUniform>::default()))
         .add_systems(Update, setup_post_cameras);
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
     render_app
         .init_resource::<SpecializedRenderPipelines<PostPipeline>>()
         .add_systems(RenderStartup, init_post_pipeline)
-        .add_systems(Render, prepare_post_pipelines.in_set(RenderSystems::Prepare))
-        .add_systems(Core3d, post_pass.after(bloom).before(tonemapping).in_set(Core3dSystems::PostProcess));
+        .add_systems(
+            Render,
+            (
+                prepare_post_pipelines.in_set(RenderSystems::Prepare),
+                post_bloom::prepare_bloom_textures.in_set(RenderSystems::PrepareResources),
+            ),
+        )
+        .add_systems(
+            Core3d,
+            (post_bloom::bloom_passes.before(post_pass), post_pass.before(tonemapping)).in_set(Core3dSystems::PostProcess),
+        );
 }
 
 /// Gives every camera with a [`Post`] the HDR / depth / bloom setup (once), and the world's own camera (the focus
@@ -155,7 +177,6 @@ fn setup_post_cameras(
             Tonemapping::None,
             DebandDither::Disabled,
             DepthPrepass,
-            Bloom { intensity: post.bloom, ..Bloom::NATURAL },
         ));
         if post.ssao || tuning.ssao > 0.5 {
             // SSAO cannot run on a multisampled depth buffer: SMAA takes over the edges
@@ -172,50 +193,103 @@ fn setup_post_cameras(
     }
 }
 
+/// The bind group layouts and shaders of the passes (built once at render startup).
 #[derive(Resource)]
-struct PostPipelineData {
-    layout: BindGroupLayoutDescriptor,
+pub(crate) struct PostPipelineData {
+    /// view, post uniform, depth, scene colour (the bright pass), and the same plus the bloom and its sampler (the final pass);
+    /// each for a single sampled and for a multisampled depth buffer
+    pub(crate) bright: [BindGroupLayoutDescriptor; 2],
+    pub(crate) last: [BindGroupLayoutDescriptor; 2],
+    /// The blur chain: a texture and a sampler.
+    pub(crate) chain: BindGroupLayoutDescriptor,
+    pub(crate) sampler: Sampler,
     fullscreen: FullscreenShader,
     shader: Handle<Shader>,
+    bloom_shader: Handle<Shader>,
 }
 
-fn init_post_pipeline(mut commands: Commands, fullscreen: Res<FullscreenShader>, assets: Res<AssetServer>) {
-    let entries = |multisampled: bool| {
-        BindGroupLayoutEntries::sequential(
-            ShaderStages::FRAGMENT,
-            (
-                uniform_buffer::<ViewUniform>(true),
-                uniform_buffer::<PostUniform>(true),
-                if multisampled { texture_depth_2d_multisampled() } else { texture_depth_2d() },
-                texture_2d(TextureSampleType::Float { filterable: false }),
+fn init_post_pipeline(
+    mut commands: Commands,
+    fullscreen: Res<FullscreenShader>,
+    assets: Res<AssetServer>,
+    render_device: Res<RenderDevice>,
+) {
+    let depth_and_color = |multisampled: bool| {
+        (
+            uniform_buffer::<ViewUniform>(true),
+            uniform_buffer::<PostUniform>(true),
+            if multisampled { texture_depth_2d_multisampled() } else { texture_depth_2d() },
+            texture_2d(TextureSampleType::Float { filterable: false }),
+        )
+    };
+    let bright = |multisampled: bool| {
+        BindGroupLayoutDescriptor::new(
+            if multisampled { "aa bright layout (msaa)" } else { "aa bright layout" },
+            &BindGroupLayoutEntries::sequential(ShaderStages::FRAGMENT, depth_and_color(multisampled)),
+        )
+    };
+    let last = |multisampled: bool| {
+        let (view, post, depth, color) = depth_and_color(multisampled);
+        BindGroupLayoutDescriptor::new(
+            if multisampled { "aa post layout (msaa)" } else { "aa post layout" },
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (
+                    view,
+                    post,
+                    depth,
+                    color,
+                    texture_2d(TextureSampleType::Float { filterable: true }),
+                    sampler(SamplerBindingType::Filtering),
+                ),
             ),
         )
     };
     commands.insert_resource(PostPipelineData {
-        layout: BindGroupLayoutDescriptor::new("aa post layout", &entries(false)),
+        bright: [bright(false), bright(true)],
+        last: [last(false), last(true)],
+        chain: BindGroupLayoutDescriptor::new(
+            "aa bloom chain layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (texture_2d(TextureSampleType::Float { filterable: true }), sampler(SamplerBindingType::Filtering)),
+            ),
+        ),
+        sampler: render_device.create_sampler(&SamplerDescriptor {
+            min_filter: FilterMode::Linear,
+            mag_filter: FilterMode::Linear,
+            ..Default::default()
+        }),
         fullscreen: fullscreen.clone(),
         shader: load_embedded_asset!(assets.as_ref(), "post.wesl"),
-    });
-    // the multisampled layout is built on demand in `prepare_post_pipelines`
-    commands.insert_resource(PostLayouts {
-        multisampled: BindGroupLayoutDescriptor::new("aa post layout (msaa)", &entries(true)),
+        bloom_shader: load_embedded_asset!(assets.as_ref(), "post_bloom.wesl"),
     });
 }
 
-#[derive(Resource)]
-struct PostLayouts {
-    multisampled: BindGroupLayoutDescriptor,
+/// The four kinds of pass of the post processing.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum PassKind {
+    /// Fogged scene to half resolution bright pass (`post.wesl`, `bright_fragment`).
+    Bright,
+    /// Blur chain, down and up (`post_bloom.wesl`).
+    Down,
+    Up,
+    /// Fog, bloom, grade and film curve into the view (`post.wesl`, `fragment`).
+    Final,
 }
 
 #[derive(Clone)]
 struct PostPipeline {
-    layout: BindGroupLayoutDescriptor,
+    layouts: [[BindGroupLayoutDescriptor; 2]; 2],
+    chain: BindGroupLayoutDescriptor,
     fullscreen: FullscreenShader,
     shader: Handle<Shader>,
+    bloom_shader: Handle<Shader>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct PostPipelineKey {
+    kind: PassKind,
     target_format: TextureFormat,
     multisample: bool,
 }
@@ -228,15 +302,32 @@ impl SpecializedRenderPipeline for PostPipeline {
         if key.multisample {
             shader_defs.push("MULTISAMPLED".into());
         }
+        let ms = key.multisample as usize;
+        let (label, layout, shader, entry, format, blend) = match key.kind {
+            PassKind::Bright => ("aa bright pipeline", self.layouts[0][ms].clone(), &self.shader, "bright_fragment", BLOOM_FORMAT, None),
+            PassKind::Final => ("aa post pipeline", self.layouts[1][ms].clone(), &self.shader, "fragment", key.target_format, None),
+            PassKind::Down => ("aa bloom down pipeline", self.chain.clone(), &self.bloom_shader, "downsample", BLOOM_FORMAT, None),
+            PassKind::Up => (
+                "aa bloom up pipeline",
+                self.chain.clone(),
+                &self.bloom_shader,
+                "upsample",
+                BLOOM_FORMAT,
+                Some(BlendState {
+                    color: BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
+                    alpha: BlendComponent { src_factor: BlendFactor::Zero, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
+                }),
+            ),
+        };
         RenderPipelineDescriptor {
-            label: Some("aa post pipeline".into()),
-            layout: vec![self.layout.clone()],
+            label: Some(label.into()),
+            layout: vec![layout],
             vertex: self.fullscreen.to_vertex_state(),
             fragment: Some(FragmentState {
-                shader: self.shader.clone(),
-                shader_defs,
-                entry_point: Some("fragment".into()),
-                targets: vec![Some(ColorTargetState { format: key.target_format, blend: None, write_mask: ColorWrites::ALL })],
+                shader: shader.clone(),
+                shader_defs: if matches!(key.kind, PassKind::Down | PassKind::Up) { Vec::new() } else { shader_defs },
+                entry_point: Some(entry.into()),
+                targets: vec![Some(ColorTargetState { format, blend, write_mask: ColorWrites::ALL })],
                 constants: vec![],
             }),
             ..default()
@@ -244,10 +335,14 @@ impl SpecializedRenderPipeline for PostPipeline {
     }
 }
 
+/// The pipelines of a view's passes.
 #[derive(Component)]
-struct PostPipelineId {
-    id: CachedRenderPipelineId,
-    multisample: bool,
+pub(crate) struct PostPipelineId {
+    last: CachedRenderPipelineId,
+    pub(crate) bright: CachedRenderPipelineId,
+    pub(crate) down: CachedRenderPipelineId,
+    pub(crate) up: CachedRenderPipelineId,
+    pub(crate) multisample: bool,
 }
 
 #[allow(clippy::type_complexity)]
@@ -256,48 +351,66 @@ fn prepare_post_pipelines(
     pipeline_cache: Res<PipelineCache>,
     mut pipelines: ResMut<SpecializedRenderPipelines<PostPipeline>>,
     data: Option<Res<PostPipelineData>>,
-    layouts: Option<Res<PostLayouts>>,
     views: Query<(Entity, &ExtractedView, &Msaa), (With<ExtractedCamera>, With<PostUniform>)>,
 ) {
-    let (Some(data), Some(layouts)) = (data, layouts) else { return };
+    let Some(data) = data else { return };
+    let pipeline = PostPipeline {
+        layouts: [data.bright.clone(), data.last.clone()],
+        chain: data.chain.clone(),
+        fullscreen: data.fullscreen.clone(),
+        shader: data.shader.clone(),
+        bloom_shader: data.bloom_shader.clone(),
+    };
     for (entity, view, msaa) in &views {
         let multisample = *msaa != Msaa::Off;
-        let pipeline = PostPipeline {
-            layout: if multisample { layouts.multisampled.clone() } else { data.layout.clone() },
-            fullscreen: data.fullscreen.clone(),
-            shader: data.shader.clone(),
+        let mut specialize = |kind: PassKind| {
+            pipelines.specialize(&pipeline_cache, &pipeline, PostPipelineKey { kind, target_format: view.target_format, multisample })
         };
-        let id = pipelines.specialize(&pipeline_cache, &pipeline, PostPipelineKey { target_format: view.target_format, multisample });
-        commands.entity(entity).insert(PostPipelineId { id, multisample });
+        let ids = PostPipelineId {
+            last: specialize(PassKind::Final),
+            bright: specialize(PassKind::Bright),
+            down: specialize(PassKind::Down),
+            up: specialize(PassKind::Up),
+            multisample,
+        };
+        commands.entity(entity).insert(ids);
     }
 }
 
 fn post_pass(
-    view: ViewQuery<(&ViewUniformOffset, &ViewTarget, &ViewDepthStencilTexture, &PostPipelineId, &DynamicUniformIndex<PostUniform>)>,
+    view: ViewQuery<(
+        &ViewUniformOffset,
+        &ViewTarget,
+        &ViewDepthStencilTexture,
+        &PostPipelineId,
+        &DynamicUniformIndex<PostUniform>,
+        Option<&BloomTextures>,
+    )>,
     pipeline_cache: Res<PipelineCache>,
     view_uniforms: Res<ViewUniforms>,
     post_uniforms: Res<ComponentUniforms<PostUniform>>,
     data: Option<Res<PostPipelineData>>,
-    layouts: Option<Res<PostLayouts>>,
     mut ctx: RenderContext,
 ) {
-    let (view_offset, target, depth, pipeline_id, post_index) = view.into_inner();
-    let (Some(data), Some(layouts)) = (data, layouts) else { return };
+    let (view_offset, target, depth, pipeline_id, post_index, bloom) = view.into_inner();
+    let Some(data) = data else { return };
     let Some(depth_view) = depth.attachment.depth_stencil_views().depth_only_view() else { return };
     let (Some(pipeline), Some(view_binding), Some(post_binding)) =
-        (pipeline_cache.get_render_pipeline(pipeline_id.id), view_uniforms.uniforms.binding(), post_uniforms.binding())
+        (pipeline_cache.get_render_pipeline(pipeline_id.last), view_uniforms.uniforms.binding(), post_uniforms.binding())
     else {
         return;
     };
+    let Some(bloom) = bloom else { return };
     let diagnostics = ctx.diagnostic_recorder();
     let diagnostics = diagnostics.as_deref();
     let time_span = diagnostics.time_span(ctx.command_encoder(), "aa_post");
     let write = target.post_process_write();
-    let layout = if pipeline_id.multisample { &layouts.multisampled } else { &data.layout };
+    let layout = &data.last[pipeline_id.multisample as usize];
+    let bloom_view = bloom.view(0);
     let bind_group = ctx.render_device().create_bind_group(
         Some("aa post bind group"),
         &pipeline_cache.get_bind_group_layout(layout),
-        &BindGroupEntries::sequential((view_binding, post_binding, depth_view, write.source)),
+        &BindGroupEntries::sequential((view_binding, post_binding, depth_view, write.source, &bloom_view, &data.sampler)),
     );
     let descriptor = RenderPassDescriptor {
         label: Some("aa post pass"),

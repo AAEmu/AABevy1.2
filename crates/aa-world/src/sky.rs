@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
 
 use crate::coords::{bevy_to_cry, cry_to_bevy};
-use crate::env::{EnvSample, Lighting, TimeOfDay};
+use crate::env::{EnvSample, HdrSetup, Lighting, TimeOfDay};
 use crate::post::{Post, PostUniform};
 use crate::sky_material::{SkyBox, SkyMaterial, ZoneSky, load_sky_box};
 use crate::water::WaterStyle;
@@ -143,6 +143,15 @@ pub struct AtmosphereTuning {
     pub sea_refl: f32,
     /// Sea: sun glint multiplier.
     pub sea_sun: f32,
+    /// Bloom (the engine's `HDRBrightPassFilterPS` + `FilmicMapping`): `r_HDRBrightLevel` (1.25) / `r_HDRBrightThreshold`
+    /// (6) / `r_HDRBrightOffset` (5) of the 1.2 client's renderer. A pixel of exposed brightness `c` brightens the bloom by
+    /// `v / (offset + v)`, `v = max(c x level / 0.18 - threshold, 0)`.
+    pub bloom_level: f32,
+    pub bloom_threshold: f32,
+    pub bloom_offset: f32,
+    /// Strength of the bloom added to the exposed scene on top of the world's `HDRSetup` (colour x multiplier): `r_HDRBloomMul` 0.2
+    /// x 3 x 0.5 of `FilmicMapping`.
+    pub bloom_gain: f32,
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
@@ -194,6 +203,10 @@ impl Default for AtmosphereTuning {
             under_scatter: 1.0,
             sea_refl: 0.5,
             sea_sun: 3.0,
+            bloom_level: 1.25,
+            bloom_threshold: 6.0,
+            bloom_offset: 5.0,
+            bloom_gain: 0.3,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
         }
@@ -250,6 +263,10 @@ impl AtmosphereTuning {
                 "under_scatter" => t.under_scatter = v,
                 "sea_refl" => t.sea_refl = v,
                 "sea_sun" => t.sea_sun = v,
+                "bloom_level" => t.bloom_level = v,
+                "bloom_threshold" => t.bloom_threshold = v,
+                "bloom_offset" => t.bloom_offset = v,
+                "bloom_gain" => t.bloom_gain = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
                 _ => {}
@@ -288,6 +305,7 @@ pub struct TodCache {
     zones: HashMap<(u16, u32), Option<Arc<TimeOfDay>>>,
     world_default: HashMap<u32, Option<Arc<TimeOfDay>>>,
     lighting: Option<Lighting>,
+    hdr: HdrSetup,
     sector_rx: Option<Mutex<Receiver<World>>>,
     zone_sky: HashMap<Option<u16>, ZoneSky>,
     sky_boxes: HashMap<String, Option<SkyBox>>,
@@ -338,6 +356,11 @@ fn setup_sky(
         .read_string(&format!("worlds/{}/lighting.xml", cfg.world))
         .ok()
         .and_then(|x| Lighting::parse(&x));
+    cache.hdr = aa_pak::Pak::global()
+        .read_string(&format!("worlds/{}/env.xml", cfg.world))
+        .ok()
+        .and_then(|x| HdrSetup::parse(&x))
+        .unwrap_or_default();
 
     ambient.brightness = 300.0;
 
@@ -714,7 +737,7 @@ fn update_sky(
             .entry(m.clone())
             .or_insert_with(|| {
                 let b = load_sky_box(m, &mut images);
-                info!("aa-world: sky box {m}: {:?}", b);
+                debug!("aa-world: sky box {m}: {:?}", b);
                 b
             })
             .clone()
@@ -759,6 +782,7 @@ fn update_post(
     cfg: Res<WorldConfig>,
     tuning: Res<AtmosphereTuning>,
     water: Option<Res<WaterQuery>>,
+    cache: Res<TodCache>,
     mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform)>,
 ) {
     let Some(cur) = &env.sample else { return };
@@ -777,6 +801,9 @@ fn update_post(
         u.film = film;
         u.grade = grade * Vec4::new(tuning.saturation, 1.0, 1.0, tuning.exposure);
         u.balance = balance.truncate().extend(if post.fog { 1.0 } else { 0.0 });
+        // the world's `HDRSetup` colour and multiplier times `r_HDRBloomMul x 3 x 0.5`
+        u.bloom = Vec4::new(tuning.bloom_level / 0.18, tuning.bloom_threshold, tuning.bloom_offset.max(1e-3), 0.0);
+        u.bloom_color = (cache.hdr.bloom_color * cache.hdr.bloom_mul * tuning.bloom_gain * post.bloom).extend(0.0);
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
         u.under = Vec4::ZERO;
         let pos = camera.translation();
