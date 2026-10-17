@@ -11,6 +11,7 @@ pub mod cover;
 pub mod env;
 pub mod entities;
 pub mod heightmap;
+pub mod night_sky;
 pub mod objects;
 pub mod pipelines;
 pub mod placement;
