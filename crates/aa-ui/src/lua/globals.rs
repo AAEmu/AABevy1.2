@@ -81,7 +81,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             method(lua, move |_, _, a| {
                 let msg = a.s(1).unwrap_or_default();
                 match level {
-                    0 => bevy::log::info!("lua: {msg}"),
+                    // `UIParent:Log` is the scripts' trace output (state names, event names): debug,
+                    // under its own target (`RUST_LOG=aa_ui::lua=debug` brings it back).
+                    0 => bevy::log::debug!(target: "aa_ui::lua", "lua: {msg}"),
                     1 => bevy::log::warn!("lua: {msg}"),
                     _ => bevy::log::error!("lua: {msg}"),
                 }
@@ -261,6 +263,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         g.raw_set("X2", &addon)?;
     }
     install_game_stub(lua, "X2DialogManager")?;
+    // `X2Cursor` (what the pointer holds) and `RegisterForDrag`'s storage: see [`super::drag`].
+    super::drag::install(lua)?;
     // `X2Chat:DispatchChatMessage(filter, text)` routes a line to the chat tabs (see
     // [`super::chat`]); the rest of `X2Chat` is the app's.
     let x2chat = install_game_stub(lua, "X2Chat")?;
@@ -300,7 +304,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
 ///   (`components/dialog_handler.lua` registers `DLG_TASK_DEFAULT`); `RequestDefaultDialog(fn,
 ///   ownerId)` / `RequestNoticeDialog(fn, ownerId)` create a window with `textbox`, `btnOk`,
 ///   `btnCancel`, run the decorator with `(wnd, info)` (`info.buttonType` `DBT_OK_CANCEL` /
-///   `DBT_OK`, modal), then `fn(wnd, info)`, and show it; `OnOK` / `OnCancel` / `OnCustom(id)`
+///   `DBT_OK`, modal), then `fn(wnd, info)`, and show it; `RequestTaskDialog(task, info, ownerId)`
+///   is the same with the handler registered for the task (`DLG_TASK_*`) as `fn`, `info` merged
+///   into the dialog's info; `OnOK` / `OnCancel` / `OnCustom(id)`
 ///   close it, `DeleteByOwnerWindow(ownerId)` closes an owner's dialogs.
 /// * `X2Locale:LocalizeUiText` returns the key until the app provides the UI text table.
 const TOOLKIT_LUA: &str = r#"
@@ -364,6 +370,13 @@ function X2DialogManager:RequestDefaultDialog(fn, owner)
 end
 function X2DialogManager:RequestNoticeDialog(fn, owner)
   return requestDialog(fn, owner, DBT_OK)
+end
+function X2DialogManager:RequestTaskDialog(task, info, owner)
+  return requestDialog(function(wnd, dialogInfo)
+    for k, v in pairs(info or {}) do dialogInfo[k] = v end
+    local handler = dialogHandlers[task]
+    if handler then handler(wnd, dialogInfo) end
+  end, owner, DBT_OK_CANCEL)
 end
 local function closeDialog(id)
   local d = dialogs[id]

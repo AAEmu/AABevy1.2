@@ -302,6 +302,42 @@ least `n`, the whole track when nothing scrolls (`reference/ingame/options_keybi
 412, and 437 of 437). A click on a bound `slot` uses it through the app (`AAUI.UseSlot`, below)
 after the script's `OnClick`.
 
+Dragging and the pointer's hand (`lua/drag.rs`, tests in `tests/drag.rs`). A widget that called
+`RegisterForDrag("LeftButton")` is a drag source (a child of it counts: the press goes to the
+source). With the left button down on it, a move of 4 UI units starts the drag instead of a click:
+the source gets `OnDragStart(self, "LeftButton")`; on release the widget under the pointer, or its
+nearest ancestor with a handler, gets `OnDragReceive(self, "LeftButton")` (only while the pointer
+holds something), then the source `OnDragStop`; what is still held then is dropped on nothing
+(`AAUI.DropOnNothing(overUi)`, `overUi` false over the game world). The click that would follow
+the release is not sent. A right click while holding clears the hand. The thing in the hand is a
+Lua table the app sets with `X2Cursor:SetHeld(t)` (`kind`, `icon`, `frame`, `count` are what the
+toolkit draws, the rest is the app's; `GetHeld`, `GetCursorInfo`, `ClearCursor`; the window move
+cursor is `SetCursorImage`, never droppable). It is drawn as a 40 px icon with its grade frame and
+the count (above 1) on the pointer, over everything: separate meshes (`UiCursorBatch`, z 100), moved
+every frame and rebuilt only when the held thing or the screen changes. `slot` widgets bound to game
+data pick up and take drops natively through `AAUI.PickupSlot(info)` / `AAUI.DropSlot(info)` (a left
+click on a bound slot while holding drops too). Rust side: `UiRuntime::holding()`,
+`clear_cursor()` and `drop_on_nothing(over_ui)` (the app calls the last for a click on the world).
+
+Native slots and widgets with only `OnDragReceive` take mouse input without an `OnClick` handler.
+Disabled controls cannot start or receive a drag. If an `OnClick` handler changes the held item,
+that consumes the native slot click: placing an item cannot also use it, and picking one up
+cannot immediately place it again. The held icon rebuilds when the UI scale changes; new stack
+count glyphs upload before the first draw.
+
+The original title bars' `StartMoving` / `StopMovingOrSizing` now capture the window and move it
+with the pointer. Its resolved size survives replacing two stretching anchors with a single
+top-left anchor. Releasing the left button outside the OS window ends capture and clears its
+move cursor. `tests/drag.rs` covers capture and the bag/action-slot routing; `tests/slot_state.rs`
+runs the original `components/action_slot.alb` to check dark unusable skills, red/cyan learning
+states, passive required points and clearing the tooltip of an emptied slot.
+
+Checked 2026-10-17: 12 drag tests, the original-bytecode slot-state test, 6 HUD-widget tests and
+3 tooltip tests passed. The existing `ingame_hud` example produced
+`shots/aa-ui/drag-moved-bag.png`: the original bag moved 300 px left and 50 px up, retaining
+its layout, and a held item with grade frame and count 37 followed the pointer. Compared the
+bag to `reference/ingame/bag/real.png`; the harness logged 213–234 FPS during the final run.
+
 Keyboard: one widget has the focus (`SetFocus`, or a press on an edit box; `ClearFocus`, Escape
 or a press elsewhere drops it; `OnAcceptFocus` on gain). Keys go to it: edit boxes insert typed
 text at the caret (with `SetMaxTextLength`, `SetDigit`, `SetDigitMax`, `SetReadOnly`;
@@ -406,7 +442,8 @@ App::new()
   | `AAUI.WorldMap()` | the `worldmap` window (every frame while shown) | nil, or `{ level = 2\|3, zone = <zone_groups id>, player = { u, v, angle }, maps = { { level = 1, id = 3, u, v }, { level = 0, id = 2, u, v } } }`: the place on the zone (or city) map image and, optional, on the maps above (`world_groups` ids: 3 west, 4 east, 5 origin continent, 2 world); `u = (x - X) / W`, `v = 1 - (y - Y) / H` from the global position and the map's `zone_groups` / `world_groups` rectangle, exact against `reference/ingame/worldmap_*`; without `maps` the upper maps' place is estimated from the masks, without the hook the `RoadMap` result is used; `markers = { { level, id, u, v, kind, icon, coords, tooltip }, ... }` are the icons on the map `(level, id)` (the fraction of that map; only the shown map's are drawn, 24 px at every zoom, the tooltip is raised as `SHOW_WORLDMAP_TOOLTIP` / `HIDE_WORLDMAP_TOOLTIP` through `GetTooltipController`), `markers_version` (an integer) makes an unchanged list cost nothing |
   | `AAUI.MapClimate(zoneGroupId)` | the world map's climate display (`GetClimateInfo`) | nil, or `{ climateId, ... }` (`climates.id`: 2 temperate, 3 tropical, 4 subarctic, 5 arid) |
   | `AAUI.ConflictZones(worldGroupId)`, `AAUI.ConflictState(zoneGroupId)` | the continent map's tension circles (`GetConflictZoneListByWorldId`, `GetConflictStateByZoneId`), the zone map's state panel | `{ zoneGroupId, ... }` (west 19, 20, 22, 26, 27); `state, remainMs` with `state` `HPWS_TROUBLE_0` .. `4` (0..4), `HPWS_BATTLE` 5, `HPWS_WAR` 6, `HPWS_PEACE` 7, nil or -1 none (both optional; `fake_worldmap.lua` has the capture's states) |
-  | `AAUI.UseSlot(slotType, slotIdx, button)`, `AAUI.UseSkill(skillType, button)`, `AAUI.UseItem(itemType, grade, button)` | a click on a bound, enabled `slot` (`EstablishSlot` / `EstablishSkill` / `EstablishItem`), after the script's `OnClick` | nothing; `button` is `"LeftButton"` or `"RightButton"`. Run what the slot's hotkey runs (the action bar scripts' `OnClick` only hides the tooltip; the client uses the slot natively). The app decides by `slotType` and `button`. The bag window's buttons are not slots: a right click on an item runs the scripts' `X2Bag:HandleUse(virtualSlot)`, which `fake_bag.lua` turns into `AAUI.UseSlot(ISLOT_BAG, realSlot, "RightButton")` (the real slot from `X2Bag:SlotByIdx`, so the app's own `SlotByIdx` applies); a left click (`HandleClick`, picking the item up onto the cursor in the client) is not routed |
+  | `AAUI.UseSlot(slotType, slotIdx, button)`, `AAUI.UseSkill(skillType, button)`, `AAUI.UseItem(itemType, grade, button)` | a click on a bound, enabled `slot` (`EstablishSlot` / `EstablishSkill` / `EstablishItem`), after the script's `OnClick` | nothing; `button` is `"LeftButton"` or `"RightButton"`. Run what the slot's hotkey runs (the action bar scripts' `OnClick` only hides the tooltip; the client uses the slot natively). The app decides by `slotType` and `button`. The bag window's buttons are not slots: a right click on an item runs the scripts' `X2Bag:HandleUse(virtualSlot)`, which `fake_bag.lua` turns into `AAUI.UseSlot(ISLOT_BAG, realSlot, "RightButton")` (the real slot from `X2Bag:SlotByIdx`, so the app's own `SlotByIdx` applies); a left click (`HandleClick`, picking the item up onto the cursor in the client) is the pointer's hand: the app defines `X2Bag.HandleClick` with `X2Cursor:SetHeld` (see Input, `crates/aa-client/src/hud/drag.lua`) |
+  | `AAUI.PickupSlot(info)`, `AAUI.DropSlot(info)`, `AAUI.DropOnNothing(overUi)` | a drag that starts on a bound, enabled `slot` (no `OnDragStart` of its own); something held dropped on (or a left click on) a slot bound with `EstablishSlot`; a drag ended with the thing still held | nothing. `info = { widget, kind = "slot"\|"skill"\|"item", slotType, slotIdx \| skillType \| itemType, grade, content (the hook's table), empty, enabled }`; `PickupSlot` calls `X2Cursor:SetHeld(...)`, `DropSlot` reads `X2Cursor:GetHeld()`. Without `DropOnNothing` the hand is emptied; the toolkit does not decide what a drop means |
   | slot `tooltip` (in `SlotContent` / `SkillContent` / `ItemContent`), `X2Bag:GetBagItemInfo`, `X2Unit:UnitBuff`, `X2Skill:GetSkillTooltip(skill, item, flags)` | the game tooltips (`slot:GetTooltip`, the bag buttons, the buff icons, an item's use skill) | the client's tooltip info tables, which the tooltip scripts read: items `{ name, grade = "Basic", gradeColor = "FFBA976D" (item_grades), itemGrade, category (item_categories name), item_impl ("portal", "weapon", "armor", "accessory", ... or "etc"), soul_bound = 1 ("Untradeable"), skillType (the use skill: its description is the "Use" text), description, sellable, refund, stack, isStackable, level_requirement, level_limit, lifeSpan }`; skills `{ tipType = "skill", name, ability ("general" is "Basic"), skillLevel ("Rank 1"), path (icon), mana, casting, channeling (0: "Instant"), minRange, maxRange, cooldown, description }`; buffs `{ tipType = "buff", name, category = "Buff", path, description, timeLeft, stack }`; texts may carry `|c` colours (`fake_bag.lua`, `fake_ingame.lua` have the captured ones) |
   | `AAUI.ChatSend(channel, text, target)` | Enter in the chat input when no script set `OnEnterPressed` on it | nothing; `channel` `CHAT_SAY` 0, `CHAT_ZONE` 1, `CHAT_TRADE` 2, `CHAT_FIND_PARTY` 3, `CHAT_PARTY` 4, `CHAT_RAID` 5, `CHAT_FACTION` 6, `CHAT_EXPEDITION` 7, `CHAT_TRIAL` 11, `CHAT_RACE` 14, `CHAT_WHISPER` -3; `target` the whisper name or `""`; the slash command is already stripped |
   | `AAUI.Entity(name)` | `UIParent:GetEntityByName(name)` | nil (no such entity), or `{ pos = { x, y, z }, angles = { x, y, z } }` (or `{ 1, 2, 3 }` arrays); the scripts get an object with `GetName`, `GetPos` / `GetWorldPos`, `GetAngles` / `GetWorldAngles` (read from the table at each call, so the app may update it) and `IsValid` |
@@ -417,6 +454,12 @@ App::new()
   | `AAUI.ChatTabs(windowId)` | `chatwindow:SetChatWindowId` | `{ { id, name = "All", filters = { CMF_PARTY, ... } }, ... }` (no `filters`: every line) |
   | `AAUI.ChatColor(filter)` | `X2Chat:DispatchChatMessage` | `{ r, g, b }` or nil (a default per filter) |
   | `AAUI.RoadMap()` | the `roadmap` (every frame) | nil, or `{ level = 2, zone = 5, player = { u, v, angle }, markers = { { u, v, kind, icon, coords, tooltip }, ... } }` (level as the scripts register maps: 2 zone, 3 city; `u, v` on the map image, 0..1; `angle` the heading in radians, 0 north, clockwise, `-yaw` of the engine; `kind` a lower-case `M_*` name of `map/common.lua` such as `"quest_zone_gives"` (yellow !) or `"quest_main_gives"`, icons from `ui/map/icon/npc_icon.dds` unless `icon` / `coords` are given; `npc_*` kinds show with the map's NPC option; `markers_version`, an integer, keeps an unchanged list from being read again) |
+
+  The scripts' `UIParent:Log` / `LogAlways` (`print`) output (state names, event names) is logged at debug level
+  under the target `aa_ui::lua` (`RUST_LOG=aa_ui::lua=debug` shows it); `UIParent:Warning` / `Error` stay
+  warnings and errors. `X2DialogManager:RequestTaskDialog(task, info, owner)` makes the task's
+  dialog (`DLG_TASK_*`, the handlers of `dialog_handler.lua`) with `info` merged in, OK / Cancel;
+  set `wnd.OkProc` on the result for what OK does.
 
   `ui.refresh_slots()` asks the slot hooks again (bars changed); the roadmap and chat colours
   are read when needed. `X2Chat:DispatchChatMessage(filter, text)` is the toolkit's (it routes

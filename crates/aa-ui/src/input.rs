@@ -2,7 +2,8 @@
 //! `OnMouseDown` / `OnMouseUp` / `OnWheelUp` / `OnWheelDown` into Lua, plus the native
 //! behaviour of buttons (state art), check buttons (toggle + `OnCheckChanged`), edit boxes
 //! (keyboard focus, see [`crate::lua::edit`]), list controls (hover / selection) and sliders
-//! (press on the track or thumb and drag: the value follows the cursor, `OnSliderChanged`).
+//! (press on the track or thumb and drag: the value follows the cursor, `OnSliderChanged`). A press on a
+//! widget registered with `RegisterForDrag` that moves on starts a drag ([`crate::lua::drag`]).
 //! The wheel (`update`'s `wheel`, > 0 = up; `UiVirtualPointer::wheel` adds to the OS wheel) goes to
 //! the `OnWheelUp` / `OnWheelDown` handler of the widget under the cursor or its nearest ancestor
 //! with one; when no script takes it, the message frame under the cursor (the chat) scrolls
@@ -22,6 +23,7 @@ const MOUSE_HANDLERS: &[&str] = &[
     "OnWheelUp",
     "OnWheelDown",
     "OnDragStart",
+    "OnDragReceive",
     "OnDragStop",
     "OnMouseMove",
 ];
@@ -34,6 +36,17 @@ pub struct MouseState {
     /// The slider being dragged (captured until the button is released).
     slider: Option<Id>,
     last_cursor: Option<(f32, f32)>,
+    /// The left button went down on a drag source and is still down.
+    drag: Option<DragPress>,
+}
+
+/// A left button press on a widget registered with `RegisterForDrag` ([`lua::drag`]).
+#[derive(Clone, Copy)]
+struct DragPress {
+    src: Id,
+    at: (f32, f32),
+    /// The pointer moved far enough: `OnDragStart` was sent.
+    started: bool,
 }
 
 /// Topmost widget under `(x, y)` (UI units) that takes the mouse.
@@ -75,7 +88,10 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
                 .parent
                 .and_then(|p| u.tree.widget(p))
                 .is_some_and(|p| p.ty == WidgetType::ListCtrl);
-            let native = w.ty.mouse_native() || in_list;
+            let native = w.ty.mouse_native()
+                || w.slot.is_some()
+                || u.drag.registered.contains(&id)
+                || in_list;
             let scripted = u
                 .handlers
                 .get(&id)
@@ -140,10 +156,11 @@ pub fn update(
     right_up: bool,
     wheel: f32,
 ) {
-    let hover = cursor.and_then(|(x, y)| pick(lua, x, y));
     if let Some(c) = cursor {
         ui(lua).cursor = c;
+        lua::drag::move_to(lua, c);
     }
+    let hover = cursor.and_then(|(x, y)| pick(lua, x, y));
     let old = ui(lua).hover;
     if hover != old {
         {
@@ -186,6 +203,10 @@ pub fn update(
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
         mouse.slider = hover.and_then(|h| slider_of(lua, h));
+        mouse.drag = hover
+            .and_then(|h| lua::drag::source_of(lua, h))
+            .zip(cursor)
+            .map(|(src, at)| DragPress { src, at, started: false });
         if let (Some(s), Some(c)) = (mouse.slider, cursor) {
             drag_slider(lua, s, c);
         }
@@ -197,21 +218,38 @@ pub fn update(
     if cursor.is_some() {
         mouse.last_cursor = cursor;
     }
+    // The pointer left the press by a few units: a drag begins (`OnDragStart`, or the slot picks its content up).
+    if let (Some(p), Some(c)) = (mouse.drag.as_mut(), cursor)
+        && !p.started
+        && (c.0 - p.at.0).hypot(c.1 - p.at.1) >= lua::drag::DRAG_START_DISTANCE
+    {
+        p.started = true;
+        let src = p.src;
+        lua::drag::start(lua, src);
+    }
     if up {
         mouse.slider = None;
+        let dragged = mouse.drag.take().filter(|p| p.started);
         let pressed = mouse.pressed.take();
         ui(lua).tree.touch();
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
         }
-        if let (Some(p), Some(h)) = (pressed, hover)
+        lua::drag::stop_moving(lua);
+        if let Some(p) = dragged {
+            // the release of a drag: the drop, not a click
+            lua::drag::finish(lua, p.src, hover);
+        } else if let (Some(p), Some(h)) = (pressed, hover)
             && (ui(lua).tree.is_descendant(h, p) || h == p)
         {
             click(lua, mouse, h, "LeftButton");
         }
     }
-    if right_up && let Some(h) = hover {
+    if right_up && lua::drag::holding(lua) {
+        // a right click puts what the pointer holds back
+        lua::drag::clear(lua);
+    } else if right_up && let Some(h) = hover {
         click(lua, mouse, h, "RightButton");
     }
     if wheel != 0.0 {
@@ -279,6 +317,7 @@ fn drag_slider(lua: &Lua, slider: Id, (cx, cy): (f32, f32)) {
 }
 
 fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
+    let held_gen = ui(lua).drag.held_gen;
     lua::sound::click_sound(lua, target, button);
     let now = ui(lua).time_ms;
     let double = mouse
@@ -330,7 +369,10 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         lua::flush(lua);
     }
     // A slot uses what it holds (`AAUI.UseSlot` / `UseSkill` / `UseItem`).
-    if lua::slot::clicked(lua, target, button) {
+    // A script may already have picked up or placed an item. Do not use the slot after
+    // it cleared the hand, or immediately drop a thing the click just picked up.
+    let hand_unchanged = ui(lua).drag.held_gen == held_gen;
+    if hand_unchanged && lua::slot::clicked(lua, target, button) {
         lua::flush(lua);
     }
     // A row of a grid (quest list) that was clicked becomes its selected row.

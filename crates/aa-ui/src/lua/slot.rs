@@ -21,7 +21,12 @@
 //! AAUI.SlotHotKey(slotType, slotIdx)   -- slot:GetHotKey: "1", "SHIFT-1", "MINUS", ... or nil
 //! AAUI.UseSlot(slotType, slotIdx, button)  -- a click on a bound slot (`slot::clicked`)
 //! AAUI.UseSkill(skillType, button), AAUI.UseItem(itemType, grade, button)
+//! AAUI.PickupSlot(info), AAUI.DropSlot(info)  -- drag and drop of bound slots, see [`super::drag`]
 //! ```
+//!
+//! A left click on a bound slot uses it; while the pointer holds something it drops it there instead
+//! (`AAUI.DropSlot`). A drag from a bound, enabled slot picks its content
+//! up (`AAUI.PickupSlot`), a drop on one that was bound with `EstablishSlot` goes to `AAUI.DropSlot`.
 //!
 //! # Cooldowns
 //!
@@ -129,13 +134,15 @@ fn hook(lua: &Lua, name: &str) -> Option<Function> {
 /// `"RightButton"`). The app runs the same path as the slot's hotkey. Disabled or empty slots
 /// do nothing. Returns whether a hook ran.
 pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
-    let found = {
+    let (slot, found) = {
         let u = ui(lua);
         let mut t = Some(target);
         let mut found = None;
+        let mut slot = None;
         while let Some(id) = t {
             if let Some(w) = u.tree.widget(id) {
                 if let Some(s) = w.slot.as_ref() {
+                    slot = Some(id);
                     if w.enabled && s.binded.as_deref().is_some_and(|b| b != "none") {
                         found = s.source.clone();
                     }
@@ -147,8 +154,16 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
             }
             t = u.tree.get(id).parent;
         }
-        found
+        (slot, found)
     };
+    // A left click while the pointer holds something drops it here instead of using the slot.
+    if button == "LeftButton"
+        && let Some(slot) = slot
+        && super::drag::holding(lua)
+        && receive(lua, slot)
+    {
+        return true;
+    }
     let Some(source) = found else { return false };
     let (name, args): (&str, Vec<Value>) = match source {
         Source::Slot(t, i) => ("UseSlot", vec![Value::Integer(t), Value::Integer(i)]),
@@ -166,6 +181,86 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
     if let Err(e) = f.call::<()>(mlua::MultiValue::from_iter(args)) {
         bevy::log::warn!("aa-ui: AAUI.{name}: {e}");
     }
+    true
+}
+
+/// The table `AAUI.PickupSlot` / `AAUI.DropSlot` get for a slot: what it is bound to (`kind` `"slot"` with `slotType` /
+/// `slotIdx`, `"skill"` with `skillType`, `"item"` with `itemType` / `grade`), its `widget`, the `content` the hook
+/// returned when it was bound (nil when `empty`).
+fn info_table(lua: &Lua, id: Id) -> mlua::Result<Option<Table>> {
+    let (source, bound, enabled) = {
+        let u = ui(lua);
+        let Some(w) = u.tree.widget(id) else { return Ok(None) };
+        let Some(s) = w.slot.as_ref() else { return Ok(None) };
+        (s.source.clone(), s.binded.as_deref().is_some_and(|b| b != "none"), w.enabled)
+    };
+    let Some(source) = source else { return Ok(None) };
+    let t = lua.create_table()?;
+    match source {
+        Source::Slot(ty, idx) => {
+            t.raw_set("kind", "slot")?;
+            t.raw_set("slotType", ty)?;
+            t.raw_set("slotIdx", idx)?;
+        }
+        Source::Skill(s) => {
+            t.raw_set("kind", "skill")?;
+            t.raw_set("skillType", s)?;
+        }
+        Source::Item(it, g) => {
+            t.raw_set("kind", "item")?;
+            t.raw_set("itemType", it)?;
+            t.raw_set("grade", g)?;
+        }
+    }
+    t.raw_set("empty", !bound)?;
+    t.raw_set("enabled", enabled)?;
+    if let Some(w) = super::object_table(lua, id)? {
+        t.raw_set("widget", w)?;
+    }
+    if let Some(c) = contents(lua)?.raw_get::<Option<Table>>(id)? {
+        t.raw_set("content", c)?;
+    }
+    Ok(Some(t))
+}
+
+/// A drag started on slot `id` (it has no `OnDragStart` of its own): a bound, enabled slot lets the app pick its
+/// content up (`AAUI.PickupSlot(info)`). Returns whether the hook ran.
+pub(crate) fn drag_start(lua: &Lua, id: Id) -> bool {
+    let Some(f) = hook(lua, "PickupSlot") else { return false };
+    let info = match info_table(lua, id) {
+        Ok(Some(t)) => t,
+        _ => return false,
+    };
+    if info.raw_get::<bool>("empty").unwrap_or(true) || !info.raw_get::<bool>("enabled").unwrap_or(false) {
+        return false;
+    }
+    if let Err(e) = f.call::<()>(info) {
+        bevy::log::warn!("aa-ui: AAUI.PickupSlot: {e}");
+    }
+    super::flush(lua);
+    true
+}
+
+/// The held thing was dropped on (or a click landed on) widget `id`: a `slot` bound with `EstablishSlot` (the action
+/// bars) takes it through `AAUI.DropSlot(info)`, empty or not. False for anything else.
+pub(crate) fn receive(lua: &Lua, id: Id) -> bool {
+    let is_slot_source = {
+        let u = ui(lua);
+        u.tree.visible(id)
+            && u.tree.widget(id).is_some_and(|w| {
+                w.enabled
+                    && w.slot.as_ref().is_some_and(|s| matches!(s.source, Some(Source::Slot(..))))
+            })
+    };
+    if !is_slot_source {
+        return false;
+    }
+    let Some(f) = hook(lua, "DropSlot") else { return false };
+    let Ok(Some(info)) = info_table(lua, id) else { return false };
+    if let Err(e) = f.call::<()>(info) {
+        bevy::log::warn!("aa-ui: AAUI.DropSlot: {e}");
+    }
+    super::flush(lua);
     true
 }
 

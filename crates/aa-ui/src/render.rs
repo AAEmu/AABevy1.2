@@ -792,6 +792,8 @@ pub struct UiRenderState {
     pub force: bool,
     /// Split mode: render layer of the background camera (`UiConfig::background_camera_order`).
     pub background_layer: Option<usize>,
+    /// What the pointer's meshes were built for: held generation, screen size and UI scale bits.
+    pub cursor_key: Option<(u64, (u32, u32), u32)>,
 }
 
 /// Marker for the UI camera.
@@ -801,6 +803,85 @@ pub struct UiCamera;
 /// Marker for batch meshes.
 #[derive(Component)]
 pub struct UiBatch;
+
+/// Marker for the meshes of what the pointer holds ([`held_quads`]): moved to the pointer every frame.
+#[derive(Component)]
+pub struct UiCursorBatch;
+
+/// Size (UI units) of the icon that follows the pointer: a slot's 40 x 40 icon.
+const HELD_ICON: f32 = 40.0;
+
+/// The quads of what the pointer holds, around the pointer (0, 0), in pixels: an item or skill icon with its grade frame
+/// and the count in the corner, or the image of an image cursor. The caller moves them to the pointer.
+pub fn held_quads(u: &mut Ui) -> Vec<Quad> {
+    let Some(h) = u.drag.held.clone() else { return Vec::new() };
+    let scale = u.ui_scale;
+    let mut out = Vec::new();
+    let white = [1.0, 1.0, 1.0, 1.0];
+    if h.kind == "image" {
+        let Some(path) = h.icon.as_deref() else { return out };
+        let (Some(resolved), Some((tw, th))) = (u.textures.resolve(path), u.textures.size(path)) else { return out };
+        let r = Rect { x: h.offset[0], y: h.offset[1], w: tw as f32, h: th as f32 };
+        out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, vcolors: None });
+        return out;
+    }
+    let r = Rect { x: -HELD_ICON / 2.0, y: -HELD_ICON / 2.0, w: HELD_ICON, h: HELD_ICON };
+    for path in [h.icon.as_deref(), h.frame.as_deref()].into_iter().flatten() {
+        if let Some(resolved) = u.textures.resolve(path) {
+            out.push(Quad { tex: Tex::Image(resolved), pos: px(r, scale), uv: [0.0, 0.0, 1.0, 1.0], color: white, corners: None, vcolors: None });
+        }
+    }
+    if h.count > 1 {
+        let tb = TextBlock {
+            text: h.count.to_string(),
+            style: crate::tree::TextStyle { size: 11.0, align: crate::tree::Align::Right, shadow: true, ..Default::default() },
+            inset: [0.0, 0.0, 4.0, 3.0],
+            ..Default::default()
+        };
+        text_quads(u, &tb, Rect { x: r.x, y: r.bottom() - 16.0, w: r.w, h: 16.0 }, white, 1.0, scale, &mut out);
+    }
+    out
+}
+
+/// Keep the meshes of the held thing in step: rebuilt when it, the screen or the scale changed, moved to `pointer` (pixels)
+/// every frame, hidden without one.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn sync_cursor(
+    commands: &mut Commands,
+    state: &mut UiRenderState,
+    u: &mut Ui,
+    pointer: Option<Vec2>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    images: &mut Assets<Image>,
+    formats: Option<&CompressedImageFormatSupport>,
+    existing: &mut Query<(Entity, &mut Transform, &mut Visibility), (With<UiCursorBatch>, Without<UiCamera>)>,
+) {
+    let key = (u.drag.held_gen, state.screen, u.ui_scale.to_bits());
+    if state.cursor_key != Some(key) {
+        for (e, _, _) in existing.iter() {
+            commands.entity(e).despawn();
+        }
+        state.cursor_key = Some(key);
+        let quads = held_quads(u);
+        if !quads.is_empty() {
+            // Stack-count glyphs can be added here after the normal UI uploaded its atlas.
+            sync_atlas(u, state, images);
+            spawn_batches(commands, state, &quads, 0, meshes, materials, images, formats, || UiCursorBatch, pointer.unwrap_or(Vec2::splat(-10_000.0)), 100.0);
+        }
+        return;
+    }
+    for (_, mut tf, mut vis) in existing.iter_mut() {
+        match pointer {
+            Some(p) => {
+                tf.translation.x = p.x;
+                tf.translation.y = -p.y;
+                *vis = Visibility::Inherited;
+            }
+            None => *vis = Visibility::Hidden,
+        }
+    }
+}
 
 pub(crate) fn load_image(path: &str, formats: CompressedImageFormats) -> Option<Image> {
     let bytes = aa_pak::Pak::global().read(path).ok()?;
@@ -834,6 +915,31 @@ pub fn sync_batches(
     formats: Option<&CompressedImageFormatSupport>,
     existing: &Query<Entity, With<UiBatch>>,
 ) {
+    for e in existing.iter() {
+        commands.entity(e).despawn();
+    }
+    state.batches.clear();
+    let ids = spawn_batches(commands, state, quads, background_quads, meshes, materials, images, formats, || UiBatch, Vec2::ZERO, 0.0);
+    state.draw_calls = ids.len();
+    state.batches = ids;
+    state.quads = quads.len();
+}
+
+/// Spawn one entity per run of quads that share a texture (`marker` tags them, `z0` is the depth of the first).
+#[allow(clippy::too_many_arguments)]
+fn spawn_batches<M: Component>(
+    commands: &mut Commands,
+    state: &mut UiRenderState,
+    quads: &[Quad],
+    background_quads: usize,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    images: &mut Assets<Image>,
+    formats: Option<&CompressedImageFormatSupport>,
+    marker: impl Fn() -> M,
+    origin: Vec2,
+    z0: f32,
+) -> Vec<Entity> {
     let formats = formats.map(|f| f.0).unwrap_or(CompressedImageFormats::BC);
     // Group consecutive quads by texture (and, in split mode, by camera).
     let split = state.background_layer.is_some();
@@ -845,10 +951,7 @@ pub fn sync_batches(
             _ => batches.push((q.tex.clone(), bg, vec![q])),
         }
     }
-    for e in existing.iter() {
-        commands.entity(e).despawn();
-    }
-    state.batches.clear();
+    let mut spawned = Vec::with_capacity(batches.len());
     for (i, (tex, bg, qs)) in batches.iter().enumerate() {
         let image = match tex {
             Tex::Atlas => state.atlas.clone(),
@@ -910,20 +1013,18 @@ pub fn sync_batches(
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
         .with_inserted_indices(Indices::U32(idx));
         let mut e = commands.spawn((
-            UiBatch,
+            marker(),
             Mesh2d(meshes.add(mesh)),
             MeshMaterial2d(mat),
-            Transform::from_xyz(0.0, 0.0, i as f32 * 0.01),
+            Transform::from_xyz(origin.x, -origin.y, z0 + i as f32 * 0.01),
             bevy::camera::visibility::NoFrustumCulling,
         ));
         if let (true, Some(layer)) = (*bg, state.background_layer) {
             e.insert(bevy::camera::visibility::RenderLayers::layer(layer));
         }
-        let e = e.id();
-        state.batches.push(e);
+        spawned.push(e.id());
     }
-    state.quads = quads.len();
-    state.draw_calls = batches.len();
+    spawned
 }
 
 /// Upload the glyph atlas if it changed.

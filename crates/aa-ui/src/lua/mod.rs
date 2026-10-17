@@ -16,6 +16,7 @@ pub mod chat_input;
 pub mod classes;
 pub mod constants;
 pub mod diagram;
+pub mod drag;
 mod drawable;
 pub mod edit;
 pub mod folder;
@@ -78,6 +79,8 @@ pub struct Ui {
     pub queued_events: Vec<(String, Vec<Value>)>,
     /// `SetSounds(set)` by widget ([`sound`]).
     pub widget_sounds: HashMap<Id, String>,
+    /// Drag sources and what the pointer holds ([`drag`]).
+    pub drag: drag::DragState,
 }
 
 /// `Show(visible, ms)` fade.
