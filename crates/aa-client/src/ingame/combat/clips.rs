@@ -24,6 +24,13 @@ impl ClipEvents {
     pub fn release(&self) -> Option<f32> {
         self.launch.or(self.combat_sync)
     }
+
+    /// The events of clip `name` of the model whose animation table is `cal` (none when the model has no event database or no
+    /// such clip).
+    pub fn of(cal: &aa_anim::Cal, name: &str) -> ClipEvents {
+        let (Some(db), Some(entry)) = (cal.anim_events.as_deref(), cal.animation(name)) else { return ClipEvents::default() };
+        clip_events(db, &entry.path)
+    }
 }
 
 type Table = HashMap<String, ClipEvents>;
