@@ -221,6 +221,7 @@ Every server packet below is decoded in `game::ServerMsg`, forwarded by the sess
 | `SCBmPoint` | `LoyaltyChanged { bm_point }` | `loyalty` (loyalty tokens) |
 | `SCCombatEngaged` / `SCCombatCleared` | `CombatChanged { obj_id, engaged }` | `in_combat` |
 | `SCUnitDeath` | `UnitDeath { obj_id }` then `DeathDetails { kill_reason, resurrect_wait_ms, lost_exp, killer }` | `dead`, `hp = 0`; in `Units` also `Unit::dead = true` |
+| `SCNotifyResurrection` | `ResurrectionOffered { caster: BuffCaster }` | event only; the HUD retains the offer until the player is dead |
 | `SCCharacterResurrected` | `Resurrected { obj_id, pos, yaw }` | `dead = false` (and `Unit::dead = false`) |
 | `SCLootableState` | `Lootable { owner_type, obj_id, has_loot }` | `Loot::lootable` (corpses with loot for the player; also cleared by `UnitsRemoved`) |
 | `SCLootBagData` | `LootBag { items, loot_all }` | `Loot::bag` (what is left in the corpse that was opened), `bag_seq` + 1 |
@@ -431,6 +432,13 @@ Quests can be changed on the lane server with the GM chat commands `/quest add <
 | `Command::LootItem { owner_type, owner_obj_id, item_index }` | `CSLootItem` (`u16` index, `u16` owner type, `bc` owner, 2 x `u16` 0) | `LootItemTook` + `ItemsChanged`, or `LootItemFailed` (bag full, no right to the item) |
 | `Command::LootClose { owner_type, owner_obj_id }` | `CSLootCloseBag` | none |
 | `Command::LeaveWorld(LeaveTarget::Quit)` | `CSLeaveWorld` | `LeavePending`, `LeftWorld`, `Disconnected` |
+
+`SCNotifyResurrection` (0x041) contains one `SkillCaster`, decoded with `BuffCaster::read` (kind,
+object id and the extra fields of item/mount casters). Its `ResurrectionOffered` event preserves
+wire order: the lane server's free in-place offer for a character below level 10, unit caster 0,
+arrives before `UnitDeath` / `DeathDetails`. The HUD must retain that offer and raise its revival
+prompt once dead. The focused `cargo test -p aa-net --lib resurrection` checks caster layouts,
+truncation, compressed-batch alignment and event order (3 matching tests passed).
 
 For `UseItem`, `item_id` is `Item::id` of the bag item, `skill_id` its `items.use_skill_id` (the
 server refuses any other skill for the item), `Inventory::find_template(template)` gives the item.
