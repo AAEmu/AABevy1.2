@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use bevy::ecs::batching::BatchingStrategy;
 use bevy::prelude::*;
 
 use crate::caf::Clip;
@@ -105,6 +106,13 @@ pub struct Animator {
     /// Playback speed multiplier.
     pub speed: f32,
     pub paused: bool,
+    /// Seconds between updates (0 = every frame): far characters animate at a lower rate, which saves sampling, bone
+    /// transform propagation and skin extraction. The clip time still advances in real time.
+    pub interval: f32,
+    /// Time since the last update.
+    pub accum: f32,
+    /// The pose changed and its bones still have to be written.
+    fresh: bool,
     fade: Option<Fade>,
     /// The idle that `random_idle` interrupts.
     base_idle: Option<Playing>,
@@ -131,6 +139,9 @@ impl Animator {
             random_idle: None,
             speed: 1.0,
             paused: false,
+            interval: 0.0,
+            accum: 0.0,
+            fresh: false,
             fade: None,
             base_idle: None,
             pose,
@@ -229,13 +240,26 @@ pub fn take_stats() -> (u32, u64) {
 fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms: Query<&mut Transform>) {
     let started = Instant::now();
     let dt = time.delta_secs();
+    // sample the poses of the characters that are due (in parallel: a crowd is hundreds of bones each)
+    animators.par_iter_mut().batching_strategy(BatchingStrategy::fixed(8)).for_each(|mut a| {
+        if a.current.is_none() {
+            return;
+        }
+        a.accum += dt;
+        if a.accum < a.interval {
+            return;
+        }
+        let step = std::mem::take(&mut a.accum);
+        a.update(step);
+        a.fresh = true;
+    });
     let mut updated = 0;
     for mut a in &mut animators {
-        if a.current.is_none() {
+        if !a.fresh {
             continue;
         }
+        a.fresh = false;
         updated += 1;
-        a.update(dt);
         let a = &*a;
         for (i, &e) in a.bones.iter().enumerate() {
             if let Ok(mut t) = transforms.get_mut(e) {
