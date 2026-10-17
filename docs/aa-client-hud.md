@@ -147,11 +147,19 @@ live in the fake bag data, so they are lost with the stage; the original keeps t
 
 ### The stage is prebuilt during Loading
 
-Building the Lua stage takes 0.6-2 s. `prebuild_hud` does it a few frames into `Screen::Loading` with a
-second `UiRuntime` (`PrebuiltStage`), while the loading screen's own runtime keeps running; `build_hud` then
-swaps it in on entering the game (about 20-50 ms: the snapshot is refreshed, the world stage's events fire
-again, the renderer is told to redraw everything). It is dropped again on the way back to the world, character
-select or create screens. Without a prebuilt stage `build_hud` falls back to building it on entry.
+Building the Lua stage takes 0.35-1.5 s. `prebuild_hud` does it during `Screen::Loading`, once the player has
+spawned, with a second `UiRuntime` next to the loading screen's, and a little per frame: `BuildingStage` is
+`UiRuntime::run_stage` taken apart (the init script, then the stage's scripts in the same order, one
+script per step) and runs steps for 8 ms of each frame (`BUILD_BUDGET_MS`, or `AA_HUD_BUDGET_MS`; a huge value
+builds in one frame to compare). Listing the stage's scripts (the pak listing for the content directories and
+reading the table of contents files, 20-90 ms) is done on another thread. What is left to the main thread is the
+Lua itself: the longest single script is `skill/main_window.alb` (30-40 ms), so no loading frame is held up much
+longer than that. Release, loading screen worst frame (`flow: loading took ... (worst frame)`): 322-326 ms with
+the whole build in one frame, 51-53 ms chunked; the stage is ready after 40 frames, about 0.6 s. If the game
+starts before the stage is done, `build_hud` finishes it in one go. `build_hud` then swaps the stage in (about
+20-50 ms: the snapshot is refreshed, the world stage's events fire again, the renderer is told to redraw
+everything). It is dropped again on the way back to the world, character select or create screens. Without a
+prebuilt stage (`--enter-world`) `build_hud` builds it on entry.
 
 ## How it works
 
