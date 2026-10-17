@@ -37,8 +37,21 @@ X2Unit.UnitGender = function(self, unit) if isPlayer(unit) then return S().gende
 X2Unit.GetUnitId = function(self, unit) if isPlayer(unit) then return S().unit_id end return nil end
 X2Unit.GetFactionName = function(self, unit) if isPlayer(unit) then return S().faction end return nil end
 
+X2Unit.UnitIsDead = function(self, unit) if isPlayer(unit) then return S().dead end return false end
+X2Unit.UnitCombatState = function(self, unit) if isPlayer(unit) then return S().in_combat end return false end
+
 -- Experience: percent of the level, exp of the level, exp for the next level.
 X2Player.GetExpInfo = function(self) return S().exp_percent, S().exp_cur, S().exp_need end
+-- Exp a resurrection at a shrine wins back: the amount and its percent of the level.
+X2Player.GetRecoverableExp = function(self)
+  local need = tonumber(S().exp_need) or 0
+  local pct = 0
+  if need > 0 then pct = 100 * S().recoverable_exp / need end
+  return tostring(S().recoverable_exp), pct
+end
+X2Player.GetGamePoints = function(self)
+  return { honorPointStr = tostring(S().honor), livingPointStr = tostring(S().vocation), crimePoint = 0, crimeRecord = 0 }
+end
 X2Player.GetLaborPower = function(self) return S().labor end
 X2Player.GetMaxLaborPower = function(self) return S().max_labor end
 X2Player.GetBmPoint = function(self) return S().bm_point end
@@ -96,17 +109,11 @@ end
 
 -- Entering the world ------------------------------------------------------------------------------------
 -- What the client raises when the character has spawned and the loading screen closed: the world is
--- entered, the zone chat channels are joined (the "Entering Chat" lines), the new character's
+-- entered (the chat channels and lines follow from aa-net's state, chat.rs), the new character's
 -- "Game Controls" tutorial opens.
 HUD.enter_world = function()
   FAKE.fire_now("ENTERED_WORLD", true)
   FAKE.fire_now("LEFT_LOADING")
-  -- FALLBACK: the chat channels are not on the wire yet; the zone and faction ones every character joins
-  FAKE.fire_now("CHAT_JOINED_CHANNEL", CHAT_ZONE, S().zone)
-  FAKE.fire_now("CHAT_JOINED_CHANNEL", CHAT_TRADE, S().zone)
-  FAKE.fire_now("CHAT_JOINED_CHANNEL", CHAT_FIND_PARTY, S().zone)
-  FAKE.fire_now("CHAT_JOINED_CHANNEL", CHAT_FACTION, S().faction)
-  FAKE.fire_now("CHAT_JOINED_CHANNEL", CHAT_RACE, S().faction)
   -- FALLBACK: the tutorial of a brand new character (id 2584, two pages)
   if S().level <= 1 then
     FAKE.fire_now("TUTORIAL_EVENT", 2584, {
@@ -114,4 +121,91 @@ HUD.enter_world = function()
       { { title = "" }, { "tutorial_contents_2584_2_2" } },
     })
   end
+  HUD.setup_chat()
+end
+
+-- Chat input ----------------------------------------------------------------------------------------------
+-- Enter (or "/") opens the chat window's own edit box; Enter again sends the line to the channel of the
+-- last slash command (say at first); Escape closes it. "/w name text" whispers, "/1" shouts, "/p" party.
+local chat = { channel = 0, target = "" }
+local SLASH = {
+  s = "SAY", say = "SAY", ["1"] = "ZONE", y = "ZONE", shout = "ZONE", ["2"] = "TRADE", trade = "TRADE",
+  ["3"] = "FIND_PARTY", findparty = "FIND_PARTY", p = "PARTY", party = "PARTY", r = "RAID", raid = "RAID",
+  n = "FACTION", nation = "FACTION", faction = "FACTION", e = "EXPEDITION", ex = "EXPEDITION",
+  f = "FAMILY", family = "FAMILY", a = "RACE", ally = "RACE", alliance = "RACE",
+}
+local CHANNEL_LABEL = {
+  SAY = "Say", ZONE = "Shout", TRADE = "Trade", FIND_PARTY = "Party Search", PARTY = "Party", RAID = "Raid",
+  FACTION = "Nation", EXPEDITION = "Guild", FAMILY = "Family", RACE = "Alliance",
+}
+
+local function chatEdit()
+  local w = HUD.chat_window()
+  if w == nil then return nil end
+  return w:GetChatEdit()
+end
+
+local function channelValue(name) return _G["CHAT_" .. name] end
+
+local function showChannel(edit)
+  local label = "Say"
+  for name, text in pairs(CHANNEL_LABEL) do
+    if channelValue(name) == chat.channel then label = text end
+  end
+  if chat.target ~= "" then label = "To " .. chat.target end
+  local w = HUD.chat_window()
+  local selector = w and w:GetChatMethodSelector()
+  if selector ~= nil and selector.SetText ~= nil then selector:SetText(label) end
+end
+
+HUD.chat_open = function(prefill)
+  local edit = chatEdit()
+  if edit == nil then return end
+  edit:Show(true)
+  edit:SetText(prefill or "")
+  showChannel(edit)
+  edit:SetFocus()
+end
+
+HUD.chat_close = function()
+  local edit = chatEdit()
+  if edit == nil then return end
+  edit:SetText("")
+  edit:ClearFocus()
+  edit:Show(false)
+end
+
+-- Send what was typed: a slash command picks the channel (and keeps it for the next line).
+HUD.chat_submit = function(text)
+  text = text or ""
+  local cmd, rest = string.match(text, "^/(%S+)%s*(.*)$")
+  if cmd ~= nil then
+    cmd = string.lower(cmd)
+    if cmd == "w" or cmd == "whisper" or cmd == "t" or cmd == "tell" then
+      local name, msg = string.match(rest, "^(%S+)%s*(.*)$")
+      if name ~= nil then
+        chat.channel, chat.target = CHAT_WHISPER, name
+        text = msg
+      else
+        text = ""
+      end
+    elseif SLASH[cmd] ~= nil then
+      chat.channel, chat.target = channelValue(SLASH[cmd]), ""
+      text = rest
+    end
+  end
+  text = string.gsub(text, "^%s+", "")
+  if text ~= "" then
+    HUD.request("chat", chat.channel, text, chat.target)
+  end
+  HUD.chat_close()
+end
+
+HUD.setup_chat = function()
+  chat.channel = CHAT_SAY
+  local edit = chatEdit()
+  if edit == nil then return end
+  edit:SetHandler("OnEnterPressed", function(self) HUD.chat_submit(self:GetText()) end)
+  edit:SetHandler("OnEscapePressed", function(self) HUD.chat_close() end)
+  edit:Show(false)
 end

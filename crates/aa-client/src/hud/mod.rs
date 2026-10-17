@@ -26,7 +26,9 @@
 
 mod api;
 mod cameras;
+mod chat;
 mod data;
+mod input;
 
 use aa_net::state::Player;
 use aa_ui::UiRuntime;
@@ -40,6 +42,8 @@ use crate::login::host;
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HudKeyboardFocus(pub bool);
 
+pub use input::HudPointerOverUi;
+
 /// `--no-hud`: do not build the HUD (frame rate comparisons, screenshots of the bare world).
 #[derive(Resource)]
 struct HudOptions {
@@ -48,7 +52,11 @@ struct HudOptions {
 
 /// Whether the HUD stage is up (the runtime currently is the in-game UI).
 #[derive(Resource, Default)]
-struct HudBuilt(bool);
+struct HudBuilt {
+    up: bool,
+    /// Built this frame: what aa-net reported until now has been replayed into the scripts.
+    fresh: bool,
+}
 
 pub struct HudPlugin;
 
@@ -61,11 +69,26 @@ impl Plugin for HudPlugin {
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()
+            .init_resource::<HudPointerOverUi>()
+            .insert_resource(chat::ScriptedKeys::from_args())
             .insert_non_send(api::HudBridge::default())
-            .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| built.0 = false)
+            .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
+            // after the OS events became `ButtonInput`, before the game's systems read it
+            .add_systems(
+                PreUpdate,
+                (input::swallow_keys, input::pointer_over_ui)
+                    .chain()
+                    .after(bevy::input::InputSystems)
+                    .run_if(in_state(Screen::InGame)),
+            )
             .add_systems(
                 Update,
-                (build_hud.run_if(hud_wanted), sync_hud.run_if(hud_up), mirror_keyboard_focus, cameras::match_world_camera)
+                (
+                    build_hud.run_if(hud_wanted),
+                    (sync_hud, chat::route_chat, chat::chat_keys, input::hotkeys, api::handle_requests).run_if(hud_up),
+                    mirror_keyboard_focus,
+                    cameras::match_world_camera,
+                )
                     .chain()
                     .run_if(in_state(Screen::InGame)),
             );
@@ -74,17 +97,18 @@ impl Plugin for HudPlugin {
 
 /// In game, spawned, and the HUD stage not built yet.
 fn hud_wanted(built: Res<HudBuilt>, player: Res<Player>, options: Res<HudOptions>) -> bool {
-    options.enabled && !built.0 && player.spawn.is_some()
+    options.enabled && !built.up && player.spawn.is_some()
 }
 
 fn hud_up(built: Res<HudBuilt>) -> bool {
-    built.0
+    built.up
 }
 
 /// Builds the HUD stage: a fresh Lua state with the game API and the world stage's scripts, then the
 /// events of entering the world.
 fn build_hud(world: &mut World) {
     let bridge = world.non_send::<api::HudBridge>().0.clone();
+    let chat_state = world.resource::<aa_net::state::Chat>().clone();
     // the scripts read the data while they load: bring the snapshot up to date first
     api::refresh_snapshot(world, &bridge);
     let ok = host::switch_stage(world, |rt| {
@@ -92,10 +116,10 @@ fn build_hud(world: &mut World) {
             error!("hud: game API: {e}");
         }
         rt.run_stage(aa_ui::Stage::World);
-        api::enter_world(rt, &bridge);
+        api::enter_world(rt, &bridge, &chat_state);
     });
     if ok {
-        world.resource_mut::<HudBuilt>().0 = true;
+        *world.resource_mut::<HudBuilt>() = HudBuilt { up: true, fresh: true };
         // the stage was just built from this snapshot
         api::mark_pushed(&bridge);
     }
