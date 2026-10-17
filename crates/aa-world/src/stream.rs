@@ -192,6 +192,7 @@ impl Plugin for AaWorldPlugin {
             );
         crate::pipelines::build(app);
         crate::sky::build(app);
+        crate::night_sky::build(app);
         crate::objects::effects::build(app);
         crate::objects::sounds::build(app);
         crate::objects::lights::build(app);

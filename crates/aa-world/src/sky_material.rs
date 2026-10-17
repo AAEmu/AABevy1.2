@@ -81,6 +81,10 @@ impl Material for SkyMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         // seen from inside
         descriptor.primitive.cull_mode = None;
+        // A sky background must not fill depth: the catalogue stars are drawn at the far plane.
+        if let Some(depth) = &mut descriptor.depth_stencil {
+            depth.depth_write_enabled = Some(false);
+        }
         Ok(())
     }
 }

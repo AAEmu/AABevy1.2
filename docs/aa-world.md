@@ -501,6 +501,34 @@ sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_
 sky_phase sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
+**Original stars** (`night_sky.rs`, `stars.wesl`): `libs/sky/stars.dat` is 106,956 bytes: `STAR`, version `0x00010001`,
+count 8,912, then 12-byte records (`f32` right ascension in hours, `f32` declination in degrees, four bytes RGB / magnitude).
+The matching catalogue reader in public Lumberyard [`CRESky.cpp`](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/RenderDll/Common/RendElements/CRESky.cpp) confirms the Cry direction
+`(-cos(dec) sin(15 RA), cos(dec) cos(15 RA), sin(dec))`. The original `shaders/hwscripts/cryfx/stars.cfx` supplies the magnitude
+conversion, eight-entry flicker table, Gaussian colour / hot-core falloff and additive blend. Its geometry shader expands
+the screen-facing quads; the matching [`CStars::Render`](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/RenderDll/XRenderD3D9/D3DRenderRE.cpp) uses five pixels, reduced below 1280 x 720, and half-speed flicker time.
+One bounded asset-worker request builds a single cached mesh (35,648 vertices, 53,472 indices), with no per-frame geometry or
+per-star entities. Camera translation is excluded; reverse-depth testing keeps terrain and opaque props in front. The sky
+background now leaves depth unwritten so stars at the far plane remain visible. `StarSettings.enabled` or `AA_NO_STARS=1`
+disables them. `StarStats` exposes the catalogue count and current intensity. `EnvSample.star_intensity` samples the authored
+`Night sky: Star intensity` spline at the same warped hour as the rest of the environment and blends between zones. The material
+uses the existing radiance / exposure calibration; intensities below the native `1e-3` threshold hide the draw entirely.
+
+`cargo run -p aa-world --example stars -- --shot shots/aa-world/night/stars.png --shot-after 14` captures the night sky above
+the main-world hills. Same-camera controls are `--off` (`night/off.png`) and `--day` (`night/day.png`). Inspected at 1920 x 1080:
+coloured stars with no dark sprite rectangles, correct hill occlusion, no stars when disabled, and no visible stars at noon
+(authored intensity 0.0012 versus 3 at midnight). Night FPS 181-253, disabled 228-253, daytime 166-206 on the shared RX 9070 XT;
+these separate runs are not a controlled GPU benchmark. No matching real-client night capture exists under `reference/`, so
+the sky brightness has not been calibrated against a nighttime reference. The real-catalogue test validates Sirius / Arcturus,
+native magnitude bytes, normalized directions, mesh counts, truncation rejection and nighttime / daytime spline interpolation.
+
+**Remaining moon gap**: main-world `env.xml` authors `big_moon_df.dds` at latitude 240 / longitude 45 / size 0.22 and
+`small_moon_df.dds` at 140 / 35 / 0.025, under the native spelling `SecondayMoons`; the other two slots are disabled. The assets
+are under `textures/skys/night/`. `x2moon.cfx` specifies the textured alpha disc and inner / outer corona formula, and the zone
+splines contain separate Moon 0 / Moon 1 colours and multipliers. The ArcheAge CPU mapping from these sizes to the moon quad
+has not been recovered. Public Cry / Lumberyard single-moon sizing differs and is not sufficient evidence for the two authored
+discs here. Moon discs / coronas remain undrawn pending that mapping; no substitute discs have been added.
+
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
 `CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
 `T(0, 0, -sin axis) x Rz((hour + 12) / 24 turn) x Rx(latitude - 90) x Ry(-rotation)` are multiplied and inverted and the point (0, 1, 0) is
@@ -1149,7 +1177,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Not rendered: deferred object.dat decals (type 9), types 6 and 14, animated/skinned `entities.xml` render slots, indirect/projected local lights.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
-  conflict, see Post), eye adaptation, moon / stars (the night sky is the gradient only), procedural grass blades, sprites for far vegetation (HLOD).
+  conflict, see Post), eye adaptation, moon discs / coronas (original stars are drawn), procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
   spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
