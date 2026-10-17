@@ -329,16 +329,25 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
             .or_else(|| g.zone(spawn.zone_id()))
     });
     let sub_zone = game.and_then(|g| g.sub_zone_at(pos.x, pos.y)).unwrap_or_default().to_string();
+    // the maxima: the database's formulas over level, gear and buffs (the server sends none), the highest seen until it is read
+    let own_buffs = world.get_resource::<aa_net::state::Buffs>().map_or(&[][..], |b| b.of(spawn.obj_id));
+    let formula_max = game.zip(world.get_resource::<aa_net::state::Inventory>()).and_then(|(g, inv)| {
+        g.stats.player_max(level, &super::stats::gear_of(&inv.equipment), &super::stats::buff_list(own_buffs))
+    });
+    let (known_hp, known_mp) = stats.map_or((character.hp, character.mp), |s| (s.max_hp, s.max_mp));
+    let hp = stats.map_or(character.hp, |s| s.hp);
+    let mp = stats.map_or(character.mp, |s| s.mp);
+    let (max_hp, max_mp) = formula_max.map_or((known_hp, known_mp), |(h, m)| (h.max(hp), m.max(mp)));
     let snapshot = Snapshot {
         unit_id: spawn.obj_id.to_string(),
         name: spawn.name().to_string(),
         level,
         race: character.race,
         gender: character.gender,
-        hp: stats.map_or(character.hp, |s| s.hp),
-        max_hp: stats.map_or(character.hp, |s| s.max_hp).max(1),
-        mp: stats.map_or(character.mp, |s| s.mp),
-        max_mp: stats.map_or(character.mp, |s| s.max_mp).max(1),
+        hp,
+        max_hp: max_hp.max(1),
+        mp,
+        max_mp: max_mp.max(1),
         dead: stats.is_some_and(|s| s.dead),
         in_combat: stats.is_some_and(|s| s.in_combat),
         exp_percent,
@@ -362,6 +371,16 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         hour: hour.floor() as u8 % 24,
         minute: (hour.fract() * 60.0).floor(),
     };
+    if formula_max.is_some() {
+        // everything else that reads `PlayerStats` gets the real maxima too
+        let (max_hp, max_mp) = (snapshot.max_hp, snapshot.max_mp);
+        drop(data);
+        if let Some(mut s) = world.get_resource_mut::<PlayerStats>().filter(|s| s.obj_id != 0 && (s.max_hp, s.max_mp) != (max_hp, max_mp)) {
+            debug!("hud: max hp/mp {max_hp}/{max_mp} from the formulas (was {}/{}, current {}/{})", s.max_hp, s.max_mp, s.hp, s.mp);
+            s.set_max(max_hp, max_mp);
+        }
+        data = bridge.borrow_mut();
+    }
     data.snapshot = snapshot;
     let own_obj_id = spawn.obj_id;
     let own_faction = character.faction_id;
@@ -443,10 +462,10 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
             return;
         }
     };
-    if changed.slots {
-        if let Err(e) = rt.refresh_slots() {
-            warn!("hud: refresh slots: {e}");
-        }
+    if changed.slots
+        && let Err(e) = rt.refresh_slots()
+    {
+        warn!("hud: refresh slots: {e}");
     }
     let id = |t: &Option<panels::TargetSnap>| t.as_ref().map(|t| t.obj_id);
     if id(&old.target) != id(&new.target) {
@@ -464,7 +483,8 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     }
 }
 
-fn push_state(rt: &UiRuntime, bridge: &Shared) {    let (old, new) = {
+fn push_state(rt: &UiRuntime, bridge: &Shared) {
+    let (old, new) = {
         let mut d = bridge.borrow_mut();
         if d.pushed.as_ref() == Some(&d.snapshot) {
             return;

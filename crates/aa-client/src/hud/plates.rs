@@ -33,7 +33,7 @@ const MAX_PLATES: usize = 40;
 const BAR_W: f32 = 69.0;
 const BAR_H: f32 = 6.0;
 /// Metres between the head and the bar.
-const HEAD_GAP: f32 = 0.3;
+pub(super) const HEAD_GAP: f32 = 0.3;
 /// A character's height for the plate, metres: the plate sits over the head, not over the bow.
 const CHARACTER_HEIGHT: f32 = 1.85;
 /// Name sizes: NPCs, other characters (the client draws player names much larger).
@@ -63,6 +63,7 @@ pub fn load_font(mut fonts: ResMut<Assets<Font>>, mut font: ResMut<PlateFont>) {
 /// The camera that draws the plates, in game only. It is spawned once the world camera has its
 /// final HDR / MSAA settings (aa-world's post processing adds them a frame after the camera exists):
 /// a frame in which the two disagree is a validation error of the shared main texture.
+#[allow(clippy::type_complexity)]
 pub fn ensure_camera(
     mut commands: Commands,
     world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>)>,
@@ -84,13 +85,15 @@ pub fn ensure_camera(
     ));
 }
 
-pub fn despawn(mut commands: Commands, cameras: Query<Entity, With<PlateCamera>>, plates: Query<Entity, With<PlateRoot>>) {
+pub fn despawn(mut commands: Commands, mut state: ResMut<PlateState>, cameras: Query<Entity, With<PlateCamera>>, plates: Query<Entity, With<PlateRoot>>) {
     for e in cameras.iter().chain(plates.iter()) {
         commands.entity(e).despawn();
     }
+    *state = PlateState::default();
 }
 
 /// The plate camera takes the world camera's HDR and MSAA settings (see `cameras.rs`).
+#[allow(clippy::type_complexity)]
 pub fn match_camera(
     mut commands: Commands,
     world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>)>,
@@ -123,14 +126,17 @@ struct Plate {
     color: (u8, u8, u8),
 }
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 pub struct PlateState {
     plates: HashMap<u32, Plate>,
     /// Unit object id -> its entity in the 3D scene, found by name every half second or so.
-    entities: HashMap<u32, Entity>,
+    pub(super) entities: HashMap<u32, Entity>,
     scan_in: u32,
     /// Unit object id -> height of its model (metres) and the attempts spent measuring it.
-    heights: HashMap<u32, (f32, u8)>,
+    pub(super) heights: HashMap<u32, (f32, u8)>,
+    /// Unit object id -> maximum HP from the formulas and the frames until it is worked out again
+    /// (the buffs and level it depends on change rarely).
+    max_hp: HashMap<u32, (i32, u8)>,
 }
 
 fn srgb(c: (u8, u8, u8)) -> Color {
@@ -169,13 +175,14 @@ fn measure(root: Entity, children: &Query<&Children>, bounds: &Query<(&Aabb, &Gl
     top.map(|t| (t - base_y).max(0.3))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_plates(
     mut commands: Commands,
-    mut state: Local<PlateState>,
+    mut state: ResMut<PlateState>,
     font: Res<PlateFont>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    buffs: Res<aa_net::state::Buffs>,
     player: Res<Player>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>)>,
     named: Query<(Entity, &Name)>,
@@ -204,13 +211,16 @@ pub fn update_plates(
             let n = name.as_str();
             if n == own_name {
                 found.insert(own, entity);
-            } else if let Some(rest) = n.strip_prefix("unit ") {
-                if let Some(id) = rest.split(' ').next().and_then(|v| v.parse::<u32>().ok()) {
-                    found.insert(id, entity);
-                }
+            } else if let Some(rest) = n.strip_prefix("unit ")
+                && let Some(id) = rest.split(' ').next().and_then(|v| v.parse::<u32>().ok())
+            {
+                found.insert(id, entity);
             }
         }
         state.entities = found;
+        // units that went out of view
+        let in_view: std::collections::HashSet<u32> = units.iter().map(|u| u.obj_id).collect();
+        state.max_hp.retain(|id, _| in_view.contains(id));
     }
     state.scan_in -= 1;
 
@@ -270,7 +280,16 @@ pub fn update_plates(
             if !state.plates.contains_key(&w.id) {
                 debug!("hud: plate {} {:?}: faction {} (unit {}) own {} -> {}, entity {:?}", w.id, name, faction, u.faction_id, spawn.character().faction_id, relation, state.entities.get(&w.id));
             }
-            let fraction = (u.hp as f32 / u.max_hp.max(u.hp).max(1) as f32).clamp(0.0, 1.0);
+            let max_hp = {
+                let entry = state.max_hp.entry(w.id).or_insert((0, 0));
+                if entry.1 == 0 {
+                    entry.0 = game.and_then(|g| super::stats::unit_max(g, u, buffs.of(u.obj_id))).map_or(u.max_hp, |m| m.0);
+                    entry.1 = 90;
+                }
+                entry.1 -= 1;
+                entry.0
+            };
+            let fraction = (u.hp as f32 / max_hp.max(u.hp).max(1) as f32).clamp(0.0, 1.0);
             (name, fraction, true, relation, u.scale, Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
         };
         // where its feet are in the 3D scene
@@ -288,13 +307,13 @@ pub fn update_plates(
         let height = {
             let frame = state.scan_in;
             let entry = state.heights.entry(w.id).or_insert((0.0, 0));
-            if entry.1 < 40 && (entry.0 <= 0.0 || frame % 10 == 0) {
+            if entry.1 < 40 && (entry.0 <= 0.0 || frame.is_multiple_of(10)) {
                 entry.1 += 1;
-                if let Some(h) = entity.and_then(|e| measure(e, &children, &bounds, root_pos.y)) {
-                    if h > entry.0 {
-                        entry.0 = h;
-                        debug!("hud: plate height of unit {} ({}): {:.2} m (scale {:.2})", w.id, name, h, scale);
-                    }
+                if let Some(h) = entity.and_then(|e| measure(e, &children, &bounds, root_pos.y))
+                    && h > entry.0
+                {
+                    entry.0 = h;
+                    debug!("hud: plate height of unit {} ({}): {:.2} m (scale {:.2})", w.id, name, h, scale);
                 }
             }
             let height = if entry.0 > 0.0 { entry.0 } else { 1.8 * scale.max(0.3) };
@@ -403,10 +422,10 @@ pub fn update_plates(
     let gone: Vec<u32> = state.plates.keys().copied().filter(|id| !seen.contains(id)).collect();
     for id in gone {
         let Some(p) = state.plates.get(&id) else { continue };
-        if let Ok((_, mut v)) = roots.get_mut(p.root) {
-            if *v != Visibility::Hidden {
-                *v = Visibility::Hidden;
-            }
+        if let Ok((_, mut v)) = roots.get_mut(p.root)
+            && *v != Visibility::Hidden
+        {
+            *v = Visibility::Hidden;
         }
         // units that left the view for good lose their plate
         if units.get(id).is_none() && id != own {
@@ -424,11 +443,13 @@ fn wanted(options: Option<Res<super::HudOptions>>) -> bool {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<PlateFont>()
+        .init_resource::<PlateState>()
+        .init_resource::<super::marks::MarkState>()
         .add_systems(Startup, load_font)
-        .add_systems(OnExit(Screen::InGame), despawn)
+        .add_systems(OnExit(Screen::InGame), (despawn, super::marks::despawn))
         .add_systems(
             PostUpdate,
-            update_plates.before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
+            (update_plates, super::marks::update_marks).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
         .add_systems(Update, (ensure_camera, match_camera).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
 }

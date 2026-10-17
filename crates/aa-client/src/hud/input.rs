@@ -30,6 +30,7 @@ pub fn swallow_keys(stats: Res<aa_ui::UiStats>, focus: Res<HudKeyboardFocus>, mu
 
 /// Whether the cursor is over a clickable widget; recomputed only when the cursor, the buttons or the
 /// widget tree changed.
+#[allow(clippy::type_complexity)]
 pub fn pointer_over_ui(
     rt: Option<NonSend<UiRuntime>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -85,10 +86,10 @@ pub fn hotkeys(keys: Res<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt
         (KeyCode::KeyL, "toggle_quest"),
         (KeyCode::KeyM, "toggle_worldmap"),
     ] {
-        if keys.just_pressed(key) {
-            if let Err(e) = rt.hotkey(action) {
-                warn!("hud: {action}: {e}");
-            }
+        if keys.just_pressed(key)
+            && let Err(e) = rt.hotkey(action)
+        {
+            warn!("hud: {action}: {e}");
         }
     }
 }

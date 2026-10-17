@@ -41,6 +41,8 @@ pub struct SlotSnap {
     /// Items: description and level requirement (tooltips).
     pub desc: String,
     pub level: i64,
+    /// Items: `item_groups.id` (bag tabs).
+    pub group: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -116,16 +118,30 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
         cooldown: None,
         desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
         level: info.map_or(0, |i| i.level),
+        group: info.map_or(0, |i| i.group),
     }
 }
 
 fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
     let info = game.and_then(|g| g.skills.get(&skill));
-    // quantized to a quarter second: the end time of a running cooldown must not jitter
+    // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
+    // ignore it waits for it), whichever ends later; quantized to a quarter second: the end time of a
+    // running cooldown must not jitter
     let cooldown = info.and_then(|i| {
-        let left = skills?.cooldown_left(skill, i.tag, i.cooldown_ms)?;
+        let skills = skills?;
+        let own = skills.cooldown_left(skill, i.tag, i.cooldown_ms).map(|left| (left, i.cooldown_ms));
+        let global = (!i.ignore_gcd)
+            .then(|| {
+                let len = game?.skills.get(&skills.last_cast_skill)?.gcd_ms;
+                skills.gcd_left(len).map(|left| (left, len))
+            })
+            .flatten();
+        let (left, total) = match (own, global) {
+            (Some(a), Some(b)) => if b.0 > a.0 { b } else { a },
+            (a, b) => a.or(b)?,
+        };
         let end = now_ms(start) + left.as_millis() as u64;
-        Some(((end + 125) / 250 * 250, i.cooldown_ms))
+        Some(((end + 125) / 250 * 250, total))
     });
     SlotSnap {
         kind: "skill",
@@ -138,6 +154,7 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
         cooldown,
         desc: String::new(),
         level: 0,
+        group: 0,
     }
 }
 
@@ -227,41 +244,44 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         p.buffs = buff_lists(game, buffs.of(own_obj_id), start);
     }
     let mut target_pos = None;
-    if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>()) {
-        if let Some(u) = target.unit(units) {
-            let template = u.kind.template_id();
-            let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
-            let faction = if u.faction_id != 0 { u.faction_id } else { npc.map_or(0, |n| n.faction_id as u32) };
-            let (race, gender) = unit_race_gender(u.race_gender);
-            let (unit_type, detail) = match u.kind {
-                UnitKind::Character { .. } => ("character", "character"),
-                UnitKind::Npc { .. } => ("npc", "npc"),
-                UnitKind::Slave { .. } => ("npc", "slave"),
-                UnitKind::Housing { .. } => ("npc", "housing"),
-                UnitKind::Transfer { .. } => ("npc", "transfer"),
-                UnitKind::Mate { .. } => ("npc", "mate"),
-                UnitKind::Shipyard { .. } => ("npc", "shipyard"),
-            };
-            let name = if !u.name.is_empty() { u.name.clone() } else { npc.map(|n| n.name.clone()).unwrap_or_default() };
-            p.target = Some(TargetSnap {
-                obj_id: u.obj_id,
-                name,
-                level: u.level.max(1),
-                hp: u.hp,
-                max_hp: u.max_hp.max(u.hp).max(1),
-                mp: u.mp,
-                max_mp: u.max_mp.max(u.mp),
-                unit_type,
-                detail,
-                faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
-                relation: game.map_or("neutral", |g| g.relation(own_faction, faction)),
-                grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
-                race,
-                gender,
-                buffs: world.get_resource::<Buffs>().map(|b| buff_lists(game, b.of(u.obj_id), start)).unwrap_or_default(),
-            });
-            target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
-        }
+    if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
+        && let Some(u) = target.unit(units)
+    {
+        let template = u.kind.template_id();
+        let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
+        let faction = if u.faction_id != 0 { u.faction_id } else { npc.map_or(0, |n| n.faction_id as u32) };
+        let (race, gender) = unit_race_gender(u.race_gender);
+        let (unit_type, detail) = match u.kind {
+            UnitKind::Character { .. } => ("character", "character"),
+            UnitKind::Npc { .. } => ("npc", "npc"),
+            UnitKind::Slave { .. } => ("npc", "slave"),
+            UnitKind::Housing { .. } => ("npc", "housing"),
+            UnitKind::Transfer { .. } => ("npc", "transfer"),
+            UnitKind::Mate { .. } => ("npc", "mate"),
+            UnitKind::Shipyard { .. } => ("npc", "shipyard"),
+        };
+        let name = if !u.name.is_empty() { u.name.clone() } else { npc.map(|n| n.name.clone()).unwrap_or_default() };
+        // the maxima come from the database's formulas; the highest seen is the fallback
+        let unit_buffs = world.get_resource::<Buffs>().map_or(&[][..], |b| b.of(u.obj_id));
+        let (max_hp, max_mp) = game.and_then(|g| super::stats::unit_max(g, u, unit_buffs)).unwrap_or((u.max_hp, u.max_mp));
+        p.target = Some(TargetSnap {
+            obj_id: u.obj_id,
+            name,
+            level: u.level.max(1),
+            hp: u.hp,
+            max_hp: max_hp.max(u.hp).max(1),
+            mp: u.mp,
+            max_mp: max_mp.max(u.mp),
+            unit_type,
+            detail,
+            faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
+            relation: game.map_or("neutral", |g| g.relation(own_faction, faction)),
+            grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
+            race,
+            gender,
+            buffs: world.get_resource::<Buffs>().map(|b| buff_lists(game, b.of(u.obj_id), start)).unwrap_or_default(),
+        });
+        target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
     }
     (p, target_pos)
 }
@@ -277,6 +297,7 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("grade", i64::from(s.grade))?;
     t.raw_set("desc", s.desc.as_str())?;
     t.raw_set("level", s.level)?;
+    t.raw_set("group", i64::from(s.group))?;
     if let Some((end, total)) = s.cooldown {
         t.raw_set("cd_end", end as f64)?;
         t.raw_set("cd_total", i64::from(total))?;
@@ -416,6 +437,7 @@ pub fn use_slot(slot: usize, game: Option<&GameData>, bar: &ActionBar, inventory
 }
 
 /// The action bar's number keys.
+#[allow(clippy::too_many_arguments)]
 pub fn action_keys(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<HudKeyboardFocus>,
