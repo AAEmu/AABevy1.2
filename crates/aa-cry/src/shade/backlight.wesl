@@ -4,6 +4,7 @@
 
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
+    mesh_bindings::mesh,
     mesh_functions::get_world_from_local,
     mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
@@ -18,14 +19,36 @@ struct BackLightParams {
     lights: array<vec4<f32>, 2>,
 }
 
-@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> back: BackLightParams;
-// rgb: factor on the base colour to get the albedo of the back lights (skins, see `skin_tag`)
-@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<uniform> albedo_scale: vec4<f32>;
+struct BackData {
+    params: BackLightParams,
+    // rgb: factor on the base colour to get the albedo of the back lights (skins, see `skin_tag`)
+    albedo: vec4<f32>,
+}
+
+// The material extension is bindless like StandardMaterial (see `CharBackExt`): an index table (binding 100) and one
+// array with the data of all materials (binding 101); without bindless a plain uniform (binding 50).
+@if(BINDLESS) {
+struct BackIndices {
+    data: u32,  // 50
+}
+
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> back_indices: array<BackIndices>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> back_array: array<BackData>;
+}
+@else {
+@group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> back_uniform: BackData;
+}
 
 const PI: f32 = 3.14159265;
 
 // What the two lights add, in the units `apply_pbr_lighting` returns (it multiplies the lux by the exposure too).
 fn back_light(pbr: PbrInput, instance_index: u32) -> vec3<f32> {
+@if(BINDLESS)
+    let data = back_array[back_indices[mesh[instance_index].material_and_lightmap_bind_group_slot & 0xffffu].data];
+@else
+    let data = back_uniform;
+    let back = data.params;
+    let albedo_scale = data.albedo;
     let n = pbr.N;
     let v = pbr.V;
     let base = pbr.material.base_color.rgb * albedo_scale.rgb;
