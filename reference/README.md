@@ -22,6 +22,11 @@ Use them to check the Bevy remake pixel for pixel and widget for widget.
 | `loading/real_01..04_*.png` | loading screen frames: fade from char select, 0 %, 48 %, 100 % (ship at sea, gauge, tip) |
 | `loading/ui_third_state_all_widgets.json` | the loading screen widget tree (it lives in the *third* Lua state, see below) |
 | `ingame/spawn/` | first frame in world (`real_first_frame.png`) and settled HUD (`real.png`) of the brand new character, ui.json, camera.json with player entity position |
+| `ingame/character_info/` | Character Info window (C) with the 3D player model: window at (28,60) 430x519; the equipment slot columns are separate widgets at x=760 (left) and x=1118 (right), 42x42 slots, y=290..774, model centred near x=960 (`player_screen.json` = player screen position) |
+| `ingame/options_keybinds/` | Options window (680x615, centred) on Key Settings - Game Keybinds; `row_titles.json` holds the row title strings (textbox `GetText()` is empty, see Quirks) with wrap info |
+| `ingame/bag/` | Bag window (I / B) with the 4 starter items (4/50 slots), docked at the right |
+| `ingame/worldmap_zone/` | World map (M) at zone level (Solzreed Peninsula / Desiree Peak, map size 3), window centred x 378..1545, y 222..858 |
+| `ingame/worldmap_continent/`, `worldmap_world/` | same window after one / two right-clicks on the map: Nuia continent, then the world map |
 | `api/widget_methods.json` | per widget class: full method list (`metatable.__index`); drawables; text style |
 | `api/x2_globals.json` | every global of the UI / System / third Lua state split into stdlib, native, `X2*`, Lua-script functions, data tables (login stage) |
 | `api/x2_globals_ingame.json` | same, in world (native surface identical, +760 script-defined UI functions) |
@@ -164,3 +169,11 @@ In-game: wait for `X2:IsEnteredWorld()`, then `capture.py screen ingame/spawn`.
 * The shared server also holds characters of other sessions; the test character here is `Refone` (account `clienttest`, Nuian male, Battlerage).
 * Capturing a PNG costs ~0.3 s (DXGI hook), a `ui.json` snapshot 1-8 s depending on the stage (in world: ~25k registry objects, ~500 shown).
 * Screen backgrounds animate (ambient motion, idle animations, fades): two captures of the "same" screen differ by ~0.6 grey levels on average.
+* **In-game windows** (`ingame/*`): open with the hotkey actions through the MCP `client_action` tool (`toggle_character`, `toggle_bag`, `toggle_worldmap`;
+  `capture.mcp_call('client_action', {'pid': pid, 'action': 'toggle_character'})`) or real key presses. World map zoom: `capture.click(pid, 860, 540, 'right_click')`
+  goes zone -> continent -> world. The Options window is opened with real clicks (gear at (1897,1055), then the **Options** entry at (1820,977), then the
+  **Game Keybinds** list entry at (698,633)); calling `ToggleOptionFrame()` through the driver threw a native "exception while running the request" in one session
+  (three of the option sub-frames failed with `attempt to call a (null) value` and a later `debug.getinfo` on a script function killed that client) while the same
+  window opened normally by clicking in a fresh session. Close it with Cancel (never Apply, it saves the options).
+* **`textbox` widgets return `''` from `GetText()`** (text length 0) although they show text; labels and buttons are fine. Texts of such rows come from the
+  `locale` tables (`ingame/options_keybinds/row_titles.json`). `GetLineCount` / `GetLongestLineWidth` / `GetTextHeight` do work and are in `ui.json`.
