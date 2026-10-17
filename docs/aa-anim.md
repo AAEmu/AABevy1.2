@@ -167,6 +167,23 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
      colour weighted by alpha: sRGB averaging darkened every contrasty face texture (tattoos, scars)
      by up to a quarter in the mips a face uses at game distance, and the colour of a decal's
      transparent texels bled into its edges.
+   * the composition (BC decode of the 512x512 texture, decals, lips, eyes, mips) costs 20-30 ms of
+     CPU, so it is memoized and can run on a worker thread:
+       - `face::FaceKey { base, layers, lips, eyes }` is everything the image depends on
+         (`FaceKey::id()` is equal for equal keys, `FaceKey::compose()` composes without caching);
+         `character::face_key(assets, mtl, model) -> Option<FaceKey>` builds it (`None`: the
+         character uses the plain base texture).
+       - `face::prewarm_face(&key) -> Result<bool>` composes into a global store (a no-op if it is
+         there already; `true`: it composed) and `face::take_face(&key) -> Result<Image>` moves the
+         prewarmed image out (else composes now). Both are CPU only and callable from any thread;
+         `face::discard_face(&key)` drops an image nobody will take.
+       - `character::prewarm_character_face(&CharacterAssets) -> Result<bool>` does it all for a
+         character: loads the face part's model and material, builds the key, prewarms. Call it
+         on `aa_cry::workers` before `spawn_character`.
+       - `spawn_character` (`face_look`) takes the prewarmed image (or composes it) and only then
+         calls `images.add` on the main thread; characters with equal keys share one texture
+         (the second one costs nothing). The shared asset is looked up by id and not held by the
+         cache, so the texture is freed with its last character.
    * Hair: aa-cry's conversion (`HairColor^1.5 * 2 * Diffuse`, alpha mask on the doubled alpha,
      isotropic highlight masked by the strand pattern; see `docs/aa-cry.md` for why not
      alpha-to-coverage / anisotropy); the colour `.mtl` of the chosen hair colour is the material.
