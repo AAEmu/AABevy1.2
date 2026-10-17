@@ -131,6 +131,8 @@ X2Player.GetLaborPower = function(self) return S().labor end
 X2Player.GetMaxLaborPower = function(self) return S().max_labor end
 X2Player.GetBmPoint = function(self) return S().bm_point end
 X2Util.GetMyMoneyString = function(self) return S().money end
+-- The cast bars (player, target) ask what a unit is casting: spell, total ms, ms so far (cast.rs).
+X2Unit.UnitCastingInfo = function(self, unit) return HUD.casting_info(unit) end
 -- Numbers as text: "1234567" -> "1,234,567" (the chat prints the XP gained so); decimal strings add as numbers
 -- (the gains of the floating "XP +N" text pile up while it shows).
 X2Util.MakeMarkedCiphersStr = function(self, text, ciphers)

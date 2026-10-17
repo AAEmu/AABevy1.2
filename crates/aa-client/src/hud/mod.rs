@@ -34,11 +34,13 @@
 
 mod api;
 mod cameras;
+mod cast;
 mod chat;
 mod combat;
 mod data;
 mod formula;
 mod input;
+mod items;
 mod marks;
 mod panels;
 mod plates;
@@ -281,7 +283,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests).run_if(hud_up),
                     mirror_keyboard_focus,
                     cameras::match_world_camera,
                     cameras::dev_fov,

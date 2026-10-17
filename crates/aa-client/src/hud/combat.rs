@@ -559,7 +559,9 @@ mod tests {
     fn moves_add_up() {
         let mut frames = vec![f(0.45, 1.0, 600.0, 300.0), f(0.45, 1.0, 0.0, 900.0), f(0.45, 0.2, 0.0, 0.0)];
         frames[1].move_y = -55.0;
-        assert_eq!(pose(&frames, 1000.0).unwrap().offset, Vec2::ZERO);
+        // nothing moves while the first frame is held and changes (900 ms), the second frame's move runs over its own change
+        assert_eq!(pose(&frames, 800.0).unwrap().offset, Vec2::ZERO);
+        assert_eq!(pose(&frames, 900.0).unwrap().offset, Vec2::ZERO);
         let half = pose(&frames, 900.0 + 450.0).unwrap().offset;
         assert!((half.y + 27.5).abs() < 1e-3);
         assert!(pose(&frames, 1800.0).is_none());
