@@ -6,16 +6,25 @@ and lane-server protocol are the sources. A window opening with fallback data is
 feature. Each row requires real data, input/actions, lifecycle/error behavior, and appropriate
 live or visual validation. No overall completion percentage is inferred from script counts.
 
-Latest checked milestone: client230 passed/36 intentional probes ignored, plus the
-separate original pet control probe. Shared original English name metadata,
-validation and formatting now cover every name-policy kind in login/create/HUD;
-original character typing and IME plus pet/chat/portal captures passed. Native
-SetEnglish login behavior passed61 UI checks and51 native oracle groups; complete
-skill-result/identity parsing passed438 network tests; global authored fog passed
-192 world tests/9 existing probes ignored. Owning docs retain exact captures and
-limits. Achievement receive/UI integration, local chat-tab configuration and the
-remaining native cooldown producers are the next active gaps; overall1.2 parity
-is still unfinished.
+Execution policy (user instruction,2026-10-18): keep multiple Sol6.1 agents working
+throughout this goal. Use all available concurrency slots (currently root plus
+three agents), assign independent owned-crate slices, and immediately give each
+finished agent another concrete parity gap. Root continues integration and QA
+alongside them. Preserve this policy across handoffs until the full1.2 client
+parity goal is achieved or the user changes the instruction.
+
+Latest checked milestone: client237 passed/37 optional probes ignored, plus the
+separate original achievement tracing/completion/detail/Back physical probe.
+Achievement descriptors, received progress, six tracing slots, native callback
+order and guarded type5 hydration/save-before-leave are integrated; native list
+row geometry and visual captures are being closed with the UI owner. Shared
+English name policies and the preceding create/pet/chat/portal captures passed.
+Network447 tests passed with the optional native UI-data codec; world193 tests/9
+existing probes ignored plus12 GPU detail-normal controls passed. Native chat
+lifecycle/metadata passed79 focused tests and its selection-save hook passed9
+focused tests, with inspected captures. Owning docs retain exact evidence and
+limits. Local chat configuration, the remaining native cooldown producers and
+further rendering/gameplay gaps remain active; overall1.2 parity is unfinished.
 
 | Area | Current evidence | Remaining work |
 |---|---|---|
@@ -40,7 +49,7 @@ is still unfinished.
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
-| Achievements, ranking and trials | Original achievement/ranking/usertrial/racing UI groups load | Actual protocol/state/rewards, trial/jury/crime/prison and racing flows |
+| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed | Native automatic list geometry/captures in progress; English summary/description data, unsupported UI-data grammar and live save/re-entry validation; ranking, trial/jury/crime/prison and racing flows |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
 | Options and UI toolkit | Applied account-local options/sound/key bindings and bag persistence; original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, graphics application, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
 

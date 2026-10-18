@@ -109,6 +109,7 @@ pub struct HudData {
     pub friends: aa_net::Friends,
     pub(super) family: super::family::View,
     pub(super) expedition: super::expedition::View,
+    pub(super) achievement: super::achievement::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -160,6 +161,7 @@ impl Default for HudData {
             friends: Default::default(),
             family: Default::default(),
             expedition: Default::default(),
+            achievement: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -268,6 +270,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::pets::install(lua, bridge)?;
     super::family::install(lua, bridge)?;
     super::expedition::install(lua, bridge)?;
+    super::achievement::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::sorting::install(lua, bridge)
 }
@@ -286,6 +289,7 @@ fn install_feature_limits(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             // restriction unset. Do not invent a positive cap from experience-table length.
             out.set("levelLimit", f64::from(level.unwrap_or(0)))?;
             out.set("mateLevelLimit", f64::from(mate.unwrap_or(0)))?;
+            out.set("achievement", state.borrow().achievement.cache.native_enabled == Some(true))?;
             Ok(out)
         })?,
     )
@@ -783,6 +787,9 @@ pub fn handle_requests(
                     // the connection is gone: the dialog's OK (EXIT_CLIENT) goes back to the server list
                     super::session::return_to_world_select(credentials.as_deref(), &mut net, &mut next);
                 } else {
+                    if let Some(save) = super::achievement::save_for_leave(&mut bridge.0.borrow_mut(), how) {
+                        net.write(NetCommand(Command::UiData(save)));
+                    }
                     super::session::leave(how, &mut net);
                 }
             }
