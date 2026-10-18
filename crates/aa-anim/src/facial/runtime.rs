@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use aa_cry::scene::{CryAssets, LoadedModel};
 use bevy::mesh::morph::{MeshMorphWeights, MorphAttributes, MorphWeights};
 use bevy::prelude::*;
 
+use super::remap::expression_set;
 use super::{ExpressionLibrary, FacialSequence};
-use crate::{Animator, Cal, CharacterAssets, Error, MorphSet, PartAsset, Result};
+use crate::{Animator, Cal, CharacterAssets, Error, PartAsset, Result};
 
 /// Opt-in authored facial playback; use with [`crate::spawn_character_with_facial`].
 /// Morphs are evaluated on the GPU, before skeletal skinning. No mesh data changes per frame.
@@ -151,119 +152,6 @@ fn bind_meshes(mut commands: Commands, meshes: Query<(Entity, &Mesh3d), Added<Me
                 .insert((MeshMorphWeights::Reference(root), InitialMorphUpload(3)));
         }
     }
-}
-
-/// Matches neutral position/UV classes and verifies oriented triangles. Exported
-/// tangent seams can split equivalent vertices differently; delta equality is checked separately.
-pub(crate) fn vertex_map(target: &aa_cry::Model, source: &aa_cry::Model) -> Result<Vec<Vec<usize>>> {
-    if target.meshes.len() != 1 || source.meshes.len() != 1 {
-        return Err(Error::Format("facial overlay needs one mesh".into()));
-    }
-    let (a, b) = (&target.meshes[0], &source.meshes[0]);
-    if a.uvs.len() != a.positions.len() || b.uvs.len() != b.positions.len() {
-        return Err(Error::Format("facial vertex/UV counts differ".into()));
-    }
-    let matches =
-        |i: usize, j: usize| a.positions[i].distance_squared(b.positions[j]) < 1e-10 && a.uvs[i].distance_squared(b.uvs[j]) < 1e-10;
-    let candidates: Vec<Vec<usize>> = (0..a.positions.len())
-        .map(|i| (0..b.positions.len()).filter(|&j| matches(i, j)).collect())
-        .collect();
-    if candidates.iter().any(Vec::is_empty) {
-        return Err(Error::Format("facial neutral position/UV differs".into()));
-    }
-    let labels: Vec<u32> = (0..a.positions.len())
-        .map(|i| {
-            (0..=i)
-                .find(|&k| a.positions[i].distance_squared(a.positions[k]) < 1e-10 && a.uvs[i].distance_squared(a.uvs[k]) < 1e-10)
-                .unwrap() as u32
-        })
-        .collect();
-    let source_labels: Vec<u32> = (0..b.positions.len())
-        .map(|j| {
-            (0..a.positions.len())
-                .find(|&i| matches(i, j))
-                .map(|i| labels[i])
-                .ok_or_else(|| Error::Format(format!("no facial position/UV match for vertex {j}")))
-        })
-        .collect::<Result<_>>()?;
-    let triangles = |mesh: &aa_cry::MeshData, mapping: &[u32]| {
-        let mut triangles = HashMap::new();
-        for subset in &mesh.subsets {
-            let range = subset.first_index as usize..(subset.first_index + subset.index_count) as usize;
-            for triangle in mesh.indices[range].chunks_exact(3) {
-                let v = [
-                    mapping[triangle[0] as usize],
-                    mapping[triangle[1] as usize],
-                    mapping[triangle[2] as usize],
-                ];
-                let rotations = [v, [v[1], v[2], v[0]], [v[2], v[0], v[1]]];
-                *triangles.entry(*rotations.iter().min().unwrap()).or_insert(0usize) += 1;
-            }
-        }
-        triangles
-    };
-    if triangles(a, &labels) != triangles(b, &source_labels) {
-        return Err(Error::Format("facial mapped triangle topology differs".into()));
-    }
-    Ok(candidates)
-}
-
-pub(crate) fn expression_set(path: &str, neutral: &aa_cry::Model) -> Result<Arc<MorphSet>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<MorphSet>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
-    if let Some(set) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
-        return Ok(set.clone());
-    }
-    let companion = path.replace("_face01.chr", "_face00.chr");
-    if companion == path {
-        return Err(Error::Missing(format!("expression companion for {path}")));
-    }
-    let (gender, letter) = if path.contains("/female/") {
-        ("female", "f")
-    } else {
-        ("male", "m")
-    };
-    // Human race customization heads share Nuian neutral geometry; e.g. the Hariharan female's
-    // old face00 is race-shaped already. Only use the shared companion after the same proof.
-    let shared = format!("objects/characters/nuian/{gender}/face/nu_{letter}_face00.chr");
-    let (source, expression_model, mapping) = [companion, shared]
-        .into_iter()
-        .find_map(|source| {
-            let model = aa_cry::Model::load(&source).ok()?;
-            let mapping = vertex_map(neutral, &model).ok()?;
-            Some((source, model, mapping))
-        })
-        .ok_or_else(|| Error::Format(format!("no matching expression topology for {path}")))?;
-    let mut set = MorphSet::load(&source)?.ok_or_else(|| Error::Missing(format!("expression morphs in {source}")))?;
-    for target in &mut set.targets {
-        let mut dense = vec![Vec3::ZERO; expression_model.meshes[0].positions.len()];
-        for &(vertex, delta) in &target.deltas {
-            *dense
-                .get_mut(vertex as usize)
-                .ok_or_else(|| Error::Format("facial morph vertex out of range".into()))? = delta;
-        }
-        let mut deltas = Vec::new();
-        for (vertex, candidates) in mapping.iter().enumerate() {
-            let delta = dense[candidates[0]];
-            if candidates.iter().any(|&i| dense[i].distance_squared(delta) > 1e-12) {
-                return Err(Error::Format(format!(
-                    "facial seam deltas disagree for {} vertex {vertex}",
-                    target.name
-                )));
-            }
-            if delta != Vec3::ZERO {
-                deltas.push((vertex as u32, delta));
-            }
-        }
-        target.deltas = deltas;
-    }
-    let set = Arc::new(set);
-    Ok(cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .entry(path.into())
-        .or_insert(set)
-        .clone())
 }
 
 #[cfg(test)]

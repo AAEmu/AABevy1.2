@@ -387,7 +387,7 @@ bind pose, and the customisation colours of the preset. `face_dump` lists / size
 `facial::{FacialSequence, ExpressionLibrary, Curve}` reads the original XML `.fsq`/`.fxl` assets.
 The 1.2 pak has **894 FSQs, 9 FXLs, no FXXs**; a regression test parses every FSQ and FXL.
 Sequence channels sum their Hermite splines, keep signed values and tangent flags, and ignore editor
-folder/selection state. FXL controllers recurse into the original morphs through Catmull?Rom curves
+folder/selection state. FXL controllers recurse into the original morphs through Catmull-Rom curves
 or a constant multiplier; a spline controller does not multiply its output by `Weight`.
 The engine's [facial animation description](https://www.cryengine.com/docs/static/engines/cryengine-5/categories/23756813/pages/23306439)
 and Crytek-authored [channel implementation](https://github.com/ValtoGameEngines/CryEngine/blob/release/Code/CryEngine/CryAnimation/FacialAnimation/FaceAnimSequence.cpp)
@@ -400,20 +400,40 @@ let root = aa_anim::spawn_character_with_facial(&mut commands, &mut cry, &clips,
 // The root has FacialAnimator and Bevy MorphWeights. Existing spawn_character stays unchanged.
 ```
 
-The customisable face01 carries 91 static sliders; the compatible face00 carries 28 authored expression
-morphs, including each eyelid, brows and `m_a` / `m_b` / `m_e` / `m_f` / `m_i` / `m_o` / `m_u`.
-They can be combined without replacing a character's customisation, textures or skinning. The overlay
-proves matching neutral position/UV classes and matching oriented surface triangles, then checks that
-coincident source vertices have equal deltas for every morph. This matters for Nuian female: the
-exporter reorders vertices, splits seams differently, and combines source material subsets. It is
-not sufficient to compare vertex counts or directly copy the vertex indices. The verified remap is
-cached per head; subsequent characters do not repeat the geometry proof.
+Human face01 meshes carry their static sliders, while their expression companions carry 28
+original morphs; Ferre companions carry 33, including tongue movement. These include each eyelid,
+brows and `m_a` / `m_b` / `m_e` / `m_f` / `m_i` / `m_o` / `m_u`. All **eight playable race/gender
+heads** now support the overlay without replacing customisation, materials or skinning.
 
-Current coverage is **Nuian male/female, Elf male/female and Hariharan male**. Hariharan female and
-Ferre male/female have different neutral geometry from the available expression companions: they
-keep their existing face and log a rejection. No nearest-surface fitting or eyelid scaling is used.
-Playable heads use the supplied `animations/pc_expressions.fxl`; older race-specific FXLs contain
-prefixed morph names that do not match the current customisable heads/FSQs.
+`facial/remap.rs` proves original vertex identity before copying any delta:
+
+* Position and UV must coincide (position tolerance 0.00001 m covers original export float noise).
+  Every target and source vertex must have a counterpart. Nuian female exports reorder vertices,
+  split seams differently and combine source materials: vertex counts/indices alone are not IDs.
+* Ferre M/F have the same 3,522 positions and UVs (maximum residual below 0.00000063 m), but change
+  68 of 5,512 triangles. The 5,444 common triangles match exactly. Each of the five remaining
+  connected patches (8, 26, 26, 2 and 6 triangles) must have the same vertex set, oriented boundary
+  and triangle count. Only diagonals/fans change; reversed, closed, missing or non-manifold patches
+  are rejected. No surface fitting or interpolation is performed.
+* Coincident vertices must have identical morph deltas, unless an unchanged oriented incident ring
+  uniquely establishes their surface identity. This distinguishes Ferre vertices 3397 and 3417:
+  identical neutral position/UV, different incident rings and native internal IDs (2649 / 2745),
+  with zero versus nonzero `m_f` deltas. Rings at a changed patch never resolve an ambiguity.
+* Before using a source, its v0x800 `CompiledExt2IntMap` (u16 IDs) and v0x801 internal skin-vertex
+  count are checked. Every external morph delta must exactly equal its internal morph delta through
+  that map. Native internal IDs are local to an export, so they are not joined across files blindly.
+
+Hariharan female has the original Nuian female template's `hariharan_Morph=1` baked into its neutral
+positions. The overlay first proves the ordinary Nuian expression-to-template map, then applies only
+that original race target to a temporary template and proves its map to Hariharan face01. Every one
+of 3,024 target vertices matches position and UV; maximum residual measured 0.000000358 m. The
+expression deltas themselves are unchanged, and the displayed Hariharan head is not transformed.
+This is the same authored race baseline that `FaceMaker::race_gender_weights` uses where it remains
+an unbaked target. Ferre's existing `Male`/`Female` baseline stays in the static customisation.
+
+The verified remaps are cached per head. Failed vertex, patch, native-map or delta checks retain the
+existing face and report the reason. Playable heads use `animations/pc_expressions.fxl`; older
+race-specific FXLs contain prefixed names that do not match these heads/current FSQs.
 
 `FacialAnimator` follows the current `Animator` CAF's matching `.cal` facial entry, using the same
 clock (including body pause, speed, random idle variants and one-shot return). Missing facial entries
@@ -429,12 +449,12 @@ face.stop();          // blend to neutral
 face.follow_body();   // resume matching the body clip
 ```
 
-The original stage idle includes the actual eye-close/brow curves, around 1.0?1.2 seconds in the
+The original stage idle includes the actual eye-close/brow curves, around 1.0-1.2 seconds in the
 Nuian male's three-second loop. No blink interval or closure geometry is invented. Morphs run on
-the GPU before skinning; frames update only the 28 weights. On this Bevy 0.20 GPU path, initial instance metadata can precede the morph descriptor. The
+the GPU before skinning; frames update only the 28 or 33 weights. On this Bevy 0.20 GPU path, initial instance metadata can precede the morph descriptor. The
 plugin refreshes each new facial mesh's instance metadata for three frames, then removes its marker.
 No vertex uploads or ongoing instance refreshes occur. A uniquely named eight-second capture verified
-that the authored blink/speech persist after those initial frames; the no-refresh comparison stays neutral. Morph attributes cost roughly 4 MB per enabled head on the GPU;
+that the authored blink/speech persist after those initial frames; the no-refresh comparison stays neutral. Morph attributes cost roughly 4-6 MB per enabled head on the GPU;
 use the opt-in spawn for the player/nearby faces instead of enabling an entire distant crowd.
 
 Limits: only position deltas are supplied (normal/tangent deformation is not reconstructed).
@@ -443,10 +463,10 @@ apply bone effectors. Procedural/balance channels, sound scheduling, phoneme ext
 camera paths are not played. Existing FSQ speech/viseme curves can play; this is not automatic
 voice-driven lip sync.
 
-Validation: **50 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
+Validation: **53 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/
-explicit-sequence transitions, all 903 facial XML assets, and safe transfer/rejection for all eight
+explicit-sequence transitions, all 903 facial XML assets, and exact transfer for all eight
 playable race/gender heads.
 
 ```powershell
@@ -460,10 +480,18 @@ closed-eye frame and was inspected as a geometry reference. The showroom uses di
 and deliberately removes hair to make the lids visible; it does not recalibrate skin.
 Inspected final captures are `shots/aa-anim/facial_startup_refresh_verify.png` (male) and
 `shots/aa-anim/facial_startup_refresh_female.png`. At 1920x1080 with three frozen reference heads,
-male FPS was 259.1?260.4 after the first 311.0 sample (212.3 during capture); female was
-193.1?249.9 (240.9 during capture), with other builds sharing the machine. The copied executable is
+male FPS was 259.1-260.4 after the first 311.0 sample (212.3 during capture); female was
+193.1-249.9 (240.9 during capture), with other builds sharing the machine. The copied executable is
 `data/extract/aa-anim/facial-qa.exe`. Use unique screenshot names when iterating: repeated reads of
 an overwritten path returned stale imagery during QA.
+
+The three newly supported heads were also inspected against their matching original
+`reference/character_create/step2_*` captures, using unique eight-second screenshots:
+`shots/aa-anim/facial_hariharan_female_exact.png`, `facial_ferre_male_exact.png` and
+`facial_ferre_female_exact.png`. Each shows open, blink and authored A speech frames. Hariharan
+female settled at 245.4-261.0 FPS (184.9 during capture), Ferre male at 198.8-269.6 FPS
+(243.5 during capture), and Ferre female at 209.2-243.6 FPS (196.5 during capture).
+Ferre female's authored blink leaves a narrow eye sliver; the original deltas are retained.
 
 ## Gaps
 
@@ -479,8 +507,8 @@ an overwritten path returned stale imagery during QA.
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
   texture).
 * `aa-client` selects locomotion and action clips; `Lmg` parsing and direction sampling are available.
-  Facial playback is opt-in and currently supports five heads (below). Hariharan female and Ferre
-  expression transfer, facial bone controllers, automatic voice/phoneme lip sync, and non-default
+  Facial playback is opt-in and supports all eight heads (above). Facial bone controllers,
+  automatic voice/phoneme lip sync, and non-default
   armour dye choice remain gaps. The `.dbh` track database is not decoded (not needed).
 * Costume specular: metal comes from the baked specular map; dielectric strength and (warm) tint
   from Bevy's `specular_texture` / `specular_tint_texture` (gold trims, leather streaks). Silver
