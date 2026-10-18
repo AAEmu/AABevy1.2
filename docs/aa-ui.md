@@ -6248,3 +6248,85 @@ pushed/disabled skins, retained selection aliases, explicitly hidden artwork and
 the dimmed item icon. The second uses an actual pointer press. Both report zero
 script errors/WARN/ERROR and self-close (PIDs46756/24964); the copied executable
 was removed. No original Lua asset, app API, font or animation timer changed.
+
+### Native drawable masks and original item hover feedback (2026-10-18)
+
+Image and icon-image SetMask/SetMaskCoords/SetMaskVisible now retain a real mask
+texture, independent normalized UV rectangle and independent visibility byte.
+Fresh image39290863/icon3928fe98 initializes that byte false. Loading a mask
+does not change it; successful reload resets the UV rectangle to the whole
+texture. Failed loading retains the previous texture, coordinates and flag.
+There is no nil unbind or fallback image. Native texture ownership methods
+392892b0/39289770 release the previous reference before acquiring the new one.
+
+Actual image bindings39234090/39234100/39234190 and icon bindings
+39234310/39234380/39234410 cast through their distinct image interfaces.
+SetMask requires an actual string, SetMaskCoords four actual numbers and
+SetMaskVisible an actual boolean or numeric boolean. Missing/invalid values and
+failed casts silently return no values. Numeric boolean comparison keeps its
+double precision, including tiny/subnormal nonzero values. Native coordinate
+methods392891c0/39289680 narrow inputs to f32, multiply by reciprocal texture
+dimensions and use endpoint1 independently for a zero width/height. Negative,
+fractional and nonfinite raw coordinates are retained.
+
+The offline drawable_mask_oracle.py executes **86 wrapper/lifetime/draw controls**:
+64 argument/ownership/invalid-order cases and22 actual image/icon submissions.
+The real Cry argument converters, bindings, refcount/UV methods and draw
+3928b420/3928ed90 through39220b90 execute; final3921fc30 submission captures all
+six native vertices, image/mask UV streams and RGBA8. Lua stack/cast, resource
+loading, texture dimensions/reference interfaces and final GPU submission are
+explicit controlled endpoints. Resource-manager editor/path-prefix behavior is
+not inferred from those loader controls. Native no-texture image coordinates
+are inert; icon coordinates dispatch through a null texture interface. The app
+refuses that invalid icon ordering safely. Retired objects are also refused.
+
+drawable_mask_state_oracle.py executes another **64 native state controls** with
+actual image/icon availability and visibility virtual methods. The combined
+**150 groups** and source are retained in native-drawable-mask-oracle-20261018.json,
+native-drawable-mask-state-oracle-20261018.json and
+native-drawable-mask-source-20261018.txt. Button state application first disables
+the former highlight background mask, then enables loaded masks of current
+highlight backgrounds/extras during its hide pass, even if that art stays hidden.
+Explicit mask visibility survives drawing until another applicable state write.
+
+The original slot.lua SetDefaultMask consumer loads ui/common/slot_over.dds,
+sets its40px rectangle, hides it and reapplies the highlight background. Hover
+therefore uses the original mask with each icon layer. Icon3928ed90 shares its
+primary normalized image UV with every retained layer; the previous whole-UV
+overlay shortcut is corrected for both masked and unmasked icon drawing.
+The existing image-plus-mask Material2d already matches the original x2ui.cfx
+blend and samplers, so the shader is reused unchanged. Rotation, parent/UI scale
+and scissor clipping carry unit UVs associated with both source rectangles.
+
+Native3921f2a0 clamps source color, multiplies in x87 precision and truncates
+to RGBA8. Masked images and cooldown fans share that conversion, including
+NaN-to-byte0 and infinity saturation; authored/raw color storage is unchanged.
+The rendered-hover state-color regression now checks alpha76/255 for authored
+alpha0.3, while its unmasked normal/pushed assertions still check0.3. Native raw
+nonfinite UVs remain in CPU state/quads, but the Bevy upload boundary refuses
+their undefined GPU material sampling. A meaningful upload test verifies no
+mask uniform/material is allocated and finite neighboring geometry still uploads.
+
+Hover and cooldown masks have distinct source roles. Generic cooldown native
+3928b3c0/3928ed10 draws base image geometry with its separately supplied timer
+mask, ignoring the drawable's own hover mask. A shared geometry implementation
+provides that base path without mutating the tree. This prevents a real hovered
+action button from losing its cooldown sweep when its ordinary image becomes
+masked. No timer, selector, GCD policy or application API changes.
+
+Crate check/example build and **215 checks pass**, with one existing optional
+font check ignored: focused59 (including nine new mask tests and two new upload/
+RGBA8 library checks), plus156 original consumer/input/animation/clip regressions.
+The original dimmed CreateCoolDownActionButton physically enters, presses,
+releases and clicks; hover masks appear while its fan triangle count and
+original OnClickProc callback remain intact. Additional checks cover strict
+arguments, load/reload failure lifetime, stale objects, raw UVs, shared icon
+layers, late highlights and rotated/scaled/scissor-clipped masked images.
+
+Both aa-dev `--shot-after 8` captures were inspected:
+shots/aa-ui/native-drawable-mask-hover-720-20261018.png
+(1280x720/default0.85, **302.2-333.3 FPS**) and
+shots/aa-ui/native-drawable-mask-hover-1080-20261018.png
+(1920x1080/default1.0, **298.0-373.3 FPS**). They show original normal/cooling,
+dimmed hovered/cooling and highlighted icons. Both report zero script errors/
+WARN/ERROR and self-close (PIDs52348/34640); the copied executable was removed.

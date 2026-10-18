@@ -157,7 +157,7 @@ fn icon_alphas(ui: &UiRuntime, button: Id, pressed: Option<Id>) -> Vec<f32> {
     render::build_quads(&mut lua::ui(&ui.lua), pressed)
         .into_iter()
         .filter(|q| {
-            matches!(&q.tex,render::Tex::Image(p)if p==&path)
+            matches!(&q.tex,render::Tex::Image(p)|render::Tex::MaskedImage{image:p,..}if p==&path)
                 && q.pos[0] >= r.x * scale - 1.
                 && q.pos[2] <= r.right() * scale + 1.
                 && q.pos[1] >= r.y * scale - 1.
@@ -200,7 +200,8 @@ fn original_dim_button_hover_press_release_remains_clickable_and_uses_matching_s
     input::update(&ui.lua, &mut mouse, Some(point), false, false, false, 0.);
     let hover = icon_alphas(&ui, button, None);
     assert!(!hover.is_empty());
-    assert!(hover.iter().all(|&a| a == 0.3));
+    // Native image-plus-mask submission truncates the authored alpha to RGBA8.
+    assert!(hover.iter().all(|&a| a == 76. / 255.));
     input::update(&ui.lua, &mut mouse, Some(point), true, false, false, 0.);
     assert_eq!(mouse.pressed, Some(button));
     let pushed = icon_alphas(&ui, button, mouse.pressed);

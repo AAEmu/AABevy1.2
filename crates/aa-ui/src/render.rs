@@ -420,6 +420,22 @@ pub(crate) fn drawable_quads(
     base: Option<Rect>,
     out: &mut Vec<Quad>,
 ) {
+    drawable_image_quads(u, d, alpha, state, scale, base, true, out);
+}
+
+/// Native3928b3c0/3928ed10 supplies base images to the independent cooldown mask.
+/// The drawable's hover mask belongs only to its normal image draw path.
+pub(crate) fn cooldown_background_quads(
+    u: &mut Ui, d: Id, alpha: f32, state: ButtonState, scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    drawable_image_quads(u, d, alpha, state, scale, None, false, out);
+}
+
+fn drawable_image_quads(
+    u: &mut Ui, d: Id, alpha: f32, state: ButtonState, scale: f32,
+    base: Option<Rect>, include_mask: bool, out: &mut Vec<Quad>,
+) {
     if !state_visible(u, d, state) {
         return;
     }
@@ -553,7 +569,8 @@ pub(crate) fn drawable_quads(
                             out.push(Quad {
                                 tex: Tex::Image(r),
                                 pos: pixels(rect),
-                                uv: [0.0, 0.0, 1.0, 1.0],
+                                // Native icon3928ed90 shares object+d0 for every layer.
+                                uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                                 color,
                                 corners: None,
                                 uvs: None,
@@ -562,6 +579,21 @@ pub(crate) fn drawable_quads(
                         }
                     }
                 }
+            }
+        }
+    }
+    if include_mask && dr.mask_visible
+        && matches!(dr.class, "drawable:image" | "drawable:iconimage")
+        && let Some(mask) = &dr.mask
+    {
+        for q in &mut out[first_quad..] {
+            if let Tex::Image(image) = &q.tex {
+                q.tex = Tex::MaskedImage {
+                    image: image.clone(), mask: mask.texture.clone(),
+                    image_uv: q.uv.map(f32::to_bits), mask_uv: mask.uv.map(f32::to_bits),
+                };
+                q.uv = [0., 0., 1., 1.];
+                q.color = rgba8(q.color);
             }
         }
     }
@@ -587,6 +619,12 @@ pub(crate) fn drawable_quads(
         // 3928fab9 clips to it for this phase, independently of ancestor scroll clipping.
         clip::quads(out, first_quad, pixels(base));
     }
+}
+
+/// Native3921f2a0: clamp, multiply in x87 precision, then truncate to RGBA8.
+/// Native NaN conversion leaves byte0; infinities clamp to the corresponding end.
+pub(crate) fn rgba8(color: [f32; 4]) -> [f32; 4] {
+    color.map(|v| ((f64::from(v.clamp(0., 1.)) * 255.).trunc() as u8) as f32 / 255.)
 }
 
 pub(crate) fn white_uv() -> [f32; 4] {
@@ -1062,6 +1100,13 @@ fn spawn_batches<M: Component>(
     }
     let mut spawned = Vec::with_capacity(batches.len());
     for (i, (tex, bg, qs)) in batches.iter().enumerate() {
+        // Native retains raw nonfinite UVs. Keep those CPU values, but refuse
+        // undefined texture sampling through a nonfinite GPU material uniform.
+        if let Tex::MaskedImage { image_uv, mask_uv, .. } = tex
+            && image_uv.iter().chain(mask_uv).any(|&v| !f32::from_bits(v).is_finite())
+        {
+            continue;
+        }
         let image_path = match tex {
             Tex::Atlas => None,
             Tex::Image(p) | Tex::MaskedImage { image: p, .. } => Some(p),
@@ -1181,6 +1226,39 @@ mod channel_upload_tests {
     use super::*;
     use bevy::ecs::world::CommandQueue;
     use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn mask_rgba8_matches_native_saturation_nonfinite_and_truncation() {
+        assert_eq!(rgba8([0.3,0.5,0.7,0.4]),[76./255.,127./255.,178./255.,102./255.]);
+        assert_eq!(rgba8([f32::NAN,f32::INFINITY,f32::NEG_INFINITY,3.]),[0.,1.,0.,1.]);
+    }
+
+    #[test]
+    fn nonfinite_mask_uv_stays_raw_but_cannot_allocate_a_gpu_uniform_or_hide_finite_neighbors() {
+        let ui=crate::UiRuntime::new("en_us",1920.,1080.).unwrap();
+        ui.exec("@mask_upload",r#"
+            w=UIParent:CreateWidget('window','maskUpload','UIParent');w:Show(true)
+            image=w:CreateImageDrawable('ui/icon/icon_skill_basic01.dds','artwork')
+            image:SetExtent(42,42);image:SetMask('ui/icon/cooldown_mask.dds')
+            image:SetMaskCoords(0/0,0,1,1);image:SetMaskVisible(true)
+            good=w:CreateColorDrawable(1,1,1,1,'overlay');good:SetExtent(20,20)
+        "#).unwrap();
+        let quads=build_quads(&mut crate::lua::ui(&ui.lua),None);
+        assert_eq!(quads.len(),2);
+        let Tex::MaskedImage{mask_uv,..}=&quads[0].tex else{panic!("raw masked view")};
+        assert!(f32::from_bits(mask_uv[0]).is_nan());
+        let mut world=World::new();let mut queue=CommandQueue::default();
+        let mut state=UiRenderState::default();let mut meshes=Assets::<Mesh>::default();
+        let mut colors=Assets::<ColorMaterial>::default();let mut masks=Assets::<MaskMaterial>::default();
+        spawn_batches(&mut Commands::new(&mut queue,&world),&mut state,&quads,0,
+            &mut meshes,&mut colors,&mut masks,&mut Assets::<Image>::default(),None,||UiBatch,Vec2::ZERO,0.);
+        queue.apply(&mut world);
+        assert!(state.mask_materials.is_empty());assert_eq!(masks.len(),0);assert_eq!(meshes.len(),1);
+        let mesh=meshes.iter().next().unwrap().1;
+        let VertexAttributeValues::Float32x3(positions)=mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else{panic!("positions")};
+        assert_eq!(positions.len(),4);assert!(positions.iter().flatten().all(|v|v.is_finite()));
+        assert!(f32::from_bits(mask_uv[0]).is_nan());
+    }
 
     #[test]
     fn native_nonfinite_scale_stays_raw_while_mesh_upload_preserves_only_finite_neighbor_geometry() {
