@@ -1710,13 +1710,10 @@ doodad and count, and its execute checks only captured count >0 before invoking 
 again. Consequently canceling a current cast cannot promise cancellation of a queued next
 cast; ordinary SkillEnded also cannot be promoted to a whole-batch completion ACK.
 
-SCCraftFailed1bf remains deliberately undecoded: the unused lane writer emits u32 id,
-i32 count and count copies of its `craft_id`; native serializer397b8110 clamps the repeated
-u32 list to 20, and OnCraftFailed391e0840 /394d2370 resolves those entries through
-item-template/message formatting. Count bounds and entry semantics therefore need a
-separate verified contract before this can safely preserve arbitrary native DD04 batches.
-No lane call site currently sends it. Static recipe catalogs and native UI presentation
-counters remain aa-client integration work.
+SCCraftFailed1bf now has the separate receive-only `CraftFailureNotice` contract documented
+below. It retains the native raw header and bounded u32 list without treating the lane's
+misleading repeated `craft_id` field as proven recipe semantics. No lane call site currently
+sends it. Static recipe catalogs and native UI presentation counters remain aa-client work.
 
 Two new offline tests check exact native min/full-width/max-count bodies and complete
 frames, then an ephemeral loopback session proves invalid/out-of-world requests send
@@ -2026,3 +2023,31 @@ Validation for these receive milestones: `cargo test -p aa-net` passes 207 libra
 scripted loopback login tests; all nine live-lane tests remain ignored. The Unicode/DD04 slave
 fixture also passes its targeted rerun. `cargo check -p aa-net --features bevy --examples` passes.
 Only aa-net and this document changed; no lane connections or server changes were used.
+
+
+### Native bounded craft notice SC1bf (2026-10-17)
+
+`CraftFailureNotice { raw_id: u32, raw_count: i32, entries: Vec<u32> }` is carried by
+`ServerMsg::CraftFailureNotice` and `Event::CraftFailureNotice`. Native reader 397b8110 first
+reads u32 rawId and i32 rawCount, then consumes exactly `max(0, min(rawCount, 20))` u32 values.
+It retains the original raw count, including negative and greater-than-twenty values. The decoder
+follows this native cap rather than allocating from the raw count, rejecting it or consuming
+unbounded lane entries. Every consumed u32 survives unchanged, including zero and duplicates.
+
+Native OnCraftFailed 391e0840 -> 394d2370 independently clamps the handler loop to twenty,
+resolves each entry through item-template lookup 39695dc0 and formats a template item link through
+394e4ef0 for `CRAFT_FAILED(itemLink)` (event0x77), once per resolved entry.
+That function does not use rawId. The network API keeps these
+fields neutral: no recipe ID, craft acceptance/completion, material settlement or queued-batch
+cancellation is inferred; authoritative skill/item/labor events remain independent.
+
+Lane `economy/craft.rs::SCCraftFailedPacket` is unused and marked TODO: it writes u32 id,
+i32 count, then `max(count,0)` copies of its field named craft_id, with no native twenty-entry cap.
+Count0..20 bodies match the native layout; positive count>20 lane bodies do not. The native reader
+wins: excess lane bytes cannot be relabeled valid fields or silently swallowed at the cost of the
+next DD04 packet. Such a server/native mismatch still needs a lane fix before that unused writer
+is activated. No server files were changed.
+
+Tests preserve signed minimum/negative/zero counts and native twenty-entry caps even for i32::MAX,
+compare the lane's existing count-two golden, cut every body byte and append a real following DD04
+packet. Session bridging emits the raw notice in order without mutating inventory or craft state.

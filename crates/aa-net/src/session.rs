@@ -497,6 +497,7 @@ pub enum Event {
     Party(crate::party::PartyEvent),
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
+    CraftFailureNotice(crate::craft::CraftFailureNotice),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
@@ -1403,6 +1404,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
+            M::CraftFailureNotice(e) => self.emit(Event::CraftFailureNotice(e)),
             M::Mate(e) => self.emit(Event::Mate(e)),
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
@@ -1836,6 +1838,12 @@ mod tests {
         batch.push(game::ServerMsg::Slave(crate::slave::SlaveEvent::Created(
             created.clone(),
         )));
+        let craft_notice = crate::craft::CraftFailureNotice {
+            raw_id: 0xfedcba98,
+            raw_count: 1,
+            entries: vec![1234],
+        };
+        batch.push(game::ServerMsg::CraftFailureNotice(craft_notice.clone()));
         batch.push(game::ServerMsg::UnitPoints {
             obj_id: 71,
             hp: 123,
@@ -1873,6 +1881,10 @@ mod tests {
                 .map(|change| change.success),
             Some(false)
         );
+        let failure_event = events.try_recv().unwrap();
+        assert!(matches!(&failure_event, Event::CraftFailureNotice(actual) if actual == &craft_notice));
+        state.apply(&failure_event);
+        assert!(state.inventory.bag.iter().all(Option::is_none));
         let points = events.try_recv().unwrap();
         assert!(matches!(
             &points,
