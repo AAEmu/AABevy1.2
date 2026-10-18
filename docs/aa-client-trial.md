@@ -81,3 +81,17 @@ under concurrent compilation were207.3-336.4,78.4-278.7,145.2-337.0 and
 build shows static clock indicators; the subsequent example adds an explicit
 fixture clock for the original time labels. No native trial-screen reference
 capture exists in reference/ingame, so no pixel-difference claim is made.
+
+The subsequent records-clock and verdict-clock captures are also inspected:
+original labels show52 seconds after8 seconds, with444.2-467.0 and323.1-459.9
+FPS respectively. The fresh main client's live world list shows Lane-bevy Up
+at273.4-371.6 FPS. All three self-close without WARN/ERROR/panic. Reproduce with
+data/extract/aa-client/trial/qa-final.ps1. Full client263 passed/38 existing
+optional probes ignored in46.78s, including all six trial checks and the actual
+account-option82 caption integration.
+
+Checked main: target/debug/aa-client-20261018-trial.exe, SHA256
+2fd4822162d43d6eff7baa91ac22df5828608266c3c6af3019350a873479a4c2.
+The playable aa-client-play.exe alias has the same bytes, refreshed after
+checking that no process was running that alias. Live in-world trial settlement
+remains unverified.

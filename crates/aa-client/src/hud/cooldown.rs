@@ -62,6 +62,7 @@ pub(super) fn observed_at(info: &SkillInfo, skills: &Skills, id: u32, now: Insta
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    caption_option(lua);
     let aaui: Table = lua.globals().get("AAUI")?;
     let state = bridge.clone();
     aaui.set(
@@ -82,6 +83,22 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             ]))
         })?,
     )
+}
+
+fn caption_option(lua: &Lua) {
+    let value = lua
+        .load("return X2Option:GetOptionItemValue(OPTION_ITEM_SLOT_COOLDOWN_VISIBLE)")
+        .eval::<Option<f32>>();
+    if let Ok(Some(value)) = value {
+        aa_ui::lua::slot::set_cooldown_numbers(lua, value != 0.0);
+    }
+}
+
+/// Read the actual account option after original input handlers and before slot drawing.
+pub(super) fn sync_caption_option(rt: Option<bevy::prelude::NonSend<aa_ui::UiRuntime>>) {
+    if let Some(rt) = rt {
+        caption_option(&rt.lua);
+    }
 }
 
 /// Bind actual descriptor routing before network PreUpdate; zero primary tags are meaningful.
