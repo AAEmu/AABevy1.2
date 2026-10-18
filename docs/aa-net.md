@@ -2389,3 +2389,105 @@ validation of public/stale quotes and fresh money/bag certificates, all ACK trun
 partial repair report rejection, and an ephemeral loopback session checking service phases,
 request rejection families, exact frame bytes, ordered real ACKs and unchanged unacknowledged
 money/items/repair requests. No live lane connections or server changes were made.
+
+
+## Opaque character UI data and native persistence boundary (2026-10-17)
+
+`Command::UiData(UiDataCommand::Request { character_id, data_type })` sends CS117;
+`Save { character_id, data_type, payload: String }` sends CS118. Type IDs remain raw u16;
+no blob schema, Lua table encoding, account synchronization or successful save is inferred.
+Both are available as low-level `game::ClientMsg::UiData` too; call `validate` before
+encoding directly. The session validates payload/phase, requires a nonzero character ID,
+and permits saves only in `InWorld` with the exact active selected ID. Requests can run in
+the character lobby, while entering, or in world; the lane alone checks connection ownership.
+
+Native exact wire audit against `D:/aa-re/client12/x2game_unpacked.dll`:
+
+- Request sender392175f0 sets opcode117 at39217610, constructor397acb90;
+  vtable399bf264 -> body397bc460. Body is u16 type then full u32 character ID (six bytes).
+- Save sender39217640 sets opcode118 at39217734, constructor397acbb0;
+  vtable399bf270 -> body397bc4d0. Body is u16 type, u32 ID, signed-i16 UTF-8 byte length,
+  exact bytes, without a trailing length field or a terminator byte. The native constructor
+  copies into a 0x2000-byte buffer, the reader limit is0x1fff, and the writer uses
+  `xlcommon::XlStringSize(char*)` (330199a0 = strlen). aa-net enforces8191 **bytes** and rejects
+  embedded NUL saves rather than silently truncating them. Empty payload is valid.
+- Response factory391b6070 (opcode assignment391b608e, allocation0x2018),
+  vtable399b4120 -> reader397b81a0: u32 character ID, u16 type, signed-i16 byte length,
+  opaque UTF-8 bytes (native cap8191), then signed-i32 raw length. aa-net preserves all text,
+  including received NULs, and the exact raw signed trailing value. Negative/oversized byte
+  lengths, invalid UTF-8 and every truncated field are rejected; a trailer never drives an
+  allocation or controls packet consumption. DD04 consumes exactly this body before its tail.
+
+`ServerMsg::UiData(UiDataResponse)` becomes `Event::UiData(UiDataEvent::Response(value))`.
+Response fields are `character_id`, `data_type`, `payload`, `raw_length`. The separate
+`matches_lane_utf16_length()` checks exactly `payload.encode_utf16().count()+1`, including
+supplementary characters as two code units. It is deliberately **not** a decoder rejection
+rule: native generic reader preserves that i32, and native consumers use it as a byte count.
+Specifically handler391e57e0 routes types1/2 to lobby storage391e4320 which calls memcpy
+(398b5446 -> msvcr memcpy) with the raw length, and other types to39217910 ->
+`xlcommon::Data::Load(char*,int)` (33004af0), which also memcpy-copies exactly that many bytes.
+The lane `packets/world.rs::SCResponseUIDataPacket` computes UTF-16 code units+1. These
+rules coincide for ASCII but can truncate native consumption of non-ASCII text; no lane or
+native semantics were silently rewritten. The native server-side producer remains unavailable.
+
+Lane ownership and lifetime are explicit. `systems/services/character_packets.rs` request
+handler responds only for the active matching character or an ID in that connection's
+character list; unowned IDs produce **no reply and no error**. Missing option returns an
+empty response. The save handler ignores the supplied ID and inserts type/payload into its
+active character's `options`; with no active character it does nothing. It emits **no save ACK**.
+`models/character.rs::Character::get_option`, and `db_character.rs` load/transaction-save
+code store these values by character ID in `options(owner,key,value)`. A socket send does not
+prove transaction persistence, and a later request response has no revision/request token
+which could prove it corresponds to a particular save. No live persistence claim was made.
+
+`UiDataEvent::Requested(command)` means a successful local socket write only;
+`RequestRejected { command, message }` reports local validation only. There is no pending
+request correlation, synthetic server error, optimistic cache update or saved event.
+`UiData` (also `WorldState.ui_data` and a NetPlugin resource) is a received-only cache:
+`get(character_id,data_type)` and `entries()` expose the last response per key in arrival
+order. It holds at most64 entries (an explicit application budget, at most about512KiB of
+payload), evicting oldest arrival; repeated keys replace/move to the end. Character selection
+retains only that character's previously received lobby values; new login/world connection,
+connect failure, `LeftWorld` and disconnect clear it. Unknown raw type IDs remain supported.
+
+The native name tables399bf178/39a20510 label IDs0..6 respectively `system_option`,
+`character_option`, `key_binding`, `quest_notifier_list`, `quest_context_state_values`,
+`common_server_data_1`, `common_local_data_1`. These labels do not establish that an arbitrary
+X2 Lua getter uses a particular wire type. Lua `ui_management.lua` uses
+`GetCharacterUiData/SetCharacterUiData` for `uiOptionDatas`, `screenResolution`, saved window
+bounds and other tables, but the complete Lua-to-manager ownership/serialization mapping is
+still unresolved. ManualSort394dc6d0 remains a local tab operation; its persistence is not
+assigned a guessed UIData type or network acknowledgement.
+
+Bounded keybinding audit for later UI integration:
+
+- SaveHotKey393ff1f0 first commits the draft via393ff190, obtains manager type2 with39217510,
+  clears/rebuilds an `xlcommon::Data` tree, then393ff7fb calls `Data::Save("hotkey.g",true)`.
+  It does not directly emit CS118. Generic manager39217640 separately uses `Data::SaveToBuffer`
+  (xlcommon33002ce0) into8192 bytes and then the native CS118 constructor/send.
+- Tables39ac9054/39ac9020/39ac9008 prove primary/second; modes `normal_mode`,
+  `mode_action_mode`, `builder_rotate_mode`, `screen_shot_mode`, `quest_directing_mode`;
+  and kinds `builtin`, `spell`, `button`, `macro`, `item`, `builtin_multi`. Save constructs
+  primary/second -> mode -> kind -> action-name; normal action leaves contain the key string,
+  while builtin_multi adds key-string -> integer binding-index beneath the action.
+- Key builder393fc400 prepends `CTRL-`, then `ALT-`, then `SHIFT-`, and the native input name
+  from39436d90. Save skips flymode/godmode and entries marked removed. Explicit unbinding is
+  separately represented in a `removed` subtree; omission alone must not erase defaults.
+- User load39400e80 loads default bindings first, requires a positive `version` in the type2
+  Data tree, then overlays via39400a70. That parser has different traversal for version0/1
+  versus later versions. Action matcher393ffc20 compares action name, kind, primary/second
+  and, for builtin_multi, binding index; key collision handling is separate. The complete
+  version emission/merge policy and exact Data text grammar remain unresolved, so aa-net
+  supplies **no purportedly compatible binding encoder/decoder**. Root's application-local
+  account settings are independent from this character-owned wire storage.
+
+Offline checks cover request/save goldens, opaque Unicode round trip, lane UTF-16 count
+(including supplementary text), exact response/trailer preservation, empty/max payload,
+negative/oversized lengths, NUL handling, invalid UTF-8, every truncation, multiple responses
+and subsequent state in a DD04 batch, bounded received-only cache/lifecycle, and scripted
+loopback session preflight/identity/request order without a fake save ACK. Natural lane
+round trip, reconnect durability and native UI application remain unverified while stalled.
+
+Validation: `cargo test -p aa-net --features bevy --quiet` passed235 library tests and2
+scripted loopback integration tests;9 live lane tests remained ignored. No lane traffic,
+server mutations, dependency changes or other-crate edits were made for this milestone.
