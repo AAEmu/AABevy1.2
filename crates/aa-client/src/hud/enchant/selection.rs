@@ -180,6 +180,9 @@ impl State {
         // enabled header would scan past it; never reinterpret unsafe native data.
         self.records.complete_bag()
     }
+    pub(super) fn equipment(&self, slot: u8) -> Option<&Item> {
+        self.active.then(|| self.records.item(1, slot)).flatten()
+    }
     fn item(&self, slot: u8) -> Option<&Item> {
         if !self.active || !self.complete() {
             return None;
