@@ -186,7 +186,7 @@ fn ui_key(name: &str) -> Option<UiKey> {
 /// one frame after the key: the toolkit forwards the same key press to the focused box in whatever
 /// order its systems run, and the very press that opens the input must not also send it.
 pub fn chat_keys(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     mut typed: MessageReader<KeyboardInput>,
     focus: Res<HudKeyboardFocus>,
     rt: Option<NonSend<UiRuntime>>,
@@ -206,7 +206,7 @@ pub fn chat_keys(
     {
         warn!("hud: chat input: {e}");
     }
-    let mut open = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
+    let mut open = actions.just_pressed("open_chat", 0);
     // "/" opens the input with a slash already typed, like the real client
     let slash = typed.read().any(|e| e.state.is_pressed() && matches!(&e.logical_key, Key::Character(c) if c.as_str() == "/"));
     // scripted keys, relative to the first frame they were looked at

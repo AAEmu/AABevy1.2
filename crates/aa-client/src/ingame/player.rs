@@ -284,7 +284,7 @@ fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z
 #[allow(clippy::too_many_arguments)]
 pub fn control_player(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
     mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>)>,
@@ -331,30 +331,30 @@ pub fn control_player(
     // an edit box of the HUD (the chat input) has the keyboard: no movement, no jump; a drag that began on the HUD does not turn us
     let typing = typing.is_some_and(|f| f.0);
     let over_ui = over_ui.is_some_and(|o| o.0);
-    let pressed = |k: KeyCode, c: char| (!typing && keys.pressed(k)) || dev.scripted(t, c);
-    let tapped = |k: KeyCode| !typing && keys.just_pressed(k);
-    let key = |k: KeyCode, c: char| pressed(k, c) as i32 as f32;
+    let pressed = |action: &str, c: char| (!typing && actions.pressed(action, 0)) || dev.scripted(t, c);
+    let tapped = |action: &str| !typing && actions.just_pressed(action, 0);
+    let key = |action: &str, c: char| pressed(action, c) as i32 as f32;
 
     // auto-run (NumLock) and the walking toggle (`.`); S stops the auto-run
-    if tapped(KeyCode::NumLock) {
+    if tapped("autorun") {
         state.autorun = !state.autorun;
     }
-    if tapped(KeyCode::Period) {
+    if tapped("toggle_walk") {
         state.walk = !state.walk;
     }
-    let back = key(KeyCode::KeyS, 'S');
+    let back = key("moveback", 'S');
     if back > 0.0 {
         state.autorun = false;
     }
     // both mouse buttons run forward
     let both_buttons = mouse.pressed(MouseButton::Left) && mouse.pressed(MouseButton::Right) && !over_ui;
-    let ahead = key(KeyCode::KeyW, 'W') > 0.0 || state.autorun || both_buttons;
+    let ahead = key("moveforward", 'W') > 0.0 || state.autorun || both_buttons;
     let fwd = ahead as i32 as f32 - back;
-    let strafe = key(KeyCode::KeyE, 'E') - key(KeyCode::KeyQ, 'Q');
-    let turn = key(KeyCode::KeyA, 'A') - key(KeyCode::KeyD, 'D');
-    let jump_held = pressed(KeyCode::Space, 'J');
-    let jump_tapped = tapped(KeyCode::Space) || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'));
-    let vertical = jump_held as i32 as f32 - key(KeyCode::KeyX, 'X');
+    let strafe = key("moveright", 'E') - key("moveleft", 'Q');
+    let turn = key("turnleft", 'A') - key("turnright", 'D');
+    let jump_held = pressed("jump", 'J');
+    let jump_tapped = tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'));
+    let vertical = jump_held as i32 as f32 - key("down", 'X');
 
     let before_facing = mover.facing;
     if turn != 0.0 {
@@ -372,7 +372,7 @@ pub fn control_player(
     let old = mover.pos;
     let swimming = mover.swim.is_some();
     // local velocity (x right, y forward): walking and running as the actor model says, swimming at the swim speed
-    let walking = state.walk != (pressed(KeyCode::ShiftLeft, 'H') || (!typing && keys.pressed(KeyCode::ShiftRight)));
+    let walking = state.walk != (dev.scripted(t, 'H') || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))));
     let local_vel = if swimming {
         swim::local_velocity(local_dir)
     } else {

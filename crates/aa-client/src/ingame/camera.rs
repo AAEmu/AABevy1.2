@@ -19,7 +19,7 @@ use aa_ui::UiBackgroundCamera;
 use aa_ui::render::UiCamera;
 use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
 use bevy::camera::{Hdr, RenderTarget};
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::pbr::{ScreenSpaceTransmission, ScreenSpaceTransmissionQuality};
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
@@ -156,7 +156,7 @@ pub fn camera_transform(orbit: &OrbitCamera, pos: Vec3) -> Transform {
 pub fn orbit_input(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
-    scroll: Res<AccumulatedMouseScroll>,
+    actions: Res<crate::settings::Actions>,
     mut cameras: Query<&mut OrbitCamera>,
     mut window: Query<&mut CursorOptions, With<PrimaryWindow>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
@@ -169,11 +169,8 @@ pub fn orbit_input(
         orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
         orbit.pitch = (orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.3, 1.45);
     }
-    if scroll.delta.y != 0.0 && !over_ui {
-        let lines = match scroll.unit {
-            MouseScrollUnit::Line => scroll.delta.y,
-            MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
-        };
+    if actions.zoom_lines() != 0.0 && !over_ui {
+        let lines = actions.zoom_lines();
         orbit.distance = (orbit.distance * 0.88f32.powf(lines)).clamp(MIN_DISTANCE, MAX_DISTANCE);
     }
     // the pointer disappears and stays put while a button drags the view, like the real client

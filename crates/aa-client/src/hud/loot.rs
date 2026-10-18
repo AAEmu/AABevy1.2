@@ -167,7 +167,7 @@ enum Fire {
 
 /// F loots everything, G opens the loot; what the window asks for becomes commands.
 pub fn loot_input(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -193,8 +193,8 @@ pub fn loot_input(
     // the keys (a scripted one, `--hud-key f 20`, counts too)
     let scripted = script.take_loot();
     let typing = focus.0 || rt.is_some_and(|rt| rt.keyboard_captured());
-    let all = scripted == Some(true) || (!typing && keys.just_pressed(KeyCode::KeyF));
-    let open = scripted == Some(false) || (!typing && keys.just_pressed(KeyCode::KeyG));
+    let all = scripted == Some(true) || (!typing && actions.just_pressed("do_interaction_1", 0));
+    let open = scripted == Some(false) || (!typing && actions.just_pressed("do_interaction_2", 0));
     if (all || open)
         && let Some((_, id)) = d.loot.nearest
     {

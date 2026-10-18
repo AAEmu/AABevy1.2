@@ -885,3 +885,63 @@ in the same folder measured271-307FPS with zero script errors. These checks are 
 live trade settlement; the game lane timeout still prevents that follow-up. All root QA
 processes exited. The playable copy at `target/debug/aa-client-play.exe` now has SHA256
 `37992B80A74EE8FD3956D40B8857F333135416825FF9B2459C01548FF9825676`.
+
+## Original Options key bindings and gameplay input (2026-10-17)
+
+`settings/bindings.rs` reads `game/default_binding.g` through aa-pak instead of maintaining a
+second key table. It retains both managers, all five mode groups and original one-based indexed
+actions. The native104-action catalogue comes from393f8d20/39ac8e68 and remains case-sensitive.
+Original defaults include Q/E strafe, A/D turn, arrow-key secondary movement, Mouse4 secondary
+autorun, Ctrl-E mail, Shift-V friends, I inventory and both action-bar rows. The former B alias
+is removed. The native18-entry overridable-action table is runtime-encoded; the implementation
+uses the non-normal groups in the authored defaults as its documented inference.
+
+Live and draft keymaps are separate. Original X2Hotkey getters, BindingToOption, InitOptionHotKey,
+indexed/button setters, removal, SaveHotKey and EnableHotkey now operate on them. A changed
+assignment displaces the same physical chord across managers within its mode, then raises native
+UPDATE_OPTION_BINDINGS(overridden, displacedBaseAction); unchanged assignments raise no event.
+Save commits the draft and raises UPDATE_BINDINGS, refreshing the original action-bar labels.
+Original Apply, Cancel and Default Keys handlers are used without replacement. Explicit empty
+records preserve removed defaults across restart. Settings use the existing bounded, atomic
+account-local JSON store; pending general-option edits remain separate from a hotkey save.
+
+Native393fc270 tries exact modifiers and then removes Alt only within each active mode before
+normal mode; Ctrl/Shift do not fall back. Native393ff880/393ff9a0 latch the action on physical
+press and release it by physical key, even if modifiers change. `settings/input.rs` follows that
+contract and tracks ordered key events. Captured/disabled input clears active actions, held-key
+repeats cannot reactivate them, focus loss clears state, and entering a world does not synthesize
+presses from keys already held. Native key names come from aa-ui's recovered keyboard mapping.
+Mouse3/4/5 and wheel pulses use the same bindings. Wheel pixel scaling remains the existing app
+camera calibration, not a recovered native constant.
+
+Movement, jump/dive, walk/autorun, camera zoom, action-bar slots1-58, chat opening, interaction
+keys, quest-directing choices, target cycling, mail and registered window/button actions consume
+the same live map. Original visible enabled button globals can receive a bound left-click.
+Action-bar requests retain their real usability/range/mana gates. Target cycling retains the
+app's existing range/order approximation. Literal Escape still closes windows/cursors/targets;
+the configured open_config action opens the original system menu. Existing Shift-to-walk and
+two-mouse-button movement conveniences remain. Dev scripted controls remain available.
+
+Known limits: normal and quest-directing modes are active in gameplay; builder, screenshot and
+context-sensitive mode activation still need their owning systems. Direct native spell/macro/item
+binding kinds, less common action consumers, camera preset actions and native key-name rejection
+need further audit. This local JSON is not the native hotkey.g/character UIData blob. aa-net now
+preserves UIData type2, but native xlcommon::Data grammar/version and lifecycle synchronization
+are unresolved; no guessed JSON is uploaded as native binding data.
+
+Validation:129 client tests pass,18 probes ignored. Six settings/input tests pass, including physical-release behavior, mode
+priority, primary/secondary keys, indexed/button assignments, conflict events, explicit removal,
+Reset/Cancel and restart. The isolated original world-stage fixture passed in5.45s: the actual
+Character Controls editor captures P, original Apply saves it, Cancel rejects O, Default Keys
+resets only the draft, and injected physical P subsequently activates moveforward while W does
+not. The fixture uses an isolated temporary store and leaves the user's account settings intact.
+`keybindings_hud` is an aa-dev example showing the original Game Keybinds page for comparison
+with `reference/ingame/options_keybinds/real.png`.
+
+The inspected `shots/hud/sol61-bindings/native.png` preserves the reference Game Keybinds
+window/art/rows and gold/blue key fields, with443-445FPS before capture at1920x1080 and zero
+script errors. Generic body/menu text still uses a visibly different serif face from the
+reference; shared font alias/fallback calibration remains open. The inspected world-select
+smoke in the same folder shows the live Lane-bevy list, zero script errors and292-405FPS.
+Both root QA windows exited. The playable copy `target/debug/aa-client-play.exe` is refreshed,
+SHA256 `A9523DFD34F89BC4F772104D8D78AE2295555A620F6D9A5EAA1352CC26B123C4`.

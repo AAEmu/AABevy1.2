@@ -6,8 +6,8 @@
 //! * [`HudPointerOverUi`] is true while the mouse is over a clickable widget of the HUD, or a button
 //!   that went down over one is still held (a window being dragged): the camera orbit and the click
 //!   to move should ignore that frame.
-//! * The key bindings of the windows (`I` / `B` bag, `C` character, `K` skills, `L` quests, `M` map,
-//!   `Escape`) go to the toolkit's `hotkey` (`Escape` is `targeting::escape_key`).
+//! * Configured window actions go to the toolkit's `hotkey`; Escape window/target handling stays
+//!   in `targeting::escape_key`.
 
 use aa_ui::{UiRuntime, UiVirtualPointer};
 use bevy::prelude::*;
@@ -73,28 +73,32 @@ pub fn pointer_over_ui(
 }
 
 /// The client's window key bindings.
-pub fn hotkeys(mut keys: ResMut<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt: Option<NonSend<UiRuntime>>) {
+pub fn hotkeys(actions: Res<crate::settings::Actions>, focus: Res<HudKeyboardFocus>, rt: Option<NonSend<UiRuntime>>) {
     let Some(rt) = rt else { return };
     if focus.0 || rt.keyboard_captured() {
         return;
     }
-    if keys.just_pressed(KeyCode::KeyE) && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)) {
-        super::mail::toggle(&rt);
-        keys.reset(KeyCode::KeyE);
-    }
-    for (key, action) in [
-        (KeyCode::KeyI, "toggle_bag"),
-        (KeyCode::KeyB, "toggle_bag"),
-        (KeyCode::KeyC, "toggle_character"),
-        (KeyCode::KeyK, "toggle_spellbook"),
-        (KeyCode::KeyL, "toggle_quest"),
-        (KeyCode::KeyM, "toggle_worldmap"),
-    ] {
-        if keys.just_pressed(key) {
-            info!("hud: key {key:?} -> {action}");
-            if let Err(e) = rt.hotkey(action) {
-                warn!("hud: {action}: {e}");
+    for (action, index, button) in actions.hotkeys() {
+        if button {
+            if let Ok(Some(value)) = rt.lua.globals().get::<Option<mlua::Value>>(action)
+                && let Some(id) = aa_ui::lua::value_id(&rt.lua, &value)
+            {
+                let enabled = {
+                    let u = aa_ui::lua::ui(&rt.lua);
+                    u.tree.visible(id) && u.tree.widget(id).is_some_and(|w| w.enabled)
+                };
+                if enabled {
+                    aa_ui::lua::call_handler(&rt.lua, id, "OnClick", vec![mlua::Value::String(rt.lua.create_string("LeftButton").unwrap())]);
+                }
             }
+        } else if index == 0 && action == "toggle_post" {
+            super::mail::toggle(&rt);
+        } else if index == 0
+            && action != "open_config"
+            && action != "open_chat"
+            && let Err(e) = rt.hotkey(action)
+        {
+            warn!("hud: {action}: {e}");
         }
     }
 }
