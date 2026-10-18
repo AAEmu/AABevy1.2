@@ -2995,3 +2995,35 @@ source proof beyond the lane's known mismatching settlement representation.
 Validation: `cargo check -p aa-net --features bevy` and the full270-test library suite pass
 for mate rename; the earlier two login loopbacks remain green. The source tests use Rust
 Unicode escapes so PowerShell's pipeline encoding cannot change the multibyte goldens.
+
+### Stablehand summon-item revival (2026-10-17)
+
+`MateCommand::ReviveItems { npc_obj_id }` sends CS0b5 with a nonzero three-byte BC NPC
+object ID. This is a separate companion service from `RepairCommand`; it supplies no
+local quote, item mutation, revive completion or special acknowledgement. A successful
+send uses the existing `MateEvent::Requested`. Existing authoritative `ItemsChanged`
+detail updates change `ItemDetail::Mate { exp, dead, level }` in the bag/bank. Public
+`mate::REPAIR_PETS_TASK = 58` names the lane's reason value without inventing a new ACK.
+
+Native `RepairPetItems` binding3944873e points to wrapper39440d80. It resolves the current
+interaction object, requires NPC kind1 at+410, resolves NPC data, and checks the stabler
+flag at+e4 before setting vtable399d9cb0 / opcode0xb5. It passes the NPC's runtime ID at+418
+to ctor397ac5f0, which stores packet+C, and sends39186810. Serializer397c79d0 delegates to
+397a7710; that helper passes length3 at397a7749 to its raw read/write virtual method,
+proving BC width rather than a u32. The lane `economy/mate_equipment.rs` reads `read_bc`,
+and `vehicles/mates.rs::revive_pet_items` checks current interaction, owned dead summon
+items, stabler role, range, unsummoned state and funds. It debits through actual money
+tasks and sends SCItemTaskSuccess with reason58 and item-detail updates; the existing
+generic MATE_RESURRECTED server message is not remapped to an arbitrary request ACK.
+
+Tests prove the exact request bytes and bounds, no dead-flag changes from a local send,
+and received reason58 padded detail updates for both bag and bank while preserving the
+reported experience/level. The lane's floating-point revive-cost function is not exposed
+as a native quote: original UI rounding/order needs separate proof before a quote API.
+No pet was killed, revived, granted, or transacted against the stalled lane for this work.
+
+Validation: the built aa-net test executable was copied to the ignored aa-net extraction
+directory and run directly, avoiding another shared cargo lock; all271 library tests pass.
+The focused `cargo test -p aa-net --features bevy --lib stablehand` also passes. The full
+cargo library invocation remains queued behind another session's build and is not claimed
+as completed yet. Earlier full crate verification covered both local login loopbacks.
