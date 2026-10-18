@@ -129,6 +129,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Inv
             anim_action: 0,
             attached_to: None,
             house_posture: None,
+            state_attachments: None,
         },
     );
     Ok((rt, bridge, inventory, units))

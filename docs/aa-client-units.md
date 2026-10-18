@@ -142,3 +142,30 @@ five ordinary subsets; body-clock and owner assertions pass. It measured223–25
 HUD fixture also used the shared GPU, with no GPU errors and normal screenshot exit.
 The client suite passes150 tests /24 ignored, including model/slot incompatibility and worker
 model-list checks. This is offline visual/source verification; live lane game connections remain stalled.
+
+## Selected remote character faces (2026-10-18)
+
+The server-confirmed Target now opts one visible, awake remote Character into original facial
+playback after normal unit culling. A target change, hidden/out-of-view target, parked Animator,
+or removed entity detaches the previous private face before enabling the next. The queued mutation
+rechecks visibility/awake identity. Unsupported heads are attempted only when eligibility changes,
+not every frame. The local player's existing spawn-time face is independent. This is a bounded
+client memory policy, not a claim of identical native crowd facial LOD.
+
+The aa-anim in-place API preserves the actual customized face, material/skin components, bones,
+movement/entity identity and cached ordinary mesh handles. It handles selection AFTER GPU upload
+has released ordinary CPU vertices by rebuilding only the selected head with the same source model,
+face_morph and aa-cry subset converter. Disabling restores ordinary handles and underlying body bone
+poses, including a parked body; private meshes are released through normal asset lifetime.
+
+The supporting aa-anim regression/capture enables at3s, disables at5s after private GPU upload and
+captures at8s. It passed73 tests /1 ignored; facial_attach_toggle_final_20261018.png was inspected
+by the owner at252-339 FPS, with no window left open. Root's main client check passes, and a
+read-only integration review found no lifecycle blocker. Natural full-world target switching is
+still awaiting the lane game-connection unblock. Same-entity appearance replacement will need an
+explicit re-enable trigger once that pipeline is implemented.
+
+Measured Nuian male morph payload is4,049,472 bytes per enabled head (about386 MiB for100), with
+zero extra image/material/bindpose assets. The crowd audit therefore did not add a CPU cache that
+would leave per-mesh GPU duplication intact. Its expression-update microbench excludes full ECS,
+body and facial-bone costs; original32-head captures check independent poses and real GPU use.

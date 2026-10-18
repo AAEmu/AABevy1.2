@@ -7,6 +7,8 @@
 //! nearest first under a per frame time budget; the cached assets make the second NPC of a kind
 //! cheap.
 
+mod face;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -483,6 +485,7 @@ pub fn plugin(app: &mut App) {
             (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders).chain().after(move_units),
             super::idle::posture_changes,
             super::idle::remote_idles.after(super::anim::drive_locomotion),
+            face::select.after(cull_units),
         )
             .run_if(super::world_screens),
     );
