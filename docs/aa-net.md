@@ -6913,3 +6913,92 @@ explicit. Runtime module marker and process image were verified before readonly 
 QA: cargo check, all10 focused bounty tests and all505 Bevy library tests pass
 (0failed/0ignored). The local TCP test sends all three bounty commands and confirms
 invalid bulletin object IDs produce no wire write or fabricated bulletin receipt.
+
+
+### Original ranking received foundation (2026-10-18)
+
+The active bevy lane declares ranking_packets/manager/runtime and registers its request
+handlers (the packet module's old introductory 'not declared' comment is stale).
+Native SC1f9 factory391b75b0?vtable399b42f4?397b89d0 reads u32 rankID;
+SC1fa391b7630?399b4300?397c4820?3961f360/3961f1a0 reads outertype u32,
+error i16, raw time64, count i32 and personal rows. SC1fb391b7700?399b430c?
+397c48b0?3961f3b0/3961f2c0 reads rankID u32, error i16, boardID i64,
+two raw time64 fields, signed entry count/rows and signed scope count/rows.
+SC205391b7c50?399b4384?397c4940 reads rankID u32 and enum u8. Current lane
+writers agree on these exact widths/order. Timestamp bits are retained as raw u64;
+no local timezone or clock projection is assumed by this received cache.
+
+Personal rows retain accountID u32, binary account string, characterID/rankID u32,
+worldID u8, signed v1/v2, two raw sum bytes, and raw recorded time64. Snapshot entries
+retain characterID/rankID, worldID, signed v1/v2, raw updated time64 and signed ranking;
+scopes retain signed scopeID/v1/v2. All raw counts, flags, names, duplicates and order
+remain in Event::Ranking and bounded last_receipt. Count feasibility is checked against
+remaining bytes before allocating, including deliberately impossible i32MAX counts.
+Negative native signed counts consume zero rows, as native signed loops do.
+
+The reader consumes full lane-declared framing; native inline readers cap personal
+storage at16 and snapshot entries/scopes at100, yet their callbacks trust the original
+counts. Out-of-cap malformed inputs therefore have unsafe/non-equivalent native behavior,
+not a valid truncation contract. The safe cache atomically refuses positive over-cap
+counts, mismatched vectors or personal account names exceeding16 bytes; complete raw
+receipts remain observable. Names within accepted caches preserve NUL tails for the
+later first-NUL Lua boundary.
+
+`Rankings.by_id` follows native unsigned board-key ordering. Handler39182340?39076980
+ignores outertype for cache keying and assigns each row under its own rankID; last duplicate
+wins. Personal assignment only replaces the personal row, preserving an existing board
+snapshot. Accepted zero-error receipts assign acknowledgement time and emit
+`RANK_PLAYER_RECORDS()` (0x258), even repeated/empty receipts; if the cache is empty,
+local error792 precedes that callback. Nonzero signed i16 error silently refuses the
+cache/callback. The native reader sign-extends the i16 into a DWORD object member:
+this is **not a 32-bit wire overread**, despite the lane packet comment's wording.
+
+Handler39182370?39076df0 accepts a zero-error snapshot only for an already cached
+rankID, replaces its ordered entries/scopes (including duplicates), and emits no immediate
+Lua event. Native frame39074fb0 emits `RANK_SNAPSHOTS()` (0x259) only when the selected
+board exists and every entry's character name resolves through390192e0?39018560.
+That provider first checks actual units by persistent characterID, then its separate
+name cache/request queue. Account strings and runtime object names must not be invented
+as substitutes. Ranking readiness, selected board, name availability, lock/unlock timers,
+and static-derived refresh timestamps remain explicit adapter/provider gaps here.
+
+Alarm39182410?39076b80 requires a static rank descriptor397f2950; it selects a static
+message string according to raw kind==1 versus other, then emits RANK_ALARM_MSG(0x25c)
+with the descriptor's signed kind and that string. RewardMail handler391e58c0 also
+requires the static descriptor, formats localized key RANK_REWARD_SENT with its descriptor
+name, and only on formatter success emits SYSTEM_MESSAGE(0xfd). RANK_REWARD_SENT is a
+localization key, not a Lua event. Both remain complete raw RankingEvent receipts until
+the app supplies those actual static/localized projections. No reward/item/mail success,
+name resolution or snapshot-ready callback is fabricated by the reducer.
+
+Native reset39076f60 empties the map and UI selection/time/ready globals. A tail-jump
+scan closes wrapper39213830, called at39213576 inside destructor39213430; the actual
+owner/lifecycle event mapping remains unclosed. The plain resource explicitly isolates on actual
+selected persistent identity replacement (CharacterSelected/PlayerSpawn) and transport
+login/connect/disconnect/kick boundaries as **app policy**, not native reset equivalence.
+A matching PlayerSpawn retains already received data, and LeftWorld retains it. Own
+identity is never inferred from any received row. No outgoing ranking requests or automatic
+name/reward operations are introduced by this foundation.
+
+Ignored source native-ranking-source-20261018.txt records exact bodies;
+ranking_cache_oracle.py / native-ranking-cache-oracle-20261018.json execute original
+39076980/39076df0, actual tree lookup and preallocated native vector appends in seven cases.
+UI visible-board builder, name-cache/static descriptor lookups and Lua/error sinks are
+explicitly mocked. Results: duplicate scores11?22; nonzero errors refuse; personal updates
+preserve vectors; known-key snapshots retain ordered IDs42/43 and duplicate scopes5/5;
+unknown-key snapshots refuse; snapshot receipts emit no immediate callbacks. New-key
+allocation and native reset caller are not claimed by those executed cases.
+
+The seventh executed case proves empty personal-map error792 observes the old
+acknowledgement, followed by RANK_PLAYER_RECORDS observing the assigned123.
+`Rankings::apply_with_dispatch` therefore supplies ordered (notice,Rankings snapshot)
+callback views; plain apply and apply_with_notices share the same fold without deep
+cache clones. Use the staged variant when local error presentation can query ranking state.
+
+QA: cargo check passes, seven focused ranking tests pass and all512 Bevy library
+tests pass (0failed/0ignored). Coverage includes every truncated prefix, all four
+raw bodies and DD04 following-packet alignment, impossible counts before allocation,
+atomic cache-cap refusal with complete raw receipt retention, duplicate assignments,
+known-key snapshots, callback-time acknowledgement views, actual identity isolation,
+matching-spawn/world-leave retention, Bevy folding and ordered Session forwarding
+without automatic name queries or rewards.

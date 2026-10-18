@@ -184,6 +184,7 @@ net_state! {
     trials: crate::trial::Trials,
     crimes: crate::crime::Crimes,
     bounties:crate::Bounties,
+    rankings:crate::Rankings,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
@@ -318,6 +319,14 @@ mod equipment_flags_tests {
         let state=app.world().resource::<crate::Trials>();assert_eq!(state.defendant_context,Some(7));assert_eq!(state.jury_counts,Some([2,5]));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert_eq!(*app.world().resource::<crate::Trials>(),crate::Trials::default());
+    }
+
+    #[test]
+    fn plugin_ranking_resource_forwards_raw_mail_without_fabricating_board(){
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Ranking(crate::RankingEvent::RewardMail{rank_id:7}))).unwrap();
+        let state=app.world().resource::<crate::Rankings>();assert!(state.by_id.is_empty());assert_eq!(state.last_receipt,Some(crate::RankingEvent::RewardMail{rank_id:7}));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();assert_eq!(*app.world().resource::<crate::Rankings>(),crate::Rankings::default());
     }
 
     #[test]

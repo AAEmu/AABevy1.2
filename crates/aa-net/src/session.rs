@@ -542,6 +542,7 @@ pub enum Event {
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
     Bounty(crate::BountyEvent),
+    Ranking(crate::RankingEvent),
     /// Local successful CS072 transport write, never an authoritative jury/seat response.
     JurySummonReplyRequested { character_id:u32,trial_id:u32,court:u32,jury_number:i32 },
     JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
@@ -1663,6 +1664,7 @@ impl Session {
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
+            M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
@@ -4585,6 +4587,12 @@ mod tests {
             if matches!(receipt,crate::TrialEvent::SummonJury{..}) {assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRejected{character_id:0,..})));}
         }
         assert!(events.try_recv().is_err(),"no inferred jury choice or seat response");
+    }
+
+    #[tokio::test]
+    async fn ranking_receipts_forward_every_duplicate_without_rewards_or_name_fabrication(){
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let value=crate::RankingEvent::Alarm{rank_id:7,raw_kind:255};for receipt in [value.clone(),value,crate::RankingEvent::RewardMail{rank_id:7}]{session.game_msg(Ok(game::ServerMsg::Ranking(receipt.clone()))).await;assert!(matches!(events.try_recv(),Ok(Event::Ranking(actual))if actual==receipt));}assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
