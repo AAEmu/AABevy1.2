@@ -730,7 +730,8 @@ Model completion checks the cached original `.mtl` sub-materials for
 NoDraw/proxy decisions and texture conversions remain intact. A typed `MeshTag`
 carries the 18-bit packed colour per instance; one shared bindless
 `ExtendedMaterial<StandardMaterial, VegetationColor>` mirrors each qualifying
-base material. The extension adds no GPU bindings, textures or per-instance
+base material. The later group-brightness slice adds a shared scalar buffer
+and bindless index table (see below), with no new textures or per-instance
 materials. Lookup and mirror creation happen at bounded model completion;
 spawning adds one tag and constant-time handle lookup to the existing sector
 budget. No per-frame curve/material scan or plant recolouring loop is added.
@@ -741,7 +742,7 @@ The slice handles ordinary authored material layers 0 and forward rendering.
 Nonzero `nMaterialLayers` variants are conservatively left on the existing
 material path (native Render skips packing for material-layer bit 1;
 `300F7190` reads the group's byte+92). Frozen/wet layer rendering, editor-selected
-material overrides, native group/terrain brightness and terrain-colour runtime blending,
+material overrides, native terrain brightness and terrain-colour runtime blending,
 wind bending, sprites and the unresolved tilt producer are separate gaps.
 Scale remains the exact native 0.1..5 clamp and no rotations are changed.
 
@@ -809,7 +810,7 @@ non-Vegetation/additive-alpha-glow materials decline this path. Native RGB bendi
 channels never become Bevy vertex colors. Positions, UV0, normals, tangents,
 indices, bounds, material opacity/cutouts and shadow eligibility stay unchanged.
 
-The existing zero-binding vegetation extension applies this AO term to lit RGB,
+The vegetation extension applies this AO term to lit RGB,
 then the existing colour variation, then fog/post. AO-only materials use an
 adapter tag bit to bypass colour variation, without changing its 18-bit payload.
 The world never sets the independent diagnostic AO-bypass tag; `--off` uses it
@@ -830,7 +831,7 @@ minimum 116. Source regressions pin these actual values and prove record byte 59
 is 0 rather than an AO factor. Synthetic geometry separately checks nontrivial
 compaction, mirrored order, unreferenced alpha 0, NoDraw/Cut/Illum/glow filtering,
 subset-map rejection, invalid/oversized streams and
-shared mirror identity. Native group/terrain brightness, wind bending,
+shared mirror identity. Native terrain brightness, wind bending,
 terrain-colour runtime blending, special material layers, native leaf/back/rim
 lighting and sprites remain separate limitations. This implements the proved AO
 factor within the existing StandardMaterial lighting approximation.
@@ -868,6 +869,88 @@ is supported by original shader/mesh data and the independent GPU controls.
 Final validation: `cargo test -p aa-world --lib` passes **175 tests**, nine
 existing ignored; `cargo check -p aa-world --examples` also passes. The six fixture runs exit zero with no shader/GPU errors and
 all windows closed. Inherited fly/post/sky/water calibration hunks are unchanged.
+
+#### Native non-terrain group brightness (`vegetation_color.rs`)
+
+Original `300F76C0` reads XML `fBrightness` into definition+56;
+`300F8270` copies definition[14] into the temporary `SStatInstGroup`+36,
+and `C3DEngine::SetStatInstGroup` (`30130DB0`) copies that field unchanged
+into the 840-byte engine group. In `CVegetation::Render` (`300F1740`), when
+the terrain-colour/brightness path is inactive, this group+36 scalar replaces
+the render-parameter ambient alpha and is capped only when greater than one.
+No lower clamp appears there. `fxconstantdefs.cfi`181 declares
+`SI_ObjectAmbColComp.x = Ambient.w`; `vegetation.cfx`326-334/403-405 multiplies
+vertex alpha by that scalar for the non-terrain-colour branch, then line780
+multiplies final lit RGB by this AO term before colour variation and fog.
+Neither material opacity nor alpha testing receives the brightness scalar.
+Source is retained in ignored `lights/vegetation-brightness-native.txt`,
+`vegetation-group-native.txt`, `vegetation-render-native.txt` and original
+`cryfx/.../{vegetation.cfx,fxconstantdefs.cfi}`.
+
+`VegGroup` now retains `fBrightness` and `bUseTerrainColor`. Supported authored
+values are finite and nonnegative, with the native upper cap of one; negative
+or malformed/nonfinite input is explicitly declined rather than lower-clamped.
+Groups with `bUseTerrainColor=1`, nonzero material layers or unsupported
+non-Vegetation/alpha-glow shaders keep their existing path. This does not
+approximate the terrain-colour runtime branch or the separate terrain-derived
+brightness producer.
+
+One exact f32 scalar travels in a shared bindless material buffer; the
+non-bindless fallback uses the equivalent uniform. Variant lookup keys are
+`(base StandardMaterial ID, brightness.to_bits())`, preserving separate
+nonunity/unity materials and exact scalar precision. Lookup IDs remain weak;
+existing model handles own each variant. Model completion queries a small
+pre-indexed XML variant list, built once, and adds no per-frame full-group scan,
+per-instance material, texture decode or geometry. Existing AO mirrors, tags,
+shadow flags, stream queue/budgets and cell/sector lifetime stay in use.
+
+Actual main-world XML has 2,771 group records (2,745 with model paths), eight
+with nonunity `fBrightness`.
+Palace cell(13,10) contains 88 group 618 `flower_a.cgf` records, authored
+`fBrightness=0.40000001`, `bUseTerrainColor=0`, layers 0. The CGF names
+`flower_abcde.mtl`; its visible Vegetation submaterial has GenMask 0x80052000.
+The original patch fixture targets Cry(13632.293,10354.819,194.68315).
+Other sampled spawn(15,15), forest(12,14), town(10,10) and cave(21,8) groups
+on the non-terrain path have unity brightness, so this change leaves their
+scalar at one.
+
+`cargo test -p aa-world --lib` passes **178 tests / 9 ignored** and
+`cargo check -p aa-world --examples` passes. Regressions cover exact source
+values, upper cap, zero, declined negatives/NaN/terrain/layers, material-override
+lookup, same-value sharing, adjacent-f32 separation, unchanged base colour/alpha
+and stale weak-cache replacement. The aa-dev `vegetation_brightness` example
+checks sixteen independent GPU pixels with and without fog: raw 0/.4/1/10
+(cap 1), lit emissive, vertex AO and an interpolated AO gradient, missing-AO
+neutrality, colour variation and unchanged opacity 0.5. All 32 controls match
+the independent CPU within one display value (unfogged max error 0, fog max 1).
+Existing unity AO 16 and colour 12 GPU controls also pass, retaining their
+original CPU expectations.
+Screenshots under `shots/aa-world/vegetation_brightness/` are `numeric.png`,
+`numeric_fog.png`, `ao_unity_regression.png`, `color_unity_regression.png`.
+
+`--world` and `--world --off` use the same original flower patch, hour 10,
+world/lighting/material inputs and camera; the control changes only that
+shared scalar to unity. Inspected `palace_native.png` /
+`palace_unity_control.png` show 60 loaded nonunity parts sharing **one mesh /
+one material**, 965 total streamed object parts, no failed or pending models.
+16,310 pixels change by more than 2 display RGB values, confined to
+x 711..1150/y 476..738 around the flowers; outside that box, the maximum
+difference is one display value. Changed-pixel mean RGB is
+(117.5,101.6,34.7) with authored .4 versus (158.3,147.3,67.4) at unity;
+the display ratio includes the unchanged HDR/post mapping, not a linear .4
+pixel requirement. Native intervals are 140-161 FPS, unity 139-158 FPS on the
+shared machine, without a performance claim. `--world --unload-check` moves
+focus outside the world after 16 s and asserts all 60 recorded entity IDs gone,
+zero streamed objects/brightness parts and no pending models; `palace_unload.png`
+was inspected. Shared model/material cache lifetime is unchanged.
+
+The existing real-client Palace references are taken at camera Z 240.410,
+well above this authored flower patch at Z 194.683, so there is no matching
+native close-view comparison or new brightness calibration. Native terrain
+brightness/terrain-colour runtime blending, special material layers, native
+leaf/back/rim lighting and wind remain open. All deliverable runs exit zero
+without shader/GPU errors and close their windows. Inherited fly/post/sky/water
+calibration hunks remain unchanged.
 
 #### Native vegetation ordinary-shadow eligibility
 
@@ -3058,6 +3141,25 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
 
 ## 7. Requests to other crates
+
+* **aa-cry, source-audited follow-up**: ordinary Illum VERTCOLORS mask 0x400000
+  is used by real Palace brushes. `illum.cfx`13/716 enables the feature;
+  `fraglib.cfi`766-768 multiplies final lit RGB by **interpolated RGB squared**,
+  after custom composition and before post balance/additive alpha glow/fog.
+  Alpha is unaffected; VERTALPHA 0x400 is separate. `MeshData.colors` retains
+  the source bytes, but `subset_mesh_with` currently omits ATTRIBUTE_COLOR.
+  A bounded survey of the nearest 25 unique model/material pairs around the
+  correct Palace world camera (13632.99463,10449.04932,240.410263), cell (13,10),
+  found 12 flagged models / 35 LOD0 subsets / 78,790 compact vertex references;
+  21 subsets across 8 models have 13,666 nonwhite RGB references, 3,774 nongrey.
+  Examples include castle_nuia_001/001_1/002/003 with authored twocrowns
+  material overrides. Exact bridge requirement: compact the matching subset
+  colours in native/mirrored index order, preserve alpha semantics separately,
+  and apply RGB squared after interpolation at the native composition stage.
+  Native D3D10 `COLOR_SWAP=1` selects `GetInputColor(Color.zyxw)`; the original
+  vertex upload/layout channel contract still needs proof before nongrey RGB
+  support. No world-side Illum material/geometry workaround was added. Survey
+  data is retained in ignored `lights/illum-palace-{candidates,colors}.json`.
 
 * **aa-cry**: `CryAssets::load_model` is main thread only and its cost (parse, mesh build, DDS decode) is the largest main thread item here;
   a prepare / finish split (parse + mesh + decode on a task, the main thread only adds assets) would remove the per-frame time budget.

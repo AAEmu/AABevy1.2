@@ -1,27 +1,21 @@
-//! Native vegetation final-light vertex AO and per-instance COLOR_VARIATION.
+//! Native vegetation final-light group brightness, vertex AO and per-instance COLOR_VARIATION.
 //! The original B/G/R bytes are six-bit packed in MeshTag; all instances share their material.
 
 use aa_cry::{CryAssets, material::Material as CryMaterial, scene::LoadedModel};
 use bevy::{
     asset::{AssetId, embedded_asset},
-    ecs::system::SystemParamItem,
     mesh::MeshVertexBufferLayoutRef,
     pbr::{
         ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
         MaterialPlugin,
     },
     prelude::*,
-    render::{
-        render_resource::{
-            AsBindGroup, AsBindGroupError, BindGroupBuilder, BindGroupLayout, BindGroupLayoutEntry,
-            BindlessDescriptor, BindlessSlabResourceLimit, RenderPipelineDescriptor,
-            SpecializedMeshPipelineError,
-        },
-        renderer::RenderDevice,
+    render::render_resource::{
+        AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     },
     shader::ShaderRef,
 };
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 pub(crate) mod ao;
 pub use ao::VegetationAoPart;
@@ -32,12 +26,21 @@ pub const NO_COLOR_VARIATION: u32 = 1 << 18;
 pub const IGNORE_VERTEX_AO: u32 = 1 << 19;
 
 pub type VegetationMaterial = ExtendedMaterial<StandardMaterial, VegetationColor>;
-pub(crate) type Mirrors = HashMap<AssetId<StandardMaterial>, AssetId<VegetationMaterial>>;
+pub(crate) type Mirrors = HashMap<(AssetId<StandardMaterial>, u32), AssetId<VegetationMaterial>>;
 pub(crate) struct Mirror {
     pub material: Handle<VegetationMaterial>,
     pub variation: bool,
+    pub brightness: f32,
 }
-pub(crate) type Materials = HashMap<AssetId<StandardMaterial>, Mirror>;
+pub(crate) type Materials = HashMap<(AssetId<StandardMaterial>, u32), Mirror>;
+
+/// A nonunity authored scalar part, for scene diagnostics and cell-lifetime checks.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct VegetationBrightnessPart {
+    pub cell: (i32, i32),
+    pub group: u16,
+    pub brightness: f32,
+}
 
 /// A material-qualified vegetation part, for scene diagnostics and cell-lifetime checks.
 #[derive(Component, Clone, Copy, Debug)]
@@ -64,6 +67,7 @@ pub(crate) fn prepare(
     cry: &mut CryAssets,
     loaded: &LoadedModel,
     ao: &ao::Meshes,
+    brightnesses: &[f32],
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
 ) -> Materials {
@@ -104,74 +108,85 @@ pub(crate) fn prepare(
         {
             continue;
         }
-        if !variation
-            && !loaded
-                .parts
-                .iter()
-                .flat_map(|(_, p)| p)
-                .any(|p| p.material == base && ao.contains_key(&p.mesh.id()))
-        {
-            continue;
-        }
-        let handle = mirrors
-            .get(&base.id())
-            .and_then(|id| materials.get_strong_handle(*id))
-            .or_else(|| {
-                cry.materials.get(&base).map(|m| {
-                    materials.add(VegetationMaterial {
-                        base: m.clone(),
-                        extension: VegetationColor,
-                    })
-                })
-            });
-        if let Some(handle) = handle {
-            mirrors.insert(base.id(), handle.id());
-            result.insert(
-                base.id(),
-                Mirror {
-                    material: handle,
-                    variation,
-                },
-            );
+        let has_ao = loaded
+            .parts
+            .iter()
+            .flat_map(|(_, p)| p)
+            .any(|p| p.material == base && ao.contains_key(&p.mesh.id()));
+        // Alpha-glow is added after AO in the native shader; that distinct pass is unsupported.
+        let brightness_supported =
+            source.shader.eq_ignore_ascii_case("Vegetation") && source.gen_mask & 0x4000_0000 == 0;
+        for &brightness in brightnesses {
+            if !variation && !has_ao && !(brightness_supported && brightness != 1.0) {
+                continue;
+            }
+            let value = if brightness_supported {
+                brightness
+            } else {
+                1.0
+            };
+            let handle = cry
+                .materials
+                .get(&base)
+                .map(|m| variant(base.id(), m, value, mirrors, materials));
+            if let Some(handle) = handle {
+                result.insert(
+                    (base.id(), brightness.to_bits()),
+                    Mirror {
+                        material: handle,
+                        variation,
+                        brightness: value,
+                    },
+                );
+            }
         }
     }
     result
 }
 
-/// No extra uniforms/textures: the native constant varies by instance, not by material.
-/// An empty bindless descriptor keeps StandardMaterial's batching without adding an empty
-/// index-table binding (which the derive macro would otherwise generate).
-#[derive(Asset, Reflect, Debug, Clone, Default)]
-pub struct VegetationColor;
-impl AsBindGroup for VegetationColor {
-    type Data = ();
-    type Param = ();
-    fn label() -> &'static str {
-        "vegetation instance colour"
+fn variant(
+    base_id: AssetId<StandardMaterial>,
+    base: &StandardMaterial,
+    value: f32,
+    mirrors: &mut Mirrors,
+    materials: &mut Assets<VegetationMaterial>,
+) -> Handle<VegetationMaterial> {
+    let key = (base_id, value.to_bits());
+    if let Some(handle) = mirrors
+        .get(&key)
+        .and_then(|id| materials.get_strong_handle(*id))
+    {
+        return handle;
     }
-    fn bind_group_data(&self) {}
-    fn bindless_slot_count() -> Option<BindlessSlabResourceLimit> {
-        Some(BindlessSlabResourceLimit::Auto)
+    let handle = materials.add(VegetationMaterial {
+        base: base.clone(),
+        extension: VegetationColor { brightness: value },
+    });
+    mirrors.insert(key, handle.id());
+    handle
+}
+
+/// One shared exact group scalar; geometry and per-instance colour tags stay unchanged.
+#[derive(Asset, Reflect, Debug, Clone, AsBindGroup)]
+#[data(50, VegetationUniform, binding_array(101))]
+#[bindless(index_table(range(50..51), binding(100)))]
+pub struct VegetationColor {
+    pub brightness: f32,
+}
+impl Default for VegetationColor {
+    fn default() -> Self {
+        Self { brightness: 1.0 }
     }
-    fn bindless_descriptor() -> Option<BindlessDescriptor> {
-        Some(BindlessDescriptor {
-            resources: Cow::Borrowed(&[]),
-            buffers: Cow::Borrowed(&[]),
-            index_tables: Cow::Borrowed(&[]),
-        })
-    }
-    fn build_bind_group(
-        &self,
-        _: &BindGroupLayout,
-        _: &RenderDevice,
-        _: &mut SystemParamItem<'_, '_, Self::Param>,
-        _: bool,
-        _: &mut BindGroupBuilder,
-    ) -> Result<(), AsBindGroupError> {
-        Ok(())
-    }
-    fn bind_group_layout_entries(_: &RenderDevice, _: bool) -> Vec<BindGroupLayoutEntry> {
-        Vec::new()
+}
+#[derive(Clone, ShaderType)]
+pub struct VegetationUniform {
+    pub brightness: Vec4,
+}
+impl From<&VegetationColor> for VegetationUniform {
+    fn from(v: &VegetationColor) -> Self {
+        Self {
+            brightness: Vec4::splat(v.brightness),
+        }
     }
 }
 impl MaterialExtension for VegetationColor {
@@ -232,9 +247,45 @@ mod tests {
         m.shader = "Illum".into();
         assert!(!enabled(&m));
         let d = VegetationColor::bindless_descriptor().unwrap();
-        assert!(d.resources.is_empty() && d.buffers.is_empty() && d.index_tables.is_empty());
+        assert_eq!(d.index_tables.len(), 1);
+        assert_eq!(VegetationColor::default().brightness, 1.0);
         assert!(VegetationMaterial::bindless_slot_count().is_some());
     }
+    #[test]
+    fn scalar_variants_share_exact_values_without_mutating_base_or_unity() {
+        let mut bases: Assets<StandardMaterial> = default();
+        let base = StandardMaterial {
+            base_color: Color::linear_rgba(0.2, 0.4, 0.6, 0.3),
+            ..default()
+        };
+        let id = bases.add(base.clone()).id();
+        let mut materials = Assets::default();
+        let mut mirrors = Mirrors::new();
+        let dark = variant(id, &base, 0.4, &mut mirrors, &mut materials);
+        let same = variant(id, &base, 0.4, &mut mirrors, &mut materials);
+        let unity = variant(id, &base, 1.0, &mut mirrors, &mut materials);
+        let adjacent = variant(
+            id,
+            &base,
+            f32::from_bits(0.4f32.to_bits() + 1),
+            &mut mirrors,
+            &mut materials,
+        );
+        assert_eq!(dark, same);
+        assert_ne!(dark, unity);
+        assert_ne!(dark, adjacent); // exact f32 cache key, no scalar quantization.
+        assert_eq!(materials.len(), 3);
+        for h in [&dark, &unity, &adjacent] {
+            assert_eq!(materials.get(h).unwrap().base.base_color, base.base_color);
+        }
+        assert_eq!(materials.get(&dark).unwrap().extension.brightness, 0.4);
+        assert_eq!(materials.get(&unity).unwrap().extension.brightness, 1.0);
+        assert_eq!(base.base_color.alpha(), 0.3); // no albedo, opacity or geometry bake.
+        materials.remove(dark.id());
+        let replacement = variant(id, &base, 0.4, &mut mirrors, &mut materials);
+        assert_ne!(replacement, dark); // stale weak cache id does not retain a material.
+    }
+
     #[test]
     fn original_forest_variation_uses_the_authored_shader_flag() {
         if !crate::pak_available() {
