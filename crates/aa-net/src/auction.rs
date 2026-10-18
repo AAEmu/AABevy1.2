@@ -6,6 +6,12 @@ use crate::session::Event;
 use crate::wire::{Reader, Result, WireError, Writer};
 
 pub const PAGE_SIZE: usize = 9;
+fn legacy_name(raw:&[u8])->String {String::from_utf8_lossy(raw).trim_matches('\0').to_string()}
+fn cstring(raw:&[u8])->&[u8] {&raw[..raw.iter().position(|&b|b==0).unwrap_or(raw.len())]}
+fn native_name<'a>(raw:&'a Option<Vec<u8>>,legacy:&'a str)->Option<&'a [u8]> {
+ let bytes=raw.as_deref().unwrap_or(legacy.as_bytes());(bytes.len()<=128).then(||cstring(bytes))
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AuctioneerIds {
     pub obj_id: u32,
@@ -75,12 +81,16 @@ pub struct AuctionLot {
     pub world_id: u8,
     pub client_id: u32,
     pub client_name: String,
+    /// Complete received bytes; String above retains its legacy display projection.
+    pub raw_client_name: Option<Vec<u8>>,
     pub start_price: i32,
     pub buyout_price: i32,
     pub post_date: i64,
     pub bid_world_id: u8,
     pub bidder_id: u32,
     pub bidder_name: String,
+    /// Complete received bytes; None permits legacy app-constructed names.
+    pub raw_bidder_name: Option<Vec<u8>>,
     pub bid_price: i32,
     pub extra: i32,
     item_wire: Vec<u8>,
@@ -102,29 +112,14 @@ impl std::fmt::Debug for AuctionLot {
 }
 impl AuctionLot {
     fn read(r: &mut Reader) -> Result<Self> {
-        let id = r.u64()?;
-        let duration = r.u8()?;
-        let before = r.rest();
-        let item = Item::read(r)?;
-        let item_wire = before[..before.len() - r.remaining()].to_vec();
-        Ok(Self {
-            id,
-            duration,
-            item,
-            item_wire,
-            world_id: r.u8()?,
-            client_id: r.u32()?,
-            client_name: r.string()?,
-            start_price: r.i32()?,
-            buyout_price: r.i32()?,
-            post_date: r.i64()?,
-            bid_world_id: r.u8()?,
-            bidder_id: r.u32()?,
-            bidder_name: r.string()?,
-            bid_price: r.i32()?,
-            extra: r.i32()?,
-        })
+        let id=r.u64()?;let duration=r.u8()?;let before=r.rest();let item=Item::read(r)?;
+        let item_wire=before[..before.len()-r.remaining()].to_vec();let world_id=r.u8()?;let client_id=r.u32()?;
+        let raw_client_name=r.blob()?.to_vec();let start_price=r.i32()?;let buyout_price=r.i32()?;let post_date=r.i64()?;
+        let bid_world_id=r.u8()?;let bidder_id=r.u32()?;let raw_bidder_name=r.blob()?.to_vec();let bid_price=r.i32()?;let extra=r.i32()?;
+        Ok(Self{id,duration,item,item_wire,world_id,client_id,client_name:legacy_name(&raw_client_name),raw_client_name:Some(raw_client_name),start_price,buyout_price,post_date,bid_world_id,bidder_id,bidder_name:legacy_name(&raw_bidder_name),raw_bidder_name:Some(raw_bidder_name),bid_price,extra})
     }
+    pub fn native_client_name(&self)->Option<&[u8]> {native_name(&self.raw_client_name,&self.client_name)}
+    pub fn native_bidder_name(&self)->Option<&[u8]> {native_name(&self.raw_bidder_name,&self.bidder_name)}
     /// Complete native AuctionLot.Write, retaining the original full item description for echo.
     pub fn from_wire(wire: &[u8]) -> Result<Self> {
         let mut r = Reader::new(wire);
@@ -140,13 +135,13 @@ impl AuctionLot {
             .raw(&self.item_wire)
             .u8(self.world_id)
             .u32(self.client_id)
-            .string(&self.client_name)
+            .blob(cstring(self.raw_client_name.as_deref().unwrap_or(self.client_name.as_bytes())))
             .i32(self.start_price)
             .i32(self.buyout_price)
             .i64(self.post_date)
             .u8(self.bid_world_id)
             .u32(self.bidder_id)
-            .string(&self.bidder_name)
+            .blob(cstring(self.raw_bidder_name.as_deref().unwrap_or(self.bidder_name.as_bytes())))
             .i32(self.bid_price)
             .i32(self.extra);
     }
@@ -154,8 +149,8 @@ impl AuctionLot {
         let mut r = Reader::new(&self.item_wire);
         self.id > 0
             && self.duration <= 3
-            && self.client_name.len() <= i16::MAX as usize
-            && self.bidder_name.len() <= i16::MAX as usize
+            && self.native_client_name().is_some()
+            && self.native_bidder_name().is_some()
             && Item::read(&mut r).is_ok_and(|item| item == self.item && r.is_empty())
     }
     pub fn item_id(&self) -> u64 {
@@ -183,6 +178,7 @@ impl AuctionLot {
             world_id,
             bidder_id,
             bidder_name: bidder_name.into(),
+            raw_bidder_name:None,
             amount,
         }
     }
@@ -194,23 +190,21 @@ pub struct AuctionBid {
     pub world_id: u8,
     pub bidder_id: u32,
     pub bidder_name: String,
+    /// Complete received bytes; None permits legacy app-constructed names.
+    pub raw_bidder_name: Option<Vec<u8>>,
     pub amount: i32,
 }
 impl AuctionBid {
-    fn read(r: &mut Reader) -> Result<Self> {
-        Ok(Self {
-            lot_id: r.u64()?,
-            world_id: r.u8()?,
-            bidder_id: r.u32()?,
-            bidder_name: r.string()?,
-            amount: r.i32()?,
-        })
+    fn read(r:&mut Reader)->Result<Self>{
+        let lot_id=r.u64()?;let world_id=r.u8()?;let bidder_id=r.u32()?;let raw_bidder_name=r.blob()?.to_vec();let amount=r.i32()?;
+        Ok(Self{lot_id,world_id,bidder_id,bidder_name:legacy_name(&raw_bidder_name),raw_bidder_name:Some(raw_bidder_name),amount})
     }
+    pub fn native_bidder_name(&self)->Option<&[u8]>{native_name(&self.raw_bidder_name,&self.bidder_name)}
     fn write(&self, w: &mut Writer) {
         w.u64(self.lot_id)
             .u8(self.world_id)
             .u32(self.bidder_id)
-            .string(&self.bidder_name)
+            .blob(cstring(self.raw_bidder_name.as_deref().unwrap_or(self.bidder_name.as_bytes())))
             .i32(self.amount);
     }
 }
@@ -283,7 +277,7 @@ impl AuctionCommand {
                     || bid.amount <= 0
                     || bid.amount < lot.start_price
                     || bid.amount <= lot.bid_price
-                    || bid.bidder_name.len() > i16::MAX as usize
+                    || bid.native_bidder_name().is_none()
                 {
                     return Err("invalid auction bid");
                 }
@@ -668,6 +662,7 @@ impl Auction {
                     lot.bid_world_id = bid.world_id;
                     lot.bidder_id = bid.bidder_id;
                     lot.bidder_name = bid.bidder_name.clone();
+                    lot.raw_bidder_name = bid.raw_bidder_name.clone();
                     lot.bid_price = bid.amount;
                 }
                 self.complete(|p|matches!(p,AuctionCommand::Bid{bid:b,..} if b.lot_id==bid.lot_id && b.amount==bid.amount));
@@ -1249,4 +1244,30 @@ mod tests {
         });
         assert_eq!(a, Auction::default());
     }
+    #[test]
+    fn auction_raw_names_preserve_receipt_and_native_cstring_echo(){
+        let original=lot();
+        let raw_lot=|seller:&[u8],bidder:&[u8]|bytes(|w|{w.u64(original.id).u8(original.duration).raw(&original.item_wire).u8(original.world_id).u32(original.client_id).blob(seller).i32(original.start_price).i32(original.buyout_price).i64(original.post_date).u8(original.bid_world_id).u32(original.bidder_id).blob(bidder).i32(original.bid_price).i32(original.extra);});
+        let seller=[255,b'A',0,b'X'];let buyer=[0,b'B'];let lot=AuctionLot::from_wire(&raw_lot(&seller,&buyer)).unwrap();
+        assert_eq!(lot.raw_client_name.as_deref(),Some(seller.as_slice()));assert_eq!(lot.raw_bidder_name.as_deref(),Some(buyer.as_slice()));assert_eq!(lot.native_client_name(),Some(&seller[..2]));assert_eq!(lot.native_bidder_name(),Some(&b""[..]));assert_eq!(lot.bidder_name,"B","legacy trim projection is retained separately from native CString");
+        let mut w=Writer::new();lot.write(&mut w);let echoed=AuctionLot::from_wire(&w.finish()).unwrap();assert_eq!(echoed.raw_client_name,Some(vec![255,b'A']));assert_eq!(echoed.raw_bidder_name,Some(vec![]));assert_eq!(echoed.item_wire,original.item_wire);
+        for n in [128,129]{let name=vec![b'A';n];let lot=AuctionLot::from_wire(&raw_lot(&name,b"")).unwrap();assert_eq!(lot.raw_client_name,Some(name));assert_eq!(lot.native_client_name().is_some(),n==128);assert_eq!(AuctionCommand::Cancel{auctioneer:context(),lot}.validate().is_ok(),n==128);}
+        let bidraw=bytes(|w|{w.u64(7).u8(3).u32(43).blob(&seller).i32(12);});let mut reader=Reader::new(&bidraw);let bid=AuctionBid::read(&mut reader).unwrap();assert!(reader.is_empty());assert_eq!(bid.raw_bidder_name.as_deref(),Some(seller.as_slice()));let mut w=Writer::new();bid.write(&mut w);let encoded=w.finish();let mut reader=Reader::new(&encoded);assert_eq!(reader.u64().unwrap(),7);assert_eq!(reader.u8().unwrap(),3);assert_eq!(reader.u32().unwrap(),43);assert_eq!(reader.blob().unwrap(),&seller[..2]);assert_eq!(reader.i32().unwrap(),12);
+    }
+
+    #[test]
+    fn auction_bid_receipt_copies_raw_name_without_reencoding(){
+        let mut cache=Auction::default();let lot=lot();apply(&mut cache,AuctionEvent::Searched{page:0,count:1,lots:vec![lot.clone()],error:0,server_time:0});let mut bid=lot.bid(12,3,43,"legacy");bid.raw_bidder_name=Some(vec![255,0,b'T']);apply(&mut cache,AuctionEvent::Bid{bid:bid.clone(),is_buyout:false,item_template_id:23388});assert_eq!(cache.lot(7).unwrap().raw_bidder_name,bid.raw_bidder_name);assert_eq!(cache.lot(7).unwrap().native_bidder_name(),Some(&[255][..]));
+    }
+
+    #[test]
+    fn auction_names_match_executed_original_writer_goldens(){
+        fn hex(s:&str)->Vec<u8>{s.as_bytes().chunks_exact(2).map(|x|u8::from_str_radix(std::str::from_utf8(x).unwrap(),16).unwrap()).collect()}
+        // Actual398a6de0/398a6880 plus330199a0 CString-size loop. Only archive sinks mocked.
+        for (name,lot_wire,bid_wire) in [("41","07000000000000000100000000032a0000000100410a0000006400000000f1536500000000012b0000000100410c00000006000000","0700000000000000012b0000000100410c000000"),("ff41005441494c","07000000000000000100000000032a0000000200ff410a0000006400000000f1536500000000012b0000000200ff410c00000006000000","0700000000000000012b0000000200ff410c000000"),("0042","07000000000000000100000000032a00000000000a0000006400000000f1536500000000012b00000000000c00000006000000","0700000000000000012b00000000000c000000"),("ed959ceab880","07000000000000000100000000032a0000000600ed959ceab8800a0000006400000000f1536500000000012b0000000600ed959ceab8800c00000006000000","0700000000000000012b0000000600ed959ceab8800c000000")]{
+            let name=hex(name);let expected=hex(lot_wire);let mut lot=AuctionLot::from_wire(&expected).unwrap();lot.raw_client_name=Some(name.clone());lot.raw_bidder_name=Some(name.clone());let mut w=Writer::new();lot.write(&mut w);assert_eq!(w.finish(),expected);
+            let expected=hex(bid_wire);let mut r=Reader::new(&expected);let mut bid=AuctionBid::read(&mut r).unwrap();bid.raw_bidder_name=Some(name);let mut w=Writer::new();bid.write(&mut w);assert_eq!(w.finish(),expected);
+        }
+    }
+
 }
