@@ -1054,3 +1054,16 @@ built successfully. The refreshed playable copy SHA256 is
 `D1FD79D8523DFBD9CD8CB83CB180E7C4D7BC0904C0970145EFBDE77E824E615E`.
 The inspected world-select smoke in the same folder shows the live Lane-bevy list,
 307–409FPS and zero script errors. Both root QA windows exited normally.
+
+Follow-up source review found and corrected a same-frame capacity ordering bug: net resources
+already contain the final batch, while the old breath tracker read the previous frame's cached
+attributes. The tracker now replays the existing Inventory/Buffs/PlayerStats reducers in event
+order and refreshes attribute inputs before each relevant breath report. Thus a buff applied
+before DIVE_START supplies the correct initial capacity, and a removal later in that batch
+does not retroactively change an earlier correction. During initial DB loading, breath notices
+retain their receipt clocks, actor identity and exact gear/buff/ability inputs for replay when
+the data becomes available (an explicit128-report application budget). Normal movement events
+do not copy equipment or recompute attributes. The real-DB regression passed in2.04s for both
+ready-data and delayed-data paths, with a real attribute91 buff, half-capacity correction and
+same-batch buff removal. This fixes source review findings; the earlier playable hash above
+predates this follow-up and will be refreshed with the next verified build.

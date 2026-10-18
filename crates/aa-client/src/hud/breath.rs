@@ -1,4 +1,5 @@
 //! Native local breath controller. DIVE events and raw corrections have separate meanings.
+use aa_net::state::{Buffs, Inventory, PlayerStats};
 use aa_net::{Event, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -86,22 +87,124 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
 }
 
 fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
+    let stamp = now(&bridge.borrow());
+    dispatch_at(rt, bridge, event, stamp);
+}
+
+fn dispatch_at(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event, stamp: u32) {
     let dive = {
         let mut data = bridge.borrow_mut();
-        let now = now(&data);
         let capacity = data.tips.lung_capacity_ms();
-        data.breath.apply(event, now, capacity)
+        data.breath.apply(event, stamp, capacity)
     };
     if let (Some(rt), Some(start)) = (rt, dive) {
         rt.fire_event(if start { "DIVE_START" } else { "DIVE_END" }, ());
     }
 }
 
-fn track(mut events: MessageReader<NetEvent>, bridge: NonSend<HudBridge>, rt: Option<NonSend<UiRuntime>>, built: Res<super::HudBuilt>) {
+#[derive(Clone)]
+struct Capacity {
+    level: u8,
+    equipment: aa_net::model::Equipment,
+    buffs: Vec<(u32, i16)>,
+    abilities: [i32; 11],
+}
+
+impl Capacity {
+    fn refresh(&self, data: &mut HudData) {
+        let game = data.game.clone();
+        if let Some(game) = game.get() {
+            data.tips.refresh(game, self.level, &self.equipment, self.buffs.clone(), &self.abilities);
+        }
+    }
+}
+
+struct Deferred {
+    event: Event,
+    stamp: u32,
+    actor: Option<u32>,
+    capacity: Capacity,
+}
+
+/// Replay the existing received-state reducers because the network resources already contain
+/// the batch's final state. A buff added/removed around a dive must keep its event-order meaning.
+#[derive(Default)]
+struct Inputs {
+    inventory: Inventory,
+    buffs: Buffs,
+    stats: PlayerStats,
+    deferred: std::collections::VecDeque<Deferred>,
+}
+
+impl Inputs {
+    fn capacity(&self) -> Capacity {
+        Capacity {
+            level: self.stats.level.max(1),
+            equipment: self.inventory.equipment.clone(),
+            buffs: super::stats::buff_list(self.buffs.of(self.stats.obj_id)),
+            abilities: self.stats.ability_exp,
+        }
+    }
+
+    fn flush(&mut self, rt: Option<&UiRuntime>, bridge: &Shared) {
+        if self.deferred.is_empty() || bridge.borrow().game.get().is_none() {
+            return;
+        }
+        let actor = bridge.borrow().breath.actor;
+        while let Some(record) = self.deferred.pop_front() {
+            {
+                let mut data = bridge.borrow_mut();
+                data.breath.actor = record.actor;
+                record.capacity.refresh(&mut data);
+            }
+            dispatch_at(rt, bridge, &record.event, record.stamp);
+        }
+        bridge.borrow_mut().breath.actor = actor;
+        self.capacity().refresh(&mut bridge.borrow_mut());
+    }
+
+    fn apply(&mut self, rt: Option<&UiRuntime>, bridge: &Shared, event: &Event, stamp: u32) {
+        let changed = self.inventory.apply(event) | self.buffs.apply(event) | self.stats.apply(event);
+        if matches!(event, Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. }) {
+            self.deferred.clear();
+        }
+        let ready = bridge.borrow().game.get().is_some();
+        if !ready && matches!(event, Event::UnderWater { .. } | Event::SetBreath { .. }) {
+            // Startup DB loading can lag spawn. Keep receipt clocks and the actual modifier
+            // inputs rather than applying a fabricated base capacity, then rescaling a correction.
+            // 128 is an app budget for failed/stalled data loading, not a native packet limit.
+            if self.deferred.len() == 128 {
+                self.deferred.pop_front();
+                warn!("hud: breath startup history exceeded its 128-report budget");
+            }
+            self.deferred.push_back(Deferred {
+                event: event.clone(),
+                stamp,
+                actor: bridge.borrow().breath.actor,
+                capacity: self.capacity(),
+            });
+            return;
+        }
+        if changed || matches!(event, Event::UnderWater { .. } | Event::SetBreath { .. }) {
+            self.capacity().refresh(&mut bridge.borrow_mut());
+        }
+        dispatch_at(rt, bridge, event, stamp);
+    }
+}
+
+fn track(
+    mut events: MessageReader<NetEvent>,
+    bridge: NonSend<HudBridge>,
+    rt: Option<NonSend<UiRuntime>>,
+    built: Res<super::HudBuilt>,
+    mut inputs: Local<Inputs>,
+) {
     // Keep the timer during Loading too: LEFT_LOADING and initial script queries need it.
     let rt = rt.as_deref().filter(|_| built.up);
+    inputs.flush(rt, &bridge.0);
     for NetEvent(event) in events.read() {
-        dispatch(rt, &bridge.0, event);
+        let stamp = now(&bridge.0.borrow());
+        inputs.apply(rt, &bridge.0, event, stamp);
     }
 }
 
@@ -119,6 +222,70 @@ pub(super) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_capacity_changes_precede_dive_corrections_even_in_one_batch_or_during_db_loading() -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::path::Path::new(aa_anim::db::DEFAULT_DB);
+        if !path.exists() {
+            return Ok(());
+        }
+        let game = super::super::data::GameData::load(aa_anim::db::DEFAULT_DB)?;
+        let conn = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut q = conn.prepare("SELECT DISTINCT owner_id FROM unit_modifiers WHERE owner_type='Buff' AND unit_attribute_id=91 ORDER BY owner_id")?;
+        let ids = q.query_map([], |r| r.get::<_, u32>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let equipment = aa_net::model::Equipment::default();
+        let (buff, capacity) = ids
+            .into_iter()
+            .find_map(|id| {
+                let capacity = game.tips.attrs(30, &equipment, &[(id, 1)], &[0; 11]).lung_capacity_ms;
+                (capacity > 0 && capacity != 60_000).then_some((id, capacity))
+            })
+            .expect("original DB contains a nonzero lung-capacity modifier");
+        let shared = super::super::data::SharedGameData::default();
+        assert!(shared.0.set(game).is_ok());
+        for deferred in [false, true] {
+            let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+            {
+                let mut data = bridge.borrow_mut();
+                data.breath.actor = Some(100);
+                if !deferred {
+                    data.game = shared.clone();
+                }
+            }
+            let mut inputs = Inputs::default();
+            inputs.stats.obj_id = 100;
+            inputs.stats.level = 30;
+            inputs.apply(
+                None,
+                &bridge,
+                &Event::BuffCreated {
+                    obj_id: 100,
+                    buff: aa_net::buff::Buff {
+                        buff_id: buff,
+                        index: 7,
+                        ability_level: 1,
+                        ..default()
+                    },
+                },
+                1000,
+            );
+            inputs.apply(None, &bridge, &Event::UnderWater { start: true }, 1000);
+            inputs.apply(None, &bridge, &Event::SetBreath { breath: capacity / 2 }, 1000);
+            if deferred {
+                assert_eq!(inputs.deferred.len(), 2);
+                bridge.borrow_mut().game = shared.clone();
+                inputs.flush(None, &bridge);
+                assert!(inputs.deferred.is_empty());
+            }
+            assert_eq!(bridge.borrow_mut().breath.time(1000, capacity), (capacity, capacity / 2));
+            // A later removal in this same batch must not retroactively change start/correction.
+            inputs.apply(None, &bridge, &Event::BuffRemoved { obj_id: 100, index: 7 }, 1000);
+            let (total, left) = bridge.borrow_mut().breath.time(1000, 60_000);
+            assert_eq!(total, 60_000);
+            assert!((29_999..=30_001).contains(&left), "capacity={capacity} deferred={deferred} left={left}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn local_breath_keeps_native_event_order_corrections_and_capacity_fraction() {
