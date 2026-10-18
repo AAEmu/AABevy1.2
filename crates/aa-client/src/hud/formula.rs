@@ -8,6 +8,7 @@
 //! (a when x > 0), `if_zero(x, a, b)` and `if(cond, a, b)` (a when cond is not 0).
 
 use std::collections::HashMap;
+mod native;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Expr {
@@ -37,6 +38,12 @@ impl Formula {
     /// The value with `vars` giving the variables (an unknown variable is 0, like the server's).
     pub fn eval(&self, vars: &HashMap<&str, f64>) -> f64 {
         eval(&self.0, vars)
+    }
+
+    /// Original compiled operators narrow each child to f32 and retain their arithmetic result.
+    /// Unsupported native operators stay unknown instead of using the lane evaluator's precision.
+    pub fn eval_native(&self, vars: &HashMap<&str, f64>) -> Option<f64> {
+        native::eval(&self.0, vars)
     }
 }
 
