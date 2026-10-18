@@ -10,6 +10,14 @@ use super::remap::expression_set;
 use super::{ExpressionLibrary, FacialSequence};
 use crate::{Animator, Cal, CharacterAssets, Error, PartAsset, Result};
 
+fn head_library(path: &str) -> Result<Arc<ExpressionLibrary>> {
+    let head_cal = format!("{}.cal", path.rsplit_once('.').map_or(path, |(stem, _)| stem));
+    let head_cal = if aa_pak::Pak::global().exists(&head_cal) { Some(Cal::shared(&head_cal)?) } else { None };
+    ExpressionLibrary::load(
+        head_cal.as_ref().and_then(|cal| cal.face_library.as_deref()).unwrap_or("animations/pc_expressions.fxl"),
+    )
+}
+
 /// Opt-in authored facial playback; use with [`crate::spawn_character_with_facial`].
 /// Morphs are evaluated on the GPU, before skeletal skinning. No mesh data changes per frame.
 pub struct FacialPlugin;
@@ -188,6 +196,34 @@ fn bind_meshes(mut commands: Commands, meshes: Query<(Entity, &Mesh3d), Added<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_head_cal_selects_library_and_npc_native_expressions() {
+        if !aa_cry::pak_available() { return; }
+        let head = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
+        let head_cal = Cal::shared("objects/characters/people/npc_chef01/face/npc_chef01_face01.cal").unwrap();
+        assert_eq!(head_cal.face_library.as_deref(), Some("animations/pc_expressions.fxl"));
+        let library = head_library(head).unwrap();
+        assert!(Arc::ptr_eq(&library, &ExpressionLibrary::load("animations/pc_expressions.fxl").unwrap()));
+        let db = crate::GameDb::open().unwrap();
+        for race in crate::Race::ALL {
+            for gender in [crate::Gender::Male, crate::Gender::Female] {
+                let assets = crate::CharacterDesc::default_for(&db, race, gender).unwrap().resolve(&db).unwrap();
+                let face = assets.parts.iter().find(|p| p.kind == crate::PartKind::Face).unwrap();
+                assert!(Arc::ptr_eq(&head_library(&face.path).unwrap(), &library), "{}", face.path);
+            }
+        }
+        let model = aa_cry::Model::load(head).unwrap();
+        let set = expression_set(head, &model).unwrap();
+        assert_eq!(set.targets.len(), 23);
+        let native = crate::MorphSet::load(head).unwrap().unwrap();
+        assert_eq!(*set, native);
+        let targets: Vec<_> = set.targets.iter().map(|t| t.name.clone()).collect();
+        let mut weights = vec![0.0; targets.len()];
+        let sequence = FacialSequence::load("animations/people/chef_01/facial/fist_ac_talk_11.fsq").unwrap();
+        library.sample_morphs(&sequence, 0.5, &targets, &mut weights);
+        assert!(weights.iter().any(|w| *w > 0.01), "{weights:?}");
+    }
     use crate::{ClipLibrary, SampleOptions, pose::shared_rig};
 
     #[test]
@@ -406,7 +442,7 @@ pub(crate) fn prepare_face(
     }
     // The playable heads use unprefixed morphs. The older race-specific libraries contain
     // el_m_*/fe_m_* morphs and close_l controllers that do not match these meshes/current FSQs.
-    let library = ExpressionLibrary::load("animations/pc_expressions.fxl")?;
+    let library = head_library(&part.path)?;
     let cal = Cal::shared(&assets.cal)?;
     let sequences = cal
         .animations

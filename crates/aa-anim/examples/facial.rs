@@ -1,6 +1,7 @@
 //! Original authored FSQ close-ups. `--race nuian|elf|hariharan|ferre --gender m|f`;
 //! `--live` runs the idle FSQ, `--bones` isolates the original Ferre male cry eye controllers.
 //! `--head` previews the PC library's authored head_x effector at -1, 0 and +1 weight.
+//! `--chef` previews the NPC chef's original native face01 speech targets.
 use aa_anim::facial::{ExpressionLibrary, FacialAnimator, FacialPlugin, FacialSequence};
 use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, GameDb, Gender, Race, spawn_character_with_facial};
 use aa_cry::scene::{CryAssets, CryPlugin};
@@ -40,6 +41,7 @@ struct Preview {
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
+    let chef = std::env::args().any(|a| a == "--chef");
     let bones = std::env::args().any(|a| a == "--bones");
     let head_preview = std::env::args().any(|a| a == "--head");
     let race = match arg("--race").as_deref() {
@@ -61,7 +63,7 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         (race, gender)
     };
     let db = GameDb::open().expect("game database");
-    let dir = format!("animations/{}/{}/facial", race.folder(), gender.folder());
+    let dir = if chef { "animations/people/chef_01/facial".into() } else { format!("animations/{}/{}/facial", race.folder(), gender.folder()) };
     let path_for = |name: &str| {
         let candidate = format!("{dir}/{name}.fsq");
         if aa_pak::Pak::global().exists(&candidate) {
@@ -82,10 +84,10 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
             .max_by(|a, b| a.value.total_cmp(&b.value))
             .map(|k| (k.value, k.time))
     };
-    let idle = path_for("fist_ac_stage_idle");
-    let blink_time = peak(&idle, "L_close_suprise").expect("authored blink keys").1;
+    let idle = path_for(if chef { "fist_ac_talk_11" } else { "fist_ac_stage_idle" });
+    let blink_time = if chef { 0.0 } else { peak(&idle, "L_close_suprise").expect("authored blink keys").1 };
     // Female default.fsq is neutral; use the strongest authored A key in these real sequences.
-    let (speech_path, speech_time) = ["default", "fist_ac_talk_11", "npc_question"]
+    let (speech_path, speech_time) = if chef { vec!["fist_ac_talk_11"] } else { vec!["default", "fist_ac_talk_11", "npc_question"] }
         .into_iter()
         .filter_map(|name| {
             let path = path_for(name);
@@ -99,6 +101,10 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         ("BLINK / IDLE", idle, blink_time),
         ("SPEECH / A", speech_path, speech_time),
     ];
+    if chef {
+        let path = path_for("fist_ac_talk_11");
+        samples = [("NPC / NEUTRAL", path.clone(), 0.0), ("NPC / AUTHORED A", path.clone(), speech_time), ("NPC / RETURN", path, 3.0)];
+    }
     if bones {
         let path = "animations/ferre/male/facial/fist_em_cry.fsq";
         samples = [
@@ -119,7 +125,19 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         let mut desc = CharacterDesc::from_preset(&db, race, gender, 0).unwrap();
         desc.hair = None;
         let transform = Transform::from_xyz((i as f32 - 1.0) * 0.48, 0.0, 0.0).with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
-        let root = spawn_character_with_facial(&mut commands, &mut cry, &clips, desc.resolve(&db).unwrap(), transform).unwrap();
+        let mut assets = desc.resolve(&db).unwrap();
+        if chef {
+            assets.skeleton = "objects/characters/people/npc_chef01/nude/npc_chef01_base.chr".into();
+            assets.cal = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal".into();
+            assets.parts.retain(|p| p.kind == aa_anim::PartKind::Face);
+            assets.parts[0].path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr".into();
+            assets.parts[0].material = None;
+            assets.face_layers.clear();
+            assets.face_lips = None;
+            assets.face_normal = None;
+            assets.pupil_color = None;
+        }
+        let root = spawn_character_with_facial(&mut commands, &mut cry, &clips, assets, transform).unwrap();
         if !live {
             commands.entity(root).insert(Preview {
                 path: path.clone(),
@@ -138,14 +156,14 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
             format!("{} {:.2}s", samples[index].0, samples[index].2)
         }
     };
-    let head = match (race, gender) {
+    let head = if chef { 1.55 } else { match (race, gender) {
         (Race::Nuian | Race::Elf, Gender::Male) => 1.72,
         (Race::Nuian | Race::Elf, _) => 1.62,
         (Race::Hariharan, Gender::Male) => 1.58,
         (Race::Hariharan, _) => 1.47,
         (Race::Ferre, Gender::Male) => 1.9,
         (Race::Ferre, _) => 1.7,
-    };
+    } };
     for (at, lux, color) in [
         (Vec3::new(1.5, 3.0, 5.0), 18000.0, Color::srgb(1.0, 0.96, 0.9)),
         (Vec3::new(-4.0, 2.0, 3.0), 5000.0, Color::srgb(0.6, 0.7, 1.0)),

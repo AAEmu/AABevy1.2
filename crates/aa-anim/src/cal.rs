@@ -39,6 +39,8 @@ pub struct Cal {
     pub tracks_dbh: Option<String>,
     pub anim_events: Option<String>,
     pub sound_events: Option<String>,
+    /// Original `$facelib` expression-library path (usually in the head's own CAL).
+    pub face_library: Option<String>,
     /// Lowercase animation name -> `.caf` (later declarations replace earlier ones).
     pub animations: HashMap<String, CalEntry>,
     /// Lowercase name -> `.fsq` facial sequence.
@@ -110,6 +112,7 @@ impl Cal {
                 "$tracksdbh" => self.tracks_dbh = Some(norm(value)),
                 "$animeventdatabase" => self.anim_events = Some(norm(value)),
                 "$soundeventdatabase" => self.sound_events = Some(norm(value)),
+                "$facelib" => self.face_library = Some(norm(value)),
                 "$include" => {
                     if depth < 8 {
                         if let Some(b) = include(&norm(value)) {
@@ -198,6 +201,16 @@ mod tests {
         assert!(c.locomotion.contains_key("_fist_mo_normal_walk"));
         let foo = c.animation("foo").unwrap();
         assert!((foo.position_scale(c.base_height) - 1.013 / 0.964).abs() < 1e-6);
+    }
+
+    #[test]
+    fn face_library_is_pak_relative_and_last_assignment_wins() {
+        let c = Cal::parse(
+            "#filepath = animations/npc\n$facelib = Animations\\Old.fxl\n$include = head.cal\n",
+            &mut |_| Some(b"$FaceLib = Animations\\PC_Expressions.fxl".to_vec()),
+        );
+        assert_eq!(c.face_library.as_deref(), Some("animations/pc_expressions.fxl"));
+        assert!(c.animations.is_empty());
     }
 
     #[test]

@@ -177,6 +177,17 @@ pub(crate) fn expression_set(path: &str, neutral: &aa_cry::Model) -> Result<Arc<
     if let Some(set) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
         return Ok(set.clone());
     }
+    // NPC heads can carry their speech/lid morphs directly in face01, unlike the
+    // customizable PC heads whose face01 contains only static shape sliders.
+    // These indices already address the rendered model: still validate the native
+    // internal/external records, but do not require an absent face00 companion.
+    if MorphSet::load(path)?.is_some_and(|set| set.find("m_a").is_some() && set.find("eye_close_l").is_some()) {
+        if neutral.meshes.len() != 1 {
+            return Err(Error::Format("facial native head needs one mesh".into()));
+        }
+        let set = Arc::new(read_expression(path)?);
+        return Ok(cache.lock().unwrap_or_else(|e| e.into_inner()).entry(path.into()).or_insert(set).clone());
+    }
     let companion = path.replace("_face01.chr", "_face00.chr");
     if companion == path {
         return Err(Error::Missing(format!("expression companion for {path}")));
