@@ -6058,3 +6058,58 @@ its active fade and the observer records same-frame alpha0.960000, without
 overlapping the report. Both log zero script errors/WARN/ERROR and self-close
 (PIDs28044/2104); the copied executable was removed. No original Lua asset,
 font calibration, root integration API or ordinary-slot policy was changed.
+
+### Native button state colors and original empty-stack icons (2026-10-18)
+
+SetNormalColor, SetHighlightColor and SetPushedColor now recolor the button's
+existing background for that state, followed by its existing matching state
+drawables. Hidden matching artwork is included. They do not change child text,
+unrelated artwork, disabled artwork, input enablement or widget alpha, and they
+do not remember a palette for images created or bound afterward. Shared image
+aliases retain their shared mutation behavior. The methods remain limited to
+their native button/checkbutton/cooldown-button surfaces; ordinary slots,
+labels and drawables do not acquire them.
+
+Actual four-number thunk3922f790/parser3922f260 and the Cry script argument
+conversion execute in button_state_color_oracle.py. Normal3922cdc0,
+highlight3922d060 and pushed3922cf10 cast the receiver through interface+14,
+then call392806c0 for the current background and39282f30 for the matching
+state list. All four arguments must be actual numbers; invalid input or a
+failed button cast silently returns no values, and extra arguments are ignored.
+Raw negative/out-of-range/nonfinite values narrow to f32 before the native
+Color copy3922b330. The **33 executed native groups** retain target order,
+payloads, no-art/no-future-palette behavior and strict argument gates in
+native-button-state-color-oracle-20261018.json and
+native-button-state-color-source-20261018.txt. Script stack/return, cast and
+virtual drawable SetColor endpoints are explicit controls. This is not a full
+native raster/color-quantization oracle.
+
+The concrete original consumer is cooldown_action_button.alb's
+ProcessEmptyStackColor: true applies white alpha0.3 to normal, pushed and
+highlight images; false restores white alpha1. Its original SetItemIcon,
+SetItemIcons and SetButtonBackground build the four item-icon state images;
+the independent disabled image retains alpha0.5. The fixture executes that
+bytecode unchanged with item4045/grade2. It does not infer the empty flag from
+SetStack, which only updates the stack text. Ordinary slot can_use=false black
+overlay policy remains separate.
+
+Targeted tests check strict arguments/return arity, raw f32 payloads, current
+hidden artwork, aliases, late-created images, original icon quads and physical
+hover/press/release. The dimmed original button stays clickable and executes
+its original OnClick before the application OnClickProc endpoint. Disabling
+and then restoring it selects the unchanged disabled artwork and restored
+normal artwork respectively. Crate check/example build and **75 selected
+checks pass**: state colors5, drawable color2, frame10, drag12, keyboard4,
+attachment5, popup9, HUD6 and slot completion7/mask8/selector6/state1. The five
+new checks also pass separately after the final fixture-caption refinement.
+
+Both final aa-dev captures with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-button-colors-normal-final-720-20261018.png
+(1280x720/default0.85, **315.6-462.2 FPS**) and
+shots/aa-ui/native-button-colors-pressed-final-1080-20261018.png
+(1920x1080/default1.0, **332.2-425.5 FPS**). The second fixture positions and
+presses the virtual physical pointer on the dimmed original button; CPU tests
+also verify its strict hit, matching pressed icon quads and release callback.
+Both report zero script errors/WARN/ERROR and self-close (PIDs1648/48024).
+The copied executable was removed. No app hook, Lua asset, font, shader or
+cooldown timing policy changed.
