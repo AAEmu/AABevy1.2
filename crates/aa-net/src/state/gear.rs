@@ -215,7 +215,6 @@ impl Inventory {
             }
             ItemTask::AutoUseAaPoint(value) => {
                 self.auto_use_aa_point_raw = *value;
-                self.pending_auto_use_aa_point = None;
             }
             // Purse and points are the player stats'.
             ItemTask::Money(_)
@@ -255,6 +254,9 @@ impl Inventory {
                 };
             }
             Event::AutoUseAaPointRequested(value) => self.pending_auto_use_aa_point = Some(*value),
+            Event::CraftItemUnlocked(unlock) if unlock.unlocks_auto_use_aa_point() => {
+                return self.pending_auto_use_aa_point.take().is_some();
+            }
             Event::PlayerSpawn(s) => self.own_obj_id = s.obj_id,
             Event::InventoryInit { bag_slots, bank_slots } => {
                 self.bag_slots = *bag_slots;
@@ -287,6 +289,10 @@ impl Inventory {
                 let mut changed = false;
                 for task in &changes.tasks {
                     changed |= self.apply_task(task);
+                }
+                // Native sink map unlocks reported keys after the complete apply loop.
+                if changes.tasks.iter().any(|task| matches!(task, ItemTask::AutoUseAaPoint(_))) {
+                    self.pending_auto_use_aa_point = None;
                 }
                 for id in &changes.force_remove {
                     changed |= self.remove_by_id(*id);
@@ -417,6 +423,21 @@ mod tests {
 
     fn tasks(reason: u8, tasks: Vec<ItemTask>) -> Event {
         Event::ItemsChanged(ItemTasks { reason, tasks, force_remove: vec![], truncated: false })
+    }
+
+    #[test]
+    fn inventory_unlock_releases_only_the_matching_pending_key_without_changing_value() {
+        use crate::craft::CraftItemUnlock;
+        let mut inv = Inventory::default();
+        inv.apply(&Event::AutoUseAaPointRequested(true));
+        for (kind, slot) in [(2, 0), (0xf0, 1)] {
+            assert!(!inv.apply(&Event::CraftItemUnlocked(CraftItemUnlock { kind, slot })));
+            assert_eq!(inv.pending_auto_use_aa_point, Some(true));
+        }
+        assert!(inv.apply(&Event::CraftItemUnlocked(CraftItemUnlock { kind: 0xf0, slot: 0 })));
+        assert_eq!(inv.pending_auto_use_aa_point, None);
+        assert!(!inv.auto_use_aa_point());
+        assert!(!inv.apply(&Event::CraftItemUnlocked(CraftItemUnlock { kind: 0xf0, slot: 0 })));
     }
 
     #[test]
