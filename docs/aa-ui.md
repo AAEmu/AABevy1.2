@@ -3474,3 +3474,76 @@ Measured **356.9–488.0 FPS**, zero script errors and no WARN/ERROR; owned
 process 21236 self-closed. `reference/ingame/spawn/real.png` supplies the
 original HUD/chat style context; no matching offset demonstration or
 pixel-parity claim.
+
+### Native selected-tab divider anchors (2026-10-18)
+
+`SetLeftLineOffset` and `SetRightLineOffset`, both called by the original
+chat constructor, now retain their signed f32 values and update the
+divider anchors. Previously both methods were ignored, and tab layout
+rewrote divider width/height directly, including overwriting any
+explicit drawable height with one pixel.
+Constructor `392cbb07/392cbb48` initializes both dividers to height one
+and hidden; aa-ui keeps that native default even without the original
+Lua constructor.
+
+Registration `3925ab7f..ab8c` binds left offset to `39258b70` ->
+`392cadd0` (`+33c`); `3925abde..abeb` binds right offset to `39258bb0`
+-> `392cadf0` (`+340`). Both immediately call `392ca420`. This updater
+hides both dividers and every message frame before checking selection.
+A valid selected tab restores the two dividers and selected message;
+invalid/empty selection leaves them hidden. It changes neither content
+anchors nor tab-button layout and does not re-fire the original Lua
+`OnSelectedChatTab` callback.
+
+The native tab area spans the chat-window width and has the configured
+tab-area height (`392c9966..99e1`). Relative to that area and selected
+button, `392ca420` installs:
+
+```
+left:  BOTTOMLEFT  -> area.BOTTOMLEFT  (left_offset, 0)
+       BOTTOMRIGHT -> tab.BOTTOMLEFT   (0, 1)
+right: BOTTOMRIGHT -> area.BOTTOMRIGHT (right_offset, 1)
+       BOTTOMLEFT  -> tab.BOTTOMRIGHT  (0, 0)
+```
+
+These are horizontal bottom-edge constraints: drawable height remains
+authored. With original one-pixel height and zero bottom inset, existing
+bottom-anchor precedence resolves the normal vertical position to
+`tab_area_height - 1`; no default one-pixel shift is introduced. The
+anchors now follow direct changes to selected-tab extent/position and
+preserve custom drawable heights, signed outer offsets and the native
+asymmetry when the tab has a bottom inset. aa-ui expresses the internal
+tab area's two outer points as equivalent window-top corner anchors;
+it does not add a new public widget.
+The native internal tab clipping/sliding area remains the separate open
+boundary recorded above; these divider anchor/offset changes do not
+claim its complete overflow-raster behavior.
+
+Sources: `data/extract/aa-ui/native-chat-lines-source-20261018.txt`.
+Offline `chat_lines_oracle.py` executes actual `392ca420`, capturing only
+Show/anchor operations. Its five passing groups in
+`native-chat-lines-oracle-20261018.json` prove default/middle selection,
+signed offsets and invalid/empty selection hiding, without live-client
+execution or writes.
+
+Validation: `cargo check -p aa-ui` and **45 selected tests** passed,
+including five new divider regressions plus content anchors, tab layout,
+scaled character clipping and native widgets. Tests exercise physical
+original tab selection/rendered line quads, signed offsets, authored
+heights, direct tab movement/resize, invalid/empty selection, f32 values,
+message visibility restoration, unchanged content anchors and absence of
+duplicate Lua selection callbacks. The original one-pixel divider height
+is preserved.
+Built and copied the aa-dev `native_chat_lines` example; inspected the
+unique `shots/aa-ui/native-chat-lines-20261018.png` capture at
+1280-by-720 after physical selection of the second original tab.
+It retains the original textures and one-pixel divider height with
+signed outer offsets. Measured **364.7–371.6 FPS**, zero script errors
+and no WARN/ERROR; owned process 20548 self-closed.
+After the constructor-default refinement, rebuilt and inspected fresh
+`shots/aa-ui/native-chat-lines-final-20261018.png`; it is byte-identical
+to the prior PNG (SHA-256 `f6332bb3ab0626af5f4732497dcea94b60259899f9ba7806eef27ab16645a9d4`).
+That run measured **85.4–198.2 FPS**, again zero script errors and no
+WARN/ERROR; owned process 52988 self-closed.
+`reference/ingame/spawn/real.png` supplies the original HUD/chat style
+context; no matching signed-offset reference or pixel-parity claim.

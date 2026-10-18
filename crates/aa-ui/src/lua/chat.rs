@@ -97,6 +97,7 @@ pub struct ChatData {
     pub whisper: String,
     pub left_line: Id,
     pub right_line: Id,
+    pub line_offset: [f32; 2],
     /// Cursor over the window at the last update.
     pub hovered: Option<bool>,
     /// Last resolved local extent passed through the native geometry callback.
@@ -656,6 +657,13 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     set_getter(lua, &selector, "GetList", list)?;
     let (left_line, _) = native_drawable(lua, id, "leftLine")?;
     let (right_line, _) = native_drawable(lua, id, "rightLine")?;
+    // Native constructor 392cbb07/392cbb48: one-pixel dividers, initially hidden.
+    for line in [left_line, right_line] {
+        let mut u = ui(lua);
+        let o = u.tree.get_mut(line);
+        o.height = 1.0;
+        o.shown = false;
+    }
     for f in ["lockNotify", "caret"] {
         let (d, _) = native_drawable(lua, id, f)?;
         ui(lua).tree.get_mut(d).shown = false;
@@ -683,6 +691,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             whisper: String::new(),
             left_line,
             right_line,
+            line_offset: [0.0; 2],
             hovered: None,
             layout_extent: [0.0; 2],
         });
@@ -760,8 +769,6 @@ fn layout(lua: &Lua, id: Id) {
         o.width = tw;
         o.height = th;
         o.shown = true;
-        let m = u.tree.get_mut(tab.message);
-        m.shown = i == c.selected;
         if let Some(b) = u
             .tree
             .widget_mut(tab.button)
@@ -782,15 +789,35 @@ fn layout(lua: &Lua, id: Id) {
         }];
     }
     o.shown = c.use_add_button;
-    // The lines under the tab area, left and right of the selected tab.
-    let sel_x = u.tree.rect(c.tabs[c.selected].button).x - wr.x;
-    for (d, x0, x1) in [(c.left_line, 0.0, sel_x), (c.right_line, sel_x + tw, wr.w)] {
-        let o = u.tree.get_mut(d);
-        o.anchors = vec![anchor(Point::TopLeft, x0, c.tab_area_height - 1.0)];
-        o.width = (x1 - x0).max(0.0);
-        o.height = 1.0;
-    }
+    layout_lines(u, id, &c);
     u.tree.touch();
+}
+
+/// 392ca420 anchors each divider to the tab area and selected tab. The
+/// drawables retain their own extents; both bottom anchors do not set height.
+fn layout_lines(u: &mut super::Ui, id: Id, c: &ChatData) {
+    u.tree.get_mut(c.left_line).shown = false;
+    u.tree.get_mut(c.right_line).shown = false;
+    for tab in &c.tabs {
+        if tab.message != crate::tree::ROOT && u.tree.get(tab.message).alive {
+            u.tree.get_mut(tab.message).shown = false;
+        }
+    }
+    let Some(tab) = c.tabs.get(c.selected) else { return };
+    let h = c.tab_area_height;
+    u.tree.get_mut(c.left_line).anchors = vec![
+        Anchor { point: Point::BottomLeft, target: id, rel: Point::TopLeft, x: c.line_offset[0], y: h },
+        Anchor { point: Point::BottomRight, target: tab.button, rel: Point::BottomLeft, x: 0.0, y: 1.0 },
+    ];
+    u.tree.get_mut(c.right_line).anchors = vec![
+        Anchor { point: Point::BottomRight, target: id, rel: Point::TopRight, x: c.line_offset[1], y: h + 1.0 },
+        Anchor { point: Point::BottomLeft, target: tab.button, rel: Point::BottomRight, x: 0.0, y: 0.0 },
+    ];
+    u.tree.get_mut(c.left_line).shown = true;
+    u.tree.get_mut(c.right_line).shown = true;
+    if tab.message != crate::tree::ROOT && u.tree.get(tab.message).alive {
+        u.tree.get_mut(tab.message).shown = true;
+    }
 }
 
 /// Native 392ca610 runs on SetContentOffset and tab insertion, separately from
@@ -1424,12 +1451,19 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
+    for (name, index) in [("SetLeftLineOffset", 0), ("SetRightLineOffset", 1)] {
+        def(name, method(lua, move |lua, id, a| {
+            if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+                c.line_offset[index] = a.f(1);
+            }
+            if let Some(c) = chat(lua, id) { layout_lines(&mut ui(lua), id, &c); }
+            none()
+        })?)?;
+    }
     for name in [
         "SetCaretOffset",
         "SetMaxNotifyTime",
         "SetNotifyBlinkingFreq",
-        "SetLeftLineOffset",
-        "SetRightLineOffset",
         "SetSlideTimeInDragging",
         "AllowTabSwitch",
         "UseSlidingButton",
