@@ -1033,8 +1033,12 @@ impl Session {
             Command::Actability(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::Actability(crate::actability::ActabilityEvent::RequestRejected { command, message: "proficiency request requires an active character".into() }));
                 } else if self.send_game(game::ClientMsg::Actability(command)).await {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::Requested(command)));
+                } else {
+                    self.emit(Event::Actability(crate::actability::ActabilityEvent::RequestRejected { command, message: "proficiency request was not sent".into() }));
                 }
             }
             Command::Slave(command) => {
@@ -1111,8 +1115,12 @@ impl Session {
                 };
                 if let Some(message) = error {
                     self.emit(Event::CraftRejected { craft_id, doodad_obj_id, count, message: message.into() });
-                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::ExecuteCraft { craft_id, doodad_obj_id, count }).await {
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::CraftRejected { craft_id, doodad_obj_id, count, message: "crafting requires an active character".into() });
+                } else if self.send_game(game::ClientMsg::ExecuteCraft { craft_id, doodad_obj_id, count }).await {
                     self.emit(Event::CraftRequested { craft_id, doodad_obj_id, count });
+                } else {
+                    self.emit(Event::CraftRejected { craft_id, doodad_obj_id, count, message: "crafting request was not sent".into() });
                 }
             }
             Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id } => {
@@ -3025,6 +3033,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proficiency_requests_reject_inactive_and_missing_transport_without_latching_pending() {
+        use crate::actability::{ActabilityCommand, ActabilityEvent};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut state = crate::state::WorldState::default();
+        let commands = [
+            ActabilityCommand::Upgrade { id: 5, auto_use_aa_point: true },
+            ActabilityCommand::Downgrade { id: 5, auto_use_aa_point: false },
+            ActabilityCommand::Expand,
+        ];
+        for phase in [Phase::Idle, Phase::CharacterSelect, Phase::InWorld] {
+            session.phase = phase;
+            for command in commands {
+                session.command(Command::Actability(command)).await;
+                let event = events.try_recv().unwrap();
+                assert!(matches!(&event, Event::Actability(ActabilityEvent::RequestRejected { command: actual, message })
+                    if *actual == command && !message.is_empty()));
+                state.apply(&event);
+                assert!(state.actabilities.pending.is_empty());
+                assert!(state.actabilities.entries.is_empty());
+                assert!(events.try_recv().is_err());
+            }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::CharacterSelect;
+        session.command(Command::Actability(commands[0])).await;
+        assert!(matches!(events.try_recv(), Ok(Event::Actability(ActabilityEvent::RequestRejected { .. }))));
+        session.phase = Phase::InWorld;
+        for (index, command) in commands.into_iter().enumerate() {
+            session.command(Command::Actability(command)).await;
+            let event = events.try_recv().unwrap();
+            assert!(matches!(&event, Event::Actability(ActabilityEvent::Requested(actual)) if *actual == command));
+            state.apply(&event);
+            let mut length = [0; 2];
+            peer.read_exact(&mut length).await.unwrap();
+            let mut received = vec![0; u16::from_le_bytes(length) as usize];
+            peer.read_exact(&mut received).await.unwrap();
+            let mut expected = vec![0xdd, 1, 0, index as u8];
+            expected.extend(command.opcode().to_le_bytes());
+            let mut body = crate::wire::Writer::new();
+            command.write(&mut body);
+            expected.extend(body.finish());
+            assert_eq!(received, expected, "inactive requests must not reach the socket");
+        }
+        assert_eq!(state.actabilities.pending, commands);
+        assert!(state.actabilities.entries.is_empty(), "sending does not invent proficiency");
+        assert_eq!(state.actabilities.expanded_expert, None);
+    }
+
+    #[tokio::test]
     async fn craft_command_validates_before_sending_and_reports_only_local_request_state() {
         use tokio::io::AsyncWriteExt;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3078,10 +3140,8 @@ mod tests {
                 count: 1,
             })
             .await;
-        assert!(
-            events.try_recv().is_err(),
-            "no connection means no successful local send"
-        );
+        assert!(matches!(events.try_recv(), Ok(Event::CraftRejected { craft_id: 1, doodad_obj_id: 1, count: 1, .. })));
+        assert!(events.try_recv().is_err());
         session.game = Some(GameConn::connect(&addr).await.unwrap());
         for (craft_id, doodad_obj_id, count) in [
             (0, 1, 1),
@@ -3111,6 +3171,7 @@ mod tests {
                 count: 1,
             })
             .await;
+        assert!(matches!(events.try_recv(), Ok(Event::CraftRejected { craft_id: 1, doodad_obj_id: 1, count: 1, .. })));
         assert!(events.try_recv().is_err());
         session.phase = Phase::InWorld;
         session
