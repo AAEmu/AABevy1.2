@@ -893,3 +893,67 @@ Verified capture: `shots/aa-anim/facial_girl_native_final_20261018.png`, inspect
 mouth at the authored A key and returns at the authored end; both original
 eyeballs remain correctly attached. Shared-GPU FPS: **257.0?282.6**.
 `cargo test -p aa-anim --lib`: **70 passed / 1 ignored**.
+
+### Facial crowd allocation and lifetime audit
+
+`facial_crowd` creates 32 identical original heads through `prepare_loaded_face`,
+with separate joints, animators and root weights. Each starts the same authored
+FSQ at a different phase. Default is Nuian male; `--girl` uses the girl's own
+head/library plus native CA_BONE eyes. A live assertion checks that mesh weight
+references address 32 independent roots and yield different current poses.
+The PC diagnostic uses the head's plain authored material, without the full
+character customization/material pass; this is an animation and allocation
+fixture, not a complete character appearance comparison.
+
+The targeted `repeated_heads_allocate_independent_meshes_and_sample_independent_poses`
+regression measures 16 repeated preparations after source/topology/CAL warmup.
+It verifies unique subset handles, no image/material/bindpose growth, independent
+poses and stopping one instance without changing another. Morph payloads are
+actual `MorphAttributes` counts times their native Rust size, including padding:
+
+| Original head | Targets/subsets | Morph bytes per instance | Added meshes for 16 | Added images/materials/bindposes |
+|---|---:|---:|---:|---:|
+| Nuian male face01 | 28 / 3 | 4,049,472 | 48 | 0 / 0 / 0 |
+| Chef face01 | 23 / 1 | 1,923,168 | 16 | 0 / 0 / 0 |
+| Girl face01 | 24 / 1 | 1,097,856 | 16 | 0 / 0 / 0 |
+
+Bevy 0.20 does not expose an independent asset handle for these immutable targets:
+`bevy_mesh/src/mesh.rs` owns `Vec<MorphAttributes>` inside each `Mesh`, and
+`try_set_morph_targets` takes an owned vector. Its `bevy_render/src/mesh/morph.rs`
+allocator creates images per `AssetId<Mesh>` on the uniform fallback and uses
+mesh-allocator storage on this Vulkan device. A new aa-anim descriptor cache would
+retain another copy while every independently handled mesh still needs its own
+owned target vector and GPU allocation. No such redundant cache was introduced,
+and no sharing by path alone bypasses custom geometry/subset identity validation.
+Sharing GPU target storage across distinct mesh IDs would require a renderer
+change. Sharing the actual mesh asset instead would require changing the current
+mesh-ID-to-owner binding contract and respecting customization identity.
+
+The `prepared_meshes_are_released_when_instance_handles_drop` regression uses a
+real minimal Bevy `AssetPlugin`: after 16 prepared model/animator values drop, one
+`app.update()` removes all their mesh IDs. No prepared handles are retained in a
+static cache; the ordinary plain-model cache remains separate. Unsupported-input
+fail-fast allocation regressions continue to pass.
+
+At 100 Nuian heads the morph payload alone is about **386 MiB**, before other
+mesh/render allocations. Sampling cost is modest; unrestricted remote facial
+opt-in remains a memory/visibility policy decision for the client. This audit
+does not enable it automatically.
+
+Representative optimized-dev measurements on the shared Ryzen 5600X machine:
+16 warm preparations took **30.80 ms** (Nuian), **14.27 ms** (chef) and
+**8.48 ms** (girl). 9600 active face updates took **23.38 / 26.61 / 28.10 ms**
+respectively, about **2.44 / 2.77 / 2.93 microseconds per face**. These are
+diagnostic timings, not asserted performance thresholds. The microbenchmark
+measures expression evaluation/update only, with explicit FSQ playback; it excludes
+ECS scheduling, body animation, facial bone restore/apply, culling and rendering.
+The live captures include the actual facial plugin and bone hierarchy.
+
+Inspected captures: `shots/aa-anim/facial_crowd_pc_20261018.png`
+(**349.6?413.1 FPS**) and `shots/aa-anim/facial_crowd_girl_20261018.png`
+(**290.5?386.6 FPS**), both on the shared RX 9070 XT. The girl run additionally
+reports 32 subset references, 32 independent roots and 32 distinct current poses.
+Its extra two mesh assets and one image are the shared original eyeballs,
+separate from the measured zero-image-growth facial factory.
+
+Full own-crate verification after the audit: **72 passed / 1 ignored**.

@@ -227,6 +227,92 @@ mod tests {
     use crate::{ClipLibrary, SampleOptions, pose::shared_rig};
 
     #[test]
+    fn repeated_heads_allocate_independent_meshes_and_sample_independent_poses() {
+        if !aa_cry::pak_available() { return; }
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<Image>>();
+        world.init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>();
+        world.init_resource::<aa_cry::scene::CryCache>();
+        let mut state = bevy::ecs::system::SystemState::<CryAssets>::new(&mut world);
+        let mut cry = state.get_mut(&mut world).unwrap();
+        for (head, cal, sequence) in [
+            ("objects/characters/nuian/male/face/nu_m_face01.chr", "objects/characters/nuian/male/nude/nu_m_base.cal", "animations/nuian/male/facial/fist_ac_talk_11.fsq"),
+            ("objects/characters/people/npc_chef01/face/npc_chef01_face01.chr", "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal", "animations/people/chef_01/facial/fist_ac_talk_11.fsq"),
+            ("objects/characters/people/girl01/face/face01/girl01_face01.chr", "objects/characters/people/girl01/nude/girl01_base.cal", "animations/people/girl01/facial/fist_ac_talk_02.fsq"),
+        ] {
+            let plain = cry.load_model(head, &aa_cry::scene::ModelOptions::default()).unwrap();
+            // Warm source/topology/CAL caches separately from repeated preparation timing.
+            let warm = prepare_loaded_face(&mut cry, head, cal, &plain).unwrap();
+            let bytes: usize = warm.0.parts.iter().flat_map(|(_, p)| p).map(|p| {
+                cry.meshes.get(&p.mesh).unwrap().get_morph_targets().unwrap().len()
+                    * std::mem::size_of::<MorphAttributes>()
+            }).sum();
+            let before = (cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len());
+            let timer = std::time::Instant::now();
+            let mut instances = (0..16).map(|_| prepare_loaded_face(&mut cry, head, cal, &plain).unwrap()).collect::<Vec<_>>();
+            let prepare = timer.elapsed();
+            let after = (cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len());
+            let subsets = plain.parts.iter().map(|(_, p)| p.len()).sum::<usize>();
+            assert_eq!(after, (before.0 + 16 * subsets, before.1, before.2, before.3));
+            let ids: HashSet<_> = instances.iter().flat_map(|(_, face, _)| face.meshes.iter().copied()).collect();
+            assert_eq!(ids.len(), 16 * subsets);
+            let sequence = FacialSequence::load(sequence).unwrap();
+            let mut outputs = Vec::new();
+            for (i, (_, face, weights)) in instances.iter_mut().enumerate() {
+                face.play(sequence.clone(), true);
+                face.follow_body = false;
+                face.fade_seconds = 0.0;
+                face.time = i as f32 / 16.0 * sequence.end;
+                let mut output = vec![0.0; face.targets.len()];
+                face.update(None, 0.0, &mut output);
+                assert!(weights.weights().iter().all(|w| *w == 0.0));
+                outputs.push(output);
+            }
+            assert!(outputs.windows(2).any(|pair| pair[0] != pair[1]));
+            let preserved = outputs[1].clone();
+            instances[0].1.stop();
+            instances[0].1.update(None, 1.0, &mut outputs[0]);
+            instances[1].1.update(None, 0.0, &mut outputs[1]);
+            assert_eq!(outputs[1], preserved);
+            instances[0].1.play(sequence.clone(), true);
+            let timer = std::time::Instant::now();
+            for _ in 0..600 {
+                for ((_, face, _), output) in instances.iter_mut().zip(&mut outputs) {
+                    face.update(None, 1.0 / 60.0, output);
+                }
+            }
+            eprintln!("CROWD {head}: targets={}, subsets={subsets}, morph_bytes/instance={bytes}, prepare16={prepare:?}, sample9600={:?}, assets={before:?}->{after:?}", instances[0].1.targets.len(), timer.elapsed());
+        }
+    }
+
+    #[test]
+    fn prepared_meshes_are_released_when_instance_handles_drop() {
+        if !aa_cry::pak_available() { return; }
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
+        app.init_asset::<Mesh>();
+        app.init_asset::<Image>();
+        app.init_asset::<StandardMaterial>();
+        app.init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        app.init_resource::<aa_cry::scene::CryCache>();
+        let mut state = bevy::ecs::system::SystemState::<CryAssets>::new(app.world_mut());
+        let ids = {
+            let mut cry = state.get_mut(app.world_mut()).unwrap();
+            let path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
+            let cal = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal";
+            let plain = cry.load_model(path, &aa_cry::scene::ModelOptions::default()).unwrap();
+            let prepared = (0..16).map(|_| prepare_loaded_face(&mut cry, path, cal, &plain).unwrap()).collect::<Vec<_>>();
+            prepared.iter().flat_map(|(_, face, _)| face.meshes.iter().copied()).collect::<Vec<_>>()
+            // All prepared models, their strong handles and animators drop here.
+        };
+        assert!(ids.iter().all(|id| app.world().resource::<Assets<Mesh>>().contains(*id)));
+        app.update();
+        assert!(ids.iter().all(|id| !app.world().resource::<Assets<Mesh>>().contains(*id)));
+    }
+
+    #[test]
     fn original_npc_loaded_head_catalog() {
         if !aa_cry::pak_available() { return; }
         let mut world = World::new();
