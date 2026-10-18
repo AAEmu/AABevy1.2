@@ -135,6 +135,7 @@ opcodes! {
         CSCompleteQuestContextPacket = 0x0d6,
         CSDropQuestContextPacket = 0x0d7,
         CSQuestTalkMadePacket = 0x0da,
+        CSExecuteCraft = 0x0f8,
         CSUpgradeExpertLimitPacket = 0x0ff,
         CSDowngradeExpertLimitPacket = 0x100,
         CSExpandExpertPacket = 0x101,

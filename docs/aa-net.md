@@ -1581,10 +1581,10 @@ charges labor through the skill system and schedules another cast while count re
 SCCraftFailed1bf has a writer (u32 id, i32 count, count u32 craftIds) but is never sent;
 there is no normal batch-completion ACK. Original Lua uses
 `CRAFTING_START(doodadId,count)`, `CRAFT_STARTED(leftCount)` and `CRAFT_ENDED(leftCount)`;
-these cannot be mapped to fabricated server completion events. Execute/batch/cancel state
-is deferred until a separate native cast audit; proficiency support does not grant or
-pretend a completed craft. Natural gathering/crafting and expert-change live QA remain
-pending while the lane is stalled.
+these cannot be mapped to fabricated server completion events. The bounded request and
+native cast audit are described under "Recipe batch requests and native presentation";
+proficiency support does not grant or pretend a completed craft. Natural gathering/crafting
+and expert-change live QA remain pending while the lane is stalled.
 
 ## Doodad skill targets and phase state
 
@@ -1650,6 +1650,76 @@ forwarding, known-only updates, clearing and preservation of unrelated fields.
 Full `cargo test -p aa-net` passed 190 library and 2 scripted-session tests, with 9 live
 tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 No live lane traffic was used for these updates.
+
+## Recipe batch requests and native presentation
+
+`Command::ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 }` submits one
+CSExecuteCraft (0x0f8): u32 recipeId, bc doodadObjId, i32 count, exactly 11 body bytes.
+The session rejects recipe 0, doodad 0 / IDs above 0xffffff, and nonpositive counts before
+anything reaches the socket. Positive counts retain their full i32 value, including the
+maximum; the server owns material, bench, range, permission, proficiency and labor checks.
+Like interaction casts, valid requests outside InWorld are ignored. The low-level
+`game::ClientMsg::ExecuteCraft` writer is unchecked like the other low-level messages.
+
+`Event::CraftRequested { craft_id, doodad_obj_id, count }` reports only a successful local
+socket write. `CraftRejected { craft_id, doodad_obj_id, count, message }` reports only
+local validation failure. No event is fabricated when there is no connection, no ACK or
+a generic server error. There is no new authoritative batch resource, completed-product
+counter or optimistic material/labor mutation. Ordinary SkillStarted/Fired/Ended, errors,
+item tasks and LaborChanged continue to carry the real server observations.
+
+The command does **not** send a second CSStartSkill. Native
+`X2Craft:ExecuteBatchCraftByType(recipeId, doodadObjId, count)` wrapper39460930 calls
+manager394d7650, validator394d6dc0 and sender394d1340. Sender394d1340 builds opcode0xf8
+with all three original arguments; constructor397ac9e0 and serializer397bbfc0 confirm
+the complete count is sent once. The lane's `economy/craft.rs::craft` starts the recipe
+skill with a doodad target through EconomyComposite::start_craft_cast; its CraftEffect
+then performs material/product settlement and schedules the next batch cast itself.
+
+The original `x2ui/crafting/crafting_renewal.lua` presentation contract is local:
+
+* `CRAFTING_START(doodadId, count)` opens the bench UI. Its `SetDoodad` treats nil / zero
+  context or count as recipe-book mode; this does not constitute a server execution ACK.
+* `GetLeftBatchCount()` reads native manager+8; `IsWorkingCraft()` tests whether it is >0.
+* Native callback394d53e0 listens to internal Started0x14, Fired0x15, Ended0x16 and
+  Stopped0x17. It filters the local unit and a skill containing CraftEffect (type0x0e).
+  The first successful Started emits `CRAFT_STARTED(initialLeftCount)` and clears a local
+  fired flag. A successful Fired sets the flag; Ended decrements the local count only
+  after Fired was seen. It emits `CRAFT_ENDED(remaining)` while positive, otherwise
+  `CRAFT_ENDED()` with no argument. Failed Started and Stopped also end with no argument.
+  These UI counters describe observed skill sequencing, not proof of received products.
+
+`X2Craft:StopBatchCrafting()` wrapper39460870 invokes manager394d1870(false).
+It calls393966d0 /393967c0 to cancel active cast slots (+0x3ac4 /+0x3acc, including a
+mounted unit when present) using existing CSStopCasting054; their exact slot labels are
+not inferred here. The false argument does not immediately zero the batch counter;
+native callback/update processing resets it. The session's existing `StopCasting` names
+plain and plot timelines explicitly, from authoritative skill events. There is no separate
+guessed craft-cancel packet.
+
+The lane's skills/handlers.rs::stop_casting cancels the matching current skill task and
+skills/skill.rs::stop reports casting stopped / ends that skill. It does not call economy
+`cancel_craft` or invalidate an already scheduled `CraftTask`. The task captures recipe,
+doodad and count, and its execute checks only captured count >0 before invoking craft
+again. Consequently canceling a current cast cannot promise cancellation of a queued next
+cast; ordinary SkillEnded also cannot be promoted to a whole-batch completion ACK.
+
+SCCraftFailed1bf remains deliberately undecoded: the unused lane writer emits u32 id,
+i32 count and count copies of its `craft_id`; native serializer397b8110 clamps the repeated
+u32 list to 20, and OnCraftFailed391e0840 /394d2370 resolves those entries through
+item-template/message formatting. Count bounds and entry semantics therefore need a
+separate verified contract before this can safely preserve arbitrary native DD04 batches.
+No lane call site currently sends it. Static recipe catalogs and native UI presentation
+counters remain aa-client integration work.
+
+Two new offline tests check exact native min/full-width/max-count bodies and complete
+frames, then an ephemeral loopback session proves invalid/out-of-world requests send
+nothing, no extra CSStartSkill precedes a batch, a local send emits only CraftRequested,
+and server refusal/silence never fabricates acceptance, products, labor or completion.
+Full `cargo test -p aa-net` passed 192 library and 2 scripted-session tests, with 9 live
+tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
+No live lane traffic was used; natural crafting and queued-cancel QA remain pending while
+the lane is stalled.
 
 ## Known gaps
 
