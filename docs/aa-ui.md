@@ -687,8 +687,32 @@ matching substitutes the raw markup for intact labels in insertion order and cle
 Editing a label so it no longer matches leaves ordinary literal text when sent. Serialized
 insertion length must remain below 1024 bytes; native label/raw buffers hold 255/511 bytes,
 and the append buffer holds 511 visible bytes. Invalid oversized names/payloads are rejected
-without creating partial metadata. `AAUI.ChatSend` retains its existing raw text contract;
-transport escaping/received unescaping remain a separate application/toolkit follow-up.
+without creating partial metadata. `AAUI.ChatSend` retains its raw text contract. The app
+calls `aa_ui::lua::chat::encode_for_transport(text)` exactly once before wire serialization:
+native ordered replacements double every `|`, restore `||i` / `||q` to `|i` / `|q`, then
+double every `@`, then replace CRLF and remaining CR/LF with spaces. This restores the
+lowercase prefixes globally, including malformed input; it is not a structural link
+validator. Whisper target and channel are not encoded. Native `393c5b06`..`393c5b59` also
+round-trips through UTF-16, applying global limit `39ac7ef8` and a 1024-byte UTF-8 conversion
+buffer. The global limit's runtime value and conversion-overflow policy are unconfirmed;
+the utility does not invent a truncation policy. The app retains protocol length validation.
+
+Incoming packet text reaches the original `CHAT_MESSAGE` event unchanged. Message insertion
+(`AddMessage` / refresh methods and `DispatchChatMessage`) decodes nonoverlapping `@@` pairs
+once before storing the line: `@@@@` becomes `@@`. Bars stay doubled until glyph parsing,
+so literal `|c`, `|k`, etc. remain visible text while real item/quest links retain metadata.
+The input and ordinary label/edit text do not run this message decoder. No incoming client
+adapter decoding is needed. `tests/chat_transport.rs` exercises the original stage's input,
+`AddLinkItem` and `CHAT_MESSAGE` handler, preserving the character/item/quest click payloads
+alongside literal color and character codes, repeated bars, @ pairs and Unicode.
+
+Native transport evidence: send `395115b8`..`395115ff` uses replacement helper `39294ca0`
+(nonoverlapping matching), followed by network newline normalization
+`393c5be2`..`393c5c0e`. The receive path `391d8b00` -> `393c7b90` passes text to event 10
+at `393c82cc`; original `chat_msg_event.alb` adds character links and prefixes. Dispatch
+`394584f0` -> `395085e0` -> `39501e80` -> `39511d70` reaches message insertion `392ba860`,
+which calls formatter `39435050` at `392ba8fc`. Its escaped-@ branch at
+`39435156`..`39435181` replaces `@@` with `@` and returns before localization-token parsing.
 
 Native evidence: entry points `39459960` / `394599e0`, active query `39508700`, explicit
 window selector `39502020` and edit own visibility `395128e0` -> `392778a0(false)`.
@@ -708,6 +732,13 @@ shows `Link: [Crushing Grip][The Prophet Terrien]` in normal edit color with no 
 visible; the message view retains distinct grade colors. Shared HUD/font/art comparison uses
 `reference/ingame/bag/real.png`, since no dedicated linked-input reference was supplied.
 The `aa_dev` capture logged 377-426 FPS, zero script errors and closed itself.
+
+The transport fixture in the same example adds an original `CHAT_MESSAGE` event containing
+literal `mail@host @@ |cFFFF0000 |kFake,0; |r` next to real item/quest links. Inspected capture
+`shots/aa-ui/native-chat-transport.png` keeps those literals visible and displays the linked
+item in its grade color. Shared HUD fonts/assets were compared against
+`reference/ingame/bag/real.png`; no dedicated real-client escaped-chat capture is available.
+The capture logged 308-373 FPS, zero script errors and closed itself.
 
 ## App integration
 

@@ -19,6 +19,9 @@ fn main() {
             fake::enter_world(ui);
             let chat = aa_ui::lua::ui(&ui.lua).tree.of_class("chatwindow")[0];
             ui.lua.globals().set("inputWindow", aa_ui::lua::object_table(&ui.lua, chat).unwrap()).unwrap();
+            ui.lua.globals().set("encodeNativeChat", ui.lua.create_function(|_, text: String| {
+                Ok(aa_ui::lua::chat::encode_for_transport(&text))
+            }).unwrap()).unwrap();
             ui.exec("@original_item_links", r#"
                 originalLinks={}
                 local original,index
@@ -51,6 +54,8 @@ fn main() {
                     message:AddMessage(line)
                     X2Chat:DispatchChatMessage(CMF_SAY,line)
                 end
+                transportText=encodeNativeChat('Escapes: mail@host @@ |cFFFF0000 |kFake,0; |r '..originalLinks[1]..' |q2531;')
+                message:AddMessage('|kSocialpeerone,0;: '..transportText)
                 X2Quest.GetLinkedQuestSummary=function(self,id) return X2Quest:GetQuestContextSummary(id) end
                 X2Quest.GetLinkedQuestObjectives=function(self,id) return {} end
                 ShowQuestLinkTooltip({questType=2531})
@@ -62,6 +67,8 @@ fn main() {
                 X2Chat:AddQuestLinkToActiveChatInput('|q2531;')
                 assert(edit:GetText()=='Link: [Crushing Grip][The Prophet Terrien]')
             "#).unwrap();
+            let transport: String = ui.lua.globals().get("transportText").unwrap();
+            ui.fire_event("CHAT_MESSAGE", (0, "0", false, "Socialpeerone", transport, true, ""));
             fake::report(ui, "native_item_links");
         }))
         .add_systems(Startup, fake::physical_pixels)
