@@ -741,7 +741,7 @@ The slice handles ordinary authored material layers 0 and forward rendering.
 Nonzero `nMaterialLayers` variants are conservatively left on the existing
 material path (native Render skips packing for material-layer bit 1;
 `300F7190` reads the group's byte+92). Frozen/wet layer rendering, editor-selected
-material overrides, native brightness/AO and terrain-colour runtime blending,
+material overrides, native group/terrain brightness and terrain-colour runtime blending,
 wind bending, sprites and the unresolved tilt producer are separate gaps.
 Scale remains the exact native 0.1..5 clamp and no rotations are changed.
 
@@ -787,6 +787,87 @@ omit distant reference trees; native lighting/terrain/water grading differences
 and absent actors/UI remain, without brightness tuning. All fixture runs
 exit zero with no shader/GPU errors and close their own windows.
 
+
+#### Native vegetation vertex-alpha AO (`vegetation_color/ao.rs`)
+
+Original `shaders/hwscripts/cryfx/vegetation.cfx` lines 403-406 copies
+`IN.Color.w` to `OUT.Color0.w`, with a separate per-object brightness term.
+`frag_vegetation_unify` forwards this value; line 780 multiplies **final lit RGB**
+by it before COLOR_VARIATION, fog and post. The raw vertex alpha is linear
+UNORM8 (`alpha/255`), not sRGB, an RGB tint, opacity or record byte 59.
+`modificatorvt.cfi` declares the COLOR input and `common.cfi::GetInputColor`
+only swaps RGB for the D3D color layout; alpha stays in `.w`.
+Opacity-alpha-glow is added later, and is explicitly excluded from this slice.
+
+The parsed original `MeshData.colors` stream was retained but absent from the
+Bevy draw meshes. Existing model workers now build a shared subset mirror
+carrying only the alpha term in otherwise unused UV1.x. The exact aa-cry subset
+geometry/material filter and first-use compacted vertex order are retained,
+including reversed triangle order for mirrored nodes. Unknown subset/part
+correspondence, skinned parts, absent/neutral alpha, oversized geometry and
+non-Vegetation/additive-alpha-glow materials decline this path. Native RGB bending
+channels never become Bevy vertex colors. Positions, UV0, normals, tangents,
+indices, bounds, material opacity/cutouts and shadow eligibility stay unchanged.
+
+The existing zero-binding vegetation extension applies this AO term to lit RGB,
+then the existing colour variation, then fog/post. AO-only materials use an
+adapter tag bit to bypass colour variation, without changing its 18-bit payload.
+The world never sets the independent diagnostic AO-bypass tag; `--off` uses it
+on fresh fixture parts to preserve all other lighting/colour/shadow behavior.
+Each original source subset shares one mesh mirror and each base material one
+existing extension mirror, with weak lookup ids and strong handles owned by the
+existing model cache. Work uses the existing nearest-first 48-job queue and
+finish/spawn budgets; additional geometry is bounded to 262,144 vertices and
+1,572,864 indices per prepared model. No per-plant assets, per-frame mesh edits,
+new texture decode, material variants per instance or main-world CPU meshes are
+needed. Parts unload through their existing sector/cell lifecycle.
+
+Actual spawn cell(15,15) groups 107/1197 have 28/11 dedicated placements,
+`fBrightness=1` and `bUseTerrainColor=0`. Original `cliff_bush_green_mini.cgf`
+LOD0's qualified subset has 1,534 compact vertices, all with alpha below 255,
+minimum 153; `small_leaves_bunch_big_c.cgf` has 859, of which 653 are below 255,
+minimum 116. Source regressions pin these actual values and prove record byte 59
+is 0 rather than an AO factor. Synthetic geometry separately checks nontrivial
+compaction, mirrored order, unreferenced alpha 0, NoDraw/Cut/Illum/glow filtering,
+subset-map rejection, invalid/oversized streams and
+shared mirror identity. Native group/terrain brightness, wind bending,
+terrain-colour runtime blending, special material layers, native leaf/back/rim
+lighting and sprites remain separate limitations. This implements the proved AO
+factor within the existing StandardMaterial lighting approximation.
+
+`vegetation_ao` is an aa-dev example: default and `--fog` each pass 16 independent
+GPU pixel controls (32 total), covering raw alpha 0/64/153/255, genuinely lit
+emissive, an interpolated 0..1 midpoint, opacity 0.5 plus COLOR_VARIATION, and a
+missing-AO-stream neutral control. CPU expectations apply AO before colour/fog,
+and leave opacity unchanged. Inspected `shots/aa-world/vegetation/ao_numeric.png`
+and `ao_numeric_fog.png` log 285-300 FPS and 221-317 FPS respectively.
+
+`--world` / `--world --off` use the original group 107 bush at
+Cry(15587.58887,15377.73267,126.51128), camera offset(-3,-5,+2), hour 10.
+Inspected `spawn_bush_ao.png` / `spawn_bush_no_ao_control.png` show 571 authored AO
+parts sharing 31 meshes/14 materials, 2,194 total object parts and zero failed or
+pending models. Pond foliage overlaps part of the bush, but its visible patch
+(550,350)-(850,650) is locally darker: native minus control mean RGB
+[-2.72,-3.41,-1.47], 61.7% of pixels differ by more than 2 in one channel.
+No broad lighting tuning is applied. Settled native 109-123 FPS, control 112-124 FPS
+on the shared machine; these are not a controlled performance benchmark.
+`--world --unload-check --shot-after 24` records all 571 AO mesh-part ids, leaves
+at 16 s and verifies every id is gone and streamed object count is 0 at 21 s;
+`spawn_bush_ao_unload.png` records the cleared state. Model caches retain their
+existing lifetime. Every fixture closes itself, with no shader/GPU errors.
+
+The same example's `--world --reference` produces inspected
+`spawn_reference_ao.png` (463 AO parts / 31 shared meshes / 14 materials,
+2,012 objects, zero pending/failed, settled 102-110 FPS). Compared against
+`reference/ingame/spawn/real.png`, nearby framing and placements remain aligned;
+the fixture's 150 m tree/object caps omit distant reference trees, and the
+known terrain/light/water material grading and absent actors/UI remain. There
+is no real-client capture matching the close bush camera; the exact AO factor
+is supported by original shader/mesh data and the independent GPU controls.
+
+Final validation: `cargo test -p aa-world --lib` passes **175 tests**, nine
+existing ignored; `cargo check -p aa-world --examples` also passes. The six fixture runs exit zero with no shader/GPU errors and
+all windows closed. Inherited fly/post/sky/water calibration hunks are unchanged.
 
 #### Native vegetation ordinary-shadow eligibility
 

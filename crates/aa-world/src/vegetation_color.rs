@@ -1,4 +1,4 @@
-//! Native CVegetation per-instance COLOR_VARIATION (300F1740 / vegetation.cfx).
+//! Native vegetation final-light vertex AO and per-instance COLOR_VARIATION.
 //! The original B/G/R bytes are six-bit packed in MeshTag; all instances share their material.
 
 use aa_cry::{CryAssets, material::Material as CryMaterial, scene::LoadedModel};
@@ -23,9 +23,21 @@ use bevy::{
 };
 use std::{borrow::Cow, collections::HashMap};
 
+pub(crate) mod ao;
+pub use ao::VegetationAoPart;
+
+/// Instance flag: AO-only submaterials must not receive COLOR_VARIATION.
+pub const NO_COLOR_VARIATION: u32 = 1 << 18;
+/// Diagnostic instance control; the world streamer never sets this bit.
+pub const IGNORE_VERTEX_AO: u32 = 1 << 19;
+
 pub type VegetationMaterial = ExtendedMaterial<StandardMaterial, VegetationColor>;
 pub(crate) type Mirrors = HashMap<AssetId<StandardMaterial>, AssetId<VegetationMaterial>>;
-pub(crate) type Materials = HashMap<AssetId<StandardMaterial>, Handle<VegetationMaterial>>;
+pub(crate) struct Mirror {
+    pub material: Handle<VegetationMaterial>,
+    pub variation: bool,
+}
+pub(crate) type Materials = HashMap<AssetId<StandardMaterial>, Mirror>;
 
 /// A material-qualified vegetation part, for scene diagnostics and cell-lifetime checks.
 #[derive(Component, Clone, Copy, Debug)]
@@ -51,6 +63,7 @@ fn enabled(material: &CryMaterial) -> bool {
 pub(crate) fn prepare(
     cry: &mut CryAssets,
     loaded: &LoadedModel,
+    ao: &ao::Meshes,
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
 ) -> Materials {
@@ -77,9 +90,8 @@ pub(crate) fn prepare(
     subsets.sort_unstable();
     subsets.dedup();
     for i in subsets {
-        if !enabled(mtl.sub(i).unwrap_or(mtl.as_ref())) {
-            continue;
-        }
+        let source = mtl.sub(i).unwrap_or(mtl.as_ref());
+        let variation = enabled(source);
         // NoDraw/proxy filtering remains the original loader's responsibility.
         let Some(base) = cry.material(Some(path), i) else {
             continue;
@@ -89,6 +101,15 @@ pub(crate) fn prepare(
             .iter()
             .flat_map(|(_, p)| p)
             .any(|p| p.material == base)
+        {
+            continue;
+        }
+        if !variation
+            && !loaded
+                .parts
+                .iter()
+                .flat_map(|(_, p)| p)
+                .any(|p| p.material == base && ao.contains_key(&p.mesh.id()))
         {
             continue;
         }
@@ -105,7 +126,13 @@ pub(crate) fn prepare(
             });
         if let Some(handle) = handle {
             mirrors.insert(base.id(), handle.id());
-            result.insert(base.id(), handle);
+            result.insert(
+                base.id(),
+                Mirror {
+                    material: handle,
+                    variation,
+                },
+            );
         }
     }
     result

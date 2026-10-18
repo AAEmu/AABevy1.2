@@ -1,4 +1,4 @@
-// Native COLOR_VARIATION: final lit RGB, before fog/post. Alpha and material alpha test unchanged.
+// Native vertex-alpha AO / COLOR_VARIATION: final lit RGB, before fog/post. Alpha and material alpha test unchanged.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_functions::get_tag,
@@ -18,7 +18,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         out.color = pbr.material.base_color;
     }
     let packed = get_tag(in.instance_index);
-    let rgb = vec3<f32>(f32(packed & 63u), f32((packed >> 6u) & 63u), f32((packed >> 12u) & 63u)) / 63.0;
-    out.color = vec4<f32>(out.color.rgb * (vec3<f32>(0.8) + rgb * 0.4), out.color.a);
+    @if(VERTEX_UVS_B) {
+        // Raw linear alpha/255 in the otherwise unused UV1; never material opacity/albedo.
+        if ((packed & 524288u) == 0u) {
+            out.color = vec4<f32>(out.color.rgb * in.uv_b.x, out.color.a);
+        }
+    }
+    if ((packed & 262144u) == 0u) {
+        let rgb = vec3<f32>(f32(packed & 63u), f32((packed >> 6u) & 63u), f32((packed >> 12u) & 63u)) / 63.0;
+        out.color = vec4<f32>(out.color.rgb * (vec3<f32>(0.8) + rgb * 0.4), out.color.a);
+    }
     return FragmentOutput(main_pass_post_lighting_processing(pbr, out.color));
 }
