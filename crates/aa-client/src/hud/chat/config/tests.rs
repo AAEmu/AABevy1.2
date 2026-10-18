@@ -47,9 +47,38 @@ fn default_tabs_restart_restores_independently_saved_selection_and_input_method(
 }
 
 #[test]
+fn original_chat_open_consumes_pending_trial_before_prefill_and_clear_does_not_switch_the_method() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (rt, state, path) = fixture::runtime(1280., 720.)?;
+    rt.lua.load("HUD.chat_close()").exec()?;
+    aa_ui::lua::chat_input::set_forced_method(&rt.lua, 11);
+    let window = live_window(&rt.lua, 0).unwrap();
+    assert_ne!(ui(&rt.lua).tree.widget(window).unwrap().chat.as_ref().unwrap().method, 11);
+    rt.lua
+        .load(
+            r#"
+        HUD.chat_open('fresh draft')
+        local edit=HUD.chat_window():GetChatEdit()
+        assert(edit:IsVisible() and edit:GetText()=='fresh draft')
+    "#,
+        )
+        .exec()?;
+    assert_eq!(ui(&rt.lua).tree.widget(window).unwrap().chat.as_ref().unwrap().method, 11);
+    assert_eq!(state.borrow().chat_config.model.extra[&0].method, 11);
+    aa_ui::lua::chat_input::set_forced_method(&rt.lua, -6);
+    rt.lua.load("HUD.chat_close();HUD.chat_open('second draft')").exec()?;
+    assert_eq!(ui(&rt.lua).tree.widget(window).unwrap().chat.as_ref().unwrap().method, 11);
+    assert!(state.borrow().requests.is_empty(), "opening/prefilling must not send a chat line");
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn original_full_reset_retires_history_deletes_only_four_owner_keys_and_recreates_defaults() -> Result<(), Box<dyn std::error::Error>> {
     let (rt, state, path) = fixture::runtime(1280., 720.)?;
     let old = live_window(&rt.lua, 0).unwrap();
+    aa_ui::lua::chat_input::set_forced_method(&rt.lua, 11);
     rt.lua.globals().set(
         "RESET_STORE_CHECK",
         rt.lua.create_function(|lua, ()| {
@@ -112,6 +141,13 @@ fn original_full_reset_retires_history_deletes_only_four_owner_keys_and_recreate
         assert!(u.tree.widget(tab.message).unwrap().message.as_ref().unwrap().lines.is_empty());
     }
     drop(u);
+    rt.lua.load("HUD.chat_open('fresh draft')").exec()?;
+    assert_eq!(
+        ui(&rt.lua).tree.widget(new).unwrap().chat.as_ref().unwrap().method,
+        0,
+        "manager reset must clear pending Trial11 before input opens"
+    );
+    rt.lua.load("HUD.chat_close()").exec()?;
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
     // Native hydration restores method0 and saves extra even when it did not change.
     assert_eq!(

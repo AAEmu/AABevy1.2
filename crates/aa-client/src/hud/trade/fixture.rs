@@ -99,6 +99,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Inv
     units.by_id.insert(
         200,
         Unit {
+            bounty_money: None,
             obj_id: 200,
             name: "Fixture peer".into(),
             kind: UnitKind::Character { char_id: 2 },

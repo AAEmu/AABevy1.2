@@ -13,8 +13,10 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest checked milestone: client255 passed/38 optional probes ignored in46.56s.
-All12 chat-configuration checks pass, including original Save/Cancel/Reset,
+Latest full-client milestone:255 passed/38 optional probes ignored in46.56s.
+The subsequent focused chat suite passes all13 checks, adding pending native
+trial-method consumption at actual chat open and pending clear during reset.
+Chat-configuration checks include original Save/Cancel/Reset,
 physical context Lock/Unlock, blocked dragging, warning timing, full Reset Chat,
 independent selection/method loading without saved tabs, and fresh-stage persistence.
 Native tab metadata, selection, method, opacity and eight owner-window locks
@@ -26,13 +28,15 @@ The native dishonor token now displays its red skull; the original
 jury waiting tooltip and the earlier separate physical probe pass. Received
 cooldowns advance once per frame before HUD reads; queries remain side-effect free.
 Earlier achievement tracing/detail/persistence and list-geometry checks remain passed.
-Network495 tests pass, including initial trial tasks/commands, history/progress,
+Network504 tests pass, including bounded bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
-World201 tests/9
+World208 tests/9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
 now reach the transmission copy in their source order. Fog/deferred decal water
-ordering adds32 GPU comparisons and nine original scene/unload runs. Owning docs
+ordering adds32 GPU comparisons and nine original scene/unload runs. Explicit
+subzone queries pass22 native controls and315 original polygon probes; automatic
+live registration remains unwired. Owning docs
 retain exact evidence and limits. Trial HUD integration, remaining
 cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.

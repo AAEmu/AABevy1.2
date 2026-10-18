@@ -20,6 +20,7 @@ pub(crate) fn spawn() -> aa_net::PlayerSpawn {
             ..default()
         },
         unit: aa_net::Unit {
+            bounty_money: None,
             obj_id: 100,
             name: "Expansion fixture".into(),
             kind: aa_net::model::UnitKind::Character { char_id: 47 },

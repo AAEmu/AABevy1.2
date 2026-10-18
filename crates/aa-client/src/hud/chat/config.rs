@@ -152,6 +152,15 @@ pub(in crate::hud) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     reset::install(lua, state)?;
     let api: Table = lua.globals().get("X2Chat")?;
     let hooks: Table = lua.globals().get("AAUI")?;
+    hooks.raw_set(
+        "PrepareChatInput",
+        lua.create_function(|lua, window: Value| {
+            if let Some(window) = aa_ui::lua::value_id(lua, &window) {
+                aa_ui::lua::chat_input::prepare_input(lua, window);
+            }
+            Ok(())
+        })?,
+    )?;
     let s = state.clone();
     hooks.raw_set(
         "ChatTabs",
