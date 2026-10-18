@@ -4605,3 +4605,43 @@ badge**. The panel/icon appearance was compared with
 zero script errors, no runtime warnings/errors and **229.0-262.1 FPS**, then
 self-closes. The quest reward's original missing-semicolon UpdateValue path is
 exercised separately in the same example before closing the quest window.
+
+### Plain numeric formatted text (2026-10-18)
+
+`|,number;` now uses the native signed-number parser rather than copying its
+body. Like the other numeric tokens, it accepts EOF, canonicalizes signs/zeros,
+wraps i64 arithmetic, consumes embedded bars/newlines and follows the native
+UTF-8-codepoint low-byte behavior. It emits no icon. The original character
+crime-point control, quest rewards, pet/player experience tooltips and labor
+displays use this token. Full source getters and literal edit text are retained.
+
+Native dispatch `39273eb2..39273f56` calls `3926fbd0`, actual XL XlI64toA
+(`3301bf30`), comma formatter `392701d0`, then ordinary string layout. Original
+`north_america.lua` and `russia.lua` explicitly call
+`UIParent:SetUseInsertComma(false)`. This slice preserves that ungrouped output.
+The generic comma-option hook, its protected-data initial value and existing
+rendered-text cache lifetime remain separate source/implementation boundaries;
+no global relayout behavior is inferred from the setter's single byte write.
+
+`data/extract/aa-ui/comma_text_oracle.py` and
+`native-comma-text-oracle-20261018.json` execute **96 native groups**: actual
+token parsing/XL integer conversion with comma formatting enabled and disabled,
+and the typed SetUseInsertComma adapter/wrapper. The wrapper accepts bool or
+numeric nonzero, rejects nil/string and returns zero Lua values. Allocation,
+memory and final string layout are captured endpoints; parser/conversion and
+formatting instructions execute unchanged. Production here implements only the
+ungrouped decoder, with no additional Lua API or option/cache policy.
+
+All **47 selected tests** pass (one existing ignored font-metrics test), across
+the library, formatted numeric text, chat/item/quest links, literal chat input,
+drawable text and slot state. Two added tests cover the plain numeric token's
+native goldens/no-icon output, literal-edit preservation and unchanged original
+crime-point markup through `CRIME_REPORTED` refresh. The existing aa-dev
+`native_dishonor_text` example rebuilds successfully for regression capture.
+
+The inspected `shots/aa-ui/native-comma-text-20261018.png` shows original
+Crime Points **80 / 50** and Infamy Pts **1234 plus skull** at 1280x720/UI scale
+0.85. The unchanged base character panel was compared with the original
+character-info reference; its extra crime rows follow the explicit fixture.
+The process reports zero script errors, no runtime warnings/errors and
+**506.8-560.9 FPS**, then self-closes.
