@@ -4191,3 +4191,50 @@ changing while text and links remain fully opaque. Both report zero Lua errors,
 no runtime warnings/errors, and self-close after the screenshot. These are
 deterministic source-contract captures; no matching real-client opacity
 reference is claimed.
+
+### Original chat tab context dispatch (2026-10-18)
+
+Right-clicking a chat tab now reaches the original context menu. The native
+tab event receiver `392ccc80` routes click kind `2` to `392caf30`. That handler
+recognizes mouse code `3` as `RightButton` (native table `39ac6a30`), finds the
+exact registered tab button, and invokes virtual `+1bc`, namely `39513750`.
+It does not select the tab or save a selected index. The separate left-button
+branch retains its ordinary selection path. This context path does not test
+the `AllowTabSwitch` flag used by the separate press/drag handler.
+
+`39513750` returns for an invalid index, missing message or failed chat-message
+cast. Otherwise it first emits **`SHOW_CHAT_TAB_CONTEXT(button, rawTabId)`**
+(event index `0x1f4`, name initialized at `392160cc`), then invokes the original
+global **`OnContextChatTab(message, button, rawTabId)`**. The raw signed ID is
+narrowed to f32 for each Lua number, and is read again after event delivery.
+An absent global callback does not suppress the UI event. The toolkit follows
+this order at its existing native click dispatch point and introduces no new
+game methods or context-menu policy.
+
+The unchanged `x2ui/chat/chat_window.alb` callback disables the chat window's
+three dynamic drawable layers and opens `chat/tab_popup.alb`. Its existing
+hide procedure reenables those layers. The original popup owns its protected
+tab-zero actions, rename/settings/clear/remove controls, outside-click closing
+and retirement; the toolkit does not reconstruct this menu.
+
+`data/extract/aa-ui/chat_context_oracle.py` and
+`native-chat-context-oracle-20261018.json` execute **13 native groups** through
+the actual event receiver, button lookup, message cast, native context handler
+and Lua argument marshaler. Only supplied script-interface endpoints, reference
+counting and event/script delivery are captured. Cases cover unselected-tab
+right-click without selection, other buttons/events, non-tab targets, invalid
+indices/message/type, missing global, f32 ID narrowing and an event listener
+changing the ID before the callback's second read. Instructions and vtable/name
+tables are recorded in `native-chat-context-source-20261018.txt`.
+
+All **39 selected tests** pass across context dispatch, alpha, clipping,
+input links, transport, configuration lifecycle and original popup retirement.
+The three new tests verify exact physical picking, press/release timing,
+right-click without selection/persistence, event/callback arguments and order,
+the post-event ID read, missing callback, original popup alpha freeze,
+outside-click retirement/reopen, and the original Clear control's raw tab ID.
+The example builds successfully. Its inspected aa-dev capture
+`shots/aa-ui/native-chat-context-20261018.png` shows the unchanged original
+tab-zero context menu at 1280x720/UI scale 0.85; zero Lua errors and no runtime
+warnings/errors are reported at **260.1-290.6 FPS**, and the process self-closes
+after its shot.

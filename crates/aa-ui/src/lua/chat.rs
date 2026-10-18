@@ -977,6 +977,27 @@ pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
     }
 }
 
+/// Native392caf30 -> 39513750: context on an exact tab button never selects it.
+pub(crate) fn context_clicked(lua: &Lua, target: Id) -> bool {
+    let Some(parent) = ui(lua).tree.get(target).parent else { return false };
+    let Some(c) = chat(lua, parent) else { return false };
+    let Some(tab) = c.tabs.iter().find(|tab| tab.button == target) else { return false };
+    let (Ok(Some(message)), Ok(Some(button))) =
+        (object_table(lua, tab.message), object_table(lua, tab.button)) else { return true };
+    if ui(lua).tree.widget(tab.message).is_none_or(|w| w.message.is_none()) {
+        return true;
+    }
+    let raw_id = |id: i64| (id as i32 as f32) as f64;
+    super::fire_ui_event(lua, "SHOW_CHAT_TAB_CONTEXT", vec![
+        Value::Table(button.clone()), Value::Number(raw_id(tab.id)),
+    ]);
+    // Native reads the message's ID again after event listeners have run.
+    let current_id = chat(lua, parent).and_then(|c| c.tabs.into_iter()
+        .find(|t| t.message == tab.message).map(|t| t.id)).unwrap_or(tab.id);
+    call_global(lua, "OnContextChatTab", (message, button, raw_id(current_id)));
+    true
+}
+
 fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
     if chat(lua, id).is_some_and(|c| c.window_id == window_id) {
         return Ok(());

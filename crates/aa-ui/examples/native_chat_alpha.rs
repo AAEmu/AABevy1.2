@@ -53,7 +53,24 @@ fn main() {
         }))
         .add_systems(Startup, fake::physical_pixels)
         .add_systems(Update, point.after(aa_ui::UiInput).before(aa_ui::UiFrame))
+        .add_systems(Update, context.after(point).before(aa_ui::UiFrame))
         .run();
+}
+
+fn context(ui: Option<NonSend<UiRuntime>>, mut step: Local<u8>, mut mouse: Local<aa_ui::input::MouseState>) {
+    if !std::env::args().any(|arg| arg == "--context") || *step >= 2 { return; }
+    let Some(ui) = ui else { return };
+    let p = {
+        let u = lua::ui(&ui.lua);
+        let Some(window) = u.tree.of_class("chatwindow").first().copied() else { return };
+        let button = u.tree.widget(window).unwrap().chat.as_ref().unwrap().tabs[0].button;
+        let r = u.animations.widget_rect(&u.tree, button);
+        (r.x + r.w / 2., r.y + r.h / 2.)
+    };
+    aa_ui::input::update_buttons(&ui.lua, &mut mouse, Some(p), aa_ui::input::MouseButtons {
+        right_press: *step == 0, right_release: *step == 1, ..Default::default()
+    }, 0.);
+    *step += 1;
 }
 
 fn point(ui: Option<NonSend<UiRuntime>>, mut pointer: ResMut<aa_ui::UiVirtualPointer>) {
