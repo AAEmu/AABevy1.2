@@ -1302,3 +1302,54 @@ The refreshed playable copy `target/debug/aa-client-play.exe` has SHA256
 Its inspected `world-select-final.png` in this folder reaches the live Lane-bevy world list,
 with no reported script errors and357–404 FPS. It exited after the screenshot. This verifies
 login/world listing; it does not resolve the existing lane game-connection stall.
+
+## Workbench recipe maps and observed batch controls (2026-10-18)
+
+Workbench maps now union unique, resolved recipes from every static template function group,
+including CraftStart lists and CraftPack lists. They do not filter solely by the received current
+phase or crafts.req_doodad_id. Alchemy Table568 contributes71 recipes and Regal Alchemy Table2241
+contributes153. CURRENT group/category/recipe getters use these maps and authored visible-order/ID
+sorting. Closing clears the active object/template identity while retaining the maps until the
+next open. Current product-name search uses retained map membership; current material-name search
+instead requires the active bench template to match recipe.req_doodad_id and preserves duplicates.
+
+The original Craft/Max Qty/Cancel buttons now queue actual ExecuteCraft and StopCasting commands.
+A request rechecks character ownership, active bench identity, received object/template, recipe
+membership and CraftEffect skill classification. A complete requested count is sent ONCE. The
+server owns subsequent casts; Ended never sends another ExecuteCraft. Plain and plot cancel slots
+are tracked separately from received local casts. Sending Cancel does not zero the batch or alter
+inventory/labor. Native first-Started, successful-Fired, Ended, failed-Started and Stopped latches
+control the presentation count/events. An unfired Ended or Stopped emits no-argument CRAFT_ENDED
+and resets the count at the next manager update; failed Started resets immediately. Wire Ended
+contains only a timeline, so classification uses the observed current local CraftEffect cast.
+This is not a product-settlement acknowledgment or a guarantee that the lane cancels queued tasks.
+Mounted-caster cancellation remains open because the current StopCasting command addresses self.
+
+Received craft-failure item notices now produce native item-link STRING arguments for CRAFT_FAILED,
+with duplicate resolved entries retained and unresolved item definitions skipped. The original
+chat/alert scripts consume these strings. They do not decrement/reset the queue or imply another
+Ended. Synthetic link defaults use constructor-zero grade/maker, flags1 and world_idff; the two
+native grade/maker globals are zero-filled in the image, with indirect initialization still an
+explicit source boundary.
+
+Validation:153 client tests passed /25 ignored. Exact original-stage workbench probe passed in1.80s
+and Folio regression in1.90s, each with exactly one test executed. The workbench probe physically
+clicks Max Qty, Craft and Cancel, observes one full count3 request, feeds received Started/Fired/
+Ended/Stopped packets, verifies no resend, preserves inventory and confirms close-map lifetime.
+Focused checks cover stale character/object identity, both cancel slots, native latch transitions,
+failure-link fields/duplicates and distinct current search sources. Logs are under
+shots/hud/sol61-workbench/. The initial inspected alchemy-native.png shows original Craft art,
+selected Potion Rack, real material counts and enabled controls;305-367 FPS, normal screenshot exit.
+The inspected alchemy-received-final.png also shows the same received three material stacks in the
+bag and Labor1,000, with matching per-material totals and3/50 occupied slots;314-361 FPS. Both
+captures reported no script/GPU errors and exited normally. No same-screen reference exists in
+the current reference tree, so absolute font/layout calibration remains open.
+
+This milestone uses an EXPLICIT received-state fixture to open a resolved bench, not a live
+natural-interaction claim. Initial/queued native range is a geometry-shape offset predicate with
+max_interaction_doodad_distance default2.0999999m, not a center-distance2.1m test. The protected
+craft callback action, player-state/permission gates and full natural input routing remain open.
+SCWorldInteractionSkillList/Cancel now decode in aa-net, but the lane has no emitter and null/zero
+CraftStart/Pack func_skill_id cannot supply a guessed action. No server ACK or successful craft
+is manufactured to hide these gaps. Broader native execution validation, special-currency and
+secure-playerflag policies, full proficiency controls/housing modifiers and pack flows remain open.

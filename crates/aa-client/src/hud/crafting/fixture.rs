@@ -25,7 +25,9 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|a| a == "--details") {
+    if std::env::args().any(|a| a == "--bench") {
+        workbench(&rt, &bridge).unwrap();
+    } else if std::env::args().any(|a| a == "--details") {
         select_first_recipe(&rt).unwrap();
     }
     App::new()
@@ -39,6 +41,91 @@ pub(crate) fn run() {
         .run();
     if path.exists() {
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+/// Explicit received fixtures: Alchemy Table, materials, labor and proficiency.
+pub(crate) fn workbench(rt: &UiRuntime, bridge: &api::Shared) -> Result<u32, Box<dyn std::error::Error>> {
+    let recipe;
+    {
+        let mut data = bridge.borrow_mut();
+        assert_eq!(super::bench::open(&mut data, 300, 568), Some(71));
+        let categories = super::bench::categories(&data, 1);
+        recipe = super::bench::recipes(&data, 1, categories[0])[0];
+        let game = data.game.get().ok_or("catalog not ready")?;
+        let definition = &game.crafting.recipes[&recipe];
+        let group = definition.actability_group;
+        let points = definition.actability_limit;
+        let bag = definition
+            .materials
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                Some(aa_net::model::Item {
+                    id: i as u64 + 9000,
+                    template_id: m.item,
+                    count: m.amount * 3,
+                    grade: if m.require_grade < 0 { 0 } else { m.require_grade as u8 },
+                    ..default()
+                })
+            })
+            .collect::<Vec<_>>();
+        let inventory = data.crafting.inventory.as_mut().unwrap();
+        inventory.bag.fill(None);
+        for (slot, item) in bag.into_iter().enumerate() {
+            inventory.bag[slot] = item;
+        }
+        data.crafting.actabilities.apply(&aa_net::Event::Actability(aa_net::ActabilityEvent::Snapshot {
+            last: true,
+            entries: vec![aa_net::actability::ActabilityValue {
+                id: group,
+                point: points,
+                step: 0,
+            }],
+        }));
+        data.snapshot.labor = 1000;
+        data.snapshot.labor_log.push((1000, 1000));
+        data.snapshot.labor_seq += 1;
+        let mut world = World::new();
+        world.insert_resource(data.crafting.inventory.clone().unwrap());
+        data.panels = super::super::panels::refresh(&world, data.game.get(), 0, 100, data.start, &data.snapshot, Vec3::ZERO).0;
+        data.panels.actions_known = true;
+    }
+    api::push_changes(rt, bridge);
+    rt.fire_event("BAG_UPDATE", (-1, -1));
+    rt.fire_event("CRAFTING_START", ("300", 71));
+    click_row(rt, 0)?;
+    click_row(rt, 1)?;
+    rt.lua
+        .load("assert(CRAFTING_FRAME.detailPage.buttonFrame:IsVisible()); assert(CRAFTING_FRAME.detailPage.buttonFrame.craftBtn:IsEnabled())")
+        .exec()?;
+    Ok(recipe)
+}
+
+pub(crate) fn doodad() -> aa_net::Doodad {
+    aa_net::Doodad {
+        obj_id: 300,
+        template_id: 568,
+        owner_obj_id: 0,
+        parent_obj_id: 0,
+        attach_point: 0,
+        pos: default(),
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: 1.0,
+        has_loot_item: false,
+        func_group_id: 0,
+        owner_id: 0,
+        ucc_id: 0,
+        item_template_id: 0,
+        type2: 0,
+        time_left: 0,
+        plant_time: 0,
+        quest_glow: 0,
+        family: 0,
+        puzzle_group: 0,
+        owner_type: 0,
+        owner_db_id: 0,
+        data: 0,
     }
 }
 
