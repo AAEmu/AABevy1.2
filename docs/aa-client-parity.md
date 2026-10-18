@@ -24,7 +24,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Chat | Live channels/whispers, original chat input and parsing, system/combat messages | Chat layout persistence, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | 3D overhead marks, group loot, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; native popup checks | Live unblock/offline/restart checks; family, guild/expedition, nation and management |
-| Mail, trade and auctions | Original content groups load; mail protocol/list/detail/send/claims/delete live-tested in aa-net | Original mailbox UI integration; trade agreement/locking (protocol active), auction search/bid/list/cancel |
+| Mail, trade and auctions | Original mailbox lists/detail/read/claim/write/send controls bound; mail protocol live-tested in aa-net | Live original mailbox transactions/restart; trade UI agreement/locking, auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | World entities and item/quest data present | Crafting recipes/actions/proficiencies, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data and some map icons | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion decoded and rendered | Owned mate/slave lifecycle, summon/unsummon/equipment/skills, mount UI, ships/cannons/transport controls |
@@ -35,10 +35,10 @@ live or visual validation. No overall completion percentage is inferred from scr
 ## Active ownership
 
 * Root: `aa-client`, mailbox/group-loot/trade and account-backed input bindings; friends and native combat-display milestones landed.
-* Network agent: `aa-net`, loot rolls; shop/bank, raid, friends, repair/expansion, mail, trade and auction milestones landed.
-* UI agent: `aa-ui`, attached-widget lifecycle/name-link metadata; native edit and combat timeline milestones landed.
-* Material agent: `aa-cry`, referenced-subset UCC eligibility/cache and full sail fixture; static composition landed.
-* World milestones committed: forward decals, static entity props, local lights, stars and verified rigid windmills.
+* Network agent: `aa-net`, owned mates/transport state; loot rolls, DEFLATE, proficiency, doodad updates and craft requests landed.
+* UI agent: `aa-ui`, native clipboard/word-navigation audit; character/item/quest links, native edit and combat timelines landed.
+* Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
+* World agent: native moon/corona audit; milestones committed: forward decals, static entity props, local lights, stars and verified rigid windmills.
 
 The shared checkout also contains inherited calibration/performance edits in other crates. Those
 are preserved; they are not counted as newly verified features until their owner or an assigned
@@ -54,7 +54,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client 109 passed / 14 ignored (two old approximation tests replaced by the native projection check), plus the opt-in original social-stage fixture passed; UI 110 passed / 1 ignored, network 161 library plus
+Current wave: client 111 passed / 15 ignored, plus the opt-in original social-stage fixture passed; UI 136 runtime plus2 doctests passed / 1 ignored, network 197 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.
