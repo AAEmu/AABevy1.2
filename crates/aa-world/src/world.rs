@@ -147,6 +147,49 @@ impl World {
         self.cells.get(&(cx, cy)).and_then(|z| z.first().copied())
     }
 
+    /// Native seamless ToD weights (crysystem 365EEC20): inspect the 5x5 sectors around
+    /// the view, retain each zone's greatest `1-distanceToSector/90` weight, at most ten.
+    /// The manager normalizes their sum when it blends raw curve values (300A5010).
+    /// Coordinates here are global; the original works in an equivalent local 8-cell grid.
+    pub fn environment_weights(&self, pos: Vec3) -> Vec<(u16, f32)> {
+        let mut weights: Vec<(u16, f32)> = Vec::with_capacity(10);
+        if !pos.is_finite() {
+            return weights;
+        }
+        let sx = (pos.x / SECTOR_SIZE).floor() as i32;
+        let sy = (pos.y / SECTOR_SIZE).floor() as i32;
+        for x in sx - 2..=sx + 2 {
+            for y in sy - 2..=sy + 2 {
+                let Some(owners) = self.sector_zones.get(&(x.div_euclid(16), y.div_euclid(16)))
+                else {
+                    continue;
+                };
+                let id = owners[(x.rem_euclid(16) * 16 + y.rem_euclid(16)) as usize];
+                if id == 0 {
+                    continue;
+                }
+                let min = bevy::math::Vec2::new(x as f32, y as f32) * SECTOR_SIZE;
+                let max = min + bevy::math::Vec2::splat(SECTOR_SIZE);
+                let distance = (pos.truncate() - pos.truncate().clamp(min, max)).length();
+                let weight = (1.0 - distance / 90.0).clamp(0.0, 1.0);
+                if weight <= 0.0 || weights.len() >= 10 {
+                    continue;
+                }
+                if let Some((_, existing)) = weights.iter_mut().find(|(zone, _)| *zone == id) {
+                    *existing = existing.max(weight);
+                } else {
+                    weights.push((id, weight));
+                }
+            }
+        }
+        if weights.is_empty()
+            && let Some(zone) = self.zone_at(pos)
+        {
+            weights.push((zone, 1.0));
+        }
+        weights
+    }
+
     pub fn zone_name(&self, id: u16) -> Option<&str> {
         self.zones.iter().find(|z| z.id == id).map(|z| z.name.as_str())
     }
@@ -185,5 +228,73 @@ mod tests {
         w.load_sector_zones().unwrap();
         let z = w.zone_at(Vec3::new(9.5 * 1024.0, 14.5 * 1024.0, 0.0)).unwrap();
         assert!(w.zone_name(z).is_some(), "zone {z}");
+    }
+    #[test]
+    fn native_environment_distance_max_weights_and_limit() {
+        let mut world = World::default();
+        // Two half planes, repeated over many sectors: repetitions must not add weight.
+        let mut owners = Box::new([1; 256]);
+        for x in 8..16 {
+            for y in 0..16 {
+                owners[x * 16 + y] = 2;
+            }
+        }
+        world.sector_zones.insert((0, 0), owners);
+        for offset in [-90.0_f32, -45.0, 0.0, 45.0, 90.0] {
+            let weights = world.environment_weights(Vec3::new(512.0 + offset, 512.0, 999.0));
+            let weight = |id| {
+                weights
+                    .iter()
+                    .find(|(z, _)| *z == id)
+                    .map_or(0.0, |(_, w)| *w)
+            };
+            assert!((weight(1) - (1.0 - offset.max(0.0) / 90.0)).abs() < 1e-6);
+            assert!((weight(2) - (1.0 - (-offset).max(0.0) / 90.0)).abs() < 1e-6);
+        }
+        // A diagonal sector uses nearest AABB distance, not distance to its center.
+        world.sector_zones.get_mut(&(0, 0)).unwrap()[9 * 16 + 9] = 3;
+        let weights = world.environment_weights(Vec3::new(560.0, 560.0, -500.0));
+        let w = weights.iter().find(|(z, _)| *z == 3).unwrap().1;
+        assert!((w - (1.0 - (16.0_f32 * 16.0 * 2.0).sqrt() / 90.0)).abs() < 1e-6);
+        for (i, z) in world
+            .sector_zones
+            .get_mut(&(0, 0))
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            *z = (i + 1) as u16;
+        }
+        assert_eq!(
+            world
+                .environment_weights(Vec3::new(512.0, 512.0, 0.0))
+                .len(),
+            10
+        );
+        assert!(world.environment_weights(Vec3::splat(f32::NAN)).is_empty());
+    }
+
+    #[test]
+    fn real_solzreed_sea_border_weights_are_continuous() {
+        if !crate::pak_available() {
+            return;
+        }
+        let mut world = World::load("main_world").unwrap();
+        world.load_sector_zones().unwrap();
+        let a = Vec3::new(15712.0, 15808.0 - 0.01, 150.0);
+        let b = a + Vec3::Y * 0.02;
+        assert_eq!(world.zone_at(a), Some(179));
+        assert_eq!(world.zone_at(b), Some(210));
+        let wa = world.environment_weights(a);
+        let wb = world.environment_weights(b);
+        assert_eq!(wa.len(), 2);
+        assert_eq!(wb.len(), 2);
+        for zone in [179, 210] {
+            let value = |weights: &[(u16, f32)]| {
+                let sum: f32 = weights.iter().map(|(_, w)| w).sum();
+                weights.iter().find(|(z, _)| *z == zone).unwrap().1 / sum
+            };
+            assert!((value(&wa) - value(&wb)).abs() < 0.001);
+        }
     }
 }
