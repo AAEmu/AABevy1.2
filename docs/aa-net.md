@@ -6059,3 +6059,35 @@ session+7b as selected world ID, not account ID; local key scope must preserve t
 
 Codec validation: focused3 tests passed; the same freshly built aa-net library binary then
 passed all447 tests (0 failed/ignored). No network traffic or persistence claim was involved.
+
+Type5 hydration/identity follow-up: native CS117 helper392175f0 has only391eb233/242 callers,
+which request types1/2 for character-list rows. There is no source-proven type5 request timing;
+the active lane `world/session.rs` pushes types1/2/5 for the actual selected snapshot ID during
+initial world hydration. OnCharacterState391b9640 allocates/constructs object3930fa80, stores
+it in client+40 at391b988f, then passes object+10 and received CharacterState to39089d50.
+That helper copies the received FIRSTu32 Character.id into header+8, hence object+18.
+Consequently CS118's `[client+40]+18` is the actual selected persistent character ID.
+
+SCResponseUIData391e57e0 ignores its character-ID field for types other than1/2, calls
+39217910, then publishes observer0x2c(type) regardless of load success. The application must
+retain its stronger active-character receipt guard. Native Data::Load(Size<=0) leaves the
+existing tree intact. An executed native length oracle confirms that short positive lengths
+can succeed while silently losing siblings or truncating later values; excessive padded
+lengths can fail with a partial tree. Exact payload byte count or byte count+1 (implied NUL)
+retains the complete tested tree. Lane UTF16units+1 is not sufficient: a30-byte UTF8 fixture
+with four non-ASCII characters supplies27, truncating later `12345` to `1234` while succeeding.
+For atomic app editing, refuse positive lengths other than full UTF8 byte length or +1, and
+leave the current tree unchanged for nonpositive lengths. These safety checks are caller
+policy; the optional raw text codec deliberately does not reinterpret a response trailer.
+
+Native trace integer loading uses XlAtoI32(base10)3301bcb0/3301ac60: skip ASCII space/9..13,
+consume optional +/- and the initial decimal digit run, wrapping multiply/add/negation in32
+bits; no digits means0. Twelve no-mock x86 oracle cases include trailing text and overflow.
+`ChildWithValue`33002dc0 returns the FIRST case-sensitive strcmp match. Save's version1
+insertion uses SetAttribute33004190/33003fa0: replace first `version` node's children/meta
+with sole child `1`, preserving sibling position/name/comments; append if absent, leave later
+duplicates untouched. The root caller owns these operations and must preserve unrelated nodes.
+The empty-string/raw_length1 case is an additional boundary: executed native Load reports
+failure and leaves a partial0xff-valued node, with no tracing subtree; the observer still
+reloads zero trace slots. Treating it as an application empty state or refusing it must be
+explicit, not described as a successful native empty parse. raw_length0 retains prior state.
