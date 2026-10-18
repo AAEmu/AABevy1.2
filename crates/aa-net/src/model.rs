@@ -533,6 +533,8 @@ pub struct Character {
     pub leave_time: i64,
     pub money: i64,
     pub crime_point: i16,
+    /// Raw native crime-state word, following infamy points in Character serialization.
+    pub crime_state: i16,
     pub infamy_point: i32,
     /// Unix times of a pending delete / transfer request (0 = none) and the delete delay.
     pub delete_request_time: i64,
@@ -583,7 +585,7 @@ impl Character {
         r.skip(8)?; // moneyAmount
         c.crime_point = r.i16()?;
         c.infamy_point = r.i32()?;
-        r.skip(2)?; // crime score
+        c.crime_state = r.i16()?;
         c.delete_request_time = r.i64()?;
         c.transfer_request_time = r.i64()?;
         c.delete_time = r.i64()?;
@@ -1744,7 +1746,7 @@ mod tests {
         w.long_position(Pos::new(100.5, 200.25, 30.0));
         ModelParams::default_face().write(&mut w);
         w.i16(50).i64(1).i16(0).i64(0).i32(0).i64(0).i32(0).i64(1234);
-        w.i64(9999).i64(0).i16(0).i32(0).i16(0);
+        w.i64(9999).i64(0).i16(0).i32(0).i16(-123);
         w.i64(0).i64(0).i64(0).i32(0).i64(11).i64(22).i64(0);
         w.bool(true).i32(0).i32(0).i32(0).i64(5).u8(0);
         w.finish()
@@ -1763,6 +1765,7 @@ mod tests {
         assert_eq!(c.equipment.get(slot::FACE).unwrap().template_id, 4001);
         assert_eq!((c.labor_power, c.leave_time, c.money), (50, 1234, 9999));
         assert_eq!((c.bm_point, c.money2, c.updated), (11, 22, 5));
+        assert_eq!(c.crime_state,-123);
         assert!(c.auto_use_aa_point);
         assert!(!c.delete_requested());
     }

@@ -132,6 +132,19 @@ impl Player {
                 if changed {spawn.state.character.expedition_id=spawn.unit.expedition_id;spawn.state.character.faction_id=spawn.unit.faction_id;}
                 changed
             }),
+            Event::Crime(receipt) => return self.spawn.as_mut().is_some_and(|spawn| {
+                match *receipt {
+                    crate::CrimeEvent::Changed{crime_points,infamy_points,crime_state,..} => {
+                        let c=&mut spawn.state.character;
+                        let changed=(c.crime_point,c.infamy_point,c.crime_state)!=(crime_points,infamy_points,crime_state);
+                        (c.crime_point,c.infamy_point,c.crime_state)=(crime_points,infamy_points,crime_state);changed
+                    }
+                    crate::CrimeEvent::JuryPointChanged{jury_point} => {
+                        let changed=spawn.state.jury_point!=jury_point;spawn.state.jury_point=jury_point;changed
+                    }
+                    crate::CrimeEvent::JuryWaitingNumber{..} => false,
+                }
+            }),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
@@ -404,6 +417,7 @@ pub struct WorldState {
     pub loot_rolls: LootRolls,
     pub scheduled_events: crate::scheduled::ScheduledEvents,
     pub dominion: crate::Dominion,
+    pub crimes: crate::crime::Crimes,
     pub achievements: crate::achievement::Achievements,
     pub expeditions: crate::expedition::Expeditions,
     pub families: crate::family::Families,
@@ -454,6 +468,7 @@ impl WorldState {
         self.loot_rolls.apply(e);
         self.scheduled_events.apply(e);
         self.dominion.apply(e);
+        self.crimes.apply(e);
         self.achievements.apply(e);
         self.expeditions.apply(e);
         self.families.apply(e);

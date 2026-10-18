@@ -6155,3 +6155,50 @@ old actor pointer. Artifacts: `timeline_reference_oracle.py`, `timeline_erase_or
 `native-timeline-*-oracle-20261018.json` outputs and `native-movie-begin-runtime-20261018.txt`.
 Generic Fired production still requires full visual/projectile reference lifetime, retained-node
 admission and remaining reset caller closure; no replacement-on-Started or erase-on-End is added.
+
+### Crime reputation and jury-number receipts (2026-10-18)
+
+`CrimeEvent` decodes three native/lane-identical bodies: SC16f `Changed` is i32 points,
+i16 crime_points, i32 infamy_points, i16 crime_state (12bytes); SC18a `JuryPointChanged`
+and SC182 `JuryWaitingNumber` each contain one i32. All signed extremes and raw points
+are retained. Native factories391b2ec0/391b3cd0/391b3850 prove those opcodes; readers are
+397b6800/397afe10/397afa10. Lane source is systems/social/packets/trial.rs. There is no
+count field, timer conversion, inferred queue position or action acknowledgment in these receipts.
+
+`Event::Crime` forwards every receipt, including duplicates. Plain `Crimes` is integrated
+with WorldState and the Bevy resource reducer. It stores actual selected persistent ID,
+optional reputation/jury points and one last raw receipt; the forwarded events carry the
+complete ordered receipt stream. CharacterSelected hydrates actual header values without
+notifications; a matching PlayerSpawn preserves later receipts, a changed actual identity
+hydrates its own snapshot. LeftWorld/connection/authentication lifecycle clears this view as
+explicit app isolation. Pre-header point receipts remain raw observations without inventing
+a zero baseline. Waiting-number receipts produce notices without a persistent native queue
+cache claim. Existing Player snapshot fields update only when a player already exists.
+`Character.crime_state` now preserves the previously skipped two bytes after infamy points.
+
+`apply_with_notices` replaces `apply` when dispatching Lua callbacks (never fold twice).
+Native391dd190 copies reputation into selected header61c/620/624 BEFORE event13c
+`CRIME_REPORTED(crimePointDelta,crimeRecordDelta,crimeScoreDelta)`. Subtractions wrap at
+16/32/16 bits respectively, then signed values convert to f32; packet `points` is not an
+argument. Every duplicate emits three zero deltas.391de280 calls3930afd0 to assign header660,
+then emits143 `PLAYER_JURY_POINT()` even unchanged.391ddc20?3907ca10 emits149
+`JURY_WAITING_NUMBER(number)` with signed i32?f32, without a cache assignment.
+X2Player.GetCrimeInfo39496420 returns ONE table with signed numeric fields `crimePoint`,
+`crimeRecord`, `crimeScore`; GetJuryPoint394969c0 returns ONE signed numeric header660
+value, or numeric0 if the client pointer is absent. Resource unknown values remain explicit;
+the app owns the native absent-client presentation. Event-name registrations39215604/3921566d/392156c7
+close the names/IDs. Disassembly artifact: native-crime-reputation-source-20261018.txt.
+No-hook local x86 delta oracle crime_delta_oracle.py executes391dd1cb..391dd25d; four
+cases verify assignment-before-notice, signed wrap and duplicate zero deltas.
+Active trial state, seats, invitations, records, verdicts and outgoing choices remain separate
+unimplemented protocol slices; no action success or jury eligibility is fabricated.
+
+The sole outgoing addition is `Command::RequestJuryWaitingNumber { character_id }`.
+X2Trial.RequestJuryWaitingNumber binding39078f4d/39078f92 calls39078410 with no Lua args;
+its wrapper returns zero values.3907c770 builds opcode079/vtable399a1ae4 and sends39186810;
+serializer3901c170 is exactly ret4 (empty body). Lane CSRequestJuryWaitingNumberPacket is
+also empty and queries the connection's actual active character. Session requires InWorld,
+matching nonzero captured persistent ID and a successful write. These are stronger app stale
+identity/transport guards, not additional native jury eligibility. `JuryWaitingNumberRequested`
+and `JuryWaitingNumberRequestRejected` are local transport observations, never native/UI ACKs.
+Only genuine SC182 can supply the displayed number; no request changes Crimes/cache/notices.
