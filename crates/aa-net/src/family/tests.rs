@@ -194,7 +194,7 @@ fn native_keyed_cache_changes_only_known_rosters_members_and_actual_receipts() {
         character_id: 1,
         kicked: true,
     }));
-    assert_eq!(state.rosters[&1].members.len(), 1);
+    assert!(!state.rosters.contains_key(&1), "native dissolves rosters below two members");
     state.apply(&Event::Family(FamilyEvent::Removed { family_id: 1 }));
     assert!(!state.rosters.contains_key(&1));
     assert_eq!(state.rosters[&2], second);
@@ -237,4 +237,27 @@ fn world_state_folds_family_receipts_and_lifecycle() {
     assert_eq!(world.families.rosters[&7].members.len(), 9);
     world.apply(&Event::Disconnected { message: String::new() });
     assert!(world.families.rosters.is_empty());
+}
+
+#[test]
+fn removal_is_first_match_only_and_dissolves_only_after_actual_removal() {
+    let mut state = Families::default();
+    let mut rows = roster(7, 3);
+    rows.members[1].character_id = rows.members[0].character_id;
+    rows.members[0].name = b"first".to_vec();
+    rows.members[1].name = b"second".to_vec();
+    state.apply(&Event::Family(FamilyEvent::Described(rows)));
+    let remove = |character_id| Event::Family(FamilyEvent::MemberRemoved { family_id: 7, character_id, kicked: false });
+    assert!(!state.apply(&remove(99)));
+    assert_eq!(state.rosters[&7].members.len(), 3);
+    assert!(state.apply(&remove(1)));
+    assert_eq!(state.rosters[&7].members.len(), 2);
+    assert_eq!(state.rosters[&7].members[0].name, b"second");
+    assert_eq!(state.rosters[&7].members[1].character_id, 3);
+    assert!(state.apply(&remove(1)));
+    assert!(!state.rosters.contains_key(&7));
+    assert!(!state.apply(&remove(3)));
+    state.apply(&Event::Family(FamilyEvent::Described(roster(8, 1))));
+    assert!(!state.apply(&Event::Family(FamilyEvent::MemberRemoved { family_id: 8, character_id: 99, kicked: true })));
+    assert_eq!(state.rosters[&8].members.len(), 1, "unknown member does not dissolve a received singleton");
 }
