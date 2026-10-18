@@ -108,6 +108,8 @@ resource! {
         pub native_tag_cooldowns: Vec<NativeCooldown>,
         /// Source-hydrated local GM mode byte1; absent until actual PlayerSpawn.
         pub native_gm_mode1: Option<u8>,
+        /// Native process frame timer; survives actor and connection resets.
+        pub native_last_frame_ms: u32,
         /// Static skill?primary cooldown tag routing; prefer set_cooldown_catalog.
         pub cooldown_catalog: std::sync::Arc<HashMap<u32,u32>>,
         /// The last refused skill (not enough mana, too far ...).
@@ -254,9 +256,11 @@ impl Skills {
         let now = Instant::now();
         match e {
             Event::PlayerSpawn(s) => {
+                let last_frame_ms=self.native_last_frame_ms;
                 let catalog=std::mem::take(&mut self.cooldown_catalog);
                 *self = Self {
                     cooldown_catalog:catalog,
+                    native_last_frame_ms:last_frame_ms,
                     native_gm_mode1:Some(s.unit.gm_modes[1]),
                     obj_id: s.obj_id,
                     known: s.unit.skills.iter().map(|&(id, level)| KnownSkill { id, level }).collect(),
@@ -476,6 +480,7 @@ impl PartialEq for Skills {
             && self.native_skill_cooldowns == o.native_skill_cooldowns
             && self.native_tag_cooldowns == o.native_tag_cooldowns
             && self.native_gm_mode1 == o.native_gm_mode1
+            && self.native_last_frame_ms == o.native_last_frame_ms
             && self.cooldown_catalog == o.cooldown_catalog
             && self.last_failure == o.last_failure
     }

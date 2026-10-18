@@ -12,21 +12,35 @@ pub enum NativeCooldownOrigin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeCooldown {
     pub cooldown: Cooldown,
+    /// Receipt/insertion metadata; never used to project mutable manager time.
     pub updated_at: Instant,
     pub origin: NativeCooldownOrigin,
     pub reset: bool,
 }
 impl NativeCooldown {
-    /// Native timers advance in integer milliseconds, including comparison before extension.
-    pub fn remaining_ms_at(&self, now: Instant) -> u32 {
-        if self.reset {
-            return 0;
-        }
-        let elapsed = now.saturating_duration_since(self.updated_at).as_millis().min(u128::from(u32::MAX)) as u32;
-        self.cooldown.remaining_ms.saturating_sub(elapsed)
+    /// Stored frame remainder. `now` is retained for API compatibility, not projection.
+    pub fn remaining_ms_at(&self, _now: Instant) -> u32 {
+        if self.reset { 0 } else { self.cooldown.remaining_ms }
     }
+
 }
 impl Skills {
+    /// Advance once AFTER queued packet folds and BEFORE HUD queries. Uses the native
+    /// wrapping timer0 millisecond domain; zero now suppresses delta but still stores zero.
+    /// Character/connection resets preserve this process-frame clock, not runtime rows.
+    /// Returns whether any stored remainder changed (the frame clock always updates).
+    pub fn advance_native_frame(&mut self, now_ms: u32) -> bool {
+        let delta = if now_ms == 0 { 0 } else { now_ms.wrapping_sub(self.native_last_frame_ms) };
+        self.native_last_frame_ms = now_ms;
+        let mut changed = false;
+        for row in self.native_skill_cooldowns.iter_mut().chain(self.native_tag_cooldowns.iter_mut()) {
+            let remaining = row.cooldown.remaining_ms.saturating_sub(delta);
+            changed |= remaining != row.cooldown.remaining_ms;
+            row.cooldown.remaining_ms = remaining;
+        }
+        changed
+    }
+
     /// Catalog query: SELECT id,cooldown_tag_id FROM skills. Present zero means a direct timer;
     /// missing entries remain unknown. Static catalog survives character/connection lifecycle.
     pub fn set_cooldown_catalog(&mut self, catalog: HashMap<u32, u32>) {
@@ -51,9 +65,11 @@ impl Skills {
         result.map(|(left, total)| (Duration::from_millis(u64::from(left)), Duration::from_millis(u64::from(total))))
     }
     pub(super) fn clear_received_state(&mut self) {
+        let last_frame_ms = self.native_last_frame_ms;
         let catalog = std::mem::take(&mut self.cooldown_catalog);
         *self = Self {
             cooldown_catalog: catalog,
+            native_last_frame_ms: last_frame_ms,
             ..Self::default()
         };
     }
@@ -195,6 +211,51 @@ mod tests {
         rows.iter().map(|r| [r.cooldown.id, r.remaining_ms_at(at), r.cooldown.total_ms]).collect()
     }
     #[test]
+    fn executed_x86_frame_oracles_saturate_unsigned_without_compacting_or_changing_totals() {
+        // Original39899e50 executed in Unicorn, no mocked instructions/calls.
+        for (delta, expected) in [(0,[0,1000,u32::MAX]),(1,[0,999,u32::MAX-1]),
+            (999,[0,1,4294966296]),(1000,[0,0,4294966295]),
+            (2147483647,[0,0,2147483648]),(u32::MAX,[0,0,0])] {
+            let at=Instant::now();let mut state=Skills::default();
+            state.native_last_frame_ms=1;
+            let rows=vec![row(77,0,4000,at),row(78,1000,4001,at),row(79,u32::MAX,4002,at)];
+            state.native_skill_cooldowns=rows.clone();state.native_tag_cooldowns=rows;
+            // MAX delta needs a nonzero wrapped now (native now==0 has a special branch).
+            if delta==u32::MAX {state.native_last_frame_ms=2;}
+            let now=state.native_last_frame_ms.wrapping_add(delta);
+            state.advance_native_frame(now);
+            for rows in [&state.native_skill_cooldowns,&state.native_tag_cooldowns] {
+                assert_eq!(rows.len(),3);
+                for (i,r) in rows.iter().enumerate() {
+                    assert_eq!(r.cooldown.remaining_ms,expected[i]);
+                    assert_eq!(r.cooldown.total_ms,4000+i as u32);
+                    assert_eq!(r.cooldown.id,77+i as u32);
+                    assert_eq!(r.updated_at,at);
+                }
+            }
+        }
+    }
+    #[test]
+    fn frame_order_zero_wrap_and_lifecycle_preserve_process_clock() {
+        let mut state=ready();let at=Instant::now();
+        state.advance_native_frame(100);
+        state.seed_native_timers(&SkillCooldowns{skills:vec![Cooldown{id:17,remaining_ms:1000,total_ms:2000}],tags:vec![]},at);
+        assert_eq!(state.native_skill_cooldowns[0].remaining_ms_at(at+Duration::from_secs(999)),1000,"queries never project time");
+        state.advance_native_frame(110);
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms,990,"fresh queued receipt loses full frame delta");
+        assert!(!state.advance_native_frame(110));
+        assert!(!state.advance_native_frame(0));
+        assert_eq!(state.native_last_frame_ms,0);
+        state.advance_native_frame(5);
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms,985);
+        state.native_last_frame_ms=u32::MAX-2;state.advance_native_frame(3);
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms,979);
+        for e in [Event::CharacterSelected(Box::default()),Event::LeftWorld{target:0},Event::Disconnected{message:String::new()},Event::PlayerSpawn(Box::new(PlayerSpawn{obj_id:7,state:Default::default(),unit:unit(7)}))] {
+            state.apply(&e);assert_eq!(state.native_last_frame_ms,3);
+            assert!(state.native_skill_cooldowns.is_empty());
+        }
+    }
+    #[test]
     fn original_x86_oracle_first_matching_row_extension_and_expired_reuse() {
         // Executed original39899f90 outputs, UI native-cooldown-producer-oracle-20261018.json.
         let at = Instant::now();
@@ -229,6 +290,20 @@ mod tests {
         assert_eq!(rows.len(), 150);
         assert_eq!(rows[0].cooldown.id, 101);
         assert_eq!(rows[149].cooldown.id, 17);
+    }
+    #[test]
+    fn stop_compares_frame_remainder_not_wall_clock_and_receipts_remain_unchanged() {
+        let at=Instant::now();let mut state=ready();state.advance_native_frame(100);
+        state.apply(&Event::Cooldowns(SkillCooldowns{skills:vec![Cooldown{id:17,remaining_ms:1000,total_ms:2000}],tags:vec![]}));
+        let receipts=state.received_skill_cooldowns.clone();
+        state.apply(&start(17,3,7));
+        assert!(state.fold_stop_timer(3,900,false,at+Duration::from_secs(100)),"only estimate invalidation, existing1000 wins");
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms,1000);
+        state.advance_native_frame(300);
+        state.apply(&start(17,4,7));
+        assert!(state.fold_stop_timer(4,900,false,at));
+        assert_eq!(state.native_skill_cooldowns[0].cooldown,Cooldown{id:17,remaining_ms:900,total_ms:900});
+        assert_eq!(state.received_skill_cooldowns,receipts);
     }
     #[test]
     fn actual_cast_stop_inserts_before_cast_removal_and_preserves_raw_snapshot_history() {
@@ -443,6 +518,7 @@ mod tests {
             assert!(!state.last_used.contains_key(&skill));assert!(state.last_used.contains_key(&999));
             assert_eq!(if tag==0 {state.native_skill_cooldowns[0]}else{state.native_tag_cooldowns[0]},timer);
             assert_eq!(state.native_cooldown_at(skill,&[tag],at),Some((Duration::from_millis(8000),Duration::from_millis(10000))));
+            state.advance_native_frame(8001);
             let expired=at+Duration::from_millis(8001);
             assert!(state.native_cooldown_at(skill,&[tag],expired).is_none());
             assert!(state.cooldown_with_total_at(skill,tag,60000,expired).is_none(),"expired real timer must not reveal stale estimate");
