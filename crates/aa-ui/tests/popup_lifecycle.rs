@@ -385,6 +385,64 @@ fn original_task_decoration_uses_explicit_buttons_and_modal_state() {
 }
 
 #[test]
+fn task_visual_without_default_decorator_does_not_allocate_or_infer_type_limits() {
+    let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    let before = lua::ui(&ui.lua).tree.objects.len();
+    ui.exec("@task_missing_default", r#"
+        specificCalls=0
+        X2DialogManager:SetHandler(9999,function() specificCalls=specificCalls+1 end)
+        assert(X2DialogManager:RequestTaskDialog(9999,{title='Pending'},'owner')==nil)
+        assert(X2DialogManager:RequestTaskDialog(9999,{title='Still pending'},'owner')==nil)
+        assert(specificCalls==0)
+    "#).unwrap();
+    assert_eq!(lua::ui(&ui.lua).tree.objects.len(), before);
+    ui.exec("@task_default_available", r#"
+        decorations=0
+        X2DialogManager:SetHandler(DLG_TASK_DEFAULT,function(wnd,info)
+            decorations=decorations+1;wnd:SetExtent(200,100)
+        end)
+        first=X2DialogManager:RequestTaskDialog(9999,{title='Retry'},'owner')
+        second=X2DialogManager:RequestTaskDialog(9999,{title='Same type allowed'},'owner')
+        missingSpecific=X2DialogManager:RequestTaskDialog(9998,{},'owner')
+        assert(first and second and missingSpecific and first:GetId()~=second:GetId())
+        assert(decorations==3 and specificCalls==2)
+    "#).unwrap();
+}
+
+#[test]
+fn original_task_retry_after_decorator_registration_keeps_real_controls_clickable() {
+    let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    ui.exec("@task_before_stage", r#"
+        pendingInfo={buttonType=DBT_CUSTOM,isModal=false,name='Arena',corpsName='Nuia'}
+        assert(X2DialogManager:RequestTaskDialog(DLG_TASK_JOIN_BATTLE_FIELD,pendingInfo,'owner')==nil)
+    "#).unwrap();
+    fake::install(&mut ui, "en_us", &fake::default_worlds());
+    fake::install_ingame(&mut ui);
+    ui.run_stage(aa_ui::Stage::World);
+    assert!(ui.errors.is_empty(), "{:?}", ui.errors);
+    ui.exec("@task_retry_after_stage", r#"
+        pendingInfo={buttonType=DBT_CUSTOM,isModal=false,name='Arena',corpsName='Nuia'}
+        retry=X2DialogManager:RequestTaskDialog(DLG_TASK_JOIN_BATTLE_FIELD,pendingInfo,'owner')
+        assert(retry and retry.btnOk:IsVisible() and retry.btnSecond:IsVisible() and retry.btnThird:IsVisible())
+        assert(not retry.btnCancel:IsVisible())
+        selectedCustom=nil
+        local oldCustom=X2DialogManager.OnCustom
+        function X2DialogManager:OnCustom(id,index)
+            selectedCustom=index;return oldCustom(self,id,index)
+        end
+    "#).unwrap();
+    lua::tick(&ui.lua, 600.);
+    let button = lua::value_id(&ui.lua, &eval(&ui, "retry.btnThird")).unwrap();
+    let r = lua::ui(&ui.lua).tree.rect(button);
+    let p = (r.x + r.w / 2., r.y + r.h / 2.);
+    assert_eq!(input::pick(&ui.lua, p.0, p.1), Some(button));
+    click(&ui, &mut MouseState::default(), p);
+    assert_eq!(eval::<i64>(&ui, "selectedCustom"), 3);
+    lua::tick(&ui.lua, 600.);
+    assert!(eval::<bool>(&ui, "not retry:IsVisible()"));
+}
+
+#[test]
 fn removal_waits_for_a_shown_to_hidden_transition_and_fade_completion() {
     let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
     ui.exec(

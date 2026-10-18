@@ -408,6 +408,9 @@ function X2DialogManager:RequestNoticeDialog(fn, owner)
   return requestDialog(fn, owner, DBT_OK)
 end
 function X2DialogManager:RequestTaskDialog(task, info, owner)
+  -- Native3902d270 refuses the visual before allocation without a default decorator.
+  -- The application retains the accepted task for retry; this is not a false choice.
+  if not dialogHandlers[DLG_TASK_DEFAULT] then return nil end
   return requestDialog(dialogHandlers[task], owner, DBT_OK_CANCEL, info)
 end
 local function closeDialog(id)
