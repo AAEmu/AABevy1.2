@@ -243,3 +243,93 @@ fn successful_cancel_write_blocks_late_admission_and_queue_mutation_without_faki
     fold(&mut s, BattlefieldEvent::Cancelled { raw: 0 });
     assert_eq!(s.joined_infos(), (0, 0, -1));
 }
+
+
+fn invite() -> BattlefieldInvitation {
+    BattlefieldInvitation { zone_id: 8, instance_id: 9, ruleset_id: 10, corps: 1, qualified_id: 0x0102030405060708 }
+}
+fn invited_state() -> Battlefield {
+    let mut s = Battlefield::default();
+    request(&mut s, 7, 2);
+    fold(&mut s, applied(7, 2));
+    fold(&mut s, BattlefieldEvent::Invited(invite()));
+    s
+}
+fn joined() -> BattlefieldJoined {
+    BattlefieldJoined { zone_id: 8, instance_id: 9, corps: 1, victory_score: -5,
+        victory_kill_count: 0x1234, victory_kill_corps_head: 0xabcdef12,
+        phase_times_ms: [-1, 2000, 3000], factions: [101, 102], killstreak_skills: std::array::from_fn(|i| i as u32 + 300) }
+}
+#[test]
+fn invitation_replies_match_native_accept_and_next_room_wire() {
+    for accept in [true, false] {
+        let c = invited_state().respond_to_invitation(invite(), accept).unwrap();
+        let mut w = Writer::new(); c.write(&mut w);
+        let mut expected = vec![u8::from(accept)];
+        expected.extend_from_slice(&if accept { invite().qualified_id } else { 0 }.to_le_bytes());
+        assert_eq!(w.finish(), expected);
+        assert_eq!(c.opcode(), 0xe3);
+        let mut bad = invite(); bad.corps = 2;
+        assert!(BattlefieldCommand::RespondToInvitation { invitation: bad, accept }.validate().is_err());
+    }
+}
+#[test]
+fn joined_native_lane_fixed_body_retains_all_fields_truncations_and_dd04_tail() {
+    let j = joined();
+    let mut w = Writer::new();
+    w.u32(j.zone_id).u32(j.instance_id).u8(j.corps).i32(j.victory_score).u16(j.victory_kill_count).u32(j.victory_kill_corps_head);
+    for t in j.phase_times_ms { w.i32(t); }
+    for f in j.factions { w.u32(f); }
+    for skill in j.killstreak_skills { w.u32(skill); }
+    let body = w.finish();
+    assert_eq!(body.len(), 135);
+    check(0x190, &body, BattlefieldEvent::Joined(j));
+}
+#[test]
+fn captured_invite_replies_and_joined_snapshots_reject_stale_or_unsent_contexts() {
+    let mut s = invited_state();
+    for field in 0..5 {
+        let mut stale = invite();
+        match field { 0 => stale.zone_id+=1, 1=>stale.instance_id+=1, 2=>stale.ruleset_id+=1, 3=>stale.corps=0, _=>stale.qualified_id+=1 }
+        assert!(s.respond_to_invitation(stale, true).is_err());
+    }
+    fold(&mut s, BattlefieldEvent::Joined(joined()));
+    assert!(s.joined.is_none());
+    let reply = s.respond_to_invitation(invite(), true).unwrap();
+    fold(&mut s, BattlefieldEvent::RequestRejected { command: reply, message: "no lane".into() });
+    assert!(s.response_pending.is_none());
+    assert!(s.respond_to_invitation(invite(), true).is_ok());
+    fold(&mut s, BattlefieldEvent::Requested(reply));
+    assert_eq!(s.invitation, Some(invite()));
+    assert!(s.respond_to_invitation(invite(), true).is_err());
+    for field in 0..3 {
+        let mut stale = joined();
+        match field { 0=>stale.zone_id+=1, 1=>stale.instance_id+=1, _=>stale.corps=0 }
+        fold(&mut s, BattlefieldEvent::Joined(stale));
+        assert!(s.joined.is_none());
+    }
+    fold(&mut s, BattlefieldEvent::InviteTimedOut { zone_id:8,instance_id:9,ruleset_id:10,corps:1 });
+    assert!(s.response_pending.is_some()); // Native accepted state4 ignores invitation timeout.
+    fold(&mut s, BattlefieldEvent::Joined(joined()));
+    assert_eq!(s.joined, Some(joined()));
+    assert!(s.invitation.is_none());
+    assert!(s.response_pending.is_none());
+    assert_eq!(s.joined_infos().2,1);
+}
+#[test]
+fn next_room_requeue_is_received_only_and_session_reset_clears_join() {
+    let mut s = invited_state();
+    let reply=s.respond_to_invitation(invite(),false).unwrap();
+    fold(&mut s,BattlefieldEvent::Requested(reply));
+    assert_eq!(s.invitation,Some(invite()));
+    fold(&mut s,applied(99,2)); assert!(s.response_pending.is_some());
+    fold(&mut s,applied(7,1)); assert!(s.response_pending.is_some());
+    fold(&mut s,applied(7,2)); // Lane declines into same field ANY queue via real Applied.
+    assert!(s.response_pending.is_none()); assert!(s.invitation.is_none());
+    assert_eq!(s.applied,Some((7,2)));
+    for event in [Event::CharacterSelected(Box::default()),Event::Kicked{reason:0,message:String::new()},Event::LeftWorld{target:0},Event::Disconnected{message:String::new()}] {
+        let mut s=invited_state(); let reply=s.respond_to_invitation(invite(),true).unwrap();
+        fold(&mut s,BattlefieldEvent::Requested(reply)); fold(&mut s,BattlefieldEvent::Joined(joined()));
+        s.apply(&event); assert_eq!(s,Battlefield::default());
+    }
+}
