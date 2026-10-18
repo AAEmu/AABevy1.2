@@ -1469,7 +1469,7 @@ fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLigh
         *wired = true;
         let terrain = terrain.clone();
         // Bevy position -> game position (x east, y north = -z); the height is Bevy's y
-        fx.ground = Some(Ground(Arc::new(move |p: Vec3| terrain.height_at(p.x, -p.z))));
+        fx.ground = Some(Ground(Arc::new(move |p: Vec3| terrain.ground_at(p.x, -p.z).map(|ground| ground.height))));
     }
     if let Ok(light) = sun.single() {
         let to_sun = (-light.forward().as_vec3()).normalize_or_zero();
