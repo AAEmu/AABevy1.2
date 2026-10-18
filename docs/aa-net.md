@@ -1550,9 +1550,9 @@ Original `x2ui/interaction.lua` builds a local menu through
 `X2Interaction:GetInteractionSkillCount()`, `GetInteractionSkillId(k)` /
 `GetInteractionSkillName(k)` (Lua indices start at1), then
 `SelectInteraction(interactionId)` or `CancelInteraction()`. `INTERACTION_START()` and
-`INTERACTION_END()` take no arguments. The current session exposes skill casts for unit
-and position targets; the lower-level `SkillTarget` already supports doodad kind4, but
-an explicit session doodad-skill command and the native local menu planner remain gaps.
+`INTERACTION_END()` take no arguments. The session exposes unit, position and explicit
+doodad-target skill casts (see "Doodad skill targets and phase state"); the native local
+menu planner remains a gap.
 Many gathering interactions run `CSStartSkill` against the doodad, then ordinary skill,
 labor, item, loot and phase packets; they do not use the NPC service-list request.
 Lane `CSStartInteraction068` only handles NPCs/mates. SC07e/07f world-interaction list /
@@ -1585,6 +1585,48 @@ these cannot be mapped to fabricated server completion events. Execute/batch/can
 is deferred until a separate native cast audit; proficiency support does not grant or
 pretend a completed craft. Natural gathering/crafting and expert-change live QA remain
 pending while the lane is stalled.
+
+## Doodad skill targets and phase state
+
+`Command::UseDoodadSkill { skill_id, doodad_obj_id }` uses the existing CSStartSkill (0x052)
+flow with a unit caster and **target kind 4**, rather than the kind 0 written by UseSkill.
+Its exact 13-byte body is u32 skillId, u8 casterKind=0, bc playerObjId, u8 targetKind=4,
+bc doodadObjId, u8 flag=0 (no skill object). The checked helper
+`SkillTarget::doodad(id) -> Result<SkillTarget, &'static str>` rejects 0 and IDs above
+0xffffff before a three-byte write can truncate them. The session also rejects skill 0,
+reporting local `DoodadSkillRejected { skill_id, doodad_obj_id, message }`; this is not
+a server SkillStarted result. A valid request outside InWorld is ignored like other
+skill commands. Target 0 never means self for this command.
+
+There is no client learned-skill filter for gathering/service interactions. The server
+must validate the target, distance, permission, labor, item and skill requirements.
+Sending does not create a cast, consume items/labor, change a phase or announce successful
+interaction/crafting. Existing authoritative SkillStarted/Fired/Ended, skill failures,
+LaborChanged, item tasks and doodad/loot events remain the only state changes. This command
+does not claim the still-untraced native mailbox/interaction menu dispatch is complete.
+
+SCDoodadPhaseChanged (0x10f) has the exact 19-byte lane layout from
+`systems/npcs/doodad/packets.rs`: bc objectId, u32 funcGroupId, u32 timeLeft,
+i32 puzzleGroup, u32 itemTemplateId. The old reader consumed only the first 7 bytes,
+leaving 12 bytes to be mistaken for another opcode in DD04. It now consumes and exposes
+all fields in `ServerMsg::DoodadPhaseChanged` and `Event::DoodadPhaseChanged`
+(`obj_id, func_group_id, time_left, puzzle_group, item_template_id`). The lane currently
+writes puzzleGroup=-1; the decoder preserves the signed wire value instead of guessing.
+
+`Doodads` updates those four fields only on an already-known object, preserving identity,
+position, owner and plant time. Zero item/time values clear previous values. Unknown or
+removed objects do not reappear from a phase update. `time_left` is the last announced
+remaining milliseconds, not an automatically decremented timer; elapsed client time
+does not fabricate a server growth phase or product.
+
+Four new offline tests cover exact kind 4 bytes and ID boundaries, a scripted local game
+connection proving invalid/out-of-world commands send no packet and successful sends
+wait for the real SkillStarted response, the complete lane phase golden followed by
+another DD04 opcode, every phase truncation, and reducer updates/clears/removal behavior.
+The scripted connection uses an ephemeral loopback port, never the live lane.
+Full `cargo test -p aa-net` passed 187 library and 2 scripted-session tests, with 9 live
+tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
+Natural gathering/interaction live QA remains pending while the lane is stalled.
 
 ## Known gaps
 

@@ -475,7 +475,7 @@ pub enum ServerMsg {
     BuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsCreated(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
-    DoodadPhaseChanged { obj_id: u32, func_group_id: u32 },
+    DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     Chat(ChatMessage),
     ErrorMsg { code: i16, kind: u32, notify: bool },
     Kicked { reason: u8, message: String },
@@ -985,6 +985,9 @@ impl ServerMsg {
             sc::SCDoodadPhaseChangedPacket => Self::DoodadPhaseChanged {
                 obj_id: r.bc()?,
                 func_group_id: r.u32()?,
+                time_left: r.u32()?,
+                puzzle_group: r.i32()?,
+                item_template_id: r.u32()?,
             },
             sc::SCChatMessagePacket => Self::Chat(ChatMessage::read(r)?),
             sc::SCErrorMsgPacket => {
@@ -1607,6 +1610,44 @@ mod tests {
         assert!(ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).is_err());
         assert_eq!(crate::compression::inflate_batch(&stored(&[1, 2, 3], true)).unwrap(), vec![1, 2, 3]);
         assert!(crate::compression::inflate_batch(&[1, 3, 0, 0, 0, 1, 2, 3]).is_err(), "length check");
+    }
+
+    #[test]
+    fn doodad_phase_full_nineteen_bytes_keep_the_next_dd04_packet_aligned() {
+        // Lane doodad/packets.rs::sc_doodad_phase_changed golden: growing30s, puzzle=-1.
+        let body = [
+            3, 2, 1, 0x2c, 0x12, 0, 0, 0x30, 0x75, 0, 0, 255, 255, 255, 255, 0xd6, 0x6b, 0, 0,
+        ];
+        let expected = ServerMsg::DoodadPhaseChanged {
+            obj_id: 0x010203,
+            func_group_id: 4652,
+            time_left: 30000,
+            puzzle_group: -1,
+            item_template_id: 27606,
+        };
+        assert_eq!(
+            ServerMsg::decode(&game_frame(sc::SCDoodadPhaseChangedPacket, &body)).unwrap(),
+            expected
+        );
+        for cut in 0..body.len() {
+            assert!(
+                ServerMsg::decode(&game_frame(sc::SCDoodadPhaseChangedPacket, &body[..cut])).is_err(),
+                "cut{cut}"
+            );
+        }
+        let mut raw = Writer::new();
+        raw.u16(0)
+            .u16(sc::SCDoodadPhaseChangedPacket)
+            .raw(&body)
+            .u16(0)
+            .u16(sc::SCOnOffSnowPacket)
+            .bool(true);
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 2, 0];
+        frame.extend(stored(&raw.finish(), true));
+        assert_eq!(
+            ServerMsg::decode(&frame).unwrap(),
+            ServerMsg::Batch(vec![expected, ServerMsg::Snow(true)])
+        );
     }
 
     #[test]

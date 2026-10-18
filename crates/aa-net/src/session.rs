@@ -219,6 +219,9 @@ pub enum Command {
     /// (0 = the player itself, for self buffs and heals). The answer is `SkillStarted`: with a
     /// non zero `result` when the server refuses.
     UseSkill { skill_id: u32, target_obj_id: u32 },
+    /// Cast an interaction/gathering skill with target kind4. No local learned-skill restriction;
+    /// the server validates the doodad, range, permissions and requirements.
+    UseDoodadSkill { skill_id: u32, doodad_obj_id: u32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
     UseSkillAt { skill_id: u32, pos: Pos },
     /// Cancel the cast or channel of the player: `tl` is the timeline of a plain skill (`SkillStarted::tl`), `plot_tl` the one
@@ -507,7 +510,9 @@ pub enum Event {
     PassiveBuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsSpawned(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
-    DoodadPhaseChanged { obj_id: u32, func_group_id: u32 },
+    DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
+    /// Local command rejection, distinct from an authoritative SkillStarted failure.
+    DoodadSkillRejected { skill_id: u32, doodad_obj_id: u32, message: String },
     /// The server moved the local player (answered automatically).
     Teleported { pos: Pos },
     Chat(ChatMessage),
@@ -980,6 +985,13 @@ impl Session {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
             }
+            Command::UseDoodadSkill { skill_id, doodad_obj_id } => {
+                let target = if skill_id == 0 { Err("interaction skill ID must be nonzero") } else { SkillTarget::doodad(doodad_obj_id) };
+                match target {
+                    Ok(target) => self.start_skill(skill_id, StartCaster::Unit, target).await,
+                    Err(message) => self.emit(Event::DoodadSkillRejected { skill_id, doodad_obj_id, message: message.into() }),
+                }
+            }
             Command::StopCasting { tl, plot_tl } => {
                 let obj_id = self.self_obj;
                 self.send_game(game::ClientMsg::StopCasting { tl, plot_tl, obj_id }).await;
@@ -1363,8 +1375,8 @@ impl Session {
             }
             M::DoodadsCreated(v) => self.emit(Event::DoodadsSpawned(v)),
             M::DoodadsRemoved(v) => self.emit(Event::DoodadsRemoved(v)),
-            M::DoodadPhaseChanged { obj_id, func_group_id } => {
-                self.emit(Event::DoodadPhaseChanged { obj_id, func_group_id });
+            M::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id } => {
+                self.emit(Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id });
             }
             M::Chat(m) => self.emit(Event::Chat(m)),
             M::ErrorMsg { code, .. } => self.emit(Event::ServerError { code }),
@@ -1528,6 +1540,111 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn doodad_skill_command_rejects_truncation_and_waits_for_real_skill_started() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stub = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut length = [0u8; 2];
+            tokio::time::timeout(Duration::from_secs(2), sock.read_exact(&mut length))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut request = vec![0u8; u16::from_le_bytes(length) as usize];
+            sock.read_exact(&mut request).await.unwrap();
+            assert_eq!(
+                request,
+                [
+                    0xdd, 1, 0, 0, 0x52, 0, 0xd4, 0x46, 0, 0, 0, 0x33, 0x22, 0x11, 4, 0x66, 0x55, 0x44,
+                    0
+                ]
+            );
+            let mut response = crate::wire::Writer::new();
+            response
+                .raw(&[0xdd, 1, 0, 0, 0xa1, 0])
+                .u32(18132)
+                .u16(7)
+                .u8(0)
+                .bc(0x112233)
+                .u8(4)
+                .bc(0x445566)
+                .u8(0)
+                .u16(150)
+                .u16(150)
+                .u8(0)
+                .u8(0);
+            let response = response.finish();
+            sock.write_all(&(response.len() as u16).to_le_bytes())
+                .await
+                .unwrap();
+            sock.write_all(&response).await.unwrap();
+        });
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.game = Some(GameConn::connect(&addr).await.unwrap());
+        session.self_obj = 0x112233;
+        session.phase = Phase::InWorld;
+        for doodad_obj_id in [0, 0x100_0000, u32::MAX] {
+            session
+                .command(Command::UseDoodadSkill {
+                    skill_id: 18132,
+                    doodad_obj_id,
+                })
+                .await;
+            assert!(
+                matches!(events.try_recv(),Ok(Event::DoodadSkillRejected{skill_id:18132,doodad_obj_id:id,..}) if id==doodad_obj_id)
+            );
+        }
+        session
+            .command(Command::UseDoodadSkill {
+                skill_id: 0,
+                doodad_obj_id: 1,
+            })
+            .await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::DoodadSkillRejected { skill_id: 0, .. })
+        ));
+        session.phase = Phase::CharacterSelect;
+        session
+            .command(Command::UseDoodadSkill {
+                skill_id: 123,
+                doodad_obj_id: 1,
+            })
+            .await;
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        session
+            .command(Command::UseDoodadSkill {
+                skill_id: 18132,
+                doodad_obj_id: 0x445566,
+            })
+            .await;
+        assert!(
+            events.try_recv().is_err(),
+            "sending must not fabricate cast or interaction success"
+        );
+        let mut state = crate::state::WorldState::default();
+        state.skills.obj_id = 0x112233;
+        assert!(state.skills.known.is_empty());
+        assert!(state.skills.casting_of(0x112233).is_none());
+        stub.await.unwrap();
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+        let event = events.try_recv().unwrap();
+        assert!(
+            matches!(&event,Event::SkillStarted(s) if s.skill_id==18132 && s.target.kind==4 && s.target.obj_id==0x445566)
+        );
+        state.apply(&event);
+        assert_eq!(
+            state.skills.casting_of(0x112233).unwrap().target,
+            SkillTarget::doodad(0x445566).unwrap()
+        );
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn independent_mixed_deflate_batch_reaches_world_state_in_wire_order() {

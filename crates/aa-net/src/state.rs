@@ -249,9 +249,12 @@ impl Doodads {
                     self.by_id.remove(id);
                 }
             }
-            Event::DoodadPhaseChanged { obj_id, func_group_id } => {
+            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id } => {
                 let Some(d) = self.by_id.get_mut(obj_id) else { return false };
                 d.func_group_id = *func_group_id;
+                d.time_left = *time_left;
+                d.puzzle_group = *puzzle_group;
+                d.item_template_id = *item_template_id;
             }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
@@ -355,6 +358,90 @@ pub(crate) mod tests {
     use super::*;
     use crate::model::{Equipment, ModelParams, Movement, UnitKind};
     use crate::wire::Pos;
+
+    #[test]
+    fn doodad_phase_updates_only_the_existing_authoritative_object_and_can_clear_fields() {
+        let obj_id = 0x010203;
+        let doodad = Doodad {
+            obj_id,
+            template_id: 2336,
+            owner_obj_id: 0,
+            parent_obj_id: 0,
+            attach_point: 0,
+            pos: Pos::new(50.0, 60.0, 7.0),
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: 1.0,
+            has_loot_item: false,
+            func_group_id: 1,
+            owner_id: 12,
+            ucc_id: 0,
+            item_template_id: 1,
+            type2: 0,
+            time_left: 1000,
+            plant_time: 1700000000,
+            quest_glow: 0,
+            family: 0,
+            puzzle_group: 5,
+            owner_type: 0,
+            owner_db_id: 0,
+            data: 0,
+        };
+        let mut state = Doodads::default();
+        let event = Event::DoodadPhaseChanged {
+            obj_id,
+            func_group_id: 4652,
+            time_left: 30000,
+            puzzle_group: -1,
+            item_template_id: 27606,
+        };
+        assert!(!state.apply(&event));
+        assert!(state.by_id.is_empty());
+        state.apply(&Event::DoodadsSpawned(vec![doodad.clone()]));
+        assert!(state.apply(&event));
+        let changed = state.by_id.get(&obj_id).unwrap();
+        assert_eq!(
+            (
+                changed.func_group_id,
+                changed.time_left,
+                changed.puzzle_group,
+                changed.item_template_id
+            ),
+            (4652, 30000, -1, 27606)
+        );
+        assert_eq!(
+            (
+                changed.pos,
+                changed.template_id,
+                changed.owner_id,
+                changed.plant_time
+            ),
+            (
+                doodad.pos,
+                doodad.template_id,
+                doodad.owner_id,
+                doodad.plant_time
+            )
+        );
+        state.apply(&Event::DoodadPhaseChanged {
+            obj_id,
+            func_group_id: 4652,
+            time_left: 0,
+            puzzle_group: 0,
+            item_template_id: 0,
+        });
+        let changed = state.by_id.get(&obj_id).unwrap();
+        assert_eq!(
+            (
+                changed.time_left,
+                changed.puzzle_group,
+                changed.item_template_id
+            ),
+            (0, 0, 0)
+        );
+        state.apply(&Event::DoodadsRemoved(vec![obj_id]));
+        assert!(!state.apply(&event));
+        assert!(state.by_id.is_empty());
+    }
 
     pub(crate) fn unit(obj_id: u32) -> Unit {
         Unit {
