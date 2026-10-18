@@ -1,7 +1,7 @@
 //! Read-only recipe/proficiency definitions. Raw IDs stay distinct from Lua display indices.
 use super::super::data::{any_flag, any_int};
 use rusqlite::Connection;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Group {
@@ -99,6 +99,9 @@ pub(in crate::hud) struct Tables {
     pub(super) material_order: Vec<(u32, usize)>,
     pub(super) product_order: Vec<(u32, usize)>,
     pub(super) doodad_names: HashMap<u32, String>,
+    /// Native CURRENT recipes come from every static function group on the template.
+    pub(super) benches: HashMap<u32, BTreeSet<u32>>,
+    pub(super) craft_skills: BTreeSet<u32>,
 }
 
 impl Tables {
@@ -270,6 +273,19 @@ impl Tables {
         for ids in out.by_material.values_mut().chain(out.by_product.values_mut()) {
             ids.sort_unstable();
             ids.dedup();
+        }
+        let mut query = conn.prepare("SELECT g.doodad_almighty_id,c.craft_id FROM doodad_funcs f JOIN doodad_func_groups g ON g.id=f.doodad_func_group_id JOIN doodad_func_craft_start_crafts c ON c.doodad_func_craft_start_id=f.actual_func_id WHERE f.actual_func_type='DoodadFuncCraftStart' UNION SELECT g.doodad_almighty_id,c.craft_id FROM doodad_funcs f JOIN doodad_func_groups g ON g.id=f.doodad_func_group_id JOIN doodad_func_craft_packs p ON p.id=f.actual_func_id JOIN craft_pack_crafts c ON c.craft_pack_id=p.craft_pack_id WHERE f.actual_func_type='DoodadFuncCraftPack'")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            let craft = any_int(row, 1)? as u32;
+            if out.recipes.contains_key(&craft) {
+                out.benches.entry(any_int(row, 0)? as u32).or_default().insert(craft);
+            }
+        }
+        let mut query = conn.prepare("SELECT DISTINCT s.skill_id FROM skill_effects s JOIN effects e ON e.id=s.effect_id WHERE e.actual_type='CraftEffect'")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            out.craft_skills.insert(any_int(row, 0)? as u32);
         }
         let mut query = conn.prepare("SELECT id,name FROM doodad_almighties ORDER BY id")?;
         let mut rows = query.query([])?;

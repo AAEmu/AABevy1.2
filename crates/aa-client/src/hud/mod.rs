@@ -343,6 +343,7 @@ impl Plugin for HudPlugin {
         breath::plugin(app);
         expansion::plugin(app);
         repair::plugin(app);
+        crafting::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);

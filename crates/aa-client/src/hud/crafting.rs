@@ -1,5 +1,7 @@
 //! Original recipe-book getters over the read-only catalog and received physical bag stacks.
 //! Bench interaction and batch presentation are separate from browsing these definitions.
+mod batch;
+mod bench;
 mod catalog;
 mod data;
 #[allow(dead_code)]
@@ -19,6 +21,10 @@ pub(super) struct View {
     inventory: Option<Inventory>,
     actabilities: aa_net::Actabilities,
     item_secure: Option<bool>,
+    current: bench::Current,
+    batch: batch::Batch,
+    casts: batch::CastSlots,
+    requests: Vec<batch::Request>,
 }
 
 pub(super) fn refresh(world: &World, data: &mut HudData) {
@@ -105,5 +111,20 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetMyActabilityInfo",
         lua.create_function(move |lua, (_self, group): (mlua::Value, u32)| my_info(lua, &state.borrow(), group))?,
     )?;
+    batch::install(lua, bridge)?;
     Ok(())
+}
+
+pub(super) fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        batch::update
+            .after(super::sync_hud)
+            .after(super::dialog::handle_dialog)
+            .before(aa_ui::UiFrame)
+            .run_if(super::hud_up),
+    )
+    .add_systems(OnExit(crate::Screen::InGame), |bridge: NonSend<super::api::HudBridge>| {
+        bridge.0.borrow_mut().crafting = default();
+    });
 }

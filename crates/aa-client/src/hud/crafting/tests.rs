@@ -24,6 +24,10 @@ fn visible_grade_labor_matches_original_x86_oracle() {
     assert_eq!(tables.recipes.len(), 7010);
     assert_eq!(tables.recipes.values().map(|r| r.materials.len()).max(), Some(8));
     assert!(tables.recipes.values().flat_map(|r| &r.materials).all(|m| m.item != 0));
+    assert_eq!(tables.benches[&274].len(), 3, "CraftStart lists also contribute recipes");
+    assert_eq!(tables.benches[&568].len(), 71);
+    assert_eq!(tables.benches[&2241].len(), 153);
+    assert!(tables.craft_skills.contains(&tables.recipes[&5557].skill));
 }
 
 #[test]

@@ -204,6 +204,10 @@ fn executable(data: &HudData, craft: u32) -> Option<i32> {
 }
 
 fn search(data: &HudData, group: u32, category: u32, name: &str, material: bool) -> Vec<u32> {
+    search_in(data, group, category, name, material, false)
+}
+
+fn search_in(data: &HudData, group: u32, category: u32, name: &str, material: bool, current: bool) -> Vec<u32> {
     if !(1..=30).contains(&name.chars().count()) {
         return Vec::new();
     }
@@ -224,14 +228,17 @@ fn search(data: &HudData, group: u32, category: u32, name: &str, material: bool)
             .iter()
             .filter_map(|&(id, i)| {
                 let m = &tables.recipes[&id].materials[i];
-                (matches(id) && game.items.get(&m.item).is_some_and(|item| item.named.name.to_lowercase().contains(&name))).then_some(id)
+                let active = !current || data.crafting.current.active.is_some_and(|b| tables.recipes[&id].required_doodad == b.template);
+                (active && matches(id) && game.items.get(&m.item).is_some_and(|item| item.named.name.to_lowercase().contains(&name))).then_some(id)
             })
             .collect()
     } else {
         tables
             .recipes
             .iter()
-            .filter_map(|(&id, r)| (matches(id) && r.title.to_lowercase().contains(&name)).then_some(id))
+            .filter_map(|(&id, r)| {
+                ((!current || data.crafting.current.recipes.contains(&id)) && matches(id) && r.title.to_lowercase().contains(&name)).then_some(id)
+            })
             .collect()
     }
 }
@@ -417,18 +424,33 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             })?,
         )?;
     }
-    // Book mode has no selected workbench. Do not manufacture an executable context.
-    for method in [
+    let state = bridge.clone();
+    craft.set(
         "EnumActabilityGroupTypesFromCurrentDoodad",
+        lua.create_function(move |lua, _: Value| nonempty(lua, super::bench::groups(&state.borrow())))?,
+    )?;
+    let state = bridge.clone();
+    craft.set(
         "GetActabilityCategoryTypesFromCurrentDoodad",
+        lua.create_function(move |lua, (_self, group): (Value, u32)| nonempty(lua, super::bench::categories(&state.borrow(), group)))?,
+    )?;
+    let state = bridge.clone();
+    craft.set(
         "GetCraftTypesFromCurrentDoodad",
-        "GetCurrentDoodadCraftTypesInGroupByName",
-        "GetCurrentDoodadCraftTypesByMaterialName",
+        lua.create_function(move |lua, (_self, group, category): (Value, u32, u32)| nonempty(lua, super::bench::recipes(&state.borrow(), group, category)))?,
+    )?;
+    for (method, material) in [
+        ("GetCurrentDoodadCraftTypesInGroupByName", false),
+        ("GetCurrentDoodadCraftTypesByMaterialName", true),
     ] {
-        craft.set(method, lua.create_function(|lua, _: mlua::MultiValue| lua.create_table())?)?;
+        let state = bridge.clone();
+        craft.set(
+            method,
+            lua.create_function(move |lua, (_self, group, category, name): (Value, u32, u32, String)| {
+                nonempty(lua, search_in(&state.borrow(), group, category, &name, material, true))
+            })?,
+        )?;
     }
-    craft.set("IsWorkingCraft", lua.create_function(|_, _: Value| Ok(false))?)?;
-    craft.set("GetLeftBatchCount", lua.create_function(|_, _: Value| Ok(0))?)?;
     Ok(())
 }
 
@@ -474,6 +496,7 @@ mod tests {
             Recipe {
                 title: "가".repeat(30),
                 category: 5,
+                required_doodad: 77,
                 consume_lp: 100,
                 actability_group: 1,
                 show_upper: true,
@@ -621,6 +644,21 @@ mod tests {
         assert!(
             search(&data, 1, 5, " Copper ", true).is_empty(),
             "native substring search does not trim the query"
+        );
+        data.crafting.current.active = Some(super::super::bench::Bench { object: 300, template: 77 });
+        assert_eq!(
+            search_in(&data, 1, 5, "copper", true, true),
+            vec![1, 1],
+            "current material search uses the active template, not current-map membership"
+        );
+        assert!(search_in(&data, 1, 5, &"가".repeat(30), false, true).is_empty());
+        data.crafting.current.recipes.insert(1);
+        assert!(super::super::bench::close(&mut data));
+        assert!(search_in(&data, 1, 5, "copper", true, true).is_empty());
+        assert_eq!(
+            search_in(&data, 1, 5, &"가".repeat(30), false, true),
+            vec![1],
+            "current product search retains the recipe map after close"
         );
         data.crafting.inventory.as_mut().unwrap().bag.fill(None);
         let missing = material_info(&lua, &data, 1)?.unwrap().get::<Table>(1)?.get::<Table>("item_info")?;
