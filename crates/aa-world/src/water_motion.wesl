@@ -11,3 +11,17 @@ fn coordinates(uv: vec2<f32>, drift: vec2<f32>, no_flow: bool) -> mat4x2<f32> {
 fn endpoint_weights(color: vec4<f32>) -> vec2<f32> {
     return vec2<f32>(color.r,sqrt(clamp(color.a,0.0,1.0))*color.r);
 }
+
+// WaterSurfacePS keeps the full normalized bump for sun shading. It has no distance
+// attenuation; the non-authored sea retains its existing flattening approximation.
+fn sun_normal(wave: vec3<f32>, distance: f32, native: bool) -> vec3<f32> {
+    if native { return wave; }
+    return normalize(mix(vec3<f32>(0.0,1.0,0.0),wave,1.0-smoothstep(60.0,260.0,distance)));
+}
+
+// Native Cry XY -> Bevy XZ. Fresnel uses this UNNORMALIZED value; reflection alone
+// normalizes it (watersurface.cfx420-448). The legacy sea normalizes for both uses.
+fn bump_normal(sun: vec3<f32>, native: bool) -> vec3<f32> {
+    if native { return sun * vec3<f32>(0.15,1.0,0.15); }
+    return mix(vec3<f32>(0.0,1.0,0.0),sun,0.2);
+}

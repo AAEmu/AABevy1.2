@@ -3719,8 +3719,8 @@ by `update_water`. The shader runs in the transmissive phase (`reads_view_transm
 reads the depth prepass. It follows the engine's own two shaders, `watersurface.cfx` and `watervolume.cfx` (read from the pak,
 `game/shaders/hwscripts/cryfx/`), for ponds, lakes and rivers:
 
-* normal: native authored volume UVs and the material's flow/NO_FLOW tap branch (see follow-up below), `WavesSpeed` and
-  `BumpScale`, flattened beyond 60 to 260 m; the sea retains its existing world-coordinate approximation,
+* normal: native authored volume UVs, flow/NO_FLOW taps, `WavesSpeed`, `BumpScale` and separate sun/reflection/Fresnel stages
+  (see follow-ups below); the sea retains its existing world-coordinate and 60-to-260 m flattening approximation,
 * **volume fog** (`WaterVolumeInto`): `mix(fog colour, refracted scene, T)` with `T = exp(-k thickness)`, `k = density x water_absorb` and
   `water_absorb` = ln 2 (the engine's `exp2(-density x depth)`); thickness is the depth prepass minus the surface depth along the view ray. The
   old absorption was `water_absorb` 6, nine times the engine's: legs, the rat and the bed vanished a metre down (lake_tank: density 0.6, 0.66
@@ -3728,7 +3728,8 @@ reads the depth prepass. It follows the engine's own two shaders, `watersurface.
   tiny (lake_tank 0.002 / 0.005 / 0.004), the real pond is far brighter: it is lit by `sky + water_lit (0.25) x sun` and scaled by
   `water_body` (6, fitted),
 * **surface** (`WaterSurfacePS`): `final = lerp(refract, ReflectionAmount x reflect, TransparencyRatio x fresnel)`, `fresnel = bias + (1 - bias)
-  (1 - N.V)^5` with `bias` = `FresnelBias`, the normal flattened as the engine does (bump x 0.15); `TransparencyRatio` is weighted by
+  (1 - N.V)^5` with `bias` = `FresnelBias`; native reflection normalizes the bump with horizontal components x 0.15, while Fresnel uses that
+  compressed value without normalization. `TransparencyRatio` is weighted by
   `water_refl` (1). The reflected colour is the material's **environment cube map** (`Environment` texture of the `.mtl`, nearly always
   `textures/cubemaps/camera_river_cubemap.dds`: a dark overcast panorama with trees, rock and a sun, sampled with the Cry space reflection
   vector, +Z is up) times the engine's `sun + sky` colour, and `water_env` (0.08, fitted) for the unit conversion. There are no screen space
@@ -3836,6 +3837,68 @@ Ignored source evidence is `lights/water-create-native.txt`, `water-vtable.txt`,
 `terrain-water-next-audit.txt`, `water-next-inputs.txt` and the original
 `watersurface.cfx` / `watersurface.ext`. `water-native-*.log` holds checks/captures;
 `water-native-reference-patch-means.txt` retains every comparison patch mean.
+
+### Native authored water normal stages
+
+`watersurface.ext` enables BUMP_MAP with mask **0x1**. The existing ordinary
+WaterSurface/BUMP_MAP style gate now also selects the native normal stages;
+unknown/new-water shaders and the sea retain their previous path. The complete
+original `WaterSurfaceVS`/`PS` has no 60-to-260 m ripple-flattening term. That
+invented fade is now removed for qualifying authored volumes, with ordinary
+texture derivative/mip filtering unchanged.
+
+At `watersurface.cfx`413 the four raw bump taps form one normalized normal;
+416 keeps it as `sunNormal`. Lines420-424 multiply only horizontal XY by **.15**,
+then normalize a separate `vn` for the reflected vector. The later Fresnel
+dot at448 deliberately uses the **unnormalized compressed normal**. The previous
+path used `normalize(mix(up,n,.2))` for both reflection and Fresnel. The Cry to
+Bevy rotation maps `(x,y,z)` to `(x,z,-y)`, so native compression is precisely
+`(n.x*.15,n.y,n.z*.15)`. The full normal drives sun glint, the normalized
+compressed vector drives reflection, and its unnormalized value drives Fresnel.
+`shadelib.cfi`326 supplies the original bias/power5 Fresnel expression.
+
+This adds only inlined shader arithmetic in `water_motion.wesl`; no image,
+binding, uniform size, material, geometry, draw or per-frame CPU allocation is
+added. Authored UVs, raw texture channels, wave clock, endpoint/shore alpha,
+body/light/exposure gains, reflection/refraction constants and the inherited cube
+LOD edits are preserved. The sea's old normalized reflection/Fresnel arithmetic
+and distance flattening remain exact. This does not close native water pass
+ordering, refraction/projection, cubemap orientation/confinement, sloped surfaces,
+physical currents, the complete native BRDF, or their existing calibration limits.
+
+The aa-dev `water_normals` fixture samples the original river and lake DDS inputs
+with independently decoded wrapping bilinear raw XY, their actual big/small/bump
+scales, both flow branches, and seconds0/4. It checks sun, normalized reflection,
+compressed bump and NdotI/Fresnel at depths2/160/300 m. All **48 native-stage GPU
+controls** agree with independent source arithmetic within one display byte.
+Another 48 controls verify the retained legacy/sea-stage arithmetic. The existing
+four raw-wave and four shallow composite controls pass; four sea composite controls
+pass at both 1280 and 1920. The full **1920x1080 sea control is pixel-identical**
+to the pre-change `native_shore_sea_control.png` (maximum difference zero).
+These are 108 distinct numeric cases plus the four repeated resolution controls.
+Native cards log **304-338 FPS**, legacy **376-407**, under shared builds.
+
+`water_motion --world --normal-stages` and `--legacy-normals` freeze wave time at
+zero after the streamed material is ready. The latter changes only these normal
+stages, retaining authored UVs, alpha and all lighting. Inspected original river
+and pond pairs are in `shots/aa-world/water_normals/`. The river is fog dominated:
+ROI [840,480,1270,710] differs by only .020 mean channel value, at most one byte.
+The clear pond ROI [320,315,690,405] differs by 1.196, with 9.47% of pixels above
+three channel values. This is a subtle source-backed ripple/reflection correction,
+not a native-camera screenshot match. River native logs **149-210 FPS**, pond
+**165-217**; the fixed-time controls retain the same camera, assets and lighting.
+The river loads six meshes/1312 vertices, the pond one/eight, no failed/pending
+models. Actual movement releases all pond water entities and mesh assets; shared
+style/texture cache lifetime remains explicit. All final runs close cleanly.
+
+The full world suite passes **222 tests**, nine existing optional ignored,
+including the original material generation gates. The first numeric launch
+caught a reserved WGSL local identifier; it was renamed and every final control
+and scene above repeated with the validated shader. Ignored
+`roads/water-normal-audit/` retains source slices, the exact pre-edit water file,
+inherited patch/hash baseline and numeric/scene evidence. Only owned water hunks
+are committed; the inherited cube LOD hunk bodies and the other four calibration
+file hashes remain unchanged.
 
 ### Native river endpoint opacity and counted outlines
 

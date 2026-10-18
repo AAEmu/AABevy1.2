@@ -1,5 +1,6 @@
 //! Original WaterSurface UV/motion GPU controls and original river/pond streaming fixture.
 //! Default: numeric oracle. --world [--pond] [--legacy] [--unload-check]: original volumes.
+//! --normal-stages / --legacy-normals freeze original wave time at zero and isolate normal-stage changes.
 
 use aa_cry::material::{Material as CryMaterial, TextureMap};
 use aa_cry::texture::{Dds, DdsOptions, dds_to_image};
@@ -22,6 +23,8 @@ struct Fixture {
     opaque: bool,
     shore: bool,
     soft_control: bool,
+    normals: bool,
+    old_normals: bool,
     unload: bool,
     moved: bool,
     done: bool,
@@ -70,6 +73,8 @@ fn main() {
                 opaque: flag("--opaque"),
                 shore: flag("--shore"),
                 soft_control: flag("--legacy-soft"),
+                normals: flag("--normal-stages") || flag("--legacy-normals"),
+                old_normals: flag("--legacy-normals"),
                 unload: flag("--unload-check"),
                 ..default()
             })
@@ -338,7 +343,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -355,6 +360,10 @@ fn world_check(
                 }
                 if fixture.soft_control {
                     control.params.motion.w = -1.0;
+                }
+                if fixture.normals {
+                    control.params.motion.z = 0.0;
+                    control.params.motion.w = if fixture.old_normals { -2.0 } else { 0.0 };
                 }
                 let original = material.id();
                 let handle = materials.add(control);
@@ -456,8 +465,12 @@ fn endpoint_numeric(
                 // The old contribution-only soft mask leaves this refraction opaque.
                 let red = Vec3::new(0.7, 0.05, 0.02);
                 let normal = Vec3::new(0.5, 1.0, -0.5 / 255.0).normalize();
-                let reflected_normal = Vec3::Y.lerp(normal, 0.2).normalize();
-                let ndot = view.dot(reflected_normal).abs();
+                let fresnel_normal = if sea_control {
+                    Vec3::Y.lerp(normal, 0.2).normalize()
+                } else {
+                    normal * Vec3::new(0.15, 1.0, 0.15)
+                };
+                let ndot = view.dot(fresnel_normal).abs();
                 let fresnel = ((0.2 + 0.8 * (1.0 - ndot).powi(5)) * 0.7).clamp(0.0, 1.0);
                 let refracted = fog.lerp(red, transmission);
                 if sea_control {

@@ -1,4 +1,4 @@
-import aa_world::water_motion::{coordinates,endpoint_weights};
+import aa_world::water_motion::{coordinates,endpoint_weights,sun_normal,bump_normal};
 // Water volumes and the sea, see `water_material.rs`.
 //
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
@@ -48,7 +48,9 @@ struct WaterParams {
     // rgb: the engine's `sun + sky` colour (pre-exposed), a: 1 = the reflection is the environment cube map times it
     // (ponds, lakes, rivers), 0 = the analytic sky (the sea)
     env_lit: vec4<f32>,
-    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output (1 normal, 2 alpha, -1 legacy softness)
+    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / output (1 wave, 2 alpha,
+    // 3 sun, 4 reflection, 5 NdotI/Fresnel, 6 compressed bump; +10 old-normal diagnostics,
+    // -1 old softness, -2 old normal stages)
     motion: vec4<f32>,
 }
 
@@ -184,19 +186,16 @@ fn trace(p: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.world_position.xyz;
+    let inspect_mode = select(water.motion.w,water.motion.w-10.0,water.motion.w>=10.0);
     var endpoints=vec2<f32>(1.0);
     @if(VERTEX_COLORS) {
         if water.motion.x > 0.5 {endpoints=endpoint_weights(in.color);}
     }
-    if water.motion.w > 1.5 {
+    if inspect_mode > 1.5 && inspect_mode < 2.5 {
         return vec4<f32>(endpoints,0.0,1.0);
     }
-    if water.motion.w > 0.5 {
+    if inspect_mode > 0.5 && inspect_mode < 1.5 {
         return vec4<f32>(wave_normal(p.xz,in.uv,globals.time)*0.5+0.5,1.0);
-    }
-    // from below the surface is the post pass's business (the window to the sky, the mirror beyond it)
-    if view.world_position.y < p.y {
-        discard;
     }
     let to_eye = view.world_position - p;
     let dist = length(to_eye);
@@ -205,15 +204,21 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = target_size();
     let pixel = frag.xy;
 
-    // far away the ripples would only shimmer: flatten them
-    let detail = 1.0 - smoothstep(60.0, 260.0, dist);
     let up = vec3<f32>(0.0, 1.0, 0.0);
-    let n = normalize(mix(up, wave_normal(p.xz,in.uv,globals.time), detail));
-    // the reflection sees a flatter surface (the engine clamps the bump to 0.15)
-    let nr = normalize(mix(up, n, 0.2));
-    let ndotv = clamp(abs(dot(v, nr)), 0.0, 1.0);
+    let native_normals = water.motion.x > 0.5 && water.motion.w != -2.0 && water.motion.w < 10.0;
+    let n = sun_normal(wave_normal(p.xz,in.uv,globals.time),dist,native_normals);
+    let bump = bump_normal(n,native_normals);
+    let nr = normalize(bump);
+    // Native Fresnel deliberately uses the compressed, unnormalized bump.
+    let ndotv = clamp(abs(dot(v, select(nr,bump,native_normals))), 0.0, 1.0);
     let f0 = water.refl.x;
     let fresnel = clamp((f0 + (1.0 - f0) * pow(1.0 - ndotv, 5.0)) * water.refl.y, 0.0, 1.0);
+    if inspect_mode > 5.5 { return vec4<f32>(bump*0.5+vec3<f32>(0.5),1.0); }
+    if inspect_mode > 4.5 { return vec4<f32>(ndotv,fresnel,0.0,1.0); }
+    if inspect_mode > 3.5 { return vec4<f32>(nr*0.5+vec3<f32>(0.5),1.0); }
+    if inspect_mode > 2.5 { return vec4<f32>(n*0.5+vec3<f32>(0.5),1.0); }
+    // From below, the surface remains the post pass's responsibility.
+    if view.world_position.y < p.y { discard; }
     // the foam is looked up unconditionally (uniform control flow), see below
     let foam_anim = fract(globals.time * 0.025 * water.foam.y);
     let foam_bump = vec2<f32>(n.x, -n.z) * (0.15 * 0.075);
@@ -272,7 +277,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let soft = clamp(water.sun.a * thickness, 0.0, 1.0);
     // Native WaterSurfacePS applies softIntersect once to final alpha. The sea keeps
     // its existing shading path; negative diagnostic mode is the isolated old control.
-    let native_soft = water.motion.x > 0.5 && water.motion.w > -0.5;
+    let native_soft = water.motion.x > 0.5 && water.motion.w != -1.0;
     let contribution_soft = select(soft,1.0,native_soft);
     colour = mix(colour, refl * water.misc.w, fresnel * contribution_soft);
 
