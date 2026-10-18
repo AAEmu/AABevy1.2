@@ -407,6 +407,9 @@ pub struct ButtonData {
     pub state: ButtonState,
     /// Native fresh initialization registers LeftButton, not Middle/RightButton.
     pub click_buttons: [bool; 3],
+    /// Native +590: suppress this button's guarded input entries while its own +e0 is set.
+    /// Hit testing, hover, focus, wheel and ancestor fades are independent.
+    pub ignore_input_on_fading: bool,
     /// Drawables per state: normal, highlight, pushed, disabled.
     pub bg: [Option<Id>; 4],
     /// Native text palette, normal/highlight/pushed/disabled; applied on state writes.
@@ -426,6 +429,7 @@ impl Default for ButtonData {
         Self {
             state: ButtonState::Normal,
             click_buttons: [true, false, false],
+            ignore_input_on_fading: false,
             bg: [None; 4],
             text_color: [[1.; 4]; 4],
             checked: false,

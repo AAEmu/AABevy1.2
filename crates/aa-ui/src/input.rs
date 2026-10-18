@@ -266,7 +266,7 @@ pub fn update_buttons(
             None => lua::edit::set_focus(lua, None),
         }
         let resizing = hover.is_some_and(|h| lua::resize::press(lua, h));
-        if let Some(h) = hover.filter(|_| !resizing) {
+        if let Some(h) = hover.filter(|&h| !resizing && !lua::widget::button_ignores_fading_input(lua, h)) {
             lua::widget::button_pointer_down(lua, h, 0);
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
@@ -291,7 +291,7 @@ pub fn update_buttons(
         drag_slider(lua, s, c);
     }
     if right_down {
-        if let Some(h) = hover {
+        if let Some(h) = hover.filter(|&h| !lua::widget::button_ignores_fading_input(lua, h)) {
             lua::widget::button_pointer_down(lua, h, 2);
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "RightButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "RightButton");
@@ -320,7 +320,9 @@ pub fn update_buttons(
         let dragged = mouse.drag.take().filter(|p| p.started);
         let pressed = mouse.pressed.take();
         ui(lua).tree.touch();
-        if let Some(h) = hover {
+        if let Some(h) = hover.filter(|&h| !lua::widget::button_ignores_fading_input(lua, h)) {
+            //39283c30 checks before OnMouseUp. A callback-created fade must not
+            // cancel this admitted release's state continuation.
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
             lua::widget::button_pointer_up(lua, h, 0);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
@@ -338,7 +340,7 @@ pub fn update_buttons(
         }
     }
     if right_up {
-        if let Some(h) = hover {
+        if let Some(h) = hover.filter(|&h| !lua::widget::button_ignores_fading_input(lua, h)) {
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "RightButton")]);
             lua::widget::button_pointer_up(lua, h, 2);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "RightButton");
@@ -433,6 +435,7 @@ fn drag_slider(lua: &Lua, slider: Id, (cx, cy): (f32, f32)) {
 }
 
 fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
+    if lua::widget::button_ignores_fading_input(lua, target) { return; }
     let held_gen = ui(lua).drag.held_gen;
     lua::sound::click_sound(lua, target, button);
     let now = ui(lua).time_ms;
@@ -462,6 +465,9 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
     // Script OnClick on the target or the nearest ancestor that has one (enabled only).
     let mut t = Some(target);
     while let Some(id) = t {
+        // A nonbutton child can deliver its own entry before bubbling into a
+        // button. Check the actual button owner at its entry, not its ancestors.
+        if id != target && lua::widget::button_ignores_fading_input(lua, id) { return; }
         let enabled = ui(lua).tree.widget(id).is_some_and(|w| w.enabled);
         if has_handler(lua, id, "OnClick") {
             if enabled {

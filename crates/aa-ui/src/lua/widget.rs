@@ -1456,6 +1456,16 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 })?,
             )?;
         }
+        def("IgnoreInputOnFading", method(lua, |lua, id, a| {
+            //3922f600/3922f1b0 require a bool-convertible script bool/number.
+            if !matches!(a.v(1), Value::Boolean(_) | Value::Integer(_) | Value::Number(_)) {
+                return none();
+            }
+            if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
+                b.ignore_input_on_fading = a.b(1, false);
+            }
+            none()
+        })?)?;
         def("SetButtonState", method(lua, |lua, id, a| {
             let Value::String(raw) = a.v(1) else { return none() };
             let bytes = raw.as_bytes();
@@ -1978,6 +1988,14 @@ fn highlight_mask(u: &mut super::Ui, id: Id, visible: bool) {
     }) {
         u.tree.drawable_mut(id).unwrap().mask_visible = visible;
     }
+}
+
+/// The native ButtonWidget input entry gate, not a hit/focus/hover admission rule.
+/// Read once per entry: callbacks may start a fade without cancelling that entry's continuation.
+pub(crate) fn button_ignores_fading_input(lua: &Lua, id: Id) -> bool {
+    ui(lua).tree.widget(id).is_some_and(|w| {
+        w.fading && w.button.as_ref().is_some_and(|b| b.ignore_input_on_fading)
+    })
 }
 
 pub(crate) fn button_pointer_down(lua: &Lua, id: Id, button: usize) {

@@ -294,6 +294,7 @@ pub fn source_of(lua: &Lua, id: Id) -> Option<Id> {
 
 /// The pointer started dragging `src`.
 pub fn start(lua: &Lua, src: Id) {
+    if super::widget::button_ignores_fading_input(lua, src) { return; }
     let name = ui(lua).tree.get(src).name.clone();
     bevy::log::debug!(target: "aa_ui::drag", "drag start on {name}");
     if has_handler(lua, src, "OnDragStart") {
@@ -318,7 +319,8 @@ pub fn finish(lua: &Lua, src: Id, hover: Option<Id>) {
         let mut t = hover;
         while let Some(id) = t {
             // A disabled control blocks the drop rather than forwarding it to a parent.
-            if ui(lua).tree.widget(id).is_some_and(|w| !w.enabled) {
+            if ui(lua).tree.widget(id).is_some_and(|w| !w.enabled)
+                || super::widget::button_ignores_fading_input(lua, id) {
                 break;
             }
             if has_handler(lua, id, "OnDragReceive") {
@@ -331,7 +333,7 @@ pub fn finish(lua: &Lua, src: Id, hover: Option<Id>) {
             t = ui(lua).tree.get(id).parent;
         }
     }
-    if has_handler(lua, src, "OnDragStop") {
+    if !super::widget::button_ignores_fading_input(lua, src) && has_handler(lua, src, "OnDragStop") {
         call_handler(lua, src, "OnDragStop", vec![arg(lua, "LeftButton")]);
     }
     if holding(lua) {
