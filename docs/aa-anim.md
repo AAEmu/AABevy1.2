@@ -674,6 +674,43 @@ original eye paths/joints, ignored Bone-mode offsets, uniform scale, absolute-to
 composition, and unsupported Skin/missing-joint errors. Client CDF attachment assembly
 still needs this opt-in helper; existing character assembly/calibration was untouched.
 
+### Packet body items and blank NPC actor CDFs
+
+An NPC actor CDF can intentionally leave its named body/face/hair attachments blank while
+binding its rigid eyes. For example, model 631 uses
+`objects/characters/people/npc_chef01/nude/npc_chef01.cdf`; its populated `_base.cdf` is a
+different authored definition and is not an inferred replacement. The live server's
+`npc/data.rs::apply_item_body_parts` produces model body items for the packet. The client's
+`Unit.equipment` already retains the face/hair/body/beard item IDs; the separate non-human
+creature producer previously consumed only the actor CDF.
+
+`BodyPart::attachment_slot()` exposes the original native slot-name mapping. The original
+`x2game.dll` routines `3956F160` and `3956F460` were executed in Unicorn to verify all 31
+database-slot names and 28 wire-slot names: database 23–29 and wire 19–25 map to
+face/hair/glasses/reserved/tail/body/beard. Artifacts are under
+`data/extract/aa-anim/body-parts-native/`. Native `ChangeVisual` (`39315250`) looks up an
+existing attachment slot and skips a missing slot rather than creating one.
+
+`Cdf::bind_body_part(&BodyPart) -> bool` binds an explicitly supplied body-part item's raw
+asset to its existing `CA_SKIN` slot. It replaces the binding/material override, makes the
+explicit binding visible, and preserves other flags and unrelated slots. Missing/non-skin
+or unknown slots return false without modifying the definition. The caller selects
+compatible model rows and supplies actual packet item IDs. The helper does not choose
+default equipment/body packs, create slots, replace CDF files, generate NPC appearances or
+apply custom skin/face/hair texture colours.
+
+Chef's explicit item IDs are face 14478, hair 14475 and body 14479 (all model 631). The
+`facial --chef-items` example fills those three originally blank actor-CDF slots and renders
+their original meshes with the public facial factory and rigid-eye helper. This is explicit
+diagnostic input, not a claim that every chef packet supplies all three items. The actor
+CDF names the left-eye CGF for both eyes; that authored binding is preserved rather than
+silently substituted. Latest own tests: **66 passed, 1 ignored**, including original blank
+slots, real item paths, native slot names, visibility of assigned slots, unchanged eyes and
+equipment slots, and no mutations for unsupported/missing slots.
+Inspected final `shots/aa-anim/facial_npc_packet_body_slots_20261018.png` shows the
+original bound face, hair and clothing plus rigid eyes and authored neutral/A/return
+speech poses at **246.0–309.3 FPS**. It holds the body bind pose for the facial diagnostic.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/

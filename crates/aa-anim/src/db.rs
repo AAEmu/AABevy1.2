@@ -163,6 +163,17 @@ pub struct BodyPart {
     pub hair_base: String,
 }
 
+impl BodyPart {
+    /// Original X2 body-part slot names (native table `3956F160`), shared with CDF AName.
+    pub fn attachment_slot(&self) -> Option<&'static str> {
+        match self.slot_type {
+            23 => Some("face"), 24 => Some("hair"), 25 => Some("glasses"),
+            26 => Some("reserved"), 27 => Some("tail"), 28 => Some("body"),
+            29 => Some("beard"), _ => None,
+        }
+    }
+}
+
 /// One model-specific equipment visual, including the original packed appearance flags.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemVisual {
