@@ -822,11 +822,68 @@ Royal Palace (zone 186, `reference/ingame/royal_palace/real*.png`, region means 
 196 / 211 / 223 -> 188 / 208 / 237 (162 / 212 / 242).
 
 **Clouds** (`sky_clouds.rs`, `clouds.wesl`): `clouds.xml` of the zone lists the distant cloud billboards (`bearing`, `distance`, `height`,
-`size`, `speed`, `material`). Each becomes a camera facing quad (4 per zone in the spawn zone) placed at `camera + compass direction x distance +
-height` and shaded as the engine's `DistanceClouds` material (`distanceclouds.cfx`) does: density = the red channel of the sprite texture, the
+`size`, `speed`, `material`). The original client `cry3dengine.dll` now proves the native parameter contract:
+`3012E8A0` (`C3DEngine::SetSkyBoxCloud`) copies bearing / distance / height / size / material /
+speed from input-record offsets 8 / 12 / 16 / 20 / 24 / 28. Size goes to both quad half extents;
+`300B42A0` sets the node's current bearing from its authored bearing. Native `300B4410`
+(`CDistanceCloudRenderNode::Render`) computes `camera + Rz(bearing) * (0,distance,0) + (0,0,height)`
+in Cry coordinates, then advances bearing by `frameSeconds * speed`, wrapping once at +/-360.
+Thus native bearing 90 points towards negative Cry X; speed is degrees per frame-second,
+independent of the world clock's game-hour speed. A bearing above 360 remains usable for its
+first pose, then wraps as the native render call does. The radial plane uses
+`normal = normalize(offset)`, `right = normalize(normal cross worldUp)`,
+`up = right cross normal`; it ignores camera pitch/roll. Its full width and height are both
+`2*size`, rather than a screen-aligned texture-aspect-scaled rectangle.
+
+The XML values continue to pass through the existing parser unchanged. **Producer boundary:**
+the native engine consumes this record layout without conversions, but the original upstream
+XML-to-record adapter has not been recovered. No bearing/clouds.xml literal or matching engine
+vtable caller was found in the readable `x2game_unpacked.dll`, `crygame.dll` or `xlcommon.dll`
+artifacts. These are exact native parameter semantics applied to the existing raw XML adapter;
+they do not prove that an unrecovered producer never transforms a particular XML field.
+
+Shading follows the engine's `DistanceClouds` material (`distanceclouds.cfx`): density = the red channel of the sprite texture, the
 colour lerps from the sky shading colour to the sun shading colour by `exp2(-Attenuation x density)` summed over 8 taps towards the sun in the
-sprite plane, alpha = `density ^ AlphaSaturation x Opacity`, faded into the haze at the horizon. `AlphaMode::Blend`, no prepass, no shadows, so
-the cost is 4 draws. The clouds are subtle against the capture's sky (`cloud_gain` scales their brightness, `speed` is not animated yet).
+sprite plane, alpha = `density ^ AlphaSaturation x Opacity`. UVs stay fixed; motion is physical
+angular advection of the node, not guessed UV scrolling. The shader's packed tangent/binormal
+are radial right / negative up, so the eight light taps now use that frame rather than camera
+right/up. Lighting selects the same native sun-or-moon direction as the directional light.
+The original vertex shader forces far depth (`z=w`); `clouds.wesl` uses Bevy reverse-Z zero,
+read-only depth and alpha blending. CPU sorting keeps clouds behind world translucency and
+above the opaque sky/catalogue, including when the camera is behind the world origin. The old
+extra horizon `smoothstep` fade has been removed: it does not occur in the original shader.
+Existing HDR/exposure/brightness calibration remains (`cloud_gain` scales brightness); no
+reference-based retuning is part of this motion change.
+
+`CloudSettings.enabled` / `AA_NO_CLOUDS` implement the native `e_clouds` on/off behavior: hide
+sprites and freeze their current angles, then resume. `Time` pause likewise stops motion.
+Zone/world changes reset authored angles and retire old entities/material references; only
+active-zone textures stay cached. An environment unload clears all cloud entities and cache
+references. Work is O(active sprites/materials), with one shared quad, shared per-material
+uniforms and at most 128 sprites per zone; no per-frame mesh generation or asset reads.
+`sky_clouds::CloudSprite::{definition,bearing}` expose the authored data and next-frame angle
+for diagnostics. The `clouds` example provides day, `--night`, `--off`,
+`--glass --behind-origin`, `--reference`, `--motion-check` and asserting `--unload-check`
+fixtures. `--reference` uses the position, direction, FOV and hour from
+`reference/ingame/spawn/camera.json`; this isolates sky comparison, with no claim of matching
+the old capture's terrain/props or unknown elapsed cloud phase.
+
+Validation (2026-10-17): all five cloud tests passed, including real zone-179/186 materials,
+60-second native angular motion, pause / switch resume, both sides of world-origin alpha
+sorting, zone/world changes and complete entity/cache unload. `cargo check -p aa-world
+--examples` passed. GPU captures are under `shots/aa-world/clouds/`: `day_8s.png`,
+`day_28s.png`, `night.png`, `off.png`, `glass.png` and `reference.png`. The real authored
+speed-0.1 cloud advanced **1.000381 degrees in 10.003 frame-seconds** in the GPU fixture.
+Day captures ran at 165-252 FPS under shared builds (the first capture 200-220), night at
+218-296, off at 235-314, behind-origin glass at 209-234 and reference pose at 192-222.
+The glass fixture shows clouds below foreground alpha and blocked by opaque geometry;
+the day/night controls preserve terrain occlusion and catalogue-star attenuation. The GPU
+`--unload-check --exit-after 18` run asserted four live sprites before environment teardown
+and zero afterward, then exited normally. The
+disabled control still contains clouds baked into the original skybox: `e_clouds` controls
+the separate distant nodes. The reference comparison retains the existing visibly bluer /
+less hazy sky and brighter-cloud calibration gap; no phase or pixel match can be asserted
+from its single still image and unrecovered XML producer.
 
 ### Post (`post.rs`, `post.wesl`)
 
@@ -1383,8 +1440,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
-  Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
-  real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: full original cloud XML-producer verification / reference brightness calibration,
+  volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
