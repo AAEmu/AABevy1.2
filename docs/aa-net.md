@@ -4733,3 +4733,34 @@ results is INSTANT_GAME_END() (0x15c), and received-load reset is
 LEAVED_INSTANT_GAME_ZONE() (0x158). Each has no arguments. Applications must
 use admitted transitions, rather than forwarding an unmatched packet as one of
 these native UI events.
+
+
+### Battlefield received score and skill-enable updates
+
+SC193 `BattlefieldPoint` matches native397b7150 and lane
+`SCInstantGameAddPointPacket`: u32 zone,u32 instance,u8 corps,i32 point delta,
+two i32 cumulative scores,string character name. Native3936d370 accepts only
+states6/7 and matching zone/instance, **overwrites** both manager scores+3c48,
+and emits INSTANT_GAME_ADD_POINT(corpsName,characterName,points as f32), event
+0x15b. CorpsName is resolved through retained ruleset ID and received corps.
+`Battlefield::accepts_point` exposes the pre-fold admission guard so repeated
+genuine notifications need not be suppressed just because scores repeat.
+
+SC195 `BattlefieldSkillEnable` matches native397b7410 and lane
+`SCInstantGameKillstreakPacket`: u32 zone,u32 instance,**signed i8** index,u32
+skillID,bool enable. Native3936d4a0 requires state7 and matching identity,
+compares skillID against the SC190 24-slot table, then writes the enable byte
+only if it changes and emits UPDATE_INSTANT_GAME_KILLSTREAK(), event0x15e.
+The safe decoder retains all signed index values; the fold rejects indices
+outside0..23 rather than reproducing native unchecked array indexing.
+`accepts_skill_change` additionally checks the old enable value for exact
+notification admission. No cooldown, learned state, or skill execution is
+invented. Joined explicitly initializes scores[2] to0 and enables[24] tofalse
+(native3936d890); received load and full session lifecycle reset them.
+`last_point`/`last_skill_enable` preserve raw receipts independently of guards.
+
+SC194 kill notifications and their per-corps kill totals / local killstreak
+producer remain a separate bounded follow-up. Native3936e180 updates local
+killstreak when killer or victim matches the local character **before** checking
+phase/instance, then only emits the main kill notification in states6/7 with
+matching instance. This order must not be approximated as the score guard.
