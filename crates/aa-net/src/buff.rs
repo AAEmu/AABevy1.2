@@ -62,6 +62,8 @@ pub struct Buff {
     pub ability_level: i16,
     /// The skill whose toggle this buff is (`SCBuffCreated` only).
     pub skill_id: u32,
+    /// Exact snapshot cooldownSkill or corresponding Created skill field; no timer inferred.
+    pub raw_cooldown_skill: Option<u32>,
     /// Total duration in ms, 0 for a permanent buff.
     pub duration_ms: i32,
     /// Time already elapsed in ms when the packet was written (0 for a new buff).
@@ -97,7 +99,7 @@ impl Buff {
         let raw_tick_index = Some(r.i32()?);
         let stacks = r.i32()?;
         let charged = r.i32()?;
-        r.skip(4)?; // cooldown skill
+        let raw_cooldown_skill = Some(r.u32()?);
         Ok(Self {
             index,
             buff_id,
@@ -106,6 +108,7 @@ impl Buff {
             caster_level,
             ability_level,
             skill_id: 0,
+            raw_cooldown_skill,
             duration_ms,
             elapsed_ms,
             tick_ms,
@@ -151,6 +154,7 @@ impl Buff {
                 caster_level,
                 ability_level,
                 skill_id,
+                raw_cooldown_skill: Some(skill_id),
                 duration_ms: (duration * 10) as i32,
                 elapsed_ms: (elapsed * 10) as u32,
                 tick_ms: (tick * 10) as u32,
@@ -195,6 +199,18 @@ pub(crate) mod tests {
             assert_eq!(Buff::created_tick_index(elapsed,tick),expected);
         }
         assert_eq!(Buff::default().native_tick_index,None);
+    }
+
+    #[test]
+    fn snapshot_cooldown_skill_retains_all_bits_without_changing_legacy_skill_id() {
+        for id in [0,1,0x80000000,u32::MAX] {
+            let mut w=Writer::new();net_buff(&mut w,2,77);let mut bytes=w.finish();
+            let n=bytes.len();bytes[n-4..].copy_from_slice(&id.to_le_bytes());bytes.push(0xa5);
+            let mut r=Reader::new(&bytes);let buff=Buff::read_net(&mut r,BuffKind::Good).unwrap();
+            assert_eq!((buff.raw_cooldown_skill,buff.skill_id),(Some(id),0));assert_eq!(r.u8().unwrap(),0xa5);
+            for n in 0..bytes.len()-1 {assert!(Buff::read_net(&mut Reader::new(&bytes[..n]),BuffKind::Good).is_err());}
+        }
+        assert_eq!(Buff::default().raw_cooldown_skill,None);
     }
 
     #[test]
@@ -259,6 +275,7 @@ pub(crate) mod tests {
         assert_eq!(b.kind, BuffKind::Unknown);
         assert_eq!(b.raw_tick_index, None);
         assert_eq!(b.native_tick_index, Some(0));
+        assert_eq!(b.raw_cooldown_skill, Some(0));
     }
 
     #[test]
@@ -272,6 +289,7 @@ pub(crate) mod tests {
         let (_, b) = Buff::read_created(&mut r).unwrap();
         assert_eq!((b.charged, b.duration_ms, b.elapsed_ms, b.tick_ms), (9, 1000, 250, 70));
         assert_eq!((b.raw_tick_index, b.native_tick_index), (None, Some(3)));
+        assert_eq!(b.raw_cooldown_skill, Some(6));
         assert_eq!(r.u8().unwrap(), 0xaa);
     }
 
