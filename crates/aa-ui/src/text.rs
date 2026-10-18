@@ -1280,8 +1280,8 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                 i += 2;
                 continue;
             }
-            if matches!(k, 'd' | 'D' | 'h' | 'H' | 'l' | 'L') {
-                // Native 39274205/250/2a7 -> 3926fbd0 consumes through ';' or EOF, including
+            if matches!(k, ',' | 'd' | 'D' | 'h' | 'H' | 'l' | 'L') {
+                // Native 39273ebb/39274205/250/2a7 -> 3926fbd0 consumes through ';' or EOF, including
                 // other bars/newlines in the numeric body. An empty body emits nothing.
                 let start = i + 2;
                 let end = (start..chars.len())
@@ -1289,18 +1289,19 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                     .unwrap_or(chars.len());
                 if end > start {
                     out.push_str(&formatted_i64(&chars[start..end]).to_string());
-                    out.push(icon_char(match k {
-                        'h' | 'H' => 4,
-                        'l' | 'L' => 5,
-                        _ => 6,
-                    }));
+                    if k != ',' {
+                        out.push(icon_char(match k {
+                            'h' | 'H' => 4,
+                            'l' | 'L' => 5,
+                            _ => 6,
+                        }));
+                    }
                 }
                 if end < chars.len() && chars[end] == '\0' { break; }
                 i = if end < chars.len() { end + 1 } else { end };
                 continue;
             }
-            let is_value =
-                k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
+            let is_value = k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R');
             if is_value {
                 let end = chars[i + 2..]
                     .iter()

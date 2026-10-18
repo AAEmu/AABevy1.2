@@ -142,3 +142,45 @@ fn original_character_dishonor_control_keeps_source_and_refreshes_on_original_ev
     assert_eq!(text::expand_codes("|d5678"), skull("5678"));
     assert!(ui.errors.is_empty(), "{:?}", ui.errors);
 }
+
+#[test]
+fn native_plain_numeric_token_uses_wrapping_i64_without_an_icon_or_required_terminator() {
+    for (body, expected) in [
+        ("001234", "1234"), ("-0", "0"), ("+00042", "42"), ("abc", "0"),
+        ("12suffix", "12"), ("\t\n-123", "-123"),
+        ("9223372036854775808", "-9223372036854775808"),
+        ("18446744073709551616", "0"), ("12|d34", "12"), ("12\n34", "12"),
+        ("\u{131}\u{132}", "12"), ("\u{a0}123", "123"), ("\u{feff}12", "12"),
+        ("1\u{e9}2", "102"), ("\u{100}12", "0"), ("12\0Tail", "12"),
+    ] {
+        for terminator in ["", ";"] {
+            let source = format!("|,{body}{terminator}");
+            assert_eq!(text::expand_codes(&source), expected, "{source:?}");
+        }
+    }
+    assert_eq!(text::expand_codes("|,"), "");
+    assert_eq!(text::expand_codes("|,;"), "");
+    assert_eq!(text::expand_codes("||,0012;"), "||,0012;");
+    assert_eq!(text::expand_codes("|cFF0000FF|,0012;|r / |,0042;"), "|cFF0000FF12|r / 42");
+    let mut fonts = FontLib::new("en_us");
+    let formatted = fonts.layout("default", 13., "|,001234", None, 0., false).clone();
+    let plain = fonts.layout("default", 13., "1234", None, 0., false);
+    assert_eq!(formatted.width, plain.width);
+    assert!(formatted.icons.is_empty());
+    assert!(fonts.layout_edit("default", 13., "|,001234", None, 0.).width > formatted.width);
+}
+
+#[test]
+fn original_crime_plain_numeric_control_retains_raw_markup_through_refresh() {
+    let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    original::install(&mut ui);
+    let crime = lua::ui(&ui.lua).tree.find("character.window.crimePoint").unwrap();
+    let raw = lua::ui(&ui.lua).tree.get(crime).text().unwrap().text.clone();
+    assert!(raw.contains("|,80;"));
+    assert!(!text::expand_codes(&raw).contains("|,"));
+    ui.exec("@crime_numeric_refresh", "X2Player.GetCrimeInfo=function() return {crimePoint=1234,crimeRecord=1234} end").unwrap();
+    lua::fire_ui_event(&ui.lua, "CRIME_REPORTED", vec![]);
+    let raw = lua::ui(&ui.lua).tree.get(crime).text().unwrap().text.clone();
+    assert!(raw.contains("|,1234;"));
+    assert!(text::expand_codes(&raw).ends_with("1234|r / 50"));
+}
