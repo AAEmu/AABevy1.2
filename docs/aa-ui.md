@@ -5477,3 +5477,61 @@ phase resumes. All four report zero script errors/WARN/ERROR and self-close
 (PIDs33776/42180/9128/40704); the copied executable was removed. No source asset,
 original script or app producer changes, and native selector activation still
 requires the genuine raw GCD/accessor inputs documented above.
+
+### Generic SetCoolDown raw Lua contract (2026-10-18)
+
+The generic setter now follows the complete Lua-facing chain: registration
+39232d26..3d selects typed thunk392328b0, parser3922f380 requires two float
+values, binding392322d0 resolves/casts the widget, and setter392809b0 copies
+raw total/remain to+5a8/+5ac. Actual Cry GetParam3550a460 and conversion3550bf90
+accept actual Lua numbers for the requested float type, narrow double to f32,
+and reject strings, booleans, tables, nil or missing arguments. Invalid input
+leaves the old sample intact; extra arguments are ignored; every call returns
+zero results. The toolkit no longer defaults the second argument, parses
+numeric strings, clamps total to remaining or deletes nonpositive samples.
+Ordinary slots retain their separately documented compatibility clock.
+
+Native draw39280ad0 checks remaining against zero, including its unordered
+comparison behavior, and computes raw f32 `(total-remain)/total` without a
+positive-total guard. The common fan3928ace0 starts with its carried endpoint
+at the center: negative or unordered progress skips interpolation for the first
+triangle, then retains each previously emitted perimeter endpoint. This yields
+one degenerate triangle plus seven finite perimeter triangles, rather than
+clamping progress to zero. Progress>=1, including positive infinity, emits
+nothing. Zero-total and nonfinite raw timer values therefore stay stored while
+the original arithmetic produces finite position/UV inputs; no nonfinite mesh
+coordinates or invented refusal are needed. Valid progress geometry, masks,
+captions, callbacks, native selector flags and GCD producers are unchanged.
+
+`cooldown_setter_wrapper_oracle.py` /
+`native-cooldown-setter-wrapper-oracle-20261018.json` execute **20 full typed
+setter cases plus five raw fan controls**. The actual x2game thunk/parser/
+binding/setter and Cry parameter conversion run unchanged; Lua stack top/type/
+number primitives, widget lookup/cast, error logging and zero-result delivery
+are explicit endpoints. The Lua number endpoint uses FLD qword followed by the
+original FSTP f32, preserving source narrowing. Cases cover invalid types,
+arity, failed cast, extra args, zero/negative/over-total counts, signed zero,
+f32 boundaries, infinity/NaN, raw draw progress and exact finite position/UV bit
+patterns. `native-cooldown-setter-wrapper-source-20261018.txt` archives native
+instructions and the Cry conversion source. No live process or original asset
+is modified.
+
+Fresh crate check and fixture build pass, and **64 selected tests pass**:
+generic-mask10, constant7, caption6, ordinary-mask8, native-selector6,
+completion7, HUD6, animation10 and scale/clip4. New tests cover all four generic
+classes, strict types/arity, invalid-call retention, signed zero, f32 narrowing,
+raw values across ticks/draws and finite nonfinite-input fan geometry. The two
+original constant-button consumer assertions now check their actual explicit
+SetCoolDown(0,0) raw sample, preserving the separate icon/click/callback checks.
+
+The aa-dev original-button fixture calls original SetViewOfUpdateCooldown before
+its explicit samples. Final captures were inspected at
+`shots/aa-ui/native-raw-cooldown-final-720-20261018.png`
+(1280x720/default0.85, **347.3-400.0 FPS**) and
+`shots/aa-ui/native-raw-cooldown-final-1080-20261018.png`
+(1920x1080/1.0, **328.4-399.4 FPS**). They demonstrate retained samples after6
+and9 seconds, over-total/zero-total masks, rejected-string retention and
+negative-remaining suppression. Both report zero script errors/WARN/ERROR and
+self-close (PIDs27116/50896); the copied executable was removed. Initial
+diagnostic captures omitted that original mask setup and are not visual mask
+evidence. Original source scripts/assets and app cooldown providers are unchanged.

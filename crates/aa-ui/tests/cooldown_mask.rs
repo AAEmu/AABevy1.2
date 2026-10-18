@@ -286,3 +286,129 @@ fn native_pixel_snap_keeps_fractional_uvs_before_rgba8_submission() {
     assert_eq!(q.corners.unwrap()[2], [141., 134.]);
     assert!((q.uvs.unwrap()[2][1] - 0.8333334).abs() < 1e-6);
 }
+
+fn snapshot_bits(ui: &UiRuntime, id: Id) -> (u32, u32) {
+    let u = lua::ui(&ui.lua);
+    let cd = u.tree.widget(id).unwrap().cooldown.as_ref().unwrap();
+    (cd.sampled_ms.unwrap().to_bits(), cd.total_ms.to_bits())
+}
+
+#[test]
+fn actual_typed_setter_requires_two_numbers_and_preserves_rejected_samples() {
+    let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    for (i, class) in [
+        "cooldownbutton",
+        "cooldownactionbutton",
+        "cooldowninventorybutton",
+        "cooldownconstantbutton",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        ui.exec("@class", &format!("button=UIParent:CreateWidget('{class}','rawCooldown{i}','UIParent');button:SetCoolDown(8000,12000)")).unwrap();
+        let id = lua::value_id(&ui.lua, &ui.lua.load("button").eval().unwrap()).unwrap();
+        for args in [
+            "",
+            "1000",
+            "nil,1000",
+            "1000,nil",
+            "'1000',2000",
+            "1000,'2000'",
+            "true,2000",
+            "{},2000",
+        ] {
+            ui.exec(
+                "@strict_args",
+                &format!("assert(select('#',button:SetCoolDown({args}))==0)"),
+            )
+            .unwrap();
+            assert_eq!(
+                snapshot_bits(&ui, id),
+                (8000f32.to_bits(), 12000f32.to_bits()),
+                "{class}: {args}"
+            );
+        }
+        ui.exec(
+            "@extra_arg",
+            "assert(select('#',button:SetCoolDown(500,1000,99))==0)",
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot_bits(&ui, id),
+            (500f32.to_bits(), 1000f32.to_bits())
+        );
+    }
+}
+
+#[test]
+fn raw_zero_negative_over_total_and_f32_values_survive_without_a_local_clock() {
+    let (ui, id) = setup();
+    for (args, expected) in [
+        ("8000,4000", (0x45fa0000, 0x457a0000)),
+        ("0,12000", (0, 0x463b8000)),
+        ("-1,12000", (0xbf800000, 0x463b8000)),
+        ("1000,0", (0x447a0000, 0)),
+        ("1000,-1000", (0x447a0000, 0xc47a0000)),
+        ("-0.0,-0.0", (0x80000000, 0x80000000)),
+        ("16777217,16777219", (0x4b800000, 0x4b800002)),
+        ("math.huge,1000", (0x7f800000, 0x447a0000)),
+    ] {
+        ui.exec("@raw_sample", &format!("button:SetCoolDown({args})"))
+            .unwrap();
+        assert_eq!(snapshot_bits(&ui, id), expected, "{args}");
+        lua::tick(&ui.lua, 9000.);
+        assert_eq!(snapshot_bits(&ui, id), expected, "after tick: {args}");
+    }
+    ui.lua.globals().set("rawNan", f64::NAN).unwrap();
+    ui.exec("@nan", "button:SetCoolDown(rawNan,1000)").unwrap();
+    assert!(f32::from_bits(snapshot_bits(&ui, id).0).is_nan());
+}
+
+#[test]
+fn native_raw_draw_gates_and_carried_fan_endpoints_keep_nonfinite_inputs_finite() {
+    use lua::slot::mask_triangles;
+    // Actual3928ace0: first start stays at center for negative/unordered progress;
+    // each later start is the previously delivered perimeter endpoint.
+    for progress in [-1., f32::NEG_INFINITY, f32::NAN] {
+        let fan = mask_triangles(progress);
+        assert_eq!(fan.len(), 8);
+        assert_eq!(fan[0], [[0.5, 0.5], [1., 0.], [0.5, 0.5]]);
+        assert_eq!(fan[1], [[0.5, 0.5], [1., 0.5], [1., 0.]]);
+        assert!(fan.iter().flatten().flatten().all(|v| v.is_finite()));
+    }
+    assert!(mask_triangles(f32::INFINITY).is_empty());
+    let (ui, id) = setup();
+    ui.lua.globals().set("rawNan", f64::NAN).unwrap();
+    ui.exec(
+        "@load",
+        "button:SetCoolDownMask('ui/icon/cooldown_mask.dds')",
+    )
+    .unwrap();
+    for (args, count) in [
+        ("0,12000", 0),
+        ("-1,12000", 0),
+        ("8000,4000", 8),
+        ("1000,0", 8),
+        ("1000,-1000", 0),
+        ("rawNan,1000", 8),
+        ("math.huge,1000", 8),
+        ("1000,math.huge", 8),
+    ] {
+        ui.exec("@raw_draw", &format!("button:SetCoolDown({args})"))
+            .unwrap();
+        let before = snapshot_bits(&ui, id);
+        let qs = quads(&ui);
+        assert_eq!(qs.len(), count, "{args}");
+        assert!(
+            qs.iter()
+                .flat_map(|q| q.corners.unwrap())
+                .flatten()
+                .all(|v| v.is_finite())
+        );
+        assert_eq!(
+            snapshot_bits(&ui, id),
+            before,
+            "draw preserves raw fields: {args}"
+        );
+    }
+}

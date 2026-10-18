@@ -149,7 +149,9 @@ fn original_equipment_cooldown_handler_preserves_icon_and_click_handler() {
     lua::call_handler(&ui.lua, id, "OnClick", vec![]);
     run(&ui, "assert(clicks==1);nativeCooldownSamples[1][1]=0");
     lua::tick(&ui.lua, 16.);
-    assert!(lua::ui(&ui.lua).tree.widget(id).unwrap().cooldown.is_none());
+    let u = lua::ui(&ui.lua);
+    let cd = u.tree.widget(id).unwrap().cooldown.as_ref().unwrap();
+    assert_eq!((cd.sampled_ms, cd.total_ms), (Some(0.), 0.));
 }
 
 #[test]
@@ -257,5 +259,7 @@ fn original_consumer_alone_replaces_the_generic_draw_snapshot() {
     }
     run(&ui, "nativeCooldownSamples[1][1]=0");
     lua::tick(&ui.lua, 16.);
-    assert!(lua::ui(&ui.lua).tree.widget(id).unwrap().cooldown.is_none());
+    let u = lua::ui(&ui.lua);
+    let cd = u.tree.widget(id).unwrap().cooldown.as_ref().unwrap();
+    assert_eq!((cd.sampled_ms, cd.total_ms), (Some(0.), 0.));
 }
