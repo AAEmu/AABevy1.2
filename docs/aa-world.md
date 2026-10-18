@@ -366,8 +366,8 @@ alpha blended pass per surface type follows, with the weight `sqrt(w * axis weig
 type, 0 at one of another type (linear over the triangle), and the axis weight selects the sub-material by the dominant axis of the normal
 (a single material is only drawn on the z axis, i.e. below about 45 degrees; steeper ground shows the cover colour alone). The layer colour is
 `pow(saturate(cover + (diffuse - 0.5) * DetailTextureStrength), 2.2)`, lit with the layer's normal map (ATI2: the first block is Y, the second X;
-`xy` = `2 * texel - 1`, z reconstructed, tangent = direction of growing u, bitangent = direction of growing v, i.e. world x / y for the z axis,
-y / z for x, x / z for y) plus the `Detail` map sampled at `DetailBumpTilling x uv` and added to the xy with `DetailBumpScale`. Checked: the
+`xy` = `2 * texel - 1`, z reconstructed only for ATI2; BC1 expands its original XYZ. Tangent/bitangent follow the native signed plane:
+world x / -y for the z axis, y / -z for x, x / -z for y) plus the `Detail` map sampled at `DetailBumpTilling x uv` and added to the xy with `DetailBumpScale`. Checked: the
 decoded normal correlates 0.5 with the gradient of the diffuse luma (dark = low) for this swap and 0 for the other one.
 
 `materials.dat` / `material_list.dat` of a cell list object materials (3 entries in `015_015`: `lake_tank`, `cliff_rock_a_med`, ...), not terrain.
@@ -1888,12 +1888,12 @@ quadtree, anisotropy 8, **non-sRGB**: see the cover texel encoding), `uv = (y / 
 **Detail layers** (`terrain_layers.rs`, `terrain_layers.wesl`): one `TerrainMaterial` per cell = `StandardMaterial` (cover texel as its base colour
 texture, lighting, shadows, fog) extended with a fragment shader that decodes the cover colour and blends the surface type layers in gamma
 space like the engine (see "client/leveldata.xml"). `LayerLibrary::build` runs once per world on a task (0.3 s for main_world, cells wait for it):
-it reads all 1205 `leveldata.xml`, the 315 `.mtl` and copies the DDS blocks into five texture arrays (`LAYER_ARRAYS`, `BuiltLayers::images`, built
-by `TerrainExt::new`; 163 MB of VRAM): 186 diffuse maps at 512 px (BC1), 53 at 1024 px, 1 at 2048 px, 255 normal maps (BC5, 512 px; the normal
-maps and the `Detail` normal maps share the arrays) and 4 more normal maps in a second normal array, mip chains down to 4 px. DXT1 normal maps are
-transcoded to BC5 (two BC4 blocks from the decoded red and green). A diffuse map goes to the array of its size (the 2048 px array holds only the
+it reads all 1205 `leveldata.xml`, 324 material entries and copies the DDS blocks into five texture arrays (`LAYER_ARRAYS`, `BuiltLayers::images`, built
+by `TerrainExt::new`; current counts/resources are recorded in the milestones below): diffuse BC1 at 512/1024/2048 px and normal/detail BC5 at 512 px,
+with an overflow BC5 array. BC1 normal blocks retain XYZ in spare slots of the non-sRGB 512 px BC1 array after diffuse admission.
+A diffuse map goes to the array of its size (the 2048 px array holds only the
 maps that big, 2.8 MB each); a table texture is `slot + 1000 * flags`: diffuse flags 0 / 1 / 2 pick the 512 / 1024 / 2048 px array, normal
-flag bit 1 the second normal array. A 256 px normal map is stored as 2 x 2 copies in the 512 px array (flag bit 0, the shader samples it at half the
+flag bit 1 the second normal array and bit 3 raw BC1 RGB in the first array. A 256 px normal map is stored as 2 x 2 copies in the 512 px array (flag bit 0, the shader samples it at half the
 uv, which gives the original back with its own texel density and mips, and keeps the tiles continuous across cell borders because the content has
 period 1 in the layer uv). Other sizes or formats are skipped (diffuse maps below 512 px, normal maps below 256 px), a texture array may have 256
 layers, so 255 per array at most (the first normal array overflows into the second, a full diffuse array drops); larger sources use their lower
@@ -1903,7 +1903,7 @@ metre and showed blocks the size of a hand right at the camera. The mean luma gr
 camera of `30_austera`, objects on, `shots/terrain/aus_gal_before.png`) is, in the lower third / the middle, 38 / 20 % higher with the 1024 px array
 (`aus_gal_after.png`) and 61 / 31 % higher with the 2048 px one (`aus_gal_huge.png`). The second normal array was checked by forcing every normal map
 past the 100th into it: the render is identical to the pixel. Per cell, the background load adds
-an `R8Uint` image of the 513 x 513 surface nibbles and a 3 KB uniform table: for each of the 16 surface types and 3 projections the array
+an `R8Uint` image of the 513 x 513 five-bit surfaces and a 7,712-byte uniform table: for each of the 32 surface types and 3 projections the array
 slots, the uv scale, a uv offset (`fract(cell origin * scale)`, so that tiles continue across cell borders, unit tested), the detail strength
 and the detail map's tiling. The shader reads the four surrounding nibbles (bilinear weights, equal types merged), the dominant axis of the
 normal gives the projection weights, and each layer is sampled with explicit gradients (`textureSampleGrad`, the loops are not uniform
@@ -2185,6 +2185,62 @@ brightness fitting was performed. Palace logs **188-270 FPS** (UV control
 rock unload again verifies zero per-cell cells/tasks/patches/materials/surface
 maps/meshes; all seven runs self-close with exit 0 and no warnings/errors.
 All five inherited calibration files retain their exact hashes.
+
+#### Native BC1 heightmap normal XYZ preservation
+
+`Common.cfi`83-109 reads/expands original RGB for `_RT_NORMAL_DXT1` and
+reconstructs Z only on the non-DXT1 path. `FragLib.cfi`505-514 adds detail's raw
+RG to base XY after that base-Z selection. The supported voxel path already
+follows this contract. The heightmap loader previously recompressed BC1 RG into
+BC5 and reconstructed Z, losing both the authored blue channel and some RG
+precision. It now copies original BC1 normal blocks unchanged into spare slots
+of the existing non-sRGB 512 px BC1 array. Diffuse admission completes first;
+normal slots never displace or renumber diffuse slots. Internal normal flag 8
+selects raw BC1 RGB with the existing independent normal sampler/UVs; flag 9
+combines it with the 256 px copy path. ATI2 provenance/overflow bits are separate.
+The base shader retains BC1 Z, while the detail shader reads only RG.
+
+This adds no arrays, bindings, uniforms, images or per-frame work. The existing
+five arrays/255-layer caps remain; exhausted/unsupported inputs are declined.
+The observed full main-world library now has 214 layers in the first array
+(192 diffuse then 22 raw BC1 normals), 54/1 larger diffuse layers, 233/0 BC5 normal
+layers: about 159 MB versus 163 MB previously. Raw BC1 replaces double-sized BC5
+transcodes; world/cell ownership and unload are unchanged. Existing signed
+projection, independent bump phase, direct detail UVs and ATI2 sampling remain.
+
+A bounded five-cell survey found four unique original BC1 bump textures among
+58 normal sources: rock703a, dirt001a, dirt001b and forest-white-sand. Comparing
+authored Z against reconstruction from original RG, before any old recompression,
+finds differences above .05 in 66.1%/70.9% of dirt001b/forest-white-sand texels;
+the normalized direction can differ by 40.2/36.5 degrees. Exact source paths,
+references and sample coordinates remain in ignored
+`roads/native-bc1-heightmap-normal-survey.json`.
+
+Unit checks retain complete original block/mip bytes, duplicate the original
+256 px mip without recompression, validate flags 8/9 and full-cap refusal, and
+verify all BC1 normal slots follow the final admitted diffuse slot. The full
+world suite passes **222 tests**, nine existing optional ignored; all 15 focused
+terrain-layer tests pass. The aa-dev `terrain_bc1_normal` fixture samples four
+original textures in all three signed frames, with copied-source routing and
+an explicit BC1 RG-detail control. All 16 GPU normal outputs agree with independent
+source XYZ/XY calculations within one display byte. The unchanged ATI2/UV and
+detail fixtures also pass all 10/12 GPU controls; both complete captures are
+pixel-identical to their pre-BC1 captures. Inspected numeric captures in
+`shots/aa-world/terrain_bc1_normal/` log **117-157 FPS** for 16 BC1 cards,
+**199-285** for ATI2 and **237-276** for detail, under shared builds.
+
+The original Palace dirt001b camera is unchanged. `--world --off` disables BC1
+base-normal inputs only; its inspected on/off terrain ROI has mean channel
+difference .69, with 6.6% of pixels changing by more than 3 in a channel.
+Against the exact prior `4d57d76` capture, the change is subtle: mean .086,
+148 pixels above 3 in the same ROI. No larger visible scene improvement or
+native screenshot match is claimed; the raw block/component controls prove
+the correction. The unchanged signed frame/weight, shader-quality and BRDF
+limits remain explicit. Native logs **165-202 FPS**, off **172-192**.
+The unload fixture verifies zero cell tasks, patches, materials, surface maps
+and mesh assets; shared arrays retain their existing library lifetime. All
+six runs self-close with exit 0 and no warnings/errors. The inherited five
+calibration file hashes are unchanged.
 
 ### Objects (`objects.rs`, `placement.rs`)
 

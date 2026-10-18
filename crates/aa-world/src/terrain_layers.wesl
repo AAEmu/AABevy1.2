@@ -61,16 +61,20 @@ fn sample_diffuse(code: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec
     return textureSampleGrad(huge_layers, diffuse_sampler, uv, slot, gx, gy).rgb;
 }
 
-// A normal map (or detail normal map): flags bit 1 is the second array, bit 0 a map that is stored as 2 x 2
+// A normal map (or detail normal map): bit 3 is raw BC1 XYZ in the first diffuse array;
+// flags bit 1 is the second BC5 array, bit 0 a map that is stored as 2 x 2
 // copies: sampled at half the uv it gives the original map back, with the same texel density and mip levels.
-fn sample_normal(code: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec2<f32> {
+fn sample_normal(code: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec3<f32> {
     let flags = flags_of(code);
     let slot = i32(code) - flags * 1000;
     let k = select(1.0, 0.5, (flags & 1) != 0);
-    if (flags & 2) != 0 {
-        return textureSampleGrad(more_normal_layers, normal_sampler, uv * k, slot, gx * k, gy * k).rg;
+    if (flags & 8) != 0 {
+        return textureSampleGrad(diffuse_layers, normal_sampler, uv * k, slot, gx * k, gy * k).rgb;
     }
-    return textureSampleGrad(normal_layers, normal_sampler, uv * k, slot, gx * k, gy * k).rg;
+    if (flags & 2) != 0 {
+        return vec3<f32>(textureSampleGrad(more_normal_layers, normal_sampler, uv * k, slot, gx * k, gy * k).rg, 0.5);
+    }
+    return vec3<f32>(textureSampleGrad(normal_layers, normal_sampler, uv * k, slot, gx * k, gy * k).rg, 0.5);
 }
 
 fn surface_at(p: vec2<i32>) -> u32 {
@@ -192,16 +196,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 if a.y >= 0.0 {
                     // Native TerrainLayerVS applies TS_BUMP independently of TS_DIFFUSE.
                     let transform = terrain.normal_uv[ids[k]*3u+u32(p)];
-                    var t = sample_normal(a.y, uv*transform.xy+transform.zw,
+                    let sampled = sample_normal(a.y, uv*transform.xy+transform.zw,
                         gx*transform.xy, gy*transform.xy) * 2.0 - 1.0;
-                    let nz = sqrt(max(1.0 - dot(t, t), 0.0));
+                    var t = sampled.xy;
+                    // Common.cfi GetNormalMap reconstructs Z only for the non-DXT1 path.
+                    let nz = select(sqrt(max(1.0 - dot(t, t), 0.0)), sampled.z, (flags_of(a.y) & 8) != 0);
                     // a detail normal map is added to the xy of the base normal (fraglib.cfi, bDetailBumpMapping);
                     // the sum is renormalised below
                     let dt = terrain.layers[entry + 2u];
                     if dt.x >= 0.0 {
                         let dc = terrain.layers[entry + 3u];
                         let duv = coord * dt.yz + dc.xy;
-                        var dn = sample_normal(dt.x, duv, cgx * dt.yz, cgy * dt.yz);
+                        var dn = sample_normal(dt.x, duv, cgx * dt.yz, cgy * dt.yz).xy;
                         // The shared arrays put ATI2 into semantic XY for GetNormalMap.
                         // Native detailMapSampler reads raw XY, without its D3D10 YX swap.
                         if (flags_of(dt.x) & 4) != 0 { dn = dn.yx; }
