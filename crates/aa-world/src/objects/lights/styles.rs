@@ -132,7 +132,10 @@ pub(super) fn animate(
     // slots and rejected nonzero-style projectors do not enter this per-frame walk.
     for (slot, mut light) in &mut lights {
         let gain = if settings.enabled { styles.gain(slot.placement.style, seconds) } else { 1.0 };
-        let rgb = slot.placement.diffuse * gain;
+        // Native38179800 applies HDR after style/base multiplication. Decline a
+        // nonfinite GPU colour even if diagnostic placement changes between selection ticks.
+        let rgb = super::hdr::color(slot.placement.diffuse, gain, slot.placement.hdr_dynamic)
+            .unwrap_or(Vec3::ZERO);
         let color = Color::linear_rgb(rgb.x, rgb.y, rgb.z);
         if light.color != color { light.color = color; }
     }

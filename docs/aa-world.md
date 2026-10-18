@@ -2516,8 +2516,9 @@ the original `ShadeLib.cfi::GetAttenuation` and `DeferredShading.cfx::GetDeferre
 give `(1-d²/r²)²`; Bevy uses `(1-(d²/r²)²)²/d²`. Luminous intensity is therefore
 `0.16 * radius² * WorldConfig.sun_lux_scale` (lumens multiply by `4*pi`), matching diffuse
 illuminance at half-radius. RGB is the authored diffuse product, without arbitrary source colors.
-The exact Cry falloff, legacy `fHDRDynamic`, per-light specular multiplier, ambient-light shader
-mode, vis-area restrictions and legacy shadow-bias units are not reproduced.
+The exact Cry falloff, per-light specular multiplier, ambient-light shader mode, vis-area
+restrictions and legacy shadow-bias units are not reproduced. Ordinary point-light
+`fHDRDynamic` uses the bounded native-default path described below.
 Ordinary point-light style animation is implemented below; other consumers retain their stated limits.
 Those fields remain typed data; shadows use Bevy's bias defaults and the bounded shadow budget.
 IndirectLight and cubemap lighting remain separate renderer work. Ordinary RGB 2D projectors
@@ -2612,6 +2613,76 @@ warning, with no errors or panics. The copied executable is removed.
 Ignored `roads/light-style-audit/` retains original source/cache, native producer,
 parser/token/update/consumer proof, all executed oracle vectors, the original XML
 survey, capture logs and inherited calibration hashes.
+
+#### Native ordinary point-light HDR
+
+`Light.lua`133 and `SimpleLight.lua`108 copy `Color.fHDRDynamic` to `lt.hdrdyn`.
+Entity loader **32043600** defaults `SRenderLight+296` to zero, then copies that
+script float unchanged. Renderer **38179800 /38179905-3817996E** first multiplies
+base RGBA by the selected style luminance, then multiplies that result by
+`engineHDRBase^hdrdyn`. There is no extra transfer conversion or brightness fit.
+This follows the ordinary HDR gates: `r_HDRRendering !=0` (native default3),
+`r_MeasureOverdraw ==0` (default0) and renderer mode field`+0x10104 ==0`
+(initial ordinary mode). Their four disabled/debug controls retain style-only RGB.
+
+Engine constructor **30131190 /30131C8A** writes base2 to`+0x5860`, and vslot476
+**30121B70** returns it. Setter vslot480 **30123720** clamps an explicit input to
+`.01..100`. A bounded executable scan finds exactly those three field accesses;
+call-site audits of the engine, renderer, X2Game, CryAction, CryGame and CrySystem
+have not closed an external setter producer. Therefore this slice uses the
+**private constructor default2**, rather than claiming that native engine state
+can never be overridden. No unused public setter or inferred application state
+is introduced; an eventual proven producer needs its actual state wired then.
+
+`objects/lights/hdr.rs` applies **`(baseRGB * styleLuminance) * 2^fHDRDynamic`**
+to the existing admitted ordinary `PointLight` components only. Authored zero
+preserves the prior RGB bits; negative and fractional exponents are supported.
+Nonfinite HDR, overflowing factors or nonfinite final RGB are declined before
+upload. Between5Hz selection ticks an invalid diagnostic mutation produces zero
+RGB until component removal. The existing64-component/two-shadow bounds,
+selection, radius/transform, falloff conversion and light units are unchanged.
+No textures, geometry, materials, extra light components or per-frame allocations
+are created. Existing specular, ambient-mode and vis-area approximations remain;
+HDR/style projectors are still rejected by their existing separate gate.
+
+**100 original RGBA uploads pass bit for bit**, executing the original style and
+HDR consumer, original engine getter and the imported x86 MSVCR100 `powf`.
+They include HDR`-4/-1/-.5/0/.5/.75/.8/1/1.5/4`, styles0/4/6/12/19 and two phases.
+Four native HDR-disable gates and ten original setter-clamp controls also pass.
+Seven original cell XMLs contain76 supported active visible nonzero-HDR point
+slots (35HDR1,14HDR.5,12HDR.8,9HDR1.5,6HDR.75), alongside91HDR0 slots. The
+survey excludes inactive/hidden/fake/negative/clip/projector records; retaining
+an ordinary point source does not claim its area/ambient behavior is native.
+
+`light_hdr` uses the production point-light path and independent original-upload
+PBR references for negative/zero/fractional exponents, with an additional
+style6/.125s mode. `--legacy` zeros HDR only in the fixture's cloned placements;
+it leaves all other source inputs intact. `--world` keeps the original dock
+Light_116 camera, `--day` changes only the clock, and `--unload-check` verifies
+all streamed authored/selected light components are removed. No native-client
+camera-reference match is claimed.
+
+Final validation: **236 library tests pass /9 existing ignored**, every example
+checks, and the dedicated example builds. All18 production/reference receiver
+RGBs are exactly equal and unclipped across plain, styled and unity controls.
+The styled numeric board uses three stops more exposure to keep its.125 gain
+measurable; every production/reference pair shares that exposure. The original
+day/night cameras keep the same exposure, scene and32 selected original lights.
+A static plank ROI`(800,750)-(1150,1000)` changes74,955 pixels by more than3 RGB
+bytes at night (max74), with mean display luma44.97 versus29.94 at unity. Daytime
+luma is80.28 versus71.40 (75,593 changed, max92). These are display/post values,
+not a claim that encoded pixels scale by2. Water motion is excluded from the ROI.
+The actual unload reaches zero authored and rendered light components, with no
+HDR assets allocated. All eight PNGs were inspected.
+
+Observed shared-machine FPS:247-438 across numeric runs,155-220 native night /
+155-193 unity night,151-202 native day /152-221 unity day, and176-247 on unload.
+These are separate-run ranges under concurrent CPU builds, not a performance
+delta. All eight processes self-close with zero warnings/errors/panics, and the
+copied executable is removed. The five inherited calibration file hashes are
+unchanged. Ignored `roads/light-style-audit/` retains the original source/caller
+proof and executed100+4+10 vectors; `roads/light-hdr-audit/` retains logs, numeric
+and static-receiver metrics, scoped diffs and calibration hashes.
 
 Read-only material finding for aa-cry: the bright RGB sail in this dock is brush model #71,
 `galleon_deco_sail01.cgf`, with cell material #54 `galleon_mahadevi.mtl`, submaterial #3 `ucc`
