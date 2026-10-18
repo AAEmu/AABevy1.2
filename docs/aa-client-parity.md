@@ -21,8 +21,14 @@ socket-info/modifier tables and full original updater calls. Eight repair
 captures are inspected without runtime errors; original source portraits and
 effect lines are present. Protected planning, shared operation pending state,
 typed request integration and result/consumption continuation remain open.
-The playable alias remains the previous native-fades build until the next
-combined build/capture validation (aa-client-enchant.md).
+The playable alias is refreshed from target/debug/aa-client-20261018-enchant-frames.exe,
+SHA256347DDF0D98E758E49CCBF6E082048BA2894635637CBF7430D14EBD2F83A00327.
+Main and three fixtures build; eight shots/hud/enchant-frames/ captures are
+inspected, pixel equal to the repaired selection captures, with no runtime
+errors. This cut includes native widget frame admission/callback order and
+static2D water environment maps/cache admission. Button-state color methods,
+foam literal precision and raw Update9 retention are subsequent worker slices
+(aa-client-enchant.md).
 
 Previous accepted playable baseline:298 passed /38 optional probes ignored in55.55s
 with three test threads. The copied suite and main include received-headgear
@@ -32,7 +38,7 @@ hair selection and the toolkit's source-verified native fade manager. Seven
 socket result417.1-478.8, grade controls365.4-484.7, unsocket controls354.2-508.5
 and real lane world select344.4-422.8. All processes self-close without
 WARN/ERROR/panic. Main and the three fixture examples build. The idle playable
-alias is refreshed from target/debug/aa-client-20261018-native-fades.exe,
+alias was refreshed from target/debug/aa-client-20261018-native-fades.exe,
 SHA256 C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
 This build also includes native qualified WaterSurface refraction and authored
 cube direction; aa-world records223 passing tests /9 optional probes ignored,
