@@ -1905,9 +1905,9 @@ camera of `30_austera`, objects on, `shots/terrain/aus_gal_before.png`) is, in t
 past the 100th into it: the render is identical to the pixel. Per cell, the background load adds
 an `R8Uint` image of the 513 x 513 five-bit surfaces and a 7,712-byte uniform table: for each of the 32 surface types and 3 projections the array
 slots, the uv scale, a uv offset (`fract(cell origin * scale)`, so that tiles continue across cell borders, unit tested), the detail strength
-and the detail map's tiling. The shader reads the four surrounding nibbles (bilinear weights, equal types merged), the dominant axis of the
-normal gives the projection weights, and each layer is sampled with explicit gradients (`textureSampleGrad`, the loops are not uniform
-control flow): up to about 4 types x 1 to 2 axes x 3 fetches, usually 3. No per-frame CPU work, no extra draw calls (the draw count is the
+and the detail map's tiling. The shader reads the actual LOD triangle's surface IDs (four grid fetches, three active corners, equal types merged),
+the normal gives the projection weights, and each layer is sampled with explicit gradients (`textureSampleGrad`, the loops are not uniform
+control flow): up to 3 types x 3 axes x 3 fetches, usually 3. No per-frame CPU work, no extra draw calls (the draw count is the
 cover texture's, one material per cell). `WorldConfig::terrain_detail = false` (`fly --no-terrain-detail`) shades the decoded cover colour only.
 The material's own `Diffuse` colour (`MatDifColor`, linear, 1 / 1 / 1 for 251 of the 306 layer materials, 0.24 to 0.97 for rock layers) multiplies
 the lit layer, as `frag_custom_end` of `terrain.cfx` does for objects too (the court yard's `tr_af_pavingstone_001b` is 0.82 / 0.82 / 0.78); it is
@@ -2241,6 +2241,68 @@ The unload fixture verifies zero cell tasks, patches, materials, surface maps
 and mesh assets; shared arrays retain their existing library lifetime. All
 six runs self-close with exit 0 and no warnings/errors. The inherited five
 calibration file hashes are unchanged.
+
+#### Native triangle and actual-LOD surface weights
+
+The original `terrain.cfx`419 computes each vertex's surface-ID equality mask;
+453 combines it with the vertex distance fade, and 614/622 take the square root
+of the interpolated mask. The engine's `300E0A10` index generator uses the B-D
+diagonal at all five terrain steps. Four bilinear weights from the full-resolution
+2 m grid therefore admitted surfaces outside the rendered triangle and used the
+wrong corners at coarser LODs. The heightmap shader now reconstructs the triangle's
+linear SID factors from its three actual corners. It retains four point fetches,
+merges equal IDs, and leaves existing normal/detail/fade composition unchanged.
+At the diagonal midpoint the native factors are A=0, B=.5, D=.5, C=0; the previous
+bilinear factors were .25 each.
+
+`terrain.rs` carries the patch's actual sample step (1/2/4/8/16) as a constant
+UV1 value. This stream had no heightmap material/lightmap contract; cover UV0 is
+unchanged. Constant interpolation keeps it exact across each triangle. The patch
+and cell sample origins (multiples of 128/512) align with every step. Geometry,
+indices, hole rejection, artificial skirts and LOD selection are unchanged. UV1
+adds 8 bytes per vertex, including skirts: at most 137,224 bytes per LOD0 patch,
+about 2.09 MiB per cell if all 16 patches have that LOD. It adds no textures,
+materials, uniforms, draws or per-frame CPU work; the existing mesh lifetime
+releases the stream. An absent-UV1 fallback uses step1 for isolated fixtures.
+
+An independent original-code oracle executes `300C91B0` with one-hot corner
+heights: **36 original x86 calls**, nine points including both triangles, the
+diagonal, vertices and edges. Its recovered basis weights, together with the
+native vertex mask and triangle-index proofs, are retained in ignored
+`roads/native-terrain-triangle-weight-oracles.json`. The `terrain_weights`
+aa-dev example uses those numeric results rather than duplicating the shader's
+triangle formula. All **45 GPU controls** (nine cases at each of five LODs,
+including equal-ID merging and absent-UV1 fallback) match the reference display
+bytes exactly. The existing 15 fade controls still pass within one byte; their
+mask/UV inputs now retain weights 1/.5/.25 under triangle interpolation. Numeric
+captures log **236-286 FPS**, fade **314-373**, under shared builds. The full
+world suite passes **222 tests**, nine existing optional ignored; focused mesh
+tests verify all five UV1 steps, counts, edge alignment, native triangles and
+holes.
+
+The original Palace fixture fixes hour10 and a clear close camera over cell
+(13,10), sample quad (256,224), authored corner IDs [12,1,1,5]. Its diagonal should
+admit only SID1. A copy built against `1609b49` supplied the exact pre-edit frame;
+the final camera, terrain/lighting formulas and original assets are unchanged.
+Inspected `shots/aa-world/terrain_weights/border-{before,after}.png` show a subtle
+boundary change: terrain ROI [150,240,1130,700] mean absolute channel difference
+.399, 5.25% of pixels differ by more than 3 in a channel. Before logs 145-204 FPS,
+after **201-261**; these shared-load runs are not a speed comparison. This is not
+a comparison against a native client capture at that camera.
+
+The actual-scene fixture inspects newly spawned patch metadata after main-world
+Update commands and before render extraction. Its initial Update-scheduled
+inspection hit Bevy's expected extracted-mesh access guard; the fixture was moved
+to Last and both original/unload runs repeated successfully. The final unload
+asserts zero cells, tasks, patches, materials, surface maps and mesh assets; all
+final runs self-close without warnings/errors. The five inherited calibration
+file hashes are unchanged.
+
+This closes the SID interpolation factor only. Native joint vertex-stage
+axis/fade/frame evaluation, quality-dependent axis selection, separate material
+pass ordering and tiny-weight admission thresholds remain approximate. Current
+artificial skirts and non-native LOD selection retain their existing limits;
+this change adds no native edge stitching or specular/BRDF support.
 
 ### Objects (`objects.rs`, `placement.rs`)
 
@@ -4358,8 +4420,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
   cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
-  has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
-  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles;
+  has no colour / the vertex normal; 4 diffuse textures are missing from the pak). SID weights now follow the actual patch triangles/LOD;
+  native joint vertex-stage axis/fade/frame evaluation, quality-dependent axis selection and separate material-pass order remain approximations;
   `terrain_tint` is a fudge for the missing exposure. Roads, forward decals and the deferred diffuse/opacity slice
   are rendered (see placement formats); native MRT decal normal/specular blending remains open.
 * Water, differences to the real captures: current authored-UV/endpoint reference-camera patch means differ by about 6-9 display values (see Water);

@@ -98,7 +98,7 @@ fn numeric(
             TextureDimension::D2,
             match row {
                 0 => vec![0, 0, 0, 0],
-                1 => vec![0, 0, 1, 1],
+                1 => vec![1, 0, 1, 1],
                 _ => vec![0, 1, 1, 1],
             },
             TextureFormat::R8Uint,
@@ -119,8 +119,9 @@ fn numeric(
             params.layers[entry + 1] = Vec4::new(0.0, 0.0, 1.0, 0.0);
             let mut mesh = Mesh::from(Rectangle::new(1.5, 0.9));
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
-            // All fragments sample the same cell-grid midpoint; surface0 has weight1/.5/.25.
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5 / 512.0, 0.5 / 512.0]; 4]);
+            // Native lower triangle: (x=.5,y=.25) gives A=.25,B=.5,D=.25.
+            // The row masks retain controlled surface0 weights1/.5/.25.
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.25 / 512.0, 0.5 / 512.0]; 4]);
             let material = mats.add(TerrainMaterial {
                 base: StandardMaterial {
                     base_color: Color::linear_rgb(82.0 / 255.0, 85.0 / 255.0, 128.0 / 255.0),
