@@ -642,6 +642,10 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
     // Request painting, without advancing an Effect that native traversal would skip.
     for (&id, e) in &u.animations.effects {
         if !e.pending() { continue; }
+        let o = u.tree.get(id);
+        if let (Some(parent), Some(d)) = (o.parent, o.drawable())
+            && u.tree.widget(parent).is_some_and(|w| !w.drawable_layers[d.layer as usize])
+        { continue; }
         let mut owner = id;
         loop {
             let o = u.tree.get(owner);
@@ -664,7 +668,9 @@ pub(crate) fn prepare_effect_draw(u: &mut Ui, owner: Id) {
     let Some(w) = u.tree.widget(owner) else { return };
     let ids: Vec<_> = w.drawables.iter().copied().filter(|&id| {
         let o = u.tree.get(id);
-        o.alive && o.shown && o.drawable().is_some_and(|d| d.class == "drawable:effect" && !d.row_template)
+        o.alive && o.shown && o.drawable().is_some_and(|d| {
+            d.class == "drawable:effect" && !d.row_template && w.drawable_layers[d.layer as usize]
+        })
     }).collect();
     for id in ids {
         let rect = u.tree.rect(id);

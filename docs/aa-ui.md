@@ -6514,3 +6514,66 @@ shows recovered health, no warning and the hidden paused loading owner.
 Both report zero script errors/WARN/ERROR and self-close (PIDs31140/24744);
 the copied executable was removed. Original Lua, app APIs and native-selector
 activation are unchanged.
+
+## Ordinary drawable owner-layer flags (2026-10-18)
+
+EnableDrawables39264d50 and DisableDrawables39264da0 use the typed string
+parser392674c0, lookup3922c120 and byte setter39277bb0. They change the owner's
+four layer flags at +108/+128/+148/+168, initialized true by3927ec30. They do
+not change individual drawable shown flags, button state, input, child widgets
+or dynamic layer factors. The previous implementation changed shown flags of
+non-state art and skipped bound button backgrounds; it therefore both revived
+independently hidden art and failed to hide an original button skin.
+
+The argument must be an actual string, with zero results on every path.
+Missing/nil/bool/number/table and a failed widget cast are inert; extra
+arguments are ignored. Native PE table39ac6aa0 names background, artwork,
+overlay and overoverlay, compared by case-sensitive strcmp through the first
+NUL. Every unknown name, including empty, uppercase, highlight and all, selects
+all four flags. No-argument calls do not mean all. Widget.drawable_layers
+retains all four flags; rendering currently supports the first three layers.
+Fourth-layer creation/ordering is a separate boundary.
+
+Native layer draw3927af50 checks this byte before calling any contained
+drawable. Ordinary owner lists now use that gate, including bound state art
+and later-created art, while preserving each drawable's own visibility.
+Generic Effect painting and repaint requests respect the same owner-layer
+admission, so a disabled layer pauses its clock without pausing child owners.
+Widget text/content and private ordinary-slot cooldown/completion draw paths
+keep their existing admission. No selector, timing or application hook changes.
+The separate WithChildren3927b610 route changes recursive dynamic factors;
+its unimplemented behavior is not represented by these owner flags.
+
+Ignored evidence drawable_layer_oracle.py and
+native-drawable-layer-oracle-20261018.json contain **32 actual native typed
+groups**, executing the thunk, parser, bindings, lookup, setter and four layer
+constructors. Lua stack/result, host cast and external strcmp are controlled
+endpoints; static names come from the mapped original PE. No flag mutation,
+layer selection or child/factor handling is mocked. The previously executed
+generic Effect paint-admission oracle supplies the layer-disabled clock control.
+
+Before the fix, direct DisableDrawables('background') on an unchanged original
+CreateEmptyButton/ApplyButtonSkin left all three skin quads painted. The test
+now passes, including a physical click while the skin is gated and restoration
+by unchanged common.alb ButtonInit. That exported helper uses the same enable
+route as the local InitButton in button.alb; no fake InitButton global is added.
+The actual SetItemIcon -> SetItemIcons -> SetIconBackGround refresh also enables
+only background, preserving independently hidden background art and a disabled
+artwork layer. These are controlled original-widget fixtures, not a claim that
+an observed live script already invokes the direct disable case.
+
+Crate/example checks and **143 selected checks pass**, with one existing
+optional font check ignored: five new layer tests plus original state colors,
+checkbuttons, text colors, masks, generic clocks, animation, private cooldown/
+completion, fades, frame traversal and popup lifetime checks. Tests also retain
+non-default dynamic factors, independently owned child art/text, late creation,
+zero arity and native case/NUL/all argument goldens.
+
+Both native_drawable_layers aa-dev captures were inspected:
+shots/aa-ui/native-drawable-layers-off-720-20261018.png
+(1280x720/default0.85, **436.2-583.7 FPS**) and
+shots/aa-ui/native-drawable-layers-restored-1080-20261018.png
+(1920x1080/default1.0, **397.7-597.3 FPS**). The first hides the original skin/
+icon layers; the second restores them while manually hidden art stays hidden.
+Both assert a physical original button click, report zero script/WARN/ERROR,
+self-close (PIDs27216/46216), and leave no copied QA executable running.
