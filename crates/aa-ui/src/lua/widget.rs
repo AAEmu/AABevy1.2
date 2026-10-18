@@ -455,6 +455,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                     ui(lua).tree.get(id).name
                 ),
             }
+            super::chat::geometry(lua, id);
             none()
         })?,
     )?;
@@ -462,6 +463,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "RemoveAllAnchors",
         method(lua, |lua, id, _| {
             ui(lua).tree.remove_anchors(id);
+            super::chat::geometry(lua, id);
             none()
         })?,
     )?;
@@ -474,6 +476,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             o.height = a.f(2);
             drop(u);
             super::auto_clip::geometry(&mut ui(lua), id);
+            super::chat::geometry(lua, id);
             scale_event(lua, id);
             none()
         })?,
@@ -483,6 +486,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).width = a.f(1);
             super::auto_clip::geometry(&mut ui(lua), id);
+            super::chat::geometry(lua, id);
             none()
         })?,
     )?;
@@ -491,6 +495,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).height = a.f(1);
             super::auto_clip::geometry(&mut ui(lua), id);
+            super::chat::geometry(lua, id);
             none()
         })?,
     )?;
