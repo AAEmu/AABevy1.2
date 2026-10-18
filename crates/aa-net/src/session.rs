@@ -506,6 +506,8 @@ pub enum Event {
     ItemsChanged(ItemTasks),
     /// Equipment slots of a unit changed; `None` = emptied.
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
+    /// Native SC095 changes persistent IDs only, preserving other record fields.
+    EquipmentIdsChanged { obj_id: u32, ids: [u64; 28] },
     /// A container grew to `slots` slots.
     InventoryExpanded { container: u8, slots: u8 },
     /// A unit began casting `skill_id` (or, with a non zero `result` and `tl` 0, the server
@@ -1711,6 +1713,7 @@ impl Session {
             M::InvenContents(chunk) => self.emit(Event::InventoryChunk(chunk)),
             M::ItemTasks(tasks) => self.emit(Event::ItemsChanged(tasks)),
             M::EquipmentChanged { obj_id, items } => self.emit(Event::EquipmentChanged { obj_id, items }),
+            M::EquipmentIdsChanged { obj_id, ids } => self.emit(Event::EquipmentIdsChanged { obj_id, ids }),
             M::InvenExpanded { container, slots } => self.emit(Event::InventoryExpanded { container, slots }),
             M::SkillStarted(s) => self.emit(Event::SkillStarted(s)),
             M::SkillFired(s) => self.emit(Event::SkillFired(s)),
@@ -4997,6 +5000,22 @@ mod tests {
             }
         }
         assert!(session.game.is_none());assert!(session.selected_state.is_none());
+    }
+
+    #[tokio::test]
+    async fn equipment_ids_forward_exact_raw_receipts_without_legacy_promotion() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let mut items=vec![Some(Item{id:11,template_id:101,..Default::default()})];items.resize(10,None);
+        seed_item_effect_records(&mut session,items);while events.try_recv().is_ok(){}
+        let legacy=session.received_inventory.borrow().clone();
+        let ids=[u64::MAX;28];
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::EquipmentIdsChanged{obj_id:99,ids})).await;
+            assert!(matches!(events.try_recv(),Ok(Event::EquipmentIdsChanged{obj_id:99,ids:got}) if got==ids));
+            assert!(events.try_recv().is_err());
+        }
+        assert_eq!(session.received_inventory.borrow().bag,legacy.bag);assert_eq!(session.received_inventory.borrow().equipment,legacy.equipment);
+        assert_eq!(session.received_native_records.borrow().item(1,0).unwrap().id,u64::MAX);
     }
 
 }

@@ -577,3 +577,41 @@ fn non_equipment_unpack_keeps_full_record_known_without_recharge_catalog() {
     assert_eq!(output.item.as_ref(), Some(current));
     assert!(records.complete_bag());
 }
+
+#[test]
+fn equipment_id_receipt_changes_only_known_ids_in_native_first_hit_order() {
+    let mut records = seed();
+    records.equipment[0] = Some(item(1, 0, 7));
+    records.equipment[1] = Some(item(2, 31432, 3));
+    records.equipment[2] = None;
+    let before = records.equipment.clone();
+    let mut ids = [0; 28];
+    ids[0] = 42;
+    ids[1] = 42;
+    ids[2] = 99;
+    records.observe(&Event::EquipmentIdsChanged { obj_id: 999, ids });
+    assert_eq!(records.equipment, before);
+    records.observe(&Event::EquipmentIdsChanged { obj_id: 100, ids });
+    let mut expected = before[0].clone().unwrap();
+    expected.id = 42;
+    assert_eq!(records.item(1, 0), Some(&expected));
+    assert_eq!(
+        records.current(42),
+        Some(&expected),
+        "template0 equipment remains first ID match"
+    );
+    assert!(
+        records.item(1, 2).is_none(),
+        "ID receipt never creates unknown metadata"
+    );
+    ids[0] = 0;
+    records.observe(&Event::EquipmentIdsChanged { obj_id: 100, ids });
+    expected.id = 0;
+    assert_eq!(records.current(0), Some(&expected));
+    records.observe(&Event::GameDecodeFailed {
+        message: String::new(),
+    });
+    records.observe(&Event::EquipmentIdsChanged { obj_id: 100, ids });
+    assert!(records.item(1, 0).is_none());
+    assert!(records.current(0).is_none());
+}

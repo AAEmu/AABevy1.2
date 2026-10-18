@@ -135,6 +135,13 @@ impl NativeItemRecords {
                     }
                 }
             }
+            Event::EquipmentIdsChanged{obj_id,ids} if self.actor!=0 && *obj_id==self.actor => {
+                //391d5545..5567 copies ID only. Unknown full records cannot be
+                //reconstructed by this receipt; loss remains sticky.
+                for (row,id) in self.equipment.iter_mut().zip(ids) {
+                    if let Some(item)=row {item.id=*id;}
+                }
+            }
             Event::ItemsChanged(changes) if changes.truncated => self.lose(),
             Event::UnitsRemoved(ids) if self.actor != 0 && ids.contains(&self.actor) => {
                 self.lose();

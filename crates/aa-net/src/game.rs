@@ -517,6 +517,8 @@ pub enum ServerMsg {
     ItemOperationError(crate::items::ItemOperationError),
     /// Items of a unit's equipment slots changed (`None` = unequipped).
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
+    /// Native SC095 changes persistent IDs only, preserving other record fields.
+    EquipmentIdsChanged { obj_id: u32, ids: [u64; 28] },
     /// A container grew to `slots`.
     InvenExpanded { container: u8, slots: u8 },
     // -- quests
@@ -670,6 +672,7 @@ impl ServerMsg {
             Self::InvenContents(_) => "SCCharacterInvenContents",
             Self::ItemTasks(_) => "SCItemTaskSuccess",
             Self::EquipmentChanged { .. } => "SCUnitEquipmentsChanged",
+            Self::EquipmentIdsChanged { .. } => "SCUnitEquipmentIds",
             Self::InvenExpanded { .. } => "SCInvenExpanded",
             Self::Quests(_) => "SCQuests",
             Self::CompletedQuests(_) => "SCCompletedQuests",
@@ -1077,6 +1080,12 @@ impl ServerMsg {
                     items.push((r.u8()?, Item::read(r)?));
                 }
                 Self::EquipmentChanged { obj_id, items }
+            }
+            sc::SCUnitEquipmentIdsPacket => {
+                let obj_id=r.bc()?;
+                let mut ids=[0;28];
+                for id in &mut ids {*id=r.u64()?;}
+                Self::EquipmentIdsChanged{obj_id,ids}
             }
             sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
             sc::SCQuestsPacket => Self::Quests(quest::read_quests(r)?),
@@ -2202,6 +2211,21 @@ mod tests {
         for n in 0..body.len() {
             let mut frame=Writer::new();frame.raw(&[0xdd,1,0,0]).u16(0x93).raw(&body[..n]);assert!(ServerMsg::decode(&frame.finish()).is_err());
         }
+    }
+
+    #[test]
+    fn native_equipment_ids_exact_codec_truncation_and_following_packet() {
+        // Actual397b38b0 oracle: BC3 then exactly28 independent u64s.
+        let ids=std::array::from_fn(|i|match i%5 {0=>0,1=>u64::MAX,_=>0x1122334400000000+i as u64});
+        let mut raw=vec![0x56,0x34,0x12];
+        for id in ids {raw.extend_from_slice(&id.to_le_bytes());}
+        let expected=ServerMsg::EquipmentIdsChanged{obj_id:0x123456,ids};
+        assert_eq!(raw.len(),227);assert_eq!(decode(0x95,&raw),expected);
+        for n in 0..227 {assert!(ServerMsg::decode(&game_frame(0x95,&raw[..n])).is_err());}
+        let mut batch=Writer::new();
+        for _ in 0..2 {batch.u16(0).u16(0x95).raw(&raw);}
+        batch.u16(0).u16(0xa3).u16(7);
+        assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::SkillEnded{tl:7}]);
     }
 
 }
