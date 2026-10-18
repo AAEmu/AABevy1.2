@@ -1094,6 +1094,9 @@ fn trim(v: f64) -> String {
 fn attr_id(name: &str) -> Option<u8> {
     ATTRIBUTES.iter().find(|(_, n)| *n == name).map(|(id, _)| *id)
 }
+pub(super) fn attribute_name(id: u8) -> Option<&'static str> {
+    ATTRIBUTES.iter().find(|(value, _)| *value == id).map(|(_, name)| *name)
+}
 
 /// What an attribute's modifier value reads as in a description: the tooltip script's
 /// `GetCalculatedAddModifierValue`, without the sign the text writes itself.
