@@ -13,6 +13,8 @@ struct Composition {
     anchor: usize,
     shown: String,
     length: usize,
+    /// SetEnglish clears model buffers without clearing the native composing flag.
+    cleared: bool,
 }
 
 #[derive(Default)]
@@ -43,7 +45,7 @@ fn eligible(lua: &Lua) -> Option<Id> {
         && !w
             .edit
             .as_ref()
-            .is_some_and(|e| e.digit || e.read_only || e.password))
+            .is_some_and(|e| e.english || e.digit || e.read_only || e.password))
     .then_some(id)
 }
 
@@ -92,6 +94,18 @@ pub(crate) fn forget(lua: &Lua, id: Id) {
     }
 }
 
+///39228c70's model clear retains composing until the context or result completes.
+pub(crate) fn clear_model(lua: &Lua, id: Id) {
+    let mut s = state(lua);
+    if let Some(c) = s.active.as_mut().filter(|c| c.owner == id) {
+        c.base.clear();
+        c.shown.clear();
+        c.anchor = 0;
+        c.length = 0;
+        c.cleared = true;
+    }
+}
+
 /// Detach the previous owner before a focus transfer or OS focus loss.
 pub(crate) fn release(lua: &Lua, id: Id) {
     if state(lua).enabled_owner == Some(id) {
@@ -110,7 +124,7 @@ pub(crate) fn complete(lua: &Lua, id: Id) {
         }
         s.active.take().unwrap()
     };
-    if text(lua, id).as_deref() == Some(&c.shown) {
+    if !c.cleared && text(lua, id).as_deref() == Some(&c.shown) {
         let shown_len = c.shown.chars().count();
         let caret = if c.base.chars().count() + c.length > shown_len {
             shown_len
@@ -153,6 +167,7 @@ fn begin(lua: &Lua, id: Id) -> Option<Composition> {
         base,
         anchor: range.start,
         length: 0,
+        cleared: false,
     })
 }
 
@@ -257,6 +272,7 @@ pub fn event(lua: &Lua, event: &Ime) -> bool {
         c.anchor + cursor.unwrap_or(c.length)
     };
     c.shown = shown.clone();
+    c.cleared = false;
     state(lua).active = (!commit).then_some(c);
     store(lua, id, shown, caret);
     if !commit && let Some(e) = ui(lua).tree.widget_mut(id).and_then(|w| w.edit.as_mut()) {

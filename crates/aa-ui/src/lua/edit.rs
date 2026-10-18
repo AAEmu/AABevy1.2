@@ -3,7 +3,7 @@
 //! One widget has the keyboard focus ([`Ui::focus`](super::Ui)): `SetFocus` or a click on an
 //! edit box gives it, `ClearFocus`, Escape or a click elsewhere takes it. Keys go to the focused
 //! widget: text is inserted at the caret (`SetMaxTextLength`, `SetDigit`, `SetDigitMax`,
-//! `SetReadOnly` apply) and fires `OnTextChanged(self)`; Enter fires `OnEnterPressed(self)`
+//! `SetEnglish`, `SetReadOnly` apply) and fires `OnTextChanged(self)`; Enter fires `OnEnterPressed(self)`
 //! (multi-line boxes insert a line break), Escape `OnEscapePressed(self)`, Tab
 //! `OnTabPressed(self)`. Physical keys fire `OnKeyDown(self, name)` on press and
 //! `OnKeyUp(self, name)` on release; programmatic `UiRuntime::key` sends both.
@@ -37,6 +37,9 @@ pub struct EditData {
     /// `SetMaxTextLength` in characters, 0 = unlimited.
     pub max_len: usize,
     pub password: bool,
+    /// Native English input accepts typed ASCII 0x21..0x7e and disables IME.
+    /// Direct SetText and clipboard buffer insertion remain unrestricted.
+    pub english: bool,
     pub digit: bool,
     /// Native defaults to enabled; SetDigit(true) disables until UseClipboard(true).
     pub clipboard_disabled: bool,
@@ -488,6 +491,7 @@ fn insert(lua: &Lua, id: Id, s: &str) -> bool {
     let mut add: String = s
         .chars()
         .filter(|c| !c.is_control() || *c == '\n')
+        .filter(|c| !e.english || ('!'..='~').contains(c))
         .filter(|c| !e.digit || c.is_ascii_digit())
         .collect();
     if e.max_len > 0 {
@@ -647,7 +651,7 @@ fn clipboard_key(lua: &Lua, id: Id, key: &UiKey) -> bool {
                 byte_at(&text, selected.start)..byte_at(&text, selected.end),
                 &add,
             );
-            // Paste is a direct buffer operation in native39228270: digit filtering is bypassed.
+            // Native39228270 inserts the clipboard buffer directly, bypassing digit/English filters.
             store(lua, id, new, selected.start + add.chars().count());
             true
         }
@@ -1019,7 +1023,24 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    def("SetEnglish", method(lua, |_, _, _| none())?)?;
+    def(
+        "SetEnglish",
+        method(lua, |lua, id, a| {
+            // Native bool adapter3923a230 rejects missing/nil/string arguments.
+            let on = match a.v(1) {
+                mlua::Value::Boolean(on) => on,
+                mlua::Value::Integer(value) => value != 0,
+                mlua::Value::Number(value) => value != 0.0,
+                _ => return none(),
+            };
+            with(lua, id, |e| e.english = on);
+            //392923e0→39228c70 clears unconditionally, without a text-change event.
+            // The model's composing flag survives until the context/result completes.
+            store(lua, id, String::new(), 0);
+            ime::clear_model(lua, id);
+            none()
+        })?,
+    )?;
     Ok(())
 }
 
