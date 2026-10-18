@@ -176,6 +176,7 @@ struct Instanced {
     nodes: Vec<Mat4>,
     rigid: Option<Arc<rigid::Clip>>,
     color_materials: vegetation_color::Materials,
+    ao_meshes: vegetation_color::ao::Meshes,
 }
 
 enum ModelState {
@@ -211,7 +212,7 @@ impl Models {
 }
 
 /// A model prepared by a worker.
-type ModelResult = (u32, Result<(PreparedModel, Option<Arc<rigid::Clip>>), aa_cry::Error>);
+type ModelResult = (u32, Result<(PreparedModel, Option<Arc<rigid::Clip>>, Vec<vegetation_color::ao::Prepared>), aa_cry::Error>);
 
 /// Most model jobs queued on the workers at once; the rest wait their turn in `Wanted`, so the queue holds what is near.
 const MAX_QUEUED_MODELS: usize = 48;
@@ -241,6 +242,7 @@ pub struct ObjectState {
     voxels: HashMap<(i32, i32), voxels::CellVoxels>,
     road_assets: RoadAssets,
     color_mirrors: vegetation_color::Mirrors,
+    ao_mirrors: vegetation_color::ao::Mirrors,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
     /// The placed sounds of each cell ([`sounds`]).
@@ -306,6 +308,7 @@ impl ObjectState {
             voxels: HashMap::new(),
             road_assets: RoadAssets::default(),
             color_mirrors: vegetation_color::Mirrors::default(),
+            ao_mirrors: vegetation_color::ao::Mirrors::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
             lights: HashMap::new(),
@@ -583,7 +586,7 @@ pub fn stream_objects(
     while let Some((id, result)) = state.model_queue.pop_front() {
         let key_path = state.models.keys[id as usize].path.clone();
         state.models.states[id as usize] = match result {
-            Ok((prepared, rigid)) => {
+            Ok((prepared, rigid, ao)) => {
                 let loaded = cry.finish_model(prepared);
                 if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
                     // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
@@ -595,8 +598,9 @@ pub fn stream_objects(
                     }
                 }
                 let nodes = loaded.parts.iter().map(|(ni, _)| Mat4::from(node_world(&loaded.model, *ni))).collect();
-                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &mut state.color_mirrors, &mut vegetation_materials);
-                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials }))
+                let ao_meshes = vegetation_color::ao::finish(ao, &mut cry.meshes, &mut state.ao_mirrors);
+                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &mut state.color_mirrors, &mut vegetation_materials);
+                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials, ao_meshes }))
             }
             Err(e) => {
                 debug!("aa-world: model {key_path}: {e}");
@@ -721,7 +725,8 @@ pub fn stream_objects(
                                 Err(e) => { debug!("aa-world: {}: {e}", key.path); None }
                             }
                         } else { None };
-                        Ok((prepared, rigid))
+                        let ao = vegetation_color::ao::prepare(&loader, prepared.loaded());
+                        Ok((prepared, rigid, ao))
                     }))
                         .unwrap_or_else(|_| Err(aa_cry::Error::Invalid(format!("panic while preparing {}", key.path))));
                     let _ = tx.send((id, result));
@@ -910,8 +915,12 @@ fn spawn_instance(
                 && let Some(material) = inst.color_materials.get(&part.material.id())
             {
                 let bgr = data.objects.vegetation[idx].color_variation;
-                entity.insert((MeshMaterial3d(material.clone()), MeshTag::with_type::<vegetation_color::VegetationColor>(vegetation_color::pack(bgr)),
-                    VegetationColorPart { cell, bgr }));
+                let tag = if material.variation { vegetation_color::pack(bgr) } else { vegetation_color::NO_COLOR_VARIATION };
+                entity.insert((MeshMaterial3d(material.material.clone()), MeshTag::with_type::<vegetation_color::VegetationColor>(tag)));
+                if material.variation { entity.insert(VegetationColorPart { cell, bgr }); }
+                if let Some(ao) = inst.ao_meshes.get(&part.mesh.id()) {
+                    entity.insert((Mesh3d(ao.mesh.clone()), vegetation_color::VegetationAoPart { cell, min_alpha: ao.min_alpha }));
+                }
             } else {
                 entity.insert(MeshMaterial3d(part.material.clone()));
             }
