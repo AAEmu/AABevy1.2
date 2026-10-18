@@ -474,6 +474,13 @@ pub struct SliderData {
     pub min_thumb: f32,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LabelData {
+    pub number_only: bool,
+    /// Native GetText bytes when they differ from the decoded text (otherwise use TextBlock).
+    pub raw: Option<Vec<u8>>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Widget {
     pub ty: WidgetType,
@@ -486,6 +493,7 @@ pub struct Widget {
     pub enabled: bool,
     pub clickable: bool,
     pub text: Option<TextBlock>,
+    pub label: Option<LabelData>,
     /// Window title text (`SetTitle`, `titleStyle`).
     pub title: Option<TextBlock>,
     pub button: Option<ButtonData>,
@@ -1305,6 +1313,7 @@ impl Widget {
             ..Default::default()
         });
         let listbox = (ty == WidgetType::ListBox).then(Default::default);
+        let label = (ty == WidgetType::Label).then(LabelData::default);
         Widget {
             clickable: !matches!(ty, WidgetType::Label | WidgetType::TextBox),
             class: ty.name().to_string(),
@@ -1315,6 +1324,7 @@ impl Widget {
             dynamic_drawable: Default::default(),
             enabled: true,
             text,
+            label,
             title,
             button,
             list,

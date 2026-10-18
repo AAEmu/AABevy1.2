@@ -5582,3 +5582,72 @@ The std numeric_limits endpoint uses host MSVCP100. Source is archived in
 `native-item-accessor-cooldown-source-20261018.txt`. Instance+1d/+1e receive
 serializer/semantic mapping and genuine placement-lifetime input remain open;
 no guessed summoned/last-despawn field or automatic selector activation is added.
+
+### Native NumberOnly labels and raw text model (2026-10-18)
+
+Label registration3924321c binds SetNumberOnly through typed thunk39243060,
+parser39242f30 and binding39242e00 to setter3929eea0. The setter only writes
+label byte+ad9; the constructor clears it. Actual Cry conversion3550a460 /
+3550bf90 accepts Lua booleans or numeric nonzero (including NaN), rejects
+strings/tables/nil/missing arguments, and returns no results. Changing the
+flag does not reformat or clear existing text. Other widget classes do not
+gain this Label-only method.
+
+Label SetText3929f180 formats future input by grouping the last three BYTES
+with literal commas, irrespective of digits, signs, existing punctuation or
+Unicode character boundaries. Thus `1234` becomes `1,234`, `-123` becomes `-,123`
+and `abcdefg` becomes `a,bcd,efg`. This path does not read the rich-text comma
+option. The shared Lua SetText wrapper39267c10 /392674c0 /392655c0 requires
+an actual string; invalid types leave a Label unchanged and return zero
+results. The toolkit applies that source contract to Labels with either flag
+state, preserving other widget classes' existing text behavior.
+
+TextModel3922b680 compares the input C-string first, counts the structurally
+valid UTF8 prefix through XlStringLen3301b000, rejects counts>=512, clears
+both buffers when the prefix count is0, otherwise copies up to2048 raw bytes
+and converts to UTF32 through3301a100. Grouping can split multibyte input:
+three e-acute characters retain malformed grouped GetText bytes while drawing
+only the first e-acute; two e-acute characters clear the model. GetText39267350
+through Label3929ee40 returns one string containing the raw stored bytes,
+independently of the rendered prefix. LabelData now preserves that distinction;
+fonts, auto-sizing and fitting consume the decoded text.
+
+The native decoder skips one leading BOM while retaining the original prefix
+count as its output limit, and accepts structurally valid overlong encodings.
+The toolkit follows this for representable scalars. Native UTF32 can also
+hold surrogates or values above Unicode, and malformed BOM-tail input can
+read beyond its C-string terminator. Those inputs remain an explicit backend
+boundary: the toolkit refuses the change and retains the old raw/rendered
+model instead of inventing replacement glyphs or reading past the terminator.
+
+`label_number_oracle.py` /
+`native-label-number-oracle-20261018.json` execute **104 actual-native groups**
+through both typed wrappers, the flag setter, byte formatter, native text
+model/XL conversion and GetText. Allocation, Lua stack primitives and memory
+interfaces are explicit endpoints; formatting/counting/decoding run unchanged.
+Cases cover default/repeated toggles, argument kinds and arity, failed Label
+cast, NUL, grouping/punctuation/non-ASCII,511/512 count and384/385 grouped-digit
+boundaries, raw-buffer truncation, BOM and malformed sequences.
+`native-label-number-source-20261018.txt` records the wrapper/class/model and
+XL/Cry source. Original money, item/cooldown stack, proficiency point and
+character stat labels call this API; their scripts/assets remain unchanged.
+
+Fresh crate check and example build pass. **55 selected tests pass** across
+NumberOnly6, auto-clip6, scaled fitting8, drawable text3, rich text9, HUD6,
+constant cooldown7, captions6 and scale/clip4. New controls include the original
+CreateTwoLineMoneyWindow/Update and CreateItemIconButton/SetStack constructors,
+strict physical item-button picking/clicking, typed wrappers, raw/display
+distinction and native storage boundaries.
+
+Final aa-dev captures were inspected:
+`shots/aa-ui/native-number-labels-final-720-20261018.png`
+(1280x720/default0.85, **597.6-637.3 FPS**) and
+`shots/aa-ui/native-number-labels-final-1080-20261018.png`
+(1920x1080/1.0, **473.1-602.4 FPS**). They show native currency123,456,789 /12 /34,
+item stack12,345 and plain/grouped label controls. The original stack's shadow
+and lower-right alignment were checked against `reference/ingame/bag/real.png`;
+that reference does not contain a large grouped count. A light diagnostic
+backing makes the original black currency text readable. Initial dark-backing
+diagnostics are not the final visual evidence. Both final runs report zero
+script errors/WARN/ERROR and self-close (PIDs46068/13800); the copied executable
+was removed. No app API, cooldown producer or native selector activation changes.

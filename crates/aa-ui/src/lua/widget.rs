@@ -9,6 +9,8 @@ use crate::tree::{
     WidgetType,
 };
 
+mod number;
+
 /// Parse `AddAnchor(point, [relativeTo], [relativePoint], [x, y])` (after `self`).
 pub(crate) fn parse_anchor(lua: &Lua, id: Id, a: &Args) -> Option<Anchor> {
     let point = Point::parse(&a.s(1)?)?;
@@ -1013,9 +1015,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetText",
         method(lua, |lua, id, a| {
+            let label = ui(lua).tree.widget(id).is_some_and(|w| w.label.is_some());
+            if label && !matches!(a.v(1), Value::String(_)) {
+                return none();
+            }
             super::auto_clip::geometry(&mut ui(lua), id);
-            let s = a.s(1).unwrap_or_default();
-            {
+            let s = if label {
+                let Value::String(raw) = a.v(1) else { unreachable!() };
+                let mut u = ui(lua);
+                let w = u.tree.widget_mut(id).unwrap();
+                number::set(
+                    w.label.as_mut().unwrap(),
+                    &w.text.as_ref().unwrap().text,
+                    &raw.as_bytes(),
+                )
+            } else {
+                Some(a.s(1).unwrap_or_default())
+            };
+            if let Some(s) = s {
                 let mut u = ui(lua);
                 // The same text again (the HUD's per-frame updates) changes nothing.
                 let same = u
@@ -1033,6 +1050,21 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             }
             auto_size(lua, id);
             super::auto_clip::refresh(&mut ui(lua), id);
+            none()
+        })?,
+    )?;
+    def(
+        "SetNumberOnly",
+        method(lua, |lua, id, a| {
+            let on = match a.v(1) {
+                Value::Boolean(v) => v,
+                Value::Integer(v) => v != 0,
+                Value::Number(v) => v != 0.,
+                _ => return none(),
+            };
+            if let Some(data) = ui(lua).tree.widget_mut(id).and_then(|w| w.label.as_mut()) {
+                data.number_only = on;
+            }
             none()
         })?,
     )?;
@@ -1056,6 +1088,11 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "GetText",
         method(lua, |lua, id, _| {
+            if let Some(raw) = ui(lua).tree.widget(id).and_then(|w| w.label.as_ref())
+                .and_then(|data| data.raw.as_ref()).cloned()
+            {
+                return ret(lua, lua.create_string(raw)?);
+            }
             let s = ui(lua)
                 .tree
                 .get(id)
@@ -1227,7 +1264,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "UseDynamicContentState",
         "SetMsgToParent",
         "SetMaxTextLength",
-        "SetNumberOnly",
         "UseConsistentTextColor",
         "InheritAnimationData",
     ] {
