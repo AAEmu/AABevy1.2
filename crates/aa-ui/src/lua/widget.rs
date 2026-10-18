@@ -249,6 +249,15 @@ pub(crate) fn create_child(
     let t = new_object_table(lua, id)?;
     match ty.to_ascii_lowercase().as_str() {
         "slot" => super::slot::init(lua, id, &t)?,
+        "cooldownconstantbutton" => {
+            if let Some(button) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
+                // Native initializer 39284865..86: invalid skill ID 0, ready flag false.
+                button.cooldown_skill = Some(super::slot::ConstantSkillCooldown {
+                    skill_type: 0,
+                    ready_notified: false,
+                });
+            }
+        }
         "message" => {
             if let Some(w) = ui(lua).tree.widget_mut(id) {
                 w.message = Some(Default::default());
@@ -1253,6 +1262,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             | "cooldowninventorybutton"
     ) {
         super::slot::cooldown_button_methods(lua, &m)?;
+    }
+    if ty == "cooldownconstantbutton" {
+        super::slot::constant_cooldown_methods(lua, &m)?;
     }
     if ty == "message" {
         super::chat::message_methods(lua, &m)?;

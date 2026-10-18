@@ -499,6 +499,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         crate::prof::handler_done(t0, || format!("{h} {}", ui(lua).tree.get(id).name));
     }
     statusbar::tick(lua, dt_ms);
+    slot::update_constant_cooldowns(lua);
     widget::remove_hidden(lua);
 }
 
