@@ -42,7 +42,7 @@ pub struct WaterParams {
     pub foam: Vec4,
     pub foam_col: Vec4,
     pub env_lit: Vec4,
-    /// Authored mesh UVs, native NO_FLOW, optional diagnostic time (-1 live), diagnostic normal output.
+    /// Authored mesh UVs, native NO_FLOW, optional diagnostic time (-1 live), diagnostic output (1 normal /2 alpha).
     pub motion: Vec4,
 }
 
@@ -81,6 +81,10 @@ pub struct WaterMaterial {
 }
 
 impl Material for WaterMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://aa_world/water.wesl".into()
+    }
+
     fn fragment_shader() -> ShaderRef {
         "embedded://aa_world/water.wesl".into()
     }

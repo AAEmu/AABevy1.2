@@ -48,10 +48,44 @@ pub(super) fn river(w: &Water) -> Option<([Vec3; 5], [Vec2; 5])> {
     uvs.iter().all(|uv| uv.is_finite()).then_some((points, uvs))
 }
 
+/// _LoadWaterVolume byte40 bits2/4 -> CreateRiver begin/end alpha booleans.
+/// Both bank vertices fade together; the native centre remains fully opaque.
+pub(super) fn river_alpha(kind: u32) -> [f32; 5] {
+    let begin = if kind & 0x200 != 0 { 0.0 } else { 1.0 };
+    let end = if kind & 0x400 != 0 { 0.0 } else { 1.0 };
+    [begin, begin, end, end, 1.0]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn native_endpoint_flags_preserve_pair_order_and_centre() {
+        assert_eq!(river_alpha(3), [1.0; 5]);
+        assert_eq!(river_alpha(0x203), [0.0, 0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(river_alpha(0x403), [1.0, 1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(river_alpha(0x603), [0.0, 0.0, 0.0, 0.0, 1.0]);
+        if !crate::pak_available() {
+            return;
+        }
+        let objects = crate::placement::load_cell_objects("main_world", 9, 12);
+        for (flag, expected) in [
+            (0x203, [0.0, 0.0, 1.0, 1.0, 1.0]),
+            (0x403, [1.0, 1.0, 0.0, 0.0, 1.0]),
+        ] {
+            let w = objects.water.iter().find(|w| w.kind == flag).unwrap();
+            let mesh = super::super::water_mesh(std::slice::from_ref(w)).unwrap();
+            let Some(VertexAttributeValues::Float32x4(colors)) =
+                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+            else {
+                panic!()
+            };
+            assert_eq!(colors.iter().map(|c| c[3]).collect::<Vec<_>>(), expected);
+            assert!(colors.iter().all(|c| c[..3] == [1.0; 3]));
+        }
+    }
 
     #[test]
     fn original_river_ranges_five_vertex_fan_and_independent_area_scales() {

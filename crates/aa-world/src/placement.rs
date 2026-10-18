@@ -233,9 +233,15 @@ pub fn parse_water(b: &[u8]) -> Option<Water> {
             && p.z > bbox[2] - 16.0
             && p.z < bbox[5] + 16.0
     };
+    // Native 301F6AB0 keeps render and physical outlines as separate counted arrays.
+    let count=u32_at(b,103) as usize;
+    let physics=u32_at(b,115) as usize;
+    let end=119usize.checked_add(count.checked_mul(12)?)?;
+    let record_end=end.checked_add(physics.checked_mul(12)?)?;
+    if count<3 || record_end>b.len() {return None}
     let mut points: Vec<Vec3> = Vec::new();
     let mut at = 119;
-    while at + 12 <= b.len() {
+    while at + 12 <= end {
         let p = Vec3::new(f32_at(b, at), f32_at(b, at + 4), f32_at(b, at + 8));
         if !ok(p) || points.first() == Some(&p) {
             break;
@@ -577,6 +583,25 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn water_render_outline_excludes_physics_and_checks_both_counts() {
+        let mut b=vec![0;119];
+        for (offset,value) in [(12,10.0_f32),(16,10.0),(20,10.0),(79,1.0),(83,-10.0)] {b[offset..offset+4].copy_from_slice(&value.to_le_bytes());}
+        b[39..43].copy_from_slice(&0x203u32.to_le_bytes());
+        b[103..107].copy_from_slice(&4u32.to_le_bytes());
+        b[115..119].copy_from_slice(&3u32.to_le_bytes());
+        let render=[[0.0_f32,0.0,10.0],[4.0,0.0,10.0],[0.0,8.0,10.0],[4.0,8.0,10.0]];
+        for p in render.into_iter().chain([[1.0,1.0,9.0],[3.0,1.0,9.0],[1.0,7.0,9.0]]) {b.extend(p.into_iter().flat_map(f32::to_le_bytes));}
+        let w=parse_water(&b).unwrap();
+        assert_eq!(w.points,render.map(Vec3::from));
+        assert_eq!(w.kind,0x203);
+        assert!(parse_water(&b[..b.len()-1]).is_none());
+        for offset in [103,115] {
+            let mut bad=b.clone();bad[offset..offset+4].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(parse_water(&bad).is_none());
+        }
+    }
 
     #[test]
     fn decal_packed_fields_and_row_major_basis_match_native_layout() {
