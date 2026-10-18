@@ -6254,8 +6254,8 @@ Tests cover every truncation, all eight exact bodies, DD04 batch plus following 
 actual/foreign/missing object gates, zero context, lifecycle and Session/plugin/WorldState.
 
 Other trial callbacks, invitations/seats/records/verdicts, ReloadUI replay and general trial
-getter state remain separate gaps. Native SummonJury additionally sends CS072; this
-receive-only slice intentionally does not implement that handshake or any jury choice.
+getter state remain separate gaps. Native SummonJury additionally sends CS072; the
+automatic reply follow-up below implements its bounded handshake without a jury choice.
 No timers, eligibility, automatic response or successful outcome is fabricated.
 
 
@@ -6468,3 +6468,42 @@ rendering needs the actual spatial query, not an ownership/proximity/protocol he
 Date3907e6e0 uses XlGetLocalTime -> xlcommon3301ca30 -> _localtime64_s, then category102
 key year_to_minute with decimal strings year/month/day/hour/minute. Invalid CRT date
 outputs and long locale truncation remain explicit formatter boundaries.
+
+
+### Genuine SummonJury automatic CS072 reply (2026-10-18)
+
+Native39080900 removes task11, calls3907f660 with the received trial, stores court/seat,
+sets its transient byte0 and immediately consumes it at39080931..46. It constructs
+opcode072/vtable399a1aa8 at39080952..65, constructor397ac160 copies trial/court/seat,
+then sends39186810. Serializer397b0e80 is exactly u32 trial+i32 court+i32 jury number.
+There is no user choice, nonzero-trial/range/level/court validation or duplicate suppression
+in this path. The final jury role flags update independently of sender success.
+Native raw u32 court bits from SC173 are copied to the signed wire field unchanged.
+
+ClientMsg::JurySummoned has those three exact fields. Session forwards each genuine
+TrialEvent::SummonJury unchanged, then sends the automatic response only in InWorld
+with nonzero selected persistent ID and matching actual selected character header.
+These are stronger app stale-session guards, not native jury eligibility rules. No public
+Lua choice/Command is added. Every genuine duplicate173 sends its own response;
+trial0 and all signed court/seat bit patterns remain valid raw inputs.
+
+JurySummonReplyRequested and JurySummonReplyRejected retain captured character ID and
+raw summon fields. Requested means an actual transport write only, never invitation
+acceptance, seating, verdict or authoritative ACK. Rejected also covers inactive/stale
+header/missing connection/failed write. The raw summon is still forwarded on all those
+paths. No receipt cache is changed by either local transport observation, no retry timer
+is introduced, and no server response is fabricated.
+
+The active lane CSJurySummonedPacket reader matches the12-byte schema, but its handler
+only logs the receipt and performs no seating/progress transition. This is an explicit
+server boundary; the client does not synthesize SC174 or advance trial state afterward.
+Tests cover full native/lane wire golden, real loopback duplicate writes, zero/raw extrema,
+actual header refusal/no bytes, missing/failed connections and raw event preservation.
+
+The executable jury_summon_reply_oracle.py records eight same/new-trial, duplicate and
+sender-return0/1 cases through original39080900+3907f660+397ac160. Only task removal,
+Lua dispatch and the sender are mocked. Final received roles are independent of sender
+return. A changed-context BeautyshopStatus callback precedes role assignment, while a
+same-trial existing defendant flag clears after the send (no intervening Lua callback).
+Future UI dispatch should preserve the callback-time pre-role view for that23c notice;
+local transport observations are not replacements for any native Lua callback.
