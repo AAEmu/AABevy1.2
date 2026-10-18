@@ -3433,3 +3433,59 @@ loader396bec80 uses SQL39a01eec `SELECT item_id, npc_id FROM item_summon_mates`,
 item keys and NPC values. Quote requires a present mapping and noninvalid NPC value.
 This closes the static eligibility lookup needed alongside impl11, actual bag/bank mate
 details and explicit pending slots; capture-drop NPC pet_item_id is a separate field.
+
+### Original active-pet UI contract audit (2026-10-18)
+
+The original `unitframe/pet.lua` and `hud/pet_action_bar/pet.lua` address one current
+`playerpet`, rather than an owned-pet roster. They create/show the frame on `SPAWN_PET`
+and hydrate it at load only when `X2Mate:IsPlayerPetExists()` is true. Native wrapper
+39069fa0 checks manager3933f5e0 for a current pet. Inventory summon items are a separate
+ownership source; do not turn the single `Mates::own` correlation into a fabricated list.
+The existing received spawn metadata plus uniquely correlated visible mate unit provide
+the current-pet identity. `UNIT_NAME_CHANGED(unitId)` refreshes the frame only when the
+ID matches `X2Unit:GetUnitId("playerpet")`.
+
+Native `PetState`3906a070 returns the strings `idle`, `passive`, `protective`, or
+`aggressive` from current mate+34 (indices0..3). It returns nil without a player/current
+mate, and while the player is attached to that same mate. Returning the wire state's
+numeric byte would violate the Lua contract. `CanDismiss`3906a560 returns false without
+a current mate; otherwise39357830 supplies a reason whose zero value permits dismissal.
+That helper rejects active casting slots with reason7. Its additional runtime virtual+8c
+predicate remains unidentified, so this audit does not replace it with a guessed health
+or death check. Original command buttons poll this predicate for their red overlay.
+
+`ShowChangeMateName` uses a target only to populate dialog text. Its callback invokes
+`X2Mate:SetMateName(newName)` without an ID. Wrapper39069860 resolves the current mate
+first, and39069970 sends that object's timeline at+14. Keep the existing explicit-TL
+network rename API, but choose that TL from the current owned mate at the original Lua
+boundary; received `UnitNameChanged` remains the name authority.
+
+`GetNumMountSkills`3906a9b0 returns current mate+ac, or0 when absent. `GetMountSkill`
+3906aa90 accepts a one-based displayed index, converts it to zero-based, and calls
+3933c340 for a context-dependent lookup; a missing mate/failed lookup returns nil.
+3933ad90 filters the ten stored mount-skill records through static mount/combat-skill
+records and attachment context. Therefore neither the raw ten-element length nor a
+combat-skill ID alone is a faithful displayed slot mapping. Helper3933b670 starts with
+the generic skill tooltip, adds `learned` as a BOOL from runtime pet level versus required
+skill level, `skillUsable` as numeric0/1, and the exact native typo `needdiver` as a BOOL.
+Original `SetPetBarSkillTooltip` sets `showReq` and `displayPetSkillLearnLevel` only when
+`learned == false`. Action widgets establish `ISLOT_PET_ACTION` using displayed slots.
+
+`GetAutoStartMountSkill`3906ab50 also maps the displayed index through3933ae60 before
+reading the raw record's byte+60 via3933a950. With a current pet its Lua result is BOOL.
+`PET_AUTO_SKILL_CHANGED` refreshes each non-driver button from that getter;
+`FAILED_TO_SET_PET_AUTO_SKILL` chooses mountable/nonmountable localized error text.
+The original widgets route actions through `ISLOT_PET_ACTION`; this audit has not proved
+a separate network auto-use command or its success authority. None is invented here.
+
+Stablehand Lua invokes the global `X2:GetTotalRepairsForPetItems()` and
+`X2:RepairPetItems()`, rather than X2Mate/X2Bag methods. Zero quote shows the need-pet
+notice; a positive quote opens the money confirmation and its OK invokes the request.
+The source-proven physical-item quote/pending/mapping contract above applies. Existing
+`MateCommand::ReviveItems` sends the contextual NPC request, and genuine reason58 item
+updates supply resurrection state. A local request outcome does not mean revival.
+
+This read-only audit adds no protocol/state API: current mate identity, explicit control
+requests, attachment events, authoritative rename, physical inventory details and pending
+slots already cover the proven boundaries. Natural summon/ride/service QA, exact action-slot
+automatic-use control, and the protected max-mate-level producer remain unresolved.
