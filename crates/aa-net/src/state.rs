@@ -423,6 +423,7 @@ pub struct WorldState {
     pub crimes: crate::crime::Crimes,
     pub bounties:crate::Bounties,
     pub rankings:crate::Rankings,
+    pub character_names:crate::CharacterNames,
     pub achievements: crate::achievement::Achievements,
     pub expeditions: crate::expedition::Expeditions,
     pub families: crate::family::Families,
@@ -477,6 +478,7 @@ impl WorldState {
         self.crimes.apply(e);
         self.bounties.apply(e);
         self.rankings.apply(e);
+        self.character_names.apply(e);
         self.achievements.apply(e);
         self.expeditions.apply(e);
         self.families.apply(e);
