@@ -501,6 +501,33 @@ Procedural/balance channels, sound scheduling, phoneme extraction/blending and
 camera paths are not played. Existing FSQ speech/viseme curves can play; this is not automatic
 voice-driven lip sync.
 
+### Authored sound metadata audit
+
+`FacialSequence::sounds` now preserves each original `SoundEntry` path, start offset in
+seconds, optional sentence text, word intervals and the raw serialized phoneme records.
+`sound_entries` remains available and counts modern plus legacy root-level entries. The
+native loader appends a legacy root `Sound`/`Sentence` after modern entries, at time zero;
+this ordering is retained. This follows the original 1.2 `CryAnimation.dll` sequence XML
+loader at `315827C0` and sentence serializer at `3159DBC0`, inspected directly in IDA.
+Native phonemes use comma-separated `start_ms:end_ms:phoneme` records; they are retained,
+not interpreted or synthesized. The bounded native decompilation and asset inventory are
+in `data/extract/aa-anim/voice/native.txt` and `audit.json`.
+
+The complete shipped catalog has **894 FSQs and 9 FXLs**. Only **7 FSQs** contain audio
+entries, all under `animations/nuian/male/machinima_facial/`, with start time zero. All seven
+have empty sentence text, empty words and no phoneme records. Their six distinct referenced
+`Game/Animations/el_02_*.wav` files are absent from the pak (one is referenced twice).
+The regular playable-character facial sequences have no authored audio linkage. Thus these
+assets do not provide automatic voice/phoneme lip sync. Existing explicit playback can
+already follow an external audio clock with `follow_body = false`, `paused = true` and
+`time = sound.start + audio_elapsed_seconds`; no redundant clock wrapper was added.
+The normal FSQ sampling still clamps spline endpoints and never invents mouth motion.
+
+Validation: `cargo test -p aa-anim --lib`: **59 passed, 1 ignored**. Regression tests check
+native modern/legacy ordering, negative offsets, sentence/word/phoneme preservation,
+non-finite offset rejection and the complete original catalog's seven empty sentences and
+absent WAV references. No rendering behavior changed in this metadata milestone.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/

@@ -8,6 +8,7 @@ mod bone;
 mod curve;
 mod remap;
 mod runtime;
+mod sound;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -18,6 +19,7 @@ use crate::{Error, Result};
 pub use curve::{Curve, Key};
 pub(crate) use runtime::prepare_face;
 pub use runtime::{FacialAnimator, FacialPlugin};
+pub use sound::{FacialSentence, SentenceWord, SoundEntry};
 
 #[derive(Clone, Debug, Default)]
 pub struct FacialSequence {
@@ -26,8 +28,10 @@ pub struct FacialSequence {
     pub channels: Vec<Channel>,
     /// Retained for callers playing the matching body animation.
     pub skeleton_animation: Option<String>,
-    /// Sound/phoneme entries need a voice playback clock; they are not synthesized here.
+    /// Number of sound entries, including the legacy root-level entry.
     pub sound_entries: usize,
+    /// Authored audio references and sentence data. No audio or phonemes are synthesized.
+    pub sounds: Vec<SoundEntry>,
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +79,7 @@ impl FacialSequence {
                 });
             }
         }
+        let sounds = sound::parse(root)?;
         Ok(Self {
             start,
             end,
@@ -84,7 +89,8 @@ impl FacialSequence {
                 .find(|n| n.has_tag_name("SkeletonAnimationEntry"))
                 .and_then(|n| n.attribute("AnimationName"))
                 .map(str::to_owned),
-            sound_entries: root.children().filter(|n| n.has_tag_name("SoundEntry")).count(),
+            sound_entries: sounds.len(),
+            sounds,
         })
     }
 
@@ -350,11 +356,23 @@ mod tests {
         }
         let pak = aa_pak::Pak::global();
         let mut counts = (0, 0);
+        let mut sounds = 0;
         for path in pak.names().filter(|p| p.ends_with(".fsq") || p.ends_with(".fxl")) {
             let bytes = pak.read(path).unwrap();
             let xml = std::str::from_utf8(&bytes).unwrap();
             if path.ends_with(".fsq") {
-                FacialSequence::parse(xml).unwrap_or_else(|e| panic!("{path}: {e}"));
+                let sequence = FacialSequence::parse(xml).unwrap_or_else(|e| panic!("{path}: {e}"));
+                assert_eq!(sequence.sound_entries, sequence.sounds.len());
+                for sound in &sequence.sounds {
+                    sounds += 1;
+                    assert!(path.contains("nuian/male/machinima_facial/"), "{path}");
+                    assert_eq!(sound.start, 0.0, "{path}");
+                    let sentence = sound.sentence.as_ref().expect(path);
+                    assert_eq!(sentence.text, "", "{path}");
+                    assert!(sentence.words.is_empty(), "{path}");
+                    assert!(sentence.phonemes.is_empty(), "{path}");
+                    assert!(!pak.exists(&sound.sound), "unexpected authored WAV: {}", sound.sound);
+                }
                 counts.0 += 1;
             } else {
                 ExpressionLibrary::parse(xml).unwrap_or_else(|e| panic!("{path}: {e}"));
@@ -362,6 +380,7 @@ mod tests {
             }
         }
         assert_eq!(counts, (894, 9));
+        assert_eq!(sounds, 7);
     }
 
     #[test]
