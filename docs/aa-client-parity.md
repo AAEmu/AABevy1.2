@@ -17,7 +17,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Environment | Native Bezier curves and 147-slot defaults/ranges, spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Area/relic overrides and legacy XML color migration, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored body-clock facial overlays/blinks for all eight playable local-player/preview heads and supported NPC heads, source-verified facial bone controllers, explicit received NPC body slots and rigid CDF bone attachments; creature and resolved-part CDF effects with visibility/unload lifetime; authored static UCC composition/native default, iris color and conservative alpha cutouts | Voice lip sync; appearance-change rebuilding, full-world selected remote facial and attachment QA, CDF entity bindings; further render reference checks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |
 | Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
-| Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; received skill/tag cooldown durations and preflight gates | Broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
+| Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; received skill/all-descriptor-tag cooldown durations and preflight gates; original equipment constant-button sweeps preserve item icons/actions | Native local cast cooldown/GCD producers and modifiers; broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions | Natural repair service routing/live repair and expansion, native premium repair payment, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original stablehand quote/confirmation over received Bag+Bank summon details; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
@@ -117,3 +117,15 @@ The visible world-select client remains the previous tested940a8c6 copy; this pa
 milestone is validated through its separate aa-dev example until the next main rebuild.
 The modified capture also confirms original green defense122 and regeneration18
 labels, both received buff icons and204-306 FPS without runtime errors.
+
+### Original equipment cooldown controls (2026-10-18)
+
+Original equipment buttons now observe received timers through a cooldown-only
+raw-skill hook, preserving their item icons and physical actions. All generic
+`tagged_skills` memberships participate in received cooldown selection/preflight,
+with global/tag/raw-ID native strict-greater tie order and unchanged zero totals.
+Full client199 passed/34 ignored, final HUD regression133 passed/21 ignored, and
+actual original equipment-screen probe1 passed/2.38s. Inspected active/ready aa-dev
+captures run188-268/405-417 FPS without runtime errors. Existing DB/cast-start
+estimates are explicitly retained as estimates; source-closed Fired/Stopped/GCD
+producer gates and skill-specific duration modifiers remain the next work.

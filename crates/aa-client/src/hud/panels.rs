@@ -128,7 +128,7 @@ pub fn now_ms(start: Instant) -> u64 {
     start.elapsed().as_millis() as u64
 }
 
-fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> SlotSnap {
+pub(in crate::hud) fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> SlotSnap {
     let info = game.and_then(|g| g.items.get(&template));
     SlotSnap {
         kind: "item",
@@ -153,7 +153,7 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
 
 impl SlotSnap {
     /// The slot of an item instance: what its tooltip reads of it besides the template.
-    fn with_instance(mut self, it: &aa_net::model::Item) -> SlotSnap {
+    pub(in crate::hud) fn with_instance(mut self, it: &aa_net::model::Item) -> SlotSnap {
         self.uid = it.id;
         if let aa_net::model::ItemDetail::Equip(d) = &it.detail {
             self.dur = Some(d.durability);
@@ -169,21 +169,11 @@ pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills
     // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
     // ignore it waits for it), whichever ends later; quantized to a quarter second: the end time of a
     // running cooldown must not jitter
-    let cooldown = info.and_then(|i| {
+    let cooldown = info.and_then(|_| {
         let skills = skills?;
-        let own = skills.cooldown_with_total(skill, i.tag, i.cooldown_ms)
-            .map(|(left, total)| (left, total.as_millis() as u32));
-        let global = (!i.ignore_gcd)
-            .then(|| {
-                let len = game?.skills.get(&skills.last_cast_skill)?.gcd_ms;
-                skills.gcd_left(len).map(|left| (left, len))
-            })
-            .flatten();
-        let (left, total) = match (own, global) {
-            (Some(a), Some(b)) => if b.0 > a.0 { b } else { a },
-            (a, b) => a.or(b)?,
-        };
-        let end = now_ms(start) + left.as_millis() as u64;
+        let (left, total) = super::cooldown::display_at(game?, skills, skill, Instant::now())?;
+        if left == 0 { return None; }
+        let end = now_ms(start) + u64::from(left);
         Some(((end + 125) / 250 * 250, total))
     });
     SlotSnap {
@@ -572,7 +562,7 @@ mod tests {
     fn skill_sweep_keeps_the_winning_received_duration_including_zero() {
         let mut game = GameData::default();
         game.skills.insert(7, super::super::data::SkillInfo {
-            tag: 9, cooldown_ms: 10_000, ignore_gcd: true, ..default()
+            tag: 9, tags: vec![9], cooldown_ms: 10_000, ignore_gcd: true, ..default()
         });
         let start = Instant::now();
         let mut skills = Skills::default();

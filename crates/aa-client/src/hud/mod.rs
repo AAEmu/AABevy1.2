@@ -41,6 +41,7 @@ mod cameras;
 mod cast;
 mod chat;
 mod combat;
+mod cooldown;
 mod crafting;
 mod data;
 mod dialog;
@@ -154,6 +155,9 @@ pub(crate) fn proficiency_fixture() { crafting::expert_fixture(); }
 
 #[allow(dead_code)]
 pub(crate) fn battlefield_fixture() { battlefield::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn cooldown_fixture() { cooldown::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;

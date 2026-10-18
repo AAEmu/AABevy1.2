@@ -1671,3 +1671,41 @@ The inspected modified capture
 (2.25%) and health regeneration18 in the original green modifier colors, alongside
 the two actual buff icons. It runs at204-306 FPS without runtime errors and its
 QA window closes after capture.
+
+### Received equipment cooldowns and complete skill tags (2026-10-18)
+
+The original `cooldownconstantbutton:SetSkill` now reads the app's
+`AAUI.SkillCooldown(rawSkillID)` hook. A missing descriptor returns no Lua values;
+a known descriptor without a local actor returns0/0. Learned ownership is not a
+descriptor lookup condition. The toolkit retains its native ready-once/active-per-tick
+callback behavior and f32 callback conversion; rebinding only changes the cooldown
+identity, leaving the item icon and physical click handler intact.
+
+Skill descriptors now retain every `SELECT skill_id, tag_id FROM tagged_skills` row,
+in SQL order including duplicates, matching395d15a0. Native3989a290 selection starts
+with global timing unless `ignore_global_cooldown`, then scans all descriptor tags
+and raw skill-ID rows. A candidate replaces the result only when its unsigned
+remaining milliseconds are strictly greater. The winner retains its own total,
+including zero; resets/expired entries do not become DB-duration receipts. Action
+slots and received preflight checks now use all these tags, including shared tags
+that differ from `skills.cooldown_tag_id`.
+
+Global timing remains the existing successful-cast/DB observation. Ordinary action
+slots separately retain the older own-cast estimate; constant equipment buttons do
+not turn that estimate into a received timer. The new source audit confirms more
+work is required: native start GCD depends on timing_id1 and attribute74, ordinary
+own cooldown inserts on Fired with toggle/timing/final-byte gates and skill-specific
+modifiers, and stopped casts can insert supplied received durations. These are open
+producer gaps, not completed native cast-manager parity. The lane's received-list
+emitter remains absent; no live cooldown receipt is claimed.
+
+Validation: full client199 passed/34 ignored in47.46s; the subsequent HUD-only
+regression after isolating the legacy estimate passes133/21 ignored in42.29s.
+Four focused timer/hook tests pass, and the actual original equipped-item screen
+probe passes1 test in2.38s. It verifies real items15875/26743, their use skills
+13419/20676, tag655/1004 sweeps, independent reset and unchanged icons/accessors.
+Inspected `equipment_cooldown` aa-dev captures in
+`shots/hud/sol61-equipment-cooldown/` show the two original equipment icons with
+active native-handler countdowns at188-268 FPS and unchanged ready icons at405-417
+FPS. Both QA processes self-close and contain no runtime errors. Shared build load
+differs between captures; these are behavior checks, not a performance comparison.
