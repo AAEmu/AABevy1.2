@@ -156,10 +156,10 @@ for each record:
 All table/count/block/tree reads are bounded by their container; malformed records
 fail atomically. A 64-level defensive stack limit rejects pathological mask chains.
 The supported slice imports brushes, vegetation, decals, roads and water through the
-existing renderers, plus supported compiled voxel base meshes and cell collision.
+existing renderers, plus supported compiled voxel base/projected diffuse meshes and cell collision.
 Voxel/distant-cloud records have exact boundaries; unknown-sized
 kinds still end their object block while retaining child trees. It does **not** render
-voxel projected detail/atlases or distant clouds, traverse portals for occlusion, apply area sky/light/fog
+voxel projected normal/specular detail/atlases or distant clouds, traverse portals for occlusion, apply area sky/light/fog
 flags or implement visarea light confinement.
 Repeated instances inside an authored area are preserved. Exterior `brush.dat` versus
 `object.dat` selection is unchanged, so their duplicate export is still selected once.
@@ -301,9 +301,9 @@ allocations. `CellStats::{voxels,voxels_colliding,voxel_triangles,voxels_unsuppo
 make skipped variants visible.
 
 Runtime volume meshing, missing/foreign-index proxies without explicit material IDs,
-multiple/deformed nodes, other compression formats and voxel projected detail/atlas rendering
+multiple/deformed nodes, other compression formats and voxel projected normal/specular detail/atlas rendering
 remain unsupported. Collision alone restores physical cave floors/walls;
-the later base-pass slice makes supported surfaces visible, while decal receivers
+the later base/diffuse slices make supported surfaces visible, while decal receivers
 remain separate work. Native point/area evidence also
 remains separate: `3017B3E0` uses min-inclusive/max-exclusive AABB tests followed by
 `3017B2F0`'s XY crossing test, while `3017BEF0` conditionally multiplies area ambient
@@ -418,9 +418,10 @@ All four runs exit zero without GPU errors and close their own windows. There is
 no matching native cave image under `reference/`; exact original geometry, packed
 colour math and on/off receiver alignment are the verified comparison boundaries.
 
-Projected `Terrain.Layer` diffuse/normal/gloss, native distance fading and projection
-ordering, volumetric mesh generation, lower LOD
-selection and custom/animated voxel materials remain unsupported. Portal/area
+The initial base-pass slice left projected `Terrain.Layer` open. The follow-up below
+adds its diffuse projection, native weights/fade and pass order; normal/gloss detail,
+volumetric mesh generation, lower LOD selection and custom/animated voxel materials
+remain unsupported. Portal/area
 receiver lighting and native atlas generation remain open; the base-pass rendering
 does not claim those features or complete original cave appearance.
 
@@ -471,8 +472,120 @@ zero voxel entities, collision cells/loading jobs and absence of all captured fo
 mesh IDs, two material IDs and two image IDs after moving the actual camera away;
 194-206 FPS after release. All runs close their own windows. No matching native
 reference image exists here: exact original geometry/cover mapping and numeric
-shader controls are the checked boundary, not complete terrain appearance. Native
-projected `Terrain.Layer` detail and its per-vertex fade remain the next slice.
+shader controls are the checked boundary, not complete terrain appearance. The
+separate projected-diffuse follow-up below adds the next native layer.
+
+**Native projected voxel diffuse layers.** Static original inputs also suffice for
+a bounded `Terrain.Layer` diffuse pass; the heightmap's existing 16-entry array path
+is unchanged. `3019FFE0` / `300DF410` use `COLORS.g &0x7f` cell surface indices,
+not the physics palette IDs. The cell XML has up to 32 entries. Native palette
+resolution matches the first case-insensitive `Name`; duplicate names do not
+authorize another entry. The supported slice requires that exact named cell entry
+in the voxel's local palette. Unknown-name fallback remains declined for rendering. Original compiled meshes
+overlap their serialized Z boxes by up to .46 m in this neighbour fixture; the
+resource guard measures actual geometry extent and does not clip/reject that
+source-authored overlap (`lights/voxel-detail-bounds.log`).
+`301227A0` / `300C9120` choose named X/XP, Y/YP and Z/ZP submaterials among the first
+six children, or the authored `ProjAxis` for a single material.
+
+Renderer `38205AE0` packs each normal component as `trunc(n*127.5+128)`; native
+index/vertex axis selection decodes around **127.5** and breaks ties X, then Y,
+then Z. The supported high-quality path keeps the original per-vertex binary
+surface/dominant-axis masks, one draw per supported surface/projection. Single
+materials use all three axis weights, not an invented slope threshold. Native
+index generation makes a superset of these draw lists; triangles with all three
+weights zero are omitted because their fragment alpha is identically zero.
+Translation-only volumes are supported, with a defensive 1024 m actual mesh extent
+bound; rotated/scaled detail is declined while its base/collision stay independent.
+
+`300C6260` stores only **DetailScaleX** at surface +76; the serialized DetailScaleY
+is not used by `300DC9B0`. Its signed projection is X `(Y,-Z)`, Y `(X,-Z)`, Z
+`(X,-Y)`, followed by the original diffuse texture's static TileU/V. Whole texture
+periods of the cell origin are removed in f64 before GPU sampling, preserving the
+world phase. Nonzero TexMod offset/rotation, animated/unknown modifiers, missing
+textures, non-`Terrain.Layer` shaders, one/two-child parent layouts, non-opaque/alpha-test
+variants and unknown palette names are declined. Original DDS dimensions and mip
+chains are retained and sampled as repeat, non-sRGB data; no atlas reconstruction,
+flat substitutes or invented texture colours are introduced.
+
+The original shader blends in gamma: `baseGamma = mix(coverGamma,
+pow(interpolatedBakedRGB,1/2.2), interpolatedBakedFlag)`, then
+`layerLinear = pow(saturate(baseGamma + (diffuseGamma-.5)*DetailTextureStrength),2.2)`.
+The authored linear material diffuse colour multiplies that layer. Native
+`TerrainLayerVS` multiplies the binary vertex mask by
+`1-min(distance/max(.001,limit),1)^4`; **after interpolation**, `TerrainLayerPS`
+takes `sqrt(saturate(weight))`. The original layer technique explicitly uses
+SrcAlpha/InvSrcAlpha and disables depth writes. Bevy's overlay uses the same
+receiver geometry with Equal depth and no raster displacement; its large CPU
+sort offsets preserve ascending surface/projection order between sky and deferred
+decals, and the specialization clears the coupled GPU depth bias. This keeps the
+existing PBR/fog/light integration, not the complete native terrain BRDF.
+
+The two distances are source-proved rather than shared with heightmap's existing
+1024 m approximation: cvar registration `3000978D` / `300097CE` loads **Z=128 m**,
+**XY=1024 m** from `3024E7AC` / `3024E75C`. Engine vtable `30263718` slots +1208 /
++1212 resolve to `30121AF0` / `30121B10`; their ratios are initialized to 1 by
+`30131190`. `3019FFE0` selects Z for single-material surfaces and XY for
+multi-projection ones. The supported path uses these native defaults; dynamic
+quality/view-distance ratios and the low-quality normal threshold remain open.
+Ignored exact-source notes: `lights/voxel-layer-{contract,params,build}.txt`,
+`voxel-detail-cvars.txt`, `voxel-normal-pack.txt`, plus original `terrain.cfx`.
+
+Each active cell retains at most **96 diffuse draws /32 MiB layer vertex+index
+bytes /32 MiB decoded diffuse texture bytes**, separate from the existing bounded
+base meshes. It shares materials by cover node/surface/projection and textures by
+path, uploads only textures actually referenced by accepted draws and drops the
+worker copies afterwards. There are no new threads, distant cell requests or
+per-frame geometry/material work. Cell unload removes all owned layer entities,
+meshes, materials and diffuse/cover images. `ObjectStats::voxel_layers` and
+`voxel_layers_unsupported` are additive; base mesh/triangle statistics keep their
+meaning. The `VoxelDetail` marker allows isolated on/off controls.
+
+**161 library tests pass**, nine existing ignored. Original fixtures verify cell
+surface 12's rock texture/material colour and `.2 * .15 = .03` UV scale, both
+native fade limits, per-vertex weights, the normal-pack tie asymmetry, signed
+matrices, exact original indices and exhaustion of the draw/byte budgets. They
+also reject rotated detail and test first-match duplicate/unknown palette names.
+`voxel_cover --layer-check` uses the original rock diffuse texel `(161,165,172)`,
+strength `.6`, authored material colour `(0.32503697,0.26735809,0.25084025)` and
+linear baked `(21,14,11)/255`. Its 96 m camera against the native 128 m limit
+checks zero, mixed and full surface masks, including interpolation of vertex fade
+before the square root. Independent CPU weights are `0`, `.34167242`, `.68317294`
+and alphas `0`, `.5845275`, `.82654274`. Inspected
+`shots/aa-world/voxel/native_layers_numeric.png` returns **`[81,66,59]`,
+`[69,55,50]`, `[63,50,46]` sRGB**, within one display value of the CPU controls;
+348-398 FPS. The zero-weight receiver stays intact.
+The cover-only regression remains byte-exact at `[17,18,6]`, `[59,49,41]`,
+`[81,66,59]` (`native_layers_cover_regression.png`, 342-359 FPS).
+
+Inspected `native_layers_exterior_on.png` / `_off.png` use the same original
+neighbour camera as the cover follow-up. `--detail-off` hides only projected
+diffuse layers; the cover/baked receiver meshes, collision, objects and lighting
+remain active. Four base meshes /3590 triangles now have **28 projected diffuse
+draws**, with zero unsupported layers, pending models or model failures. The on
+image restores the original rock/ground texture patterns over those surfaces;
+the off image shows the flat low-detail base. Final settled intervals are
+135-174 FPS on /152-168 FPS off, with no reliable delta between separate runs on
+the shared GPU. `native_layers_exterior_unload.png` verifies zero base/detail
+entities, collision cells/jobs, and absence of all **32 captured mesh IDs,
+18 material IDs and all captured cover/diffuse image IDs** after real camera
+movement; 251-260 FPS after release.
+
+`native_layers_cave_on.png` uses the original cave-floor camera from the base-pass
+fixture. Rock walls, ceiling and ground now have authored projected diffuse detail
+around the original bridge, ore cart and torch fixtures. Nine streamed base meshes
+/47347 triangles (seven interior plus nearby exterior slots) have **50 diffuse
+draws**, zero unsupported slots/layers and zero pending/failed models. The original
+floor remains `454.91745` m; final intervals are 71-81 FPS. No brightness, material,
+light or exposure value was tuned. All six final visual runs exit zero, produce no
+GPU errors and close their own windows. The last five focused voxel regressions
+pass after the native seam-overlap bound correction; the earlier full library
+suite is 161 passed /9 ignored, and all examples check. A matching native cave
+capture is still absent, so this does not claim full original appearance.
+
+Normal/detail-bump/specular/gloss maps, native AO/rim/environment accumulation,
+runtime atlas generation, deformation, further voxel LODs, clipped/procedural
+materials and area/portal receiver lighting remain explicit limits.
 
 Area flags are a separate unresolved rendering contract. Exact `30170860` maps
 header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`
@@ -522,7 +635,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, 119 B + 12 times the two counts at +103/+115 |
-| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD native baked-colour base and serialized collision supported; projected detail/atlases open |
+| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD native cover/baked base, projected diffuse and serialized collision supported; normal/specular detail/atlases open |
 | 14 | distant cloud, 79 B; skipped |
 
 Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
@@ -2261,8 +2374,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: native MRT normal/specular decal effects, voxel projected detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
-  Interior supported placements render/collide through the existing paths, including the supported baked-colour voxel base; voxel projected detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
+* Not rendered: native MRT normal/specular decal effects, voxel projected normal/specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
+  Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse; voxel normal/specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).

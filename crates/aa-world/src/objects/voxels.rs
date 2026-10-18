@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::placement::PlacedVoxel;
 
 mod cover;
+mod layers;
 mod material;
 pub use material::{VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelParams};
 
@@ -25,18 +26,29 @@ pub struct VoxelSurface {
     pub triangles: usize,
 }
 
+/// One native projected diffuse layer; separate visibility control from the base receiver.
+#[derive(Component)]
+pub struct VoxelDetail {
+    pub cell: (i32, i32),
+    pub slot: usize,
+    pub surface: u8,
+    pub axis: u8,
+}
+
 pub(crate) struct PreparedVoxel {
     mesh: Mesh,
     slot: usize,
     triangles: usize,
     distance: f32,
     cover: Option<cover::Node>,
+    layers: Vec<layers::Draw>,
 }
 
 #[derive(Default)]
 pub(crate) struct PreparedCell {
     meshes: Vec<PreparedVoxel>,
     covers: HashMap<cover::Node, Image>,
+    layers: layers::Layers,
     unsupported: usize,
 }
 
@@ -44,6 +56,9 @@ pub(crate) struct CellVoxels {
     pub entities: Vec<Entity>,
     pub triangles: usize,
     pub unsupported: usize,
+    pub base_count: usize,
+    pub layer_count: usize,
+    pub layers_unsupported: usize,
     meshes: Vec<Handle<Mesh>>,
     materials: Vec<Handle<VoxelMaterial>>,
     images: Vec<Handle<Image>>,
@@ -123,6 +138,9 @@ fn mesh(
 
 pub(crate) fn prepare_cell(world: &str, cell: (i32, i32), voxels: &[PlacedVoxel]) -> PreparedCell {
     let mut out = PreparedCell::default();
+    if !voxels.is_empty() {
+        out.layers = layers::Layers::load(world, cell);
+    }
     let (mut decoded, mut bytes) = (0usize, 0usize);
     // Read once on the bounded placement worker, only if a mesh actually needs cover.
     let mut cover_bytes = None;
@@ -136,7 +154,7 @@ pub(crate) fn prepare_cell(world: &str, cell: (i32, i32), voxels: &[PlacedVoxel]
             continue;
         }
         decoded += size.unwrap();
-        let Some(source) = voxel.compiled_base_mesh() else {
+        let Some((source, ids)) = voxel.compiled_surface_mesh() else {
             out.unsupported += 1;
             continue;
         };
@@ -168,7 +186,7 @@ pub(crate) fn prepare_cell(world: &str, cell: (i32, i32), voxels: &[PlacedVoxel]
         } else {
             None
         };
-        let Some(mesh) = mesh(voxel, source, cover) else {
+        let Some(mesh) = mesh(voxel, source.clone(), cover) else {
             out.unsupported += 1;
             continue;
         };
@@ -179,12 +197,14 @@ pub(crate) fn prepare_cell(world: &str, cell: (i32, i32), voxels: &[PlacedVoxel]
             continue;
         }
         bytes += size;
+        let layers = out.layers.prepare(voxel, &source, &ids, &mesh);
         out.meshes.push(PreparedVoxel {
             mesh,
             slot,
             triangles: indices / 3,
             distance: voxel.max_view_dist,
             cover,
+            layers,
         });
     }
     out
@@ -200,24 +220,83 @@ pub(crate) fn spawn_cell(
 ) -> CellVoxels {
     let mut material_by_cover = HashMap::new();
     let mut images = Vec::new();
-    let mut covers = prepared.covers;
+    let used_covers: std::collections::HashSet<_> =
+        prepared.meshes.iter().filter_map(|m| m.cover).collect();
+    let covers: HashMap<_, _> = prepared
+        .covers
+        .into_iter()
+        .filter(|(node, _)| used_covers.contains(node))
+        .map(|(node, image)| {
+            let image = cry.images.add(image);
+            images.push(image.clone());
+            (node, image)
+        })
+        .collect();
+    let mut layer_data = prepared.layers;
+    let used_textures: std::collections::HashSet<_> = prepared
+        .meshes
+        .iter()
+        .flat_map(|m| &m.layers)
+        .map(|layer| layer_data.definitions[&layer.key].texture.clone())
+        .collect();
+    layer_data
+        .textures
+        .retain(|path, _| used_textures.contains(path));
+    let textures: HashMap<_, _> = layer_data
+        .textures
+        .drain()
+        .map(|(path, image)| {
+            let image = cry.images.add(image);
+            images.push(image.clone());
+            (path, image)
+        })
+        .collect();
     for mesh in &prepared.meshes {
-        material_by_cover.entry(mesh.cover).or_insert_with(|| {
-            let cover = mesh.cover.map(|key| {
-                let image = cry.images.add(covers.remove(&key).unwrap());
-                images.push(image.clone());
-                image
+        material_by_cover
+            .entry((mesh.cover, None))
+            .or_insert_with(|| {
+                let cover = mesh.cover.map(|key| covers[&key].clone());
+                materials.add(VoxelMaterial {
+                    base: StandardMaterial {
+                        base_color: Color::WHITE,
+                        perceptual_roughness: 1.0,
+                        reflectance: 0.0,
+                        ..default()
+                    },
+                    extension: VoxelExtension::new(cover),
+                })
             });
-            materials.add(VoxelMaterial {
-                base: StandardMaterial {
-                    base_color: Color::WHITE,
-                    perceptual_roughness: 1.0,
-                    reflectance: 0.0,
-                    ..default()
-                },
-                extension: VoxelExtension::new(cover),
-            })
-        });
+        for layer in &mesh.layers {
+            material_by_cover
+                .entry((mesh.cover, Some(layer.key)))
+                .or_insert_with(|| {
+                    let definition = &layer_data.definitions[&layer.key];
+                    let mut extension =
+                        VoxelExtension::new(mesh.cover.map(|key| covers[&key].clone()));
+                    extension.diffuse = Some(textures[&definition.texture].clone());
+                    extension.params.flags.y = 1.0;
+                    extension.params.flags.z = definition.strength;
+                    extension.params.flags.w = definition.distance;
+                    extension.params.u = definition.u;
+                    extension.params.v = definition.v;
+                    extension.params.origin =
+                        crate::cry_to_bevy(crate::coords::cell_origin(cell.0, cell.1)).extend(0.0);
+                    extension.params.colour = definition.colour.extend(1.0);
+                    materials.add(VoxelMaterial {
+                        base: StandardMaterial {
+                            base_color: Color::WHITE,
+                            perceptual_roughness: 1.0,
+                            reflectance: 0.0,
+                            alpha_mode: AlphaMode::Blend,
+                            // Preserve native surface/projection pass order before deferred decals/world glass.
+                            depth_bias: -900_000.0
+                                + (layer.key.0 as f32 * 3.0 + layer.key.1 as f32) * 4096.0,
+                            ..default()
+                        },
+                        extension,
+                    })
+                });
+        }
     }
     let mut out = CellVoxels {
         entities: Vec::new(),
@@ -225,6 +304,9 @@ pub(crate) fn spawn_cell(
         materials: material_by_cover.values().cloned().collect(),
         images,
         unsupported: prepared.unsupported,
+        base_count: prepared.meshes.len(),
+        layer_count: layer_data.draws,
+        layers_unsupported: layer_data.unsupported,
         triangles: 0,
     };
     for prepared in prepared.meshes {
@@ -244,7 +326,7 @@ pub(crate) fn spawn_cell(
                         triangles: prepared.triangles,
                     },
                     Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material_by_cover[&prepared.cover].clone()),
+                    MeshMaterial3d(material_by_cover[&(prepared.cover, None)].clone()),
                     Transform::from_translation(crate::cry_to_bevy(crate::coords::cell_origin(
                         cell.0, cell.1,
                     ))),
@@ -258,6 +340,36 @@ pub(crate) fn spawn_cell(
         );
         out.meshes.push(mesh);
         out.triangles += prepared.triangles;
+        for layer in prepared.layers {
+            let mesh = cry.meshes.add(layer.mesh);
+            out.entities.push(
+                commands
+                    .spawn((
+                        Name::new("Native voxel projected diffuse layer"),
+                        VoxelDetail {
+                            cell,
+                            slot: prepared.slot,
+                            surface: layer.key.0,
+                            axis: layer.key.1,
+                        },
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(
+                            material_by_cover[&(prepared.cover, Some(layer.key))].clone(),
+                        ),
+                        Transform::from_translation(crate::cry_to_bevy(
+                            crate::coords::cell_origin(cell.0, cell.1),
+                        )),
+                        VisibilityRange {
+                            start_margin: 0.0..0.0,
+                            end_margin: view..view,
+                            use_aabb: true,
+                        },
+                        bevy::light::NotShadowCaster,
+                    ))
+                    .id(),
+            );
+            out.meshes.push(mesh);
+        }
     }
     out
 }
@@ -315,6 +427,11 @@ mod tests {
             (cell.meshes.len(), cell.unsupported, cell.covers.len()),
             (2, 0, 1)
         );
+        assert!(
+            cell.meshes.iter().all(|m| !m.layers.is_empty()),
+            "both native neighbour slots retain projected detail despite their compiled Z overlap"
+        );
+        assert_eq!(cell.layers.unsupported, 0);
         let cover = &cell.covers[&cover::Node {
             level: 4,
             x: 13,

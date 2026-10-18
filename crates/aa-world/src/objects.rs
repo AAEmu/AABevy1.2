@@ -269,6 +269,8 @@ pub struct ObjectStats {
     pub voxels: usize,
     pub voxel_triangles: usize,
     pub voxels_unsupported: usize,
+    pub voxel_layers: usize,
+    pub voxel_layers_unsupported: usize,
     /// Drawn parts of static `entities.xml` slots, also included in `entities`.
     pub entity_props: usize,
     /// Drawn parts of authored playing CGAs, also included in `entities`.
@@ -556,7 +558,9 @@ pub fn stream_objects(
     state.stats.water_cells = state.water.len();
     state.stats.roads = state.roads.values().map(Vec::len).sum();
     state.stats.decals = state.decals.values().map(Vec::len).sum();
-    state.stats.voxels = state.voxels.values().map(|v| v.entities.len()).sum();
+    state.stats.voxels = state.voxels.values().map(|v| v.base_count).sum();
+    state.stats.voxel_layers = state.voxels.values().map(|v| v.layer_count).sum();
+    state.stats.voxel_layers_unsupported = state.voxels.values().map(|v| v.layers_unsupported).sum();
     state.stats.voxel_triangles = state.voxels.values().map(|v| v.triangles).sum();
     state.stats.voxels_unsupported = state.voxels.values().map(|v| v.unsupported).sum();
     let Some(groups) = state.groups.clone() else { return };
