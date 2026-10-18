@@ -1,6 +1,7 @@
 //! Native flat and recursive listbox rows (3929fc40 / 392a10a0 / 392a22a0).
-//! Icon append overloads and state-texture variants remain pending.
+//! Source-backed row icons, branch images and authored state textures.
 
+mod paint;
 mod tree;
 
 use super::{Ui, call_handler, method, none, ret, ui};
@@ -18,6 +19,7 @@ struct Row {
     selected: bool,
     opened: bool,
     child: Vec<Row>,
+    icon: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,6 +41,11 @@ pub struct ListBoxData {
     opened_image: Option<Id>,
     closed_image: Option<Id>,
     epoch: u64,
+    separator_image: Option<Id>,
+    state_texture: Option<String>,
+    state_coords: [[f32; 4]; 3],
+    state_inset: [f32; 4],
+    icons_seen: bool,
 }
 
 impl Default for ListBoxData {
@@ -65,6 +72,11 @@ impl Default for ListBoxData {
             opened_image: None,
             closed_image: None,
             epoch: 0,
+            separator_image: None,
+            state_texture: None,
+            state_coords: [[0., 0., 1., 1.]; 3],
+            state_inset: [0.; 4],
+            icons_seen: false,
         }
     }
 }
@@ -248,14 +260,24 @@ fn set_top(lua: &Lua, id: Id, requested: i32) {
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     tree::methods(lua, m)?;
+    paint::methods(lua, m)?;
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
     def(
         "AppendItem",
         method(lua, |lua, id, a| {
-            // Native overloads: text/value and text/value/RGBA. Icon overloads remain pending.
-            if !matches!(a.len(), 3 | 7) || !a.is_num(2) {
+            // Native overloads: text/value[/icon] and text/value/RGBA[/icon].
+            if !matches!(a.len(), 3 | 4 | 7 | 8) || !a.is_num(2) {
                 return none();
             }
+            let icon = match a.len() {
+                4 | 8 => {
+                    let mlua::Value::String(path) = a.v(a.len() - 1) else {
+                        return none();
+                    };
+                    paint::icon(lua, Some(path.to_string_lossy()))
+                }
+                _ => None,
+            };
             let mlua::Value::String(text) = a.v(1) else {
                 return none();
             };
@@ -270,7 +292,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 .widget(id)
                 .and_then(|w| w.text.as_ref())
                 .map_or([1.0; 4], |t| t.style.color);
-            if a.len() == 7 {
+            if a.len() >= 7 {
+                if !(3..=6).all(|i| a.opt_f(i).is_some()) {
+                    return none();
+                }
                 color = [a.f(3), a.f(4), a.f(5), a.f(6)];
             }
             change(lua, id, |d| {
@@ -290,6 +315,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     selected: false,
                     opened: false,
                     child: Vec::new(),
+                    icon,
                 });
                 d.epoch = d.epoch.wrapping_add(1);
                 ((), true)
@@ -517,6 +543,7 @@ pub(crate) fn quads(
         return;
     }
     let first = out.len();
+    let mut icons_seen = d.icons_seen;
     let child_style = if d.child_style {
         u.tree.widget(id).and_then(|w| w.aux_style.clone())
     } else {
@@ -540,24 +567,20 @@ pub(crate) fn quads(
         } else {
             0
         };
-        let mut color = d.colors[state];
-        color[3] *= alpha;
-        if color[3] > 0.0 {
-            out.push(Quad {
-                tex: Tex::Atlas,
-                pos: [
-                    inner.x * scale,
-                    y * scale,
-                    (inner.x + inner.w) * scale,
-                    (y + height) * scale,
-                ],
-                uv: crate::render::white_uv(),
-                color,
-                corners: None,
-                uvs: None,
-                vcolors: None,
-            });
-        }
+        let depth_offset = 10.0 * depth as f32;
+        paint::state(
+            d,
+            state,
+            Rect {
+                x: inner.x + 5.0 + depth_offset,
+                y,
+                w: (inner.w - 10.0 - depth_offset).max(0.0),
+                h: height,
+            },
+            alpha,
+            scale,
+            out,
+        );
         let child = (depth > 0).then_some(child_style.as_ref()).flatten();
         let mut t = child.unwrap_or(text).clone();
         t.text = row.text.clone();
@@ -571,6 +594,26 @@ pub(crate) fn quads(
         } else {
             row.color
         };
+        // Native caches tree icons but paints branch templates instead. Flat icon placement
+        // uses TOPLEFT at the row midpoint (392a0ba7..0c0a), not the branch-image centering.
+        if !d.tree_mode
+            && let Some(path) = row.icon.as_ref()
+        {
+            paint::quad(
+                Tex::Image(path.clone()),
+                Rect {
+                    x: inner.x + 10.0 + 15.0 * depth as f32,
+                    y: y + height * 0.5,
+                    w: height,
+                    h: height,
+                },
+                [0., 0., 1., 1.],
+                [1., 1., 1., alpha],
+                scale,
+                out,
+            );
+            icons_seen = true;
+        }
         if d.tree_mode && !row.child.is_empty() {
             if let Some(image) = if row.opened {
                 d.opened_image
@@ -587,8 +630,7 @@ pub(crate) fn quads(
                 );
             }
         }
-        let depth_offset = 10.0 * depth as f32;
-        let indent = if d.tree_mode {
+        let indent = if d.tree_mode || icons_seen {
             d.indent.map_or(height, |n| n as f32)
         } else {
             0.0
@@ -607,15 +649,35 @@ pub(crate) fn quads(
             scale,
             out,
         );
+        if line > 0
+            && depth == 0
+            && let Some(image) = d.separator_image
+        {
+            let extent = u.tree.get(image);
+            let center = (
+                inner.x + 10.0 + extent.width * 0.5,
+                y + 2.0 - extent.height * 0.5,
+            );
+            tree::image(u, image, center, alpha, scale, out);
+        }
     }
+    if icons_seen
+        && !d.icons_seen
+        && let Some(d) = u.tree.widget_mut(id).and_then(|w| w.listbox.as_mut())
+    {
+        // Native remembers that an icon was painted, including across ClearItem. Only the
+        // first visible flat icon changes this; repeated paints do not write tree state.
+        d.icons_seen = true;
+    }
+    let bounds = u.tree.rect(id);
     crate::render::clip::quads(
         out,
         first,
         [
-            inner.x * scale,
-            inner.y * scale,
-            (inner.x + inner.w) * scale,
-            (inner.y + inner.h) * scale,
+            bounds.x * scale,
+            bounds.y * scale,
+            (bounds.x + bounds.w) * scale,
+            (bounds.y + bounds.h) * scale,
         ],
     );
 }

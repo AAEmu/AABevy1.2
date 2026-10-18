@@ -1032,7 +1032,7 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 
 Per native class: methods implemented natively (including deliberate no-ops such as sounds and
 animations), methods present as logging stubs, and the client's total. Generated with
-`cargo run -p aa-ui --example native_crafting_tree -- --coverage` (2026-10-17).
+`cargo run -p aa-ui --example native_listbox_art -- --coverage` (2026-10-17).
 
 | class | native | stub | listed |
 |---|---|---|---|
@@ -1059,7 +1059,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `gametooltip` | 81 | 26 | 107 |
 | `grid` | 94 | 54 | 148 |
 | `label` | 74 | 24 | 98 |
-| `listbox` | 104 | 34 | 138 |
+| `listbox` | 110 | 28 | 138 |
 | `listctrl` | 81 | 28 | 109 |
 | `listctrlitem` | 102 | 1940 | 2042 |
 | `message` | 92 | 27 | 119 |
@@ -1499,7 +1499,7 @@ does not establish pixel parity. Targeted font extracts are under
 (default false), and recursive `child` arrays. An invalid node stops its sibling array after
 the valid prefix, matching the native reader. A cyclic table or more than 64 nested arrays
 is rejected by a toolkit guard; authored trees are acyclic. `iconPath` remains an unsupported
-variant. `SetItemTrees` replaces storage and resets selection, hover and top, without a
+variant at this checkpoint; its bounded storage path is added below. `SetItemTrees` replaces storage and resets selection, hover and top, without a
 selection event. Appending any valid tree node enables tree mode, even a leaf-only tree;
 clearing storage returns to flat mode.
 
@@ -1559,3 +1559,60 @@ transactions. There is no supplied Folio reference capture, so shared window art
 were checked against the existing Options reference without claiming pixel parity. Font
 rendering is unchanged. Full `cargo test -p aa-ui` passed, including all 10 flat/tree listbox
 tests and both doctests; the existing font-metrics test remains ignored.
+
+## Native listbox state art, separators and bounded icons
+
+`SetListItemStateTexture`, its four insets and `SetDefaultItemCoord` /
+`SetOveredItemCoord` / `SetSelectedItemCoord` now render authored state images. Coordinate
+setters act only when a texture is loaded and store normalized UVs, matching `3929f820`
+and `392861d0`; replacing the texture preserves those UVs. A zero coordinate width or height
+extends to that texture edge. The row starts at left inset + 5 + 10 per depth and ends at
+right inset - 5; state insets then add left/top and subtract right/bottom. Selection takes
+precedence over enabled hover, with the existing parent-selection gate. The whole widget
+rectangle clips row artwork, preserving the expanded selection images authored with negative
+insets by original `components/scrolllistbox.alb`. There is no per-frame listbox tick.
+
+`CreateSeparatorImageDrawable` is now a list-owned template, painted for root-depth rows
+whose viewport index is greater than zero. Native `392a0e20`–`392a0e9f` anchors its BOTTOMLEFT
+at left inset + 10, top inset + viewport index times row height + 2. The anchor enum table
+`39ac6a5c` establishes BOTTOMLEFT = 2. Separators use authored coordinates, extent, color and
+alpha without generating per-row objects. `IsItemOpened(index)` is the native zero-based
+**root** query (`392a0440`), returning false for invalid indices; original Achievement count
+generation now uses it directly.
+
+The native `AppendItem` dispatcher (`39243ec0`–`392440cb`) also accepts
+`(text, value, iconPath)` and `(text, value, r, g, b, a, iconPath)`. Both overloads retain normal
+text/value/selection behavior. `SetItemTrees` reads the same optional `iconPath` field into
+each record. The native renderer (`392a0b42`–`392a0de8`) suppresses record icons in tree mode
+and instead paints branch templates. Flat icons use row-height square extents and TOPLEFT
+at left inset + 10, top inset + (viewport row + 0.5) times row height. The native icon-seen
+flag becomes persistent after a visible icon is painted, including across `ClearItem`; later
+rows and paints apply the extra row-height text inset (or authored tree indent).
+
+Icon support is deliberately bounded to direct **64×64 DDS sources**. Native cache creation
+`3921e161`–`3921e179` / `39223820` establishes 64×64 cells, and `3922439e` validates the
+renderer-returned image dimensions before copying pixels to the cache. Ordinary item DDS
+samples are 48×48; the renderer loader's `0x2000` flag and image-info conversion have not been
+recovered, so their cache path remains unsupported. It would be incorrect to equate cache-cell
+dimensions with a proven native source-file restriction. The fixture's real 64×64 control
+sheets (`ui/button/screenshot_mode.dds`, `ui/ranking/period.dds`) exercise the overloads and
+full-image UVs; they do not establish ordinary item-icon parity. Missing or unsupported icon
+sources leave the row text usable. Independent template animation/visibility, state-image
+fallback texture shape, line borders and listbox tooltips remain pending.
+
+`tests/listbox_art.rs` checks icon argument validation and placement, tree suppression,
+persistent indentation, normalized coordinate lifecycle, expanded-state clipping and
+selection/hover texture changes. `examples/fixtures/listbox_art.lua` constructs the original
+Achievement window and original `CreateSliderList` icon-forwarding wrapper. No widget handler
+is replaced. Its regression opens/collapses a real category, checks authored separators and
+count alignment, and exercises viewport scrolling.
+
+All 13 targeted tests passed with `cargo test -p aa-ui --test listbox --test listbox_tree`
+and `cargo test -p aa-ui --test listbox_art`. The original-window test advances its authored
+opening animation before comparing physical quads. `examples/native_listbox_art.rs` uses
+`aa_dev`; inspected `shots/aa-ui/native-listbox-art.png` shows the original Achievement
+summary, expanded General category, aligned counts/separators, textured selection and the
+two bounded control-sheet icons. It logged 390–414 FPS, zero script errors and closed itself.
+There is no supplied Achievement reference capture; shared window art/scale were compared
+with the existing Options reference, without claiming pixel parity. Font rendering is
+unchanged, and the fake Achievement data does not exercise server completion requests.

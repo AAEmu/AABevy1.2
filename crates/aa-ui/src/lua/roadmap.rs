@@ -62,7 +62,7 @@ use std::sync::Arc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use super::{method, new_object_table, none, ret, ui, value_id};
+use super::{method, none, ret, ui, value_id};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
 /// The map icon sheet the markers come from.
@@ -707,34 +707,6 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "ReloadAllInfo",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
-    }
-    Ok(())
-}
-
-/// Separator templates remain hidden until their row placement is implemented.
-/// Opened/closed tree templates are registered and painted by `listbox`.
-pub(crate) fn listbox_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
-    for name in ["CreateSeparatorImageDrawable"] {
-        m.raw_set(
-            name,
-            method(lua, |lua, id, a| {
-                let d = {
-                    let mut u = ui(lua);
-                    let d = u.tree.create_drawable(
-                        id,
-                        DrawKind::Image,
-                        "drawable:image",
-                        DrawLayer::parse(&a.s(2).unwrap_or_else(|| "artwork".into())),
-                    );
-                    if let Some(dr) = u.tree.drawable_mut(d) {
-                        dr.texture = a.s(1);
-                    }
-                    u.tree.get_mut(d).shown = false;
-                    d
-                };
-                ret(lua, new_object_table(lua, d)?)
-            })?,
-        )?;
     }
     Ok(())
 }
