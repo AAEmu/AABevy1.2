@@ -152,8 +152,9 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         let (unit, spawn) = current(mates, units, data.character_id)?;
         let game = data.game.get();
         let buffs = world.get_resource::<aa_net::state::Buffs>().map_or(&[][..], |b| b.of(unit.obj_id));
+        let native_buffs = world.get_resource::<aa_net::state::Buffs>().and_then(|b| b.native.of(unit.obj_id));
         let (max_hp, max_mp) = game
-            .and_then(|g| super::super::stats::unit_max(g, unit, buffs))
+            .and_then(|g| super::super::stats::mate_max(g, unit, native_buffs))
             .unwrap_or((unit.max_hp, unit.max_mp));
         let me = world.get_resource::<Player>()?.spawn.as_ref()?;
         let rider = units.get(me.obj_id).unwrap_or(&me.unit);

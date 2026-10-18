@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use super::formula::Formula;
+mod mate;
 
 /// `UnitFormulaOwnerType`.
 const OWNER_CHARACTER: u8 = 0;
@@ -95,6 +96,7 @@ pub struct StatTables {
     /// `item_grades.id` -> `stat_multiplier`.
     grade_stat: HashMap<i32, i32>,
     config: StatConfig,
+    mate: mate::Tables,
 }
 
 fn int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
@@ -204,6 +206,7 @@ impl StatTables {
                 t.items.insert(id, EquipStat { level: level.get(&id).copied().unwrap_or(0), mod_set: int(r, 1)? as u32, coverage: 0, holdable: Some(h) });
             }
         }
+        t.mate = mate::Tables::load(conn)?;
         Ok(t)
     }
 
@@ -371,6 +374,11 @@ pub fn unit_max(game: &super::data::GameData, unit: &aa_net::Unit, buffs: &[aa_n
         aa_net::model::UnitKind::Character { .. } => game.stats.player_max(level, &gear_of(&unit.equipment), &list),
         _ => None,
     }
+}
+
+/// Mate formulas require a known native stack view; a lane charge-derived list is not equivalent.
+pub(super) fn mate_max(game: &super::data::GameData, unit: &aa_net::Unit, buffs: Option<&[aa_net::state::BuffEntry]>) -> Option<(i32, i32)> {
+    mate::pools(game, unit, buffs)
 }
 
 /// The keys of an NPC's formula variables.
