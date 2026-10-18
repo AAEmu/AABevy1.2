@@ -5,6 +5,7 @@ use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod bounty;
 #[allow(dead_code)]
 pub(super) mod fixture;
 mod getters;
@@ -13,6 +14,7 @@ mod tasks;
 mod tests;
 
 enum UiEffect {
+    Bounty(aa_net::BountyNotice, aa_net::Bounties),
     Notice(TrialNotice, Trials),
     ForcedMethod(i32, Trials),
 }
@@ -28,6 +30,7 @@ pub(super) struct View {
     main_world: Option<bool>,
     ignore_jury: bool,
     pending: Vec<UiEffect>,
+    bounty: bounty::View,
 }
 impl View {
     fn current(&self) -> &Trials {
@@ -99,6 +102,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, _: MultiValue| getters::crime_data(lua, &s.borrow(), &t))?,
     )?;
     let s = state.clone();
+    let record_texts = texts.clone();
     api.raw_set(
         "GetCrimeRecordsByPage",
         lua.create_function(move |lua, args: MultiValue| {
@@ -108,7 +112,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             Ok(MultiValue::from_iter([Value::Table(getters::records(
                 lua,
                 &s.borrow(),
-                &texts,
+                &record_texts,
                 page,
             )?)]))
         })?,
@@ -143,7 +147,8 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             })?,
         )?;
     }
-    tasks::install(lua, state)
+    tasks::install(lua, state)?;
+    bounty::install(lua, state, texts)
 }
 
 fn emit(rt: Option<&UiRuntime>, state: &Shared, notice: TrialNotice) -> mlua::Result<()> {
@@ -221,6 +226,10 @@ fn emit(rt: Option<&UiRuntime>, state: &Shared, notice: TrialNotice) -> mlua::Re
 
 fn apply_ui(rt: &UiRuntime, state: &Shared, effect: UiEffect) {
     let (notice, forced, snapshot) = match effect {
+        UiEffect::Bounty(notice, snapshot) => {
+            bounty::apply_ui(rt, state, notice, snapshot);
+            return;
+        }
         UiEffect::Notice(notice, snapshot) => (Some(notice), None, snapshot),
         UiEffect::ForcedMethod(method, snapshot) => (None, Some(method), snapshot),
     };
@@ -316,9 +325,10 @@ fn dispatch_at(rt: Option<&UiRuntime>, state: &Shared, event: &Event, epoch: Opt
         }
     }
     tasks::received(rt.map(|rt| &rt.lua), state, event);
+    bounty::dispatch(rt, state, event);
 }
 fn flush(data: &mut HudData) -> Vec<aa_net::Command> {
-    std::mem::take(&mut data.trial.requests)
+    let mut commands: Vec<_> = std::mem::take(&mut data.trial.requests)
         .into_iter()
         .filter_map(|(owner, command)| {
             (data.trial.owner == Some(owner) && command.validate_received(&data.trial.received).is_ok()).then_some(aa_net::Command::Trial {
@@ -326,7 +336,9 @@ fn flush(data: &mut HudData) -> Vec<aa_net::Command> {
                 command,
             })
         })
-        .collect()
+        .collect();
+    commands.extend(bounty::flush(data));
+    commands
 }
 fn context(
     state: NonSend<HudBridge>,

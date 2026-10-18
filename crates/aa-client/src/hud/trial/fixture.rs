@@ -106,7 +106,32 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
     selected(Some(&rt), &state);
     rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--waiting") {
+    if args.iter().any(|arg| arg == "--bounty-empty") {
+        dispatch_at(
+            Some(&rt),
+            &state,
+            &Event::Bounty(aa_net::BountyEvent::List {
+                total: 0,
+                declared_count: 0,
+                rows: vec![],
+            }),
+            Some(1_700_000_000),
+        );
+    } else if args.iter().any(|arg| arg == "--bounty-setup") {
+        dispatch_at(
+            Some(&rt),
+            &state,
+            &Event::Bounty(aa_net::BountyEvent::SetPermitted {
+                kind: 50,
+                name: b"Received defendant".to_vec(),
+                money: 12345,
+                raw_allowed: 1,
+            }),
+            Some(1_700_000_000),
+        );
+        // Explicit standalone original function probe: SET_BOUNTY has no original listener.
+        rt.lua.load("ShowSetupBountyWindow(50,'Received defendant',12345)").exec()?;
+    } else if args.iter().any(|arg| arg == "--waiting") {
         send(Some(&rt), &state, E::SummonDefendant { trial_id: 9 });
         send(
             Some(&rt),

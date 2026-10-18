@@ -13,7 +13,14 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client milestone:263 passed/38 optional probes ignored in46.78s.
+Latest full-client milestone:268 passed/38 optional probes ignored in93.60s.
+Five bounty checks add native fifteen-column getter values, ordered complete-map
+callbacks, actual actor name/local flags, typed captured controls and the original
+empty bulletin/standalone setup button. The nonempty original bulletin still
+fails on undefined original Lua globals; its provider audit and the absent
+SET_BOUNTY-to-setup listener remain explicit gaps. No bounty payment is inferred.
+Three bounty/world-list captures are inspected without warnings/errors; the
+playable alias now includes the bounty adapter (see aa-client-bounty.md).
 All six trial HUD checks pass, including original physical Task6/7/8, records,
 verdict and waiting controls, deferred visual admission, captured identities,
 native callback snapshots and original time labels. Seven trial/world-list
@@ -78,7 +85,7 @@ parity is unfinished.
 
 ## Active ownership
 
-* Root: `aa-client`, original Folio browsing and explicit received NPC body slots/rigid attachments passed original-stage, physical-input and inspected visual checks; crafting/proficiency actions and pets/transport next. Repair/notifier, received auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, received cooldown and original breath bar milestones passed. Key settings, mailbox/group-loot/trade, friends and native combat-display milestones landed.
+* Root: `aa-client`, original trial tasks/controls and bounty received adapters; ranking HUD integration is next over executed native contracts and the actual static catalog. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
 * Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
 * UI agent: `aa-ui`, native listbox hierarchy/art/tooltips for original crafting/achievement, including visible/animated templates and white/grey state fallbacks; native48px icon rejection audited. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed. Read-only native repair API audit supports root's next integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.

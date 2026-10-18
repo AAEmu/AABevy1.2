@@ -12,7 +12,7 @@ pub(super) fn ready(received: &Trials) -> bool {
         && received.history.is_some()
 }
 
-fn faction(lua: &Lua, data: &super::super::api::HudData, id: u32) -> mlua::Result<mlua::LuaString> {
+pub(super) fn faction(lua: &Lua, data: &super::super::api::HudData, id: u32) -> mlua::Result<mlua::LuaString> {
     if id < 100 {
         return lua.create_string("");
     }
@@ -28,27 +28,31 @@ fn faction(lua: &Lua, data: &super::super::api::HudData, id: u32) -> mlua::Resul
     )
 }
 
+pub(super) fn race(lua: &Lua, texts: &UiTexts, id: u8) -> mlua::Result<mlua::LuaString> {
+    let races = [
+        "none",
+        "nuian",
+        "fairy",
+        "dwarf",
+        "elf",
+        "hariharan",
+        "ferre",
+        "returned",
+        "warborn",
+    ];
+    let value = races.get(usize::from(id)).map_or("invalid char_race", |race| {
+        texts.get(&(47, (*race).into())).map_or("", String::as_str)
+    });
+    text(lua, value.as_bytes())
+}
+
 pub(super) fn crime_data(lua: &Lua, data: &super::super::api::HudData, texts: &UiTexts) -> mlua::Result<Table> {
     let received = data.trial.current();
     let out = lua.create_table()?;
     out.raw_set("isJury", received.is_jury)?;
     if let Some(defendant) = &received.defendant {
         out.raw_set("defendant", text(lua, &defendant.name)?)?;
-        let races = [
-            "none",
-            "nuian",
-            "fairy",
-            "dwarf",
-            "elf",
-            "hariharan",
-            "ferre",
-            "returned",
-            "warborn",
-        ];
-        let race = races.get(usize::from(defendant.race)).map_or("invalid char_race", |race| {
-            texts.get(&(47, (*race).into())).map_or("", String::as_str)
-        });
-        out.raw_set("race", text(lua, race.as_bytes())?)?;
+        out.raw_set("race", race(lua, texts, defendant.race)?)?;
         out.raw_set("faction", faction(lua, data, defendant.faction_id)?)?;
     }
     if let Some(counts) = received.crime_kind_counts {
