@@ -156,7 +156,8 @@ for each record:
 All table/count/block/tree reads are bounded by their container; malformed records
 fail atomically. A 64-level defensive stack limit rejects pathological mask chains.
 The supported slice imports brushes, vegetation, decals, roads and water through the
-existing renderers. Voxel/distant-cloud records have exact skip boundaries; unknown-sized
+existing renderers, plus supported compiled voxel proxies through cell collision.
+Voxel/distant-cloud records have exact boundaries; unknown-sized
 kinds still end their object block while retaining child trees. It does **not** render
 voxel surfaces or distant clouds, traverse portals for occlusion, apply area sky/light/fog
 flags or implement visarea light confinement.
@@ -211,8 +212,8 @@ blocks after the following native boundaries were recovered:
   `0x20`, volume `u16[32768]` +32, surface names `char[32][64]` +65568, colours +67616.
   The object matrix is at **198727**, 48 bytes. With compiled data present, `3019D570`
   reads `u32 blockCount`, then repeated `u32 byteCount; bytes[byteCount]`;
-  `30194B70` confirms total byte length `4 + sum(4+byteCount)`. The parser skips these
-  buffers without decompressing, copying, retaining or uploading them.
+  `30194B70` confirms total byte length `4 + sum(4+byteCount)`. The parser retains
+  only the first compiled LOD for collision; later LODs are consumed without copies.
 * `301F6AB0` is `_LoadWaterVolume`: **119 fixed bytes**, then two float3 arrays whose
   counts are at +103/+115. Even its disabled branch advances both counts. The old
   whole-object-block assumption lost later records; the existing water parser now
@@ -250,10 +251,90 @@ the first surveyed compiled blob is a length-prefixed zlib stream containing a v
 The original `voxterrain.cfx` samples generated diffuse/normal atlases with per-atlas
 range restoration. The CGF also contains `COLORS2` and `VERT_MATS` streams, which
 `aa-cry::Model` currently does not retain. Native palette-to-atlas generation,
-surface blending, collision and render flags need their own supported path; drawing
+surface blending and render flags need their own supported path; drawing
 the mesh with guessed vertex colours, terrain UVs or a generic rock material is not
 implemented. Read-only audit outputs are under ignored `lights/visarea-*` and
 `lights/voxel-*`; the original shader is extracted under ignored `voxel/`.
+
+**Native compiled voxel collision.** `placement/voxels.rs` retains the cell-local
+matrix, 32 surface names and first compiled memory block; `collide/voxels.rs` adds
+its serialized triangles to the existing structure soup/grid. Native `301A0790`
+(`CVoxelMesh::MakeRenderMeshsFromMemBlocks`) physicalizes the first LOD through
+`3019BFA0`, using `301A0D30` decompression when the memory block does not start with
+`CryTek`. The supported path accepts raw CGF or the surveyed zlib stream prefixed by
+its decoded length, one identity `Merged` static node, and one serialized triangle proxy
+with explicit per-face palette IDs. Native bit `0x80` is not a physics-disable bit:
+the loader's vtable +344 call reaches `30194220`, which sets byte +448; the audited
+physicalization path does not gate on that byte. No such guessed exclusion is used.
+
+The first original (20,8) voxel's CGF has 2,901 vertices / 5,642 triangles. Every
+serialized proxy triangle's material matches native `3019BFA0`'s majority rule on
+the **first byte of the four-byte `VERT_MATS` stream (type 11)**: choose vertex 1
+when vertices 1 and 2 agree and differ from vertex 0, otherwise vertex 0. The proxy
+reorders triangle indices; it is not replaced with the render mesh. Palette counts
+are 5,262 / 362 / 18 for IDs 0 / 1 / 2. `COLORS2.r` is zero in this sample and is
+not the native physics material selector.
+
+Native `30196930` resolves local palette names case-insensitively against the cell's
+32 surface entries, falling back to its first entry with a material, otherwise entry
+zero. `300C66F0` maps authored capital `ProjAxis` X/Y/Z to 1/2/3. `301227A0` assigns
+the first six material children projection IDs by X/XP, Y/YP, Z/ZP, XN, YN, ZN name;
+`300C9120` selects the matching child (or root when fewer than three children).
+Physicalization passes the entry's default projection axis, not the triangle normal.
+Thus the sample rock's authored Z projection resolves to `mat_dirt` even on its wall;
+no material or normal-based tuning is applied. Empty local slots remain absent;
+unknown physical surface names use the existing default surface table.
+
+Cell origin is applied once, then the serialized matrix; reflected transforms flip
+winding. Proxy triangles participate in ground, capsule/camera and structure rays
+through the same cell/grid lifecycle as brushes. Parsing retains at most 128 slots
+and 16 MiB of first-LOD compressed bytes per placement file; exterior/interior data
+can each contribute that bound. Individual decoded CGFs are limited to 16 MiB / 64
+chunks / 65,536 vertices per mesh/stream/proxy / one million mesh indices / 32 subsets.
+Collision attempts at most 64 MiB decoded bytes and one million contributed voxel triangles
+per cell, one slot at a time on the existing shared cell worker. A conservative XY
+grid-reference estimate caps added voxel index storage at 8,388,608 IDs (32 MiB);
+an entire slot is rejected before insertion if it exceeds the remaining budget.
+Exact decoded size, zlib checksum/end/trailing bytes, proxy indices/material IDs and finite transforms
+are checked. There are no added threads, per-frame voxel scans or world-wide startup
+allocations. `CellStats::{voxels,voxels_colliding,voxel_triangles,voxels_unsupported}`
+make skipped variants visible.
+
+Runtime volume meshing, missing/foreign-index proxies without explicit material IDs,
+multiple/deformed nodes, other compression formats and voxel surface/atlas rendering
+remain unsupported. This restores physical cave floors/walls; it does not make
+their surfaces visible or create decal receivers. Native point/area evidence also
+remains separate: `3017B3E0` uses min-inclusive/max-exclusive AABB tests followed by
+`3017B2F0`'s XY crossing test, while `3017BEF0` conditionally multiplies area ambient
+by native sky colour or the renderer HDR multiplier. Bevy light `RenderLayers`
+filter camera clusters/shadow passes, not each receiver's polygon/portal membership;
+no camera-global sky, fog or ambient approximation has been substituted.
+
+Collision QA: **154 library tests pass**, nine existing ignored, and all examples
+check. Compressed-length/checksum/truncation/trailing-byte regressions, malformed
+CGF/proxy count/transform cases (including an extreme-scale grid-budget regression),
+actual CGF material-majority verification and authored projection-name/fallback tests
+pass. Original cell (20,8) contributes seven supported
+slots / **45,413 voxel triangles**, no unsupported slots. Three native proxy triangle
+centroid/normal probes hit their original floors/wall within 0.3 mm; the floor at
+Cry `(21354.6667,9055.3333,454.91738)` also resolves through `ground_below` and reports
+`mat_dirt`. The fixed cell origin is `(20480,8192,0)` and first object translation is
+`(832,832,434.29898)`, with explicit tests against accidental double addition.
+
+`voxel_collision` uses `aa_dev` and draws only the real first proxy, with explicitly
+diagnostic colours/edges and gold hit markers. Inspected 1920x1080
+`shots/aa-world/voxel/native_proxy.png` logs **279-396 FPS** in the final rerun
+(earlier 382-437 FPS, shared GPU); this is a diagnostic mesh
+fixture, not full-world rendering performance or a claim of original surface parity.
+Its complete cell collision builds in 488/457 ms in the final two runs, 883,049
+structure/prop triangles total and 38,549,190 bytes (vegetation stays instanced).
+`--unload-check` moves the actual camera outside the authored world, follows it with
+the existing release path, and asserts zero cells, pending jobs, triangles, cell bytes
+and diagnostic entities; the prior floor structure ray becomes absent. Inspected
+`native_proxy_unload.png` confirms that state, 431-455 FPS after unload. Both runs
+exit zero and close their own windows. No matching native cave reference capture is
+available under `reference/`; serialized geometry/numeric ray oracles are the native
+comparison for this collision-only slice.
 
 Area flags are a separate unresolved rendering contract. Exact `30170860` maps
 header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`
@@ -303,7 +384,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, 119 B + 12 times the two counts at +103/+115 |
-| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; skipped |
+| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD serialized collision supported, surface rendering open |
 | 14 | distant cloud, 79 B; skipped |
 
 Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
@@ -1738,7 +1819,7 @@ file; none of the 3826 models fails to parse. `CollisionConfig::visible_fallback
 (`aa_cry::physics::collision_mesh(bytes, true)`); off by default. The physics triangles of all distinct models together are 1.1 M.
 
 **Build.** Per cell, on the `aa_cry::workers` threads (`WorldCollision::request`): `brush.dat` + `statobjs.dat` (else the `object.dat` octree, as
-`load_cell_objects`), plus the interior `visareas.dat` brushes. Each distinct model's proxy is loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
+`load_cell_objects`), plus the interior `visareas.dat` brushes and supported first-LOD voxel proxies. Each distinct model's proxy is loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
 tens of MB), the brush matrix and the cell origin applied (mirrored matrices flip the winding), the triangles split into structures and props
 and each indexed by an 8 m grid over XY (`collide/soup.rs`: CSR rows of triangle ids, big triangles only in the cells they touch, ground
 candidates first in every row). Vegetation stays instanced: `collide/instances.rs` shares model-space triangles, keeps each placement in 24 bytes,

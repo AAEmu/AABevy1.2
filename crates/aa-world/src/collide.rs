@@ -29,6 +29,8 @@
 //! * Vegetation whose model has physics: tree trunks, boulders, big plants (`vegetation.dat`, the sector files and
 //!   the octree). Sub-materials that the physics lets through (`no_collide` surface types: canopy, leaves, grass; the
 //!   `nocollide` sub-materials) are left out, so only the trunks and rocks remain.
+//! * Supported type-6 voxels' first compiled LOD: the original serialized triangle proxy and local surface palette,
+//!   transformed from cell-local space. These cave floors/walls count as structures. Runtime voxel meshing is unsupported.
 //!
 //! Brushes are split by size: [`Mask::STRUCTURES`] (houses, walls, rocks, bridges, ...) and [`Mask::PROPS`]
 //! (everything whose bounding box is below [`CollisionConfig::prop_volume`]: barrels, fences, lamp posts).
@@ -60,6 +62,7 @@ mod geom;
 mod instances;
 mod soup;
 mod surface;
+mod voxels;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -216,6 +219,11 @@ pub struct CellStats {
     pub models: usize,
     pub structure_triangles: usize,
     pub prop_triangles: usize,
+    /// Native compiled voxel slots / supported slots / contributed proxy triangles.
+    pub voxels: usize,
+    pub voxels_colliding: usize,
+    pub voxel_triangles: usize,
+    pub voxels_unsupported: usize,
     /// Vegetation instances in the cell / the ones with collision / of those the ones that also stop the camera.
     pub vegetation: usize,
     pub vegetation_colliding: usize,
@@ -224,7 +232,7 @@ pub struct CellStats {
     pub build_ms: f32,
 }
 
-/// The collision of one cell's brushes and vegetation in game space.
+/// The collision of one cell's brushes, compiled voxels and vegetation in game space.
 pub struct CellCollision {
     pub cell: (i32, i32),
     structures: Soup,
@@ -1038,6 +1046,7 @@ impl Inner {
             stats.colliding += 1;
         }
         stats.models = meshes.iter().filter(|m| m.get().is_some_and(|m| m.is_some())).count();
+        voxels::append(self, &objects.voxels, (cx, cy), &mut structures, &mut stats);
         stats.structure_triangles = structures.0.len();
         stats.prop_triangles = props.0.len();
         let structures = Soup::build_with(structures.0, structures.1, self.config.grid, self.min_nz);
