@@ -129,6 +129,10 @@ impl NativeBuffs {
                 }
                 // A complete catalog proves missing descriptor: native callback does not erase.
             }
+            // These diagnostics prove unread data was discarded. Normal unsupported packets
+            // have a known frame boundary and do not by themselves prove a buff-history gap.
+            Event::GameDecodeFailed { .. } => self.by_unit.clear(),
+            Event::UnhandledGamePacket { level, len, .. } if *level == crate::game::LEVEL_COMPRESSED && *len > 0 => self.by_unit.clear(),
             Event::UnitsRemoved(ids) => {
                 for id in ids {
                     self.by_unit.remove(id);
@@ -236,6 +240,27 @@ mod tests {
             assert_eq!(b.duration_ms, if rule == 5 { 2000 } else { 1000 });
         }
     }
+    #[test]
+    fn actual_decode_loss_invalidates_only_native_history_until_snapshot() {
+        let mut world=crate::state::WorldState::default();world.buffs.native=view(4,false);
+        world.buffs.native.set_catalog(world.buffs.native.rules.clone());
+        let buff=Buff{index:7,buff_id:77,kind:BuffKind::Good,..Buff::default()};
+        let mut snapshot=crate::state::tests::unit(9);snapshot.buffs=vec![buff.clone()];
+        world.apply(&Event::UnitSpawned(Box::new(snapshot.clone())));
+        for event in [Event::UnhandledGamePacket{level:crate::game::LEVEL_GAME,opcode:0x3ff,len:99},
+            Event::UnhandledGamePacket{level:crate::game::LEVEL_COMPRESSED,opcode:0x3ff,len:0}] {
+            world.apply(&event);assert!(world.buffs.native.of(9).is_some());
+        }
+        for loss in [Event::UnhandledGamePacket{level:crate::game::LEVEL_COMPRESSED,opcode:0x3ff,len:1},
+            Event::GameDecodeFailed{message:"truncated actual packet".into()}] {
+            world.apply(&loss);assert!(world.buffs.native.of(9).is_none());
+            assert_eq!(world.buffs.of(9).len(),1);assert!(world.buffs.native.catalog_loaded());assert!(world.buffs.native.rules.contains_key(&77));
+            world.apply(&created(8,10,1));assert!(world.buffs.native.of(9).is_none(),"Created cannot repair unknown history");
+            world.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:8,charged:8});assert!(world.buffs.native.of(9).is_none());
+            world.apply(&Event::UnitSpawned(Box::new(snapshot.clone())));assert!(world.buffs.native.of(9).is_some());
+        }
+    }
+
     #[test]
     fn buff_updated_first_group_descriptor_guards_and_no_clamp() {
         let mut v=view(4,false);let rule=v.rules[&77];let mut bad_rule=rule;bad_rule.kind=BuffKind::Bad;
