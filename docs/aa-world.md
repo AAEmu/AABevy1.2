@@ -1474,10 +1474,87 @@ plus priority, and the existing zero raster depth bias. Fog sorts later at
 -300,000. The source-identity regression uses real `PLACEHOLDER`/`MainEntity` keys,
 checks both view halves and restores every range on source/ocean/view changes.
 Deferred draws remain early without an ocean; mirrored views keep their prior path.
-No asset, geometry or per-frame material work is added. Forward alpha roads and
-legacy decals retain their separate late path; their water-half/opaque-overlay
-ordering remains open. Normal/specular/MRT limits above are unchanged. Raw original
+No asset, geometry or per-frame material work is added. Ordinary Illum type13 roads
+also use their source-proved early path below. Legacy forward decals retain their
+separate late path; their water-half/opaque-overlay ordering remains open.
+Normal/specular/MRT limits above are unchanged. Raw original
 pass-order disassembly is ignored `lights/fog-water-decal-order-asm.txt`.
+
+#### Native ordinary-road list5 pass
+
+Original 1.2 `CRoadRenderNode::Render` **302098B0** copies the 0xB8-byte
+`SRendParams`, sets byte **+0x82 = 5** at **30209A9B**, copies authored sort
+priority to the render object's +0x14 word, ORs object+0x64 with 0x2000, and
+ORs object flags with 0x100604 (including the 0x400 decal bit). Its render-mesh
+vslot +0xF4 dispatches through vtable **38305AC0** to **381FEAA0**;
+**381FEB8A** reads that exact list byte, and **381FEE39 / 381FEFB6** forward
+it to queue **38179EB0**. The queue's **3817A12F..3817A203** decal classifier
+selects list5 unless object+0x64 bit1 selects list7. This is closed through the
+actual temp-object factory: renderer vtable **382F2D88** +0x26C is **3817AC90**;
+both new/reused paths call **380D8E90**, whose **380D8F4A** clears +0x64.
+Ordinary roads then set only 0x2000, leaving bit1 clear.
+
+The original `illum.cfx` global declarations set SupportsDeferredShading /
+SupportsAttrInstancing (shader+0x24 bits0x20/0x40; parser **3823C4DB /
+3823C4EC**) and optionally Decal (bit0x80, **3823C43E**). They do not set the
+shader+0x28 **0x474680** mask that invokes a separate list classifier.
+The full renderer **380D2A00** draws list5 at **380D317C / 380D319A**
+(HDR repeat **380D3205 / 380D3223**), before deferred decals **380D792E**,
+cloud/fog group0 and water **380D8081 / 380D80A0**. Later list5 calls at
+380D87D0 / 380D884C belong to the separate fallback branch; they do not establish
+the full-scene order.
+
+`RoadMesh` retains type13 provenance, separate from legacy/deferred decals sharing
+its material implementation. Only type13 + ordinary Illum receives
+`RoadSurfacePass`; custom shaders and forward decals retain their existing path.
+The material cache already separates type13 repeating textures from clamped
+decals. The marker requires `NoAutomaticBatching` and selects original
+`MainEntity` identities in ordinary, non-mirrored views, with or without ocean
+data. It reuses the existing before-transmission pass without extra copies or
+geometry. CPU sorting is -600,000 + existing authored priority, ahead of deferred
+overlays (-500,000) and fog (-300,000); a pipeline-only key clears raster depth
+bias. This preserves existing road height/triangles, UVs, vertex opacity,
+separate opacity textures, RGB and PBR approximations. It does not reproduce a
+native priority-only comparator or recursive/reflection pass IDs.
+
+The bounded ignored oracle `roads/native_road_order.py` executes the original x86
+temp reset, road setup, mesh-list read and queue classifier for **36 cases**:
+threads0/1, priorities0/17/255, shader flags0x60/0xE0 and batch flags0/2/0x482.
+Every ordinary case selects list5; a synthetic after-water-bit control selects
+list7. Raw disassembly and `native-road-order-oracles.json` are beside it.
+Rust regressions cover provenance/shader exclusion, unchanged opacity uniforms,
+pipeline-key separation, real PLACEHOLDER/MainEntity phase keys, GPU offsets,
+three-frame restoration, ordinary/mirrored views, unmarked legacy draws and
+marker removal without ocean data. Existing native deferred MRT limits remain.
+
+Verification: `cargo check -p aa-world --lib`, the full **210 passing / nine
+optional ignored** library suite (3.88 s), and both changed examples build.
+`fog_water --road-control --two-views` uses a real ViewTransmissionTexture
+receiver whose RGB reversal makes ordering observable, with independent CPU
+density integration. Positive GPU pixels are exactly **[133,179,178] /
+[189,179,115]**; forced-late pixels are **[147,155,177] / [198,155,113]**.
+No-ocean and post-fog-unload controls also match both CPU views exactly; fog
+unload reaches zero source entities/materials. This isolates phase ordering;
+the synthetic card is not a native road-shading comparison.
+
+Original `roads` captures in `shots/aa-world/road_order/` cover cell(14,11)
+on/off, foreground glass, Memoria and the existing Nuian spawn reference camera.
+Cell(14,11) has 12 streamed roads / 6,645 object parts; the on/off pair exposes
+the original road texture over the green underlying cover. The glass pane stays
+above the path. Memoria has 91 streamed roads / 20,554 parts and retains the
+connected paths around the original tree house. The reference-camera picture
+retains the spawn pond and bank arrangement against `reference/ingame/spawn/real.png`;
+this does not close the documented lighting/cloud/water calibration differences,
+and no exact native screenshot exists for the two elevated road cameras.
+`roads --stream-check --exit-after 18` asserts loaded early road markers, then
+zero road count, road entities and markers after leaving the world. All ten
+GPU/example runs self-close without shader/runtime errors. Final six logged FPS
+samples span **48.6-94.7** for cell(14,11) on, **45.9-80.0** off,
+**90.2-142.8** glass, **51.8-114.4** Memoria and **60.4-101.6** reference
+at1920x1080; numeric two-view controls at1280x720 span **80.9-202.9** overall.
+Shared-box FPS varies substantially during concurrent builds; these are correctness checks, not a
+performance improvement claim. The five inherited calibration file hashes remain
+unchanged.
 
 Remaining decal limits: this is a diffuse/opacity overlay through the existing PBR shader,
 not native MRT albedo/normal/specular accumulation. In particular native square-root encoded

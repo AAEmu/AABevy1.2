@@ -531,9 +531,10 @@ pub fn stream_objects(
         }
         let mut entities = Vec::new();
         for road in roads {
+            let early = road.early_surface();
             let Some(material) = road.material(&mut cry, &mut road_materials) else { continue };
             let end = road.distance.min(cfg.brush_distance).max(0.0) + road.radius;
-            entities.push(commands.spawn((
+            let mut entity = commands.spawn((
                 Name::new("Terrain road"),
                 Mesh3d(cry.meshes.add(road.mesh)),
                 MeshMaterial3d(material),
@@ -544,7 +545,9 @@ pub fn stream_objects(
                     use_aabb: true,
                 },
                 NotShadowCaster,
-            )).id());
+            ));
+            if early { entity.insert(crate::sky_material::composite::RoadSurfacePass); }
+            entities.push(entity.id());
         }
         if !entities.is_empty() {
             state.roads.insert(c, entities);

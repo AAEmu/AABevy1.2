@@ -80,6 +80,7 @@ impl Material for CaptureMaterial {
 struct OverlayMaterial {
     #[uniform(0)]
     color: Vec4,
+    road: bool,
 }
 impl Material for OverlayMaterial {
     fn vertex_shader() -> ShaderRef {
@@ -92,7 +93,7 @@ impl Material for OverlayMaterial {
         AlphaMode::Blend
     }
     fn depth_bias(&self) -> f32 {
-        -500_000.0
+        if self.road { -600_000.0 } else { -500_000.0 }
     }
     fn enable_prepass() -> bool {
         false
@@ -198,7 +199,7 @@ fn expected(c: &Control, index: usize, changed: bool) -> Vec3 {
         && !(changed && flag("--lose-ocean"));
     // Native deferred diffuse is already on the opaque receiver. Forced-late
     // overlays miss the copy and fail depth behind the diagnostic receiver.
-    let scene = if flag("--decal-control") && !flag("--late-decal-control") {
+    let scene = if (flag("--decal-control") || flag("--road-control")) && !flag("--late-decal-control") {
         BACK.lerp(DECAL, 0.6)
     } else {
         BACK
@@ -280,16 +281,21 @@ fn setup(
         Transform::from_xyz(0.0, height, c.wall),
     ));
     let capture = captures.add(CaptureMaterial { color: Vec4::ZERO });
-    if flag("--decal-control") {
+    if flag("--decal-control") || flag("--road-control") {
         let mut decal = commands.spawn((
             Mesh3d(meshes.add(Rectangle::new(200.0, 200.0))),
             MeshMaterial3d(overlays.add(OverlayMaterial {
                 color: DECAL.extend(0.6),
+                road: flag("--road-control"),
             })),
             Transform::from_xyz(0.0, height, c.wall + 0.01),
         ));
         if !flag("--late-decal-control") {
-            decal.insert(aa_world::sky_material::composite::DeferredDecalPass);
+            if flag("--road-control") {
+                decal.insert(aa_world::sky_material::composite::RoadSurfacePass);
+            } else {
+                decal.insert(aa_world::sky_material::composite::DeferredDecalPass);
+            }
         }
     }
     let quad = meshes.add(Rectangle::new(100.0, 100.0));
