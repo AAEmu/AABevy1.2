@@ -2974,12 +2974,17 @@ column 135 `timing_id`, 45 `default_gcd`, and 43 `custom_gcd`.
 
 The ordinary direct/tag cooldown begins in `OnSkillFired` (`391d58a0` ->
 `3939b010`), at `3939b3d1..3eb`, rather than unconditionally at Started.
-It requires the resolved source actor, final received byte `packet+160`
+It requires the resolved source actor, decoded boolean `packet+160`
 (native argument `+34`) false, `toggle_buff_id == 0` (`+1c0`) and nonzero
 `timing_id`. It calls `39368f90` with descriptor `cooldown_time` (`+88`),
 then `39368440` -> `3989a360` -> `3989f900` -> `39899f90`. If Fired has no
 matching timeline, `3939b0b6..e9` first runs the Started setup, so a missing
 Started packet does not imply the global timer is absent.
+Serializer `397ca390` derives `packet+160` from **bit 1** of the final raw
+wire flags byte (`raw_final_flag & 2`); bit 0 instead populates `+14c`.
+Thus raw flags value 1 does not suppress this cooldown path. The aa-net
+executed serializer oracle covers all 256 flag values in
+`data/extract/aa-net/native-cooldown-fired-result-oracle-20261018.json`.
 
 `3989f900` evaluates a separate skill-modifier query with category 1 and
 an initial flat/percentage pair 0/100. It invokes the native provider at
@@ -3698,3 +3703,109 @@ The examples retain existing game-data fixtures, including their name guide;
 these captures verify active controls and original artwork/layout, not the
 application-owned name-policy adapter. `reference/ingame/spawn/real.png`
 supplies HUD style context; no matching sponsor reference or pixel-parity claim.
+
+### English native name-policy source and application handoff (2026-10-18)
+
+The original character, summons/pet, guild, family-title, chat-tab and portal
+name controls share application-owned `X2Util` methods. Their complete English
+contracts are now recorded for aa-client integration; aa-ui does not replace
+these game utilities. Existing type-2 guild oracle artifacts were preserved.
+
+`XlInitStringUtil` (`xlcommon3301af40`) matches `en_us`, selects locale index 2
+at `3307d5e4` and calls MSVCR100 `setlocale(LC_CTYPE=2,"english")`.
+`XlGetNamePolicyInfo33009650` uses six 24-byte records per locale. Native kind
+6 aliases kind 0; its separate public constant/name is not invented.
+The English records, before X2Util's table conversion, are:
+
+| Kind / original constant | local min/max | English min/max | space count | flags |
+|---|---|---|---|---|
+| 0 `VNT_CHAR` | 2/26 | 2/26 | 0 | 0 |
+| 1 `VNT_SUMMONS` | 2/26 | 2/26 | 0 | 0 |
+| 2 `VNT_FACTION` | 2/32 | 3/32 | 0 | 5 |
+| 3 `VNT_FAMILY_TITLE` | 2/26 | 2/26 | 0 | 4 |
+| 4 `VNT_CHAT_TAB` | 2/10 | 2/10 | 0 | 5 |
+| 5 `VNT_PORTAL` | 3/32 | 3/32 | 0 | 5 |
+| 6 (native alias of 0) | 2/26 | 2/26 | 0 | 0 |
+
+The nine emitted fields and flag bits are the mapping in the preceding
+milestone. A zero space-count limit is unlimited when spaces are allowed.
+Metadata flags alone do not describe the validator: the English branch does
+not apply the mixed-language bit, and its character range includes punctuation
+and digits. `A1b`, `1ab`, `A_b`, `A-b` and `A.b` pass character-name validation;
+`A1B` fails because uppercase after the first decoded character is forbidden
+for kinds 0/1/6. A lowercase initial letter is accepted by the validator.
+
+`XlIsValidName330095c0` rejects an original first byte `.` before dispatching
+to English validator `330091a0`. Original byte-string `XlStringLen3301b000`
+counts UTF-8 characters including a leading BOM. The original first byte's
+ASCII alphabetic classification selects English versus local length bounds.
+`XlMultiToWide3301a100` then strips exactly one leading UTF-8 BOM. The first
+decoded character cannot be native space (ASCII 9..13 or 32). The trailing
+check at `33009257` indexes the **original UTF-8 bytes** with converted
+UTF-32 count minus one; it does not inspect the final decoded character.
+Remaining decoded characters pass native space rules or ranges U+0020..007F
+and U+00A0..017F, then the optional uppercase-after-first check.
+
+Executed kind-2 boundary results include BOM+`Ab` and BOM+`A ` accepted,
+BOM+` .ab` rejected, BOM+`.Abc` accepted, and two BOMs+`Ab` rejected.
+For BOM+`Ab`, original scalar count is 3, converted count is 2 and the trailing
+check reads original byte `BB`. For `é ` it reads byte `A9`, so this trailing
+space is accepted. Leading/trailing NBSP U+00A0 are accepted; U+0085, U+1680,
+U+2000 and U+2028 are rejected. Unicode trimming or general Unicode character
+classification would change these source-backed results.
+
+`CheckAvailableName394c8940` takes text and a mix-case boolean. It converts
+at most 32 decoded codepoints into a 33-DWORD buffer, strips one leading BOM,
+and returns through a 129-byte UTF-8 buffer. When mix-case is false, leading
+native space produces the empty string. If the first decoded character is
+native alphabetic, it uppercases that character and lowercases the rest;
+otherwise case remains unchanged. With mix-case true it preserves case and
+leading space. Punctuation is preserved. C-string NUL termination applies to
+all three utilities. This method performs no server name-availability request.
+
+Native `XlIsAlpha`/`XlIsUpper` and case functions cap their domain at U+07FF;
+above that, classification is false and case conversion is identity. ASCII
+uses original byte tables, with remaining values delegated to the initialized
+MSVCR100 wide-character functions. `native-name-classes-20261018.json` records
+all **8,192 actual native helper calls** for 0..07FF: 39 alphabetic ranges,
+265 uppercase ranges, 456 changed lowercase pairs and 459 changed uppercase
+pairs. The reference Rust artifact retains 65 uppercase ranges needed within
+the validator's Latin range and losslessly compresses the complete case pairs
+into 82 lowercase and 85 uppercase arithmetic runs. No Rust Unicode case or
+classification approximation is used. The host x64 MSVCR100 used by the
+oracle and the installed x86 counterpart both report version `10.00.40219.325`.
+
+Argument conversion is explicit. CryScriptSystem `3550A460` -> `3550BF90`
+requires Lua string for text and Lua number for numeric kind; numeric strings
+and numeric text are rejected. Numbers narrow to f32 and CVTTSS2SI truncates
+the kind. A requested boolean also accepts Lua numbers through double `!=0`;
+missing/nil/string values fail. Failed parameter parsing yields zero results.
+Successfully parsed invalid kinds (negative, >6, or CVTT indefinite) return
+zero results from `GetNamePolicyInfo`, but one `false` from `IsValidName`.
+Valid metadata returns one nine-field table; normalization returns one string,
+including the empty string when appropriate.
+
+Read-only artifacts under `data/extract/aa-ui/`:
+
+- `native-name-source-20261018.txt`: PE hashes, disassembly and CryScriptSystem
+  conversion source; `name_source.py` reproduces the extraction.
+- `name_oracle.py` / `native-name-oracle-20261018.json`: **448 validation**,
+  **58 normalization**, **31 wrapper** cases, direct BOM/length probes and
+  eight separately labeled malformed/NUL byte groups. Original X2 trampolines,
+  typed adapters, bodies and returns execute; Script GetParamAny/table/return
+  interfaces and memset are captured, with conversion grounded in `3550BF90`.
+  Windows conversion and CRT functions call the real host APIs after actual
+  native English initialization, including buffer writes on conversion failure.
+- `name_classes.py` / `native-name-classes-20261018.json`: complete helper
+  classification/case mappings for the bounded native domain.
+- `name_contract.py` / `native-name-contract-20261018.json` and
+  `native_name_contract.rs`: implementation-ready well-formed UTF-8 contract.
+  Its equivalent Python rules match every fixed case plus **609 differential
+  groups / 5,481 actual native calls**. Generated Rust stays outside Cargo and
+  was intentionally not compiled; aa-client owns implementation and tests.
+
+Malformed UTF-8 observations use offline NUL-terminated, zero-padded buffers.
+They are separate evidence of the native decoder boundary, not a claim that
+safe Rust strings reproduce arbitrary invalid-buffer reads. No live-client
+execution/writes, Cargo runs, production edits or additional visual deliverable
+were needed for this source-only audit.
