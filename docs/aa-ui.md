@@ -5226,3 +5226,74 @@ rounded black blending by `1-(199/255)^2` exactly in every RGB channel, e.g.
 coordinates/results are recorded in
 `data/extract/aa-ui/native-slot-mask-pixels-20261018.json`. No art or original
 Lua script is modified, and no reverse/GCD producer is guessed.
+
+### Native slot accessor kind is a factory result (2026-10-18)
+
+`slot_accessor_oracle.py` / `native-slot-accessor-oracle-20261018.json` now
+record **27 executed factory/prefix/query/default groups**. The factory's
+accessor+4 domain must not be confused with either UI ISLOT values or received
+ActionSlot kinds. With an ordinary descriptor, actual SkillFactory392c5790
+selects SkillAccessor kinds as follows:
+
+| UI source kind | Native accessor kind |
+|---|---:|
+| ability view243, active skill | 18 |
+| mode action246, skill branch | 4 |
+| constant249, direct EstablishSkill | 5 |
+| action254, skill branch | 12 |
+
+A descriptor tag matching runtime39ac6f08 (closed tag204) takes the earlier
+SkillAccessor15 branch BEFORE that UI switch. The oracle confirms UI244 with
+tag204 succeeds as15 while ordinary UI244 is rejected by this skill factory.
+This is not permission to classify all killstreak or action controls as15.
+The actual received/content producer and descriptor tag membership matter.
+
+The three global-selector exclusions are also distinct concrete accessors:
+
+- **16: direct item-template preview.** Registered EstablishItem39256370 calls
+  392c6d40 ->392c6100 ->ItemAccessor constructor3920caa0(16), VT399bb388.
+  Its actual Update path logs `X2::GameClient::ItemAccessor::Update`.
+- **17: callback/icon accessor.** Factory392c5e30 constructs39209900(17),
+  VT399bb1a8, for pet-command247 and the script branch of mode-action246.
+  It retains a callback pointer and icon/description strings. Its cooldown
+  function39209960 returns true without writing the initially-zero outputs.
+- **19: BuffAccessor.** Ability-view243 producer types2/3 call392c6020/5f40,
+  both constructing392091c0(19), VT399bb160. Its Update3920a650 logs
+  `X2::GameClient::BuffAccessor::Update`. Cooldown39209210 likewise returns
+  true with untouched zero outputs. Active ability-view skills instead use18.
+
+Direct item16's final query result needs particular care. Actual39209460
+calls394df5b0 ->39391a30 and CAN receive nonzero combined use-skill counts.
+It then requires a live instance through virtual+20, actual39209610. That
+switch has no16 branch and returns null, so the FINAL query bool is false,
+even with8000/12000 output counts. Native slot frame392c7360 discards false
+query outputs and zeros both draw fields. Thus the app adapter result for
+this direct preview is None; callback17 and Buff19 are Some(0/0). A control
+ItemAccessor10 with a live instance returns true with the same counts;
+missing instance or failed combined timer is false. Exclusion alone was not
+used to infer those return values.
+
+Item descriptor+98 is `items.use_skill_id`: SQL39a00d90 column43 is stored at
+local record+98 (396cb951..966), then copied into the descriptor. The helper
+resolves that skill and reaches existing combined getter393919f0. Live item
+queries also have instance/implementation8/9 overrides; a use-skill lookup
+alone is not a complete live-item adapter. No guessed item timer is wired.
+
+The executed constructor prefix392c7950 overwrites deliberately nonzero test
+fields with zero reverse+310, selected-global+311, accessor-active+312 and
+both f32 durations. Generic base construction is an explicit endpoint, and
+execution stops after those native stores. The reverse branch remains
+unexposed pending an actual setter/producer; its existence does not establish
+a Lua method or original runtime user of it.
+
+The oracle executes real skill descriptor/tag-vector/byte-switch branches
+and39208ea0 constructor, with catalog lookup/allocation controlled. Item
+construction stops after actual kind/vtable/default stores and before live
+inventory registration; callback/Buff constructors execute fully before the
+factory's descriptor/visual continuation. Separate query cases execute
+39209460/394df5b0/39391a30 and actual instance-kind switch39209610, with
+catalog/item lookup and combined timer endpoints explicit. Raw counts and
+final bool are recorded separately. `native-slot-accessor-source-20261018.txt`
+archives these paths, registrations, SQL and descriptor field copies. There
+are no production edits, new Lua hooks, network assumptions or mode activation
+in this source-only follow-up.
