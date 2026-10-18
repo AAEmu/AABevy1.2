@@ -12,6 +12,7 @@ use crate::placement::PlacedVoxel;
 mod cover;
 mod layers;
 mod material;
+mod normals;
 pub use material::{VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelParams};
 
 const MAX_CELL_DECODED_BYTES: usize = 64 * 1024 * 1024;
@@ -237,7 +238,14 @@ pub(crate) fn spawn_cell(
         .meshes
         .iter()
         .flat_map(|m| &m.layers)
-        .map(|layer| layer_data.definitions[&layer.key].texture.clone())
+        .flat_map(|layer| {
+            let definition = &layer_data.definitions[&layer.key];
+            std::iter::once(definition.texture.clone()).chain(
+                definition.normal.iter().flat_map(|n| {
+                    std::iter::once(n.texture.clone()).chain(n.detail.iter().cloned())
+                }),
+            )
+        })
         .collect();
     layer_data
         .textures
@@ -282,6 +290,21 @@ pub(crate) fn spawn_cell(
                     extension.params.origin =
                         crate::cry_to_bevy(crate::coords::cell_origin(cell.0, cell.1)).extend(0.0);
                     extension.params.colour = definition.colour.extend(1.0);
+                    if let Some(normal) = &definition.normal {
+                        extension.normal = Some(textures[&normal.texture].clone());
+                        extension.detail_normal =
+                            normal.detail.as_ref().map(|path| textures[path].clone());
+                        extension.params.normals = Vec4::new(
+                            normal.mode,
+                            if normal.detail.is_some() { 1.0 } else { 0.0 },
+                            normal.detail_scale,
+                            0.0,
+                        );
+                        extension.params.bump_u = normal.u;
+                        extension.params.bump_v = normal.v;
+                        extension.params.detail_u = normal.detail_u;
+                        extension.params.detail_v = normal.detail_v;
+                    }
                     materials.add(VoxelMaterial {
                         base: StandardMaterial {
                             base_color: Color::WHITE,

@@ -1,4 +1,4 @@
-//! Bounded native Terrain.Layer diffuse projection, separate from heightmap's 16-slot path.
+//! Bounded native Terrain.Layer diffuse/normal projection, separate from heightmap's 16-slot path.
 
 use aa_cry::material::{Material, TextureMap};
 use aa_cry::texture::{Dds, DdsOptions, load_dds};
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::placement::PlacedVoxel;
 
 pub(super) const MAX_DRAWS: usize = 96;
-const MAX_TEXTURE_BYTES: usize = 32 * 1024 * 1024;
+pub(super) const MAX_TEXTURE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_MESH_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -21,6 +21,20 @@ pub(super) struct Layer {
     pub strength: f32,
     pub distance: f32,
     pub multi: bool,
+    pub normal: Option<NormalLayer>,
+}
+
+#[derive(Clone)]
+pub(super) struct NormalLayer {
+    pub texture: String,
+    /// 1: original BC1 XYZ, 2: raw ATI2 YX with reconstructed Z.
+    pub mode: f32,
+    pub u: Vec4,
+    pub v: Vec4,
+    pub detail: Option<String>,
+    pub detail_u: Vec4,
+    pub detail_v: Vec4,
+    pub detail_scale: f32,
 }
 
 pub(super) struct Draw {
@@ -35,6 +49,7 @@ pub(super) struct Layers {
     pub unsupported: usize,
     pub draws: usize,
     bytes: usize,
+    texture_bytes: usize,
     names: Vec<String>,
 }
 
@@ -73,7 +88,13 @@ fn named_palette(names: &[String], slots: &[String; 32]) -> [bool; 32] {
     qualified
 }
 
-fn projection(axis: usize, scale: f32, tile: Vec2, offset: Vec2, cell: (i32, i32)) -> (Vec4, Vec4) {
+pub(super) fn projection(
+    axis: usize,
+    scale: f32,
+    tile: Vec2,
+    offset: Vec2,
+    cell: (i32, i32),
+) -> (Vec4, Vec4) {
     let su = scale * tile.x;
     let sv = scale * tile.y;
     let origin = [cell.0 as f64 * 1024.0, cell.1 as f64 * 1024.0];
@@ -98,6 +119,7 @@ fn projection(axis: usize, scale: f32, tile: Vec2, offset: Vec2, cell: (i32, i32
 impl Layers {
     pub fn load(world: &str, cell: (i32, i32)) -> Self {
         let mut out = Self::default();
+        let mut normal_requests = Vec::new();
         let path = format!(
             "game/worlds/{world}/cells/{:03}_{:03}/client/leveldata.xml",
             cell.0, cell.1
@@ -108,7 +130,7 @@ impl Layers {
         let Ok(doc) = roxmltree::Document::parse(&xml) else {
             return out;
         };
-        let mut texture_bytes = 0;
+
         out.names = doc
             .descendants()
             .filter(|n| n.has_tag_name("SurfaceType"))
@@ -223,7 +245,7 @@ impl Layers {
                         || dds.depth != 1
                         || dds.width > 4096
                         || dds.height > 4096
-                        || dds.data.len() > MAX_TEXTURE_BYTES - texture_bytes
+                        || dds.data.len() > MAX_TEXTURE_BYTES - out.texture_bytes
                     {
                         continue;
                     }
@@ -231,12 +253,13 @@ impl Layers {
                         continue;
                     };
                     let size = image.data.as_ref().map_or(0, Vec::len);
-                    if size > MAX_TEXTURE_BYTES - texture_bytes {
+                    if size > MAX_TEXTURE_BYTES - out.texture_bytes {
                         continue;
                     }
-                    texture_bytes += size;
+                    out.texture_bytes += size;
                     out.textures.insert(path.clone(), image);
                 }
+                normal_requests.push(((surface as u8, axis as u8), m.clone(), axis, scale, tile));
                 let (u, v) = projection(axis, scale, tile, offset, cell);
                 out.definitions.insert(
                     (surface as u8, axis as u8),
@@ -248,9 +271,23 @@ impl Layers {
                         strength,
                         distance: if multi { 1024.0 } else { 128.0 },
                         multi,
+                        normal: None,
                     },
                 );
             }
+        }
+        // Existing diffuse receivers have priority within the same 32 MiB image budget.
+        for (key, material, axis, scale, tile) in normal_requests {
+            let normal = super::normals::load(
+                &material,
+                axis,
+                scale,
+                tile,
+                cell,
+                &mut out.textures,
+                &mut out.texture_bytes,
+            );
+            out.definitions.get_mut(&key).unwrap().normal = normal;
         }
         out
     }
@@ -328,6 +365,16 @@ impl Layers {
                 self.bytes += bytes;
                 let mut mesh = base.clone();
                 mesh.insert_indices(Indices::U32(indices));
+                // Native TEMP_TERRAIN expands the renderer's packed bytes without normalization.
+                // Preserve that vector for the independent projected vertex frame.
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_NORMAL,
+                    source
+                        .normals
+                        .iter()
+                        .map(|n| crate::cry_to_bevy(super::normals::packed_normal(*n)))
+                        .collect::<Vec<_>>(),
+                );
                 mesh.insert_attribute(
                     Mesh::ATTRIBUTE_UV_1,
                     weights
