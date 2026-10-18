@@ -107,6 +107,7 @@ pub struct HudData {
     pub tips: super::tips::TipState,
     pub party: aa_net::Party,
     pub friends: aa_net::Friends,
+    pub(super) family: super::family::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -156,6 +157,7 @@ impl Default for HudData {
             tips: Default::default(),
             party: Default::default(),
             friends: Default::default(),
+            family: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -261,6 +263,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::repair::install(lua, bridge)?;
     super::crafting::install(lua, bridge)?;
     super::pets::install(lua, bridge)?;
+    super::family::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::sorting::install(lua, bridge)
 }

@@ -1768,3 +1768,62 @@ head/saddle/feet at194.6-196.8 FPS and Wolfhound's head/chest/feet at189.2-222.3
 Both capture processes self-close with no runtime errors; the user's existing
 world-selection client remains open. These captures use explicit received fixtures
 and do not claim a live pet-equipment transaction.
+
+### Original family controls and received roster callbacks (2026-10-18)
+
+The original Social/Family tab now uses real family getters and requests. Its UI
+cache retains the native first8 rows, name128/title104 byte buffers and first-NUL
+string behavior, separately from aa-net's complete lane roster. The actor's family
+ID starts from actual PlayerSpawn and changes only through native per-member
+callbacks; another family's roster does not establish local membership. Missing
+cache does not erase a nonzero actor family ID. GetMembers returns dense
+name/title/raw-role/online rows in received order before the original UI sorts
+them, and GetMemberCount returns online,total. Offline filtering and case-sensitive
+IsMyFamily use those rows; IsOwner tests the first local-ID row's nonzero role.
+GetMembers' original checkbox-boolean path is verified; nonboolean binding
+coercion remains unclaimed (the app refuses it with zero Lua values).
+
+Every received change mutates state before its original FAMILY_* callback. Equal
+online notices still fire, removal affects the first matching row, and dropping
+below2 members dissolves the cache without inventing an extra FAMILY_REMOVED.
+Explicit removal emits FAMILY_REMOVED even without a cache entry. Created uses
+rows0/1, later additions/title changes use the last nonzero-role owner name (or
+native "X"). Owner changes clear all other roles and set every matching-ID row;
+the last matching name supplies the event. Described has no immediate UI event.
+Invalid incoming addition indices use an explicit app bounds guard. Overhead
+FamilyTitle unit presentation is separate and remains open.
+
+Invite, Leave, Kick and ChangeTitle require received feature byte0 mask2. The
+ChangeOwner wrapper and captured Task4 reply do not have this feature gate.
+Native ownership/membership/name checks use the UI cache; failures use original
+localized FAMILY_* errors. All six typed requests retain the selected character
+ID and are rechecked against the actual player before sending. Roster/membership
+updates remain received-only, including after a requested ownership transfer.
+The additional absent-actor and stale-character checks are app guards.
+
+Invitations use the original type4 nonmodal OK/Cancel task, invitorName/familyTitle
+fields and numeric account-backed option74 (native g_ignore_family_invite).
+Duplicate queued invitations and ignore=1 automatically queue a decline of that
+captured inviter/title. Join, Decline, close and task cancellation answer once;
+tokens survive resets monotonically so an old callback cannot answer a later
+invitation. There is no invented existing-family refusal. Without a player the
+invitation is discarded. During loading the app retains the task until the world
+HUD exists and applies option74 at presentation; native non-HUD task timing is
+not claimed. Scene/character reset closes old task windows and clears pending
+actions while preserving the received connection feature bit appropriately.
+
+Sources: native wrappers394747e0/39474840..394748d0, family cache398a8730,
+getters392ffeb0/39300440, callbacks392ff2e0..39300340 and Task4
+391d29e0/392ff820/392ff590. Detailed source artifacts are under
+`data/extract/aa-ui/native-family-*` and `data/extract/aa-client/family-native/`.
+
+Validation: full client207 passed/36 ignored in28.41s. All five focused family
+checks pass, including the original Invite/Join/Decline buttons, member popup
+Kick/ChangeOwner/ChangeTitle, its original title edit dialog, received-owner
+transition and Leave, plus original task cancellation. Unit probes cover native
+duplicate/name/buffer/cache rules, mutation-before-callback, feature gates,
+captured replies/ignore behavior and stale selected characters. Inspected aa-dev
+`family` captures under `shots/hud/sol61-family/` show real fixture rows with the
+original offline color and3/4 count at337.5-378.5 FPS, and the original invitation
+at306.6-371.2 FPS. Both processes self-close without runtime errors. These are
+controlled original-script checks; paired live family settlement is unverified.
