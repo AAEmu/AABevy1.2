@@ -3755,3 +3755,41 @@ DD04 batch without desynchronization or fabricated UnitAttached state.
 Validation: strict object-tail `cargo check -p aa-net --features bevy` and full292
 library tests pass; diff check is clean. No live summon, vehicle, attachment or server
 transaction was issued during this protocol-only work.
+
+### Vehicle equipment reports and pet expiry notices (2026-10-18)
+
+`SlaveEvent::EquipmentChanged(SlaveEquipmentChange)` receives SC0x068 with exact wire
+ordering: stored character u32, slave TL u16, database slave u32, bts boolean, two full
+optional Items, first container/slot bytes, second container/slot bytes, success boolean.
+Names deliberately preserve first/second order rather than claiming accepted destinations.
+Native factory391e3590/vtable399b73b0→397aec10 invokes397d1410, whose header and common
+transaction397d12a0 match the lane `economy/item_effect_packets.rs` writer. This packet has
+no entry count or expireTime. The lane defines it but has no sender. The transport exposes
+the raw result without fabricating an owned slave, inventory swap or equipment settlement.
+
+`MateEvent::EquipmentExpired { mate_tl_id, container, slot }` receives SC0x127 as exactly
+u16 TL plus two bytes. Native factory391b04c0/vtable399b390c→397b5530 proves that layout.
+Handler391db280→394e5a90 requires containerfc, the current owned mate's matching TL and
+an existing visible unit. It selects the current equipped descriptor (slot<=27) and calls
+394e5410, which formats the descriptor through394e4ef0 and emits native EXPIRED_ITEM
+(event0x89) with one item-link string. It does not delete gear, mutate item flags or
+produce an inventory task. Original chat/chat_msg_event.lua receives EXPIRED_ITEM text.
+Consequently this typed expiry report is notification-only: neither Mates nor Units nor
+Inventory is changed from this packet alone, and unknown container/slot bytes remain raw.
+A future app bridge must use the matched actual descriptor, not a synthetic expired item.
+
+Three regressions cover independent headers, full opaque item details/timers, raw locations,
+false/true success flags, all truncations, following DD04 alignment, repeated receive order
+and absence of phantom owned units/equipment removal or fabricated completion events.
+
+Fresh original pet auto-use source also closes a previous wire uncertainty: setter3933c750
+is called by the ISLOT path39209032. After3933af60 eligibility and required-level checks,
+userstate<2 emits FAILED_TO_SET_PET_AUTO_SKILL (0x11b). Otherwise3933c80f writes the local
+raw-slot auto flag at mate+60+slot*8 and calls3933bbf0. That function rebuilds local
+AI.skills.combat from enabled mount-skill→combat-skill mappings and emits
+PET_AUTO_SKILL_CHANGED (0x11a) at3933bdcd. These functions have no separate configuration
+packet send. This is local AI/action-slot state, not a justification to add a guessed
+CS auto-use opcode or mark a network setting ACK. Anim/root owns the remaining original
+pet Lua/control integration and exact eligibility predicates.
+
+Validation: cargo check -p aa-net --features bevy and all 295 library tests passed.
