@@ -173,7 +173,8 @@ fn empty_tab_vector_stores_offsets_for_later_insertion_without_touching_children
     for (id, r) in before {
         assert_eq!(rect(&ui, id), r);
     }
-    run(&ui, "window:SetChatWindowId(0)");
+    // Same-ID assignment is a native no-op; assign another configured window to rebuild.
+    run(&ui, "window:SetChatWindowId(1)");
     for tab in tabs(&ui) {
         assert_eq!(
             rect(&ui, tab.message),

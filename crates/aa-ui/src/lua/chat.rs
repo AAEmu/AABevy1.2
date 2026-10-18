@@ -6,13 +6,16 @@
 //!
 //! A chat window builds its tabs natively after `SetChatWindowId(id)` like the client, calling
 //! the script's global callbacks: `OnCreateChatWindow(window)` when created,
-//! `OnCreateChatTabButton(button)`, `OnSetChatTabId(button, tabId)` and
-//! `OnCreateChatMessage(message)` per tab, `OnSelectedChatTab(button, selected)` on selection.
+//! `OnCreateChatMessage(message)`, `OnCreateChatTabButton(button)` and
+//! `OnSetChatTabId(button, tabId)` per hydrated tab, then
+//! `OnSelectedChatTab(button, selected)` on selection. A live append selects before ID binding.
 //! The tabs come from the app: `AAUI.ChatTabs(windowId)` returns
 //! `{ { id = n, name = "All", filters = { CMF_SAY, ... } }, ... }` (no `filters` = every
 //! message; no hook = one "All" tab). `X2Chat:DispatchChatMessage(filter, text)` (toolkit) adds
 //! a line to every tab that takes `filter`, coloured by `AAUI.ChatColor(filter)` (`{r, g, b}`)
-//! or a default per filter.
+//! or a default per filter. Configured per-tab colours override that fallback and recolour
+//! retained history. The public Rust lifecycle helpers let the app update its local configuration
+//! while preserving existing widget objects, handlers and scrollback.
 //!
 //! # Scrolling
 //!
@@ -34,10 +37,17 @@ use super::widget::create_child;
 use super::{call_handler, method, new_object_table, none, object_table, ret, ui, value_id};
 use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock};
 
+mod lifecycle;
+pub use lifecycle::{ChatTabInfo, ChatWindowInfo, append_tab, hydrate_window, remove_tab, update_tab};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MessageData {
     /// (text, time added in UI ms).
     pub lines: Vec<(String, f64)>,
+    /// Source filter and fallback colour for dispatched lines. Ordinary AddMessage has none.
+    pub(crate) sources: Vec<Option<(i64, [f32; 4])>>,
+    pub(crate) filter_colors: Vec<(i64, [f32; 4])>,
+    pub(crate) background: Option<[f32; 4]>,
     pub max_lines: usize,
     /// Seconds a line stays visible (`SetTimeVisible`); `None` = forever.
     pub time_visible: Option<f32>,
@@ -52,6 +62,9 @@ impl Default for MessageData {
     fn default() -> Self {
         MessageData {
             lines: Vec::new(),
+            sources: Vec::new(),
+            filter_colors: Vec::new(),
+            background: None,
             max_lines: 100,
             time_visible: None,
             scroll: 0,
@@ -76,6 +89,7 @@ pub struct ChatData {
     pub(crate) links: Vec<super::chat_input::InputLink>,
     pub window_id: i64,
     pub tabs: Vec<ChatTab>,
+    /// Zero-based numeric selection; usize::MAX is native -1 (no selected row).
     pub selected: usize,
     pub tab_width: f32,
     pub min_tab_width: f32,
@@ -104,6 +118,8 @@ pub struct ChatData {
     pub hovered: Option<bool>,
     /// Last resolved local extent passed through the native geometry callback.
     layout_extent: [f32; 2],
+    /// Only configured windows participate in native empty-window retirement.
+    hydrated: bool,
 }
 
 fn with_msg<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut MessageData) -> R) -> Option<R> {
@@ -163,6 +179,8 @@ pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
     if let Some(w) = u.tree.widget_mut(id) {
         let m = w.message.get_or_insert_with(MessageData::default);
         m.lines.push((text.to_string(), now));
+        m.sources.resize(m.lines.len() - 1, None);
+        m.sources.push(None);
         // Scrolled back: the view stays on the same messages.
         if m.scroll > 0 {
             m.scroll += 1;
@@ -171,6 +189,7 @@ pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
         if m.lines.len() > max {
             let n = m.lines.len() - max;
             m.lines.drain(..n);
+            m.sources.drain(..n.min(m.sources.len()));
             m.scroll = m.scroll.min(m.lines.len().saturating_sub(1));
         }
     }
@@ -237,18 +256,28 @@ pub(crate) fn compose(u: &mut super::Ui, id: Id, rect: Rect) -> Option<TextBlock
     let scale = u.ui_scale;
     let inner_w = (rect.w - base.inset[0] - base.inset[2]).max(1.0);
     let inner_h = (rect.h - base.inset[1] - base.inset[3]).max(0.0);
-    let live: Vec<&str> = m
+    let live: Vec<String> = m
         .lines
         .iter()
+        .enumerate()
         // Scrolled back, the whole history is there (the time limit only fades the live view).
-        .filter(|(_, t)| m.scroll > 0 || m.time_visible.is_none_or(|s| now - t < s as f64 * 1000.0))
-        .map(|(s, _)| s.as_str())
+        .filter(|(_, (_, t))| m.scroll > 0 || m.time_visible.is_none_or(|s| now - t < s as f64 * 1000.0))
+        .map(|(i, (text, _))| {
+            let Some((filter, fallback)) = m.sources.get(i).copied().flatten() else {
+                return text.clone();
+            };
+            let color = m.filter_colors.iter().find(|(key, _)| *key == filter)
+                .map_or(fallback, |(_, color)| *color);
+            // Dispatch always contributes exactly one base colour. The original inline
+            // markup remains after it and can override/reset that colour as before.
+            colored(text.get(10..).unwrap_or(text), color)
+        })
         .collect();
     let end = live.len().saturating_sub(m.scroll).max(live.len().min(1));
     let mut shown: Vec<&str> = Vec::new();
     let size = base.style.size * scale;
     for line in live[..end].iter().rev() {
-        let mut test = vec![*line];
+        let mut test = vec![line.as_str()];
         test.extend(shown.iter().copied());
         let text = test.join("\n");
         let lo = u.fonts.layout(
@@ -674,9 +703,9 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
         w.chat = Some(ChatData {
             active: false,
             links: Vec::new(),
-            window_id: 0,
+            window_id: -1,
             tabs: Vec::new(),
-            selected: 0,
+            selected: usize::MAX,
             tab_width: 50.0,
             min_tab_width: 0.0,
             auto_resize_tabs: false,
@@ -697,6 +726,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             tab_clip_vertical: [3.0, 20.0],
             hovered: None,
             layout_extent: [0.0; 2],
+            hydrated: false,
         });
     }
     super::chat_input::activate(lua, id);
@@ -889,8 +919,12 @@ pub(crate) fn geometry(lua: &Lua, id: Id) {
 }
 
 fn select(lua: &Lua, id: Id, idx: usize) {
+    select_inner(lua, id, idx, false);
+}
+
+fn select_inner(lua: &Lua, id: Id, idx: usize, force: bool) {
     let Some(c) = chat(lua, id) else { return };
-    if idx >= c.tabs.len() {
+    if idx >= c.tabs.len() || (!force && c.selected == idx) {
         return;
     }
     if let Some(w) = ui(lua).tree.widget_mut(id)
@@ -901,6 +935,7 @@ fn select(lua: &Lua, id: Id, idx: usize) {
         ch.hovered = None;
     }
     layout(lua, id);
+    lifecycle::tint_dividers(lua, id, c.tabs[idx].message);
     for (i, tab) in c.tabs.iter().enumerate() {
         if let Ok(Some(b)) = object_table(lua, tab.button) {
             call_global(lua, "OnSelectedChatTab", (b, i == idx));
@@ -929,72 +964,11 @@ pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
 }
 
 fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
-    // The tabs: the app's hook, else one "All" tab.
-    let mut specs: Vec<(i64, String, Option<Vec<i64>>)> = Vec::new();
-    let hook = lua
-        .globals()
-        .raw_get::<Option<Table>>("AAUI")?
-        .and_then(|t| t.raw_get::<Option<Function>>("ChatTabs").ok().flatten());
-    if let Some(f) = hook
-        && let Value::Table(list) = f.call::<Value>(window_id)?
-    {
-        for v in list.sequence_values::<Table>() {
-            let v = v?;
-            let filters = v
-                .raw_get::<Option<Table>>("filters")?
-                .map(|t| t.sequence_values::<i64>().filter_map(Result::ok).collect());
-            specs.push((
-                v.raw_get::<Option<i64>>("id")?
-                    .unwrap_or(specs.len() as i64),
-                v.raw_get::<Option<String>>("name")?.unwrap_or_default(),
-                filters,
-            ));
-        }
+    if chat(lua, id).is_some_and(|c| c.window_id == window_id) {
+        return Ok(());
     }
-    if specs.is_empty() {
-        specs.push((0, "All".into(), None));
-    }
-    // Drop old tabs.
-    if let Some(c) = chat(lua, id) {
-        let mut u = ui(lua);
-        for t in &c.tabs {
-            u.tree.get_mut(t.button).shown = false;
-            u.tree.get_mut(t.button).alive = false;
-            u.tree.get_mut(t.message).shown = false;
-            u.tree.get_mut(t.message).alive = false;
-        }
-    }
-    let mut tabs = Vec::new();
-    for (i, (tab_id, name, filters)) in specs.into_iter().enumerate() {
-        let b = create_child(lua, Some(id), "button", &format!("chatTab{i}"), 0, false)?;
-        let bid = value_id(lua, &Value::Table(b.clone())).unwrap();
-        if let Some(tb) = ui(lua).tree.get_mut(bid).text_mut() {
-            tb.text = name;
-        }
-        call_global(lua, "OnCreateChatTabButton", b.clone());
-        call_global(lua, "OnSetChatTabId", (b.clone(), tab_id));
-        let (mid, m) = create_tab_message(lua, id, i)?;
-        call_global(lua, "OnCreateChatMessage", m);
-        apply_chat_options(lua, mid);
-        tabs.push(ChatTab {
-            id: tab_id,
-            button: bid,
-            message: mid,
-            filters,
-        });
-    }
-    if let Some(w) = ui(lua).tree.widget_mut(id)
-        && let Some(c) = w.chat.as_mut()
-    {
-        c.window_id = window_id;
-        c.tabs = tabs;
-        c.selected = 0;
-    }
-    if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
-        c.hovered = None;
-    }
-    layout_content(lua, id);
-    select(lua, id, 0);
+    let info = lifecycle::info_from_hook(lua, window_id)?;
+    hydrate_window(lua, id, &info)?;
     Ok(())
 }
 
@@ -1026,6 +1000,10 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
 pub(crate) fn update(lua: &Lua) {
     let windows = ui(lua).tree.of_class("chatwindow");
     for id in windows {
+        if chat(lua, id).is_some_and(|c| c.hydrated && c.tabs.is_empty()) {
+            super::widget::remove_subtree(lua, id);
+            continue;
+        }
         geometry(lua, id);
     }
     let mut g = ui(lua);
@@ -1119,17 +1097,8 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
         ],
         None => default_color(filter),
     };
-    let to = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let line = if text.starts_with("|c") || text.starts_with("|C") {
-        text.to_string()
-    } else {
-        format!(
-            "|cFF{:02X}{:02X}{:02X}{text}",
-            to(rgb[0]),
-            to(rgb[1]),
-            to(rgb[2])
-        )
-    };
+    let color = [rgb[0], rgb[1], rgb[2], 1.0];
+    let line = colored(text, color);
     let frames: Vec<Id> = {
         let u = ui(lua);
         u.tree
@@ -1138,12 +1107,18 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
             .filter(|o| o.alive)
             .filter_map(|o| o.widget()?.chat.as_ref())
             .flat_map(|c| c.tabs.iter())
-            .filter(|t| t.filters.as_ref().is_none_or(|f| f.contains(&filter)))
+            // Native 39511860 uses RAID's enable bit for filter56, but colour56.
+            .filter(|t| t.filters.as_ref().is_none_or(|f| f.contains(&if filter == 56 { 5 } else { filter })))
             .map(|t| t.message)
             .collect()
     };
     for m in frames {
         add_line(lua, m, &line);
+        with_msg(lua, m, |data| {
+            if let Some(source) = data.sources.last_mut() {
+                *source = Some((filter, color));
+            }
+        });
         // Scrolled back, the new line is below the view: the down-to-bottom button flickers.
         if with_msg(lua, m, |x| x.scroll).unwrap_or(0) > 0 {
             call_handler(
@@ -1155,6 +1130,11 @@ pub(crate) fn dispatch(lua: &Lua, filter: i64, text: &str) -> mlua::Result<()> {
         }
     }
     Ok(())
+}
+
+fn colored(text: &str, color: [f32; 4]) -> String {
+    let to = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("|c{:02X}{:02X}{:02X}{:02X}{text}", to(color[3]), to(color[0]), to(color[1]), to(color[2]))
 }
 
 pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
@@ -1180,7 +1160,7 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def("AddMessage", add.clone())?;
     def("AddMessageEx", add.clone())?;
     let refresh = method(lua, |lua, id, a| {
-        with_msg(lua, id, |m| m.lines.clear());
+        with_msg(lua, id, |m| { m.lines.clear(); m.sources.clear(); });
         add_line(lua, id, &a.s(1).unwrap_or_default());
         none()
     })?;
@@ -1191,6 +1171,7 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, _| {
             with_msg(lua, id, |m| {
                 m.lines.clear();
+                m.sources.clear();
                 m.scroll = 0;
             });
             none()

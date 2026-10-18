@@ -3868,3 +3868,137 @@ with its space/accent preserved (**263.0–300.9 FPS**). Both report zero Lua
 errors and self-close (owned PIDs 6748 and 30012). The standalone 2D login
 still has a partially shown logo and no `login_camera` scene entity; each run
 logs that one missing-camera warning. Full login-scene rendering remains open.
+
+### Native local chat configuration and live tab lifecycle (2026-10-18)
+
+The application-facing Rust API is `aa_ui::lua::chat::{ChatTabInfo,
+ChatWindowInfo, hydrate_window, append_tab, update_tab, remove_tab}`. These
+helpers take `&Lua`, a widget or global raw tab ID, and plain configuration
+data; they add no native Lua method or event. The application owns native
+global ID allocation, name validation, persistent configuration and API result
+semantics. `ChatTabInfo` carries the ID/name, optional enabled-filter list,
+optional font size/raw background RGBA, and per-filter RGBA pairs. Omitted
+font/background fields keep the legacy defaults on creation and existing
+values on update. `filters=None` accepts every filter; an empty enabled list
+accepts none. A window carries its ID, ordered rows, signed stored selected
+index and input method.
+
+Native `39514120` skips same-window-ID assignments before reading config.
+The constructor initializes window ID `-1` at `3951448a`; base constructor
+`392cb708` and RemoveAll `392cb303` initialize/reset selection to `-1`.
+`ChatData.selected == usize::MAX` represents that native no-selection state.
+Hydration constructs each message, then its button, refreshes the raw-ID
+metadata/history and calls `OnSetChatTabId`; only after all rows does it
+force the stored selection and restore the input method. Invalid indices
+cause no selection callback. Empty hydration returns before method restore
+and creates no fallback row. A same-ID call preserves the rows and does not
+call the app's hook.
+
+Live append `39513680 -> 392cc270 -> 392cc160` calls
+`OnCreateChatMessage`, then `OnCreateChatTabButton`, selects the appended row,
+and finally calls `OnSetChatTabId`. Existing button/message objects, Lua
+handlers, scrollback and selection callbacks survive. Native selection
+`392cad00` suppresses an unchanged selection unless its force argument is set.
+Rename/update `39507ae0`/`39507d40 -> 39503fd0 -> 395125a0` refresh the existing
+objects and emit no create/ID/selection callbacks. Rename uses the ordinary
+button text/auto-size/prefix-cache path, so a same-extent rename refreshes its
+visible prefix while full text and the original tooltip getter remain intact.
+
+Widget removal `39501e00 -> 39512fb0 -> 392cac10` preserves the numeric
+selected index, clamping only when it is beyond the new end; removing an
+earlier row does not preserve the selected raw ID. No selection callback is
+emitted. Descendant widgets/drawables, focus, input registrations, handlers,
+attachments and event listeners retire through the same subtree cleanup used
+by completed popup removal. An empty configured window survives until the
+next toolkit update, matching `395130e0`.
+
+Direct native Delete has a deliberate observable edge: `39507f90` removes
+the live widget row first, then model deletion `39506a70` refuses raw ID0.
+Thus Delete(0) can return false after the UI changed, without saving or global
+relayout. The Rust widget helper accepts ID0; configuration policy remains
+separate. History remains available for later hydration when model deletion
+fails. A newly allocated append, including reuse of a raw ID, starts empty.
+Unknown live raw IDs return false without widget mutation.
+
+`GetChatTabInfoTable` (`394593a0 -> 395080f0 -> 39503d20`) returns no values
+for an unknown ID, or one six-field table: `id`, `name`, `fontSize`,
+`bgColor={r,g,b,a}`, `filters={[2..59]=bool}` and
+`filterColors={[2..59]={r,g,b,a}}`. Numeric metadata crosses native f32.
+The internal `0xdb8`-byte record has ID/window/name at `+0/+4/+8`, 200 filter
+bytes at `+59`, 200 RGBA entries at `+124`, font at `+da4`, background at
+`+da8`. Font/background tint application is explicit in `395125a0`:
+`39275030` applies the font and `3927b860` tints background-layer drawables.
+`395124a0` relayouts retained lines with the current per-filter palette.
+The toolkit retains each dispatched line's source filter and fallback colour;
+composition replaces its base colour while preserving stored text, times,
+scroll position, link payloads and inline colour markup. As with existing
+chat markup, rendered colour codes use 8-bit ARGB. Native filter eligibility
+`39511860` accepts IDs2..199; filter56 follows filter5's enabled flag while
+retaining colour56. Updating filters affects subsequent dispatch, not old
+history.
+
+The existing `AAUI.ChatTabs(windowId)` hook remains compatible with its old
+ID/name/enabled-ID-list rows. It also accepts native keyed-boolean filters,
+`fontSize`, `bgColor`, and `filterColors`; the returned row list may carry
+app-only `selected` and `method` fields. Only an absent/non-table hook falls
+back to the legacy All row. `AAUI.ChatColor` remains the fallback palette.
+
+Configuration evidence for the application adapter: manager `3a5bb0a0` has
+eight global occupancy bytes at `+60..67`, shared across windows. Native
+base/new tab `39500c50` has no enabled filters, en_us font15 (explicit original
+`SetOptionDefaultFontSize(15)`), background `[0,0,0,1]` and a 200-entry palette.
+Default constructors `39500cd0/d40/db0` produce raw IDs0/1/2 with en_us names
+All/Party/Trade. General enables 41 filters including60, beyond the Lua
+getter's range; Party enables `[4,5,32,35,36,37,38,39,47,56]`, Trade enables
+`[9,35,36,38,40,49]`. `GetDefault` requires an existing record and preserves
+its current ID/window/name after resetting the other fields. Native saves
+raw records in ascending raw-ID order through LevelDB, independently of
+window geometry and the separate 12-byte window extra records (window ID,
+selected index, input method). Save-key `39286690` uses
+`world_u8:character_field_u32:suffix`: original EnterWorld `394cbb10` passes
+the requested world to `393cf830`, which resolves the login world list and
+stores that ID's low byte at session `+7b` (`393cf893`). Current-world lookup
+`393ce880` and the item formatter's `isMyWorld` comparison corroborate it.
+The second component is `[[client+40]+18]`; its precise character identity
+producer remains a separate source audit. No network or disk format is
+invented here.
+
+Ignored evidence under `data/extract/aa-ui/`:
+`chat_lifecycle_source.py` / `native-chat-lifecycle-source-20261018.txt` record
+the PE hash and targeted original instructions.
+`chat_metadata_oracle.py` / `native-chat-metadata-oracle-20261018.json` execute
+19 metadata/default groups plus 10 filter-eligibility cases, including all
+200 palette entries and both native tree lookup levels.
+`chat_lifecycle_oracle.py` / `native-chat-lifecycle-oracle-20261018.json`
+execute 18 assignment/delete/selection/append groups. Widget allocation, layout/visibility,
+destruction, scripting interfaces and nonzero model erase/save endpoints are
+captured; the actual ID0 model guard, widget lookup/removal, selection
+bounds/force logic and append ordering run unchanged. This is offline PE
+execution, with no live-client or original game-data writes.
+
+General dynamic drawable alpha/fade, drag reparent/tear-off, and app-owned
+chat configuration persistence remain separate work. This change applies
+the supplied raw tint and introduces no generalized alpha workaround.
+
+QA: `cargo check -p aa-ui`, example build, and **79 focused tests** pass
+(chat lifecycle/layout/clip/dividers/content/links/input/transport, native
+widgets, HUD scrolling and popup lifecycle). The final seven lifecycle tests
+were rerun after the final changes. They cover exact callback order, same-ID
+no-op, invalid/empty selections, raw ID reuse/history restoration, metadata
+recolouring without changing stored lines, filter56, focused descendant/event
+retirement, and actual original chat handlers with physical tab picking,
+same-extent rename/prefix refresh and the full original tooltip. Three older
+tests that manually cleared rows now assign a different window ID to rebuild;
+their previous same-ID reconstruction assumption contradicted native source.
+
+`native_chat_lifecycle` uses the original scripts through aa-dev's standard
+plugins and screenshot/exit harness. Both inspected **1280x720 / 0.85**
+captures report zero Lua errors and self-close:
+`shots/aa-ui/native-chat-before-085-20261018.png` shows initial All/Trade
+with retained history and the original tooltip (**180.0–201.3 FPS**);
+`shots/aa-ui/native-chat-after-085-20261018.png` shows appended/renamed Harbor,
+the updated font/raw background/palette on old lines, inline colour markup,
+and removal of Trade (**317.9–411.5 FPS**). An initial inspected 1920x1080
+capture, `native-chat-before-20261018.png`, logged **154.3–166.9 FPS** and
+also self-closed. The differing host load prevents treating these ranges as
+a before/after performance comparison.

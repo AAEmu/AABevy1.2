@@ -231,7 +231,8 @@ fn zero_tab_guard_retains_area_anchor_height_until_nonempty_layout() {
     assert_eq!(colored(&ui, [1., 1., 0.])[0].pos, [100., 120., 120., 130.]);
     run(
         &ui,
-        "window:SetChatWindowId(0);add:RemoveAllAnchors();add:AddAnchor('TOPLEFT',window,0,20);add:Show(true)",
+        // Same-ID hydration is a native no-op; use a different window to repopulate.
+        "window:SetChatWindowId(1);add:RemoveAllAnchors();add:AddAnchor('TOPLEFT',window,0,20);add:Show(true)",
     );
     // Insertion runs the nonempty tab-area layout with today's height70.
     let r = lua::ui(&ui.lua).tree.rect(id(&ui, "add"));
