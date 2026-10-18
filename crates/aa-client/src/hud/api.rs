@@ -80,6 +80,7 @@ pub struct HudData {
     pub local_combat: bool,
     pub(super) pvp: super::pvp::View,
     pub(super) radar: super::radar::View,
+    pub(super) battlefield: super::battlefield::View,
     pub(super) breath: super::breath::View,
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
@@ -133,6 +134,7 @@ impl Default for HudData {
             local_combat: false,
             pvp: Default::default(),
             radar: Default::default(),
+            battlefield: Default::default(),
             breath: Default::default(),
             expansion: Default::default(),
             repair: Default::default(),
@@ -245,6 +247,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::trade::install(lua, bridge)?;
     super::pvp::install(lua, bridge)?;
     super::radar::install(lua, bridge)?;
+    super::battlefield::install(lua, bridge)?;
     super::breath::install(lua, bridge)?;
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
@@ -498,6 +501,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let Some(spawn) = world.resource::<Player>().spawn.clone() else {
         bridge.borrow_mut().pvp = Default::default();
         bridge.borrow_mut().radar = Default::default();
+        bridge.borrow_mut().battlefield = Default::default();
         bridge.borrow_mut().expansion.clear();
         bridge.borrow_mut().repair = Default::default();
         bridge.borrow_mut().crafting = Default::default();
@@ -529,6 +533,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::pvp::refresh(world, &mut data, &spawn);
     super::radar::refresh(world, &mut data, &spawn);
     data.character_id = spawn.character().id;
+    super::battlefield::refresh(world, &mut data, &spawn);
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
     super::crafting::refresh(world, &mut data);
@@ -657,6 +662,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let (new_panels, target_pos) = panels::refresh(world, game.get(), own_faction, own_obj_id, start, &data.snapshot, data.pos);
     data.panels = new_panels;
     data.target_pos = target_pos;
+    super::battlefield::refresh_slots(world, &mut data);
 }
 
 /// `--hud-sim mp=N` / `--hud-sim dead` (dev): the HUD behaves as if the player had at most N mana / were dead, for screenshots of
@@ -687,6 +693,7 @@ fn dev_sim(s: &mut Snapshot) {
 /// The events the client raises when the player has entered the world and the loading screen closed,
 /// then the chat channels joined and the lines received so far.
 pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) {
+    super::battlefield::entered_world(rt, bridge);
     super::expansion::extend_slots(rt, bridge.borrow().panels.bag_slots);
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");

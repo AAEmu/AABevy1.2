@@ -1531,3 +1531,78 @@ and renders the original frame/bar. Inspected capture
 `shots/hud/sol61-native-pools/original-pet.png`:306-524 FPS after startup,
 zero runtime errors, screenshot-and-exit completed. This is an isolated received-state
 fixture; it does not claim a live lane pet transaction.
+
+
+## Original battlefield flow (2026-10-18)
+
+`hud/battlefield` connects the original recruiter, queue alarm/cancel, three-choice
+invitation, waiting/countdown, match bars, result roster and Leave button to separately
+received `aa-net::Battlefield` state. Recruiter routing requires actual received
+service12660 on a raw NPC, the authored recruiting field, native service minimum
+level and original near-target/stored-NPC selection contract. It does not fabricate a
+service from static NPC data. Entrance getters retain descending level bands, the
+native55 cap, corps/ruleset lookup, exact victory fields and zero-Lua-result sentinels.
+Native request preflight uses known native buff history and the eight explicit blockers
+plus tag1253; unknown history does not assert an empty buff list.
+
+Local request/cancel state is separate from queue ACKs and admission. Cancel resets
+the local getter/UI and fires `INSTANT_GAME_JOIN_CANCEL` synchronously before its
+command; received counts and invitation/Joined state change only on their receipts.
+An invitation retains its entire qualifier as u64 in Rust, including values above
+2^53. Accept/Next/Decline revalidate owner, token, current invitation and blockers;
+ESC only closes the task, matching native vtable+18. The native custom button type
+and nonmodal setting are supplied before decoration, avoiding the default Cancel
+button behind the authored three-button layout. The actual HUD entered-world
+continuation sends e4 only for the retained accepted offer; Joined receipt alone
+never invents world readiness.
+
+Native progress getters expose states5..8, including results in `IsInInstantGame`.
+The skill getter always returns24 indexed rows while the authored bar creates10
+buttons. Time uses backend-captured Pong/TimeKeeper mapping, including native
+wrapping arithmetic, f32 conversion and Countdown's+6000 offset. Joined deliberately
+omits start/end keys; SC191's `now` is unused. No clock-dependent table is invented
+before an actual clock sample. The HUD manager survives Lua world transfers; an
+actual LoadInstance resets an admitted match and emits the native leave callback.
+The clock and raw received protocol remain owned by aa-net.
+
+Received Point/Kill/SkillEnable callbacks use native admission and source-before-event
+order. A local killstreak notification precedes phase/instance checks and global
+kill-count updates; a victim callback is0 while the stored getter still receives the
+killer's signed streak. Duplicate accepted Point receipts still notify; unchanged
+skill enable bytes do not. Wait sees state6 before an immediate Start sees state7.
+Frame-time promotion emits Start once, actual End emits the result callback, and
+SC196 emits the unsigned half-up rounded notice without inventing a countdown.
+
+The result getter preserves50 members per team, two team arrays, native12-key rows,
+low-five bonus flags, zero-based own index and integer-truncated positive scheduled
+ratio before f32 score multiplication. Original-source ScheduledEventStarted folds
+its full received record and values[10] ratio; the lane defines that opcode but has
+no sender. Global cumulative point/kill fields stay separate from result-team totals.
+AskLeave only queues the source state8 e5 command, leaving the received match intact
+until its real world-load receipt.
+
+Slot244 resolves actual received IDs, tag204 metadata and ordinary skill icons/tooltips.
+Its extra native gate scans the first matching ID among24 rows, so duplicate displayed
+IDs share that first enable byte. Existing ordinary HUD resource/target/death/cooldown
+checks also apply; changing eligibility refreshes the original slot's `can_use` event
+and dark overlay. Protected native ordinary eligibility and actor-planner click/forced-
+target behavior remain open; no guessed cast request or successful cast is claimed.
+The no-active-cutscene Movie count getter returns0 so the original level-up effect
+can finish; a cinematic player remains separate open work.
+
+Twelve focused normal tests pass. Full client suite:186 passed/32 ignored in9.94s.
+Three exact original-script probes pass individually: recruiter2.43s, invitation2.44s,
+and full match/results/physical Leave with received-load reset2.76s. The latter
+advances the original alarm animation through its ten-second automatic result reveal.
+Inspected aa-dev captures under `shots/hud/sol61-battlefield/` show the clean original
+invitation at190-238 FPS, received score/results at209-250 FPS, and enabled/dark
+killstreak slots during play at295-314 FPS, with no runtime WARN/ERROR and all QA
+windows self-closed. The real playable binary was rebuilt/copied to
+`target/debug/aa-client-play.exe`; its live lane world list capture shows Lane-bevy Up,
+zero script errors and369-417 FPS. No live game-session/match claim follows from
+that successful login/world-list check.
+All battlefield probes are isolated received-state fixtures with an explicit controlled
+shared clock domain. The active lane currently gives Pong and battlefield start two
+separate timer origins, so these are not claims of natural live matchmaking or timer
+correctness against that lane defect. Native source contracts and executed timer
+oracles are linked in `docs/aa-ui.md` and `docs/aa-net.md`.

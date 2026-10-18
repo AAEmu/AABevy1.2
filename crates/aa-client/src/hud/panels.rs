@@ -81,6 +81,8 @@ pub struct BuffLists {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TargetSnap {
     pub obj_id: u32,
+    /// Original GetNpcTypeIndex accepts raw Npc only, excluding mates and other NPC facades.
+    pub npc_type: Option<u32>,
     pub character_id: u32,
     pub name: String,
     pub level: u8,
@@ -162,7 +164,7 @@ impl SlotSnap {
     }
 }
 
-fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
+pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
     let info = game.and_then(|g| g.skills.get(&skill));
     // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
     // ignore it waits for it), whichever ends later; quantized to a quarter second: the end time of a
@@ -316,6 +318,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         let (max_hp, max_mp) = game.and_then(|g| super::stats::unit_max(g, u, unit_buffs)).unwrap_or((u.max_hp, u.max_mp));
         p.target = Some(TargetSnap {
             obj_id: u.obj_id,
+            npc_type: match u.kind { UnitKind::Npc { template_id, .. } => Some(template_id), _ => None },
             character_id: match u.kind { UnitKind::Character { char_id }=>char_id,_=>0 },
             name,
             level: u.level.max(1),
@@ -347,7 +350,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     (p, target_pos)
 }
 
-fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
+pub(in crate::hud) fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.raw_set("kind", s.kind)?;
     t.raw_set("id", i64::from(s.id))?;
@@ -455,6 +458,7 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
                 x.raw_set("in_combat", false)?;
                 x.raw_set("unit_type", t.unit_type)?;
                 x.raw_set("detail", t.detail)?;
+                x.raw_set("npc_type", t.npc_type)?;
                 x.raw_set("faction", t.faction_name.as_str())?;
                 x.raw_set("relation", t.relation)?;
                 x.raw_set("grade", t.grade)?;
