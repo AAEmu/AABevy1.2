@@ -46,6 +46,7 @@ mod friends;
 mod input;
 mod items;
 mod loot;
+mod mail;
 mod marks;
 mod markers;
 mod panels;
@@ -67,6 +68,11 @@ mod usable;
 #[allow(dead_code)]
 pub(crate) fn combat_fixture() {
     combat::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn mailbox_fixture() {
+    mail::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -281,6 +287,7 @@ impl Plugin for HudPlugin {
         drag::plugin(app);
         party::plugin(app);
         friends::plugin(app);
+        mail::plugin(app);
         store::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
@@ -311,14 +318,14 @@ impl Plugin for HudPlugin {
                     .after(bevy::input::InputSystems)
                     .run_if(in_state(Screen::InGame)),
             )
-            .add_systems(Update, (mirror_keyboard_focus, input::swallow_keys).chain().after(aa_ui::UiInput).in_set(HudInputReady).run_if(in_state(Screen::InGame)))
+            .add_systems(Update, (mirror_keyboard_focus, input::swallow_keys, input::hotkeys).chain().after(aa_ui::UiInput).in_set(HudInputReady).run_if(in_state(Screen::InGame)))
             .add_systems(
                 Update,
                 (
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::talk_input, dialog::handle_dialog).chain(), chat::route_chat, chat::chat_keys, input::hotkeys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::talk_input, dialog::handle_dialog).chain(), chat::route_chat, chat::chat_keys, panels::action_keys, targeting::tab_target, targeting::click_target, targeting::escape_key, api::handle_requests, alerts::show).run_if(hud_up),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )

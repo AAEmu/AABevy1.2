@@ -706,3 +706,59 @@ blocked by the lane-server connection timeout after the separate auction/refund 
 unblock/offline/delete script checks pass in the isolated original-stage fixture. Full
 live unblock/offline/restart coverage is explicitly pending. The headless peer logged out;
 all root test windows exited.
+
+
+## Original mailbox integration (2026-10-17)
+
+`mail.rs` binds the original received/sent lists, unread count, detail tables, date tables,
+individual money/item claims, sequential claims, deletion, outgoing normal/express mail and
+housing-tax request to `aa_net::Mailbox`. Mail IDs and header `extra` remain decimal strings;
+`chargeMoney` is the native numeric second money field. Item claims clone the cached original
+Item.Write attachment, including detail bytes. No request changes inventory or balances locally.
+Body/header queries and success events use acknowledged state. Batched prepare-body/claim packets
+retain physical attachment indices, and a completed sequential claim advances its original Lua
+queue once. The first synchronization seeds a new stage even if the resource did not change.
+The attached-count query reads the authoritative header byte (native3948d550/393cce70);
+the item-count query counts only nonzero instances with valid item definitions
+(native3948d010), independently of all three money fields.
+
+Ctrl-E opens the original mailbox locally. It chooses a currently visible NaviOpenMailbox
+function group within the lane's five-metre 2D send radius, when available; inbox reading also
+works without a mailbox. Native393b1040 emits numeric doodad ID plus boolean true; there is no
+invented interaction acknowledgement. The broader native interaction chooser and exact automatic
+end-distance behavior are still pending. Sending revalidates the selected mailbox against all
+currently nearby mailboxes, rather than requiring it to remain the nearest. Hotkey consumption
+now completes before gameplay input, so Ctrl-E does not also move the character right.
+
+Outgoing drafts use ten local attachment slots and real physical bag addresses. Whole-stack
+pickup records exact unique IDs as strings, rejects partial drags and bound items, locks attached
+slots, and checks identity again at dispatch after the original button clears its cart. Money
+parsing checks arithmetic and coin ranges. Only one send is outstanding through this UI; the
+write window is disabled while awaiting its response. Failure, local rejection or the explicit
+20-second app timeout restores the cleared text/coins and still-valid attachments without a fake
+ACK. Timeouts do not change network state or automatically retry. Drafts are not persisted over
+process exit. The native digit-edit getter returns its initial value (normally zero) for an
+empty numeric field and writes that text back without a change event. The toolkit implements
+that behavior from native392930c0; the original mail fee calculation consequently shows100c
+express/50c normal with one item and no money, without an app-side edit override.
+
+The English gold-only client returns gold currency and zero from GetCurrentMailAAPointStr.
+Native3948f4b0 likewise returns literal zero with feature0x1000 disabled; when enabled its value
+is the raw third money field, not billing_amount. That raw amount remains retained/countable, but
+AA-point claims/currency mode, commercial/MIA classification, complete system-mail variants and
+quest-mail sender resolution remain pending. CanSendMail is the account/trial gate; the lane
+exposes no trial entitlement, so it is permissive and proximity is validated separately. Return
+has no usable1.2 lane opcode and reports unavailable; sent-mail deletion and generic COD retain
+their documented lane limitations. General failure notices currently retain raw result codes.
+
+Validation: 111 client tests pass, with15 probes ignored. The isolated original-stage mail test
+passes with real tables: native list double-click queues Read, its acknowledged body opens the
+original detail view, the native money button queues the correct claim, the original Write/Send
+buttons queue the expected recipient/text/mailbox, and failed-send recovery restores the form.
+Focused tests preserve IDs above2^53, exact attachment bytes, nonoptimistic claims, physical bag
+slots, whole-stack identity, locks and checked copper. `mailbox_hud` is a server-free aa-dev
+example with read and --compose views. Inspected `read-native.png` and `compose-native.png`
+under `shots/hud/sol61-mail/` show the original controls with a real Heart's Beat template,
+4-item stack,5c incoming and50c/100c outgoing fees. Both have zero Lua errors; read measured
+303?465FPS and compose404?455FPS at1920?1080. Both root-owned windows exited. Source fixtures do not substitute for live transaction verification: the lane game
+connection timeout still blocks that follow-up.

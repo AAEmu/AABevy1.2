@@ -224,6 +224,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::dialog::load_script(lua)?;
     super::party::load_script(lua)?;
     super::store::load_script(lua)?;
+    super::mail::install(lua, bridge)?;
     crate::settings::install_hud(lua)
 }
 

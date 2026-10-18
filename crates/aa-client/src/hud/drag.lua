@@ -46,7 +46,7 @@ local function holdBag(real, amount)
   if s == nil then return end
   local count = amount or s.count
   X2Cursor:SetHeld({
-    kind = "bag", slot = real, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade),
+    kind = "bag", slot = real, uid = s.uid, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade),
     count = count, total = s.count, partial = count < s.count,
   })
 end

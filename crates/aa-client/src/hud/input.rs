@@ -73,10 +73,14 @@ pub fn pointer_over_ui(
 }
 
 /// The client's window key bindings.
-pub fn hotkeys(keys: Res<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt: Option<NonSend<UiRuntime>>) {
+pub fn hotkeys(mut keys: ResMut<ButtonInput<KeyCode>>, focus: Res<HudKeyboardFocus>, rt: Option<NonSend<UiRuntime>>) {
     let Some(rt) = rt else { return };
     if focus.0 || rt.keyboard_captured() {
         return;
+    }
+    if keys.just_pressed(KeyCode::KeyE) && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)) {
+        super::mail::toggle(&rt);
+        keys.reset(KeyCode::KeyE);
     }
     for (key, action) in [
         (KeyCode::KeyI, "toggle_bag"),

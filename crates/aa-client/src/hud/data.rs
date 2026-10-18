@@ -226,6 +226,7 @@ pub struct GameData {
     /// Ability trees, passive buffs and the skill points the player may spend.
     pub book: super::skillbook::Book,
     pub stores: super::store::Tables,
+    pub mail: super::mail::Tables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -540,6 +541,7 @@ impl GameData {
         data.rules = super::usable::Rules::load(&conn)?;
         data.book = super::skillbook::Book::load(&conn)?;
         data.stores = super::store::Tables::load(&conn)?;
+        data.mail = super::mail::Tables::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }
