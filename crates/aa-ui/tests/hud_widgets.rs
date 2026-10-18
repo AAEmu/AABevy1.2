@@ -89,7 +89,7 @@ fn glyph_quads(ui: &UiRuntime) -> usize {
 }
 
 #[test]
-fn short_cooldown_has_no_time_label() {
+fn generic_cooldown_button_has_no_time_label_at_any_duration() {
     let ui = runtime();
     ui.exec(
         "@setup",
@@ -102,17 +102,17 @@ fn short_cooldown_has_no_time_label() {
         "#,
     )
     .unwrap();
-    // The global cooldown: the sweep dims the icon, no "1" over it.
+    // Generic cooldown buttons draw a mask without the slot caption function.
     assert!(sweep_quads(&ui) >= 1);
     assert_eq!(glyph_quads(&ui), 0);
     ui.exec("@limit", "btn:SetCoolDown(1500, 1500)").unwrap();
     assert_eq!(glyph_quads(&ui), 0);
-    // Longer ones count down in whole seconds, to the last one.
+    // Duration does not turn a generic button into a slot caption.
     ui.exec("@long", "btn:SetCoolDown(1600, 1600)").unwrap();
-    assert!(glyph_quads(&ui) >= 1);
+    assert_eq!(glyph_quads(&ui), 0);
     tick(&ui, 1000.0);
-    assert!(glyph_quads(&ui) >= 1);
-    assert_eq!(aa_ui::lua::slot::time_label(600.0), "1");
+    assert_eq!(glyph_quads(&ui), 0);
+    assert_eq!(aa_ui::lua::slot::time_label(600.0), "1s");
 }
 
 #[test]

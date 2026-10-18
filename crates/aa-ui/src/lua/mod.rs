@@ -75,6 +75,8 @@ pub struct Ui {
     pub damage: damage::Damage,
     pub time_ms: f64,
     pub frame_ms: f32,
+    /// Native slot caption option and localized time templates; generic cooldown buttons have none.
+    pub(crate) cooldown_captions: slot::CaptionOptions,
     /// Derived index of enabled native fitting caches, including hidden widgets.
     pub(crate) auto_clip_widgets: std::collections::BTreeSet<Id>,
     /// Calls to stubbed (unimplemented) methods: name -> count.

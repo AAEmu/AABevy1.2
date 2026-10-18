@@ -81,6 +81,7 @@ impl UiRuntime {
             damage: Default::default(),
             time_ms: 0.0,
             frame_ms: 16.0,
+            cooldown_captions: Default::default(),
             auto_clip_widgets: Default::default(),
             stub_calls: Default::default(),
             hover: None,
@@ -258,6 +259,7 @@ impl UiRuntime {
     /// Serve `X2Locale:LocalizeUiText(category, key, ...)` from `texts` (`$1`.. are replaced by
     /// the extra arguments, a missing text returns the key).
     pub fn set_ui_texts(&self, texts: std::sync::Arc<uitext::UiTexts>) -> mlua::Result<()> {
+        lua::slot::set_caption_texts(&self.lua, &texts);
         let x2locale = lua::install_game_stub(&self.lua, "X2Locale")?;
         let f = self
             .lua

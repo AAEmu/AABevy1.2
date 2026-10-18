@@ -34,8 +34,8 @@
 //! the skill or item is cooling down right now. The native then draws the client's sweep over the
 //! icon (a dark clockwise wipe from 12 o'clock, the dark part being the time left, in the colour
 //! of `ui/icon/cooldown_mask.dds`: 46/255 grey at 78 % opacity) and the time left as text in
-//! `slot.cooltime_style` (whole seconds rounded up below a minute, then `5m`, `2h`, `6d`; no label
-//! on a cooldown of 1.5 s or less, [`LABEL_MIN_TOTAL_MS`]: the global cooldown only dims), counts it
+//! `slot.cooltime_style` (native single-precision seconds/minutes/hours, including a unit suffix;
+//! totals below [`LABEL_MIN_TOTAL_MS`] skip slot drawing), counts it
 //! down per frame in `update` on its own, and when it runs out removes the sweep and raises
 //! `OnContentUpdated(self, "skill_cooldown_done")`. Binding a cooling slot raises
 //! `OnContentUpdated(self, "skill_cooldown_start", total)`. The hook is asked again by
@@ -50,6 +50,10 @@
 //! `cooldownconstantbutton:SetSkill(rawId)` observes `AAUI.SkillCooldown(rawId)`, which returns
 //! `(remaining_ms, total_ms)` for an existing descriptor, or nil for an unknown descriptor.
 //! This is independent of `SkillContent` and never replaces the item's icon or click action.
+//! These four cooldown button classes draw a sweep without a native time caption. Slot captions
+//! obey option 82 through [`set_cooldown_numbers`]. Native explicit global/own slot selection
+//! (+311/+312) is not supplied by the current content hook; duration does not identify a global
+//! cooldown. The app must not infer that state from `SkillCooldown`'s combined winning timer.
 //!
 //! [`refresh_slots`] asks again for every bound slot (the app calls it when bars change). The slot
 //! creates its icon drawable itself (`slot.icon`, also `slot.gradeIcon`, inset 1 like the
@@ -118,6 +122,43 @@ const SWEEP_COLOR: [f32; 4] = [46.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 199.0 /
 /// The sweep edge moves in steps of 2 degrees (180 per turn): about one pixel at the corners of a
 /// slot, which keeps a long cooldown at ~15 mesh rebuilds a second.
 const SWEEP_STEPS: f32 = 180.0;
+
+/// Native CVar visibility and category 98 time templates, independent of cooldown identity.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CaptionOptions {
+    visible: bool,
+    texts: [String; 3],
+}
+
+impl Default for CaptionOptions {
+    fn default() -> Self {
+        Self {
+            // 392c50f0 permits captions when the CVar has not been installed.
+            visible: true,
+            texts: ["$1s".into(), "$1m".into(), "$1h".into()],
+        }
+    }
+}
+
+/// Supply the actual `OPTION_ITEM_SLOT_COOLDOWN_VISIBLE` (82) / `slot_cooldown_visible` value.
+/// Changes existing captions immediately, without rebinding contents or restarting timers.
+pub fn set_cooldown_numbers(lua: &Lua, visible: bool) {
+    let mut u = ui(lua);
+    if u.cooldown_captions.visible != visible {
+        u.cooldown_captions.visible = visible;
+        u.tree.touch();
+    }
+}
+
+pub(crate) fn set_caption_texts(lua: &Lua, texts: &crate::uitext::UiTexts) {
+    let mut u = ui(lua);
+    for (i, key) in ["second_initial", "minute_initial", "hour_initial"].iter().enumerate() {
+        if let Some(text) = texts.get(&(98, (*key).into())) {
+            u.cooldown_captions.texts[i] = text.clone();
+        }
+    }
+    u.tree.touch();
+}
 
 /// Bound contents (Lua tables) by slot id.
 fn contents(lua: &Lua) -> mlua::Result<Table> {
@@ -537,32 +578,55 @@ fn content_field(lua: &Lua, id: Id, key: &str) -> mlua::Result<Value> {
     }
 }
 
-/// The label of a cooldown's time left: whole seconds rounded up (`8`), then `5m`, `2h`, `6d`.
+/// The native en_us time caption. Uses the same f32 operations and truncation as 392c50f0,
+/// so exactly 1000 ms is `2s`, 60000 ms is `2m`, and durations above a day stay in hours.
 pub fn time_label(remain_ms: f64) -> String {
-    let s = (remain_ms / 1000.0).ceil().max(0.0) as i64;
-    match s {
-        0..=59 => s.to_string(),
-        60..=3599 => format!("{}m", (s + 59) / 60),
-        3600..=86399 => format!("{}h", (s + 3599) / 3600),
-        _ => format!("{}d", (s + 86399) / 86400),
+    caption(remain_ms as f32, &CaptionOptions::default().texts)
+}
+
+fn cvtt(value: f32) -> i32 {
+    // CVTTSS2SI returns the indefinite integer on NaN/overflow; Rust's cast saturates.
+    if !value.is_finite() || !(-2147483648.0..2147483648.0).contains(&value) {
+        i32::MIN
+    } else {
+        value as i32
     }
 }
 
-/// Cooldowns this long or shorter (ms, the whole cooldown) get the sweep but no time label: the
-/// global cooldown (0.5-1.5 s) only dims the slots in the client.
-pub const LABEL_MIN_TOTAL_MS: f32 = 1500.0;
+fn caption(remain_ms: f32, texts: &[String; 3]) -> String {
+    let seconds = remain_ms * 0.001_f32;
+    if seconds <= 0.0 {
+        return String::new();
+    }
+    let (value, unit) = if seconds > 3600.0 {
+        (1_i32.wrapping_sub(cvtt(seconds * -0.00027777778450399637_f32)), 2)
+    } else if seconds > 60.0 {
+        (1_i32.wrapping_sub(cvtt(seconds * -0.01666666753590107_f32)), 1)
+    } else {
+        (cvtt(seconds).wrapping_add(1), 0)
+    };
+    let text = texts[unit].replace("$1", &value.to_string());
+    // Native destination is eight bytes including NUL. Its subsequent XlMultiToWide
+    // drops an incomplete final UTF-8 character (executed through 3922b830).
+    let mut end = text.len().min(7);
+    while !text.is_char_boundary(end) { end -= 1; }
+    text[..end].to_owned()
+}
 
-/// The time label a cooldown shows with `remain` ms left (none for a short cooldown).
-fn label_of(cd: &Cooldown, remain: f64) -> Option<String> {
-    (cd.total_ms > LABEL_MIN_TOTAL_MS).then(|| time_label(remain))
+/// Native 392c67e0 skips the slot's mask and caption below this total; equality is included.
+pub const LABEL_MIN_TOTAL_MS: f32 = 200.0;
+
+fn label_of(cd: &Cooldown, remain: f64, options: &CaptionOptions) -> Option<String> {
+    (cd.total_ms >= LABEL_MIN_TOTAL_MS && options.visible)
+        .then(|| caption(remain as f32, &options.texts))
 }
 
 /// What the screen shows of a cooldown with `remain` ms left: (sweep step, label).
-fn drawn_state(cd: &Cooldown, remain: f64) -> (i32, String) {
+fn drawn_state(cd: &Cooldown, remain: f64, options: &CaptionOptions, slot: bool) -> (i32, String) {
     let frac = (remain as f32 / cd.total_ms.max(1.0)).clamp(0.0, 1.0);
     (
         (frac * SWEEP_STEPS).floor() as i32,
-        label_of(cd, remain).unwrap_or_default(),
+        if slot { label_of(cd, remain, options).unwrap_or_default() } else { String::new() },
     )
 }
 
@@ -612,7 +676,8 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
                 }
                 continue;
             }
-            let state = drawn_state(&cd, remain);
+            let slot = u.tree.widget(id).is_some_and(|w| w.slot.is_some());
+            let state = drawn_state(&cd, remain, &u.cooldown_captions, slot);
             if state != cd.drawn
                 && let Some(c) = u.tree.widget_mut(id).and_then(|w| w.cooldown.as_mut())
             {
@@ -702,6 +767,9 @@ pub(crate) fn cooldown_quads(
     if remain <= 0.0 || cd.total_ms <= 0.0 {
         return;
     }
+    if w.slot.is_some() && cd.total_ms < LABEL_MIN_TOTAL_MS {
+        return;
+    }
     let frac = (remain as f32 / cd.total_ms).clamp(0.0, 1.0);
     let widget_rect = u.tree.rect(id);
     let area = w
@@ -734,7 +802,10 @@ pub(crate) fn cooldown_quads(
             vcolors: None,
         });
     }
-    let Some(label) = label_of(cd, remain) else {
+    if w.slot.is_none() {
+        return;
+    }
+    let Some(label) = label_of(cd, remain, &u.cooldown_captions) else {
         return;
     };
     let mut tb = w.aux_style.clone().unwrap_or_else(cooltime_block);
@@ -838,8 +909,8 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-/// The cooldown buttons' natives: `SetCoolDown(remainMs, totalMs)` starts the sweep and the time
-/// text (`SetCoolDown(0, 0)` clears it); the mask setters take the stock mask and do nothing.
+/// The cooldown buttons' natives: `SetCoolDown(remainMs, totalMs)` starts the sweep
+/// (`SetCoolDown(0, 0)` clears it); the mask setters take the stock mask and do nothing.
 pub(crate) fn cooldown_button_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "SetCoolDown",
