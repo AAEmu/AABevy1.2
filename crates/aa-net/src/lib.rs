@@ -18,6 +18,7 @@ pub mod auction;
 pub mod buff;
 pub mod bank;
 mod compression;
+pub mod craft;
 pub mod friend;
 pub mod game;
 pub mod interaction;
@@ -50,6 +51,7 @@ pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFail
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
+pub use craft::CraftFailureNotice;
 pub use login::Secret;
 pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};
