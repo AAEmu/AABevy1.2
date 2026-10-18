@@ -7,6 +7,8 @@ pub use commands::TrialCommand;
 mod progress;
 #[cfg(test)]
 mod dispatch_tests;
+#[cfg(test)]
+mod initial_tests;
 pub use progress::{TrialHistory, TrialRulingStatus};
 pub use data::{TrialCrimeRecord, TrialDefendantData, TrialRecords};
 use crate::{
@@ -15,6 +17,9 @@ use crate::{
 };
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialEvent {
+    ImprisonOrTrialOffered { crime_value:i32, jail_minutes:i32 },
+    JuryInvited { defendant_name:Vec<u8>, trial_id:u32 },
+    JurySeated { raw_is_west:u8, trial_id:u32, court:i32, jury_number:i32 },
     JuryOkCount{count:i32,total:i32},
     VerdictCount{count:i32,total:i32},
     RulingStatus(TrialRulingStatus),
@@ -33,11 +38,14 @@ pub enum TrialEvent {
 }
 impl TrialEvent {
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x173 | 0x175 | 0x176 | 0x177 | 0x178 | 0x179 | 0x17a | 0x17b | 0x17c | 0x17d | 0x17e | 0x17f | 0x180 | 0x181 | 0x183)
+        matches!(op, 0x171 | 0x172 | 0x173 | 0x174 | 0x175 | 0x176 | 0x177 | 0x178 | 0x179 | 0x17a | 0x17b | 0x17c | 0x17d | 0x17e | 0x17f | 0x180 | 0x181 | 0x183)
     }
     /// Native and active lane bodies agree; consume complete raw names, including NULs.
     pub fn read(op: u16, r: &mut Reader) -> Result<Self> {
         Ok(match op {
+            0x171 => Self::ImprisonOrTrialOffered {crime_value:r.i32()?,jail_minutes:r.i32()?},
+            0x172 => Self::JuryInvited {defendant_name:r.blob()?.to_vec(),trial_id:r.u32()?},
+            0x174 => Self::JurySeated {raw_is_west:r.u8()?,trial_id:r.u32()?,court:r.i32()?,jury_number:r.i32()?},
             0x179 => Self::JuryOkCount{count:r.i32()?,total:r.i32()?},
             0x17a => Self::VerdictCount{count:r.i32()?,total:r.i32()?},
             0x17d => Self::RulingStatus(TrialRulingStatus::read(r)?),
@@ -77,6 +85,12 @@ impl TrialEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialNotice {
+    /// Close actual native Tasks6/7 after role reset and before terminal Lua callbacks. NOT a Lua event.
+    CloseTrialTasks,
+    /// Native Task8 producer after phase callbacks; this is a task request, NOT a Lua event.
+    SkipFinalStatementTask { trial_id:u32 },
+    /// Native phase5 closes Task8 only if actually queued. NOT a Lua event.
+    CloseSkipFinalStatementTask,
     /// TRIAL_TIMER(phase, period table from raw signed seconds), using an explicit local Unix sample.
     Timer { phase:u8, remaining_seconds:i64 },
     /// AUDIENCE_JOINED(name), before local object/context admission. Raw bytes; Lua uses first NUL.
@@ -188,6 +202,8 @@ impl Trials {
             Event::Trial(receipt) => {
                 self.last_receipt = Some(receipt.clone());
                 match receipt {
+                    // These create native tasks or request a seating actor action; no trial-manager assignment.
+                    TrialEvent::ImprisonOrTrialOffered {..}|TrialEvent::JuryInvited {..}|TrialEvent::JurySeated {..}=>{},
                     TrialEvent::JuryOkCount{count,total} => {
                         self.jury_ok_count=Some(*count);self.jury_ok_total=Some(*total);
                         emit(TrialNotice::JuryOkCount{count:*count,total:*total},self);
@@ -235,10 +251,10 @@ impl Trials {
                         self.adopt_trial(*trial_id,emit);self.jury_court=Some(*court);self.jury_number=Some(*jury_number);self.defendant_context=None;self.is_jury=true;
                     }
                     TrialEvent::RulingClosed => {
-                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::RulingClosed,self);emit(TrialNotice::Closed,self);
+                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::CloseTrialTasks,self);emit(TrialNotice::RulingClosed,self);emit(TrialNotice::Closed,self);
                     }
                     TrialEvent::Canceled { .. } => {
-                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::Closed,self);emit(TrialNotice::Canceled,self);
+                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::CloseTrialTasks,self);emit(TrialNotice::Closed,self);emit(TrialNotice::Canceled,self);
                     }
                     TrialEvent::DefendantData(data) => {
                         if data.name.len()<=128 {
@@ -285,6 +301,11 @@ impl Trials {
                                 5 if self.is_jury => {if let Some(ms)=self.sentence_time_ms {emit(TrialNotice::Verdicts{minutes:verdict_minutes(ms as u32)},self);}},
                                 _=>{}
                             }
+                        }
+                        // The outer handler runs this AFTER the inner admission, even if it refused a different trial.
+                        if self.is_defendant() {
+                            if *phase==4 {emit(TrialNotice::SkipFinalStatementTask{trial_id:*trial_id},self);}
+                            else if *phase==5 {emit(TrialNotice::CloseSkipFinalStatementTask,self);}
                         }
                     }
                     TrialEvent::AudienceJoined { trial_id, obj_id, name } => {
@@ -413,8 +434,8 @@ mod tests {
             }
             batch.u16(0).u16(*op).raw(body);
         }
-        assert!(!TrialEvent::handles(0x174));
-        assert!(TrialEvent::read(0x174, &mut Reader::new(&[])).is_err());
+        assert!(!TrialEvent::handles(0x170));
+        assert!(TrialEvent::read(0x170, &mut Reader::new(&[])).is_err());
         batch.u16(0).u16(0x1bc).u32(99);
         use std::io::Write;
         let mut compressor = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());

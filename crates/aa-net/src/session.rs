@@ -4328,6 +4328,29 @@ mod tests {
         let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::TrialRequested{..}));rejected|=matches!(e,Event::TrialRequestRejected{..});}assert!(rejected);
     }
     #[tokio::test]
+    async fn initial_trial_task_receipts_never_reply_automatically_and_commands_use_captured_task_context(){
+        use crate::{TrialCommand,TrialEvent};
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());session.phase=Phase::InWorld;session.selected=42;
+        let mut header=crate::model::CharacterState::default();header.character.id=42;session.selected_state=Some(header);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        for receipt in [TrialEvent::ImprisonOrTrialOffered{crime_value:-1,jail_minutes:60},TrialEvent::JuryInvited{defendant_name:b"A\0tail".to_vec(),trial_id:999},TrialEvent::JurySeated{raw_is_west:255,trial_id:999,court:-1,jury_number:4}] {
+            session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;assert!(matches!(events.try_recv(),Ok(Event::Trial(e))if e==receipt));assert!(events.try_recv().is_err());
+        }
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());assert_eq!(session.received_trials.borrow().trial_id,0);
+        for(command,body)in [
+            (TrialCommand::ReplyImprisonOrTrial{request_trial:false},vec![0x6f,0,0]),
+            (TrialCommand::ReplyJuryInvitation{accept:true,trial_id:999},vec![0x71,0,1,231,3,0,0]),
+            (TrialCommand::SkipFinalStatement{trial_id:999},vec![0x70,0,231,3,0,0])]{
+            let before=session.received_trials.borrow().clone();session.command(Command::Trial{character_id:42,command}).await;
+            let n=peer.read_u16_le().await.unwrap();let mut actual=vec![0;n as usize];peer.read_exact(&mut actual).await.unwrap();assert_eq!(actual[4..],body);
+            assert!(matches!(events.try_recv(),Ok(Event::TrialRequested{command:c,..})if c==command));assert_eq!(*session.received_trials.borrow(),before);
+            session.command(Command::Trial{character_id:41,command}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        }
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+    }
+
+    #[tokio::test]
     async fn trial_control_identity_header_missing_send_and_lifecycle_are_checked_at_write(){
         use crate::{TrialCommand,TrialEvent};let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
         let command=TrialCommand::CancelTrial{trial_id:0};

@@ -328,6 +328,9 @@ mod tests {
                     } else {
                         assert_eq!((s.phase, s.current_jury, s.remaining_time_ms), (1, Some(99), 0));
                     }
+                    // Outer task actions follow the inner Lua callbacks even when wrong-ID admission refused.
+                    if role==2 && phase==4 {expected.push(TrialNotice::SkipFinalStatementTask{trial_id:trial});}
+                    if role==2 && phase==5 {expected.push(TrialNotice::CloseSkipFinalStatementTask);}
                     assert_eq!(actual, expected, "role{role}/trial{trial}/phase{phase}");
                 }
             }

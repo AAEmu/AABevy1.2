@@ -3,13 +3,38 @@ use super::Trials;
 use crate::wire::Writer;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrialCommand {
-    ConfirmCrimeRecords { trial_id: u32, jury_number: i32 },
-    CancelTrial { trial_id: u32 },
-    ChooseVerdict { trial_id: u32, jury_number: i32, choice: u8 },
+    /// Captured Task7 choice; wire body contains only this bool.
+    ReplyImprisonOrTrial {
+        request_trial: bool,
+    },
+    /// Captured Task6; caller performs the source main_world gate/forced decline.
+    ReplyJuryInvitation {
+        accept: bool,
+        trial_id: u32,
+    },
+    /// Only true Task8 response sends; Cancel/ESC sends nothing.
+    SkipFinalStatement {
+        trial_id: u32,
+    },
+    ConfirmCrimeRecords {
+        trial_id: u32,
+        jury_number: i32,
+    },
+    CancelTrial {
+        trial_id: u32,
+    },
+    ChooseVerdict {
+        trial_id: u32,
+        jury_number: i32,
+        choice: u8,
+    },
 }
 impl TrialCommand {
     pub fn opcode(&self) -> u16 {
         match self {
+            Self::ReplyImprisonOrTrial { .. } => 0x06f,
+            Self::SkipFinalStatement { .. } => 0x070,
+            Self::ReplyJuryInvitation { .. } => 0x071,
             Self::ConfirmCrimeRecords { .. } => 0x073,
             Self::CancelTrial { .. } => 0x074,
             Self::ChooseVerdict { .. } => 0x075,
@@ -17,6 +42,15 @@ impl TrialCommand {
     }
     pub fn write(&self, w: &mut Writer) {
         match self {
+            Self::ReplyImprisonOrTrial { request_trial } => {
+                w.u8(u8::from(*request_trial));
+            }
+            Self::SkipFinalStatement { trial_id } => {
+                w.u32(*trial_id);
+            }
+            Self::ReplyJuryInvitation { accept, trial_id } => {
+                w.u8(u8::from(*accept)).u32(*trial_id);
+            }
             Self::ConfirmCrimeRecords { trial_id, jury_number } => {
                 w.u32(*trial_id).i32(*jury_number);
             }
@@ -32,6 +66,9 @@ impl TrialCommand {
     pub fn validate_received(&self, state: &Trials) -> Result<(), &'static str> {
         let trial_id = match self {
             Self::ConfirmCrimeRecords { trial_id, .. } | Self::CancelTrial { trial_id } | Self::ChooseVerdict { trial_id, .. } => *trial_id,
+            // Native task callbacks capture their own context, not the manager's trial ID.
+            // Root validates actual task identity/admission; Session validates selected identity.
+            _ => return Ok(()),
         };
         if trial_id != state.trial_id {
             return Err("trial request refers to a stale received context");
@@ -58,6 +95,7 @@ impl TrialCommand {
                     return Err("trial cancellation requires known zero current jury count");
                 }
             }
+            _ => {}
         }
         Ok(())
     }

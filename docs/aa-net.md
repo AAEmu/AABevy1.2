@@ -6472,7 +6472,7 @@ outputs and long locale truncation remain explicit formatter boundaries.
 
 ### Genuine SummonJury automatic CS072 reply (2026-10-18)
 
-Native39080900 removes task11, calls3907f660 with the received trial, stores court/seat,
+Native39080900 calls UI-data helper39508950(11), calls3907f660 with the received trial, stores court/seat,
 sets its transient byte0 and immediately consumes it at39080931..46. It constructs
 opcode072/vtable399a1aa8 at39080952..65, constructor397ac160 copies trial/court/seat,
 then sends39186810. Serializer397b0e80 is exactly u32 trial+i32 court+i32 jury number.
@@ -6663,3 +6663,69 @@ clock return, errno pointer, Lua/table interfaces are mocked. Separate phase-clo
 oracle executes20 cases including0/negative/MAX epochs, unsigned durationMAX, floor
 milliseconds, addition wrap and zero expiry. Embedded tests cover both oracles,
 unknown sampling, reset/adoption/lifecycle, stale-ID refusal and callback-time fields.
+
+
+### Initial trial tasks and exact response packets
+
+TrialEvent adds ImprisonOrTrialOffered (SC171:twoi32), JuryInvited (SC172:raw blob,
+u32trial), and JurySeated (SC174:raw west byte,u32trial,i32court,i32jury). Native factories
+391b3650/391b36d0/391b3050 and serializers397af770/397af7b0/397af880 agree with active
+lane framing. Lane names crime_value u32, but native i32 accessor and Task7 signed-f32
+conversion establish the signed projection with unchanged bits. Names retain full binary
+bytes; native Task6 input cap128 is an app admission boundary, not framing truncation.
+These receipts update last_receipt only: no inferred jury role, seat, current trial,
+acceptance, or automatic response. Native174 handler3907bcc0 ignores trial, requires
+client and unsigned seat<=4, resolves a static west/court/seat actor then requests its
+interaction; it does not assign trial-manager membership. Rendering/planning stays open.
+
+TrialCommand adds ReplyImprisonOrTrial { request_trial } CS06f bool,
+ReplyJuryInvitation { accept,trial_id } CS071 bool/u32, and SkipFinalStatement { trial_id }
+CS070 u32. These reuse selected-header Session transport guards/local outcomes, without
+requiring the manager's current trial to equal a captured task trial. Root owns genuine
+task token/lifecycle/admission and source world gate. Native true Task8 choice sends;
+false/ESC sends no CS070. Root must not queue a skip command for cancellation. No received
+state changes on any transport observation. All three lane handlers perform real trial
+operations. Source serializers397b0e00/20/40 establish the exact1/4/5byte bodies.
+
+Task7 creation3907d690 first refuses an existing Task7 silently. vt399a1b34 returns
+buttonType0,isModaltrue, info crimeValue/jailMinutes signed i32?f32. Task8 vt399a1b54
+is buttonType0/isModaltrue, captures raw phase packet trial, and supplies localized
+title/category28 and content/category29 using skip_final_statement. Task6 vt399a1b74
+is buttonType0/isModalfalse, captures defendantName (CString) and trial, and admits only
+if no queued6 and game option index4!=1.390fa85e binds index4/store+334 to
+ g_ignore_jury_invite default0;39182860 compares exactly1. Generic admission refusal
+3902d570 invokes false callback for buttonType0, hence sends a jury decline. Common
+Cancel3902b2f0 likewise calls false: Task7 sends CS06f(false), Task6 CS071(false),
+Task8 sends nothing. Task manager/editor suppression branches remain root lifecycle scope.
+
+Native Task6 true reply3907c820 queries ISystem virtual144?CrySystem3654d650?object+ac;
+its virtual8=365f2170 returns byte10. Producer365efa10 sets this byte iff client env
+byte150 and current loaded layer name exactly main_world; constructorzero. False
+forces decline and emits local error544 CANNOT_JOIN_TRIAL_FROM_INSTANT_ZONE before
+CS071. This is not Battlefield membership. Unknown app world context must refuse safely;
+no true-by-default gate is supplied in aa-net. Original callbacks/constructors execute
+in trial_initial_choice_oracle.py/native-trial-initial-choice-oracle-20261018.json,
+12cases with main_world query/error/sender mocked only; native forced decline and no
+cache mutations are independently observed. Read-only runtime method-pointer proof and
+full source are archived in native-trial-jury-accept-runtime-20261018.txt and
+native-trial-initial-tasks-source-20261018.txt.
+
+TrialNotice::SkipFinalStatementTask { trial_id } and CloseSkipFinalStatementTask are
+explicit task actions, NOT Lua events. Original outer390809e0 runs them after inner
+phase callbacks/admission, only while defendant byte2 is true. Phase4 captures raw
+packet trial even if an active wrong-trial inner update was refused. Phase5 checks
+actual queued8 before closing; root must retain that task-manager guard. Tests exercise
+pre/post snapshots, wrong-ID refusal followed by task request, raw receipts/truncation/
+DD04 following-packet alignment, native weak command gates, and real loopback transport
+with no automatic reply or optimistic state mutation.
+
+
+Task closure precision: TrialNotice::CloseTrialTasks is an explicit non-Lua request to
+close native Tasks6/7 only, emitted after reset/Beautyshop and before terminal ruling/
+closed/canceled notices. Context adoption does not close them. Neither173 nor175 closes
+Task7: both call39508950(11) before adoption. Earlier 'remove task11' wording was an
+incorrect mock label, now corrected.39508950 writes UI manager3a5bb120, with?6 sentinel
+skipping active edit update; downstream395107d0 restores chat input method (method11
+is Trial), independently source-closed by aa-ui. RulingClosed calls?6 before reset;
+local AudienceLeft calls?6 before old-context Closed/reset. Canceled and AudienceJoined
+do not call it. This milestone does not invent a Task11 or synthesize chat behavior.
