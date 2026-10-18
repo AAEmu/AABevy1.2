@@ -1545,8 +1545,8 @@ of subtracting it (inherited C# bug). Only the real game-point/item tasks update
 resources; the expansion ACK changes only the returned count.
 
 Original Lua contracts are in `x2ui/skill/tab_actability.lua` and
-`actability_info_notify.lua`: `ACTABILITY_REFRESH_ALL()` after the snapshot completes,
-`ACTABILITY_EXPERT_CHANGED(id)` for point changes,
+`actability_info_notify.lua`: `ACTABILITY_REFRESH_ALL()` for each received snapshot packet,
+`ACTABILITY_EXPERT_CHANGED(id, localizedName, actualCappedDelta, total)` for point changes,
 `ACTABILITY_EXPERT_GRADE_CHANGED(id)` for regrading and
 `ACTABILITY_EXPERT_EXPANDED()` for capacity changes. `X2Ability:UpgradeExpert(id)` and
 `:DowngradeExpert(id)` take one Lua argument; native wrappers39438840/39438870 obtain
@@ -4387,3 +4387,65 @@ charge.max(1)?stacks is an explicitly incomplete lane convenience, not native st
 proof. Unit snapshot NetBuff has genuine separate stacks/charged fields. A subsequent
 catalog-aware native stack reconciliation is needed before claiming all buff stat
 multipliers exact; gear request work does not silently reinterpret charge.
+
+
+### Catalog-aware native buff stacks (2026-10-18)
+
+`Buffs.native` is an additive `NativeBuffs` sidecar. Install actual `buffs` rows with
+`set_catalog(HashMap<u32, NativeBuffRule>)`: `kind` maps kind_id1/2/3 to Good/Bad/Hidden;
+remaining public fields are per_unit_creation, stack_rule_id, max_stack and max_charge.
+`native.of(objectID)` returns `Option<&[BuffEntry]>`. A genuine unit snapshot seeds its
+separate stack/charge fields even before catalog installation. Created packets require
+both known prior unit history and the matching static row; missing either leaves None.
+Unknown history is not repaired by installing a catalog later. UnitsRemoved and session
+selection/kick/leave/disconnect discard received views; static rules survive. Raw lane
+`Buffs.of` remains index-based and retains the incoming charge convenience count.
+
+Native SCBuffCreated handler391d5e00 passes detail, caster, casterCharID and index to
+3938a3c0. Its call to3989e080 passes detail, static template, caster and casterCharID:
+runtime+28 is **casterCharID, not index or caster objectID**. Template loader SQL39a07550
+and stores397342d9/397343b2/397343bd/39734552/39734d4f establish kind_id?+f4,
+max_charge?+110, max_stack?+114, per_unit_creation?+12b and stack_rule_id?+194.
+The +f4 field is not group_id. Manager vtable399d1990 +4?39387770 finds first matching
+(kind,buffID); +8?39387710 additionally matches casterCharID. Rule6 always allocates.
+New records start stacks1, charge=received charge (3989e1e8..f2). Existing records retain
+caster/ability/skill metadata: rule4 increments stacks; rule2 replaces charge; rule3 adds
+charge. Every result caps stacks at max_stack; only rule3 caps charge at max_charge.
+Rule5 adds duration; others replace it. Rule5 selects greater elapsed, other refreshes
+select lesser elapsed. The sidecar retains packet-time elapsed baselines; it does not
+reproduce the native per-frame tick scheduler. Modifier398a0960 consumes runtime+40
+stack count and unsigned runtime+2e ability level. It must not consume raw charge.
+
+A new incoming index rekeys the merged record when it was not previously present
+(3938a517..20); removal follows that index. An index colliding with another record marks
+the sidecar unknown rather than guessing the manager replacement path. Snapshot resets
+restore known state. The small-detail four PISC values are charge, duration/10, elapsed/10
+and tick/10 (397c9070); the decoder now retains the third value instead of discarding it.
+
+This is explicitly native presentation/state folding, not a claim that the lane's server
+buff model matches native stacking. Lane models/buff.rs writes snapshot stack1/charged0,
+and its refresh/charge/extend replacement algorithm differs. Raw values and lane list
+remain available. No wire format, command, modifier policy or server state was changed.
+Regressions cover independent vs per-caster grouping, separate charge rules, stack caps,
+index/removal identity, missing catalog/history, snapshot preservation, session resets,
+and a trailing-byte golden for nonzero received elapsed.
+
+Additional proficiency event producer proof: SC136 handler391db5e0?3930bc60 ignores
+packet bool+c, rebuilds rows and emits0x55 ACTABILITY_REFRESH_ALL() at3930be5a on every
+packet. Labor handler391d3db8 invokes3930be90 only for nonzero proficiency delta. After
+capped update, a resolved skill_page_visible group emits0xc3 ACTABILITY_EXPERT_CHANGED
+(id NUMBER, localizedName STRING, actualCappedDelta NUMBER, postChangeTotal NUMBER)
+via3930bf95?394242a0. Total includes recognized unit-attribute modifiers but excludes
+GetMyActabilityInfo's separate enclosing-house bonus. There is no ACTABILITY_CHANGED
+notification in this path. Native event producer chunk behavior and the lane resource's
+accumulated snapshot completion are distinct contracts.
+
+Direct Item modifier level closure: items SQL39a00d90 column22 is `level` (not
+level_limit/level_requirement). Loader396cb701 reads it,396cb70c stores low byte at
+temporary?f4; temporary base?140 is passed396cbb4d..54 to396ba730, so descriptor+4c
+is that byte. Call398a0af2 sign-extends it and supplies multiplier1. Rune runtime+20
+and each gem runtime+30 DWORD are resolved directly by the same item-ID lookup39695dc0,
+then contribute their own descriptor+dc modifiers with multiplier1 and signed own level.
+Seven gem entries are visited, stopping at first sentinel. Base-slot eligibility rejection
+at397cc080 skips all those contributions; it is a descriptor impl_id switch with static
+subtype/equip-slot mask lookups, not a proven simple use_as_stat predicate.
