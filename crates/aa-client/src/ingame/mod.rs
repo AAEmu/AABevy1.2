@@ -31,7 +31,7 @@ mod bench;
 pub(crate) mod appearance;
 pub(crate) mod camera;
 mod combat;
-mod creature;
+pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
 pub(crate) mod enter;
