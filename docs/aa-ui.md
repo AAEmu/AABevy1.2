@@ -4645,3 +4645,79 @@ Crime Points **80 / 50** and Infamy Pts **1234 plus skull** at 1280x720/UI scale
 character-info reference; its extra crime rows follow the explicit fixture.
 The process reports zero script errors, no runtime warnings/errors and
 **506.8-560.9 FPS**, then self-closes.
+
+### Pending Trial chat input method (2026-10-18)
+
+Two application-only Rust helpers now match the native chat manager's pending
+method state; they add no Lua X2 method:
+
+```rust
+aa_ui::lua::chat_input::set_forced_method(lua, method_i32);
+aa_ui::lua::chat_input::prepare_input(lua, window_id);
+```
+
+`set_forced_method` always stores the value. Except for sentinel **-6**, it
+immediately restores the selected chat window's method when the edit's **own**
+visibility flag is true, independently of focus or parent visibility. The
+pending value remains stored after immediate application. **-6 only clears the
+request**; it does not restore or clear the visible input. The application
+calls it at its received Trial transition and at chat-manager reload/reset.
+The existing `reset_windows` helper keeps its window/history-only contract.
+
+`prepare_input` belongs immediately before the application's actual input-open
+Show/prefill/focus sequence. It consumes pending **11** only when that window's
+current method differs from 11, then stores -6. Already-Trial input retains the
+request; other pending values are not consumed. Generic Show/SetFocus calls do
+not apply this policy. No autocomplete, method-list or channel restriction is
+inferred from the pending value.
+
+Native setter `39508950` initializes/reloads UIData if necessary, stores signed
+method at `3a5bb120` (UIData+80), then checks selected window `39502020`, own
+edit visibility `395128e0` (IsVisible(false)), edit `39512960` and virtual+84
+before restoration `395107d0`. Native input opening `39512ce0`, specifically
+`39512d12..39512d3f`, consumes only 11 before its Show operation at `39512d49`.
+Manager reload `395072c0` initializes the pending value to -6. Net source
+separately closes Trial173/175 setting 11 before adoption, 17e clearing -6
+before role reset, and local180 clearing -6 before closing/resetting context;
+the toolkit does not own those protocol transitions.
+
+Restoration also fixes hydration's existing use of the ordinary command setter.
+Native `395107d0` clears the prefix, then invokes actual EditBox SetText(empty)
+**before writing the new method**. Changed text dispatches OnTextChanged while
+the old method/selector is still present. Unchanged empty text takes the native
+early return, retaining edit state and skipping the text callback. Method save
+through `AAUI.ChatMethod` still precedes selector display/OnContentUpdated.
+Non-whisper restoration preserves both the cached whisper target and any prefix
+the text callback installs; it does not clear that prefix a second time.
+Ordinary typed-command behavior remains separate.
+
+`data/extract/aa-ui/chat_forced_method_oracle.py` and
+`native-chat-forced-method-oracle-20261018.json` execute **14 native groups**:
+the setter, deferred opening through its pre-show point, restoration, actual
+EditBox `39292f70` including XL UTF-8 conversion/UTF-32 comparison, actual
+`39510e50` and OnTextChanged dispatch `39292460`. Explicit captured endpoints
+are GUI/layout, model string assignment, prefix, GetText/empty command parsing,
+Lua event delivery, persistence and selected-window lookup. The oracle covers
+immediate/closed/missing-selected inputs, repeat/empty drafts, signed methods,
+-6, already-Trial retention, non-Trial pending values, lazy initialization/reload
+and callback prefix mutation. No live client is executed or written.
+
+All **74 selected tests** pass across forced method (nine), existing method,
+chat lifecycle/reset/links/context/locks/transport, selection, IME and keyboard.
+Coverage includes the old-method callback/save/display order, unchanged empty
+edit state, hidden-parent own visibility, unrelated focus, deferred consumption,
+cached whisper retention, hydration, composition cancellation, retired/invalid
+window safety and both actual-original strict pointer/typing paths. The new
+`native_chat_forced_method` aa-dev example builds successfully.
+
+Inspected final captures show the original Trial selector and physically typed
+`Ready to speak in Trial`, with the old draft absent:
+
+* `shots/aa-ui/native-chat-forced-deferred-final-720-20261018.png`,
+  1280x720/default UI scale0.85: **322.9-551.2 FPS**.
+* `shots/aa-ui/native-chat-forced-immediate-final-1080-20261018.png`,
+  1920x1080/UI scale1: **445.4-494.3 FPS**.
+
+Both report zero script errors, no runtime warnings/errors and self-close.
+The original chat/HUD artwork was compared with the character-info reference;
+the centered single-tab placement and test text are explicit fixture settings.
