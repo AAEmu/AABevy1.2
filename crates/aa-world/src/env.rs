@@ -209,6 +209,8 @@ impl HdrSetup {
 pub struct EnvSample {
     /// Direction *towards* the sun (cry space, Z up).
     pub sun_dir: Vec3,
+    /// Native primary-moon path: the same orbital matrix, phase advanced by half a day.
+    pub moon_dir: Vec3,
     /// `Sun color * multiplier`, linear.
     pub sun: Vec3,
     pub sky: Vec3,
@@ -223,6 +225,7 @@ pub struct EnvSample {
     pub night_zenith: Vec3,
     /// Authored `Night sky: Star intensity`, evaluated at the same warped hour as the sky.
     pub star_intensity: f32,
+    pub moons: [MoonSample; 4],
     /// 0 at night .. 1 at day: how much the sun contributes.
     pub day: f32,
     /// `Fog color (top) * multiplier`, linear: the colour of the thin fog high up.
@@ -275,6 +278,18 @@ pub struct EnvSample {
     pub ocean_under: f32,
 }
 
+/// Renderer parameters 30 / 32..36: native sampled float RGB times multipliers / HDR scale.
+/// Unlike the calibrated surface-light samples, these retain the engine's RGB values unchanged.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MoonSample {
+    pub color: Vec3,
+    pub inner: Vec3,
+    pub outer: Vec3,
+    pub inner_scale: f32,
+    pub outer_scale: f32,
+    pub outer_size: f32,
+}
+
 /// Linear interpolation of the sample's field types.
 trait Mix: Copy {
     fn mix(self, other: Self, t: f32) -> Self;
@@ -314,16 +329,25 @@ impl<T: Mix, const N: usize> Mix for [T; N] {
     }
 }
 
+impl Mix for MoonSample {
+    fn mix(self, o: Self, t: f32) -> Self {
+        Self { color: self.color.mix(o.color, t), inner: self.inner.mix(o.inner, t), outer: self.outer.mix(o.outer, t),
+            inner_scale: self.inner_scale.mix(o.inner_scale, t), outer_scale: self.outer_scale.mix(o.outer_scale, t),
+            outer_size: self.outer_size.mix(o.outer_size, t) }
+    }
+}
+
 impl EnvSample {
     /// Component-wise interpolation between two samples (zone changes, time steps).
     pub fn lerp(&self, other: &EnvSample, t: f32) -> EnvSample {
         macro_rules! mix {
             ($($f:ident),*) => {
-                EnvSample { sun_dir: self.sun_dir.mix(other.sun_dir, t).normalize_or(other.sun_dir), $($f: self.$f.mix(other.$f, t)),* }
+                EnvSample { sun_dir: self.sun_dir.mix(other.sun_dir, t).normalize_or(other.sun_dir),
+                    moon_dir: self.moon_dir.mix(other.moon_dir, t).normalize_or(other.moon_dir), $($f: self.$f.mix(other.$f, t)),* }
             };
         }
         mix!(
-            sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, day, fog_top,
+            sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
             color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
             char_back, char_back_shadow, ocean_under
@@ -372,6 +396,7 @@ impl TimeOfDay {
         };
         EnvSample {
             sun_dir: sun_direction(hour, lighting),
+            moon_dir: sun_direction(hour + 12.0, lighting),
             sun,
             sky,
             ambient_ground,
@@ -383,6 +408,18 @@ impl TimeOfDay {
             night_horizon: nh,
             night_zenith: nz,
             star_intensity: self.scalar("Night sky: Star intensity", t),
+            moons: std::array::from_fn(|i| {
+                let prefix = if i == 0 { "Night sky: Moon".to_string() } else { format!("Night sky: Moon{i}") };
+                // Native UpdateEngineMoonParameters multiplies the sampled float RGB directly;
+                // SetGlobalParameter copies it unchanged. The engine HDR base defaults to 2.
+                let hdr = self.scalar("HDR dynamic power factor", t).exp2();
+                let color = |suffix: &str| self.color(&format!("{prefix}{suffix} color"), t)
+                    * self.scalar(&format!("{prefix}{suffix} color multiplier"), t) * hdr;
+                MoonSample { color: color(""), inner: color(" inner corona"), outer: color(" outer corona"),
+                    inner_scale: self.scalar(&format!("{prefix} inner corona scale"), t),
+                    outer_scale: self.scalar(&format!("{prefix} outer corona scale"), t),
+                    outer_size: self.scalar(&format!("{prefix} outer corona size"), t) }
+            }),
             day,
             fog_top,
             fog_layer: Vec4::new(
@@ -545,6 +582,25 @@ mod tests {
         let mut b = a.clone();
         b.fog_density = 0.6;
         assert!((a.lerp(&b, 0.5).fog_density - 0.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn moon_raw_rgb_hdr_factor_and_zone_blending() {
+        let xml = r#"<TimeOfDayList><TimeOfDay>
+            <Variable Name="Night sky: Moon color" Color="0.5,0.4,0.3"/>
+            <Variable Name="Night sky: Moon color multiplier" Value="3"/>
+            <Variable Name="HDR dynamic power factor" Value="1"/>
+            </TimeOfDay></TimeOfDayList>"#;
+        let a = TimeOfDay::parse(xml).unwrap().sample(0.0, Lighting::default());
+        assert!((a.moons[0].color - Vec3::new(3.0, 2.4, 1.8)).length() < 1e-6);
+        let mut b = a.clone();
+        b.moons[0].color = Vec3::ZERO;
+        b.moons[0].outer_size = 2.0;
+        b.moon_dir = Vec3::X;
+        let middle = a.lerp(&b, 0.5);
+        assert!((middle.moons[0].color - a.moons[0].color * 0.5).length() < 1e-6);
+        assert!((middle.moons[0].outer_size - 1.0).abs() < 1e-6);
+        assert!((middle.moon_dir.length() - 1.0).abs() < 1e-6);
     }
 
     #[test]
