@@ -1096,3 +1096,22 @@ source listings are `attachments-native/particle-{decomp,methods,spawn,spawn-ada
 Parser and original numeric checks: **75 passed / 1 ignored**. The manual complete
 CDF inventory assertions also pass. Visual particle assembly remains a client/aa-fx
 integration deliverable, rather than a claimed parser screenshot.
+
+### Preserve attachments while unwrapping a character part
+
+`PartAsset.attachments: Vec<cdf::Attachment>` retains the exact attachment
+definitions when `CharacterDesc::resolve` unwraps a part CDF into its Model/Material.
+A directly supplied CHR and the ordinary body constructor have an empty vector;
+no similarly named CDF is inferred. Hair variant CDF resolution preserves the
+same data and replaces the old variant's attachments when its mesh changes.
+The selected path, material and dye semantics are unchanged. There is no aa-fx
+dependency or automatic emitter creation in aa-anim.
+
+The public character-resolution regression supplies the original elf female
+white-day001 costume CDF, verifies the unwrapped model/material, retains its
+headring Effect identifier and placement verbatim, and proves the returned local
+transform against the shared base-skeleton Bip01 Head. Supplying the underlying
+raw CHR explicitly has no inferred headring. Client assembly can now iterate
+`Character.assets.parts[*].attachments` after Character is added, for in-game
+characters and login previews alike. Payload dispatch and native hidden/emitter
+lifetime handling remain client responsibilities.

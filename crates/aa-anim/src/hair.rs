@@ -126,11 +126,11 @@ impl CharacterAssets {
             self.parts.retain(|part| part.kind != PartKind::Hair);
             return Ok(variants);
         };
-        let (path, material) = if path.ends_with(".cdf") {
+        let (path, material, attachments) = if path.ends_with(".cdf") {
             let cdf = crate::Cdf::load(path)?;
-            (cdf.model, cdf.material)
+            (cdf.model, cdf.material, cdf.attachments)
         } else {
-            (crate::cdf::norm(path), None)
+            (crate::cdf::norm(path), None, Vec::new())
         };
         let mut selected = crate::PartAsset {
             kind: PartKind::Hair,
@@ -138,6 +138,7 @@ impl CharacterAssets {
             path,
             material,
             dye: None,
+            attachments,
         };
         if let Some(existing) = self
             .parts
@@ -145,6 +146,7 @@ impl CharacterAssets {
             .find(|part| part.kind == PartKind::Hair)
         {
             existing.path = selected.path;
+            existing.attachments = selected.attachments;
             if existing.material.is_none() {
                 existing.material = selected.material;
             }
