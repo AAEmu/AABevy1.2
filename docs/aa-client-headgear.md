@@ -55,9 +55,16 @@ selection/render check; source hair/armor clipping and full native-scene visual
 equivalence remain unclaimed.
 
 The later combined main target/debug/aa-client-20261018-enchant-frames.exe and
-idle target/debug/aa-client-play.exe alias now share SHA256
+then-idle target/debug/aa-client-play.exe alias shared SHA256
 347DDF0D98E758E49CCBF6E082048BA2894635637CBF7430D14EBD2F83A00327.
 Its full suite passes307 tests /38 optional probes ignored in86.92s, including
 the same headgear checks. Eight inspected original HUD/world-list captures
 validate that combined build (aa-client-enchant.md); they add no new headgear
 scene/reference claim.
+
+The current inspected alias comes from
+target/debug/aa-client-20261018-enchant-records.exe, SHA256
+8C3D1CDC2FDDF96F44F050814A93D32822F755D18FF61C1BB1F175D1CC8A3726.
+Its frozen suite passes315 tests /38 optional probes ignored in91.99s and eight
+original HUD/world-list captures are inspected. These are combined regression
+checks, with no additional headgear-scene or paired-reference claim.
