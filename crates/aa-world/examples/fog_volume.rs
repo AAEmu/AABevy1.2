@@ -320,7 +320,7 @@ fn world_setup(mut commands: Commands) {
     let eye = vector_arg("--camera").unwrap_or(target + offset);
     let look = vector_arg("--target").unwrap_or(target + Vec3::Z * 2.);
     info!("Original fog camera Cry{eye:?} looking at Cry{look:?}");
-    commands.spawn((
+    let mut camera = commands.spawn((
         Camera3d::default(),
         Transform::from_translation(aa_world::cry_to_bevy(eye))
             .looking_at(aa_world::cry_to_bevy(look), Vec3::Y),
@@ -331,6 +331,7 @@ fn world_setup(mut commands: Commands) {
             ..default()
         }),
     ));
+    if flag("--transmission") { camera.insert(bevy::pbr::ScreenSpaceTransmission::default()); }
 }
 fn world_check(
     mut commands: Commands,

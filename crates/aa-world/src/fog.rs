@@ -10,6 +10,11 @@ use bevy::{
     mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
     pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin},
     prelude::*,
+    render::{
+        RenderApp,
+        batching::NoAutomaticBatching,
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
+    },
     render::render_resource::{
         AsBindGroup, ColorWrites, CompareFunction, Face, RenderPipelineDescriptor, ShaderType,
         SpecializedMeshPipelineError,
@@ -298,7 +303,10 @@ impl Plugin for FogVolumePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "fog.wesl");
         bevy::shader::load_shader_library!(app, "fog_math.wesl");
-        app.add_plugins(MaterialPlugin::<FogMaterial>::default())
+        app.add_plugins((
+            MaterialPlugin::<FogMaterial>::default(),
+            ExtractComponentPlugin::<FogWaterPass>::default(),
+        ))
             .add_systems(Update, refresh_global_color.after(crate::sky::update_environment));
     }
 }
@@ -312,6 +320,19 @@ pub struct FogAssets<'w> {
 pub struct FogVolumePart {
     pub cell: (i32, i32),
     pub guid: u64,
+}
+
+/// Static authored node centre for native normal-pass water-half selection.
+/// Cry 300B5B60 stores the matrix translation; this is not a bounds corner or falloff base.
+#[derive(Component, Clone, Copy, Debug, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[require(NoAutomaticBatching)]
+pub struct FogWaterPass {
+    pub center_height: f32,
+}
+
+pub(crate) fn after_water(camera_height: f32, ocean_height: f32, center_height: f32) -> bool {
+    ((camera_height - ocean_height) * 0.5) * (center_height - ocean_height) > 0.0
 }
 
 /// Retains authored density while a global-colour volume waits for environment data.
@@ -414,9 +435,8 @@ pub(crate) fn spawn_cell(
             continue;
         }
         let mesh = meshes.add(mesh(volume));
-        let material = materials.add(FogMaterial {
-            params: volume.params(cell, radiance),
-        });
+        let params = volume.params(cell, radiance);
+        let material = materials.add(FogMaterial { params });
         let mut entity = commands
             .spawn((
                 Name::new(format!("FogVolume {}", volume.name)),
@@ -427,6 +447,9 @@ pub(crate) fn spawn_cell(
                 FogVolumePart {
                     cell,
                     guid: volume.guid,
+                },
+                FogWaterPass {
+                    center_height: params.center.y,
                 },
             ));
         if volume.global_color {
@@ -441,6 +464,35 @@ pub(crate) fn spawn_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn original_x86_water_halves_use_matrix_translation_and_strict_boundary() {
+        // Original 301121C0, normal pass ID zero. Its caller supplies node+208,
+        // written directly from the Matrix34 translation by 300B5B60.
+        for (eye, center, after) in [
+            (90.0, 90.0, true),
+            (90.0, 100.0, false),
+            (90.0, 110.0, false),
+            (100.0, 90.0, false),
+            (100.0, 100.0, false),
+            (100.0, 110.0, false),
+            (110.0, 90.0, false),
+            (110.0, 100.0, false),
+            (110.0, 110.0, true),
+        ] {
+            assert_eq!(after_water(eye, 100.0, center), after);
+        }
+        let mut volume = fixture(1);
+        volume.matrix = Mat4::from_translation(Vec3::new(299.0, 308.0, 117.0))
+            * Mat4::from_rotation_y(0.7)
+            * Mat4::from_scale(Vec3::new(-2.0, 3.0, 4.0));
+        volume.direction = Vec3::Z;
+        volume.shift = -80.0;
+        let params = volume.params((12, 10), 1.0);
+        assert_eq!(params.center.y, 117.0);
+        assert_eq!(params.base.y, 37.0);
+        assert!(after_water(130.0, 100.0, params.center.y));
+        assert!(!after_water(130.0, 100.0, params.base.y));
+    }
     fn fixture(kind: u8) -> FogVolume {
         parse(&format!(r#"<Mission><Objects><Entity EntityClass="FogVolume" EntityGuid="A" Pos="0,8,0"><Properties VolumeType="{kind}" GlobalDensity="0.2" FallOffScale="0"><Size x="4" y="4" z="4"/></Properties></Entity></Objects></Mission>"#)).remove(0)
     }
@@ -557,6 +609,13 @@ mod tests {
         assert_eq!(first.over_budget + second.over_budget, 48);
         commands.apply(&mut world);
         assert_eq!(world.query::<&FogVolumePart>().iter(&world).count(), 32);
+        assert_eq!(world.query::<&FogWaterPass>().iter(&world).count(), 32);
+        for entity in first.entities.iter().chain(&second.entities) {
+            let handle = world.get::<MeshMaterial3d<FogMaterial>>(*entity).unwrap();
+            let params = materials.get(handle.id()).unwrap().params;
+            assert_eq!(world.get::<FogWaterPass>(*entity).unwrap().center_height, params.center.y);
+            assert!(world.get::<NoAutomaticBatching>(*entity).is_some());
+        }
         assert_eq!(world.query::<&GlobalFogColor>().iter(&world).count(), 16);
         first.release(
             &mut Commands::new(&mut commands, &world),
@@ -570,6 +629,7 @@ mod tests {
         );
         commands.apply(&mut world);
         assert_eq!(world.query::<&FogVolumePart>().iter(&world).count(), 0);
+        assert_eq!(world.query::<&FogWaterPass>().iter(&world).count(), 0);
         assert_eq!(world.query::<&GlobalFogColor>().iter(&world).count(), 0);
         assert_eq!((meshes.len(), materials.len()), (0, 0));
     }

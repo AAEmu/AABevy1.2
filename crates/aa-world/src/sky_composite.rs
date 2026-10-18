@@ -95,6 +95,13 @@ pub struct SkyComposite;
 #[require(NoAutomaticBatching)]
 pub struct SkyPass;
 
+/// Existing diffuse overlays for native opaque deferred decals, before fog/water.
+/// Forward alpha roads and legacy decals do not carry this marker.
+#[derive(Component, Clone, Copy, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[require(NoAutomaticBatching)]
+pub struct DeferredDecalPass;
+
 struct Draw {
     parent: Entity,
     entity: Entity,
@@ -188,8 +195,9 @@ fn sync(
 }
 
 mod pass {
-    use super::SkyPass;
+    use super::{DeferredDecalPass, SkyPass};
     use super::cloud_water::{CloudWaterPass, OceanLevel, after_water};
+    use crate::fog::FogWaterPass;
     use bevy::camera::{MainPassResolutionOverride, Viewport};
     use bevy::core_pipeline::{
         Core3dSystems,
@@ -205,16 +213,19 @@ mod pass {
         render_phase::{SortedRenderPhase, ViewSortedRenderPhases},
         render_resource::{RenderPassDescriptor, StoreOp},
         renderer::{RenderContext, ViewQuery},
-        sync_world::{MainEntity, MainEntityHashSet},
+        sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet},
         view::{ExtractedView, RetainedViewEntity, ViewDepthStencilTexture, ViewTarget},
     };
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     #[derive(Resource, Default)]
     struct SkyPhases(ViewSortedRenderPhases<Transparent3d>);
 
     pub(super) fn build(app: &mut App) {
-        app.add_plugins(ExtractComponentPlugin::<SkyPass>::default())
+        app.add_plugins((
+            ExtractComponentPlugin::<SkyPass>::default(),
+            ExtractComponentPlugin::<DeferredDecalPass>::default(),
+        ))
             .add_systems(
                 PostUpdate,
                 tag.before(bevy::transform::TransformSystems::Propagate),
@@ -308,11 +319,16 @@ mod pass {
         mut late: ResMut<ViewSortedRenderPhases<Transparent3d>>,
         tagged: Query<&MainEntity, With<SkyPass>>,
         clouds: Query<&MainEntity, With<CloudWaterPass>>,
+        fog: Query<(&MainEntity, &FogWaterPass)>,
+        decals: Query<&MainEntity, With<DeferredDecalPass>>,
         views: Query<&ExtractedView, With<Camera3d>>,
         ocean: Res<OceanLevel>,
         mut entities: Local<MainEntityHashSet>,
         mut cloud_entities: Local<MainEntityHashSet>,
         mut before_water: Local<HashSet<RetainedViewEntity>>,
+        mut fog_entities: Local<MainEntityHashMap<f32>>,
+        mut normal_views: Local<HashMap<RetainedViewEntity, f32>>,
+        mut decal_entities: Local<MainEntityHashSet>,
     ) {
         // Bevy 0.20 PBR items use (PLACEHOLDER, MainEntity), rather than the
         // extracted render entity. Retain this small set's capacity across frames.
@@ -321,12 +337,22 @@ mod pass {
         cloud_entities.clear();
         cloud_entities.extend(clouds.iter().copied());
         before_water.clear();
-        if let Some(level) = ocean.0 {
-            for view in &views {
-                let height = view.world_from_view.translation().y;
-                // Native recursive/reflection pass IDs have no port input. Decline
-                // mirrored views instead of guessing that their pass ID is zero.
-                if !view.invert_culling && height.is_finite() && !after_water(height, level) {
+        fog_entities.clear();
+        fog_entities.extend(
+            fog.iter()
+                .filter(|(_, p)| p.center_height.is_finite())
+                .map(|(entity, p)| (*entity, p.center_height)),
+        );
+        normal_views.clear();
+        decal_entities.clear();
+        decal_entities.extend(decals.iter().copied());
+        for view in &views {
+            let height = view.world_from_view.translation().y;
+            // Native recursive/reflection pass IDs have no port input. Decline
+            // mirrored views instead of guessing that their pass ID is zero.
+            if !view.invert_culling && height.is_finite() {
+                normal_views.insert(view.retained_view_entity, height);
+                if ocean.0.is_some_and(|level| !after_water(height, level)) {
                     before_water.insert(view.retained_view_entity);
                 }
             }
@@ -336,11 +362,17 @@ mod pass {
                 .0
                 .entry(*view)
                 .or_insert_with(SortedRenderPhase::default);
+            let fog_view = normal_views.get(view).copied().zip(ocean.0);
             for item in source.items.values_mut() {
                 if entities.contains(&item.entity.1)
+                    || (normal_views.contains_key(view) && decal_entities.contains(&item.entity.1))
                     || (before_water.contains(view) && cloud_entities.contains(&item.entity.1))
+                    || fog_view.is_some_and(|(eye, level)| {
+                        fog_entities.get(&item.entity.1)
+                            .is_some_and(|height| !crate::fog::after_water(eye, level, *height))
+                    })
                 {
-                    // SkyPass requires NoAutomaticBatching: a range cannot include a
+                    // Each marker requires NoAutomaticBatching: a range cannot include a
                     // foreground receiver. Preserve the already-prepared GPU instance index.
                     debug_assert!(item.batch_range.len() <= 1, "batched sky draw");
                     target.add_retained(prepared_copy(item));
@@ -393,6 +425,7 @@ mod pass {
         use super::*;
         use bevy::core_pipeline::core_3d::TransparentSortingInfo3d;
         use bevy::render::{
+            batching::NoAutomaticBatching,
             render_phase::{
                 Draw, DrawError, DrawFunctions, PhaseItemExtraIndex, TrackedRenderPass,
             },
@@ -495,6 +528,190 @@ mod pass {
                 .remove(&a);
             app.update();
             assert!(!app.world().resource::<SkyPhases>().0.contains_key(&a));
+        }
+
+        #[test]
+        fn fog_halves_are_per_volume_and_view_and_restore_prepared_ranges() {
+            use bevy::render::render_resource::TextureFormat;
+            let mut app = App::new();
+            app.init_resource::<SkyPhases>()
+                .insert_resource(OceanLevel(Some(100.0)))
+                .init_resource::<ViewSortedRenderPhases<Transparent3d>>()
+                .add_systems(Update, (restore, prepare).chain());
+            let sources: Vec<_> = (0..5).map(|_| app.world_mut().spawn_empty().id()).collect();
+            let markers: Vec<_> = [90.0, 100.0, 110.0]
+                .into_iter()
+                .zip(&sources)
+                .map(|(height, source)| {
+                    app.world_mut()
+                        .spawn((
+                            MainEntity::from(*source),
+                            FogWaterPass {
+                                center_height: height,
+                            },
+                        ))
+                        .id()
+                })
+                .collect();
+            let overlay = app
+                .world_mut()
+                .spawn((MainEntity::from(sources[3]), DeferredDecalPass))
+                .id();
+            assert!(app.world().get::<NoAutomaticBatching>(overlay).is_some());
+            let keys: Vec<_> = (0..2)
+                .map(|_| {
+                    RetainedViewEntity::new(app.world_mut().spawn_empty().id().into(), None, 0)
+                })
+                .collect();
+            let views: Vec<_> = [90.0, 110.0]
+                .into_iter()
+                .zip(&keys)
+                .map(|(height, key)| {
+                    app.world_mut()
+                        .spawn((
+                            Camera3d::default(),
+                            ExtractedView {
+                                retained_view_entity: *key,
+                                clip_from_view: Mat4::IDENTITY,
+                                world_from_view: GlobalTransform::from(Transform::from_xyz(
+                                    0.0, height, 0.0,
+                                )),
+                                clip_from_world: None,
+                                target_format: TextureFormat::Rgba8Unorm,
+                                viewport: UVec4::new(0, 0, 128, 128),
+                                color_grading: default(),
+                                invert_culling: false,
+                            },
+                        ))
+                        .id()
+                })
+                .collect();
+            let functions = DrawFunctions::<Transparent3d>::default();
+            let draw = functions.write().add(UnusedDraw);
+            for key in &keys {
+                // Prepared native opaque-overlay draw precedes fog; the final item is foreground alpha.
+                for i in [3, 0, 1, 2, 4] {
+                    let source = sources[i];
+                    app.world_mut()
+                        .resource_mut::<ViewSortedRenderPhases<Transparent3d>>()
+                        .entry(*key)
+                        .or_default()
+                        .add_retained(Transparent3d {
+                            sorting_info: TransparentSortingInfo3d::Sorted {
+                                mesh_center: Vec3::new(0.0, 500.0, 0.0),
+                                depth_bias: if i == 3 { -500_000.0 } else { -300_000.0 },
+                            },
+                            distance: 10.0,
+                            pipeline: CachedRenderPipelineId::INVALID,
+                            entity: (Entity::PLACEHOLDER, source.into()),
+                            draw_function: draw,
+                            batch_range: i as u32 + 40..i as u32 + 41,
+                            extra_index: PhaseItemExtraIndex::DynamicOffset(1536),
+                            indexed: true,
+                        });
+                }
+            }
+            // Original normal-pass goldens, opaque overlay and untagged foreground item.
+            for (heights, expected) in [
+                (
+                    [90.0, 110.0],
+                    [
+                        [false, true, true, true, false],
+                        [true, true, false, true, false],
+                    ],
+                ),
+                (
+                    [110.0, 90.0],
+                    [
+                        [true, true, false, true, false],
+                        [false, true, true, true, false],
+                    ],
+                ),
+            ] {
+                for (view, height) in views.iter().zip(heights) {
+                    app.world_mut()
+                        .get_mut::<ExtractedView>(*view)
+                        .unwrap()
+                        .world_from_view =
+                        GlobalTransform::from(Transform::from_xyz(0.0, height, 0.0));
+                }
+                for _ in 0..3 {
+                    app.update();
+                    for (view, selected) in keys.iter().zip(expected) {
+                        let early = &app.world().resource::<SkyPhases>().0[view];
+                        assert_eq!(
+                            early.items.get_index(0).unwrap().1.entity.1,
+                            sources[3].into()
+                        );
+                        let late = &app
+                            .world()
+                            .resource::<ViewSortedRenderPhases<Transparent3d>>()[view];
+                        for (i, source) in sources.iter().enumerate() {
+                            let key = (Entity::PLACEHOLDER, (*source).into());
+                            assert_eq!(early.items.contains_key(&key), selected[i]);
+                            let range = i as u32 + 40..i as u32 + 41;
+                            let item = if selected[i] {
+                                &early.items[&key]
+                            } else {
+                                &late.items[&key]
+                            };
+                            assert_eq!(item.batch_range, range);
+                            let expected_bias = if i == 3 { -500_000.0 } else { -300_000.0 };
+                            assert!(matches!(item.sorting_info,
+                                TransparentSortingInfo3d::Sorted { depth_bias, .. }
+                                    if depth_bias == expected_bias));
+                            assert!(matches!(
+                                item.extra_index,
+                                PhaseItemExtraIndex::DynamicOffset(1536)
+                            ));
+                        }
+                    }
+                }
+            }
+            app.world_mut()
+                .get_mut::<ExtractedView>(views[0])
+                .unwrap()
+                .invert_culling = true;
+            app.update();
+            assert!(
+                app.world().resource::<SkyPhases>().0[&keys[0]]
+                    .items
+                    .is_empty()
+            );
+            assert!(
+                !app.world().resource::<SkyPhases>().0[&keys[1]]
+                    .items
+                    .is_empty()
+            );
+            // Ocean loss restores fog; native opaque decals still precede water independently.
+            app.world_mut().resource_mut::<OceanLevel>().0 = None;
+            app.update();
+            assert!(
+                app.world().resource::<SkyPhases>().0[&keys[0]]
+                    .items
+                    .is_empty()
+            );
+            assert_eq!(
+                app.world().resource::<SkyPhases>().0[&keys[1]].items.len(),
+                1
+            );
+            for marker in markers {
+                app.world_mut().entity_mut(marker).despawn();
+            }
+            app.world_mut().entity_mut(overlay).despawn();
+            app.world_mut().resource_mut::<OceanLevel>().0 = Some(100.0);
+            app.update();
+            for view in keys {
+                let late = &app
+                    .world()
+                    .resource::<ViewSortedRenderPhases<Transparent3d>>()[&view];
+                assert!(late.items.values().all(|item| item.batch_range.len() == 1));
+                assert!(
+                    app.world().resource::<SkyPhases>().0[&view]
+                        .items
+                        .is_empty()
+                );
+            }
         }
 
         #[test]
