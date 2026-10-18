@@ -1,5 +1,5 @@
 // Native catalogue sprite math from the client's stars.cfx. Position is a direction, so the
-// camera translation is excluded; clip-space expansion keeps a star five pixels wide.
+// camera translation is excluded; native 380BCF50 sets size from the physical viewport.
 import bevy_pbr::render::mesh_view_bindings::view;
 
 struct StarParams { values: vec4<f32>, }
@@ -21,7 +21,7 @@ fn vertex(input: Input) -> Output {
     var out: Output;
     var clip = view.clip_from_world * vec4<f32>(input.direction, 0.0);
     let viewport = view.viewport.zw;
-    let size = stars.values.z * min(1.0, min(viewport.x / 1280.0, viewport.y / 720.0));
+    let size = max(3.0, floor(min(viewport.x, viewport.y) * (8.0 / 768.0))) * stars.values.z;
     clip = vec4<f32>(clip.xy + (input.uv * 2.0 - 1.0) * size / viewport * clip.w, 0.0, clip.w);
     out.clip = clip;
     out.uv = input.uv;
