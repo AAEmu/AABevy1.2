@@ -496,6 +496,7 @@ pub fn stream_objects(
                     .spawn((
                         Mesh3d(cry.meshes.add(mesh)),
                         MeshMaterial3d(material),
+                        crate::water::WaterSurface { cell: c },
                         Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
                         NotShadowCaster,
                     ))

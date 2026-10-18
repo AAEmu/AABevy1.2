@@ -1971,8 +1971,8 @@ by `update_water`. The shader runs in the transmissive phase (`reads_view_transm
 reads the depth prepass. It follows the engine's own two shaders, `watersurface.cfx` and `watervolume.cfx` (read from the pak,
 `game/shaders/hwscripts/cryfx/`), for ponds, lakes and rivers:
 
-* normal: the four layers of the bump map the engine adds (big waves x2 and x4, small waves x8 and x16 tiles, drifting at `WavesSpeed`), world
-  space coordinates, `BumpScale`, flattened beyond 60 to 260 m,
+* normal: native authored volume UVs and the material's flow/NO_FLOW tap branch (see follow-up below), `WavesSpeed` and
+  `BumpScale`, flattened beyond 60 to 260 m; the sea retains its existing world-coordinate approximation,
 * **volume fog** (`WaterVolumeInto`): `mix(fog colour, refracted scene, T)` with `T = exp(-k thickness)`, `k = density x water_absorb` and
   `water_absorb` = ln 2 (the engine's `exp2(-density x depth)`); thickness is the depth prepass minus the surface depth along the view ray. The
   old absorption was `water_absorb` 6, nine times the engine's: legs, the rat and the bed vanished a metre down (lake_tank: density 0.6, 0.66
@@ -1992,7 +1992,7 @@ reads the depth prepass. It follows the engine's own two shaders, `watersurface.
   `foam x lum x (sun + sky) x FoamMultiplier x water_foam (0.7)`. These are the white flecks of the real frames: sparse over shallow water,
   dense where the water is thin (around legs and plants, at the shore).
 
-**Fit** to the real combat frames (`reference/ingame/combat_triple_slash/real_05.png`, `combat_return/real_10.png`, the Nuian pond; `fly
+**Historical material fit, before the authored UV/motion follow-up below**, to the real combat frames (`reference/ingame/combat_triple_slash/real_05.png`, `combat_return/real_10.png`, the Nuian pond; `fly
 --camera-json cam_c05.json --shift 11264,11264,0` at the frames' real game hours 2.81 and 3.76, no pinned sun: they read the splines at 6.7 and
 7.5, the sun is low in the north-east; before the time of day warp the fit used `--hour 10` with `AA_TUNE=sun_az=290,sun_el=15`, which gave 6.8 and
 `water_body` 6 / `water_lit` 0.25, the real hours score 11.9 with those and 7.2 with the current 7 / 0.35): mean colour of 12 water regions (near / mid / far, left / right, both frames), mean abs error over
@@ -2007,6 +2007,86 @@ display values.
 **Sea**: the same material (style `<sea>`, bigger and faster waves) on a plane at `ocean_level` following the camera; its colour is the zone's
 `<Ocean FogColor>` x `sea_body`, its own knobs (`sea_absorb` 6, `sea_refl` 0.5, `sea_sun` 3) keep it exactly as before the pond fit (the
 analytic sky and the screen space reflections, no foam; mean abs pixel difference of `fly --pos 15000,10000,200` before / after: 0.007).
+
+### Native authored volume UVs and wave motion
+
+Exact 1.2 `_LoadWaterVolume` **301F6AB0** passes serialized UV scales at offsets
+95/99 and river U begin/end at 87/91 into `CWaterVolumeRenderNode` vtable
+**3025F730**. Slot +312 is **300E85A0 CreateArea**: each outline vertex uses
+`(point.xy-firstPoint.xy)*UVScale.xy`. Both scales and the first-point anchor
+matter; the spawn pond's `.03/.02` was previously replaced by global `.2` world UVs.
+Slot +316 is **300E9320 CreateRiver**: four bank vertices plus their centre,
+native indices `0,1,4 /1,3,4 /3,2,4 /0,4,2`. It builds inward vertical planes for
+opposite end/bank pairs. The UV ratios are signed plane distances
+`a/(a+b)` when `abs(a+b)>=FLT_EPSILON`, otherwise zero. U interpolates
+**absolute** serialized begin/end then multiplies scale X; V multiplies scale Y.
+The centre retains the native plane-ratio result and its own four-triangle
+interpolation, rather than using two guessed rectangular triangles. Degenerate,
+nonfinite or non-four-point river surfaces are declined. Existing polygon
+triangulation and horizontal-plane support remain the boundary for area geometry;
+the native long-edge/triangle subdivision is not reproduced.
+
+Original `WaterSurfaceVS` uses the mesh UV directly. `OceanGenParams.x` is explicitly
+`PB_time .0125`; drift is `(seconds*.0125*WavesSpeed,0)`. With `d` as this drift,
+the default tap coordinates are `4uv+2d`, `2uv+3d`, `8uv+2d`, `16uv+3d`.
+`watersurface.ext` sets **NO_FLOW=0x200**: that branch instead uses `2uv+2d`,
+`3uv-2d`, `4uv+2d`, `5uv-2d`. NO_FLOW still animates the counter-drifting pairs;
+it is the material generation flag, not the volume's river/lake kind. Original
+`lake_tank` enables it; `valley_river_watervolume1` does not.
+
+`WaterSurfacePS` samples bump texture **raw XY**, not `Common.cfi::GetNormalMap`.
+Qualifying WaterSurface/BUMP_MAP styles now retain the original ATI2 blocks without
+aa-cry's semantic XY swap. Normal texture cache keys distinguish that raw input
+from the sea's existing semantic input. Big/small scales and BumpScale remain the
+authored values. Unknown/new-water shaders and the sea keep their existing sampling
+path. Fog, reflection, exposure, foam, body/light gains and inherited calibration
+hunks were not adjusted. Native river endpoint vertex-alpha flags, sloped-water
+geometry, physical flow/current input and the complete native water shading/composite
+contract remain open; this slice implements authored UV/wave inputs only.
+
+The existing two placement jobs prepare these meshes. Rivers add only their one
+native centre vertex; the view streams six water-style meshes /1297 vertices over
+the original river/neighbour cells. No per-frame mesh work or per-cell texture
+allocations are added. `WaterSurface { cell }` is an additive inspection marker;
+`WaterMaterialPlugin` exposes the existing shader to the isolated aa_dev fixture.
+Actual unload drops water entities/mesh handles; the shared material/normal/foam/cube
+cache retains its existing world-resource lifetime, explicitly not a claim that
+all shared style images are freed per cell.
+
+**164 library tests pass /9 existing ignored**, and all examples check. Original
+fixtures verify the >100 river records in cell9,12, serialized U range/scales,
+endpoint UVs, native five-vertex fan, degenerate decline and the spawn pond's
+independent first-point-relative scales. Material tests distinguish NO_FLOW from
+volume kind and preserve the sea path. `water_motion` compares four production GPU
+cases against independent bilinear sampling of original DDS bytes: river flow /
+pond NO_FLOW at seconds0/4. Inspected `native_uv_motion_numeric.png` yields
+`[189,255,196]`, `[200,254,193]`, `[181,254,172]`, `[176,254,186]`, within one display
+value of CPU controls; 238-300 FPS.
+
+Inspected `native_river_uv_on.png` / `_legacy.png` show the same source-backed river
+camera, six style meshes /1297 vertices, zero pending/failed models; 158-179 FPS
+native /161-191 legacy control. `native_pond_uv_on.png` / `_legacy.png` show the
+original spawn pond, one mesh /8 vertices; 149-192 FPS native /154-194 control.
+The legacy control changes only UV/motion sampling and retains the new raw normal
+texture, geometry and current lighting; it is not a full old-binary comparison.
+The river is mostly volume-fog dominated in this view, so its still-image difference
+is subtle. `native_water_unload.png` verifies all **six mesh asset IDs and all
+water entities** absent after actual camera movement; 180-233 FPS after release.
+
+`native_pond_reference05.png` / `reference10.png` use the original combat camera
+positions/yaws/FOV and recorded hours2.80975842/3.76261711, shifted to main-world
+coordinates. Both native references were inspected. Twelve fixed 48px clear-water
+patches at X550/1500/1650/1800 and Y720/850/940 give mean RGB patch errors
+**6.8 /9.4 display values**; this is a different sampling grid from the historical
+fit, not a before/after improvement metric. Wave phase, full scene/vegetation,
+refraction and reflection shading still differ. No values were tuned to hide those
+differences. Reference captures run145-201 /132-199 FPS. All eight visual runs
+exit zero without GPU errors and close their windows.
+
+Ignored source evidence is `lights/water-create-native.txt`, `water-vtable.txt`,
+`terrain-water-next-audit.txt`, `water-next-inputs.txt` and the original
+`watersurface.cfx` / `watersurface.ext`. `water-native-*.log` holds checks/captures;
+`water-native-reference-patch-means.txt` retains every comparison patch mean.
 
 **Water queries** (`water_query.rs`): `aa_world::WaterQuery` (a `Resource` the plugin inserts next to `TerrainQuery`, a clonable `Arc` handle
 like it, `&self`, `Send + Sync`) answers "is there water here":
@@ -2454,10 +2534,10 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles;
   `terrain_tint` is a fudge for the missing exposure. Roads, forward decals and the deferred diffuse/opacity slice
   are rendered (see placement formats); native MRT decal normal/specular blending remains open.
-* Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
-  at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
+* Water, differences to the real captures: current authored-UV reference-camera patch means differ by about 7-9 display values (see Water);
+  calibration still covers one pond at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
-  owner's (the cover colour is a flat teal where the real bed is darker and greener), no flow along rivers, the sun glint of the real frames
+  owner's (the cover colour is a flat teal where the real bed is darker and greener), river endpoint alpha/physical currents remain open, the sun glint of the real frames
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).

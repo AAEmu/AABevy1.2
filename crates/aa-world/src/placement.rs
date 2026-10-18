@@ -195,6 +195,8 @@ pub struct Water {
     pub surface: f32,
     pub depth: f32,
     pub uv_scale: [f32; 2],
+    /// Native river U begin/end at serialized offsets 87/91 (absolute values during UV generation).
+    pub river_u: [f32; 2],
     pub points: Vec<Vec3>,
     /// `u32 @39`: the volume type (low 2 bits: 2 = area, 3 = river; higher bits are flags).
     pub kind: u32,
@@ -221,6 +223,7 @@ pub fn parse_water(b: &[u8]) -> Option<Water> {
     let surface = if normal.z > 0.99 { -f32_at(b, 83) } else { bbox[5] };
     let surface = if (surface - bbox[5]).abs() < 2.0 { surface } else { bbox[5] };
     let uv_scale = [f32_at(b, 95), f32_at(b, 99)];
+    let river_u = [f32_at(b,87), f32_at(b,91)];
     let depth = f32_at(b, 107).max(0.0);
     let ok = |p: Vec3| {
         p.x > bbox[0] - 12.0
@@ -244,7 +247,7 @@ pub fn parse_water(b: &[u8]) -> Option<Water> {
     let material = u32_at(b, 51);
     let fog_density = f32_at(b, 55);
     let fog_color = [f32_at(b, 59), f32_at(b, 63), f32_at(b, 67)];
-    (points.len() >= 3).then_some(Water { bbox, surface, depth, uv_scale, points, kind, material, fog_density, fog_color })
+    (points.len() >= 3).then_some(Water { bbox, surface, depth, uv_scale, river_u, points, kind, material, fog_density, fog_color })
 }
 
 #[derive(Clone, Debug, Default)]

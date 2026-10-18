@@ -42,6 +42,8 @@ pub struct WaterParams {
     pub foam: Vec4,
     pub foam_col: Vec4,
     pub env_lit: Vec4,
+    /// Authored mesh UVs, native NO_FLOW, optional diagnostic time (-1 live), diagnostic normal output.
+    pub motion: Vec4,
 }
 
 impl Default for WaterParams {
@@ -58,6 +60,7 @@ impl Default for WaterParams {
             foam: Vec4::new(0.25, 2.0, 0.0, 0.0),
             foam_col: Vec4::ZERO,
             env_lit: Vec4::ZERO,
+            motion: Vec4::new(0.0,0.0,-1.0,0.0),
         }
     }
 }
@@ -127,6 +130,8 @@ struct StyleBase {
     env_map: String,
     /// The sea plane: its colour comes from the zone's ocean fog.
     sea: bool,
+    native_uv: bool,
+    no_flow: bool,
 }
 
 impl StyleBase {
@@ -149,6 +154,8 @@ impl StyleBase {
             repeat: 0.2,
             env_map: DEFAULT_ENV_MAP.to_string(),
             sea: false,
+            native_uv: false,
+            no_flow: false,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -170,6 +177,8 @@ impl StyleBase {
         let Ok(mtl) = aa_cry::material::Material::load(&format!("{}.mtl", style.material.trim_end_matches(".mtl"))) else {
             return (base, normal_map);
         };
+        base.native_uv = mtl.shader.eq_ignore_ascii_case("WaterSurface") && mtl.gen_mask & 1 != 0;
+        base.no_flow = base.native_uv && mtl.gen_mask & 0x200 != 0;
         let param = |name: &str, default: f32| mtl.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         base.sun_multiplier = param("SunMultiplier", base.sun_multiplier);
         base.shine = param("SunShinePow", base.shine).max(1.0);
@@ -245,10 +254,18 @@ impl WaterStyles {
         let (base, normal_path) = StyleBase::of(style);
         let normal_map = self
             .normal_maps
-            .entry(normal_path.clone())
+            .entry(if base.native_uv {format!("@raw:{normal_path}")} else {normal_path.clone()})
             .or_insert_with(|| {
                 let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat: true };
-                match aa_cry::texture::load_dds_from_pak(&normal_path, opts) {
+                let loaded = if base.native_uv {
+                    aa_cry::read(&normal_path).and_then(|bytes| {
+                        let mut dds=aa_cry::texture::Dds::parse(&bytes)?;
+                        // WaterSurfacePS reads raw texture XY, not Common.cfi GetNormalMap.
+                        dds.swapped_rg=false;
+                        aa_cry::texture::dds_to_image(&dds,opts)
+                    })
+                } else { aa_cry::texture::load_dds_from_pak(&normal_path,opts) };
+                match loaded {
                     Ok(image) => Some(images.add(image)),
                     Err(e) => {
                         warn!("aa-world: water normal map {normal_path}: {e}");
@@ -271,7 +288,7 @@ impl WaterStyles {
             })
             .clone();
         let env_map = self.env_maps.entry(base.env_map.clone()).or_insert_with(|| load_cube(&base.env_map, images)).clone();
-        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), ..default() };
+        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(if base.native_uv {1.0}else{0.0},if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
         let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map });
         self.materials.insert(style.clone(), handle.clone());
         self.bases.push((handle.clone(), base));
@@ -287,9 +304,18 @@ impl WaterStyles {
     }
 }
 
+/// The water shader, also available to isolated native sampling fixtures.
+pub struct WaterMaterialPlugin;
+impl Plugin for WaterMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app,"water.wesl");
+        bevy::shader::load_shader_library!(app,"water_motion.wesl");
+        app.add_plugins(MaterialPlugin::<WaterMaterial>::default());
+    }
+}
+
 pub(crate) fn build(app: &mut App) {
-    embedded_asset!(app, "water.wesl");
-    app.add_plugins(MaterialPlugin::<WaterMaterial>::default()).init_resource::<WaterStyles>();
+    app.add_plugins(WaterMaterialPlugin).init_resource::<WaterStyles>();
 }
 
 fn luminance(c: Vec3) -> f32 {
@@ -347,6 +373,7 @@ pub fn update_water(
             foam: Vec4::new(base.foam_reach, base.speed, 0.0, 0.0),
             foam_col: foam.extend(0.0),
             env_lit: foam_light.extend(cube),
+            motion: Vec4::new(if base.native_uv {1.0}else{0.0},if base.no_flow {1.0}else{0.0},-1.0,0.0),
         };
         let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
         if !unchanged && let Some(mut m) = materials.get_mut(handle) {
@@ -358,6 +385,18 @@ pub fn update_water(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_watersurface_no_flow_is_a_material_flag_not_the_volume_kind() {
+        if !crate::pak_available() { return }
+        let pond=WaterStyle::new("game/materials/ocean/lake_tank",2,[0.0;3],0.2);
+        let river=WaterStyle::new("game/materials/ocean/valley_river_watervolume1",3,[0.0;3],0.2);
+        let (p,_)=StyleBase::of(&pond); let (r,_)=StyleBase::of(&river);
+        assert!(p.native_uv && p.no_flow && r.native_uv && !r.no_flow);
+        assert_eq!((p.speed,r.speed),(1.5,1.0));
+        let (sea,_)=StyleBase::of(&WaterStyle::new(SEA,0,[0.0;3],0.2));
+        assert!(!sea.native_uv && !sea.no_flow);
+    }
 
     #[test]
     fn style_reads_the_material() {
