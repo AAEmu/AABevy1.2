@@ -6637,3 +6637,70 @@ cover the stack counters in the first; clearing restores the same counters in
 the second. Both assert an actual physical original-slot click, retain original
 label geometry/text and callbacks, report zero script/WARN/ERROR, self-close
 (PIDs51936/1748), and leave no copied QA executable running.
+
+## Button input during its own pending fade (2026-10-18)
+
+The unchanged character_create_view.alb enables IgnoreInputOnFading on its
+cancel, next, previous and complete buttons. The controller uses its own
+button Show transitions, including Show(true,1000). A physical original Next
+click reproduced the missing method: the toolkit advanced Step1 to Step2
+while the button's own fade was pending. It now remains on Step1 and the
+same original handler advances after completion. The fixture uses an actual
+hide/show transition; repeating Show(true) alone retains native no-op behavior.
+
+Registration39230438 selects thunk3922f600/parser3922f1b0. Binding3922d410
+uses the actual host virtual+14 button cast and writes byte+590. Initialization
+392837b2..39283813 clears that flag. Script bools and real numbers are accepted,
+including double tiny/nonfinite nonzero values; missing/nil/string/table arguments
+and failed button casts are inert. Extra arguments are ignored and every path
+returns zero results. The setter neither changes state/visibility nor restarts
+or cancels the manager fade.
+
+Native mouse down39283a80, up39283c30, click39280ff0 and drag start392820e0,
+stop392807d0 and receive39281350 guard on own+590 AND own pending-fade+e0.
+The toolkit checks these entries against ButtonData and the existing manager
+pending flag. It does not consult ancestors or alpha-channel activity. The
+hit function3927c6d0 remains unchanged: a fading-in button retains the hit
+and blocks controls behind it. Hover39284030, focus39284090/392840b0,
+wheel and generic key delivery remain live; global MOUSE_DOWN/MOUSE_UP are
+also preserved. This is not a blanket handler/input gate. The separately
+guarded native OnButtonDown/OnButtonUp/OnEnterPressed paths were audited,
+but this pointer/drag slice adds no new button keyboard-activation mechanism.
+
+Each guard is read once on entry. In particular, an admitted OnMouseUp
+callback can start a fade and its release state continuation still executes;
+the following distinct click entry then observes the new pending flag. An
+admitted checkbutton click still finishes its toggle after its callback starts
+a fade. Drag recipient/source guards remain independent of the existing
+unconsumed-held-item cleanup. No capture, hit-order or generic keyboard
+policy is added.
+
+Ignored button_fade_input_oracle.py and
+native-button-fade-input-oracle-20261018.json contain **119 actual native
+groups**. The thunk, parser, Cry GetParam/conversion, binding, class casts,
+initialization block, input entries, state writes and hit traversal execute.
+Lua primitives/results, script delivery, capture/timing/sound and the fixture
+rectangle provider are explicit endpoints. Controls include an actual release
+callback writing pending=true followed by a rejected click. FPCW037f is set
+explicitly, with PC24/53/64 branch controls007f/027f/037f; no runtime FPCW
+or new numeric interpolation claim is inferred. Disassembly is archived as
+native-button-fade-input-source-20261018.txt.
+
+Crate/example check, example build and **195 selected checks pass** across24
+targets, with one existing optional font check ignored. Eight new tests cover
+the unchanged full original creation controller, typed/default/failed-class
+rules, own versus ancestor fade, alpha0, immediate pending completion,
+late option changes, hover/focus/wheel/keys/global events, reentrant press/
+release/check continuations, drag admission and retained manager cleanup.
+Existing original skin/state/text, checkbutton, popup/attachment, chat drag,
+edit/keyboard, resize, cooldown/selector/completion, effect/layer/order,
+channel/fade/frame and casting/HP regressions also pass.
+
+Both native_button_fading aa-dev captures were inspected against the original
+creation reference controls: shots/aa-ui/native-button-fading-active-720-20261018.png
+(1280x720/default0.85, **192.2-276.3 FPS**) retains Select Race after the
+blocked physical Next; shots/aa-ui/native-button-fading-ready-1080-20261018.png
+(1920x1080/default1.0, **248.9-345.4 FPS**) reaches Customize after the
+same control resumes. These examples render the original 2D UI only; no
+character actor is supplied. Both report zero script/runtime WARN/ERROR,
+self-close (PIDs43704/16480), and leave no copied QA executable running.
