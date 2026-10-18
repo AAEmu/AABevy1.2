@@ -157,26 +157,26 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 var tangent: vec3<f32>;
                 var bitangent: vec3<f32>;
                 if p == 0 {
-                    // along x: u = y, v = z
+                    // LayerTexGen along x: u = y, v = -z (negative scale is in the table).
                     coord = pos.yz;
                     cgx = dx.yz;
                     cgy = dy.yz;
                     tangent = vec3<f32>(0.0, 0.0, -1.0);
-                    bitangent = vec3<f32>(0.0, 1.0, 0.0);
+                    bitangent = vec3<f32>(0.0, -1.0, 0.0);
                 } else if p == 1 {
-                    // along y: u = x, v = z
+                    // along y: u = x, v = -z
                     coord = pos.xz;
                     cgx = dx.xz;
                     cgy = dy.xz;
                     tangent = vec3<f32>(1.0, 0.0, 0.0);
-                    bitangent = vec3<f32>(0.0, 1.0, 0.0);
+                    bitangent = vec3<f32>(0.0, -1.0, 0.0);
                 } else {
-                    // along z: u = x, v = y
+                    // along z: u = x, v = -y
                     coord = pos.xy;
                     cgx = dx.xy;
                     cgy = dy.xy;
                     tangent = vec3<f32>(1.0, 0.0, 0.0);
-                    bitangent = vec3<f32>(0.0, 0.0, -1.0);
+                    bitangent = vec3<f32>(0.0, 0.0, 1.0);
                 }
                 let uv = coord * a.zw + b.xy;
                 let gx = cgx * a.zw;
