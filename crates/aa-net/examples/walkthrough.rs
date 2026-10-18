@@ -203,6 +203,7 @@ async fn main() -> Result<()> {
     let options = ClientOptions {
         ping_interval: args.ping.then_some(Duration::from_millis(args.ping_interval_ms)),
         first_ping_delay: Duration::from_millis(args.first_ping_delay_ms),
+        item_recharge_catalog: None,
     };
     let mut client = Client::spawn_on_with(&tokio::runtime::Handle::current(), options);
     let mut state = WorldState::default();

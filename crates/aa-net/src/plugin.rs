@@ -58,7 +58,8 @@ impl Plugin for NetPlugin {
         app.add_message::<NetCommand>().add_message::<NetEvent>();
         init_state(app);
         app.add_systems(PreUpdate, (send_commands, receive_events).chain());
-        match Client::spawn_thread() {
+        let options=app.world().get_resource::<crate::ClientOptions>().cloned().unwrap_or_default();
+        match Client::spawn_thread_with(options) {
             Ok(client) => {
                 app.insert_resource(NetClient(Mutex::new(client)));
             }

@@ -615,3 +615,118 @@ fn equipment_id_receipt_changes_only_known_ids_in_native_first_hit_order() {
     assert!(records.item(1, 0).is_none());
     assert!(records.current(0).is_none());
 }
+
+fn charged_item(template: u32) -> Item {
+    let mut item = item(42, template, 1);
+    item.detail = ItemDetail::Equip(crate::model::EquipDetail {
+        charge_time: 102,
+        ..Default::default()
+    });
+    let mut payload = vec![0; 55];
+    payload[5] = 0xa5;
+    payload[11..19].copy_from_slice(&102i64.to_le_bytes());
+    item.detail_payload = Some(payload);
+    item
+}
+fn unpack() -> ItemTask {
+    ItemTask::Security {
+        container: 2,
+        slot: 0,
+        item_id: 999,
+        bits: 4,
+        is_unsecure_excess: 0,
+        is_unsecure_set: 0,
+        is_unpack: 255,
+        unsecure_time: -7,
+        unpack_time: -9,
+    }
+}
+#[test]
+fn complete_recharge_catalog_distinguishes_unknown_zero_and_actual_static_sources() {
+    use std::{collections::HashMap, sync::Arc};
+    // Readonly compactDB items join matching impl1/2 class rows, not orphan child descriptors.
+    let actual = [
+        (26390, 4874),
+        (26587, 4926),
+        (29036, 6539),
+        (30006, 5797),
+        (30007, 5797),
+        (30008, 5797),
+        (30009, 5797),
+        (31888, 7511),
+        (31889, 7511),
+        (33049, 7724),
+        (34308, 8262),
+        (34800, 11011),
+    ];
+    let catalog = Arc::new(HashMap::from(actual));
+    for (template, _) in actual {
+        let mut records = seed();
+        records.bag[0] = Some(charged_item(template));
+        records.set_recharge_catalog(catalog.clone());
+        let output = records.apply_row(&unpack()).unwrap();
+        assert!(output.admitted);
+        let current = records.item(2, 0).unwrap();
+        assert!(matches!(&current.detail,ItemDetail::Equip(e) if e.charge_time == -9));
+        assert_eq!(
+            &current.detail_payload.as_ref().unwrap()[11..19],
+            &(-9i64).to_le_bytes()
+        );
+        assert_eq!(current.detail_payload.as_ref().unwrap()[5], 0xa5);
+    }
+    let mut records = seed();
+    records.bag[0] = Some(charged_item(31432));
+    records.set_recharge_catalog(catalog.clone());
+    assert!(records.apply_row(&unpack()).unwrap().admitted);
+    assert!(
+        matches!(&records.item(2,0).unwrap().detail,ItemDetail::Equip(e) if e.charge_time == 102)
+    );
+    let mut unknown = seed();
+    unknown.bag[0] = Some(charged_item(26390));
+    assert!(unknown.apply_row(&unpack()).is_none());
+    assert!(unknown.item(2, 0).is_none());
+    unknown.set_recharge_catalog(catalog);
+    assert!(
+        unknown.item(2, 0).is_none(),
+        "catalog arrival never repairs unknown full metadata"
+    );
+}
+#[test]
+fn recharge_catalog_arc_is_shared_and_survives_every_runtime_reset() {
+    use std::{collections::HashMap, sync::Arc};
+    let catalog = Arc::new(HashMap::from([(26390, 4874)]));
+    let mut records = seed();
+    records.set_recharge_catalog(catalog.clone());
+    assert!(Arc::ptr_eq(
+        records.clone().recharge_catalog.as_ref().unwrap(),
+        &catalog
+    ));
+    let spawn = spawn();
+    for event in [
+        Event::LeftWorld { target: 0 },
+        Event::Disconnected {
+            message: String::new(),
+        },
+        Event::Kicked {
+            reason: 0,
+            message: String::new(),
+        },
+        Event::PhaseChanged(crate::Phase::Authenticating),
+        Event::CharacterSelected(Box::new(spawn.state.clone())),
+    ] {
+        records.observe(&event);
+        assert!(Arc::ptr_eq(
+            records.recharge_catalog.as_ref().unwrap(),
+            &catalog
+        ));
+    }
+    records.observe(&Event::PlayerSpawn(Box::new(spawn)));
+    records.observe(&Event::InventoryInit {
+        bag_slots: 10,
+        bank_slots: 0,
+    });
+    let mut items = vec![Some(charged_item(26390))];
+    items.resize(10, None);
+    chunk(&mut records, 2, 0, items);
+    assert!(records.apply_row(&unpack()).unwrap().admitted);
+}
