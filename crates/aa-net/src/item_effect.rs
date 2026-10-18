@@ -173,6 +173,22 @@ impl ItemEffectRequest {
         }
         Ok(())
     }
+    /// Revalidate full captured records against the source-qualified shared native
+    /// provider. Unknown records never fall back to the legacy Inventory reducer.
+    /// Character/transport ownership and catalog/planner checks remain caller-owned.
+    pub fn recheck_native(&self, records: &crate::NativeItemRecords, auto_use_aa_point_raw: u8) -> std::result::Result<(), &'static str> {
+        for captured in self.captures() {
+            if records.item(2,captured.slot)!=Some(&captured.item) {
+                return Err("captured native item effect BAG slot is unknown or changed");
+            }
+        }
+        if let ItemEffectMode::Grade { auto_use_aa_point } = self.mode {
+            if auto_use_aa_point != (auto_use_aa_point_raw==1) {
+                return Err("captured AA point setting changed");
+            }
+        }
+        Ok(())
+    }
     pub fn write(&self, w: &mut crate::wire::Writer, self_obj_id: u32) {
         let auto = match self.mode {
             ItemEffectMode::Grade { auto_use_aa_point } => Some(auto_use_aa_point),

@@ -747,7 +747,7 @@ struct Session {
     battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
     server_clock: std::cell::RefCell<crate::clock::ServerClock>,
     received_inventory: std::cell::RefCell<crate::state::Inventory>,
-    item_effect_known_bag: std::cell::RefCell<std::collections::BTreeSet<u8>>,
+    received_native_records: std::cell::RefCell<crate::NativeItemRecords>,
     received_trials: std::cell::RefCell<crate::Trials>,
     received_rankings:std::cell::RefCell<crate::Rankings>,
     /// What we wait for and until when.
@@ -802,7 +802,7 @@ impl Session {
             battlefield: Default::default(),
             server_clock: Default::default(),
             received_inventory: Default::default(),
-            item_effect_known_bag: Default::default(),
+            received_native_records: Default::default(),
             received_trials: Default::default(),
             received_rankings:Default::default(),
             waiting: None,
@@ -849,46 +849,7 @@ impl Session {
         if let Some(now)=self.server_clock.borrow().mapped_now() {self.battlefield.borrow_mut().advance_server_time(now);}
     }
     fn emit(&self, e: Event) {
-        match &e {
-            Event::CharacterSelected(_) | Event::Kicked{..} | Event::LeftWorld{..} | Event::Disconnected{..} | Event::InventoryInit{..} | Event::GameDecodeFailed{..} => self.item_effect_known_bag.borrow_mut().clear(),
-            Event::InventoryExpanded{container:crate::items::container::INVENTORY,..} => self.item_effect_known_bag.borrow_mut().clear(),
-            Event::UnhandledGamePacket{level:4,len,..} if *len>0 => self.item_effect_known_bag.borrow_mut().clear(),
-            Event::InventoryChunk(chunk) if chunk.truncated => self.item_effect_known_bag.borrow_mut().clear(),
-            Event::InventoryChunk(chunk) if chunk.container==crate::items::container::INVENTORY => {
-                // This guard needs actual full snapshot provenance, not a tolerant prefix or
-                // synthesized empty slots. Native packet capacity is 5*10, storage is 13*10;
-                // the header enables floor(low_byte/10)*10 slots independently of allocation.
-                let enabled=usize::from((self.received_inventory.borrow().bag_slots as u8)/10)*10;
-                let first=chunk.first_slot();let end=first+chunk.items.len();
-                if chunk.chunks>5 || chunk.items.len()!=usize::from(chunk.chunks)*10 || end>130 || end>enabled {
-                    self.item_effect_known_bag.borrow_mut().clear();
-                } else {self.item_effect_known_bag.borrow_mut().extend((first..end).map(|slot|slot as u8));}
-            }
-            Event::ItemsChanged(changes) if changes.truncated || !changes.force_remove.is_empty() || changes.tasks.iter().any(|task|!matches!(task,
-                crate::items::ItemTask::Money(_) | crate::items::ItemTask::BankMoney(_) |
-                crate::items::ItemTask::GamePoint{..} | crate::items::ItemTask::AaPoint(_) |
-                crate::items::ItemTask::BankAaPoint(_) | crate::items::ItemTask::AutoUseAaPoint(_))) => {
-                // Explicit stronger app policy: the legacy reducer is not the native task
-                // projection. It may continue serving its consumers, but cannot requalify
-                // queued transport captures after item mutation without a fresh snapshot.
-                self.item_effect_known_bag.borrow_mut().clear();
-            }
-            Event::ItemDetailUpdated(update) if update.container==crate::items::container::INVENTORY => {
-                use crate::item_task_projection::{NativeItemTaskContext,NativeItemTaskLocation,NativeItemTaskMutation,project_native_item_detail_update};
-                if self.item_effect_known_bag.borrow().contains(&update.slot) {
-                    let mut inventory=self.received_inventory.borrow_mut();
-                    let projected=inventory.bag.get(usize::from(update.slot)).and_then(Option::as_ref).and_then(|item|
-                        project_native_item_detail_update(update,NativeItemTaskContext::Found{
-                            location:NativeItemTaskLocation{container:update.container,slot:update.slot},item}));
-                    match projected {
-                        Some(NativeItemTaskMutation::Replace{item,..}) => inventory.bag[usize::from(update.slot)]=Some(item),
-                        Some(NativeItemTaskMutation::None) => {},
-                        _ => {self.item_effect_known_bag.borrow_mut().remove(&update.slot);}
-                    }
-                }
-            }
-            _=>{}
-        }
+        self.received_native_records.borrow_mut().apply(&e);
 
         if matches!(e,Event::Kicked{..}) {*self.received_inventory.borrow_mut()=Default::default();}
         self.received_inventory.borrow_mut().apply(&e);
@@ -1220,8 +1181,8 @@ impl Session {
             }
             Command::ItemEffect {character_id,request} => {
                 let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.self_obj==0 || self.self_obj>0xff_ffff || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id) {Some("item effect requires the same active received character")}
-                    else if request.captures().any(|v|!self.item_effect_known_bag.borrow().contains(&v.slot)) {Some("item effect BAG snapshot coverage is unknown")}
-                    else {request.recheck(&self.received_inventory.borrow()).err()};
+                    else if self.received_native_records.borrow().owner()!=Some(character_id) {Some("item effect native record owner is unknown or changed")}
+                    else {request.recheck_native(&self.received_native_records.borrow(),self.received_inventory.borrow().auto_use_aa_point_raw).err()};
                 if let Some(message)=invalid {self.emit(Event::ItemEffectRejected{character_id,request,message:message.into()});}
                 else if self.send_game(game::ClientMsg::ItemEffect{self_obj_id:self.self_obj,request:request.clone()}).await {self.emit(Event::ItemEffectRequested{character_id,request});}
                 else {self.emit(Event::ItemEffectRejected{character_id,request,message:"item effect request was not sent".into()});}
@@ -4931,96 +4892,93 @@ mod tests {
         assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());assert!(world.player.spawn.is_none());
     }
 
+    fn seed_item_effect_records(session:&mut Session,items:Vec<Option<Item>>) -> InvenChunk {
+        assert_eq!(items.len(),10);
+        let mut spawn=crate::native_item_records::tests::spawn();
+        spawn.obj_id=99;spawn.unit.obj_id=99;spawn.unit.kind=crate::model::UnitKind::Character{char_id:42};spawn.state.character.id=42;
+        session.phase=Phase::InWorld;session.selected=42;session.self_obj=99;session.selected_state=Some(spawn.state.clone());
+        session.emit(Event::CharacterSelected(Box::new(spawn.state.clone())));session.emit(Event::PlayerSpawn(Box::new(spawn)));
+        session.emit(Event::InventoryInit{bag_slots:10,bank_slots:0});
+        let chunk=InvenChunk{container:2,chunks:1,start_chunk:0,items,truncated:false};session.emit(Event::InventoryChunk(chunk.clone()));chunk
+    }
+    fn native_item_effect_request(session:&Session,mode:crate::item_effect::ItemEffectMode)->crate::item_effect::ItemEffectRequest {
+        use crate::item_effect::{CapturedBagItem,ItemEffectMode,ItemEffectRequest};
+        let records=session.received_native_records.borrow();
+        ItemEffectRequest::new(mode,if matches!(mode,ItemEffectMode::Grade{..}){22520}else{11285},
+            CapturedBagItem{slot:0,item:records.item(2,0).unwrap().clone()},
+            CapturedBagItem{slot:1,item:records.item(2,1).unwrap().clone()},None).unwrap()
+    }
+    async fn read_item_effect_write(peer:&mut tokio::net::TcpStream,request:&crate::item_effect::ItemEffectRequest) {
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6],&0x52u16.to_le_bytes());assert_eq!(&frame[6..],&game::ClientMsg::ItemEffect{self_obj_id:99,request:request.clone()}.encode_body());
+    }
     #[tokio::test]
-    async fn item_effect_requires_fresh_snapshot_identity_and_reports_actual_write() {
+    async fn item_effect_native_records_retry_supported_tasks_and_detail_without_snapshot() {
         use crate::item_effect::{CapturedBagItem,ItemEffectMode,ItemEffectRequest};
         let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
-        let source=Item{id:11,template_id:101,grade:6,made_unit_id:9,..Default::default()};let target=Item{id:22,template_id:202,grade:7,..Default::default()};
+        let source=Item{id:11,template_id:101,count:2,grade:6,made_unit_id:9,..Default::default()};let target=Item{id:22,template_id:202,count:1,grade:7,..Default::default()};
         let request=ItemEffectRequest::new(ItemEffectMode::Gem,11285,CapturedBagItem{slot:0,item:source.clone()},CapturedBagItem{slot:1,item:target.clone()},None).unwrap();
-        let command=||Command::ItemEffect{character_id:42,request:request.clone()};
-        session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
-        session.phase=Phase::InWorld;session.selected=42;session.self_obj=99;let mut state=CharacterState::default();state.character.id=42;session.selected_state=Some(state);
-        session.emit(Event::InventoryInit{bag_slots:10,bank_slots:0});let mut items=vec![Some(source),Some(target)];items.resize(10,None);let chunk=InvenChunk{container:2,chunks:1,start_chunk:0,items,truncated:false};session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}
-        session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..}))); // missing transport
+        let command=|request:&ItemEffectRequest|Command::ItemEffect{character_id:42,request:request.clone()};
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
+        let mut items=vec![Some(source),Some(target)];items.resize(10,None);let chunk=seed_item_effect_records(&mut session,items);while events.try_recv().is_ok(){}
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..}))); // no transport
         let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(conn,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(conn.unwrap());
-        session.emit(Event::UnhandledGamePacket{level:1,opcode:0xfff,len:20});while events.try_recv().is_ok(){}assert_eq!(session.item_effect_known_bag.borrow().len(),10);
-        session.emit(Event::UnhandledGamePacket{level:4,opcode:0xfff,len:20});while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
-        session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}session.command(Command::ItemEffect{character_id:41,request:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
-        let mut stale=chunk.clone();stale.items[0].as_mut().unwrap().grade+=1;session.emit(Event::InventoryChunk(stale));while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
-        session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));
-        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();assert_eq!(&frame[4..6],&0x52u16.to_le_bytes());assert_eq!(&frame[6..],&game::ClientMsg::ItemEffect{self_obj_id:99,request:request.clone()}.encode_body());assert_eq!(session.received_inventory.borrow().bag,chunk.items);
-        let update=crate::items::ItemDetailUpdate{item_id:11,container:2,slot:0,raw_detail:vec![3,17,0,0,0,1,28]};session.emit(Event::ItemDetailUpdated(update));while events.try_recv().is_ok(){}
-        session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
-        let refreshed=ItemEffectRequest::new(ItemEffectMode::Gem,11285,CapturedBagItem{slot:0,item:session.received_inventory.borrow().bag[0].clone().unwrap()},request.target().clone(),None).unwrap();
-        session.command(Command::ItemEffect{character_id:42,request:refreshed.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{request:got,..}) if got==refreshed));
-        peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();assert_eq!(&frame[6..],&game::ClientMsg::ItemEffect{self_obj_id:99,request:refreshed}.encode_body());
-        session.game.as_mut().unwrap().shutdown().await;session.command(command()).await;let mut rejected=false;while let Ok(e)=events.try_recv(){if matches!(e,Event::ItemEffectRejected{..}){rejected=true;}assert!(!matches!(e,Event::ItemEffectRequested{..}));}assert!(rejected);
-        let mut partial=chunk.clone();partial.truncated=true;session.emit(Event::InventoryChunk(partial));assert!(session.item_effect_known_bag.borrow().is_empty());
-        for event in [Event::GameDecodeFailed{message:"loss".into()},Event::InventoryInit{bag_slots:2,bank_slots:0},Event::LeftWorld{target:0},Event::Disconnected{message:String::new()}] {session.emit(Event::InventoryChunk(chunk.clone()));session.emit(event);assert!(session.item_effect_known_bag.borrow().is_empty());}
+        session.emit(Event::UnhandledGamePacket{level:1,opcode:0xfff,len:20});while events.try_recv().is_ok(){}
+        assert!(session.received_native_records.borrow().complete_bag());
+        session.command(Command::ItemEffect{character_id:41,request:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&request).await;
+        // Native Count ignores packet ID; the legacy reducer refuses this row. The
+        // retry must read native PRE-row projection rather than the old legacy copy.
+        session.emit(Event::ItemsChanged(crate::items::ItemTasks{tasks:vec![crate::items::ItemTask::Count{container:2,slot:1,item_id:999,template_id:999,delta:1}],..Default::default()}));while events.try_recv().is_ok(){}
+        assert_eq!(session.received_inventory.borrow().bag[1].as_ref().unwrap().count,1);
+        assert_eq!(session.received_native_records.borrow().item(2,1).unwrap().count,2);
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        let after_count=native_item_effect_request(&session,ItemEffectMode::Gem);session.command(command(&after_count)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&after_count).await;
+        session.emit(Event::ItemDetailUpdated(crate::items::ItemDetailUpdate{item_id:11,container:2,slot:0,raw_detail:vec![3,17,0,0,0,1,28]}));while events.try_recv().is_ok(){}
+        assert_eq!(session.received_inventory.borrow().bag[0].as_ref().unwrap().detail,crate::model::ItemDetail::None);
+        session.command(command(&after_count)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
+        let after_detail=native_item_effect_request(&session,ItemEffectMode::Gem);session.command(command(&after_detail)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&after_detail).await;
+        // Unknown padded task detail retires only that row. Legacy post-state is
+        // never adopted, and a partial093 cannot reconstruct its missing metadata.
+        session.emit(Event::ItemsChanged(crate::items::ItemTasks{tasks:vec![crate::items::ItemTask::Update{container:2,slot:0,item_id:11,detail:crate::model::ItemDetail::None,detail_payload:None,raw_detail_block:None}],..Default::default()}));while events.try_recv().is_ok(){}
+        assert!(session.received_native_records.borrow().item(2,0).is_none());assert!(session.received_native_records.borrow().item(2,1).is_some());
+        session.command(command(&after_detail)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&request).await;
+        session.emit(Event::GameDecodeFailed{message:"loss".into()});session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        // Identical full items from a different actual record owner cannot satisfy
+        // an old captured-character request, even while the selected header is old.
+        let mut replacement=crate::native_item_records::tests::spawn();replacement.obj_id=99;replacement.unit.obj_id=99;
+        session.emit(Event::PlayerSpawn(Box::new(replacement)));session.emit(Event::InventoryInit{bag_slots:10,bank_slots:0});session.emit(Event::InventoryChunk(chunk));while events.try_recv().is_ok(){}
+        assert_eq!(session.received_native_records.borrow().owner(),Some(47));assert!(request.recheck_native(&session.received_native_records.borrow(),0).is_ok());
+        session.command(command(&request)).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.game.as_mut().unwrap().shutdown().await;while events.try_recv().is_ok(){}
     }
 
     #[tokio::test]
-    async fn detail_update_refreshes_only_known_full_private_guard_and_preserves_raw_events() {
+    async fn detail_update_forwards_duplicates_and_changes_only_shared_native_provider() {
         let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
-        let before=crate::model::Item{id:123,template_id:8001,count:7,grade:6,..Default::default()};
-        session.emit(Event::InventoryInit{bag_slots:10,bank_slots:0});
-        let mut items=vec![Some(before.clone()),Some(before.clone())];items.resize(10,None);
-        let chunk=crate::items::InvenChunk{container:2,chunks:1,start_chunk:0,items,truncated:false};session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}
+        let before=Item{id:123,template_id:8001,count:7,grade:6,..Default::default()};
+        let mut items=vec![Some(before.clone()),Some(before.clone())];items.resize(10,None);let chunk=seed_item_effect_records(&mut session,items);while events.try_recv().is_ok(){}
         let update=crate::items::ItemDetailUpdate{item_id:123,container:2,slot:0,raw_detail:vec![3,17,0,0,0,1,28]};
-        for _ in 0..2 {
-            session.game_msg(Ok(game::ServerMsg::ItemDetailUpdated(update.clone()))).await;
-            assert!(matches!(events.try_recv(),Ok(Event::ItemDetailUpdated(got)) if got==update));assert!(events.try_recv().is_err());
-        }
-        assert!(session.item_effect_known_bag.borrow().contains(&0));assert!(session.item_effect_known_bag.borrow().contains(&1));
+        for _ in 0..2 {session.game_msg(Ok(game::ServerMsg::ItemDetailUpdated(update.clone()))).await;assert!(matches!(events.try_recv(),Ok(Event::ItemDetailUpdated(got)) if got==update));assert!(events.try_recv().is_err());}
         let mut after=before.clone();after.detail=crate::model::ItemDetail::Mate{exp:17,dead:1,level:28};after.detail_payload=Some(update.raw_detail[1..].to_vec());
-        assert_eq!(session.received_inventory.borrow().bag[0],Some(after.clone()));assert_eq!(session.received_inventory.borrow().bag[1],Some(before.clone()));
-        let mut wrong=update.clone();wrong.item_id=999;session.emit(Event::ItemDetailUpdated(wrong));assert_eq!(session.received_inventory.borrow().bag[0],Some(after.clone()));assert!(session.item_effect_known_bag.borrow().contains(&0));
-        let mut foreign=update.clone();foreign.container=3;foreign.slot=1;session.emit(Event::ItemDetailUpdated(foreign));assert!(session.item_effect_known_bag.borrow().contains(&1));
-        let mut malformed=update.clone();malformed.raw_detail.pop();session.emit(Event::ItemDetailUpdated(malformed));assert!(!session.item_effect_known_bag.borrow().contains(&0));assert!(session.item_effect_known_bag.borrow().contains(&1));
-        session.emit(Event::ItemDetailUpdated(update.clone()));assert!(!session.item_effect_known_bag.borrow().contains(&0)); // no unknown-history recovery
-        session.emit(Event::InventoryChunk(chunk));assert!(session.item_effect_known_bag.borrow().contains(&0));
-        assert_eq!(session.received_inventory.borrow().bag[0],Some(before));
+        assert_eq!(session.received_native_records.borrow().item(2,0),Some(&after));assert_eq!(session.received_inventory.borrow().bag[0],Some(before.clone()));
+        let mut wrong=update.clone();wrong.item_id=999;session.emit(Event::ItemDetailUpdated(wrong));assert_eq!(session.received_native_records.borrow().item(2,0),Some(&after));
+        let mut malformed=update.clone();malformed.raw_detail.pop();session.emit(Event::ItemDetailUpdated(malformed));assert!(session.received_native_records.borrow().item(2,0).is_none());assert!(session.received_native_records.borrow().item(2,1).is_some());
+        session.emit(Event::ItemDetailUpdated(update));assert!(session.received_native_records.borrow().item(2,0).is_none());
+        session.emit(Event::InventoryChunk(chunk));assert_eq!(session.received_native_records.borrow().item(2,0),Some(&before));
     }
 
     #[test]
-    fn item_effect_guard_retires_task_history_but_preserves_only_currency_and_setting_rows() {
-        use crate::items::{ItemTask,ItemTasks};
-        let(tx,_)=unbounded_channel();let session=Session::new(tx,ClientOptions::default());
-        let item=Item{id:11,template_id:101,count:8,..Default::default()};
-        let mut items=vec![Some(item.clone())];items.resize(10,None);
-        let chunk=InvenChunk{container:2,chunks:1,start_chunk:0,items,truncated:false};
-        session.emit(Event::InventoryInit{bag_slots:10,bank_slots:0});session.emit(Event::InventoryChunk(chunk.clone()));
-        session.emit(Event::ItemsChanged(ItemTasks{tasks:vec![ItemTask::Money(1),ItemTask::BankMoney(2),ItemTask::GamePoint{kind:1,amount:3},ItemTask::AaPoint(4),ItemTask::BankAaPoint(5),ItemTask::AutoUseAaPoint(1)],..Default::default()}));
-        assert_eq!(session.item_effect_known_bag.borrow().len(),10);assert_eq!(session.received_inventory.borrow().auto_use_aa_point_raw,1);
-        for changes in [
-            ItemTasks{tasks:vec![ItemTask::Count{container:2,slot:0,item_id:999,delta:-1,template_id:101}],..Default::default()},
-            ItemTasks{tasks:vec![ItemTask::RemoveCrafting{item_id:11}],..Default::default()},
-            ItemTasks{truncated:true,..Default::default()},
-            ItemTasks{force_remove:vec![11],..Default::default()},
-        ] {
-            session.emit(Event::InventoryChunk(chunk.clone()));assert_eq!(session.item_effect_known_bag.borrow().len(),10);
-            session.emit(Event::ItemsChanged(changes));assert!(session.item_effect_known_bag.borrow().is_empty());
-            let old=session.received_inventory.borrow().bag[0].clone();
-            session.emit(Event::ItemDetailUpdated(crate::items::ItemDetailUpdate{item_id:11,container:2,slot:0,raw_detail:vec![3,17,0,0,0,1,28]}));
-            assert!(session.item_effect_known_bag.borrow().is_empty());assert_eq!(session.received_inventory.borrow().bag[0],old);
-        }
-        session.emit(Event::InventoryChunk(chunk));assert_eq!(session.item_effect_known_bag.borrow().len(),10);
-        session.emit(Event::InventoryExpanded{container:2,slots:20});assert!(session.item_effect_known_bag.borrow().is_empty());
-    }
-
-    #[test]
-    fn item_effect_snapshot_guard_requires_native_safe_complete_enabled_rows() {
-        let(tx,_)=unbounded_channel();let session=Session::new(tx,ClientOptions::default());
-        let valid=InvenChunk{container:2,chunks:1,start_chunk:0,items:vec![None;10],truncated:false};
-        for (slots,chunks,start,len,truncated) in [(10,1,0,9,false),(60,6,0,60,false),(200,1,13,10,false),(9,1,0,10,false),(256,1,0,10,false),(10,1,0,10,true)] {
-            session.emit(Event::InventoryInit{bag_slots:slots,bank_slots:0});
-            session.emit(Event::InventoryChunk(InvenChunk{container:2,chunks,start_chunk:start,items:vec![None;len],truncated}));
-            assert!(session.item_effect_known_bag.borrow().is_empty(),"{slots}/{chunks}/{start}/{len}/{truncated}");
-        }
-        session.emit(Event::InventoryInit{bag_slots:53,bank_slots:0});session.emit(Event::InventoryChunk(valid.clone()));assert_eq!(session.item_effect_known_bag.borrow().len(),10);
-        session.emit(Event::InventoryChunk(InvenChunk{start_chunk:4,..valid.clone()}));assert!(session.item_effect_known_bag.borrow().contains(&49));
-        session.emit(Event::InventoryChunk(InvenChunk{start_chunk:5,..valid.clone()}));assert!(session.item_effect_known_bag.borrow().is_empty());
-        session.emit(Event::InventoryInit{bag_slots:130,bank_slots:0});session.emit(Event::InventoryChunk(InvenChunk{start_chunk:12,..valid}));assert!(session.item_effect_known_bag.borrow().contains(&129));
+    fn item_effect_native_recheck_preserves_settings_and_refuses_changed_owner_or_unknown_rows() {
+        use crate::item_effect::ItemEffectMode;
+        let(tx,_)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let mut items=vec![Some(Item{id:11,template_id:101,count:2,..Default::default()}),Some(Item{id:22,template_id:202,count:1,..Default::default()})];items.resize(10,None);seed_item_effect_records(&mut session,items);
+        let request=native_item_effect_request(&session,ItemEffectMode::Grade{auto_use_aa_point:false});assert!(request.recheck_native(&session.received_native_records.borrow(),0).is_ok());assert!(request.recheck_native(&session.received_native_records.borrow(),1).is_err());assert!(request.recheck_native(&session.received_native_records.borrow(),255).is_ok());
+        session.emit(Event::ItemsChanged(crate::items::ItemTasks{tasks:vec![crate::items::ItemTask::AutoUseAaPoint(1)],..Default::default()}));assert!(session.received_native_records.borrow().complete_bag());assert_eq!(session.received_inventory.borrow().auto_use_aa_point_raw,1);
+        assert!(request.recheck_native(&session.received_native_records.borrow(),session.received_inventory.borrow().auto_use_aa_point_raw).is_err());
+        session.emit(Event::UnitsRemoved(vec![99]));assert!(request.recheck_native(&session.received_native_records.borrow(),0).is_err());assert!(session.received_native_records.borrow().item(2,1).is_none());
     }
 
     #[tokio::test]
