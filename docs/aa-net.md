@@ -6729,3 +6729,35 @@ skipping active edit update; downstream395107d0 restores chat input method (meth
 is Trial), independently source-closed by aa-ui. RulingClosed calls?6 before reset;
 local AudienceLeft calls?6 before old-context Closed/reset. Canceled and AudienceJoined
 do not call it. This milestone does not invent a Task11 or synthesize chat behavior.
+
+
+### Executed task removal callbacks and jury main-world flag producer
+
+CloseTrialTasks means the actual native3902cef0 removal path, not no-choice closure.
+3902cef0 pushes fourth argument0 into3902ce30; the latter invokes virtual18 with
+bool(buttonType==1) BEFORE dialog/node removal. Trial Tasks6/7 have buttonType0, so
+if genuinely queued, close6 sends captured CS071(false,trial), then close7 sends
+CS06f(false). Native3902cf10 instead passes fourth argument1 and suppresses callback;
+trial reset handlers do not use that variant. Root must not invalidate both tokens
+before executing the native close callbacks. An absent task sends nothing.
+
+trial_task_close_oracle.py/native-trial-task-close-oracle-20261018.json execute actual
+3907bb90/3907bc30,3902cef0/3902cf10/3902ce30,predicate,Task6/7callbacks and packet
+constructors against a synthetic two-node pending list. Only UI chat mode, clock,
+Lua/visual close, free allocator and sender are mocked. Observed reset order is
+Beautyshop(state0), CS071(false,captured999), remove6, CS06f(false), remove7, then
+ruling/closed or closed/canceled events. Directcef0 emits decline; cf10 emits none.
+3902db50 is the cdecl manager singleton, not a type-consuming lookup; preceding pushed
+6/7 remains on stack for the following method. Older mock labels did not establish
+no-choice behavior and must not be used for that conclusion.
+
+The jury-accept gate's gEnv byte150 now has a concrete original producer. Original
+X2:ConnectToServer39440bd0, registered39447daa as ConnectToServer(serverIP,userId,password),
+sets gEnv+96hex to1 at39440c1f BEFORE session393d4860 starts its connection. Original
+login.lua241 calls this method. X2Login:OnEndLoginState39484cb0, registration39489ddb,
+also sets1 at39484d6b after its GAME_RATING_SHOW path. A read-only module-verified
+PID48924 observation sees1. The root adapter may track that actual login action,
+separately from the currently loaded engine layer main_world; it is not an InWorld,
+received feature bit, or faction inference. Unknown producer/world context still
+refuses acceptance safely; decline remains supported. The nominal global flag name
+is not required to preserve its concrete producer/consumer contract.
