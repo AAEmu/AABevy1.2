@@ -4896,3 +4896,22 @@ Committed goldens cover all7 sequences: odd RTT/outlier, mixed threshold, f32
 precision boundary, unsigned wrap, zero anchor, signed-square overflow/count0,
 and nontransitive RTT. Additional tests cover delayed delivery, lifecycle,
 WorldState/Bevy integration and genuine Pong?backend phase?empty Leave wire.
+
+
+### SC196 unearned-win remaining-time notice
+
+Native factory391b4350 sets opcode0x196/vtable399b3e28, whose serializer397afb20
+reads one u32 at packet+c. Handler391de900 calls3936d4f0, which computes unsigned
+quotient milliseconds/1000 and increments when remainder>499, then emits
+INSTANT_GAME_UNEARNED_WIN_REMAIN_TIME(seconds as f32), event0x162. There is no
+phase/identity guard, persistent native countdown write, or phase transition.
+The lane `SCInstantGameRemainTimePacket` writes the same u32 using its
+SCInstantGameUnkPacket0x196 constant, but its server code never emits it.
+
+`BattlefieldEvent::UnearnedWinRemaining { milliseconds }` preserves every genuine
+notice; `last_remaining_time_ms` retains the latest raw value without decrementing
+it. `unearned_win_remaining_seconds` implements the exact half-up conversion for
+UI callbacks. Initial state is None and lifecycle reset clears the receipt. Wire
+goldens cover u32 extremes, all truncations and DD04 trailing entry alignment;
+rounding tests cover both sides of499/500 and1499/1500. No simulated countdown,
+completion acknowledgement, or lane transaction is introduced.

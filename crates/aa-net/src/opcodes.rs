@@ -336,6 +336,7 @@ opcodes! {
         SCInstantGameAddPointPacket = 0x193,
         SCInstantGameKillPacket = 0x194,
         SCInstantGameKillstreakPacket = 0x195,
+        SCInstantGameUnkPacket = 0x196,
         SCActabilityPacket = 0x136,
         SCGimmicksCreatedPacket = 0x13c,
         SCGimmicksRemovedPacket = 0x13d,
