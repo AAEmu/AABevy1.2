@@ -211,6 +211,64 @@ pub enum NativeItemTaskMutation {
     },
 }
 
+/// Original SC093 uses ONLY the static BAG container, never equipment or bank.
+pub fn lookup_native_item_detail_update<'a>(
+    update: &crate::items::ItemDetailUpdate,
+    inventory: &NativeItemTaskInventory<'a>,
+) -> NativeItemTaskContext<'a> {
+    if update.container != 2 {
+        return NativeItemTaskContext::Missing;
+    }
+    lookup_native_item_task(
+        &ItemTask::Count {
+            container: 2,
+            slot: update.slot,
+            item_id: 0,
+            delta: 0,
+            template_id: 0,
+        },
+        inventory,
+    )
+    .unwrap()
+}
+
+/// No task output or0x1c admission. A Replace denotes actual detail mutation,
+/// after which native394e47b0 releases this packed BAG key with pending=false.
+/// None is unknown/malformed context; Some(None) is a proven native no-op.
+pub fn project_native_item_detail_update(
+    update: &crate::items::ItemDetailUpdate,
+    context: NativeItemTaskContext<'_>,
+) -> Option<NativeItemTaskMutation> {
+    if update.container != 2 {
+        return Some(NativeItemTaskMutation::None);
+    }
+    let detail = update.detail()?;
+    match context {
+        NativeItemTaskContext::Unknown => None,
+        NativeItemTaskContext::Missing => Some(NativeItemTaskMutation::None),
+        NativeItemTaskContext::Found { location, item } => {
+            if location
+                != (NativeItemTaskLocation {
+                    container: 2,
+                    slot: update.slot,
+                })
+            {
+                return None;
+            }
+            if item.id != update.item_id || item.template_id == 0 {
+                return Some(NativeItemTaskMutation::None);
+            }
+            let mut changed = item.clone();
+            changed.detail = detail;
+            changed.detail_payload = Some(update.raw_detail[1..].to_vec());
+            Some(NativeItemTaskMutation::Replace {
+                location,
+                item: changed,
+            })
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeItemTaskProjection {
     /// Whether native 397d1030 returns true, permitting the later 0x1c notification.
@@ -1778,6 +1836,110 @@ mod tests {
         assert_eq!(
             &changed.detail_payload.unwrap()[11..19],
             &i64::MAX.to_le_bytes()
+        );
+    }
+    #[test]
+    fn detail_update_native_mutation_gates_and_full_metadata_preservation() {
+        let mut original = item(5);
+        original.flags = 0x81;
+        original.world_id = 7;
+        original.unsecure_time = -7;
+        original.unpack_time = -9;
+        let update = crate::items::ItemDetailUpdate {
+            item_id: 123,
+            container: 2,
+            slot: 3,
+            raw_detail: vec![3, 0xff, 0xff, 0xff, 0xff, 0xf2, 0xfe],
+        };
+        let context = NativeItemTaskContext::Found {
+            location: location(3),
+            item: &original,
+        };
+        let NativeItemTaskMutation::Replace {
+            location: at,
+            item: changed,
+        } = project_native_item_detail_update(&update, context).unwrap()
+        else {
+            panic!()
+        };
+        let mut expected = original.clone();
+        expected.detail = crate::model::ItemDetail::Mate {
+            exp: -1,
+            dead: 0xf2,
+            level: 0xfe,
+        };
+        expected.detail_payload = Some(update.raw_detail[1..].to_vec());
+        assert_eq!(at, location(3));
+        assert_eq!(changed, expected);
+        assert_eq!(original.detail, crate::model::ItemDetail::None);
+        let mut wrong = update.clone();
+        wrong.item_id = 999;
+        assert_eq!(
+            project_native_item_detail_update(&wrong, context),
+            Some(NativeItemTaskMutation::None)
+        );
+        assert_eq!(
+            project_native_item_detail_update(&update, NativeItemTaskContext::Missing),
+            Some(NativeItemTaskMutation::None)
+        );
+        assert!(
+            project_native_item_detail_update(&update, NativeItemTaskContext::Unknown).is_none()
+        );
+        for container in [1, 3, 4, 0xfc] {
+            wrong = update.clone();
+            wrong.container = container;
+            assert_eq!(
+                project_native_item_detail_update(&wrong, NativeItemTaskContext::Unknown),
+                Some(NativeItemTaskMutation::None)
+            );
+        }
+        let empty = Item {
+            id: 0,
+            template_id: 0,
+            ..Default::default()
+        };
+        wrong = update.clone();
+        wrong.item_id = 0;
+        assert_eq!(
+            project_native_item_detail_update(
+                &wrong,
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &empty
+                }
+            ),
+            Some(NativeItemTaskMutation::None)
+        );
+        let valid_zero = Item {
+            id: 0,
+            template_id: 8001,
+            ..Default::default()
+        };
+        assert!(matches!(
+            project_native_item_detail_update(
+                &wrong,
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &valid_zero
+                }
+            ),
+            Some(NativeItemTaskMutation::Replace { .. })
+        ));
+        wrong = update.clone();
+        wrong.raw_detail.pop();
+        assert!(project_native_item_detail_update(&wrong, context).is_none());
+        let rows = [None, None, None, Some(&original)];
+        let inventory = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Unknown,
+            bag: NativeItemTaskStorage::Present {
+                records: &rows,
+                extent: 4,
+                container: 2,
+            },
+            bank: NativeItemTaskStorage::Unknown,
+        };
+        assert!(
+            matches!(lookup_native_item_detail_update(&update,&inventory),NativeItemTaskContext::Found{item,..} if item.id==123)
         );
     }
 }
