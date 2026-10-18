@@ -4283,3 +4283,107 @@ request versus received admission, wrong queue IDs/corps,
 capacity caps, exact invitation/timeout matching, lifecycle, WorldState/Bevy folding,
 local inactive/missing transport outcomes and session event ordering. No live queue
 transaction or server mutation was used.
+
+
+### Pet equipment request and original method boundary (2026-10-18)
+
+MateCommand::ChangeEquipment(Box<MateEquipmentRequest>) adds CSChangeMateEquipment0a9.
+Construct with MateEquipmentRequest::new(stored character ID,mate TL,passenger ID,bts,
+Vec<MateEquipmentEntry>); header fields are public, entries() exposes an immutable slice.
+Each request has1..2 entries. First location must be physical BAG2; second must be mate
+EQUIPMENTfc raw slot0..27. At least one side must contain an existing full equipment
+item. The immutable entry echoes require nonzero template/database identity and an
+exact retained55-byte Equip detail agreeing with parsed fields; synthetic/missing or
+mismatched detail bytes are rejected rather than padded/invented. Full raw grade/flags,
+reserved detail bytes, timing and ownership fields survive serialization. Native
+3961f500 item encoding and lane read_wire_equip_item agree for these equipment items.
+This is a request codec, not a static gear eligibility/ownership/range planner.
+
+Wire header is u32 stored owner,u16 mate TL,u32 passenger,bool bts,u8 entry count.
+Each entry writes first full optional Item, second full optional Item, then first
+container/slot and second container/slot bytes. Empty item is just u32 template0.
+There is NO success byte on the request. Native packet constructor394e50c0 installs
+vtable399e6140 and opcodea9;397ac2c0/397cc9a0 initialize header,397cdfc0 appends inline
+entry copies,397ac2e0?397d1340 serializes header and at most two entries,397d12a0 writes
+both items then four location bytes. Native sender394e8b30 marks packed slot pending
+keys397d23b0 before send. aa-net does not fabricate pending unlock/settlement or update
+bag/mate equipment on Requested/RequestRejected. Existing SC126 is an ordered raw
+notice, not an unconditional crossed swap; actual received UnitEquipmentsChanged and
+item tasks remain authoritative. Lane can write success=true even on refused moves.
+
+Original pet.lua uses X2Equipment:PickupMateEquippedItem("playerpet",slotNo) for left
+click/drag and MateUnequipItem("playerpet",slotNo) for right click. Authored slots
+1(helmet),3(armor),4(saddle),7(shoes) become raw0,2,3,6. Pickup wrapper3946e950 verifies
+owned mate through3933b1f0 and current mate state+bc, decrements Lua index, constructs
+containerfc, and uses the actual cursor. Bag cursor kind2 invokes394eb6c0?394e8b30;
+empty cursor selects a local item/cursor operation rather than instantly unequipping.
+Native sender also gates actor byte+3a76/current mate state and actual packed pending
+slots, with error143/d0; those planner predicates are not reconstructed as always true.
+The raw command cannot stand in for all cursor/bind-confirmation behavior.
+
+MateUnequipItem wrapper3946f710 finds an actual empty bag slot397d19d0; none emits
+error19 and BOOLfalse. Otherwise it invokes394eb6c0 and returns BOOLtrue, which is
+local invocation, not ACK/successful inventory settlement. Pickup returns no Lua values.
+GetEquippedItemTooltipText3946f1b0 resolves actual supplied unit and slot, then formats
+its actual item through39423560; no valid unit returns no values. The original panel
+refreshes on UNIT_NPC_EQUIPMENT_CHANGED and uses this actual mate item tooltip, not the
+player's worn item. MAX_PET_BAG_COUNT is0 in the authored pet_view.lua, so dormant mount
+bag loops are not evidence to invent working bag commands. CanMount/CanDismiss local
+planner guards remain recorded separately in docs/aa-ui.md Original pet command gates.
+
+Focused tests verify native/lane one/two-entry goldens for equip/unequip/swap, full item
+reserved bytes and timing, exact four-location ordering, empty sides, malformed echo/
+container/count rejection, and that requests/rejections/SC126 do not predict any slot
+swap; actual UnitEquipmentsChanged alone changes the fixture's mate gear.
+
+### Additional source closures for current integrations (2026-10-18)
+
+Battlefield NPC mapping is exact: SQL39a01098 column52 recruiting_battle_field_id;
+loader396d03e8 reads column34hex through3953a390,396d03f6 stores temp[ebp-15c], relative
+to record baseebp-20c gives+b0. Copy396ba8f0 preserves+b0 at396baa9e..aaa4. RequestInstanceGame
+wrapper39455e00 resolves NPC type, rejects invalid+b0, requires battle_fields397f2210,
+clamps corps>2 to2, then sends via3936f780. CancelInstanceGame39455dc0 takes no arguments
+and returns no values. Native manager state0 is required for Apply; no level/time/range
+predicate appears in3936f780 before sending. It additionally searches actual player
+buffs using3936e950: eight globals39ac7510..752c or any static buff tag1253 block apply.
+Read-only PID48924, fixed-base StandMode verification, resolves those globals to
+631,2028,3619,3623,3621,4868,6295,4876 in address order. Artifact
+data/extract/aa-net/battlefield-native/runtime-blocker-ids-20261018.json records access
+PROCESS_VM_READ|PROCESS_QUERY_LIMITED_INFORMATION only; no writes/input/control.
+A matched blocker shows native text3936f3b0 and cancels/reset state<=4; missing local
+player also prevents sending. UPDATE_INSTANT_GAME_STATE160 and INSTANT_GAME_JOIN_CANCEL156
+are noargs. Invitation opens native confirmation dialog3936d620; timeout3936d2a0 closes
+it and returns to appliedstate2, without a separate fabricated Lua timeout event.
+
+Radar toggle timing is AREA first, immediate category observer second, after both
+buffers are cleared: ship39366a1e then39366a2b..36(category30), transfer39366adc then
+39366ae9..af4(category31), fish39366b9e then39366bab..b6(category39). All invoke
+39202fb0(category,0)?39202db0. Enabled observer diffs cached IDs and emits REMOVE per
+vanished contact then INFO for empty published data; disabled emits CLEAR. It does not
+wait for list completion. Transfer removal is specifically17d at3904c2fa..30a.
+
+Auto-AA default is source-backed constructor state:3961eb10 clears EBX at3961eb45,
+then3961ebe1 writes inventory+C340=0. Getter397ccd50 returns that field==1. Character
+state/action18 later hydrate it; no OS/Lua persistence key has been established or is
+needed for the authoritative setting API. Playerflag1000 producer remains unresolved
+and must not be replaced with Unit.flags or a guessed SCInitialConfig feature bit.
+
+Mate modifier3989fde0 no-stub Unicorn oracle confirms per-level value arithmetic is
+NOT banker's rounding. For nonzero linear coefficient it computes wrapping i32
+linear*level, converts to f32, multiplies0.01f, adds0.5f, floors with SSE, adds base value
+as f32 and truncates to i32, then multiplies by stack/multiplier and accumulates flat
+or percent. Base10: linear1/level50 gives11,1/150 gives12,-1/50 gives10,-1/150 gives9;
+stack3 turns11 into33, stack0 contributes0. Npc modifier caller passes actual received
+unit level, not0. Oracle data/extract/aa-net/mate-stats-native/modifier_oracle.py.
+Gear slot is wholly skipped when max durability397ce6b0(template,rawGrade)!=0 AND
+actual durability byte+1d==0; max0 non-durable items are not treated broken. This
+excludes generated attributes, direct Item modifiers, rune and gems together.
+
+Buff modifier callback398a0960 uses runtime+40 stack multiplier and unsigned word+2e
+ability level. However SCBuffCreated391d5e00?3938a3c0?3989e080 initializes NEW stack
+count1 at3989e1e8, while incoming charge goes to runtime+44 at3989e1ef..f2. Repeat
+stack_rule4 increments+40; descriptor max_stack+114 caps it. Current aa-net Created
+charge.max(1)?stacks is an explicitly incomplete lane convenience, not native stack
+proof. Unit snapshot NetBuff has genuine separate stacks/charged fields. A subsequent
+catalog-aware native stack reconciliation is needed before claiming all buff stat
+multipliers exact; gear request work does not silently reinterpret charge.

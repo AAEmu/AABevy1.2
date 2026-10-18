@@ -12,6 +12,7 @@ use crate::wire::{Reader, Result, WireError, Writer};
 /// Exact mate control requests. A local send is not a server acknowledgement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MateCommand {
+    ChangeEquipment(Box<crate::mate_equipment::MateEquipmentRequest>),
     /// Stablehand revives dead summon items in bag/bank; separate from equipment repair.
     ReviveItems { npc_obj_id: u32 },
     Rename { tl_id: u16, name: String },
@@ -45,6 +46,7 @@ pub enum MateCommand {
 impl MateCommand {
     pub fn validate(&self) -> std::result::Result<(), &'static str> {
         let tl_id = match self {
+            Self::ChangeEquipment(request) => return request.validate(),
             Self::ReviveItems { npc_obj_id } => return if *npc_obj_id == 0 || *npc_obj_id > 0xffffff {
                 Err("stablehand NPC ID must be nonzero and fit in 24 bits")
             } else { Ok(()) },
@@ -77,6 +79,7 @@ impl MateCommand {
 
     pub fn opcode(&self) -> u16 {
         match self {
+            Self::ChangeEquipment(_) => cs::CSChangeMateEquipmentPacket,
             Self::ReviveItems { .. } => cs::CSRepairPetItemsPacket,
             Self::Rename { .. } => cs::CSChangeMateNamePacket,
             Self::Dismiss { .. } => cs::CSRemoveMatePacket,
@@ -89,6 +92,7 @@ impl MateCommand {
 
     pub fn write(&self, w: &mut Writer) {
         match self {
+            Self::ChangeEquipment(request) => request.write(w),
             Self::ReviveItems { npc_obj_id } => { w.bc(*npc_obj_id); }
             Self::Rename { tl_id, name } => {
                 w.u16(*tl_id).string(name);
