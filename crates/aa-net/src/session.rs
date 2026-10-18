@@ -498,6 +498,7 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
     Mate(crate::mate::MateEvent),
+    Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
@@ -1403,6 +1404,7 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::Mate(e) => self.emit(Event::Mate(e)),
+            M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
             M::Trade(e) => {
                 if let crate::trade::TradeEvent::Made(tasks) = &e {
@@ -1811,10 +1813,29 @@ mod tests {
                 dynamic: dynamic.clone(),
             },
             MateEvent::SlaveState(slave),
+            MateEvent::EquipmentChanged(crate::mate_equipment::MateEquipmentChange {
+                character_id: 42,
+                mate_tl_id: 12,
+                passenger_id: 0,
+                bts: false,
+                entries: vec![],
+                success: false,
+            }),
         ];
         let (evt, mut events) = unbounded_channel();
         let mut session = Session::new(evt, ClientOptions::default());
         let mut batch: Vec<_> = packets.iter().cloned().map(game::ServerMsg::Mate).collect();
+        let created = crate::slave::SlaveCreated {
+            owner_obj_id: 0x112233,
+            tl_id: 9,
+            obj_id: 81,
+            hide_spawn_effect: false,
+            raw_id: i64::MIN,
+            creator_name: "Someone".into(),
+        };
+        batch.push(game::ServerMsg::Slave(crate::slave::SlaveEvent::Created(
+            created.clone(),
+        )));
         batch.push(game::ServerMsg::UnitPoints {
             obj_id: 71,
             hp: 123,
@@ -1837,6 +1858,21 @@ mod tests {
             assert!(matches!(&event, Event::Mate(actual) if actual == &expected));
             state.apply(&event);
         }
+        let creation_event = events.try_recv().unwrap();
+        assert!(
+            matches!(&creation_event, Event::Slave(crate::slave::SlaveEvent::Created(actual)) if actual == &created)
+        );
+        state.apply(&creation_event);
+        assert_eq!(state.slaves.created.get(&81), Some(&created));
+        assert!(state.slaves.own.is_none());
+        assert_eq!(
+            state
+                .mates
+                .last_equipment_change
+                .as_ref()
+                .map(|change| change.success),
+            Some(false)
+        );
         let points = events.try_recv().unwrap();
         assert!(matches!(
             &points,

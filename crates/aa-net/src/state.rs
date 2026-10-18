@@ -40,6 +40,7 @@ pub use crate::auction::Auction;
 pub use crate::loot_roll::LootRolls;
 pub use crate::actability::Actabilities;
 pub use crate::mate::Mates;
+pub use crate::slave::Slaves;
 pub use crate::trade::Trade;
 
 resource! {
@@ -329,6 +330,7 @@ pub struct WorldState {
     pub loot_rolls: LootRolls,
     pub actabilities: Actabilities,
     pub mates: Mates,
+    pub slaves: Slaves,
 }
 
 impl WorldState {
@@ -359,6 +361,7 @@ impl WorldState {
         self.loot_rolls.apply(e);
         self.actabilities.apply(e);
         self.mates.apply(e);
+        self.slaves.apply(e);
         self.trade.apply(e);
         self.trade.seed_inventory(e, &self.inventory);
     }
