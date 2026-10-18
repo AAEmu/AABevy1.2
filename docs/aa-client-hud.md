@@ -810,3 +810,78 @@ Natural paired live loot settlement remains pending while the lane game connecti
 
 The root playable copy is refreshed at `target/debug/aa-client-play.exe` (SHA256
 `887F09EBADA1D9848DA7B4ED262C93730988B09FD445C005B02C184350B4D8D8`).
+
+## Original player trade and chat transport (2026-10-17)
+
+`trade.rs` binds the original target-menu request, incoming invitation response, ten-slot carts,
+money editors, lock toggle, confirmation and cancellation to `aa_net::Trade`. Own cart indices
+are one-based physical bag slots; the native removal API takes zero-based physical indices.
+Remote item indices are zero-based and the original Lua compacts them after removal. Real
+item definitions and retained instance fields supply the original tooltips. An unavailable
+definition refuses confirmation instead of displaying a fabricated offer.
+
+Original `popup_menu_proc.alb` calls RequestTrade with no arguments; it resolves the actual
+target. Incoming TRADE_CAN_START runs the original exclusive-window gate and accept/decline
+handlers. X2.GetTargetFactionRelationship now follows native39442960/394bb977: hostile1,
+neutral2, friendly3, unknown0 and missing target2. The original target menu excludes hostile1;
+the request adapter likewise permits neutral characters and rejects self/hostile/noncharacters.
+Native LockTrade registration394b4cd5 reaches394fd5b0, which sends the inverse of
+the acknowledged byte at3a5ba538 without changing it locally. The binding consequently toggles
+the acknowledged flag. It permits the native unlock operation after a confirmation, while
+offer edits retain the lane's explicit refusal once either participant has confirmed.
+
+Bag right-click prioritizes a visible original trade cart. Real drag payloads now carry the
+native cursor category separately from their internal kind: stackable definitions use Item,
+unique definitions use Item_Id, and skills use Spell. The criterion is maximum stack size,
+including a stackable item whose current count is1. The original trade background accepts
+Item only; its empty item-slot click accepts both Item and Item_Id. No original handler is
+replaced to bypass those rules. Exact item IDs remain decimal strings above2^53.
+
+Whole-stack preflight checks physical inventory, bound flags, cart capacity including outstanding
+offers, held identity and count. Dispatch rechecks identity/count against current inventory.
+Confirmation requires both acknowledged locks and unchanged complete own-item snapshots.
+Coin parsing checks ranges, overflow and the current PlayerStats balance; edits coalesce to the
+last amount in the frame, including returning to zero while a previous amount is outstanding.
+Queued sends do not create cart entries, lock resources, grant settlement items or change money.
+SCTradeMade's item tasks are applied by aa-net once, before the UI event. Closing after Made or
+Canceled does not send a redundant cancel from the original OnHide handler.
+
+Coalesced network events replay their individual snapshots before firing Lua events, so a lock
+query sees the corresponding transition rather than the frame's final flags. Local rejection
+and an explicit60-second app timeout report failure and restore the original button's
+presentation from acknowledged flags. A timeout does not retry or clear authoritative state.
+The original controls and bag locks follow actual offer/remove/cancel/settlement notifications.
+
+Known limits: native RequestTrade also checks configured player/target level thresholds,
+runtime distance and several action/status flags. Their exact values/meaning remain unresolved;
+they are not replaced with guessed constants. The lane does not implement all those eligibility
+checks. The lane supports whole stacks, and its explicit unlock retains confirmation flags;
+changing a confirmed offer requires cancellation. Settlement rollback, partial stacks and
+generic failures retain the network/server limitations recorded in aa-net docs. Original UI
+transactions still need paired live validation after the lane game connection recovers.
+
+The chat request adapter now calls `aa_ui::lua::chat::encode_for_transport` exactly once after
+native input-link substitution. Native395115b8 escapes bars except item/quest prefixes, doubles
+literal @, and393c5be2 collapses CRLF before replacing remaining CR/LF with spaces. Incoming
+CHAT_MESSAGE text is forwarded unchanged; the toolkit's native message insertion handles the
+single escaped-@ decode and glyph parsing consumes escaped bars. Runtime character limits and
+the native1024-byte conversion overflow policy remain unresolved, rather than guessed.
+
+Validation:124 client tests passed,17 probes ignored. Six trade regressions cover whole stacks,
+64-bit identities, ten outstanding offers, changed counts, native lock toggling, current balance,
+neutral/self/hostile target gates and per-event coalesced lock queries. The root chat adapter
+test verifies native escaping/newline conversion occurs once on the actual Request-to-Command
+path. The isolated original-stage trade test passed in4.79s: original target popup/button,
+stack background drag, unique-item empty-slot click, right-click removal, remote index compaction,
+money change events, ACK-driven locking/confirmation, settlement close and cancellation.
+It also verifies no optimistic cart entry, inventory mutation or duplicate close-time cancel.
+
+`trade_hud` is an aa-dev fixture using actual item definitions and explicit synthetic instances.
+The inspected `shots/hud/sol61-trade/native.png` measured289-327FPS at1920x1080, with zero Lua
+errors. It preserves the original authored anchor, which places30px of the430px outer window
+left of the screen; native window-bound clamping/reference calibration remains an open layout
+check. Its original cart controls and the bag are visible. The inspected world-select capture
+in the same folder measured271-307FPS with zero script errors. These checks are not paired
+live trade settlement; the game lane timeout still prevents that follow-up. All root QA
+processes exited. The playable copy at `target/debug/aa-client-play.exe` now has SHA256
+`37992B80A74EE8FD3956D40B8857F333135416825FF9B2459C01548FF9825676`.

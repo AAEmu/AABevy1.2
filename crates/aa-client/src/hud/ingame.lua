@@ -84,6 +84,13 @@ X2Unit.GetCombatRelationshipStr = function(self, unit)
   if t == nil then return "neutral" end
   return t.relation
 end
+-- Native39442960 /394bb977: the original target popup excludes hostile1;
+-- neutral2 and friendly3 remain eligible. A missing target returns neutral2.
+X2.GetTargetFactionRelationship = function(self)
+  local t = HUD.target
+  if t == nil then return 2 end
+  return ({hostile=1,neutral=2,friendly=3})[t.relation] or 0
+end
 -- Metres to the target.
 X2Unit.UnitDistance = function(self, unit)
   if unit == "target" and HUD.target ~= nil then return HUD.target_distance() end

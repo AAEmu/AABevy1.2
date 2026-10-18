@@ -19,12 +19,12 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state | Broader progression/live coverage; cooldown and tooltip corner cases; damage breakdown option |
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs | Repair/sorting/expansion, dye/look/enchant/temper/gem workflows and missing tooltip fields |
-| NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, trade, specialty |
+| NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons | Objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/ship/public-farm icons, climate/conflict overlays |
-| Chat | Live channels/whispers, original chat input and parsing, real clickable item/quest links, system/combat messages | Chat layout persistence, full command set, moderation/social integrations and less common channel events |
+| Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages | Native send-size overflow policy, chat layout persistence, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; native popup checks | Live unblock/offline/restart checks; family, guild/expedition, nation and management |
-| Mail, trade and auctions | Original mailbox lists/detail/read/claim/write/send controls bound; mail protocol live-tested in aa-net | Live original mailbox transactions/restart; trade UI agreement/locking, auction search/bid/list/cancel |
+| Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | World entities and item/quest data present | Crafting recipes/actions/proficiencies, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data and some map icons | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, mate controls and raw equipment transactions decoded | Original owned pet/slave UI, summon/unsummon/equipment/skills, mount UI, ships/cannons/transport controls |
@@ -34,9 +34,9 @@ live or visual validation. No overall completion percentage is inferred from scr
 
 ## Active ownership
 
-* Root: `aa-client`, mailbox/group-loot/trade and account-backed input bindings; friends and native combat-display milestones landed.
+* Root: `aa-client`, account-backed input bindings next; mailbox/group-loot/trade, friends and native combat-display milestones landed.
 * Network agent: `aa-net`, remaining craft/slave packets; owned mate/slave metadata and mate controls landed; loot rolls, DEFLATE, proficiency, doodad updates and craft requests landed.
-* UI agent: `aa-ui`, native active-chat item/quest insertion; clipboard landed; character/item/quest links, native edit and combat timelines landed.
+* UI agent: `aa-ui`, IME/input audit; native chat insertion/transport, cursor categories, clipboard, character/item/quest links, edit and combat timelines landed. Native hotkey contract recovered for root integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
 * World agent: wrapped/deferred renderer-matrix audit; native moons/coronas/orbit, light direction and sky ordering landed; milestones committed: forward decals, static entity props, local lights, stars and verified rigid windmills.
 
@@ -54,7 +54,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client 117 passed / 16 ignored, plus isolated original social/mail/loot stage fixtures passed; UI 141 runtime plus 2 doctests passed / 1 ignored, network 207 library plus
+Current wave: client124 passed /17 ignored, plus isolated original social/mail/loot/trade stage fixtures passed; UI141 runtime plus2 doctests passed /1 ignored at the last full baseline, with additional targeted cursor/chat regressions passed; network221 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.
