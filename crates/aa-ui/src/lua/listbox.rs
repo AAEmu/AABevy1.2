@@ -1,5 +1,7 @@
-//! Native flat listbox rows (3929fc40 / 392a10a0 / 392a22a0).
-//! Tree records and row icons remain separate, unsupported native variants.
+//! Native flat and recursive listbox rows (3929fc40 / 392a10a0 / 392a22a0).
+//! Icon append overloads and state-texture variants remain pending.
+
+mod tree;
 
 use super::{Ui, call_handler, method, none, ret, ui};
 use crate::{
@@ -14,6 +16,8 @@ struct Row {
     value: i32,
     color: [f32; 4],
     selected: bool,
+    opened: bool,
+    child: Vec<Row>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,6 +32,13 @@ pub struct ListBoxData {
     toggle: bool,
     text_colors: [[f32; 4]; 3],
     colors: [[f32; 4]; 3],
+    tree_mode: bool,
+    select_parent: bool,
+    child_style: bool,
+    indent: Option<i32>,
+    opened_image: Option<Id>,
+    closed_image: Option<Id>,
+    epoch: u64,
 }
 
 impl Default for ListBoxData {
@@ -47,6 +58,13 @@ impl Default for ListBoxData {
                 [0.4, 0.4, 0.4, 0.5],
                 [0.4, 0.4, 0.4, 0.5],
             ],
+            tree_mode: false,
+            select_parent: true,
+            child_style: false,
+            indent: None,
+            opened_image: None,
+            closed_image: None,
+            epoch: 0,
         }
     }
 }
@@ -102,7 +120,7 @@ fn metrics(u: &mut Ui, id: Id) -> Option<(Rect, f32, i32)> {
 
 fn max_top(u: &mut Ui, id: Id) -> i32 {
     let count = metrics(u, id).map_or(0, |m| m.2);
-    (data(u, id).map_or(0, |d| d.rows.len() as i32) - count).max(0)
+    (data(u, id).map_or(0, |d| d.opened_count() as i32) - count).max(0)
 }
 
 fn row_at(u: &mut Ui, id: Id) -> Option<usize> {
@@ -115,11 +133,14 @@ fn row_at(u: &mut Ui, id: Id) -> Option<usize> {
     let y = base.y + (u.cursor.1 - view.y) * base.h / view.h.max(0.001);
     // Native cvttss2si truncates toward zero, including the authored top inset.
     let index = ((y - inner.y) / height).trunc() as i32 + data(u, id)?.top;
-    (index >= 0 && index < (data(u, id)?.rows.len() as i32)).then_some(index as usize)
+    (index >= 0 && index < (data(u, id)?.opened_count() as i32)).then_some(index as usize)
 }
 
 fn select(lua: &Lua, id: Id, index: i32, notify_same: bool, clear: bool) {
     let event = change(lua, id, |d| {
+        if clear && d.tree_mode {
+            return (false, false);
+        }
         let old = d.selected;
         let mut dirty = false;
         let valid = index < d.rows.len() as i32;
@@ -137,6 +158,10 @@ fn select(lua: &Lua, id: Id, index: i32, notify_same: bool, clear: bool) {
         if let Some(row) = usize::try_from(index).ok().and_then(|i| d.rows.get_mut(i)) {
             dirty |= !row.selected;
             row.selected = true;
+            if !clear && !row.child.is_empty() {
+                row.opened = !row.opened;
+                dirty = true;
+            }
         }
         let event = notify_same || old != index;
         (event, dirty || old != index)
@@ -160,6 +185,10 @@ pub(crate) fn clicked(lua: &Lua, id: Id) {
         row_at(&mut u, id)
     };
     if let Some(index) = index {
+        if data(&ui(lua), id).is_some_and(|d| d.tree_mode) {
+            tree::clicked(lua, id, index);
+            return;
+        }
         change(lua, id, |d| {
             let selected = !(d.toggle && d.rows[index].selected);
             let mut dirty = d.selected != index as i32;
@@ -218,6 +247,7 @@ fn set_top(lua: &Lua, id: Id, requested: i32) {
 }
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    tree::methods(lua, m)?;
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
     def(
         "AppendItem",
@@ -258,7 +288,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     value,
                     color,
                     selected: false,
+                    opened: false,
+                    child: Vec::new(),
                 });
+                d.epoch = d.epoch.wrapping_add(1);
                 ((), true)
             });
             none()
@@ -273,6 +306,8 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 d.selected = -1;
                 d.top = 0;
                 d.hover = None;
+                d.tree_mode = false;
+                d.epoch = d.epoch.wrapping_add(1);
                 ((), dirty)
             });
             none()
@@ -287,7 +322,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "GetOpenedItemCount",
         method(lua, |lua, id, _| {
-            ret(lua, data(&ui(lua), id).map_or(0, |d| d.rows.len()))
+            ret(lua, data(&ui(lua), id).map_or(0, |d| d.opened_count()))
         })?,
     )?;
     def(
@@ -311,10 +346,12 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "ClearAllSelected",
         method(lua, |lua, id, _| {
             change(lua, id, |d| {
-                let mut dirty = false;
+                let mut dirty = d.tree_mode && d.selected != -1;
                 for row in &mut d.rows {
-                    dirty |= row.selected;
-                    row.selected = false;
+                    dirty |= row.clear(d.tree_mode);
+                }
+                if d.tree_mode {
+                    d.selected = -1;
                 }
                 ((), dirty)
             });
@@ -331,7 +368,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "GetSelectedValue",
         method(lua, |lua, id, _| {
             let value = data(&ui(lua), id)
-                .and_then(|d| d.rows.iter().find(|r| r.selected))
+                .and_then(|d| tree::selected(&d.rows))
                 .map(|r| r.value)
                 .filter(|v| *v != -1);
             match value {
@@ -473,19 +510,30 @@ pub(crate) fn quads(
     scale: f32,
     out: &mut Vec<Quad>,
 ) {
-    let Some((inner, height, _)) = metrics(u, id) else {
+    let Some((inner, height, count)) = metrics(u, id) else {
         return;
     };
     if height <= 0.0 || inner.w <= 0.0 || inner.h <= 0.0 {
         return;
     }
     let first = out.len();
-    for (line, row) in d.rows.iter().skip(d.top.max(0) as usize).enumerate() {
+    let child_style = if d.child_style {
+        u.tree.widget(id).and_then(|w| w.aux_style.clone())
+    } else {
+        None
+    };
+    for (line, (row, depth)) in d
+        .visible_rows()
+        .into_iter()
+        .skip(d.top.max(0) as usize)
+        .take(count.max(0) as usize)
+        .enumerate()
+    {
         let y = inner.y + line as f32 * height;
         if y >= inner.y + inner.h {
             break;
         }
-        let state = if row.selected {
+        let state = if row.selected && (d.select_parent || row.child.is_empty()) {
             2
         } else if d.hover == Some(d.top.max(0) as usize + line) {
             1
@@ -510,21 +558,48 @@ pub(crate) fn quads(
                 vcolors: None,
             });
         }
-        let mut t = text.clone();
+        let child = (depth > 0).then_some(child_style.as_ref()).flatten();
+        let mut t = child.unwrap_or(text).clone();
         t.text = row.text.clone();
         t.inset = [0.0; 4];
         let color = if d.consistent {
-            d.text_colors[state]
+            if state == 0 {
+                child.map_or(d.text_colors[state], |t| t.style.color)
+            } else {
+                d.text_colors[state]
+            }
         } else {
             row.color
+        };
+        if d.tree_mode && !row.child.is_empty() {
+            if let Some(image) = if row.opened {
+                d.opened_image
+            } else {
+                d.closed_image
+            } {
+                tree::image(
+                    u,
+                    image,
+                    (inner.x + 10.0 + 15.0 * depth as f32, y + height * 0.5),
+                    alpha,
+                    scale,
+                    out,
+                );
+            }
+        }
+        let depth_offset = 10.0 * depth as f32;
+        let indent = if d.tree_mode {
+            d.indent.map_or(height, |n| n as f32)
+        } else {
+            0.0
         };
         crate::render::text_quads(
             u,
             &t,
             Rect {
-                x: inner.x + 5.0,
+                x: inner.x + 5.0 + depth_offset + indent,
                 y,
-                w: (inner.w - 10.0).max(0.0),
+                w: (inner.w - 10.0 - depth_offset - 2.0 * indent).max(0.0),
                 h: height,
             },
             color,

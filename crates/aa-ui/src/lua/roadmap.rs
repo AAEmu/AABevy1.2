@@ -711,14 +711,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-/// `listbox` tree images (`CreateOpenedImageDrawable(path)`, closed, separator): image drawables
-/// the native list places on tree items; kept hidden (tree lists are not drawn yet).
+/// Separator templates remain hidden until their row placement is implemented.
+/// Opened/closed tree templates are registered and painted by `listbox`.
 pub(crate) fn listbox_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
-    for name in [
-        "CreateOpenedImageDrawable",
-        "CreateClosedImageDrawable",
-        "CreateSeparatorImageDrawable",
-    ] {
+    for name in ["CreateSeparatorImageDrawable"] {
         m.raw_set(
             name,
             method(lua, |lua, id, a| {
