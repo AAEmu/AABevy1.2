@@ -34,8 +34,9 @@
 //!   continuous across cell borders, independent base-normal tiling/phase, the detail strength and
 //!   the detail normal map's tiling.
 //!
-//! The shader takes the four surrounding samples (bilinear weights), the layers they select, the
-//! projection weights from the normal and blends sequentially like the engine does.
+//! The shader takes the rendered triangle's three corner samples at the patch's actual LOD, merges
+//! equal surface IDs, and blends their layers with projection weights from the normal. Vertex-stage
+//! axis/fade/frame evaluation and the engine's separate pass ordering remain approximations.
 
 use std::collections::HashMap;
 use std::sync::Arc;

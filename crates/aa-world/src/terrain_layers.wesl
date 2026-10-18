@@ -98,18 +98,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let dx = to_cry(dpdx(wpos));
     let dy = to_cry(dpdy(wpos));
 
-    // the four surrounding heightmap samples and their bilinear weights
+    // Native layer masks are interpolated over the actual B-D terrain triangles.
+    // Heightmap meshes carry their grid step in UV1; isolated older fixtures use step1.
     let g = vec2<f32>(in.uv.y, in.uv.x) * 512.0;
-    let cell = floor(g);
-    let f = g - cell;
+    var lod_step = 1.0;
+    @if(VERTEX_UVS_B) { lod_step = clamp(round(in.uv_b.x),1.0,16.0); }
+    let cell = floor(g / lod_step) * lod_step;
+    let f = (g - cell) / lod_step;
     let i = vec2<i32>(cell);
+    let step = i32(lod_step);
     var ids = array<u32, 4>(
         surface_at(i),
-        surface_at(i + vec2<i32>(1, 0)),
-        surface_at(i + vec2<i32>(0, 1)),
-        surface_at(i + vec2<i32>(1, 1)),
+        surface_at(i + vec2<i32>(step, 0)),
+        surface_at(i + vec2<i32>(0, step)),
+        surface_at(i + vec2<i32>(step, step)),
     );
-    var weights = array<f32, 4>((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+    let triangle = select(vec4<f32>(1.0-f.x-f.y,f.x,f.y,0.0),
+        vec4<f32>(0.0,1.0-f.y,1.0-f.x,f.x+f.y-1.0),f.x+f.y>1.0);
+    var weights = array<f32, 4>(triangle.x,triangle.y,triangle.z,triangle.w);
     // merge samples of the same type into the first of them
     for (var a = 0; a < 3; a++) {
         for (var b = a + 1; b < 4; b++) {

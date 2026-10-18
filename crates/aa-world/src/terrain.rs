@@ -119,6 +119,12 @@ pub fn build_patch_mesh(h: &CellHeights, px: usize, py: usize, lod: usize) -> Me
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+    // TerrainMaterial's second UV stream carries the actual patch grid step. No lightmap
+    // uses this stream on heightmap patches; the cover remains on UV0.
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        vec![[step as f32, 0.0]; mesh.count_vertices()],
+    );
     mesh.insert_indices(Indices::U32(idx));
     mesh
 }
@@ -180,6 +186,18 @@ mod tests {
             let n = PATCH_UNITS / LOD_STEPS[lod];
             assert_eq!(m.count_vertices(), (n + 1) * (n + 1) + 4 * n);
             assert_eq!(m.indices().unwrap().len(), n * n * 6 + 4 * n * 6);
+            let Some(bevy::mesh::VertexAttributeValues::Float32x2(meta)) =
+                m.attribute(Mesh::ATTRIBUTE_UV_1)
+            else {
+                panic!("missing terrain step")
+            };
+            assert_eq!(meta.len(), m.count_vertices());
+            assert!(meta.iter().all(|v| *v == [LOD_STEPS[lod] as f32, 0.0]));
+            assert_eq!(
+                PATCH_UNITS % LOD_STEPS[lod],
+                0,
+                "patch edges align with every LOD grid"
+            );
         }
     }
 
