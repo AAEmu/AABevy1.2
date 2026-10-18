@@ -37,7 +37,8 @@ fn original_recipe_book_groups_categories_and_recipe_selection() -> Result<(), B
     rt.lua
         .load(
             r#"
-      local groups=X2Craft:EnumActabilityGroupTypes(); assert(#groups==34)
+      local groups=X2Craft:EnumActabilityGroupTypes(); assert(#groups==33)
+      local found=false;for _,id in ipairs(groups) do assert(id~=20);if id==19 then found=true end end;assert(found)
       local categories=X2Craft:GetActabilityCategoryTypesGroupType(1); assert(#categories>0)
       assert(X2Craft:GetCraftBaseInfo(0)==nil and X2Craft:GetCraftMaterialInfo(0)==nil)
       assert(X2Craft:GetCraftProductInfo(0)==nil and X2Craft:GetExecutableCraftCount(0)==nil)

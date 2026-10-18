@@ -147,6 +147,9 @@ pub(crate) fn owned_pet_fixture() { pets::active_fixture::run(); }
 #[allow(dead_code)]
 pub(crate) fn radar_fixture() { radar::fixture::run(); }
 
+#[allow(dead_code)]
+pub(crate) fn proficiency_fixture() { crafting::expert_fixture(); }
+
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
 use aa_ui::{UiConfig, UiRuntime};

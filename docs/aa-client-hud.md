@@ -1470,3 +1470,38 @@ eight symbols and retain all four transport/fish symbols when ships clear. Examp
 `shots/hud/sol61-radar/received-original-maps.png` was inspected, with193 startup and
 265-330 steady FPS, zero runtime errors and normal screenshot exit. Network fixtures
 are not evidence of a live server transaction.
+
+### Original proficiency controls (2026-10-18)
+
+`crafting/expert.rs` replaces the original skill book's proficiency fallbacks with
+SHOW-filtered native grade indices, current/previous limits, colors, price strings,
+language IDs21..30, skill-page lists, exact-grade counts and separate >=grade upgrade
+capacity. Capacity excludes0/19/21..30 and hidden skill-page groups; base limit0 is
+unlimited. Craft-group enumeration separately excludes20 (33 actual catalog groups).
+Before the initial snapshot the native getters display constructor zeros; actions and
+recipe eligibility still require actual known data. Missing/unknown downgrade points
+are not presented as a received total.
+
+Original UpgradeExpert/DowngradeExpert/ExpandExpert confirmations queue typed commands,
+bound to the current character and revalidated before dispatch. Current catalog regrade
+prices are all raw currency0/price0; priced variants remain gated on the unresolved
+native playerflags1000 payment configuration. The auto-AA bit comes from actual inventory.
+Expansion checks actual vocation and physical certificates, excluding pending bag slots.
+The original bag-count getter includes pending stacks and has no secure-item flag check;
+neither path counts bank or slots outside the received bag capacity. No tier, currency,
+item consumption or expansion count is invented from a send.
+
+Received events update state before original callbacks, including four-argument point
+and grade notifications. Complete lane snapshots refresh the original page; the native
+SC136 handler itself ignores last and refreshes per packet (all current34 lane groups
+fit one packet). The explicit lane downgrade helper uses ALL raw rows, distinct from
+the original SHOW grade map. Housing proficiency modifiers and live transactions remain
+unverified; unsupported premium-cost paths are not claimed complete.
+
+The full client suite passes168 tests (29 ignored,2.04s), including five focused tests.
+The exact ignored original-script pointer probe passes1 test
+in1.91s: upgrade Cancel/Confirm, delayed upgrade/downgrade replies, expansion Cancel/
+Confirm, unchanged certificate until its own receipt, and stale-character rejection.
+Example `proficiency -- --confirm` and `--expand` uses aa-dev. Inspected captures under
+`shots/hud/sol61-proficiency/` show the original upgrade dialog at302-339 FPS and the
+certificate1/1 capacity dialog at355-439 FPS, zero runtime errors and normal exit.

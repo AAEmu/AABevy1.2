@@ -4,6 +4,7 @@ mod batch;
 mod bench;
 mod catalog;
 mod data;
+mod expert;
 #[allow(dead_code)]
 pub(super) mod fixture;
 #[cfg(test)]
@@ -25,6 +26,7 @@ pub(super) struct View {
     batch: batch::Batch,
     casts: batch::CastSlots,
     requests: Vec<batch::Request>,
+    expert: expert::View,
 }
 
 pub(super) fn refresh(world: &World, data: &mut HudData) {
@@ -40,7 +42,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         }
     }
     if let Some(received) = world.get_resource::<aa_net::Actabilities>() {
-        if data.crafting.actabilities != *received {
+        if !data.crafting.expert.active && data.crafting.actabilities != *received {
             data.crafting.actabilities.clone_from(received);
         }
     }
@@ -91,7 +93,9 @@ fn my_info(lua: &Lua, data: &HudData, group: u32) -> mlua::Result<Option<Table>>
     let Some(definition) = data.game.get().and_then(|g| g.crafting.groups.get(&group)) else {
         return Ok(None);
     };
-    let Some((point, grade)) = proficiency(data, group) else {
+    // The original native getter displays its constructor's zero entry before a snapshot.
+    // This local presentation default does not satisfy recipe/action eligibility below.
+    let Some((point, grade)) = proficiency(data, group).or_else(|| (!data.crafting.actabilities.loaded).then_some((0, 0))) else {
         return Ok(None);
     };
     let t = lua.create_table()?;
@@ -112,10 +116,12 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, (_self, group): (mlua::Value, u32)| my_info(lua, &state.borrow(), group))?,
     )?;
     batch::install(lua, bridge)?;
+    expert::install(lua, bridge)?;
     Ok(())
 }
 
 pub(super) fn plugin(app: &mut App) {
+    expert::plugin(app);
     app.add_systems(
         Update,
         batch::update
@@ -128,3 +134,5 @@ pub(super) fn plugin(app: &mut App) {
         bridge.0.borrow_mut().crafting = default();
     });
 }
+
+pub(super) fn expert_fixture(){expert::fixture::run();}
