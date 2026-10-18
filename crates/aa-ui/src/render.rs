@@ -390,22 +390,8 @@ fn state_index(s: ButtonState) -> usize {
 }
 
 /// Current visual state of a button.
-pub fn button_state(u: &Ui, id: Id, pressed: Option<Id>) -> ButtonState {
-    let Some(w) = u.tree.widget(id) else {
-        return ButtonState::Normal;
-    };
-    if w.button.is_none() {
-        return ButtonState::Normal;
-    }
-    if !w.enabled {
-        ButtonState::Disabled
-    } else if pressed == Some(id) && u.hover.is_some_and(|h| u.tree.is_descendant(h, id)) {
-        ButtonState::Pushed
-    } else if u.hover.is_some_and(|h| u.tree.is_descendant(h, id)) {
-        ButtonState::Highlight
-    } else {
-        ButtonState::Normal
-    }
+pub fn button_state(u: &Ui, id: Id, _pressed: Option<Id>) -> ButtonState {
+    u.tree.widget(id).and_then(|w| w.button.as_ref()).map(|b| b.state).unwrap_or_default()
 }
 
 fn effective_alpha(u: &Ui, id: Id) -> f32 {
@@ -417,25 +403,12 @@ fn effective_alpha(u: &Ui, id: Id) -> f32 {
     o.parent.map_or(own, |p| effective_alpha(u, p) * own)
 }
 
-/// Whether a button state drawable shows while its owner is in `state`: the background of the
-/// current state (missing states fall back to normal), and `Create<State>Drawable` extras of
-/// that state. Other drawables always pass.
-pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
-    let Some(dr) = u.tree.get(d).drawable() else {
-        return true;
-    };
-    // Check marks use the real shown flag written by SetChecked/bind/Enable.
-    // A draw-time checked-state predicate would undo explicit visibility and
-    // reveal previously bound hidden artwork after a replacement.
-    if let Some((owner, _)) = dr.state_of {
-        let Some(b) = u.tree.widget(owner).and_then(|w| w.button.as_ref()) else {
-            return true;
-        };
-        if b.bg[state_index(state)].or(b.bg[0]) != Some(d) {
-            return false;
-        }
-    }
-    dr.state_only.is_none_or(|st| st == state)
+/// Compatibility hook: button state application already writes actual artwork visibility.
+/// Drawable traversal checks `shown`; a second state predicate would lose manual visibility.
+pub fn state_visible(_u: &Ui, _d: Id, _state: ButtonState) -> bool {
+    // Native state application writes the artwork's shown flags. A renderer
+    // predicate would erase explicit SetVisible and retained old-binding lifetime.
+    true
 }
 
 pub(crate) fn drawable_quads(

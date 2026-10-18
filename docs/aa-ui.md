@@ -6175,3 +6175,76 @@ unchecked and disabled checked artwork, an explicitly hidden mark, and a mark
 restored by a repeated SetChecked without changing its value. Both report
 zero script errors/WARN/ERROR and self-close (PIDs4252/16700); the copied
 executable was removed. No original Lua asset, app API, font or timer changed.
+
+### Native ordinary button artwork and pointer-state lifetime (2026-10-18)
+
+Ordinary button state is now retained independently of the renderer's pointer
+snapshot. Native39282f70 hides the currently bound backgrounds and state extras
+in Disabled/Normal/Highlighted/Pushed order, then shows only the selected
+state's artwork. A missing state has no normal-background fallback. The toolkit
+uses those actual shown flags, so explicit drawable SetVisible survives drawing
+until another state write. Old background replacement392840d0 explicitly hides
+the previous image before rebinding and reapplying the current state. This
+differs from the checkmark replacement lifetime described above.
+
+Aliased backgrounds preserve ordered writes; late-created state extras reapply
+the current state, including the native creation-failure continuation. Actual
+CreateStateDrawable39284b80/list insertion39282930 and state application execute
+in button_art_creation_oracle.py. Drawable construction and heap allocation are
+controlled endpoints. Existing supported toolkit drawable factories are retained;
+this does not close every unsupported factory type or its typed Lua wrapper.
+
+SetButtonState's typed thunk3922f5e0/parser3922f100/binding3922d3c0 requires an
+actual string. NUL-terminated, case-insensitive DISABLED/HIGHLIGHTED/PUSHED names
+select those states; other strings select NORMAL. A disabled widget forces
+DISABLED. GetButtonState3922e510 returns the exact uppercase name. Background
+thunk3922f5c0/parser3922f040 and bindings3922d670/d7f0/d970/daf0 require a live
+drawable object table: nil is not an unbind request. Invalid arguments or failed
+casts silently return no values. Retired objects are safely refused by the app.
+
+Native enter39284090/leave392840b0 write state before their Lua handler. A changed
+Enable continuation39283ff0 disables the art immediately; reenabling a previously
+disabled state uses the current hover state. Repeated Enable does not rewrite
+art. Pointer down39283a80 selects PUSHED before OnMouseDown; pointer up39283c30
+delivers OnMouseUp while pushed, then rereads current state/registration before
+restoring HIGHLIGHTED. Handler changes and rebindings therefore survive the
+continuation. RegisterForClicks3922e490/392812c0 uses a case-sensitive actual
+string and an optional literal boolean, otherwise true. Fresh initialization
+3928397e registers LeftButton only; final39283a44 selects NORMAL.
+
+button_art_oracle.py, button_pointer_oracle.py and button_art_creation_oracle.py
+execute **227 native groups** (86 artwork/bindings, 105 pointer/state/registration/
+getter and 36 creation/list/failure cases). Their native-button-art*,
+native-button-pointer* JSON and native-button-art-source-20261018.txt artifacts
+preserve source, observations and controlled Lua/cast/allocator/script-event
+endpoints. The existing click/capture/base-widget fallback policy is unchanged;
+registration now governs the source-proven pressed-art transitions. Nondefault
+native block-during-fade admission remains open. Drawable image/icon
+SetMask/SetMaskCoords/SetMaskVisible and hover-mask rendering remain a separate
+backend gap; no mask, GCD, selector or timer policy is inferred here.
+
+Nine new checks cover strict wrappers, no fallback, manual visibility, aliases,
+old/late artwork, enable/repeat behavior, callback rebinding and physical pointer
+order. The unchanged original CreateEmptyButton/ApplyButtonSkin(DEFAULT),
+SetBGPushed/SetBGHighlighted and dimmed CreateCoolDownActionButton consumers run
+with their original physical handlers. The existing state-color fixture now
+uses a separate bare button for future-art assertions instead of assuming nil
+unbinds. The selected-mask geometry fixture uses SetButtonState explicitly
+instead of mutating the hover snapshot of a bare handler-free cooldownbutton;
+its quads must remain nonempty and retain their original geometry assertions.
+
+Crate check/example build and **168 selected checks pass**: new art9, colors5,
+generic mask10, plus144 broader checks covering checkbuttons, pet/event listeners,
+original action/equipment slots, unusable-skill overlay, achievement rows, active
+tabs, chat context, popups, drag, attachments and widget animation/fade/frame order.
+The final focused24 checks also pass after the fixture correction.
+
+Both aa-dev captures with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-button-art-normal-720-20261018.png
+(1280x720/default0.85, **328.9-400.5 FPS**) and
+shots/aa-ui/native-button-art-pressed-1080-20261018.png
+(1920x1080/default1.0, **334.4-407.4 FPS**). They show original normal/highlighted/
+pushed/disabled skins, retained selection aliases, explicitly hidden artwork and
+the dimmed item icon. The second uses an actual pointer press. Both report zero
+script errors/WARN/ERROR and self-close (PIDs46756/24964); the copied executable
+was removed. No original Lua asset, app API, font or animation timer changed.

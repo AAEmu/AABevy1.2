@@ -167,9 +167,13 @@ fn mask_samples_actual_texture_over_the_selected_background_rectangle() {
     "#,
     )
     .unwrap();
-    let id = lua::value_id(&ui.lua, &ui.lua.load("button").eval().unwrap()).unwrap();
-    lua::ui(&ui.lua).hover = Some(id);
-    for q in quads(&ui) {
+    // This bare cooldownbutton has no script input handlers. Select its native
+    // state explicitly; physical original-button transitions are covered in button_art.
+    ui.exec("@selected_state", "button:SetButtonState('HIGHLIGHTED')").unwrap();
+    assert_eq!(ui.lua.load("button:GetButtonState()").eval::<String>().unwrap(), "HIGHLIGHTED");
+    let qs = quads(&ui);
+    assert!(!qs.is_empty());
+    for q in qs {
         for p in q.corners.unwrap() {
             assert!((107. - 0.001..=127. + 0.001).contains(&p[0]));
             assert!((109. - 0.001..=127. + 0.001).contains(&p[1]));

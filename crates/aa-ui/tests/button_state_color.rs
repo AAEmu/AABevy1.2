@@ -112,11 +112,10 @@ fn shared_background_aliases_are_mutated_and_late_art_keeps_authored_colors() {
         r#"
         button:SetHighlightBackground(bg);button:SetPushedBackground(bg)
         button:SetPushedColor(0.4,0.5,0.6,0.7)
-        button:SetNormalBackground(nil)
-        normal:SetVisible(false)
-        button:SetNormalColor(0.1,0.1,0.1,0.1)
-        late=button:CreateNormalDrawable('colorDrawable',0.6,0.7,0.8,0.9,nil,'artwork')
-        lateBg=button:CreateColorDrawable(0.3,0.4,0.5,0.6,'artwork');button:SetNormalBackground(lateBg)
+        local bare=UIParent:CreateWidget('button','lateColorButton','UIParent')
+        bare:SetNormalColor(0.1,0.1,0.1,0.1)
+        late=bare:CreateNormalDrawable('colorDrawable',0.6,0.7,0.8,0.9,nil,'artwork')
+        lateBg=bare:CreateColorDrawable(0.3,0.4,0.5,0.6,'artwork');bare:SetNormalBackground(lateBg)
     "#,
     );
     assert_eq!(color(&ui, "bg"), [0.4, 0.5, 0.6, 0.7]);
