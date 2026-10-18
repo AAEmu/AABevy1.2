@@ -85,7 +85,7 @@ pub use mate_equipment::{MateEquipmentRequest, MateEquipmentChange, MateEquipmen
 pub use model::{Character, CreateCharacter, Doodad, Unit, UnitStateAttachments};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;
-pub use skill::{Cooldown, SkillCooldowns, COOLDOWN_LIMIT};
+pub use skill::{SkillResult, Cooldown, SkillCooldowns, COOLDOWN_LIMIT};
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};

@@ -304,6 +304,27 @@ pub fn write_start_skill(w: &mut Writer, skill_id: u32, self_obj_id: u32, caster
     w.u8(0); // no skill object
 }
 
+/// Native397b1ef0 result framing. Flags select independent fields; unknown bits are retained.
+/// The native reader clears code/extra/value before reading the selected fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkillResult {
+    pub raw_flags:u8,
+    pub code:u8,
+    pub extra:u16,
+    pub value:u32,
+}
+impl SkillResult {
+    pub fn read(r:&mut Reader)->Result<Self> {
+        let raw_flags=r.u8()?;
+        Ok(Self {
+            raw_flags,
+            code:if raw_flags&1!=0 {r.u8()?} else {0},
+            extra:if raw_flags&2!=0 {r.u16()?} else {0},
+            value:if raw_flags&4!=0 {r.u32()?} else {0},
+        })
+    }
+}
+
 /// `SCSkillStarted`: a unit begins casting, or (with a non zero `result`, `tl` 0) a skill the
 /// client asked for was refused.
 #[derive(Clone, Debug, PartialEq)]
@@ -321,6 +342,8 @@ pub struct SkillStarted {
     pub result: u8,
     /// Detail of a failure (for example the missing amount).
     pub result_value: u32,
+    /// Complete native result; preserves simultaneous u16/u32 fields and unknown flag bits.
+    pub raw_result:SkillResult,
 }
 
 impl SkillStarted {
@@ -333,19 +356,11 @@ impl SkillStarted {
         let cast_ms = u32::from(r.u16()?) * 10;
         let base_cast_ms = u32::from(r.u16()?) * 10;
         let synergy = r.u8()?;
-        let flags = r.u8()?;
-        let mut result = 0;
-        let mut result_value = 0;
-        if flags & 1 != 0 {
-            result = r.u8()?;
-        }
-        if flags & 2 != 0 {
-            result_value = u32::from(r.u16()?);
-        }
-        if flags & 4 != 0 {
-            result_value = r.u32()?;
-        }
-        Ok(Self { skill_id, tl, caster, target, cast_ms, base_cast_ms, synergy, result, result_value })
+        let raw_result=SkillResult::read(r)?;
+        let result=raw_result.code;
+        // Preserve the historical app field: u32 takes precedence over the u16 detail.
+        let result_value=if raw_result.raw_flags&4!=0 {raw_result.value} else {u32::from(raw_result.extra)};
+        Ok(Self { skill_id, tl, caster, target, cast_ms, base_cast_ms, synergy, result, result_value, raw_result })
     }
 
     /// The skill did not start.
@@ -366,12 +381,16 @@ pub struct SkillFired {
     /// Channeling time, ms (0 for plain skills).
     pub channeling_ms: i32,
     pub fire_anim_id: u32,
+    pub result:SkillResult,
     /// Final wire byte, preserved without assigning a general cooldown meaning.
-    /// The active lane writes zero; native consumers use nonzero as one cooldown insertion gate.
+    /// The active lane writes zero. Native serializer maps bit1 to its cooldown suppression gate.
     pub raw_final_flag: u8,
 }
 
 impl SkillFired {
+    /// Native397ca4aa..bd unpacks bit1 into packet+160, tested by3939b35b.
+    /// This is one producer gate, not a claim that the remaining planner admits the cast.
+    pub fn native_cooldown_suppressed(&self)->bool {self.raw_final_flag&2!=0}
     pub fn read(r: &mut Reader) -> Result<Self> {
         let skill_id = r.u32()?;
         let tl = r.u16()?;
@@ -380,7 +399,7 @@ impl SkillFired {
         skip_skill_object(r)?;
         let delay = i32::from(r.i16()?);
         let channeling = i32::from(r.i16()?);
-        r.skip(1)?;
+        let result=SkillResult::read(r)?;
         let fire_anim_id = r.u32()?;
         let raw_final_flag = r.u8()?;
         Ok(Self {
@@ -391,6 +410,7 @@ impl SkillFired {
             delay_ms: (delay - 10) * 10,
             channeling_ms: (channeling - 10) * 10,
             fire_anim_id,
+            result,
             raw_final_flag,
         })
     }
@@ -661,6 +681,58 @@ mod tests {
         assert_eq!(back.kind, target_kind::POSITION);
         let p = back.pos.unwrap();
         assert_eq!((p.x, p.y, p.z), (100.5, 200.25, 50.0));
+    }
+
+    #[test]
+    fn native_skill_result_executed_x86_goldens_preserve_independent_fields_and_unknown_bits() {
+        // Original397b1ef0 executed via mocked abstract-reader primitives; self-contained outputs.
+        let cases: &[(&[u8],SkillResult)]=&[
+            (&[0],SkillResult{raw_flags:0,code:0,extra:0,value:0}),
+            (&[1,73],SkillResult{raw_flags:1,code:73,extra:0,value:0}),
+            (&[2,0x34,0x12],SkillResult{raw_flags:2,code:0,extra:0x1234,value:0}),
+            (&[3,73,0x34,0x12],SkillResult{raw_flags:3,code:73,extra:0x1234,value:0}),
+            (&[4,0xef,0xcd,0xab,0x89],SkillResult{raw_flags:4,code:0,extra:0,value:0x89abcdef}),
+            (&[5,73,0xef,0xcd,0xab,0x89],SkillResult{raw_flags:5,code:73,extra:0,value:0x89abcdef}),
+            (&[6,0x34,0x12,0xef,0xcd,0xab,0x89],SkillResult{raw_flags:6,code:0,extra:0x1234,value:0x89abcdef}),
+            (&[7,73,0x34,0x12,0xef,0xcd,0xab,0x89],SkillResult{raw_flags:7,code:73,extra:0x1234,value:0x89abcdef}),
+            (&[255,73,0x34,0x12,0xef,0xcd,0xab,0x89],SkillResult{raw_flags:255,code:73,extra:0x1234,value:0x89abcdef}),
+            (&[128],SkillResult{raw_flags:128,code:0,extra:0,value:0}),
+        ];
+        for (bytes,expected) in cases {
+            let mut r=Reader::new(bytes);assert_eq!(SkillResult::read(&mut r).unwrap(),*expected);assert!(r.is_empty());
+            for n in 0..bytes.len() {assert!(SkillResult::read(&mut Reader::new(&bytes[..n])).is_err());}
+        }
+        assert_eq!(SkillResult::default(),cases[0].1);
+    }
+    #[test]
+    fn fired_and_started_result_framing_all_flags_and_compressed_tail() {
+        use std::io::Write;
+        for flags in 0..=u8::MAX {
+            let mut result=Writer::new();result.u8(flags);
+            if flags&1!=0 {result.u8(73);}
+            if flags&2!=0 {result.u16(0x1234);}
+            if flags&4!=0 {result.u32(0x89abcdef);}
+            let result=result.finish();
+            let mut started=Writer::new();started.u32(18132).u16(3).u8(0).bc(1).u8(0).bc(2).u8(0).u16(15).u16(20).u8(0).raw(&result);
+            let started=started.finish();let mut sr=Reader::new(&started);let started_result=SkillStarted::read(&mut sr).unwrap();assert!(sr.is_empty());
+            assert_eq!(started_result.raw_result.raw_flags,flags);assert_eq!(started_result.result,if flags&1!=0 {73}else{0});
+            assert_eq!(started_result.raw_result.extra,if flags&2!=0 {0x1234}else{0});
+            assert_eq!(started_result.raw_result.value,if flags&4!=0 {0x89abcdef}else{0});
+            assert_eq!(started_result.result_value,if flags&4!=0 {0x89abcdef}else if flags&2!=0 {0x1234}else{0});
+            let mut fired=Writer::new();fired.u32(18132).u16(3).u8(0).bc(1).u8(0).bc(2).u8(0).i16(40).i16(10).raw(&result).u32(296).u8(flags);
+            let fired=fired.finish();let mut fr=Reader::new(&fired);let fired_result=SkillFired::read(&mut fr).unwrap();assert!(fr.is_empty());
+            assert_eq!(fired_result.result,started_result.raw_result);assert_eq!(fired_result.fire_anim_id,296);assert_eq!(fired_result.raw_final_flag,flags);
+            assert_eq!(fired_result.native_cooldown_suppressed(),flags&2!=0);
+            for n in 0..fired.len() {assert!(SkillFired::read(&mut Reader::new(&fired[..n])).is_err());}
+            for n in 0..started.len() {assert!(SkillStarted::read(&mut Reader::new(&started[..n])).is_err());}
+            let mut raw=Writer::new();raw.u16(0).u16(0xa1).raw(&started).u16(0).u16(0xa2).raw(&fired).u16(0).u16(0xa3).u16(3);
+            let mut compressor=flate2::write::DeflateEncoder::new(Vec::new(),flate2::Compression::fast());compressor.write_all(&raw.finish()).unwrap();
+            let mut batch=Writer::new();batch.u8(0xdd).u8(crate::game::LEVEL_COMPRESSED).u16(3).raw(&compressor.finish().unwrap());
+            let crate::game::ServerMsg::Batch(messages)=crate::game::ServerMsg::decode(&batch.finish()).unwrap() else{panic!()};
+            assert_eq!(messages.len(),3);assert!(matches!(&messages[0],crate::game::ServerMsg::SkillStarted(s) if s.raw_result==fired_result.result));
+            assert!(matches!(&messages[1],crate::game::ServerMsg::SkillFired(f) if f.result==fired_result.result &&f.raw_final_flag==flags));
+            assert!(matches!(messages[2],crate::game::ServerMsg::SkillEnded{tl:3}));
+        }
     }
 
     #[test]
