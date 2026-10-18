@@ -371,6 +371,7 @@ pub enum Event {
     ConnectFailed { message: String },
     /// Genuine proxy 0x13 receipt; no clock mapping or phase advancement is inferred.
     Pong(crate::proxy::ProxyPong),
+    ClockSample(crate::clock::ClockSample),
     /// The game connection is established and in the lobby.
     LobbyReady,
     /// Congestion per race (index = race id) for character creation.
@@ -675,6 +676,7 @@ struct Session {
     selected_state: Option<CharacterState>,
     self_obj: u32,
     battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
+    server_clock: std::cell::RefCell<crate::clock::ServerClock>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -723,6 +725,7 @@ impl Session {
             selected_state: None,
             self_obj: 0,
             battlefield: Default::default(),
+            server_clock: Default::default(),
             waiting: None,
         }
     }
@@ -763,8 +766,13 @@ impl Session {
         self.send_game(game::ClientMsg::Ping { time_ms }).await;
     }
 
+    fn advance_battlefield_clock(&self) {
+        if let Some(now)=self.server_clock.borrow().mapped_now() {self.battlefield.borrow_mut().advance_server_time(now);}
+    }
     fn emit(&self, e: Event) {
-        self.battlefield.borrow_mut().apply(&e);
+        self.server_clock.borrow_mut().apply(&e);
+        self.advance_battlefield_clock();
+        self.battlefield.borrow_mut().apply_with_time(&e,self.server_clock.borrow().mapped_now());
         let _ = self.evt.send(e);
     }
 
@@ -873,6 +881,7 @@ impl Session {
     // ---- commands -----------------------------------------------------------------------------
 
     async fn command(&mut self, cmd: Command) {
+        self.advance_battlefield_clock();
         tracing::debug!("command {cmd:?}");
         match cmd {
             Command::Login { addr, user, password } => self.start_login(addr, user, password).await,
@@ -1342,6 +1351,9 @@ impl Session {
     // ---- game server --------------------------------------------------------------------------
 
     async fn game_msg(&mut self, r: net::Result<game::ServerMsg>) {
+        let received_at=Instant::now();
+        let local_receive_ms=received_at.duration_since(self.started).as_millis() as u32;
+        self.advance_battlefield_clock();
         let msg = match r {
             Ok(m) => m,
             Err(NetError::Wire(e)) => {
@@ -1354,14 +1366,20 @@ impl Session {
             // A batch holds packets that would each have arrived alone.
             game::ServerMsg::Batch(list) => {
                 for m in list {
-                    self.game_one(m).await;
+                    self.game_one_at(m,received_at,local_receive_ms).await;
                 }
             }
-            msg => self.game_one(msg).await,
+            msg => self.game_one_at(msg,received_at,local_receive_ms).await,
         }
     }
 
-    async fn game_one(&mut self, msg: game::ServerMsg) {
+    #[cfg(test)]
+    async fn game_one(&mut self,msg:game::ServerMsg) {
+        let received_at=Instant::now();let local_receive_ms=received_at.duration_since(self.started).as_millis() as u32;
+        self.game_one_at(msg,received_at,local_receive_ms).await;
+    }
+    async fn game_one_at(&mut self, msg: game::ServerMsg,received_at:Instant,local_receive_ms:u32) {
+        self.advance_battlefield_clock();
         use game::ServerMsg as M;
         match msg {
             M::ChangeState(state) => {
@@ -1595,7 +1613,10 @@ impl Session {
             }
             M::LeaveWorldGranted { target } => self.left_world(target).await,
             M::ReconnectAuth { token } => self.reconnect(token).await,
-            M::Pong(pong) => self.emit(Event::Pong(pong)),
+            M::Pong(pong) => {
+                self.emit(Event::ClockSample(crate::clock::ClockSample{pong,local_receive_ms,received_at,local_origin:self.started}));
+                self.emit(Event::Pong(pong));
+            },
             M::SlotCount(_) | M::AccountInfo { .. } => {}
             M::Unhandled { level, opcode, len } => {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");
@@ -2273,8 +2294,11 @@ mod tests {
         session.command(Command::Battlefield(C::Leave)).await;
         assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{command:C::Leave,..}))));
         assert!(tokio::time::timeout(Duration::from_millis(30),peer.read_u8()).await.is_err());
-        // Explicit test clock, no public command or automatic timer invented.
-        session.battlefield.borrow_mut().advance_server_time(14000);
+        // A genuine Pong is captured and mapped by the backend before subsequent packets/actions.
+        session.game_msg(Ok(game::ServerMsg::Pong(crate::proxy::ProxyPong{tm:0,when:0,elapsed:0,remote:14000000,local:0,world:14000}))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::ClockSample(_))));
+        assert!(matches!(events.try_recv(),Ok(Event::Pong(_))));
+        assert_eq!(session.battlefield.borrow().phase,Some(crate::battlefield::BattlefieldPhase::Playing));
         session.game_msg(Ok(game::ServerMsg::Battlefield(E::Ended(end)))).await;
         events.try_recv().unwrap(); session.command(Command::Battlefield(C::Leave)).await;
         assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::Requested(C::Leave)))));
@@ -2292,7 +2316,11 @@ mod tests {
         let pong=crate::proxy::ProxyPong{tm:-1,when:2,elapsed:3,remote:4000,local:u32::MAX,world:4};
         let before=session.battlefield.borrow().clone();
         session.game_msg(Ok(game::ServerMsg::Pong(pong))).await;
+        let Event::ClockSample(sample)=events.try_recv().unwrap() else {panic!("missing backend sample")};
+        assert_eq!(sample.pong,pong);assert_eq!(sample.local_origin,session.started);
+        assert_eq!(sample.local_receive_ms,sample.received_at.duration_since(sample.local_origin).as_millis() as u32);
         assert!(matches!(events.try_recv(),Ok(Event::Pong(p)) if p==pong));
+        assert!(session.server_clock.borrow().mapped_now().is_some());
         assert_eq!(*session.battlefield.borrow(),before);assert!(events.try_recv().is_err());
     }
 

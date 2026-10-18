@@ -176,6 +176,8 @@ pub struct Battlefield {
     pub joined_ruleset_id: Option<u32>,
     pub phase: Option<BattlefieldPhase>,
     pub start: Option<BattlefieldStart>,
+    pub opening_at_ms: Option<u32>,
+    pub ending_at_ms: Option<u32>,
     /// Phase-admitted matching result (native state7 only).
     pub result: Option<BattlefieldEnd>,
     /// Last genuine raw End receipt, including unmatched or clock-gated context.
@@ -278,6 +280,20 @@ impl Battlefield {
             .unwrap_or((0, 0));
         (cur, max, self.joined.map_or_else(|| self.applied.map_or(-1, |(_, c)| i32::from(c)), |j| i32::from(j.corps)))
     }
+    /// Clocked native receive fold. Raw `apply` deliberately cannot invent phase timestamps.
+    pub fn apply_with_time(&mut self,e:&Event,mapped_now:Option<u32>)->bool {
+        let before=self.clone();let previous=self.phase;
+        self.apply(e);
+        if previous==Some(BattlefieldPhase::Joined) && self.phase==Some(BattlefieldPhase::Opening)
+            && matches!(e,Event::Battlefield(BattlefieldEvent::Started(_))) {
+            self.opening_at_ms=mapped_now.map(|n|n.wrapping_add(6000));
+            // SC191's immediate branch differs from the subsequent frame rule.
+            if mapped_now.is_some_and(|n|self.start.is_some_and(|s|s.start_ms<=n)) {self.phase=Some(BattlefieldPhase::Playing);}
+        }
+        if previous==Some(BattlefieldPhase::Playing) && self.phase==Some(BattlefieldPhase::Ending)
+            && matches!(e,Event::Battlefield(BattlefieldEvent::Ended(_))) {self.ending_at_ms=mapped_now;}
+        *self!=before
+    }
     pub fn apply(&mut self, e: &Event) -> bool {
         let before = self.clone();
         match e {
@@ -351,6 +367,7 @@ impl Battlefield {
                 self.joined_ruleset_id = self.response_pending.map(|(i, _)| i.ruleset_id);
                 self.joined = Some(*joined);
                 self.phase = Some(BattlefieldPhase::Joined);
+                self.opening_at_ms=None;self.ending_at_ms=None;self.start=None;self.result=None;
                 self.scores=[0;2]; self.kill_scores=[0;2]; self.skills_enabled=[false;24];
                 self.response_pending = None;
                 self.invitation = None;

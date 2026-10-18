@@ -367,6 +367,7 @@ pub struct WorldState {
     pub trade: Trade,
     pub auction: Auction,
     pub loot_rolls: LootRolls,
+    pub server_clock: crate::clock::ServerClock,
     pub battlefield: crate::battlefield::Battlefield,
     pub actabilities: Actabilities,
     pub mates: Mates,
@@ -408,7 +409,9 @@ impl WorldState {
         self.mailbox.apply(e);
         self.auction.apply(e);
         self.loot_rolls.apply(e);
-        self.battlefield.apply(e);
+        self.server_clock.apply(e);
+        if let Some(now)=self.server_clock.mapped_now() {self.battlefield.advance_server_time(now);}
+        self.battlefield.apply_with_time(e,self.server_clock.mapped_now());
         self.actabilities.apply(e);
         self.mates.apply(e);
         self.units.apply_mate_equipment_flags(e, &self.mates);

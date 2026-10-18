@@ -4682,10 +4682,9 @@ The received `now` argument is passed but **not read** by this function. Wrapper
 `3936e110` immediately enters7/emits0x15a() if start<=engine-mapped now; frame
 update `3936cf50` instead enters7 when unsigned wrapping `(now+6000)>=start`.
 `advance_server_time(mapped_now_ms)` exposes that frame rule explicitly. The
-engine timer virtual+10/+20 clock mapping is not yet established as a network
-clock sample; no packet-now-to-Instant conversion, autonomous timer, or Session
-clock command is invented. Session preflight therefore keeps later leave gated
-until a real clock producer is integrated.
+engine timer virtual+10/+20 clock mapping is now supplied by the source-proven
+Pong/TimeKeeper integration below. No SC191-now-to-Instant conversion or Session
+clock command is invented; before an actual clock sample, later leave stays gated.
 
 SC192 native factory `391b4110` uses vtable399b3df8, serializer `397c3c50`, and
 team serializer `398a97b0`. Active lane writer `SCInstantGameEndPacket` agrees:
@@ -4721,9 +4720,8 @@ CSe5 and received LoadInstance reset.
 UI-agent independent runtime/module trace closes the timer transform itself:
 CrySystem timer virtual+10=3656f740 converts timer[index0] i64 microseconds to
 milliseconds; virtual+20=3656ea30 forwards timer+2a8 to33025600, returning
-wrapping `input + mapper[2c] - mapper[30]`. The mapper-offset producer/network
-synchronization remains unproved here, so received SC191 now is still not used
-as that native timer mapping. Source artifact:
+wrapping `input + mapper[2c] - mapper[30]`. The mapper-offset producer is the native Pong/TimeKeeper path documented
+below; received SC191 now is not used as that native timer mapping. Source artifact:
 `data/extract/aa-net/battlefield-native/later-phases-20261018.txt`.
 
 Native callback names are confirmed by event-name registration39215799..392157ee
@@ -4820,9 +4818,10 @@ golden has tm1,when2,elapsed0,remote4000,local3,world4.
 Native1626b0e1..1626b119 calls TimeKeeper::AddSample only when connection+2c
 is nonzero, using received local, received world, and a freshly read timer0
 local receive time. It does not use the four i64 fields for that sample. The
-connection starts with+2c zero; enabling producer/filter details are a remaining
-clock integration boundary. Raw values, including signed i64 extremes and u32
-wrap, are preserved without sanitization or phase advancement.
+connection starts with+2c zero; the guard is a non-null listener pointer, with
+the active Session event listener providing the corresponding client context.
+Raw values, including signed i64 extremes and u32 wrap, remain preserved. The
+separate ClockSample path below owns the proven filter and phase timing.
 
 Lane Ping echoes tm/when/local. It generates elapsed0 and remote=world*1000,
 where world comes from `packets/proxy.rs::tick_count`. Existing aa-net Ping
@@ -4836,3 +4835,64 @@ SC191 now is silently used to manufacture a common clock or completion.
 Wire tests preserve all40bytes, reject every truncation, and leave a trailing
 sentinel aligned. A Session test verifies exact forwarding without changing
 Battlefield state or emitting any extra acknowledgement.
+
+
+### Native TimeKeeper and backend receive-time clock samples
+
+`ServerClock` (exported at crate root, Clone and a Bevy resource) implements
+`apply(&Event)` and `mapped_now()->Option<u32>`. It returns None before any actual
+Pong sample. Session captures a single fresh std::time::Instant and low32 elapsed
+milliseconds at game receive dispatch, then emits
+`Event::ClockSample(ClockSample { pong, local_receive_ms, received_at, local_origin })` before
+raw Event::Pong. Native CryNetwork1626b0e1..b119 calls timer AddSample with the
+same three inputs: echoed local send S, remote world R, fresh local receive L.
+The i64 Pong fields are retained but not substituted for these inputs.
+
+Native xlcommon33032040 computes signed wrapping RTT=L-S and f32 halfRTT. If
+remote anchor is0 it stores R and fills all5 pairs with RTT and
+CVTTSS2SI(f32(i32(L))-halfRTT), leaving ring index unchanged. Otherwise it writes
+one pair at index, local=CVTTSS2SI(f32(i32(anchor-R+L))-halfRTT), then increments
+index modulo5. Conversion reproduces x86 indefinite i32::MIN for out-of-range
+values rather than Rust's saturating float cast. Remote0 consequently repeats
+the initialization branch on the next sample, as in the original.
+
+The exact MSVCR100 five-pointer qsort/shortsort63194a80?63194993 selects a maximum
+using signed wrapping RTT subtraction, swaps it to the current tail, and repeats
+for tail4,3,2,1. Equal candidates do not replace the maximum; tail swaps remain
+unstable. This explicit five-entry implementation also reproduces nontransitive
+wrapping comparisons without using Rust's total-order sort. Let m be sorted
+RTT[2]. Squares are signed wrapping (RTT[i]-m)^2; threshold is signed truncating
+(square0+square1+square3 wrapping)/5. The fifth square is deliberately omitted
+from the threshold sum but still checked for inclusion. Include every pair whose
+signed square<=threshold, sum local values with wrapping i32 arithmetic, and
+signed-divide by count; count0 gives mean0. GetRemoteTime33025600 returns wrapping
+localNow+anchor-mean. Native Init33032010 clears only anchor/index; constructor
+330321d0 clears all storage. Both are independently covered.
+
+`ServerClock` retains the actual backend local timer origin as well as the capture
+Instant, so delayed UI delivery reads the same fresh timer without accumulating
+a sub-millisecond re-anchoring error or measuring a new UI receipt. It resets on a
+new game connection phase, failed connection, disconnect or kick; character
+selection preserves the connection clock. The backend owns the same filter and
+advances Battlefield before game messages/actions. WorldState and Bevy resources
+fold samples and advance before battlefield updates; Bevy also advances on frames
+without new events. There is no no-wire clock command, fabricated sample, or
+SC191.now substitution. The separate active-lane proxy/instant-game timer-origin
+mismatch remains a server boundary, despite this source-correct client mapping.
+
+`Battlefield::apply_with_time(event, mapped_now)` retains matching SC191
+`opening_at_ms=now+6000` and matching SC192 `ending_at_ms=now`; unknown clock
+leaves these None. It preserves SC191's immediate now>=start branch independently
+of the subsequent frame's now+6000>=start rule. Shared Session/WorldState/Bevy
+folds use this API, and HUD replay can use it too. Native callbacks remain
+WAIT() before any immediate START(); the resource does not emit invented wire
+acknowledgements. Received Joined clears native timestamp slots. The captured
+fields survive ordinary resource clones/HUD reconstruction.
+
+Independent oracle artifacts are
+`data/extract/aa-ui/native-timekeeper-oracle-20261018.json` and its helper, executing
+original AddSample, comparator and actual MSVCR100 qsort locally in Unicorn.
+Committed goldens cover all7 sequences: odd RTT/outlier, mixed threshold, f32
+precision boundary, unsigned wrap, zero anchor, signed-square overflow/count0,
+and nontransitive RTT. Additional tests cover delayed delivery, lifecycle,
+WorldState/Bevy integration and genuine Pong?backend phase?empty Leave wire.
