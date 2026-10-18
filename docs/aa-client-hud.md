@@ -1878,3 +1878,90 @@ zero script errors at387.8-463.0 FPS. It was compared with
 check used a separate QA account and does not claim a live in-game stop receipt.
 The tested executable `target/debug/aa-client-20261018-hud.exe` has SHA256
 `5EC6517593D6FBFAEBAF9ACEA8D8842C313920899E4A895561E4E9F104B55003`.
+
+### Original guild roster, permissions and management (2026-10-18)
+
+The original expedition window now reads aa-net's admitted native faction, policy
+and member caches. It uses the actual selected/spawned character's guild and role;
+receiving a faction or an incomplete roster does not invent local membership.
+The native loaded-ID comparison includes reset0==0, while the original Lua also
+checks for a nonzero own guild. Names retain byte buffers until Lua's first-NUL
+conversion. Policies use the native ten-column order, excluding the wire dismiss
+byte; the original Lua adds its own derived raid/memo/policy columns.
+
+LocalRequestExpeditionMembers performs the native local query, without a packet:
+stable level-descending order over character-ID order, nonzero online filtering,
+50 rows per page and the original exact-multiple empty-last-page behavior. The
+original screen displays ten rows from each callback. Native f32/signed conversion
+and wrapping page decrement are preserved, including invalid float conversion;
+non-boolean/non-numeric inputs are refused at the app adapter boundary. Online
+locations use id3 subzone, zone-key display text and localized world-group name.
+Offline rows use actual Unix seconds,365-day years and30-day months, with all six
+duration fields and the native unsigned future/negative-time guard. This is not
+Windows FILETIME despite the native helper's name. Missing location data remains
+absent rather than using the player's location.
+
+Received changes update the cache before their ordered original EXPEDITION_*
+events. MemberStatus emits exactly one notice: an existing name-flag row emits
+NAME_CHANGED, another existing row STATUS_CHANGED, and a missing row UPDATED.
+Initial member batches do not invent an event. Policy changes require their
+native existing-key/success conditions; owner settlement updates faction metadata
+before its policy-dependent role changes. aa-net also updates only admitted,
+matching existing actors for membership/dismissal receipts. No request changes
+membership, rank, ownership or permission values optimistically.
+
+Invite, Kick, rank, Change Title/Apply and Delegate use source-backed native
+permission, target-name and rank checks, including equal-rank kick admission and
+the singleton-leader Leave-to-Disband route. Names use first-NUL ASCII case folding;
+locale-dependent high-byte CRT folding remains unclaimed. Policy names follow the
+actual en_us/type2 path, including its byte-indexed trailing-space quirk, verified
+against23 executed native cases. Malformed UTF-8 and unsupported argument types
+are explicit app refusals. The native policy decoder leaves its dismiss byte
+uninitialized; this app deliberately preserves the known received value and
+normalizes it for the writer instead of claiming deterministic native behavior.
+
+Delegate checks aa-net's received Dominion state: only siege period4 and a matching
+defender/offense guild block it. The native constructor's empty map is known empty;
+an unhandled relevant packet, abandoned compressed tail or decode failure makes
+nonzero-guild eligibility unknown. A later individual row or final-data flag does
+not restore completeness. Unknown eligibility refuses the action without inventing
+the native active-siege error. Full territory/siege UI remains separate work.
+
+Invitations use original nonmodal Task3 Join/Decline with captured inviter/guild IDs,
+cached faction-name lookup and account-backed option73. Duplicate tasks and ignore=1
+automatically answer decline; the native existing-guild callback error also applies
+to decline. Leave and Disband use original modal Tasks26/27 and send only on a
+positive result. Each task answers once with captured actual character/object IDs;
+tokens remain monotonic across resets. Character/guild context changes clear queued
+actions and close old task windows. Pre-HUD invitation presentation and stale-actor
+refusal are explicit app lifecycle boundaries. Local write notices are not server
+acknowledgments.
+
+The aa-dev `expedition` example supports default permissions, `--members`,
+`--invitation`, `--leave` and `--dismiss`. Inspected captures under
+`shots/hud/sol61-expedition/` show original permissions at286.8-313.2 FPS,
+member/location/offline rows and3/4 count at286.8-424.2 FPS, invitation at426.5-471.0,
+Leave at294.4-324.2 and Disband at388.8-426.6 FPS. All five processes self-close
+without runtime errors. These are controlled original-script fixtures; there is
+no reference guild screenshot in this checkout and no paired live guild claim.
+Creation/rename, web content, siege management and overhead guild titles remain
+open. Native source/packet evidence is in docs/aa-net.md and targeted artifacts
+under `data/extract/aa-net/native-expedition-*`,
+`data/extract/aa-net/native-dominion-received-20261018.txt` and
+`data/extract/aa-client/expedition/`.
+
+Validation: all11 focused guild checks pass in4.54s. They include physical original
+Apply/Change Title/Invite, Delegate/OK, Leave/Disband Confirm/Cancel and Task3
+Join/Decline controls; captured typed kick/rank requests; native cache/getter,
+callback, paging, name and stale-identity boundaries; received siege eligibility
+and actual owner settlement. Full client219 passed/36 ignored in14.37s against
+the completed native chat clipping and received Dominion/decode-gap changes.
+
+The refreshed main `target/debug/aa-client-20261018-guild.exe` reaches the live
+Lane-bevy world list with zero script errors at260.3-361.5 FPS; its inspected
+`world-select-final.png` is under the same capture directory. SHA256:
+`B9D37122CC7910E138F342B735A8B32DD85AC1B97D8AE85709677AF9766B62A2`.
+A fresh `original-members-final.png` from the integrated example confirms the
+same original rows at316.6-450.0 FPS with no runtime errors. Both self-close.
+This verifies login/world selection; the existing lane game-connection timeout
+still prevents natural in-game settlement QA.
