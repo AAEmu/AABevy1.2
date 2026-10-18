@@ -10,8 +10,9 @@ use crate::session::Event;
 use crate::wire::{Reader, Result, WireError, Writer};
 
 /// Exact mate control requests. A local send is not a server acknowledgement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MateCommand {
+    Rename { tl_id: u16, name: String },
     Dismiss {
         tl_id: u16,
     },
@@ -40,33 +41,38 @@ pub enum MateCommand {
 }
 
 impl MateCommand {
-    pub fn validate(self) -> std::result::Result<(), &'static str> {
+    pub fn validate(&self) -> std::result::Result<(), &'static str> {
         let tl_id = match self {
-            Self::Dismiss { tl_id }
+            Self::Rename { tl_id, .. }
+            | Self::Dismiss { tl_id }
             | Self::Mount { tl_id, .. }
             | Self::Unmount { tl_id, .. }
             | Self::Target { tl_id, .. }
-            | Self::UserState { tl_id, .. } => tl_id,
+            | Self::UserState { tl_id, .. } => *tl_id,
         };
         if tl_id == 0 {
             return Err("mate timeline ID must be nonzero");
         }
         match self {
-            Self::Mount { point, .. } | Self::Unmount { point, .. } if !matches!(point, 1 | 2) => {
+            Self::Rename { name, .. } if name.len() > 128 || name.contains('\0') => {
+                Err("mate name must fit the native 128-byte buffer and contain no NUL")
+            }
+            Self::Mount { point, .. } | Self::Unmount { point, .. } if !matches!(*point, 1 | 2) => {
                 Err("mate attach point must be driver 1 or passenger 2")
             }
-            Self::Target { target_obj_id, .. } if target_obj_id > 0xffffff => {
+            Self::Target { target_obj_id, .. } if *target_obj_id > 0xffffff => {
                 Err("mate target ID must fit in 24 bits")
             }
-            Self::UserState { state, .. } if state > 3 => {
+            Self::UserState { state, .. } if *state > 3 => {
                 Err("mate user state must be 0 through 3")
             }
             _ => Ok(()),
         }
     }
 
-    pub fn opcode(self) -> u16 {
+    pub fn opcode(&self) -> u16 {
         match self {
+            Self::Rename { .. } => cs::CSChangeMateNamePacket,
             Self::Dismiss { .. } => cs::CSRemoveMatePacket,
             Self::Mount { .. } => cs::CSMountMatePacket,
             Self::Unmount { .. } => cs::CSUnMountMatePacket,
@@ -75,10 +81,13 @@ impl MateCommand {
         }
     }
 
-    pub fn write(self, w: &mut Writer) {
+    pub fn write(&self, w: &mut Writer) {
         match self {
+            Self::Rename { tl_id, name } => {
+                w.u16(*tl_id).string(name);
+            }
             Self::Dismiss { tl_id } => {
-                w.u16(tl_id);
+                w.u16(*tl_id);
             }
             Self::Mount {
                 tl_id,
@@ -90,16 +99,16 @@ impl MateCommand {
                 point,
                 reason,
             } => {
-                w.u16(tl_id).u8(point).u8(reason);
+                w.u16(*tl_id).u8(*point).u8(*reason);
             }
             Self::Target {
                 tl_id,
                 target_obj_id,
             } => {
-                w.u16(tl_id).bc(target_obj_id);
+                w.u16(*tl_id).bc(*target_obj_id);
             }
             Self::UserState { tl_id, state } => {
-                w.u16(tl_id).u8(state);
+                w.u16(*tl_id).u8(*state);
             }
         }
     }
@@ -608,8 +617,32 @@ mod tests {
     }
 
     #[test]
+    fn mate_rename_preserves_native_bytes_and_changes_only_received_existing_unit_names() {
+        use crate::state::WorldState;
+        let mut state = WorldState::default();
+        let mate = unit(51, 0x102, 42);
+        state.apply(&mate);
+        let old = state.units.by_id[&51].name.clone();
+        let command = MateCommand::Rename { tl_id: 0x102, name: "A\u{e9}".into() };
+        state.apply(&Event::Mate(MateEvent::Requested(command)));
+        assert_eq!(state.units.by_id[&51].name, old);
+        state.apply(&Event::UnitNameChanged { obj_id: 51, name: "Received".into() });
+        assert_eq!(state.units.by_id[&51].name, "Received");
+        state.apply(&Event::UnitNameChanged { obj_id: 99, name: "Unknown".into() });
+        assert!(!state.units.by_id.contains_key(&99));
+        for name in ["a".repeat(128), "\u{e9}".repeat(64), String::new(), " a ".into()] {
+            assert!(MateCommand::Rename { tl_id: 1, name }.validate().is_ok());
+        }
+        for name in ["a".repeat(129), "\u{e9}".repeat(65), "a\0b".into()] {
+            assert!(MateCommand::Rename { tl_id: 1, name }.validate().is_err());
+        }
+        assert!(MateCommand::Rename { tl_id: 0, name: "A".into() }.validate().is_err());
+    }
+
+    #[test]
     fn explicit_mate_controls_match_lane_bytes_and_never_optimistically_change_owned_state() {
         let commands = [
+            (MateCommand::Rename { tl_id: 0x102, name: "A\u{e9}".into() }, 0xa6, vec![2, 1, 3, 0, 65, 0xc3, 0xa9]),
             (MateCommand::Dismiss { tl_id: 0x102 }, 0xa4, vec![2, 1]),
             (
                 MateCommand::Mount {
@@ -670,14 +703,14 @@ mod tests {
         let before = state.clone();
         for (command, opcode, body) in commands {
             assert_eq!(command.validate(), Ok(()));
-            let message = crate::game::ClientMsg::Mate(command);
+            let message = crate::game::ClientMsg::Mate(command.clone());
             assert_eq!(message.opcode(), opcode);
             assert_eq!(message.encode_body(), body);
             let mut expected = vec![0xdd, 1, 0, 7];
             expected.extend((opcode as u16).to_le_bytes());
             expected.extend(body);
             assert_eq!(message.encode(7), expected);
-            assert!(!state.apply(&Event::Mate(MateEvent::Requested(command))));
+            assert!(!state.apply(&Event::Mate(MateEvent::Requested(command.clone()))));
             assert!(!state.apply(&Event::Mate(MateEvent::RequestRejected {
                 command,
                 message: "test".into()
