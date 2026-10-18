@@ -108,6 +108,11 @@ impl ExpeditionMember {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExpeditionEvent {
+    PolicyChanged { policy:ExpeditionRolePolicy, success:u8 },
+    RoleChanged { character_id:u32, role:u8, name:Vec<u8> },
+    OwnerChanged { old_owner_id:u32, new_owner_id:u32, name:Vec<u8> },
+    Dismissed { expedition_id:u32, success:u8 },
+    MembershipChanged { obj_id:u32, character_id:u32, kicker:Vec<u8>, name:Vec<u8>, old_expedition_id:u32, new_expedition_id:u32, expel:u8 },
     /// SC01a: complete raw invitation; task admission belongs to the native UI bridge.
     Invitation { inviter_id:u32, inviter_name:Vec<u8>, expedition_id:u32, expedition_name:Vec<u8> },
     Factions(Vec<ExpeditionFaction>),
@@ -124,10 +129,15 @@ pub enum ExpeditionEvent {
 }
 impl ExpeditionEvent {
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, 0x008 | 0x00b | 0x016 | 0x017 | 0x01a)
+        matches!(opcode, 0x008 | 0x00b..=0x00e | 0x015..=0x017 | 0x01a | 0x01c)
     }
     pub fn read_lane(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            0x00c => Self::PolicyChanged { policy:ExpeditionRolePolicy::read_lane(r)?,success:r.u8()? },
+            0x00d => Self::RoleChanged { character_id:r.u32()?,role:r.u8()?,name:r.blob()?.to_vec() },
+            0x00e => Self::OwnerChanged { old_owner_id:r.u32()?,new_owner_id:r.u32()?,name:r.blob()?.to_vec() },
+            0x015 => Self::Dismissed { expedition_id:r.u32()?,success:r.u8()? },
+            0x01c => Self::MembershipChanged { obj_id:r.bc()?,character_id:r.u32()?,kicker:r.blob()?.to_vec(),name:r.blob()?.to_vec(),old_expedition_id:r.u32()?,new_expedition_id:r.u32()?,expel:r.u8()? },
             0x01a => Self::Invitation { inviter_id:r.u32()?,inviter_name:r.blob()?.to_vec(),expedition_id:r.u32()?,expedition_name:r.blob()?.to_vec() },
             0x008 => {
                 let count = r.u8()?;
@@ -163,11 +173,27 @@ impl ExpeditionEvent {
         })
     }
 }
+/// Source-order, no-argument original Lua callbacks. No receipt is manufactured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpeditionNotice { PolicyChanged, RoleChanged, Updated, MemberStatusChanged, MemberNameChanged, UpdateMainMenu }
+impl ExpeditionNotice {
+    pub fn event_name(self)->&'static str {
+        match self {
+            Self::PolicyChanged=>"EXPEDITION_MANAGEMENT_POLICY_CHANGED",
+            Self::RoleChanged=>"EXPEDITION_MANAGEMENT_ROLE_CHANGED",
+            Self::Updated=>"EXPEDITION_MANAGEMENT_UPDATED",
+            Self::MemberStatusChanged=>"EXPEDITION_MANAGEMENT_MEMBER_STATUS_CHANGED",
+            Self::MemberNameChanged=>"EXPEDITION_MANAGEMENT_MEMBER_NAME_CHANGED",
+            Self::UpdateMainMenu=>"UPDATE_MAIN_MENU_EXPEDITION",
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Expeditions {
     /// Actual selected/spawned local persistent identity, never inferred from roster order.
     pub local_character_id: Option<u32>,
+    pub local_object_id: Option<u32>,
     /// Native manager constructor/reset values are all zero (invalid expedition sentinel).
     pub own_id: u32,
     pub own_role: u8,
@@ -201,10 +227,75 @@ impl Expeditions {
         let mut row=member.clone();row.name.truncate(128);row.memo.truncate(63);
         self.members.insert(row.character_id,row);
     }
-    pub fn apply(&mut self, event: &Event) -> bool {
+    /// The compatibility reducer discards notices; callers needing UI callbacks should call
+    /// apply_with_notices INSTEAD, never fold the same receipt twice.
+    pub fn apply(&mut self, event: &Event) -> bool { self.apply_with_notices(event).0 }
+    pub fn apply_with_notices(&mut self,event:&Event)->(bool,Vec<ExpeditionNotice>) {
+        let mut notices=Vec::new();let changed=self.apply_inner(event,&mut notices);(changed,notices)
+    }
+    /// Evaluate before folding a Dismissed receipt: native removes metadata before actor cleanup.
+    pub fn admitted_dismissal(&self,event:&Event)->Option<u32> {
+        let Event::Expedition(ExpeditionEvent::Dismissed{expedition_id,success})=event else{return None};
+        (*success!=0 && self.factions.get(expedition_id).is_some_and(|f|f.mother_id!=0)).then_some(*expedition_id)
+    }
+    fn reset_native_view(&mut self) {
+        self.own_id=0;self.own_role=0;self.loaded_id=0;
+        self.members.clear();self.policies.clear();self.totals.clear();
+    }
+    fn apply_inner(&mut self, event: &Event, notices:&mut Vec<ExpeditionNotice>) -> bool {
         match event {
             Event::Expedition(receipt) => {
                 match receipt {
+                    ExpeditionEvent::PolicyChanged{policy,success} => {
+                        let key=(policy.expedition_id,policy.role);
+                        if *success==0 { notices.push(ExpeditionNotice::PolicyChanged); }
+                        else if policy.expedition_id==self.own_id && self.policies.contains_key(&key) {
+                            let mut row=policy.clone();row.name.truncate(128);self.policies.insert(key,row);
+                            notices.push(ExpeditionNotice::PolicyChanged);
+                        }
+                    }
+                    ExpeditionEvent::RoleChanged{character_id,role,..} => {
+                        if self.policies.contains_key(&(self.own_id,*role)) {
+                            if self.local_character_id==Some(*character_id) {
+                                self.own_role=*role;notices.push(ExpeditionNotice::RoleChanged);
+                            }
+                            // Native operator[] zero-initializes only the ROW; identity is the tree key.
+                            self.members.entry(*character_id).or_default().role=*role;
+                            notices.push(ExpeditionNotice::Updated);
+                        }
+                    }
+                    ExpeditionEvent::OwnerChanged{old_owner_id,new_owner_id,name} => {
+                        if let Some(faction)=self.factions.get_mut(&self.own_id).filter(|f|f.owner_id==*old_owner_id) {
+                            faction.owner_id=*new_owner_id;faction.owner_name=name.iter().copied().take(128).collect();
+                            if self.policies.contains_key(&(self.own_id,255)) && self.policies.contains_key(&(self.own_id,0)) {
+                                if let Some(row)=self.members.get_mut(old_owner_id) {row.role=0;}
+                                if let Some(row)=self.members.get_mut(new_owner_id) {row.role=255;}
+                                if self.local_character_id==Some(*old_owner_id) {self.own_role=0;notices.push(ExpeditionNotice::RoleChanged);}
+                                else if self.local_character_id==Some(*new_owner_id) {self.own_role=255;notices.push(ExpeditionNotice::RoleChanged);}
+                                notices.push(ExpeditionNotice::Updated);
+                            }
+                        }
+                    }
+                    ExpeditionEvent::Dismissed{expedition_id,success} => {
+                        if *success!=0 && self.factions.get(expedition_id).is_some_and(|f|f.mother_id!=0) {
+                            self.factions.remove(expedition_id);
+                            if self.own_id==*expedition_id {self.reset_native_view();notices.push(ExpeditionNotice::UpdateMainMenu);}
+                        }
+                    }
+                    ExpeditionEvent::MembershipChanged{obj_id,character_id,old_expedition_id,new_expedition_id,..} => {
+                        let context=if *old_expedition_id==0 {*new_expedition_id} else {*old_expedition_id};
+                        if context!=0 && self.factions.contains_key(&context) {
+                            if self.local_object_id==Some(*obj_id) && self.local_character_id==Some(*character_id) {
+                                self.reset_native_view();
+                                if *old_expedition_id==0 {self.own_id=*new_expedition_id;notices.push(ExpeditionNotice::UpdateMainMenu);}
+                                else if *new_expedition_id==0 {notices.push(ExpeditionNotice::UpdateMainMenu);}
+                            } else if self.local_character_id!=Some(*character_id) && self.own_id!=0
+                                && *old_expedition_id==self.own_id && *new_expedition_id==0 {
+                                // Native392fe4bf: offline targets need no runtime actor to leave the keyed roster.
+                                self.members.remove(character_id);notices.push(ExpeditionNotice::Updated);
+                            }
+                        }
+                    }
                     ExpeditionEvent::Invitation { .. } => {}
                     ExpeditionEvent::Factions(rows) => {
                         for row in rows.iter().take(20) {
@@ -233,8 +324,10 @@ impl Expeditions {
                             }
                         }
                     }
-                    ExpeditionEvent::MemberStatus { member, .. } => {
-                        self.cache_member(member);
+                    ExpeditionEvent::MemberStatus { member, flag } => {
+                        let notice=if !self.members.contains_key(&member.character_id) {ExpeditionNotice::Updated}
+                            else if flag&1!=0 {ExpeditionNotice::MemberNameChanged} else {ExpeditionNotice::MemberStatusChanged};
+                        self.cache_member(member);notices.push(notice);
                     }
                 }
                 self.last_receipt = Some(receipt.clone());
@@ -245,11 +338,13 @@ impl Expeditions {
                 // Session emits PlayerSpawn only for the actual selected Character-kind actor.
                 let crate::model::UnitKind::Character{char_id}=spawn.unit.kind else {return false};
                 if char_id==0 || char_id!=spawn.state.character.id {return false;}
-                if self.local_character_id==Some(char_id) {return false;}
-                self.hydrate_character(&spawn.state.character); true
+                if self.local_character_id==Some(char_id) {
+                    let changed=self.local_object_id!=Some(spawn.unit.obj_id);self.local_object_id=Some(spawn.unit.obj_id);return changed;
+                }
+                self.hydrate_character(&spawn.state.character);self.local_object_id=Some(spawn.unit.obj_id); true
             }
             Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                let changed = self.local_character_id.is_some() || self.own_id != 0 || self.own_role != 0 || self.loaded_id != 0
+                let changed = self.local_character_id.is_some() || self.local_object_id.is_some() || self.own_id != 0 || self.own_role != 0 || self.loaded_id != 0
                     || !self.factions.is_empty() || !self.policies.is_empty() || !self.members.is_empty()
                     || !self.totals.is_empty() || self.last_receipt.is_some();
                 *self = Self::default();
@@ -481,6 +576,111 @@ mod tests {
         assert_eq!(state.members[&21].memo.len(),63);assert!(!state.info_loaded(),"status does not reconcile");
         state.apply(&Event::Expedition(ExpeditionEvent::Members{total:21,expedition_id:9,members:vec![]}));
         assert!(state.info_loaded(),"native callback count/cache conditions now hold with actual local row");
+    }
+
+    #[test]
+    fn five_mutation_layouts_preserve_raw_bytes_truncations_and_dd04_tail() {
+        let cases=vec![
+            (0x0c,vec![9,0,0,0,2,1,0,255,1,0,1,0,1,0,1,0,1,2]),
+            (0x0d,vec![7,0,0,0,2,2,0,255,0]),
+            (0x0e,vec![7,0,0,0,8,0,0,0,2,0,255,0]),
+            (0x15,vec![9,0,0,0,255]),
+            (0x1c,vec![77,0,0,7,0,0,0,1,0,255,2,0,128,0,9,0,0,0,0,0,0,0,2]),
+        ];
+        for (opcode,bytes) in cases {
+            let mut r=Reader::new(&bytes);let receipt=ExpeditionEvent::read_lane(opcode,&mut r).unwrap();assert!(r.is_empty());
+            for n in 0..bytes.len(){assert!(ExpeditionEvent::read_lane(opcode,&mut Reader::new(&bytes[..n])).is_err(),"opcode{opcode:x} at{n}");}
+            use std::io::Write;
+            let mut raw=Writer::new();raw.u16(0).u16(opcode).raw(&bytes).u16(0).u16(0x0b).u8(0);
+            let mut compressor=flate2::write::DeflateEncoder::new(Vec::new(),flate2::Compression::fast());compressor.write_all(&raw.finish()).unwrap();
+            let mut batch=Writer::new();batch.u8(0xdd).u8(crate::game::LEVEL_COMPRESSED).u16(2).raw(&compressor.finish().unwrap());
+            let crate::game::ServerMsg::Batch(messages)=crate::game::ServerMsg::decode(&batch.finish()).unwrap() else {panic!()};
+            assert!(matches!(&messages[0],crate::game::ServerMsg::Expedition(value) if value==&receipt));
+            assert!(matches!(&messages[1],crate::game::ServerMsg::Expedition(ExpeditionEvent::Policies(rows)) if rows.is_empty()));
+        }
+    }
+    #[test]
+    fn mutation_guards_and_notices_follow_native_cache_order_without_optimistic_success() {
+        use ExpeditionNotice::*;
+        let mut state=Expeditions::default();state.apply(&selected(7,9));
+        let mut policy=ExpeditionRolePolicy{expedition_id:9,role:2,name:vec![65],..Default::default()};
+        let notice=|s:&mut Expeditions,event|s.apply_with_notices(&Event::Expedition(event)).1;
+        assert!(notice(&mut state,ExpeditionEvent::PolicyChanged{policy:policy.clone(),success:1}).is_empty());
+        assert_eq!(notice(&mut state,ExpeditionEvent::PolicyChanged{policy:policy.clone(),success:0}),vec![PolicyChanged]);
+        state.policies.insert((9,2),policy.clone());policy.name=vec![255;129];
+        assert_eq!(notice(&mut state,ExpeditionEvent::PolicyChanged{policy:policy.clone(),success:2}),vec![PolicyChanged]);
+        assert_eq!(state.policies[&(9,2)].name.len(),128);
+        assert!(notice(&mut state,ExpeditionEvent::RoleChanged{character_id:7,role:3,name:vec![]}).is_empty());
+        assert_eq!(notice(&mut state,ExpeditionEvent::RoleChanged{character_id:7,role:2,name:vec![65]}),vec![RoleChanged,Updated]);
+        assert_eq!(state.own_role,2);assert_eq!(state.members[&7].character_id,0);assert!(state.members[&7].name.is_empty());
+        state.factions.insert(9,ExpeditionFaction{id:9,mother_id:1,owner_id:7,..Default::default()});
+        let owner=ExpeditionEvent::OwnerChanged{old_owner_id:7,new_owner_id:8,name:vec![255;129]};
+        assert!(notice(&mut state,owner.clone()).is_empty());assert_eq!(state.factions[&9].owner_id,8,"faction updates even when role policies are missing");
+        state.policies.insert((9,0),ExpeditionRolePolicy::default());state.policies.insert((9,255),ExpeditionRolePolicy::default());
+        assert!(notice(&mut state,owner).is_empty(),"stale oldowner cannot rewrite current owner");
+        assert_eq!(notice(&mut state,ExpeditionEvent::OwnerChanged{old_owner_id:8,new_owner_id:7,name:vec![66]}),vec![RoleChanged,Updated]);
+        assert_eq!(state.own_role,255);assert_eq!(state.members[&7].role,255);assert!(!state.members.contains_key(&8));
+        assert!(notice(&mut state,ExpeditionEvent::Dismissed{expedition_id:9,success:0}).is_empty());
+        assert_eq!(notice(&mut state,ExpeditionEvent::Dismissed{expedition_id:9,success:2}),vec![UpdateMainMenu]);
+        assert_eq!((state.own_id,state.loaded_id,state.own_role),(0,0,0));assert!(state.members.is_empty()&&state.policies.is_empty());assert!(!state.factions.contains_key(&9));
+    }
+    #[test]
+    fn actual_membership_identity_and_existing_unit_guards_preserve_unknown_receipts() {
+        use ExpeditionNotice::*;
+        let mut world=crate::state::WorldState::default();world.apply(&spawn(7,0));
+        world.apply(&Event::UnitSpawned(Box::new(world.player.spawn.as_ref().unwrap().unit.clone())));
+        assert_eq!(world.expeditions.local_object_id,Some(77));
+        world.expeditions.factions.insert(9,ExpeditionFaction{id:9,mother_id:1,..Default::default()});
+        let receipt=|obj_id,character_id,old_expedition_id,new_expedition_id|ExpeditionEvent::MembershipChanged{obj_id,character_id,kicker:vec![255],name:vec![0],old_expedition_id,new_expedition_id,expel:2};
+        assert!(world.expeditions.apply_with_notices(&Event::Expedition(receipt(77,8,0,9))).1.is_empty());
+        assert!(world.expeditions.apply_with_notices(&Event::Expedition(receipt(88,7,0,9))).1.is_empty());
+        let accepted=Event::Expedition(receipt(77,7,0,9));
+        assert_eq!(world.expeditions.apply_with_notices(&accepted).1,vec![UpdateMainMenu]);
+        assert_eq!(world.expeditions.own_id,9);assert!(!world.expeditions.info_loaded());
+        world.player.apply(&accepted);world.units.apply(&accepted);
+        assert_eq!(world.player.spawn.as_ref().unwrap().unit.expedition_id,9);
+        assert_eq!(world.player.spawn.as_ref().unwrap().state.character.expedition_id,9);
+        assert_eq!(world.units.by_id[&77].expedition_id,9);
+        world.units.apply(&Event::Expedition(receipt(77,8,9,0)));assert_eq!(world.units.by_id[&77].expedition_id,9);
+        world.units.apply(&Event::Expedition(receipt(999,7,9,0)));assert!(!world.units.by_id.contains_key(&999));
+        assert_eq!(world.expeditions.apply_with_notices(&Event::Expedition(receipt(77,7,9,0))).1,vec![UpdateMainMenu]);
+        assert_eq!(world.expeditions.own_id,0);assert!(world.expeditions.factions.contains_key(&9));
+        let status=ExpeditionEvent::MemberStatus{member:ExpeditionMember{character_id:8,..Default::default()},flag:1};
+        assert_eq!(world.expeditions.apply_with_notices(&Event::Expedition(status.clone())).1,vec![Updated]);
+        assert_eq!(world.expeditions.apply_with_notices(&Event::Expedition(status)).1,vec![MemberNameChanged]);
+        world.apply(&Event::LeftWorld{target:0});assert!(world.expeditions.local_object_id.is_none());
+    }
+
+    #[test]
+    fn admitted_dismissal_clears_only_existing_matching_actors_before_metadata_is_removed() {
+        for (success,mother,present,admitted) in [(0,1,true,false),(1,0,true,false),(1,1,false,false),(2,1,true,true)] {
+            let mut world=crate::state::WorldState::default();let mut own=spawn(7,9);
+            if let Event::PlayerSpawn(value)=&mut own {value.unit.expedition_id=9;}
+            world.apply(&own);
+            let mut unit=crate::state::tests::unit(88);unit.expedition_id=9;world.units.by_id.insert(88,unit);
+            let mut other=crate::state::tests::unit(89);other.expedition_id=10;world.units.by_id.insert(89,other);
+            if present {world.expeditions.factions.insert(9,ExpeditionFaction{id:9,mother_id:mother,..Default::default()});}
+            let event=Event::Expedition(ExpeditionEvent::Dismissed{expedition_id:9,success});
+            assert_eq!(world.expeditions.admitted_dismissal(&event),admitted.then_some(9));world.apply(&event);
+            assert_eq!(world.units.by_id[&88].expedition_id,if admitted{0}else{9});
+            assert_eq!(world.player.spawn.as_ref().unwrap().unit.expedition_id,if admitted{0}else{9});
+            assert_eq!(world.units.by_id[&89].expedition_id,10);assert_eq!(world.units.by_id.len(),2);
+            assert_eq!(world.expeditions.factions.contains_key(&9),present&&!admitted);
+        }
+    }
+
+    #[test]
+    fn nonlocal_leave_and_offline_kick_remove_persistent_row_and_emit_even_if_missing() {
+        let mut state=Expeditions::default();state.apply(&spawn(7,9));
+        state.factions.insert(9,ExpeditionFaction{id:9,mother_id:1,..Default::default()});
+        state.members.insert(8,ExpeditionMember{character_id:8,expedition_id:9,..Default::default()});
+        let kick=Event::Expedition(ExpeditionEvent::MembershipChanged{obj_id:0,character_id:8,kicker:vec![255],name:vec![0],old_expedition_id:9,new_expedition_id:0,expel:2});
+        for _ in 0..2 {
+            assert_eq!(state.apply_with_notices(&kick).1,vec![ExpeditionNotice::Updated]);
+            assert!(!state.members.contains_key(&8));assert_eq!(state.own_id,9);
+        }
+        let mut unknown=state.clone();unknown.factions.clear();unknown.members.insert(8,ExpeditionMember::default());
+        assert!(unknown.apply_with_notices(&kick).1.is_empty());assert!(unknown.members.contains_key(&8));
     }
 
 }

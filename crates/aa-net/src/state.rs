@@ -118,9 +118,20 @@ resource! {
 }
 
 impl Player {
+    pub fn clear_expedition(&mut self, expedition_id:u32)->bool {
+        let Some(spawn)=self.spawn.as_mut() else{return false};
+        if spawn.unit.expedition_id!=expedition_id || expedition_id==0 {return false;}
+        spawn.unit.expedition_id=0;spawn.state.character.expedition_id=0;true
+    }
+
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
             Event::PlayerSpawn(s) => self.spawn = Some((**s).clone()),
+            Event::Expedition(receipt) => return self.spawn.as_mut().is_some_and(|spawn| {
+                let changed=spawn.unit.apply_expedition(receipt);
+                if changed {spawn.state.character.expedition_id=spawn.unit.expedition_id;}
+                changed
+            }),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
@@ -141,6 +152,13 @@ resource! {
 }
 
 impl Units {
+    pub fn clear_expedition(&mut self, expedition_id:u32)->bool {
+        if expedition_id==0{return false;}
+        let mut changed=false;
+        for unit in self.by_id.values_mut() {if unit.expedition_id==expedition_id {unit.expedition_id=0;changed=true;}}
+        changed
+    }
+
     /// Apply received flags only to the existing, uniquely correlated current owned mate.
     pub fn apply_mate_equipment_flags(&mut self, event: &Event, mates: &Mates) -> bool {
         let Event::Mate(crate::mate::MateEvent::EquipmentFlagsChanged { mate_tl_id, container, slot, flags }) = event else { return false };
@@ -160,6 +178,8 @@ impl Units {
             Event::UnitSpawned(u) => {
                 self.by_id.insert(u.obj_id, (**u).clone());
             }
+            Event::Expedition(receipt @ crate::ExpeditionEvent::MembershipChanged{obj_id,..}) =>
+                return self.by_id.get_mut(obj_id).is_some_and(|unit|unit.apply_expedition(receipt)),
             Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
@@ -390,6 +410,9 @@ pub struct WorldState {
 
 impl WorldState {
     pub fn apply(&mut self, e: &Event) {
+        if let Some(id)=self.expeditions.admitted_dismissal(e) {
+            self.player.clear_expedition(id);self.units.clear_expedition(id);
+        }
         self.worlds.apply(e);
         self.characters.apply(e);
         self.player.apply(e);

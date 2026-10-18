@@ -5455,3 +5455,87 @@ future values (including negative wire i64 interpreted unsigned) to zero age,
 then394245f0 decomposes365-day years/30-day months/days/hours/minutes/seconds;
 39429b20 exposes all six keyed numeric components. This clock is independent of
 mapped monotonic ServerClock.
+
+
+### Expedition authoritative mutation settlement (2026-10-18)
+
+Received SC00c PolicyChanged, SC00d RoleChanged, SC00e OwnerChanged, SC015
+Dismissed and SC01c MembershipChanged preserve complete binary names and raw
+boolean bytes. Native factories391a77ee/786e/78ee/7e6b/806e and vtables399b3060,
+306c,3078,30cc,30fc resolve serializers397c1b00,397c1b30,397b2b50,
+397b2c70,397c56f0. These match the active lane social expedition writers.
+SC01c order is BC object ID, u32 persistent ID, string kicker, string name,
+u32 old expedition, u32 new expedition, u8 expel. Raw receipts are forwarded
+regardless of native cache admission; no outgoing request fabricates these events.
+
+`Expeditions::apply_with_notices(&Event) -> (bool, Vec<ExpeditionNotice>)`
+returns source-ordered original no-argument callback names through `.event_name()`.
+It is an ALTERNATIVE to `.apply`, whose compatibility implementation discards
+notices. Never call both for the same receipt. Cache lifecycle and source guards:
+
+* PolicyChanged success0 emits POLICY_CHANGED without modifying cache. Nonzero
+  success requires an existing matching policy and policy.expedition_id==own_id;
+  then replace that row (128-byte cached name) and emit POLICY_CHANGED.
+* RoleChanged requires the new role's policy for own_id. Actual local persistent
+  target updates own_role and emits ROLE_CHANGED; then the target keyed member
+  receives role and UPDATED emits. Native operator[] creates a zero ROW if missing;
+  persistent ID belongs to the tree key, so no name/identity metadata is invented.
+* OwnerChanged requires own cached faction and exact current owner==old_owner_id.
+  It updates faction owner/name FIRST. Only when role255 and role0 policies both
+  exist does it set existing old/new member roles0/255, update actual local role
+  with ROLE_CHANGED, and emit UPDATED. It creates no missing member rows.
+* Dismissed requires nonzero success, an existing faction and nonzero mother_id.
+  It deletes that faction. Matching own_id resets policies/members/role/loadedID
+  and emits UPDATE_MAIN_MENU_EXPEDITION, retaining other faction metadata and
+  actual selected/spawned identity.
+* MembershipChanged native UI context chooses old expedition when nonzero,
+  otherwise new expedition; that faction must be cached. This implementation
+  also requires actual PlayerSpawn object AND persistent character identity
+  (persistent guard is a stronger stale-object application boundary). It resets
+  native member/policy view; joining from0 sets own_id=new, leaving to0 retains
+  own_id0, both emit UPDATE_MAIN_MENU_EXPEDITION. Direct nonzero?nonzero resets
+  but emits neither branch's menu callback, matching native control flow.
+  Nonlocal old_id==own_id!=0?new_id0 removes the persistent target member and
+  emits UPDATED, even for an offline actor (object0) or already-missing member.
+  It still requires the cached context; before actual local spawn identity, a
+  packet naming the selected local persistent character is not treated as remote.
+
+`local_object_id` hydrates only actual matched PlayerSpawn and survives native
+view reset; session lifecycle clears it. SC01c independently updates already
+present matching Character Units/Player and the Player character snapshot. It
+requires a nonzero matching persistent ID, never creates a missing actor and
+never changes another object's reused identity. Native broader SC01c actor updates remain distinct from these guarded Character
+folds; packet receipt alone does not establish an unknown actor's identity.
+Dismiss bulk clearing is integrated BEFORE cache folding in both WorldState and
+the Bevy plugin: `admitted_dismissal` checks genuine success/cached faction/mother
+first, then Player/Units clear only already-present actors with the matching
+nonzero expedition ID, before the reducer removes faction metadata. Failure,
+missing faction and mother0 leave actor state intact.
+
+MemberStatus notice correction:392f9630 selects EXACTLY ONE callback after row
+upsert: missing row?UPDATED, existing with flag&1?MEMBER_NAME_CHANGED, otherwise
+MEMBER_STATUS_CHANGED. There is no preceding status callback on rename.
+Members batch392fb160 reconciles manager state but emits no management callback.
+Source artifact `data/extract/aa-net/native-expedition-settlement-20261018.txt`.
+
+Additional source closures: mother sentinel3a5e1388 is static0 and read-only
+module-verified runtime0.390fa7fa binds g_ignore_expedition_invite to store+32c
+(324+index2*4), default0;39182860 tests exactly1. This is option73's underlying
+index, not Lua option2. Task admission3902d570 rejected-admission calls callback
+with virtual+8()==1; Task3's +8 returns0, hence auto-decline, except callback's
+already-member guard still blocks send with132. Policy table converter392fa6f0
+maps Lua3/4/5/6/7/8/9/10 to invite/expel/promote/join_siege/siege_master/
+dominion/chat/manager_chat. It NEVER writes dismiss+8d, and wrapper39472840 uses
+uninitialized stack row storage; there is no proven native defaultfalse.
+Preserving a known received dismiss value is an explicit safer application policy.
+
+Owner guard392f4ec0 scans Dominion tree39d44aec for row.state(+d8)==4 and calls
+39839600(own_id,null), matching expedition against row+e0 OR row+298. It is not
+an any-siege-worldwide predicate. The received producer is now closed: SC01d factory391ce1ca/vtable399b7524,
+serializer397afd00?3983a470?39839f40 on row+a8; the latter reads signed i8
+siege_period into timers+30 (=row+d8), then participant structs at timers+38/
++1f0 (=row+e0/+298) via39839c80. Active lane DominionSiegeTimers agrees.
+A typed full Dominion received cache/snapshot-completeness contract is still
+needed before the client can safely return a negative blocker result; no
+DB-only or missing-receipt 'no siege' context is substituted. Continued source:
+`data/extract/aa-net/native-expedition-owner-dominion-20261018.txt`.
