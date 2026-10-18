@@ -169,3 +169,33 @@ Measured Nuian male morph payload is4,049,472 bytes per enabled head (about386 M
 zero extra image/material/bindpose assets. The crowd audit therefore did not add a CPU cache that
 would leave per-mesh GPU duplication intact. Its expression-update microbench excludes full ECS,
 body and facial-bone costs; original32-head captures check independent poses and real GPU use.
+
+## CDF particle and object attachments (2026-10-18)
+
+The client now distinguishes object paths, named particle effects and entity bindings before
+prewarming or spawning. Original CA_BONE objects and effects use the authored bone/local
+transform. Creature CDFs and their skin-part CDFs retain these bindings; assembled Characters
+use the attachments retained by aa-anim on each resolved costume/hair part. Named effects are
+never mistaken for mesh filenames. The three source entity bindings remain unsupported.
+
+Effect anchors follow the existing actor bones while retaining their actual source part as
+owner. A hidden actor or independently hidden part releases the emitter; unhide lazily creates
+it again. Removing a part releases its bone-parented attachment, and actor unload removes all
+descendants. Rigid object attachments also follow source-part visibility and lifetime.
+
+Native constructor31515900 uses scale1; lazy spawn31517A40 and update31517CC0 retain the
+emitter pointer until hidden/destructed. The integration therefore uses scale1, no priming,
+and no forced repeat. Native flag0x20000 passed through315170B0 remains unclassified and is
+not represented as an invented priming/loop option. This does not claim full native particle
+rendering/material parity.
+
+The unattended cdf_attachments example uses the actual horse_lord.cdf four hoof effects and
+the Elf female white-day costume head ring. Inspected native-bindings.png shows all five;
+native-unload.png and its assertions confirm zero Effect/FxMesh entities after despawn.
+The baseline measured218-298 FPS, and the hide/show/unload run279-412 FPS on the shared GPU,
+with no render errors. Captures/logs are in shots/aa-client/cdf-attachments/. These are original
+asset/lifetime checks in a controlled scene; same-scene real-client lighting comparison and
+live full-world attachment validation remain open.
+
+The fresh client suite passes156 tests /26 ignored (4.34s), including part/actor visibility,
+emitter recreation, source-part destruction and named-effect exclusion from mesh prewarm.

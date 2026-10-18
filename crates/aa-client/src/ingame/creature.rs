@@ -23,7 +23,8 @@ pub fn model_files(file: &str, definition: Option<&Cdf>) -> Vec<(String, Option<
         let parts = cdf
             .attachments
             .iter()
-            .filter(|a| matches!(a.kind, aa_anim::cdf::AttachmentKind::Skin | aa_anim::cdf::AttachmentKind::Bone) && !a.binding.is_empty() && a.flags & 1 == 0)
+            .filter(|a| matches!(a.kind, aa_anim::cdf::AttachmentKind::Skin | aa_anim::cdf::AttachmentKind::Bone)
+                && a.binding_kind == aa_anim::cdf::BindingKind::Object && !a.binding.is_empty() && a.flags & 1 == 0)
             .map(|a| (a.binding.clone(), a.material.clone()))
             .collect::<Vec<_>>();
         (cdf.model, cdf.material, parts)
@@ -37,6 +38,9 @@ pub fn model_files(file: &str, definition: Option<&Cdf>) -> Vec<(String, Option<
     for (path, material) in attachments {
         if path.ends_with(".cdf") {
             if let Ok(c) = Cdf::load(&path) {
+                for attachment in &c.attachments {
+                    if let Some(model) = super::attachments::model(attachment) { out.push(model); }
+                }
                 out.push((c.model, c.material.or(material)));
             }
         } else {
@@ -66,7 +70,7 @@ pub(crate) fn configured_cdf(db: &aa_anim::GameDb, file: &str, model: u32, equip
 /// `definition` is the same effective CDF used by the worker's model prewarm.
 pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, file: &str, definition: Option<&Cdf>, transform: Transform) -> Option<Entity> {
     // the base skin and the extra skin attachments
-    let (main, main_material, attachments, rigid) = if file.ends_with(".cdf") {
+    let (main, main_material, attachments, mut rigid) = if file.ends_with(".cdf") {
         let cdf = match definition.cloned().map(Ok).unwrap_or_else(|| Cdf::load(file)) {
             Ok(c) => c,
             Err(e) => {
@@ -82,9 +86,9 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
                 continue;
             }
             match a.kind {
-                aa_anim::cdf::AttachmentKind::Skin => parts.push((a.binding.clone(), a.material.clone())),
+                aa_anim::cdf::AttachmentKind::Skin if a.binding_kind == aa_anim::cdf::BindingKind::Object => parts.push((a.binding.clone(), a.material.clone())),
                 aa_anim::cdf::AttachmentKind::Bone => rigid.push(a.clone()),
-                aa_anim::cdf::AttachmentKind::Other => {},
+                _ => {},
             }
         }
         (cdf.model, cdf.material, parts, rigid)
@@ -118,7 +122,10 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
         // attached parts may themselves be a `.cdf` wrapper around a `.chr`
         let (path, material) = if path.ends_with(".cdf") {
             match Cdf::load(&path) {
-                Ok(c) => (c.model, c.material.or(material)),
+                Ok(c) => {
+                    rigid.extend(c.attachments.into_iter().filter(|attachment| attachment.kind == aa_anim::cdf::AttachmentKind::Bone));
+                    (c.model, c.material.or(material))
+                }
                 Err(_) => continue,
             }
         } else {
@@ -142,15 +149,7 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
     }
 
     for attachment in rigid {
-        let Ok((joint, local)) = attachment.bone_binding(&skeleton) else { continue };
-        let (path, material) = if attachment.binding.ends_with(".cdf") {
-            let Ok(cdf) = Cdf::load(&attachment.binding) else { continue };
-            (cdf.model, cdf.material.or(attachment.material))
-        } else { (attachment.binding, attachment.material) };
-        let options = ModelOptions { material, cry_space: true, ..default() };
-        let Ok(loaded) = cry.load_model(&path, &options) else { continue };
-        let part = spawn_loaded(commands, &path, &loaded, &options);
-        commands.entity(part).insert((Transform::from_matrix(Mat4::from(local)), ChildOf(bones[joint])));
+        super::attachments::spawn(commands, cry, root, &attachment, &skeleton, &bones);
     }
 
     // animations: `<model>.cal` next to the skeleton file

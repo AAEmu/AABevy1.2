@@ -89,6 +89,12 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
             if let Ok(m) = loader.prepare_model(&part.path, &options) {
                 models.push(m);
             }
+            for attachment in &part.attachments {
+                if let Some((path, material)) = super::attachments::model(attachment) {
+                    let options = ModelOptions { material, cry_space: true, shading: Shading::Full, ..default() };
+                    if let Ok(model) = loader.prepare_model(&path, &options) { models.push(model); }
+                }
+            }
         }
         let carried = weapons::carried(db, &unit.equipment);
         for item in &carried {
@@ -142,6 +148,12 @@ pub fn prepare_listed(db: &Db, loader: &CryLoader, c: &aa_net::model::Character)
         let options = ModelOptions { material: part.material.clone(), cry_space: true, shading: Shading::Full, ..default() };
         if let Ok(m) = loader.prepare_model(&part.path, &options) {
             models.push(m);
+        }
+        for attachment in &part.attachments {
+            if let Some((path, material)) = super::attachments::model(attachment) {
+                let options = ModelOptions { material, cry_space: true, shading: Shading::Full, ..default() };
+                if let Ok(model) = loader.prepare_model(&path, &options) { models.push(model); }
+            }
         }
     }
     Some((Box::new(assets), models))

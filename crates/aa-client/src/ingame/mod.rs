@@ -27,6 +27,7 @@
 //! cells unload. The character list is then built again by `login`.
 
 mod anim;
+pub(crate) mod attachments;
 mod bench;
 pub(crate) mod appearance;
 pub(crate) mod camera;
@@ -107,6 +108,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
+            .add_plugins(attachments::plugin)
             .add_plugins(bench::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
