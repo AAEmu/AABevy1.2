@@ -4371,8 +4371,11 @@ locked, remaining zero, 500 ms interval and 2,000 ms maximum. Original
 the HUD lock image. The constructor anchors that drawable's BOTTOMLEFT to the
 window TOPLEFT with zero offsets (`392cbe81..b1`; native point table `39ac6a5c`).
 `AllowTabSwitch(true)` (`392c9680`) clears the timer and hides the drawable;
-false retains both. Number adapters `39259c90` and bool adapter `39259d50` require
-their exact types: missing values, numeric strings and wrong types do nothing.
+false retains both. Number adapter `39259c90` requires a number; bool adapter
+`39259d50` accepts the bool produced by CryScript `3550bf90`, which also converts
+numeric arguments using `value != 0` (including NaN as true). Missing values,
+numeric strings and other types do nothing. The initial bool-only interpretation
+was corrected after checking this script-interface conversion boundary.
 Timer setters `392c96c0/392c96f0` clamp negative values to zero while preserving
 negative zero, NaN and positive infinity; they retain any running timer.
 
@@ -4386,9 +4389,10 @@ milliseconds directly into chat update.
 
 `data/extract/aa-ui/chat_lock_oracle.py` and
 `native-chat-lock-oracle-20261018.json` execute **40 native groups** with the PE
-hash: constructor stores/anchor, strict argument adapters, raw setters and f32
+hash: constructor stores/anchor, typed argument adapters, raw setters and f32
 edges, actual ButtonWidget drag producer/callback order, real tab/message lookup,
 raw-zero protection, secondary split boundary and frame blinking/expiry.
+GetParamAny applies the source-closed CryScript numeric-to-bool conversion;
 Lua/audio/profile delivery, observer forwarding, generic move capture, secondary
 split and manager preparation are explicit endpoints; remaining instructions run
 unchanged. The oracle neither performs nor emulates splitting. Instructions are
@@ -4396,7 +4400,7 @@ in `native-chat-lock-source-20261018.txt`.
 
 `cargo check -p aa-ui`, the example build and **37 selected tests** pass across
 locking, alpha, context, method persistence, ordinary dragging and resizing.
-Seven new tests exercise exact setter types/defaults, signed zero/NaN/infinity,
+Seven new tests exercise typed setter conversion/defaults, signed zero/NaN/infinity,
 simple clicks/context while locked, callback-before-policy ordering, physical
 movement and capture release, disabling during capture, retained timer state,
 expiry/zero interval, removal during the drag callback and the unchanged original
@@ -4407,3 +4411,8 @@ The inspected `shots/aa-ui/native-chat-lock-20261018.png` shows the original loc
 above the chat tabs at 1280x720/UI scale 0.85. It reports zero Lua errors, no
 runtime warnings/errors and **224.1-283.8 FPS**; its copied process self-closes
 after the screenshot. No corresponding locked-chat reference capture is present.
+
+The bool-conversion correction passes all **15 focused locking/context/method
+tests**, including numeric zero, negative zero, negative nonzero and NaN, while
+strings/missing values retain the previous policy. Literal bool behavior and the
+inspected capture are unchanged.
