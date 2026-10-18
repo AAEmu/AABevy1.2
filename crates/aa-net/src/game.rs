@@ -549,6 +549,8 @@ pub enum ServerMsg {
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// Raw skill-effect feedback. Authoritative item updates are separate item-task receipts.
+    ScheduleItems { declared_count:u8, items:Vec<crate::schedule::ScheduleItem> },
+    ScheduleItemSent { schedule_type:u32, raw_by_mail:u8 },
     ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
@@ -690,6 +692,8 @@ impl ServerMsg {
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffUpdated { .. } => "SCBuffUpdated",
+            Self::ScheduleItems { .. } => "SCScheduleItemUpdate",
+            Self::ScheduleItemSent { .. } => "SCScheduleItemSent",
             Self::ItemUccDataChanged { .. } => "SCItemUccDataChanged",
             Self::GradeEnchantResult(_) => "SCItemGradeEnchantResult",
             Self::GradeEnchantBroadcast(_) => "SCItemGradeEnchantBroadcast",
@@ -1112,6 +1116,8 @@ impl ServerMsg {
             }
             sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
             sc::SCBuffUpdatedPacket => Self::BuffUpdated { obj_id:r.bc()?, index:r.u32()?, stacks:r.i32()?, charged:r.i32()? },
+            sc::SCScheduleItemUpdatePacket => { let (declared_count,items)=crate::schedule::read_lane(r)?; Self::ScheduleItems{declared_count,items} },
+            sc::SCScheduleItemSentPacket => Self::ScheduleItemSent{schedule_type:r.u32()?,raw_by_mail:r.u8()?},
             sc::SCItemUccDataChangedPacket => Self::ItemUccDataChanged { ucc_id:r.u64()?, player_id:r.u32()?, target_item_id:r.u64()? },
             sc::SCItemGradeEnchantResultPacket => Self::GradeEnchantResult(crate::item_effect::GradeEnchantResult::read(r)?),
             sc::SCItemGradeEnchantBroadcastPacket => Self::GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast::read(r)?),
@@ -2158,6 +2164,17 @@ mod tests {
         assert_eq!(decode(sc::SCItemUccDataChangedPacket,&[0;20]),ServerMsg::ItemUccDataChanged{ucc_id:0,player_id:0,target_item_id:0});
         let mut batch=Writer::new();batch.u16(0).u16(sc::SCItemUccDataChangedPacket).raw(&raw).u16(0).u16(sc::SCItemUccDataChangedPacket).raw(&raw).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
         assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::BuffRemoved{obj_id:9,index:7}]);
+    }
+
+    #[test]
+    fn schedule_lane32_and_raw_sent_dd04_alignment() {
+        let row=[0x44,0x33,0x22,0x11,255,0xfe,255,255,255,0,0,0,0,0,0,0,128];let mut body=vec![32];for _ in 0..32{body.extend_from_slice(&row);}
+        let entry=crate::schedule::ScheduleItem{schedule_type:0x11223344,raw_gave:255,accumulated:-2,raw_updated:i64::MIN};
+        let expected=ServerMsg::ScheduleItems{declared_count:32,items:vec![entry;32]};assert_eq!(decode(sc::SCScheduleItemUpdatePacket,&body),expected);
+        let sent=[255,255,255,255,255];assert_eq!(decode(sc::SCScheduleItemSentPacket,&sent),ServerMsg::ScheduleItemSent{schedule_type:u32::MAX,raw_by_mail:255});
+        for n in 0..sent.len(){assert!(ServerMsg::decode(&game_frame(sc::SCScheduleItemSentPacket,&sent[..n])).is_err());}
+        let mut batch=Writer::new();batch.u16(0).u16(sc::SCScheduleItemUpdatePacket).raw(&body).u16(0).u16(sc::SCScheduleItemSentPacket).raw(&sent).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
+        assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected,ServerMsg::ScheduleItemSent{schedule_type:u32::MAX,raw_by_mail:255},ServerMsg::BuffRemoved{obj_id:9,index:7}]);
     }
 
 }

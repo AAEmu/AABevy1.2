@@ -274,6 +274,8 @@ opcodes! {
         SCItemTaskSuccessPacket = 0x090,
         SCUnitEquipmentsChangedPacket = 0x094,
         SCSyncItemLifespanPacket = 0x098,
+        SCScheduleItemSentPacket = 0x151,
+        SCScheduleItemUpdatePacket = 0x1eb,
         SCItemUccDataChangedPacket = 0x15d,
         SCItemGradeEnchantResultPacket = 0x09c,
         SCItemGradeEnchantBroadcastPacket = 0x09f,

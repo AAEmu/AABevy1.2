@@ -617,6 +617,8 @@ pub enum Event {
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// Received result only; does not grant, consume or modify any item.
+    ScheduleItems { declared_count:u8, items:Vec<crate::schedule::ScheduleItem> },
+    ScheduleItemSent { schedule_type:u32, raw_by_mail:u8 },
     ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
@@ -1782,6 +1784,8 @@ impl Session {
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
             M::BuffUpdated { obj_id, index, stacks, charged } => self.emit(Event::BuffUpdated { obj_id, index, stacks, charged }),
+            M::ScheduleItems {declared_count,items} => self.emit(Event::ScheduleItems{declared_count,items}),
+            M::ScheduleItemSent {schedule_type,raw_by_mail} => self.emit(Event::ScheduleItemSent{schedule_type,raw_by_mail}),
             M::ItemUccDataChanged {ucc_id,player_id,target_item_id} => self.emit(Event::ItemUccDataChanged{ucc_id,player_id,target_item_id}),
             M::GradeEnchantResult(result) => self.emit(Event::GradeEnchantResult(result)),
             M::GradeEnchantBroadcast(result) => self.emit(Event::GradeEnchantBroadcast(result)),
@@ -4854,6 +4858,19 @@ mod tests {
             let e=events.try_recv().unwrap();assert!(matches!(&e,Event::ItemUccDataChanged{ucc_id:id,player_id:u32::MAX,target_item_id:u64::MAX} if *id==ucc_id));world.apply(&e);assert!(events.try_recv().is_err());
         }
         assert!(session.selected_state.is_none());assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());assert!(world.player.spawn.is_none());
+    }
+
+    #[tokio::test]
+    async fn schedule_receipts_preserve_duplicates_without_claim_or_cache_success() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());let mut world=crate::state::WorldState::default();
+        let row=crate::schedule::ScheduleItem{schedule_type:7,raw_gave:255,accumulated:i32::MIN,raw_updated:i64::MAX};
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::ScheduleItems{declared_count:2,items:vec![row.clone();2]})).await;
+            let e=events.try_recv().unwrap();assert!(matches!(&e,Event::ScheduleItems{declared_count:2,items} if items==&vec![row.clone();2]));world.apply(&e);
+            session.game_msg(Ok(game::ServerMsg::ScheduleItemSent{schedule_type:7,raw_by_mail:255})).await;
+            let e=events.try_recv().unwrap();assert!(matches!(&e,Event::ScheduleItemSent{schedule_type:7,raw_by_mail:255}));world.apply(&e);assert!(events.try_recv().is_err());
+        }
+        assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());assert!(world.player.spawn.is_none());
     }
 
 }
