@@ -879,6 +879,30 @@ is proved. No global login-area override is installed.
 script binding **3204A280** separately confirms `ENTITY_FLAG_TRIGGER_AREAS=0x4000`.
 That generic area-trigger flag does not establish the additional ToD bit 0x20.
 
+Qualification recheck: original instructions **32099F16** test area owner ID
+`[ESI+48h]`, then **32099F1A** loads the moving subject from handler argument
+`[EBP+1Ch]`. **32099F21/26** call its vtable +18h (`GetFlags`), **32099F28** is
+`test al,20h`, and **32099F2A** is **`jne 32099F49`**, entering registration.
+Without the bit, ordinary runtime takes **32099F38 je 32099FC4**, skipping it;
+only the separate editor gate can bypass qualification. Both UpdatePlayer call
+sites (**3209C1BB-C1D0**, **3209C4DC-C4F0**) forward their moving-entity argument
+`[EBP+0Ch]` into the handler's final argument slot. Thus the bit is a positive subject test,
+not an owner flag or exclusion. Original **3204A280** explicitly registers
+`NOT_REGISTER_IN_SECTORS=0x40`, `TRIGGER_AREAS=0x4000`, `CLIENT_ONLY=0x100`;
+historical header values must not replace this 1.2 table.
+
+CryAction **306ADEE0** sets `g_localActorId`/`g_localActor`; **306AF9A0** resolves
+that IEntity, calls **AddFlags +28** with **0x40004000**, and emits GameObject
+event **10**, named `BecomeLocalPlayer` by **306F7200**. Native AddFlags
+**32016AB0** only ORs that mask into entity +24 via SetFlags, without adding
+0x20. **305017E0 ActorSystem::CreateActor** initializes spawn flags at +32 to
+zero or 0x400000; **32013BC0 CEntity constructor** copies them into entity +24.
+This proves the local-actor area-update route, but does not prove its additional
+ToD qualification. The remaining bit assignment in actor extension/event handling
+was not recovered in the bounded x2game/CryAction pass. Raw exports and operand
+scans are under `environment/area-{raw-caller,actor-source,client-actor-setter,
+actor-system,flag-names}.txt`; the original actor is still not marked by aa-client.
+
 **32083A10** transforms the polygon, then **32094AD0 SetPoints** uses its minimum Z as the base;
 serialized positive `Height` remains unscaled. **3208F090** uses the native half-open
 XY crossings and inclusive height bounds; nonpositive height is vertically unbounded.
