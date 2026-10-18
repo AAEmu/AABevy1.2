@@ -137,6 +137,20 @@ resource! {
 }
 
 impl Units {
+    /// Apply received flags only to the existing, uniquely correlated current owned mate.
+    pub fn apply_mate_equipment_flags(&mut self, event: &Event, mates: &Mates) -> bool {
+        let Event::Mate(crate::mate::MateEvent::EquipmentFlagsChanged { mate_tl_id, container, slot, flags }) = event else { return false };
+        if *container != 0xfc || *slot > 27 { return false; }
+        let Some(own) = &mates.own else { return false };
+        if own.spawn.tl_id != *mate_tl_id { return false; }
+        let Some(unit) = own.obj_id.and_then(|id| self.by_id.get_mut(&id)) else { return false };
+        if !mates.is_current_owned_unit(unit, *mate_tl_id) { return false; }
+        let Some(item) = unit.equipment.slots[*slot as usize].as_mut() else { return false };
+        if item.flags == *flags { return false; }
+        item.flags = *flags;
+        true
+    }
+
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
             Event::UnitSpawned(u) => {
@@ -389,6 +403,7 @@ impl WorldState {
         self.loot_rolls.apply(e);
         self.actabilities.apply(e);
         self.mates.apply(e);
+        self.units.apply_mate_equipment_flags(e, &self.mates);
         self.slaves.apply(e);
         self.gimmicks.apply(e);
         self.houses.apply(e);

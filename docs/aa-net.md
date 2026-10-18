@@ -3793,3 +3793,24 @@ CS auto-use opcode or mark a network setting ACK. Anim/root owns the remaining o
 pet Lua/control integration and exact eligibility predicates.
 
 Validation: cargo check -p aa-net --features bevy and all 295 library tests passed.
+
+
+### Current owned pet equipment flags (2026-10-18)
+
+SC0x128 is `MateEvent::EquipmentFlagsChanged { mate_tl_id, container, slot, flags }`.
+Native factory391b0540/vtable399b43fc uses serializer397b8e50..397b8ece: u16 TL,
+u8 container, u8 slot, u8 flags. The lane declares this as SCUnkPacket4 and has no
+emitter. No outgoing configuration command or acknowledgement is inferred.
+Handler391db300 forwards to394e1d20. It requires container0xfc, the current owned
+mate with matching TL and an existing runtime unit, selects slot0..27 at unit+4b8
+(stride0xc0), writes descriptor+0x0d, then calls394e0d70 to refresh that location.
+
+`Units::apply_mate_equipment_flags` changes only flags on an existing item in the
+uniquely correlated `Mates.own` unit; it rechecks the actual unit's Mate kind, TL and
+selected stored owner ID. It neither creates a unit/item nor changes Inventory,
+Mates ownership or expiry state. Invalid slots safely remain raw notifications.
+Both WorldState and the Bevy resource fold invoke this same helper after Mates
+correlation. Repeated raw events remain observable even when the flags are unchanged.
+Native SC127 expiry remains notification-only and cannot stand in for this update.
+
+SC128 validation: cargo check and all 297 aa-net library tests passed, including the Bevy resource fold.

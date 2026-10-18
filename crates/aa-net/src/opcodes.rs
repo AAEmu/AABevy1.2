@@ -325,6 +325,7 @@ opcodes! {
         SCMateSpawnedPacket = 0x125,
         SCMateEquipmentChangedPacket = 0x126,
         SCMateEquipmentExpiredPacket = 0x127,
+        SCMateEquipmentFlagsChangedPacket = 0x128,
         SCExpertLimitModifiedPacket = 0x1c0,
         SCExpertExpandedPacket = 0x1c1,
         SCAiAggroPacket = 0x1c4,

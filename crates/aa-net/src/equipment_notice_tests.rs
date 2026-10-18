@@ -107,3 +107,88 @@ fn mate_expiry_is_raw_location_notice_without_deleting_or_replacing_equipment() 
         assert_eq!(world.units.by_id, before, "EXPIRED_ITEM is presentation, not item removal");
     }
 }
+
+pub(crate) fn flags_fixture() -> Vec<Event> {
+    let selected = Event::CharacterSelected(Box::new(crate::model::CharacterState {
+        character: crate::model::Character { id: 42, ..Default::default() },
+        ..Default::default()
+    }));
+    let mut unit = crate::state::tests::unit(51);
+    unit.kind = crate::model::UnitKind::Mate {
+        tl_id: 0x102,
+        template_id: 100,
+        owner_id: 42,
+    };
+    unit.equipment.slots[1] = Some(crate::model::Item {
+        template_id: 77,
+        id: 99,
+        flags: 3,
+        ..Default::default()
+    });
+    vec![
+        selected,
+        Event::UnitSpawned(Box::new(unit)),
+        Event::Mate(MateEvent::Spawned(crate::mate::tests::spawn_fixture())),
+    ]
+}
+
+#[test]
+fn equipment_flags_golden_and_current_owned_existing_item_only() {
+    with_tail(
+        sc::SCMateEquipmentFlagsChangedPacket,
+        &[2, 1, 0xfc, 1, 0xa5],
+        ServerMsg::Mate(MateEvent::EquipmentFlagsChanged {
+            mate_tl_id: 0x102,
+            container: 0xfc,
+            slot: 1,
+            flags: 0xa5,
+        }),
+    );
+    let mut state = crate::state::WorldState::default();
+    for event in flags_fixture() {
+        state.apply(&event);
+    }
+    let update = |tl, container, slot| {
+        Event::Mate(MateEvent::EquipmentFlagsChanged {
+            mate_tl_id: tl,
+            container,
+            slot,
+            flags: 0xa5,
+        })
+    };
+    for event in [update(9, 0xfc, 1), update(0x102, 2, 1), update(0x102, 0xfc, 28), update(0x102, 0xfc, 2)] {
+        state.apply(&event);
+        assert_eq!(state.units.by_id[&51].equipment.slots[1].as_ref().unwrap().flags, 3);
+    }
+    for (tl_id, owner_id) in [(9, 42), (0x102, 43)] {
+        let mut stale = state.clone();
+        stale.units.by_id.get_mut(&51).unwrap().kind = crate::model::UnitKind::Mate {
+            tl_id,
+            template_id: 100,
+            owner_id,
+        };
+        stale.apply(&update(0x102, 0xfc, 1));
+        assert_eq!(stale.units.by_id[&51].equipment.slots[1].as_ref().unwrap().flags, 3);
+    }
+    let mut ambiguous = state.clone();
+    let mut duplicate = ambiguous.units.by_id[&51].clone();
+    duplicate.obj_id = 52;
+    ambiguous.apply(&Event::UnitSpawned(Box::new(duplicate)));
+    ambiguous.apply(&update(0x102, 0xfc, 1));
+    assert_eq!(ambiguous.units.by_id[&51].equipment.slots[1].as_ref().unwrap().flags, 3);
+    state.apply(&update(0x102, 0xfc, 1));
+    assert!(!state.units.apply_mate_equipment_flags(&update(0x102, 0xfc, 1), &state.mates));
+    let item = state.units.by_id[&51].equipment.slots[1].as_ref().unwrap();
+    assert_eq!((item.id, item.template_id, item.flags), (99, 77, 0xa5));
+    state.units.by_id.get_mut(&51).unwrap().kind = crate::model::UnitKind::Mate {
+        tl_id: 0x102,
+        template_id: 100,
+        owner_id: 43,
+    };
+    assert!(!state.units.apply_mate_equipment_flags(&update(0x102, 0xfc, 1), &state.mates));
+    state.apply(&Event::UnitsRemoved(vec![51]));
+    state.apply(&update(0x102, 0xfc, 1));
+    assert!(state.units.by_id.is_empty());
+    state.apply(&Event::LeftWorld { target: 0 });
+    assert!(state.mates.own.is_none());
+}

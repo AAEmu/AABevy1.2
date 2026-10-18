@@ -197,6 +197,8 @@ pub enum MateEvent {
     EquipmentChanged(MateEquipmentChange),
     /// Notification only; native formats the current equipped descriptor as EXPIRED_ITEM.
     EquipmentExpired { mate_tl_id: u16, container: u8, slot: u8 },
+    /// Received flags for an existing current owned mate equipment descriptor.
+    EquipmentFlagsChanged { mate_tl_id: u16, container: u8, slot: u8, flags: u8 },
     /// Local socket write only; authoritative unit/skill events follow independently.
     Requested(MateCommand),
     RequestRejected {
@@ -222,7 +224,7 @@ impl MateEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket | sc::SCMateEquipmentChangedPacket | sc::SCMateEquipmentExpiredPacket
+            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket | sc::SCMateEquipmentChangedPacket | sc::SCMateEquipmentExpiredPacket | sc::SCMateEquipmentFlagsChangedPacket
         )
     }
 
@@ -233,6 +235,7 @@ impl MateEvent {
             Self::SlaveState(_) => "SCSlaveState",
             Self::EquipmentChanged(_) => "SCMateEquipmentChanged",
             Self::EquipmentExpired { .. } => "SCMateEquipmentExpired",
+            Self::EquipmentFlagsChanged { .. } => "SCMateEquipmentFlagsChanged",
             Self::Requested(_) => "MateRequested",
             Self::RequestRejected { .. } => "MateRequestRejected",
             Self::SkillRequested { .. } => "MateSkillRequested",
@@ -242,6 +245,7 @@ impl MateEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCMateEquipmentFlagsChangedPacket => Self::EquipmentFlagsChanged { mate_tl_id: r.u16()?, container: r.u8()?, slot: r.u8()?, flags: r.u8()? },
             sc::SCMateEquipmentExpiredPacket => Self::EquipmentExpired { mate_tl_id: r.u16()?, container: r.u8()?, slot: r.u8()? },
             sc::SCMateEquipmentChangedPacket => Self::EquipmentChanged(MateEquipmentChange::read(r)?),
             sc::SCMateSpawnedPacket => {
@@ -310,6 +314,12 @@ pub struct Mates {
 }
 
 impl Mates {
+    pub(crate) fn is_current_owned_unit(&self, unit: &crate::model::Unit, tl_id: u16) -> bool {
+        self.character_id != 0
+            && self.own.as_ref().is_some_and(|own| own.spawn.tl_id == tl_id && own.obj_id == Some(unit.obj_id))
+            && matches!(unit.kind, UnitKind::Mate { tl_id: actual, owner_id, .. } if actual == tl_id && owner_id == self.character_id)
+    }
+
     fn correlate(&mut self) {
         let Some(own) = &mut self.own else { return };
         let mut matches = self.visible.iter().filter(|(_, mate)| {
@@ -440,7 +450,7 @@ impl Mates {
 pub(crate) use tests::spawn_fixture as test_spawn_fixture;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::game::ServerMsg;
     use crate::model::{Character, CharacterState};
