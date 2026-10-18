@@ -54,6 +54,8 @@ opcodes! {
 opcodes! {
     /// Client to game server, level 1 (`CS*`).
     pub mod cs {
+        CSRankCharacterPacket = 0x12f,
+        CSRankSnapshotPacket = 0x130,
         CSFamilyInviteMemberPacket = 0x01a,
         CSFamilyReplyInvitationPacket = 0x01b,
         CSFamilyLeavePacket = 0x01c,
