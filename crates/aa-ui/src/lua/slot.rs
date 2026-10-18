@@ -18,7 +18,7 @@
 //! --   state of the skill window's slots (sent as OnContentUpdated "learned" / "canLearn" / ...),
 //! --   cooldown = { remain = ms, total = ms },  -- optional, see below
 //! --   tooltip = {...}, extraInfo = {...} }
-//! AAUI.SlotHotKey(slotType, slotIdx)   -- slot:GetHotKey: "1", "SHIFT-1", "MINUS", ... or nil
+//! AAUI.SlotHotKey(slotType, slotIdx)   -- "1", "SHIFT-1", "MINUS", ... or nil (unbound)
 //! AAUI.UseSlot(slotType, slotIdx, button)  -- a click on a bound slot (`slot::clicked`)
 //! AAUI.UseSkill(skillType, button), AAUI.UseItem(itemType, grade, button)
 //! AAUI.PickupSlot(info), AAUI.DropSlot(info)  -- drag and drop of bound slots, see [`super::drag`]
@@ -811,12 +811,17 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     .and_then(|s| s.source.clone())
                 {
                     Some(Source::Slot(t, i)) => (t, i),
-                    _ => return none(),
+                    _ => return ret(lua, ""),
                 },
             };
             match hook(lua, "SlotHotKey") {
-                Some(f) => ret(lua, f.call::<Value>((ty, idx))?),
-                None => none(),
+                Some(f) => {
+                    let key = f.call::<Value>((ty, idx))?;
+                    if key.is_nil() { ret(lua, "") } else { ret(lua, key) }
+                }
+                // Native 39256500 returns the slot's string at +0x340; its constructor
+                // initializes it empty. Original pet bars abbreviate it without a nil guard.
+                None => ret(lua, ""),
             }
         })?,
     )?;

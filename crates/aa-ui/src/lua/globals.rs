@@ -164,7 +164,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     def(
         "SetEventHandler",
         method(lua, |lua, _, a| {
-            // Global handler for an event: register UIParent itself.
+            // Native 39212370 inserts every (event, function) registration, including
+            // duplicates. Keep stable slots: dispatch may add/release callbacks live.
             let name = a.s(1).unwrap_or_default();
             if let Value::Function(f) = a.v(2) {
                 let r = reg(lua);
@@ -177,8 +178,15 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
                         t
                     }
                 };
-                hs.raw_set(key, f)?;
-                ui(lua).events.entry(name).or_default().push(0);
+                let callbacks = match hs.raw_get::<Option<Table>>(key.as_str())? {
+                    Some(t) => t,
+                    None => {
+                        let t = lua.create_table()?;
+                        hs.raw_set(key, &t)?;
+                        t
+                    }
+                };
+                callbacks.raw_set(callbacks.raw_len() + 1, f)?;
             }
             none()
         })?,
@@ -187,8 +195,22 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         "ReleaseEventHandler",
         method(lua, |lua, _, a| {
             let name = a.s(1).unwrap_or_default();
-            if let Some(l) = ui(lua).events.get_mut(&name) {
-                l.retain(|&x| x != 0);
+            let Value::Function(f) = a.v(2) else {
+                return none();
+            };
+            if let Some(hs) = reg(lua).handlers.raw_get::<Option<Table>>(0)? {
+                if let Some(callbacks) = hs.raw_get::<Option<Table>>(format!("__ev_{name}"))? {
+                    for i in 1..=callbacks.raw_len() {
+                        if let Value::Function(registered) = callbacks.raw_get::<Value>(i)? {
+                            if registered.to_pointer() == f.to_pointer() {
+                                // 39210f50 removes only the first matching function. False
+                                // releases its reference without invalidating live cursors.
+                                callbacks.raw_set(i, false)?;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             none()
         })?,
