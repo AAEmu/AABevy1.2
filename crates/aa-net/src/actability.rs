@@ -2,7 +2,7 @@
 use crate::opcodes::{cs, sc};
 use crate::session::Event;
 use crate::wire::{Reader, Result, WireError, Writer};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActabilityCommand {
@@ -150,8 +150,25 @@ pub struct Actabilities {
     pub pending: Vec<ActabilityCommand>,
     pub last_error: Option<ActabilityFailure>,
     snapshot_open: bool,
+    unresolved_downgrades: HashMap<u32, u8>,
 }
 impl Actabilities {
+    /// Reconcile an already-applied lane downgrade ACK with the matching static catalog.
+    /// `up_limits` must contain ALL expert_limits rows ordered by up_limit ASC, indexed
+    /// from step zero (not DB IDs and not the native SHOW-filtered grade list).
+    /// No result is inferred from a request, upgrade, stale ACK or an intervening point update.
+    /// Native clamps old points; the active lane instead assigns this exact limit.
+    pub fn resolve_downgrade_points(&mut self, event: &Event, up_limits: &[i32]) -> bool {
+        let Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, id, step }) = event else { return false };
+        if self.unresolved_downgrades.get(id) != Some(step) || up_limits.windows(2).any(|pair| pair[0] > pair[1]) {
+            return false;
+        }
+        let Some(point) = up_limits.get(usize::from(*step)).copied() else { return false };
+        let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == *id && entry.step == *step && entry.point.is_none()) else { return false };
+        entry.point = Some(point);
+        self.unresolved_downgrades.remove(id);
+        true
+    }
     pub fn get(&self, id: u32) -> Option<&Actability> {
         self.entries.iter().find(|a| a.id == id)
     }
@@ -183,7 +200,7 @@ impl Actabilities {
                     };
                     return true;
                 }
-                Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+                Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => {
                     let changed = *self != Self::default();
                     *self = Self::default();
                     return changed;
@@ -194,6 +211,7 @@ impl Actabilities {
                     step,
                     ..
                 } if *action > 0 => {
+                    self.unresolved_downgrades.remove(&(*action as u32));
                     let entry = self.get_mut(*action as u32);
                     // The wire contains a capped delta, never an absolute point total.
                     entry.point = entry.point.map(|old| old.wrapping_add(*point));
@@ -207,9 +225,11 @@ impl Actabilities {
             ActabilityEvent::Snapshot { last, entries } => {
                 if !self.snapshot_open {
                     self.entries.clear();
+                    self.unresolved_downgrades.clear();
                     self.loaded = false;
                 }
                 for entry in entries {
+                    self.unresolved_downgrades.remove(&entry.id);
                     *self.get_mut(entry.id) = Actability {
                         id: entry.id,
                         point: Some(entry.point),
@@ -224,6 +244,8 @@ impl Actabilities {
                 id,
                 step,
             } => {
+                if *is_upgrade { self.unresolved_downgrades.remove(id); }
+                else { self.unresolved_downgrades.insert(*id, *step); }
                 let entry = self.get_mut(*id);
                 entry.step = *step;
                 if !is_upgrade {

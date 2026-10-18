@@ -4025,3 +4025,46 @@ Native UnitTarget setter394270a0 (diagnostic399d875c) reads old property4 at
 same property at39427130..3942713d. Thus this is the LOCAL PLAYER selected-target
 object ID, not mana/HP. Subsequent393989e0 still performs genuine target planning,
 validation and39396e20, so knowing this input does not establish an always-send API.
+
+
+### Proficiency controls and lane downgrade reconciliation (2026-10-18)
+
+The existing API already covers rank/slot controls: Command::Actability with
+Upgrade/Downgrade{id,auto_use_aa_point} and Expand; Requested/RequestRejected are
+local send outcomes, TierChanged/Expanded are received-only. Original confirmation
+OkProc invokes X2Ability:UpgradeExpert(type) or DowngradeExpert(type), one NUMBER;
+ExpandExpert() has no arguments. Native39438840/39438870 read auto-AA via397ccd50,
+then393101c0/39310080 check eligibility and optional playerflag1000 currency gates
+before sending. No duplicate new wire command or speculative expansion ACK is added.
+
+The fresh native downgrade comparison is important: SC1c0 handler391d3f60 calls
+3930c0f0.397a93a0 decrements its existing local grade and clamps point to the lesser
+of old point and the new visible grade's up_limit (fallback10000). Upgrade397a9370
+increments grade. The native handler does not assign the packet step to its local
+map, although it uses that step for grade text. Active lane services/expands.rs
+regrade instead assigns exact newStep.up_limit on downgrade and sends that step.
+Its character_templates.rs loader uses ALL expert_limits ORDER BY up_limit ASC,
+including SHOW=false rows, unlike the original visible-grade map. aa-net follows
+this lane boundary and retains the received step; it does not emulate local drift.
+
+`Actabilities::resolve_downgrade_points(event, up_limits)` reconciles the omitted
+lane point total ONLY after apply received an exact matching downgrade id/step.
+The supplied slice is the complete lane up_limit sequence, ordered ASC, indexed
+from step0, not DB IDs or the SHOW-filtered native grade list. Missing/unsorted
+limits, upgrades, requests, wrong profession/step and already-resolved evidence
+return false. Point deltas, another tier report, a new snapshot or lifecycle reset
+invalidate stale evidence; an intervening delta cannot be silently dropped by
+restoring an old base. Unavailable catalogs leave point None. Successful resolution
+sets exact lane up_limit, including the source-proven difference when old points
+were below that limit. No currency/item state or completion event is invented.
+Kicked now clears proficiency/pending/reset evidence alongside select/leave/disconnect.
+
+Native grade callback3930c0f0 mutates state first, then emits event0xc4
+ACTABILITY_EXPERT_GRADE_CHANGED(id NUMBER,isUpgrade BOOL,groupName STRING,gradeName
+STRING), gated by static group+0c. tab_actability.lua uses id; chat uses all four.
+SC1c1 handler391d3fe0?3930c250 writes count first, then event0xc5
+ACTABILITY_EXPERT_EXPANDED() with no args. Generic lane errors/silent returns do not
+identify an owned request and remain uncorrelated. Existing expansion cost-sign bug
+and ignored auto-AA wire flag remain lane limitations, not fabricated client fixes.
+
+Proficiency reconciliation validation: cargo check and all 312 aa-net library tests passed.
