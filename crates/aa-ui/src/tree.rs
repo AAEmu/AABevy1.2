@@ -369,8 +369,9 @@ pub struct AutoClipChar {
     pub enabled: bool,
     /// Native cached UTF-32 prefix length; enabling alone does not recalculate it.
     pub count: usize,
-    /// Last resolved extent, so anchor-driven changes take the native size callback path.
-    pub extent: [f32; 2],
+    /// Last resolved local rectangle and inherited scale (native geometry callbacks).
+    pub rect: [f32; 4],
+    pub scale: f32,
 }
 
 /// Text carried by a widget (labels, buttons, textboxes, window titles ...).

@@ -3324,3 +3324,100 @@ window, and fixed tabs remain 140 px in the 430 px window. Logs report
 **476.6–604.2 FPS**, zero script errors and no WARN/ERROR; process 48680
 self-closed. `reference/ingame/spawn/real.png` supplies the original HUD/tab
 style comparison; no matching resized-tab reference or pixel-parity claim.
+
+### Physical font sizing and scaled character clipping (2026-10-18)
+
+Original chat tabs now fit and draw ordinary button text using the same
+native physical font size. Before this change, fitting used the local
+width/base font while rendering rasterized at global UI scale and then
+stretched the finished glyphs through parent/widget transforms. That
+disagreed with the original at non-unit scales, including the original
+1280-by-720 default UI scale of 0.85.
+
+Native `3927b2f0` stores inherited scale `+68 = own +64 * parent +68`
+and physical extents `+74/+78 = local +8c/+90 * inherited scale`.
+Button font callback `39280780` selects the ordinary face through
+`39275150`: truncate the f32 result `f32(base integer size * scale) +
+0.3f32`. This is not nearest rounding: size 13 at scale 1.5 selects size
+19, while scales 0.8 and 1.25 select 10 and 16. Font kinds 0/1 receive
+that physical integer; ImageText kind 2 receives the base integer instead.
+This callback is shared by the seven source-verified button-family
+vtables, including check buttons and action/inventory buttons.
+
+Geometry callbacks `39280930/39280850/392808c0` subtract **raw, unscaled**
+left and right insets from the physical width, in f32 order, before the
+existing native-prefix fitting operation. Drawing `39280e6c` scales those
+insets separately. Draw bridge `392218a0` branches at `392219b4`: ordinary
+faces draw with scale 1; ImageText draws with widget effective scale.
+aa-ui now emits the ordinary button-text range directly at the physical
+face size and transformed origin, bypassing only that range in the later
+widget/ancestor transform pass. Artwork, other widget text, overlays,
+clipping, shadows and font aliases retain their existing paths. Both
+AutoClip flag states use this ordinary face selection, so toggling the
+flag changes only the displayed prefix.
+
+The fitting cache tracks resolved position/extent and inherited scale.
+Accepted `SetScale`, including an identical value, refreshes the native
+cache; native `3927d120` sets the geometry-dirty byte before calling
+`3927b2f0` and `39276350(true)`. Active scale-animation frames use the
+same path (`3927e18f..1d3`). Explicit `SetWidth/Height/Extent`
+(`392763c0/39276410/39276460`) dispatch their callback even for unchanged
+extents, propagating to anchor dependents. `AddAnchor` also dispatches;
+`RemoveAllAnchors` (`39276a70` -> `39276940`) only detaches anchors.
+Inset-only writes still retain the cached count until a real callback.
+A small derived index of enabled caches propagates scale/geometry changes
+to hidden tabs without scanning the full HUD. Opted-out UI-scale roots
+retain their effective scale and cached prefix.
+
+Style `GetTextWidth` binding `3925b320` passes `true` to `39275210`,
+measuring the complete source with the selected physical font and
+dividing by effective scale. Original `SetAutoResize(true)` likewise
+uses that full local width, adds raw horizontal insets in the FPU, then
+narrows the resulting local extent. Full text getters, the unchanged
+original chat-tab name lookup, and its tooltip keep the complete string.
+Original `baselib.lua:935..941` supplies the 0.85 default; the original
+option conversion maps step 90 to 0.93.
+
+Source artifacts under `data/extract/aa-ui/`:
+`native-auto-clip-scaled-contracts-next-20261018.txt`,
+`native-auto-clip-scaled-units-next-20261018.txt`,
+`native-auto-clip-scaled-font-next-20261018.txt`,
+`native-auto-clip-scale-lifecycle-next-20261018.txt`,
+`native-auto-clip-render-and-forced-callbacks-next-20261018.txt`,
+`native-auto-clip-anchor-callbacks-next-20261018.txt`, and
+`native-auto-clip-fulltext-metrics-next-20261018.txt`.
+Offline `auto_clip_scale_oracle.py` executes actual `39275150` in nine
+groups, supplying only the font factory; `auto_clip_geometry_scale_oracle.py`
+executes actual `39280930` -> `39274a70` -> `392e3760` in five groups,
+supplying only glyph/kerning accessors. All fourteen groups pass, without
+live-client execution or writes. Supplied glyph advances prove width
+units, without claiming measured FreeType font metrics.
+
+The ImageText fitting branch uses the supported base-size bitmap metrics
+and retains the existing bitmap drawing backend. Native ImageText's
+zero-height/baseline and alignment behavior (`392ef420/392ef430`) remains
+open; this change does not claim full ImageText raster parity. General
+FreeType-versus-Swash glyph rasterization and invalid/nonpositive native
+font-size fallback remain separate boundaries.
+
+Validation: `cargo check -p aa-ui` and **94 selected tests** passed, with
+one existing font-metric test ignored. Eight new regressions cover native
+physical-face rounding, parent/widget/global scale, hidden and unchanged
+callbacks, animation ownership, unscaled fitting insets, scaled Unicode
+exact-fit/one-f32-ULP exclusion, full-width auto-resize, ImageText base-size
+fitting, and original 1280-by-720 chat hover/physical pointer presses at
+0.85 and 0.93. Existing prefix/copper-glyph, chat layout/link/transport,
+animation, drawable-text, native widgets and pet/tooltip overflow suites
+also pass. The aa-dev `native_auto_clip_scale` example supports
+`--size 1280x720` and optional `--option-step 90`; it applies the original
+Lua conversion after three seconds and holds the first tab's full-name
+tooltip using `UiVirtualPointer`.
+Inspected both unique captures,
+`shots/aa-ui/native-auto-clip-scale085-20261018.png` and
+`shots/aa-ui/native-auto-clip-scale093-20261018.png`: original labels
+retain clipped prefixes while the complete first-tab name remains in the
+tooltip after the option change. Measured **164.9–222.0 FPS** at 0.85 and
+**216.6–249.5 FPS** in the scale-change run; both logs report zero script
+errors and no WARN/ERROR. Owned processes 44000 and 19844 self-closed.
+`reference/ingame/spawn/real.png` supplies the original HUD/tab style
+context; no matching scaled long-name reference or pixel-parity claim.

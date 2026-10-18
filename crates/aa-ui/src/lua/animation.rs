@@ -90,6 +90,11 @@ impl Animations {
         widgets::transform_rect(&self.widgets, tree, id, tree.rect(id))
     }
 
+    /// Native +68: own scale times the parent's inherited scale, in parent-first f32 order.
+    pub(crate) fn widget_scale(&self, tree: &crate::tree::Tree, id: Id) -> f32 {
+        self.widgets.effective_scale(tree, id)
+    }
+
     pub fn widget_clip_rect(&self, tree: &crate::tree::Tree, id: Id) -> Option<Rect> {
         let mut out: Option<Rect> = None;
         let mut owner = tree.get(id).parent;

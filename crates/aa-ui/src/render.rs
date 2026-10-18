@@ -87,6 +87,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         }
         let state = button_state(u, id, pressed);
         let quads_start = out.len();
+        let mut physical_text = None;
         let mut ds: Vec<Id> = w
             .drawables
             .iter()
@@ -179,7 +180,13 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                     .and_then(|b| b.text_color[state_index(state)].or(b.text_color[0]))
                     .unwrap_or(t.style.color);
                 if !edit {
-                    text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+                    if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
+                        let start = out.len();
+                        button_text_quads(u, id, &shown, color, alpha, &mut out);
+                        physical_text = Some(start..out.len());
+                    } else {
+                        text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+                    }
                 }
             }
             if edit {
@@ -218,7 +225,12 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 let r = u.tree.rect(ancestor);
                 let pivot = [(r.x + r.w * animation.pivot.fx()) * scale, (r.y + r.h * animation.pivot.fy()) * scale];
                 let point = |p: [f32; 2]| std::array::from_fn(|i| pivot[i] + (p[i] - pivot[i]) * animation.scale + animation.offset[i] * scale);
-                for q in &mut out[quads_start..] {
+                for (i, q) in out[quads_start..].iter_mut().enumerate() {
+                    // Native ordinary button faces are already selected/rasterized at
+                    // effective physical size. Their text must not be stretched again.
+                    if physical_text.as_ref().is_some_and(|r| r.contains(&(quads_start + i))) {
+                        continue;
+                    }
                     let lo = point([q.pos[0], q.pos[1]]);
                     let hi = point([q.pos[2], q.pos[3]]);
                     q.pos = [lo[0], lo[1], hi[0], hi[1]];
@@ -236,6 +248,28 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
     }
     let n = background_end.unwrap_or(out.len());
     (out, n)
+}
+
+/// Native button39280510/392218a0 draws an ordinary physical face with scale1.
+/// Keep its paint position between artwork and overlay, while only this range
+/// bypasses the later widget/ancestor transforms. ImageText keeps its bitmap path.
+fn button_text_quads(u: &mut Ui, id: Id, t: &TextBlock, color: [f32; 4], alpha: f32, out: &mut Vec<Quad>) {
+    let local = u.tree.rect(id);
+    let view = u.animations.widget_rect(&u.tree, id);
+    let scale = u.animations.widget_scale(&u.tree, id);
+    let rect = Rect {
+        x: view.x * u.ui_scale,
+        y: view.y * u.ui_scale,
+        // Native +74/+78 are multiplied independently of position; subtracting
+        // rounded transformed corners can lose a width ULP at a large origin.
+        w: local.w * scale,
+        h: local.h * scale,
+    };
+    let mut text = t.clone();
+    text.style.size = u.fonts.button_font_size(&t.style.font, t.style.size, scale);
+    text.inset = t.inset.map(|v| v * scale);
+    text.line_space *= scale;
+    text_quads(u, &text, rect, color, alpha, 1.0, out);
 }
 
 /// Cut quads to the pixel rectangle `c` (x0, y0, x1, y1), moving the texture coordinates with

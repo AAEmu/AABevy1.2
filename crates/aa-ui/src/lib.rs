@@ -81,6 +81,7 @@ impl UiRuntime {
             damage: Default::default(),
             time_ms: 0.0,
             frame_ms: 16.0,
+            auto_clip_widgets: Default::default(),
             stub_calls: Default::default(),
             hover: None,
             entered: Vec::new(),
