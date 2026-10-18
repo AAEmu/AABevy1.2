@@ -6,6 +6,7 @@ use aa_net::{
 use bevy::prelude::*;
 use rusqlite::Connection;
 use std::collections::HashMap;
+pub(super) mod cancel;
 
 pub(super) fn load(db: &Connection) -> rusqlite::Result<HashMap<u32, NativeBuffRule>> {
     let mut out = HashMap::new();

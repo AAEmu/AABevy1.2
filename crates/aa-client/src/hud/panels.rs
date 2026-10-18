@@ -61,6 +61,8 @@ pub struct SlotSnap {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BuffSnap {
     pub id: u32,
+    /// Received instance identity; the original click callback still passes its one-based ordinal.
+    pub instance_index: u32,
     pub name: String,
     pub icon: String,
     pub desc: String,
@@ -218,6 +220,7 @@ pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::Buff
         });
         let snap = BuffSnap {
             id: b.buff_id,
+            instance_index: b.index,
             name: info.map(|i| i.named.name.clone()).unwrap_or_default(),
             icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
             desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
@@ -228,6 +231,11 @@ pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::Buff
         if good { lists.good.push(snap) } else { lists.bad.push(snap) }
     }
     lists
+}
+
+/// The original manager folds repeats in place. Keep raw lane icons only while its history is unknown.
+fn unit_buff_lists(game: Option<&GameData>, buffs: &Buffs, obj_id: u32, start: Instant) -> BuffLists {
+    buff_lists(game, buffs.native.of(obj_id).unwrap_or_else(|| buffs.of(obj_id)), start)
 }
 
 fn unit_race_gender(race_gender: u8) -> (u8, u8) {
@@ -283,7 +291,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             .collect();
     }
     if let Some(buffs) = world.get_resource::<Buffs>() {
-        p.buffs = buff_lists(game, buffs.of(own_obj_id), start);
+        p.buffs = unit_buff_lists(game, buffs, own_obj_id, start);
     }
     let mut target_pos = None;
     if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
@@ -324,7 +332,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             race,
             gender,
             abilities: u.active_abilities.iter().copied().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
-            buffs: world.get_resource::<Buffs>().map(|b| buff_lists(game, b.of(u.obj_id), start)).unwrap_or_default(),
+            buffs: world.get_resource::<Buffs>().map(|b| unit_buff_lists(game, b, u.obj_id, start)).unwrap_or_default(),
         });
         target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
     }

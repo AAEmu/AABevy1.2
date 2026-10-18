@@ -83,6 +83,8 @@ pub struct BuffInfo {
     pub named: Named,
     pub desc: String,
     pub kind: i64,
+    /// Native descriptor+0x1a5: prevents manual cancellation with error224.
+    pub system: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -462,7 +464,7 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, icon_id, desc, kind_id FROM buffs")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, desc, kind_id, system FROM buffs")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -472,6 +474,7 @@ impl GameData {
                         named: Named { name: name("buffs", id, r.get(1)?), icon: icon(r.get(2)?) },
                         desc: fill_placeholders(&name("buffs_desc", id, r.get(3)?), |_| None),
                         kind: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
+                        system: any_flag(r, 5)?,
                     },
                 );
             }

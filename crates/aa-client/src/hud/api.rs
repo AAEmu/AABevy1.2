@@ -114,6 +114,7 @@ pub struct HudData {
     pub(super) crime: super::crime::View,
     pub(super) trial: super::trial::View,
     pub(super) ranking: super::ranking::View,
+    pub(super) buff_cancel: super::buffs::cancel::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -170,6 +171,7 @@ impl Default for HudData {
             crime: Default::default(),
             trial: Default::default(),
             ranking: Default::default(),
+            buff_cancel: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -284,6 +286,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::crime::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
     super::ranking::install(lua, bridge)?;
+    super::buffs::cancel::install(lua, bridge)?;
     super::sorting::install(lua, bridge)
 }
 
