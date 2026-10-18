@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use bevy::light::SpotLightTexture;
 use bevy::prelude::*;
 
+mod hdr;
 mod projectors;
 pub mod styles;
 
@@ -172,7 +173,9 @@ fn update_lights(
         result.authored += 1;
         let p = &slot.placement;
         let projection = projectors::projection(p);
-        if !p.supported() && (projection.is_none() || !projector_support.0) {
+        if (!p.supported() && (projection.is_none() || !projector_support.0))
+            || (projection.is_none() && hdr::color(p.diffuse, 1.0, p.hdr_dynamic).is_none())
+        {
             result.unsupported += 1;
             continue;
         }
