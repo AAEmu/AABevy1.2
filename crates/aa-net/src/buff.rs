@@ -69,6 +69,8 @@ pub struct Buff {
     pub tick_ms: u32,
     /// Exact signed NetBuff tickIndex; Created has no corresponding wire field.
     pub raw_tick_index: Option<i32>,
+    /// Snapshot value or native Created constructor projection; no ongoing tick advancement.
+    pub native_tick_index: Option<i32>,
     /// Genuine snapshot stack count; Created uses the lane charge convenience value.
     /// For original-client modifiers use the catalog-aware `state::NativeBuffs` view.
     pub stacks: i32,
@@ -77,6 +79,10 @@ pub struct Buff {
 }
 
 impl Buff {
+    pub(crate) fn created_tick_index(elapsed_ms: u32, tick_ms: u32) -> i32 {
+        if tick_ms == 0 { 0 } else { (elapsed_ms / tick_ms) as i32 }
+    }
+
     /// One entry of a unit-state buff list (`NetBuff`).
     pub fn read_net(r: &mut Reader, kind: BuffKind) -> Result<Self> {
         let index = r.u32()?;
@@ -104,6 +110,7 @@ impl Buff {
             elapsed_ms,
             tick_ms,
             raw_tick_index,
+            native_tick_index: raw_tick_index,
             stacks,
             charged,
             kind,
@@ -148,6 +155,7 @@ impl Buff {
                 elapsed_ms: (elapsed * 10) as u32,
                 tick_ms: (tick * 10) as u32,
                 raw_tick_index: None,
+                native_tick_index: Some(Self::created_tick_index((elapsed * 10) as u32, (tick * 10) as u32)),
                 stacks: charge.max(1) as i32,
                 charged: charge as i32,
                 kind: BuffKind::Unknown,
@@ -181,6 +189,15 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn created_tick_projection_matches_executed_constructor_fragment() {
+        for (elapsed, tick, expected) in [(0,0,0),(25,7,3),(999,100,9),(1000,100,10),
+            (u32::MAX,1,-1),(0x80000000,3,715827882),(u32::MAX,u32::MAX,1)] {
+            assert_eq!(Buff::created_tick_index(elapsed,tick),expected);
+        }
+        assert_eq!(Buff::default().native_tick_index,None);
+    }
+
+    #[test]
     fn snapshot_tick_index_preserves_signed_bits_and_alignment() {
         for index in [i32::MIN, -1, 0, 123, i32::MAX] {
             let mut w = Writer::new();
@@ -190,7 +207,8 @@ pub(crate) mod tests {
             bytes[offset..offset + 4].copy_from_slice(&index.to_le_bytes());
             bytes.push(0xa5);
             let mut r = Reader::new(&bytes);
-            assert_eq!(Buff::read_net(&mut r, BuffKind::Good).unwrap().raw_tick_index, Some(index));
+            let b = Buff::read_net(&mut r, BuffKind::Good).unwrap();
+            assert_eq!((b.raw_tick_index, b.native_tick_index), (Some(index), Some(index)));
             assert_eq!(r.u8().unwrap(), 0xa5);
             for n in 0..bytes.len() - 1 {
                 assert!(Buff::read_net(&mut Reader::new(&bytes[..n]), BuffKind::Good).is_err());
@@ -240,6 +258,7 @@ pub(crate) mod tests {
         assert_eq!((b.index, b.buff_id, b.duration_ms, b.stacks), (2, 8_000_011, 30_000, 1));
         assert_eq!(b.kind, BuffKind::Unknown);
         assert_eq!(b.raw_tick_index, None);
+        assert_eq!(b.native_tick_index, Some(0));
     }
 
     #[test]
@@ -252,6 +271,7 @@ pub(crate) mod tests {
         let mut r = Reader::new(&bytes);
         let (_, b) = Buff::read_created(&mut r).unwrap();
         assert_eq!((b.charged, b.duration_ms, b.elapsed_ms, b.tick_ms), (9, 1000, 250, 70));
+        assert_eq!((b.raw_tick_index, b.native_tick_index), (None, Some(3)));
         assert_eq!(r.u8().unwrap(), 0xaa);
     }
 

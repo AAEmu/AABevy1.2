@@ -1,6 +1,6 @@
 //! Original-client stack folding, separate from the active lane's raw index-based list.
 use super::BuffEntry;
-use crate::{buff::BuffKind, session::Event};
+use crate::{buff::{Buff, BuffKind}, session::Event};
 use std::{collections::HashMap, time::Instant};
 
 /// Exact static `buffs` columns consumed by native 3989e080. No inferred defaults.
@@ -72,6 +72,7 @@ impl NativeBuffs {
                     old.buff.tick_ms = buff.tick_ms;
                     // This receipt does not carry a new authoritative tick index.
                     old.buff.raw_tick_index = buff.raw_tick_index;
+                    old.buff.native_tick_index = Some(Buff::created_tick_index(old.buff.elapsed_ms, old.buff.tick_ms));
                     match rule.stack_rule_id {
                         2 => old.buff.charged = buff.charged,
                         3 => old.buff.charged = old.buff.charged.wrapping_add(buff.charged),
@@ -86,6 +87,7 @@ impl NativeBuffs {
                 } else {
                     let mut new = buff.clone();
                     new.kind = rule.kind;
+                    new.native_tick_index = Some(Buff::created_tick_index(new.elapsed_ms, new.tick_ms));
                     new.stacks = 1.min(rule.max_stack);
                     if rule.stack_rule_id == 3 {
                         new.charged = new.charged.min(rule.max_charge);
@@ -181,6 +183,27 @@ mod tests {
             let b = &v.of(9).unwrap()[0].buff;
             assert_eq!(b.charged, charge);
             assert_eq!(b.duration_ms, if rule == 5 { 2000 } else { 1000 });
+        }
+    }
+    #[test]
+    fn repeated_created_tick_projection_matches_executed_reconciliation_fragment() {
+        for (rule, old_elapsed, incoming, tick, expected_elapsed, expected_index) in [
+            (1,100,25,7,25,3),(1,25,100,7,25,3),(1,u32::MAX,1,1,1,1),
+            (1,1,0x80000000,3,1,0),(1,100,25,0,25,0),
+            (5,100,25,7,100,14),(5,25,100,7,100,14),(5,u32::MAX,1,1,u32::MAX,-1),
+            (5,1,0x80000000,3,0x80000000,715827882),(5,100,25,0,100,0)] {
+            let mut v=view(rule,false);
+            let mut event=created(1,10,1);
+            let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};
+            buff.elapsed_ms=old_elapsed;buff.duration_ms=2000;
+            v.apply(&event);
+            let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};
+            buff.elapsed_ms=incoming;buff.duration_ms=1000;buff.tick_ms=tick;
+            v.apply(&event);
+            let result=&v.of(9).unwrap()[0].buff;
+            assert_eq!((result.elapsed_ms,result.native_tick_index),(expected_elapsed,Some(expected_index)));
+            assert_eq!(result.raw_tick_index,None);
+            assert_eq!(result.duration_ms,if rule==5{3000}else{1000});
         }
     }
     #[test]
