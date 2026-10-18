@@ -32,8 +32,8 @@
 //!
 //! `cooldown = { remain = 8000, total = 12000 }` (both in milliseconds, `remain` <= `total`) says
 //! the skill or item is cooling down right now. The native then draws the client's sweep over the
-//! icon (a dark clockwise wipe from 12 o'clock, the dark part being the time left, in the colour
-//! of `ui/icon/cooldown_mask.dds`: 46/255 grey at 78 % opacity) and the time left as text in
+//! icon (eight clockwise perimeter sectors from 12 o'clock, sampling the original
+//! `ui/icon/cooldown_mask.dds` as both image and mask) and the time left as text in
 //! `slot.cooltime_style` (native single-precision seconds/minutes/hours, including a unit suffix;
 //! totals below [`LABEL_MIN_TOTAL_MS`] skip slot drawing), counts it
 //! down per frame in `update` on its own, and when it runs out removes the sweep and raises
@@ -79,6 +79,8 @@ pub struct SlotData {
     /// `GetBindedType()`: "none", "skill", "item", ...
     pub binded: Option<String>,
     pub icon: Option<Id>,
+    /// Native slot loader's stock mask image (+314/+328); independent of bound icon artwork.
+    pub cooldown_mask: Option<String>,
     /// Actual slot-frame selector flags +311/+312, present only for the explicit native adapter.
     pub native_cooldown: Option<NativeCooldownState>,
 }
@@ -103,8 +105,8 @@ pub enum Source {
     Item(i64, i64),
 }
 
-/// A cooldown ([`crate::tree::Widget::cooldown`]): slots use `end_ms - Ui::time_ms`, while
-/// generic buttons retain `sampled_ms` until their next explicit SetCoolDown call.
+/// A cooldown ([`crate::tree::Widget::cooldown`]): compatibility slots use the UI clock;
+/// native slots and generic buttons retain the latest explicit sample.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cooldown {
     /// UI time the slot cooldown ends at; for generic buttons, time of the sample plus remaining.
@@ -308,11 +310,11 @@ fn active(lua: &Lua) -> mlua::Result<Table> {
     }
 }
 
-/// The dark colour of the sweep: the pixels of `ui/icon/cooldown_mask.dds` (46, 46, 46, 199).
-const SWEEP_COLOR: [f32; 4] = [46.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 199.0 / 255.0];
+/// Native ordinary slots sample this stock texture as both image and mask.
+const SLOT_MASK: &str = "ui/icon/cooldown_mask.dds";
 
-/// The sweep edge moves in steps of 2 degrees (180 per turn): about one pixel at the corners of a
-/// slot, which keeps a long cooldown at ~15 mesh rebuilds a second.
+/// Compatibility countdowns invalidate at180 equal progress steps per turn.
+/// Actual native-adapter samples retain their separately supplied frame timing.
 const SWEEP_STEPS: f32 = 180.0;
 
 /// Native CVar visibility and category 98 time templates, independent of cooldown identity.
@@ -542,9 +544,13 @@ pub(crate) fn init(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             );
         }
         // Always shown (the reference lists it on empty slots too); no texture, no quad.
+        let cooldown_mask = u.textures
+            .resolve(SLOT_MASK)
+            .filter(|path| u.textures.size(path).is_some());
         if let Some(w) = u.tree.widget_mut(id) {
             w.slot = Some(SlotData {
                 icon: Some(d),
+                cooldown_mask,
                 native_cooldown: native_mode(lua).then(NativeCooldownState::default),
                 ..Default::default()
             });
@@ -895,80 +901,89 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
     }
 }
 
-/// The dark wipe of a cooldown with `frac` of its time left over `r` (a clockwise sweep from
-/// 12 o'clock: the part already elapsed is clear, the rest dark), as triangles from the centre:
-/// pixel positions, ready for [`Quad::corners`].
+/// Native perimeter fan with `frac` of its time left, mapped to `r` without pixel snapping.
+/// The slot's separate progress gate precedes this geometry routine.
 pub fn sweep_triangles(r: [f32; 4], frac: f32) -> Vec<[[f32; 2]; 3]> {
     let [x0, y0, x1, y1] = r;
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    let (hw, hh) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
-    if hw <= 0.0 || hh <= 0.0 || frac <= 0.0 {
+    if x1 <= x0 || y1 <= y0 || frac <= 0.0 {
         return Vec::new();
     }
-    let tau = std::f32::consts::TAU;
-    let start = tau * (1.0 - frac.min(1.0));
-    // Where a ray from the centre at `a` (clockwise from up) leaves the rectangle.
-    let edge = |a: f32| -> [f32; 2] {
-        let (dx, dy) = (a.sin(), -a.cos());
-        let tx = if dx.abs() > 1e-6 {
-            hw / dx.abs()
-        } else {
-            f32::MAX
-        };
-        let ty = if dy.abs() > 1e-6 {
-            hh / dy.abs()
-        } else {
-            f32::MAX
-        };
-        let t = tx.min(ty);
-        [cx + dx * t, cy + dy * t]
-    };
-    // Corner angles, clockwise from the top right one.
-    let c1 = hw.atan2(hh);
-    let mut angles = vec![start];
-    angles.extend(
-        [
-            c1,
-            std::f32::consts::PI - c1,
-            std::f32::consts::PI + c1,
-            tau - c1,
-        ]
+    mask_triangles(1.0 - frac.min(1.0))
         .into_iter()
-        .filter(|&a| a > start + 1e-4 && a < tau - 1e-4),
-    );
-    angles.push(tau);
-    let mut out = Vec::new();
-    for w in angles.windows(2) {
-        let (a, b) = (edge(w[0]), edge(w[1]));
-        let c = [cx, cy];
-        let cross = (a[0] - c[0]) * (b[1] - c[1]) - (a[1] - c[1]) * (b[0] - c[0]);
-        if cross.abs() < 1e-4 {
-            continue;
-        }
-        // The same winding as the rectangles (clockwise on screen).
-        out.push(if cross < 0.0 { [c, b, a] } else { [c, a, b] });
-    }
-    out
+        .map(|triangle| triangle.map(|[x, y]| [x0 + (x1 - x0) * x, y0 + (y1 - y0) * y]))
+        .collect()
 }
 
 /// Native3928ace0: eight equal time sectors along the rectangle perimeter.
 /// Unit positions also supply the two independent affine UV streams.
 pub fn mask_triangles(progress: f32) -> Vec<[[f32; 2]; 3]> {
-    let edge = [[0.5, 0.], [1., 0.], [1., 0.5], [1., 1.], [0.5, 1.],
-        [0., 1.], [0., 0.5], [0., 0.], [0.5, 0.]];
+    let edge = [
+        [0.5, 0.],
+        [1., 0.],
+        [1., 0.5],
+        [1., 1.],
+        [0.5, 1.],
+        [0., 1.],
+        [0., 0.5],
+        [0., 0.],
+        [0.5, 0.],
+    ];
     let mut out = Vec::new();
     for i in 0..8 {
-        if progress >= (i + 1) as f32 * 0.125 { continue; }
+        if progress >= (i + 1) as f32 * 0.125 {
+            continue;
+        }
         let f = ((progress - i as f32 * 0.125) * 8.).max(0.);
-        let start = [edge[i][0] + (edge[i + 1][0] - edge[i][0]) * f,
-            edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f];
+        let start = [
+            edge[i][0] + (edge[i + 1][0] - edge[i][0]) * f,
+            edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f,
+        ];
         out.push([[0.5, 0.5], edge[i + 1], start]);
     }
     out
 }
 
-/// The quads of a widget's cooldown: the dark sweep over the icon (a slot's icon drawable, else
-/// the whole widget) and the time left in `cooltime_style`. Drawn by `render::build_quads` after
+/// Shared native3928ace0/39220920 fan and submission for both button and slot images.
+fn masked_image_quads(image: Quad, mask: &CooldownMask, progress: f32, out: &mut Vec<Quad>) {
+    let Tex::Image(path) = image.tex else { return };
+    let [x0, y0, x1, y1] = image.pos;
+    let corners = image
+        .corners
+        .unwrap_or([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    for [a, b, c] in mask_triangles(progress) {
+        // Snap after interpolation, retaining both original fractional UV streams.
+        let point = |[x, y]: [f32; 2]| {
+            [
+                corners[0][0]
+                    + (corners[1][0] - corners[0][0]) * x
+                    + (corners[3][0] - corners[0][0]) * y,
+                corners[0][1]
+                    + (corners[1][1] - corners[0][1]) * x
+                    + (corners[3][1] - corners[0][1]) * y,
+            ]
+            .map(|p| (p + 0.5).trunc())
+        };
+        out.push(Quad {
+            tex: Tex::MaskedImage {
+                image: path.clone(),
+                mask: mask.texture.clone(),
+                image_uv: image.uv.map(f32::to_bits),
+                mask_uv: mask.uv.map(f32::to_bits),
+            },
+            pos: [0.; 4],
+            uv: [0., 0., 1., 1.],
+            color: image
+                .color
+                .map(|v| ((f64::from(v.clamp(0., 1.)) * 255.).trunc() / 255.) as f32),
+            corners: Some([point(a), point(b), point(c), point(c)]),
+            uvs: Some([a, b, c, c]),
+            vcolors: None,
+        });
+    }
+}
+
+/// The quads of a widget's cooldown: the native texture fan (a slot's independent one-pixel
+/// inset image, or a generic button's selected art) and slot time in `cooltime_style`. Drawn after
 /// the widget's background and artwork, before its overlay.
 pub(crate) fn cooldown_quads(
     u: &mut Ui,
@@ -982,7 +997,10 @@ pub(crate) fn cooldown_quads(
     let Some(cd) = w.cooldown.as_ref() else {
         return;
     };
-    let remain = cd.sampled_ms.map(f64::from).unwrap_or(cd.end_ms - u.time_ms);
+    let remain = cd
+        .sampled_ms
+        .map(f64::from)
+        .unwrap_or(cd.end_ms - u.time_ms);
     if remain <= 0.0 || cd.total_ms <= 0.0 {
         return;
     }
@@ -991,65 +1009,74 @@ pub(crate) fn cooldown_quads(
     }
     let widget_rect = u.tree.rect(id);
     if w.slot.is_none() {
-        let Some(mask) = w.button.as_ref().and_then(|b| b.cooldown_mask.as_ref()).cloned() else { return };
-        let Some((background, state)) = background else { return };
-        let Some(drawable) = u.tree.get(background).drawable() else { return };
-        if !matches!(drawable.kind, DrawKind::Image | DrawKind::Icon) { return; }
+        let Some(mask) = w
+            .button
+            .as_ref()
+            .and_then(|b| b.cooldown_mask.as_ref())
+            .cloned()
+        else {
+            return;
+        };
+        let Some((background, state)) = background else {
+            return;
+        };
+        let Some(drawable) = u.tree.get(background).drawable() else {
+            return;
+        };
+        if !matches!(drawable.kind, DrawKind::Image | DrawKind::Icon) {
+            return;
+        }
         let icon = drawable.class == "drawable:iconimage";
         let mut art = Vec::new();
         crate::render::drawable_quads(u, background, alpha, state, scale, None, &mut art);
         // Icon3928ed10 reuses object+d0 for every retained texture layer.
-        let icon_uv = if icon { art.first().map(|q| q.uv) } else { None };
+        let icon_uv = if icon {
+            art.first().map(|q| q.uv)
+        } else {
+            None
+        };
         let progress = (cd.total_ms - remain as f32) / cd.total_ms;
-        for image in art {
-            let Tex::Image(path) = image.tex else { continue };
-            let [x0, y0, x1, y1] = image.pos;
-            let corners = image.corners.unwrap_or([[x0,y0],[x1,y0],[x1,y1],[x0,y1]]);
-            for [a,b,c] in mask_triangles(progress) {
-                // Native39220920 snaps after interpolation, retaining the unsnapped UVs.
-                let point = |[x,y]: [f32;2]| [
-                    corners[0][0] + (corners[1][0] - corners[0][0]) * x + (corners[3][0] - corners[0][0]) * y,
-                    corners[0][1] + (corners[1][1] - corners[0][1]) * x + (corners[3][1] - corners[0][1]) * y,
-                ].map(|p| (p + 0.5).trunc());
-                out.push(Quad {
-                    tex: Tex::MaskedImage { image: path.clone(), mask: mask.texture.clone(),
-                        image_uv: icon_uv.unwrap_or(image.uv).map(f32::to_bits), mask_uv: mask.uv.map(f32::to_bits) },
-                    // Native3921f2a0 packs the multiplied source color as RGBA8.
-                    pos: [0.;4], uv: [0.,0.,1.,1.],
-                    color: image.color.map(|v| ((f64::from(v.clamp(0.,1.)) * 255.).trunc() / 255.) as f32),
-                    corners: Some([point(a),point(b),point(c),point(c)]),
-                    uvs: Some([a,b,c,c]), vcolors: None,
-                });
-            }
+        for mut image in art {
+            image.uv = icon_uv.unwrap_or(image.uv);
+            masked_image_quads(image, &mask, progress, out);
         }
         return;
     }
-    let frac = (remain as f32 / cd.total_ms).clamp(0.0, 1.0);
     let slot = w.slot.as_ref().unwrap();
-    let area = slot.icon.map(|d| u.tree.rect(d))
-        .filter(|r| r.w > 0.0 && r.h > 0.0).unwrap_or(widget_rect);
-    let px = [
-        (area.x * scale).round(),
-        (area.y * scale).round(),
-        (area.right() * scale).round(),
-        (area.bottom() * scale).round(),
-    ];
-    let color = [
-        SWEEP_COLOR[0],
-        SWEEP_COLOR[1],
-        SWEEP_COLOR[2],
-        SWEEP_COLOR[3] * alpha,
-    ];
-    for [a, b, c] in sweep_triangles(px, frac) {
-        out.push(Quad {
-            tex: Tex::Atlas,
-            pos: [0.0; 4],
-            uv: crate::render::white_uv(),
-            color,
-            corners: Some([a, b, c, c]),
-            uvs: None,
-            vcolors: None,
-        });
+    let progress = (cd.total_ms - remain as f32) / cd.total_ms;
+    if let Some(texture) = &slot.cooldown_mask {
+        if progress > 0. && progress <= 1. {
+            masked_image_quads(
+                Quad {
+                    tex: Tex::Image(texture.clone()),
+                    pos: [
+                        (widget_rect.x + 1.) * scale,
+                        (widget_rect.y + 1.) * scale,
+                        (widget_rect.right() - 1.) * scale,
+                        (widget_rect.bottom() - 1.) * scale,
+                    ],
+                    uv: [0., 0., 1., 1.],
+                    color: [1., 1., 1., alpha],
+                    corners: None,
+                    uvs: None,
+                    vcolors: None,
+                },
+                &CooldownMask {
+                    texture: texture.clone(),
+                    uv: [0., 0., 1., 1.],
+                },
+                progress,
+                out,
+            );
+        } else if slot.native_cooldown.is_some() {
+            // Native392c3960 clears draw fields before caption delivery, without an event.
+            // Compatibility's separate estimated clock remains until its next tick/rebind.
+            if let Some(cd) = u.tree.widget_mut(id).and_then(|w| w.cooldown.as_mut()) {
+                cd.total_ms = 0.;
+                cd.sampled_ms = Some(0.);
+            }
+            return;
+        }
     }
     let Some(label) = label_of(cd, remain, &u.cooldown_captions) else {
         return;

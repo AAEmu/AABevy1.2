@@ -16,14 +16,14 @@ fn tick(ui: &UiRuntime, ms: f32) {
     aa_ui::lua::tick(&ui.lua, ms);
 }
 
-/// Quads of the sweep: free-corner triangles in the sweep's dark colour.
+/// Native dual-texture perimeter triangles.
 fn sweep_quads(ui: &UiRuntime) -> usize {
     let mut g = aa_ui::lua::ui(&ui.lua);
     aa_ui::render::build_quads(&mut g, None)
         .iter()
         .filter(|q| {
-            q.corners.is_some() && ((q.tex == Tex::Atlas && (q.color[3] - 199.0 / 255.0).abs() < 0.01)
-                || matches!(&q.tex, Tex::MaskedImage { mask, .. } if mask.ends_with("cooldown_mask.dds")))
+            q.corners.is_some()
+                && matches!(&q.tex, Tex::MaskedImage { mask, .. } if mask.ends_with("cooldown_mask.dds"))
         })
         .count()
 }
@@ -53,11 +53,11 @@ fn slot_cooldown_sweep_counts_down() {
     )
     .unwrap();
     // Bound while cooling down: the script is told, the sweep is drawn (a quarter of the time
-    // has passed, so three of the four sides of the square are dark: 4 triangles at most).
+    // has passed, leaving six of the eight native perimeter sectors).
     assert!(eval::<String>(&ui, "table.concat(events, ' ')").contains("skill_cooldown_start:4000"));
     assert!(eval::<bool>(&ui, "slot.cooltime_style ~= nil"));
     let n = sweep_quads(&ui);
-    assert!((1..=5).contains(&n), "{n} sweep triangles");
+    assert_eq!(n, 6);
     // 2 s later it is still going; the clock only moves in ticks.
     tick(&ui, 2000.0);
     assert!(sweep_quads(&ui) >= 1);
@@ -159,8 +159,8 @@ fn sweep_geometry() {
     assert!((area(&sweep_triangles(r, 1.0)) - 1600.0).abs() < 1.0);
     assert!((area(&sweep_triangles(r, 0.5)) - 800.0).abs() < 1.0);
     assert!((area(&sweep_triangles(r, 0.25)) - 400.0).abs() < 1.0);
-    // 36 degrees left of 12 o'clock: a triangle of 20 x 20 * tan(36 degrees) to the top edge.
-    assert!((area(&sweep_triangles(r, 0.1)) - 145.3).abs() < 1.0);
+    // Equal time advances linearly along each edge, rather than by a trigonometric angle.
+    assert!((area(&sweep_triangles(r, 0.1)) - 160.0).abs() < 1.0);
     assert!(sweep_triangles(r, 0.0).is_empty());
     // The dark part is what is left, running clockwise to 12 o'clock: at 1/4 left it is the
     // top left quarter (every vertex in the left half, above the middle).
