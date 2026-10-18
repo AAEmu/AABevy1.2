@@ -39,7 +39,7 @@ impl HairVariant {
     }
 }
 
-/// Selectors from the chosen visible helmet asset, after any visual override.
+/// Selectors from the effective visible cosplay asset, falling back to head gear.
 /// Decode that asset's detail, rather than an item's name, armour class or slot alone.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HeadgearVariants {
@@ -48,6 +48,14 @@ pub struct HeadgearVariants {
 }
 
 impl HeadgearVariants {
+    /// Native descriptor priority: wire slot 27 (cosplay) before slot 0 (head).
+    /// Pass `None` for a hidden/absent slot. A present cosplay descriptor wins even
+    /// when its detail selects ordinary hair; this is not a search for nonzero flags.
+    /// Image-item substitution, when applicable, happens before this selection.
+    pub fn effective_detail(head: Option<u32>, cosplay: Option<u32>) -> Option<u32> {
+        cosplay.or(head)
+    }
+
     pub fn from_asset_detail(detail: u32) -> Self {
         match (detail >> 13) & 7 {
             3 | 7 => Self {
@@ -89,8 +97,9 @@ impl BodyPart {
 }
 
 impl CharacterDesc {
-    /// Resolve the ordinary appearance, then apply the selected visible helmet's authored
-    /// detail. `None` means no visible helmet. Selecting equipment visibility/overrides remains
+    /// Resolve the ordinary appearance, then apply the effective visible asset's authored
+    /// detail (see `HeadgearVariants::effective_detail`). `None` means neither visible slot.
+    /// Selecting equipment visibility/overrides remains
     /// the caller's responsibility; beard attachment assembly is not added here.
     pub fn resolve_with_headgear(
         &self,
@@ -160,6 +169,29 @@ impl CharacterAssets {
 mod tests {
     use super::*;
     use crate::GameDb;
+
+    #[test]
+    fn native_cosplay_precedes_head_even_with_default_detail() {
+        // AdjustHairAsset reads model+0x88 first, then +0x1c. ChangeVisual's
+        // descriptor array is model+0x1c+4*wire_slot, so these are slots 27 and 0.
+        let head = (3 << 13) | (4 << 10);
+        let cosplay = (7 << 13) | (1 << 10);
+        for (head, cosplay, expected) in [
+            (None, None, None),
+            (Some(head), None, Some(head)),
+            (None, Some(cosplay), Some(cosplay)),
+            (Some(head), Some(cosplay), Some(cosplay)),
+            (Some(head), Some(0), Some(0)),
+        ] {
+            assert_eq!(HeadgearVariants::effective_detail(head, cosplay), expected);
+        }
+        assert_eq!(
+            HeadgearVariants::from_asset_detail(
+                HeadgearVariants::effective_detail(Some(head), Some(0)).unwrap()
+            ),
+            HeadgearVariants::default()
+        );
+    }
 
     #[test]
     fn native_selector_table_and_missing_alternates() {
