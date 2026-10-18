@@ -1,7 +1,8 @@
-//! Selected native BAG keys, over a receipt-ordered inventory. No operation planner.
+//! Selected native BAG keys, over receipt-ordered native records. No operation planner.
 use super::{
     Mode, Shared,
     catalog::{self, Tables},
+    records::Records,
 };
 use aa_net::{
     Event,
@@ -15,16 +16,13 @@ use std::collections::HashSet;
 #[derive(Default)]
 pub(super) struct State {
     pub slots: [Option<u8>; 3], // target, source, support; physical zero-based BAG slots
-    inventory: Inventory,
+    pub(super) records: Records,
     config: GameConfig,
-    known: HashSet<u8>,
-    bag_extent: Option<u8>,
     external_pending: HashSet<u8>,
     owner: Option<u32>,
     actor: u32,
     level: u8,
     active: bool,
-    lost: bool,
 }
 impl State {
     pub fn clear(&mut self) {
@@ -43,7 +41,7 @@ impl State {
             .collect();
     }
     fn locked(&self, slot: u8) -> bool {
-        self.slots.contains(&Some(slot)) || self.external_pending.contains(&slot) || self.inventory.item_slot_pending(2, slot)
+        self.slots.contains(&Some(slot)) || self.external_pending.contains(&slot)
     }
     pub fn receive(&mut self, event: &Event) {
         self.config.apply(event);
@@ -64,46 +62,32 @@ impl State {
                         owner: Some(spawn.character().id),
                         ..Default::default()
                     };
-                    self.inventory.apply(&Event::CharacterSelected(Box::new(spawn.state.clone())));
                 }
                 self.actor = spawn.obj_id;
                 self.level = spawn.character().level;
                 self.active = true;
             }
             Event::LevelChanged { obj_id, level } if *obj_id == self.actor => self.level = *level,
-            Event::InventoryInit { bag_slots, .. } => {
+            Event::InventoryInit { .. } => {
                 self.clear();
-                self.known.clear();
-                //391d34c0 ->3961bcc0: low-byte header, floored to complete
-                // ten-slot blocks. Contents receipts do not change this extent.
-                self.bag_extent = Some((*bag_slots as u8 / 10) * 10);
             }
-            Event::InventoryExpanded { container: 2, slots } => self.bag_extent = Some((*slots / 10) * 10),
             Event::InventoryChunk(chunk)
                 if chunk.truncated
                     || chunk.chunks > 5
+                    || chunk.items.len() != usize::from(chunk.chunks) * 10
                     || (matches!(chunk.container, 2 | 3) && chunk.first_slot() + usize::from(chunk.chunks) * 10 > 130) =>
             {
-                self.lost = true;
                 self.clear();
-                self.known.clear();
-            }
-            Event::InventoryChunk(chunk) if chunk.container == 2 => {
-                for offset in 0..chunk.items.len() {
-                    if let Ok(slot) = u8::try_from(chunk.first_slot() + offset) {
-                        self.known.insert(slot);
-                    }
-                }
             }
             Event::GameDecodeFailed { .. } | Event::UnhandledGamePacket { level: 4, len: 1.., .. } => {
-                self.lost = true;
                 self.clear();
-                self.known.clear();
             }
             Event::ItemsChanged(tasks) if tasks.truncated => {
-                self.lost = true;
                 self.clear();
-                self.known.clear();
+            }
+            Event::UnitsRemoved(ids) if self.actor != 0 && ids.contains(&self.actor) => {
+                self.active = false;
+                self.clear();
             }
             event if super::retires(event) => {
                 let config = std::mem::take(&mut self.config);
@@ -114,21 +98,26 @@ impl State {
             }
             _ => {}
         }
-        self.inventory.apply(event);
+        self.records.observe(event);
+        if let Event::ItemsChanged(changes) = event {
+            if !changes.truncated {
+                for task in &changes.tasks {
+                    self.records.apply_row(task);
+                }
+                self.records.finish(changes);
+            }
+        }
     }
     fn complete(&self) -> bool {
         // Original BAG storage has130 records. Refuse a whole-BAG quote whose
         // enabled header would scan past it; never reinterpret unsafe native data.
-        !self.lost
-            && self
-                .bag_extent
-                .is_some_and(|n| n > 0 && n <= 130 && (0..n).all(|slot| self.known.contains(&slot)))
+        self.records.complete_bag()
     }
     fn item(&self, slot: u8) -> Option<&Item> {
-        if !self.active || !self.complete() || self.bag_extent.is_none_or(|n| slot >= n) {
+        if !self.active || !self.complete() {
             return None;
         }
-        self.inventory.item_at(2, usize::from(slot)).filter(|item| item.template_id != 0)
+        self.records.item(2, slot).filter(|item| item.template_id != 0)
     }
     fn selected(&self, index: usize) -> Option<&Item> {
         self.item(self.slots[index]?)
@@ -361,11 +350,9 @@ fn info(lua: &Lua, state: &Shared, index: usize) -> mlua::Result<MultiValue> {
         table.raw_set("socketInfo", sockets)?;
     }
     let total = view
-        .inventory
-        .bag
-        .iter()
-        .take(usize::from(view.bag_extent.unwrap_or(0)))
-        .flatten()
+        .records
+        .bag_items()
+        .map(|(_, item)| item)
         .filter(|i| i.template_id == item.template_id && i.grade == item.grade)
         .fold(0i32, |sum, i| sum.wrapping_add(i.count));
     table.raw_set("total", f64::from(total as f32))?;

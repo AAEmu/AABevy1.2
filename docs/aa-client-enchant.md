@@ -216,3 +216,47 @@ WARN/ERROR/panic; shared-machine compilation remains active. These are
 original-script/asset regression checks, not natural live item transactions
 or paired original-client pixel comparisons. Request/planner/controller and
 full native inventory/tooltip limitations above remain explicit.
+
+## Native item records for selection and continuation
+
+Enchant selection and its BAG totals now read receipt-ordered native modeled
+records instead of the legacy Inventory reducer. Equipment has28 physical
+records; BAG and bank each retain130. Unknown is distinct from a known native
+empty record. SC040 and local Character-kind0 SC069 body slots19..25 retain
+the native template-setter flags1/count1/world255, including template0.
+Ordinary empty equipment and Remove resets have world255; SC04c's whole-block
+zero initialization has world0. Local SC094 replaces full received records,
+including body slots, and duplicate entries apply in received order.
+
+Each supported row resolves its actual PRE-row context through aa-net's pure
+projection before the next row applies. Count ignores packet IDs, uses wrapping
+i32 arithmetic and preserves zero/negative stacks. Remove resolves equipment,
+BAG then bank by ID and may clear a record despite failed declared-location
+admission. Grade returns its old grade before mutation; supported raw128 Update
+and Add/Take/Owner paths return the resulting record. Move resolves both old
+physical records before applying its ordered swap writes, with no consumed-item
+output. Flags, non-unpack Security, Seize and native-false RemoveCrafting use
+their source-qualified projections. Item/model fields remain the public parsed
+representation; this does not expose every native union byte or runtime field.
+
+Unprovided mutations retire affected record certainty rather than adopting a
+legacy relocated/post-batch value. A later full contents block can restore
+specifically unknown rows. Nonzero unpack Security remains unprovided because
+its static-item branch may also change equipment detail. Unsafe/truncated/lost
+receipts and local-actor retirement require a fresh selected-character boundary;
+same-owner spawn cannot repair them. Init's fresh-row requirement and retiring
+records named in the lane's force-remove tail are explicit stronger application
+safety policies. The original SC090 handler does not dispatch that tail or
+generate an item-consumption observer from it.
+
+Twenty focused enchant checks pass in6.60s, including seven record-provider
+regressions and a selection/quote regression across zero-stack then ID-removal
+receipts. Existing physical original controls/getters also pass over this new
+provider. The copied full client suite passes315 tests /38 existing optional
+probes ignored in91.99s with three test threads; its log is
+data/extract/aa-client/trial/enchant-records-full-tests.log. The synthetic
+result fixture's Add constructor explicitly supplies
+raw_detail_block=None; a synthetic item is not promoted to a native raw128
+receipt. Execute still refuses explicitly: typed request integration, shared
+operation pending/effects and controller callbacks are the next integration
+boundary. No request, ACK or item settlement is inferred from this provider.
