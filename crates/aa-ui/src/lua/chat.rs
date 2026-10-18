@@ -936,6 +936,16 @@ fn select_inner(lua: &Lua, id: Id, idx: usize, force: bool) {
     }
     layout(lua, id);
     lifecycle::tint_dividers(lua, id, c.tabs[idx].message);
+    // Native395139b4..bb stores/saves the numeric index before OnSelectedChatTab.
+    // This app-only hook preserves the application's other window-extra fields.
+    let hook = lua.globals().raw_get::<Option<Table>>("AAUI").ok().flatten()
+        .and_then(|t| t.raw_get::<Option<Function>>("ChatSelection").ok().flatten());
+    if let Some(hook) = hook {
+        if let Err(error) = hook.call::<()>((c.window_id, idx as i32)) {
+            bevy::log::warn!("aa-ui: AAUI.ChatSelection: {error}");
+        }
+        super::flush(lua);
+    }
     for (i, tab) in c.tabs.iter().enumerate() {
         if let Ok(Some(b)) = object_table(lua, tab.button) {
             call_global(lua, "OnSelectedChatTab", (b, i == idx));
