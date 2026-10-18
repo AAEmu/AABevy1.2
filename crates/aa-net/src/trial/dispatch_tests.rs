@@ -166,7 +166,7 @@ fn changed_summon_beautyshop_getcrime_role_is_before_native_final_jury_assignmen
     };
     let (_, updated) = s.apply_with_dispatch(&Event::Trial(TrialEvent::DefendantData(data)));
     assert_eq!(
-        updated.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        updated.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
         [
             TrialNotice::ShowCrimeRecords { phase: 1 },
             TrialNotice::Status { phase: 1, current_jury: 99 },
@@ -276,4 +276,35 @@ fn records_adoption_callback_precedes_new_type_headers_and_rows() {
     );
     assert_eq!(ids(&s), [77]);
     assert_eq!(total_records(&s), Some(10.0));
+}
+
+
+#[test]
+fn close_and_audience_native_dispatch_has_pre_and_post_reset_getters() {
+    let mut s=seed();s.local_obj_id=Some(42);s.defendant_context=Some(7);
+    let (_,ds)=s.apply_with_dispatch(&Event::Trial(TrialEvent::AudienceJoined{trial_id:8,obj_id:42,name:b"name\0tail".to_vec()}));
+    assert_eq!(ds.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),[TrialNotice::AudienceJoined{name:b"name\0tail".to_vec()},TrialNotice::BeautyshopStatus]);
+    assert_eq!((ds[0].1.trial_id,ds[0].1.is_defendant(),ids(&ds[0].1)),(7,true,vec![11,12]));
+    assert_eq!((ds[1].1.trial_id,ds[1].1.is_defendant(),ids(&ds[1].1)),(8,false,vec![]));
+    let (_,ds)=s.apply_with_dispatch(&Event::Trial(TrialEvent::AudienceLeft{obj_id:42,name:vec![255,0,1]}));
+    assert_eq!(ds.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),[TrialNotice::Closed,TrialNotice::BeautyshopStatus,TrialNotice::AudienceLeft{name:vec![255,0,1]}]);
+    assert_eq!(ds.iter().map(|(_,v)|v.trial_id).collect::<Vec<_>>(),[8,0,0]);
+    let (_,ds)=s.apply_with_dispatch(&Event::Trial(TrialEvent::AudienceLeft{obj_id:42,name:vec![]}));
+    assert_eq!(ds.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),[TrialNotice::BeautyshopStatus,TrialNotice::AudienceLeft{name:vec![]}]);
+    for (e,tail) in [(TrialEvent::RulingClosed,vec![TrialNotice::RulingClosed,TrialNotice::Closed]),(TrialEvent::Canceled{trial_id:999},vec![TrialNotice::Closed,TrialNotice::Canceled])] {
+        s=seed();s.defendant_context=Some(7);let(_,ds)=s.apply_with_dispatch(&Event::Trial(e));
+        assert_eq!(ds[0].0,TrialNotice::BeautyshopStatus);assert_eq!(ds[1..].iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),tail);
+        for (_,v) in ds {assert_eq!((v.trial_id,v.is_defendant(),v.phase),(0,false,0));assert_eq!(ids(&v),[11,12]);}
+    }
+}
+
+#[test]
+fn audience_nonlocal_duplicate_and_oversize_raw_receipts_are_distinct() {
+    let mut s=seed();s.local_obj_id=Some(42);
+    for e in [TrialEvent::AudienceJoined{trial_id:8,obj_id:99,name:b"other".to_vec()},TrialEvent::AudienceLeft{obj_id:99,name:b"other".to_vec()}] {
+        for _ in 0..2 {let(_,ds)=s.apply_with_dispatch(&Event::Trial(e.clone()));assert_eq!(ds.len(),1);assert_eq!(ds[0].1.trial_id,7);assert_eq!(ids(&ds[0].1),[11,12]);}
+    }
+    for e in [TrialEvent::AudienceJoined{trial_id:8,obj_id:42,name:vec![0;129]},TrialEvent::AudienceLeft{obj_id:42,name:vec![0;129]}] {
+        let(_,ds)=s.apply_with_dispatch(&Event::Trial(e.clone()));assert!(ds.is_empty());assert_eq!(s.trial_id,7);assert_eq!(s.last_receipt,Some(e));
+    }
 }
