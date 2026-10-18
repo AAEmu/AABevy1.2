@@ -1936,3 +1936,38 @@ translation remains unresolved. The lane writer's normal 29-byte form maps direc
 Offline tests cover every native fixed tag, both lane slave-time forms, all item truncation cuts,
 nonzero equipment reserved bytes, task padding exclusion and a DD04 loot notification followed by
 loot settlement and snow. No stalled-lane traffic was used.
+
+
+### Mate equipment receive transactions (2026-10-17)
+
+`MateEvent::EquipmentChanged(MateEquipmentChange)` decodes `SCMateEquipmentChanged` (0x126):
+`u32 character_id, u16 mate_tl_id, u32 passenger_id, bool bts, u8 count`, then `count` entries
+of two full optional items followed by `u8 first.container, first.slot, second.container,
+second.slot`, and one final `bool success`. The stored character ID must not be confused with
+its runtime object ID. `MateEquipmentEntry::{first,second}` each hold `MateItemLocation` with
+`item: Option<Item>, container: u8, slot: u8`; exact raw detail payloads survive on both items.
+
+Native packet vtable 399b5e2c -> 397af340 -> 397d1340, entry reader 397d12a0, proves the full
+items, header widths, final flag and inline maximum of two entries (constructor 391cfaff also
+allocates two). Native clamps counts to two; this decoder rejects larger counts rather than
+misidentify unread transaction bytes as a following DD04 opcode. Empty lists are legal.
+The lane's economy/item_effect_packets.rs writer currently sends exactly one entry.
+
+`Mates.last_equipment_change` caches only notifications matching the selected stored character
+ID and current owned mate timeline. A replacement summon, matched removal/object reuse or session
+teardown clears it. It records a notification, not successful settlement. No inventory swap or
+phantom mate is inferred from it. Actual visible mate gear still follows the existing authoritative
+`SCUnitEquipmentsChanged` / `Event::EquipmentChanged` path.
+
+Known lane discrepancy: the trailing success is unconditionally true even when `change_mate_equipment`
+rejects a move. Its successful enter/leave effect-generated locations also cannot be treated as a
+universal crossed swap: native OnMateEquipmentChanged (391db200 -> 394e1c10) copies only the second
+item into the second location when that location resolves in the bag cache, then releases pending
+locations through 397d2370. The source's successful effect packets commonly mark that second location
+as mate equipment (252). Retaining the exact notification is safe; inventing missing bag settlement
+would hide this server/native mismatch. Outbound mate equipment and reconciliation remain a separate
+milestone; slave equipment handlers are still logging stubs in this lane.
+
+Offline tests cover zero/one/two entries, both success flags, opaque full-item identities and detail
+bytes, raw passenger ID/BTS, every truncation, invalid counts, DD04 continuation, ownership/timeline
+matching and the absence of inferred inventory/Unit changes. Live equipment QA remains deferred.
