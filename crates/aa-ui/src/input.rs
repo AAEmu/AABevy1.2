@@ -179,6 +179,7 @@ pub fn update(
         let old_chain = std::mem::replace(&mut ui(lua).entered, new_chain.clone());
         for &o in old_chain.iter().rev() {
             if !new_chain.contains(&o) {
+                lua::listbox::leave(lua, o);
                 call_handler(lua, o, "OnLeave", vec![]);
             }
         }

@@ -1032,7 +1032,7 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 
 Per native class: methods implemented natively (including deliberate no-ops such as sounds and
 animations), methods present as logging stubs, and the client's total. Generated with
-`cargo run -p aa-ui --example native_listbox_art -- --coverage` (2026-10-17).
+`cargo run -p aa-ui --example native_listbox_tooltip -- --coverage` (2026-10-17).
 
 | class | native | stub | listed |
 |---|---|---|---|
@@ -1059,7 +1059,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `gametooltip` | 81 | 26 | 107 |
 | `grid` | 94 | 54 | 148 |
 | `label` | 74 | 24 | 98 |
-| `listbox` | 110 | 28 | 138 |
+| `listbox` | 111 | 27 | 138 |
 | `listctrl` | 81 | 28 | 109 |
 | `listctrlitem` | 102 | 1940 | 2042 |
 | `message` | 92 | 27 | 119 |
@@ -1646,3 +1646,43 @@ continue to render. All three `listbox_art` tests passed.
 potion is selected and its rejected icon stays blank. It logged 411–456 FPS, zero script
 errors and closed itself. The two valid control-sheet icons remain visible. No resize,
 application hook, font substitution or broader image-loader change was introduced.
+
+## Native listbox row tooltips
+
+`ShowTooltip(bool)` enables the native `OnTooltip(text, x, y)` notification. It starts
+disabled. Native `392a19c0` checks the absolute visible-preorder row against the last
+notified row; it reports stored row text regardless of visual ellipsis and without a delay.
+The callback's physical-screen coordinates are the row's right and bottom edges: widget
+insets, the native 5-unit horizontal text margin, row height and viewport index, minus state
+right/bottom insets, all scaled by the UI scale. Tree depth and icon indentation do not
+change that corner. Native `392a1c90` refreshes this path when scrolling.
+
+The toolkit emits a new notification on a changed valid row and refreshes it when the top
+changes under the pointer. Unchanged hover returns before layout/row traversal and does not
+mutate tree state. Replacing storage resets notification state; copied text is released from
+the UI borrow before Lua runs, so callbacks can clear/repopulate rows safely. Disabling
+tooltips only changes the gate, matching native `39243b80`. Native `3929f730` resets row
+tracking and emits **zero-argument** `OnTooltip()` before base `OnLeave`, even when the gate
+is disabled; the input handoff now preserves that order. There is no listbox timer or tick.
+
+The notification buffer matches the source's 512-byte conversion buffer: up to 511 bytes
+plus NUL. `xlcommon.dll!XlWideToMulti` (`3301a1d0`–`3301a287`) checks capacity after each
+UTF-8 byte, so a boundary can retain a partial final sequence. The callback preserves those
+raw Lua-string bytes rather than silently changing the native payload. A regression checks
+this with repeated non-ASCII text.
+
+The unmodified original `CreateSliderList` handler checks `IsMouseOver`, calls
+`SetTooltipOnPos` for a row, and calls `HideTooltip` on leave. Original `SetTooltipOnPos`
+converts the physical callback coordinates with `CalcDontApplyUIScale` and anchors the
+tooltip's BOTTOMLEFT corner there. `tests/listbox_tooltip.rs` covers enable/disable,
+physical coordinates at 1.25 UI scale, unchanged-hover cost, scrolling, recursive rows,
+callback replacement, native leave ordering and the actual original Lua tooltip window.
+All 16 targeted flat/tree/art/tooltip tests passed; the final UTF-8 boundary change passed
+the three tooltip tests again.
+
+`examples/native_listbox_tooltip.rs` uses `aa_dev` and the original list/tooltip scripts.
+The inspected `shots/aa-ui/native-listbox-tooltip.png` shows a visually shortened Health row
+and its complete text in the original dark tooltip skin. Tooltip art was compared with
+`reference/ingame/tooltip_hud/real.png`; there is no dedicated supplied listbox-tooltip
+reference. The capture logged 180–237 FPS, zero script errors and closed itself. Template
+visibility/animation and line-border variants remain separate pending work.
