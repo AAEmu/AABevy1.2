@@ -106,6 +106,8 @@ mod equipment_notice_tests;
 pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, BattlefieldInvitation, BattlefieldQueue};
 
 pub mod family;
+pub mod family_command;
+pub use family_command::FamilyCommand;
 pub use family::{Families, FamilyEvent, FamilyInvitation, FamilyMember, FamilyRoster, FamilyTitle};
 
 pub mod unpack;

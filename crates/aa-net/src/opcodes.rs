@@ -54,6 +54,12 @@ opcodes! {
 opcodes! {
     /// Client to game server, level 1 (`CS*`).
     pub mod cs {
+        CSFamilyInviteMemberPacket = 0x01a,
+        CSFamilyReplyInvitationPacket = 0x01b,
+        CSFamilyLeavePacket = 0x01c,
+        CSFamilyKickPacket = 0x01d,
+        CSFamilyChangeTitlePacket = 0x01e,
+        CSFamilyChangeOwnerPacket = 0x01f,
         X2EnterWorldPacket = 0x000,
         CSLeaveWorldPacket = 0x001,
         CSCancelLeaveWorldPacket = 0x002,
