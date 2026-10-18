@@ -1,53 +1,5 @@
-//! Original faction-name policy and guild creation/rename controls.
+//! Original guild creation/rename controls.
 use super::*;
-
-fn install_name_policy(lua: &Lua) -> mlua::Result<()> {
-    let util: Table = lua.globals().get("X2Util")?;
-    let previous: mlua::Function = util.get("GetNamePolicyInfo")?;
-    util.set(
-        "GetNamePolicyInfo",
-        lua.create_function(move |lua, args: MultiValue| {
-            if args.get(1).cloned().and_then(super::role) != Some(2) {
-                return previous.call::<MultiValue>(args);
-            }
-            // Original en_us/type2 record3305db78+2*144+2*24; wrapper394c8ca0.
-            let out = lua.create_table()?;
-            for (key, value) in [
-                ("local_min", 2.),
-                ("local_max", 32.),
-                ("eng_min", 3.),
-                ("eng_max", 32.),
-                ("limit_space_cnt", 0.),
-            ] {
-                out.set(key, value)?;
-            }
-            for (key, value) in [
-                ("is_allow_space", true),
-                ("is_allow_mix_lang", false),
-                ("is_allow_mix_case", true),
-                ("is_allow_special_letter", false),
-            ] {
-                out.set(key, value)?;
-            }
-            Ok(MultiValue::from_iter([Value::Table(out)]))
-        })?,
-    )?;
-    let previous: mlua::Function = util.get("IsValidName")?;
-    util.set(
-        "IsValidName",
-        lua.create_function(move |_, args: MultiValue| {
-            if args.get(2).cloned().and_then(super::role) != Some(2) {
-                return previous.call::<MultiValue>(args);
-            }
-            let valid = match args.get(1) {
-                Some(Value::String(name)) => actions::valid_policy_name(&name.as_bytes()),
-                _ => false, // Unsupported native adapter coercion is an app refusal.
-            };
-            Ok(MultiValue::from_iter([Value::Boolean(valid)]))
-        })?,
-    )?;
-    Ok(())
-}
 
 fn create(view: &View, name: &[u8], sponsor_id: u32) -> Result<aa_net::ExpeditionCommand, i16> {
     if !actions::valid_policy_name(name) {
@@ -71,7 +23,6 @@ fn create(view: &View, name: &[u8], sponsor_id: u32) -> Result<aa_net::Expeditio
 }
 
 pub(super) fn install(lua: &Lua, faction: &Table, bridge: &Shared) -> mlua::Result<()> {
-    install_name_policy(lua)?;
     let shared = bridge.clone();
     faction.set(
         "GetMyTopLevelFaction",
@@ -179,23 +130,6 @@ pub(super) fn check_service(rt: &UiRuntime, bridge: &Shared, units: &aa_net::sta
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn faction_name_policy_exposes_native_record_and_preserves_other_kind_adapters() -> mlua::Result<()> {
-        let lua = Lua::new();
-        lua.load(
-            "X2Util={GetNamePolicyInfo=function(_,kind)return kind,'prior' end,IsValidName=function(_,name,kind)return name,kind end}",
-        )
-        .exec()?;
-        install_name_policy(&lua)?;
-        lua.load(
-            "local p=X2Util:GetNamePolicyInfo(2);assert(p.local_min==2 and p.local_max==32 and p.eng_min==3 and p.eng_max==32 and p.limit_space_cnt==0);\
-             assert(p.is_allow_space and not p.is_allow_mix_lang and p.is_allow_mix_case and not p.is_allow_special_letter);\
-             assert(X2Util:IsValidName('A B',2) and X2Util:IsValidName('!!',2) and not X2Util:IsValidName('AB',2));\
-             local a,b=X2Util:GetNamePolicyInfo(3);assert(a==3 and b=='prior');\
-             a,b=X2Util:IsValidName('AB',3);assert(a=='AB' and b==3)",
-        ).exec()
-    }
 
     #[test]
     fn creation_checks_name_before_membership_and_uses_current_faction_sponsor_override() {

@@ -1,0 +1,3038 @@
+{
+  "provenance": "Offline actual English Xl name policy / validation and X2 CheckAvailableName.\nNative Xl parsing, classifiers' ASCII tables, case conversion, buffer limits,\nvalidator and normalizer run unchanged. Script return/table interfaces and\nmemset are captured. External MultiByteToWideChar and MSVCR100 wide-character\nimports call the host's real APIs; no Python Unicode approximation is used.\nThis is source-oracle evidence, not execution in or writing to a live client.\n",
+  "source_artifacts": [
+    "data/extract/aa-ui/native-name-source-20261018.txt",
+    "data/extract/aa-ui/native-name-oracle-20261018.json",
+    "data/extract/aa-ui/native-name-classes-20261018.json"
+  ],
+  "locale": "English_United States.1252",
+  "policies": {
+    "0": {
+      "local_min": 2,
+      "local_max": 26,
+      "eng_min": 2,
+      "eng_max": 26,
+      "limit_space_cnt": 0,
+      "is_allow_space": false,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": false,
+      "is_allow_special_letter": false
+    },
+    "1": {
+      "local_min": 2,
+      "local_max": 26,
+      "eng_min": 2,
+      "eng_max": 26,
+      "limit_space_cnt": 0,
+      "is_allow_space": false,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": false,
+      "is_allow_special_letter": false
+    },
+    "2": {
+      "local_min": 2,
+      "local_max": 32,
+      "eng_min": 3,
+      "eng_max": 32,
+      "limit_space_cnt": 0,
+      "is_allow_space": true,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": true,
+      "is_allow_special_letter": false
+    },
+    "3": {
+      "local_min": 2,
+      "local_max": 26,
+      "eng_min": 2,
+      "eng_max": 26,
+      "limit_space_cnt": 0,
+      "is_allow_space": false,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": true,
+      "is_allow_special_letter": false
+    },
+    "4": {
+      "local_min": 2,
+      "local_max": 10,
+      "eng_min": 2,
+      "eng_max": 10,
+      "limit_space_cnt": 0,
+      "is_allow_space": true,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": true,
+      "is_allow_special_letter": false
+    },
+    "5": {
+      "local_min": 3,
+      "local_max": 32,
+      "eng_min": 3,
+      "eng_max": 32,
+      "limit_space_cnt": 0,
+      "is_allow_space": true,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": true,
+      "is_allow_special_letter": false
+    },
+    "6": {
+      "local_min": 2,
+      "local_max": 26,
+      "eng_min": 2,
+      "eng_max": 26,
+      "limit_space_cnt": 0,
+      "is_allow_space": false,
+      "is_allow_mix_lang": false,
+      "is_allow_mix_case": false,
+      "is_allow_special_letter": false
+    }
+  },
+  "valid": [
+    {
+      "kind": 0,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "AB",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "ABC",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "ab",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Ab",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "lEADER",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A b",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A\tB",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A\u000bB",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A  B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A1B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "A_B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "A-B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "A.B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "A\u00e9B",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\ufeffA ",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\ufeff.Abc",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u00a0Ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 0,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 0,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "AB",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "ABC",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "ab",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Ab",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "lEADER",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A b",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A\tB",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A\u000bB",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A  B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A1B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "A_B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "A-B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "A.B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "A\u00e9B",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\ufeffA ",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\ufeff.Abc",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u00a0Ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 1,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 1,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "AB",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "ABC",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "Ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "lEADER",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A b",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "A\tB",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A\u000bB",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A  B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A1B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A_B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A-B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A.B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "A\u00e9B",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\ufeffA ",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\ufeff.Abc",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u00a0Ab",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 2,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 2,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "AB",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "ABC",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "ab",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Ab",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "lEADER",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A B",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A b",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A\tB",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A\u000bB",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A  B",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "A1B",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A_B",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A-B",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A.B",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "A\u00e9B",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\ufeffA ",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\ufeff.Abc",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u00a0Ab",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 3,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 3,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "AB",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "ABC",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "ab",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Ab",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "lEADER",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A b",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "A\tB",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A\u000bB",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A  B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A1B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A_B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A-B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A.B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "A\u00e9B",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\ufeffA ",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\ufeff.Abc",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u00a0Ab",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 4,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 4,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "AB",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "ABC",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "Ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "lEADER",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A b",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "A\tB",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A\u000bB",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A  B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A1B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A_B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A-B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A.B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u00e9\u00e9",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u00c9\u00e9",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "A\u00e9B",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\u017f\u017f",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u00a0\u00a0",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\ufeffA ",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\ufeff.Abc",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u00a0Ab",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 5,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 5,
+      "text": "Ab\u0085",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "AB",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "ABC",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "ab",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Ab",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "abc",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Abc",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Leader",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "lEADER",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A b",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": " A B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A B ",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A\tB",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A\u000bB",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A  B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A1B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A1b",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "1ab",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "A_B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A_b",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "A-B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A-b",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "A.B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "A.b",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": ".Abc",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u00e9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\u00c9\u00e9",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "A\u00e9B",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u017f\u017f",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\u0180\u0180",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u07ff\u07ff",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u0800\u0800",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u4e00\u4e00",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\ud83d\ude00\ud83d\ude00",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u00a0\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\ufeffAbc",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\ufeffAb",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\ufeffA ",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\ufeff .ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\ufeff.Abc",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\ufeff.abc",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\ufeff\ufeffAb",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u0085Ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u00a0Ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "Ab\u00a0",
+      "valid": true
+    },
+    {
+      "kind": 6,
+      "text": "\u1680Ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u2000Ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "\u2028Ab",
+      "valid": false
+    },
+    {
+      "kind": 6,
+      "text": "Ab\u0085",
+      "valid": false
+    }
+  ],
+  "normal": [
+    {
+      "mix_case": false,
+      "input": "",
+      "output_hex": ""
+    },
+    {
+      "mix_case": false,
+      "input": " aBc",
+      "output_hex": ""
+    },
+    {
+      "mix_case": false,
+      "input": "\taBc",
+      "output_hex": ""
+    },
+    {
+      "mix_case": false,
+      "input": "aBc DEF",
+      "output_hex": "41626320646566"
+    },
+    {
+      "mix_case": false,
+      "input": "1aBc",
+      "output_hex": "31614263"
+    },
+    {
+      "mix_case": false,
+      "input": "!aBc",
+      "output_hex": "21614263"
+    },
+    {
+      "mix_case": false,
+      "input": "a_b-c.d",
+      "output_hex": "415f622d632e64"
+    },
+    {
+      "mix_case": false,
+      "input": "\u00e9COLE",
+      "output_hex": "c389636f6c65"
+    },
+    {
+      "mix_case": false,
+      "input": "\u017fAbC",
+      "output_hex": "c5bf616263"
+    },
+    {
+      "mix_case": false,
+      "input": "\u4e00aBC",
+      "output_hex": "e4b880614243"
+    },
+    {
+      "mix_case": false,
+      "input": "\ud83d\ude00aBC",
+      "output_hex": "f09f9880614243"
+    },
+    {
+      "mix_case": false,
+      "input": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "output_hex": "4161616161616161616161616161616161616161616161616161616161616161"
+    },
+    {
+      "mix_case": false,
+      "input": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+      "output_hex": "c389c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9"
+    },
+    {
+      "mix_case": false,
+      "input": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+      "output_hex": "f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeffaBc",
+      "output_hex": "416263"
+    },
+    {
+      "mix_case": false,
+      "input": "Abc\u0000Ignored",
+      "output_hex": "416263"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeffAb",
+      "output_hex": "4162"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeffA ",
+      "output_hex": "4120"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeff .ab",
+      "output_hex": ""
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeff.Abc",
+      "output_hex": "2e416263"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeff.abc",
+      "output_hex": "2e616263"
+    },
+    {
+      "mix_case": false,
+      "input": "\ufeff\ufeffAb",
+      "output_hex": "efbbbf4162"
+    },
+    {
+      "mix_case": false,
+      "input": "\u0085Ab",
+      "output_hex": "c2854162"
+    },
+    {
+      "mix_case": false,
+      "input": "\u00a0Ab",
+      "output_hex": "c2a04162"
+    },
+    {
+      "mix_case": false,
+      "input": "Ab\u00a0",
+      "output_hex": "4162c2a0"
+    },
+    {
+      "mix_case": false,
+      "input": "\u1680Ab",
+      "output_hex": "e19a804162"
+    },
+    {
+      "mix_case": false,
+      "input": "\u2000Ab",
+      "output_hex": "e280804162"
+    },
+    {
+      "mix_case": false,
+      "input": "\u2028Ab",
+      "output_hex": "e280a84162"
+    },
+    {
+      "mix_case": false,
+      "input": "Ab\u0085",
+      "output_hex": "4162c285"
+    },
+    {
+      "mix_case": true,
+      "input": "",
+      "output_hex": ""
+    },
+    {
+      "mix_case": true,
+      "input": " aBc",
+      "output_hex": "20614263"
+    },
+    {
+      "mix_case": true,
+      "input": "\taBc",
+      "output_hex": "09614263"
+    },
+    {
+      "mix_case": true,
+      "input": "aBc DEF",
+      "output_hex": "61426320444546"
+    },
+    {
+      "mix_case": true,
+      "input": "1aBc",
+      "output_hex": "31614263"
+    },
+    {
+      "mix_case": true,
+      "input": "!aBc",
+      "output_hex": "21614263"
+    },
+    {
+      "mix_case": true,
+      "input": "a_b-c.d",
+      "output_hex": "615f622d632e64"
+    },
+    {
+      "mix_case": true,
+      "input": "\u00e9COLE",
+      "output_hex": "c3a9434f4c45"
+    },
+    {
+      "mix_case": true,
+      "input": "\u017fAbC",
+      "output_hex": "c5bf416243"
+    },
+    {
+      "mix_case": true,
+      "input": "\u4e00aBC",
+      "output_hex": "e4b880614243"
+    },
+    {
+      "mix_case": true,
+      "input": "\ud83d\ude00aBC",
+      "output_hex": "f09f9880614243"
+    },
+    {
+      "mix_case": true,
+      "input": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "output_hex": "4141414141414141414141414141414141414141414141414141414141414141"
+    },
+    {
+      "mix_case": true,
+      "input": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+      "output_hex": "c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9"
+    },
+    {
+      "mix_case": true,
+      "input": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+      "output_hex": "f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880f09f9880"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeffaBc",
+      "output_hex": "614263"
+    },
+    {
+      "mix_case": true,
+      "input": "Abc\u0000Ignored",
+      "output_hex": "416263"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeffAb",
+      "output_hex": "4162"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeffA ",
+      "output_hex": "4120"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeff .ab",
+      "output_hex": "202e6162"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeff.Abc",
+      "output_hex": "2e416263"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeff.abc",
+      "output_hex": "2e616263"
+    },
+    {
+      "mix_case": true,
+      "input": "\ufeff\ufeffAb",
+      "output_hex": "efbbbf4162"
+    },
+    {
+      "mix_case": true,
+      "input": "\u0085Ab",
+      "output_hex": "c2854162"
+    },
+    {
+      "mix_case": true,
+      "input": "\u00a0Ab",
+      "output_hex": "c2a04162"
+    },
+    {
+      "mix_case": true,
+      "input": "Ab\u00a0",
+      "output_hex": "4162c2a0"
+    },
+    {
+      "mix_case": true,
+      "input": "\u1680Ab",
+      "output_hex": "e19a804162"
+    },
+    {
+      "mix_case": true,
+      "input": "\u2000Ab",
+      "output_hex": "e280804162"
+    },
+    {
+      "mix_case": true,
+      "input": "\u2028Ab",
+      "output_hex": "e280a84162"
+    },
+    {
+      "mix_case": true,
+      "input": "Ab\u0085",
+      "output_hex": "4162c285"
+    }
+  ],
+  "wrappers": [
+    {
+      "name": "policy/zero",
+      "call": "return X2Util:GetNamePolicyInfo(0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "table",
+          "fields": {
+            "local_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "local_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "eng_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "eng_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "limit_space_cnt": {
+              "type": "number",
+              "value": 0.0
+            },
+            "is_allow_space": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_lang": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_case": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_special_letter": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "policy/six",
+      "call": "return X2Util:GetNamePolicyInfo(6)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "table",
+          "fields": {
+            "local_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "local_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "eng_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "eng_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "limit_space_cnt": {
+              "type": "number",
+              "value": 0.0
+            },
+            "is_allow_space": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_lang": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_case": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_special_letter": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "policy/fractional",
+      "call": "return X2Util:GetNamePolicyInfo(2.9)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "table",
+          "fields": {
+            "local_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "local_max": {
+              "type": "number",
+              "value": 32.0
+            },
+            "eng_min": {
+              "type": "number",
+              "value": 3.0
+            },
+            "eng_max": {
+              "type": "number",
+              "value": 32.0
+            },
+            "limit_space_cnt": {
+              "type": "number",
+              "value": 0.0
+            },
+            "is_allow_space": {
+              "type": "boolean",
+              "value": true
+            },
+            "is_allow_mix_lang": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_case": {
+              "type": "boolean",
+              "value": true
+            },
+            "is_allow_special_letter": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "policy/negative_fraction_zero",
+      "call": "return X2Util:GetNamePolicyInfo(-0.9)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "table",
+          "fields": {
+            "local_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "local_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "eng_min": {
+              "type": "number",
+              "value": 2.0
+            },
+            "eng_max": {
+              "type": "number",
+              "value": 26.0
+            },
+            "limit_space_cnt": {
+              "type": "number",
+              "value": 0.0
+            },
+            "is_allow_space": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_lang": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_mix_case": {
+              "type": "boolean",
+              "value": false
+            },
+            "is_allow_special_letter": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "policy/past_end",
+      "call": "return X2Util:GetNamePolicyInfo(7)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/negative",
+      "call": "return X2Util:GetNamePolicyInfo(-1)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/nan",
+      "call": "return X2Util:GetNamePolicyInfo(0/0)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/infinity",
+      "call": "return X2Util:GetNamePolicyInfo(math.huge)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/huge",
+      "call": "return X2Util:GetNamePolicyInfo(1e40)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/missing",
+      "call": "return X2Util:GetNamePolicyInfo()",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/numeric_string",
+      "call": "return X2Util:GetNamePolicyInfo('2')",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "policy/bool",
+      "call": "return X2Util:GetNamePolicyInfo(true)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "valid/ok",
+      "call": "return X2Util:IsValidName('Leader',0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "valid/empty",
+      "call": "return X2Util:IsValidName('',0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "valid/six",
+      "call": "return X2Util:IsValidName('Leader',6)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "valid/past_end",
+      "call": "return X2Util:IsValidName('Leader',7)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "valid/negative",
+      "call": "return X2Util:IsValidName('Leader',-1)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "valid/nan_kind",
+      "call": "return X2Util:IsValidName('Leader',0/0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "boolean",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "valid/missing_kind",
+      "call": "return X2Util:IsValidName('Leader')",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "valid/numeric_string_kind",
+      "call": "return X2Util:IsValidName('Leader','0')",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "valid/numeric_text",
+      "call": "return X2Util:IsValidName(123,0)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "valid/bool_kind",
+      "call": "return X2Util:IsValidName('Leader',true)",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "normal/ok",
+      "call": "return X2Util:CheckAvailableName('aBc',false)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": "416263"
+        }
+      ]
+    },
+    {
+      "name": "normal/true",
+      "call": "return X2Util:CheckAvailableName('aBc',true)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": "614263"
+        }
+      ]
+    },
+    {
+      "name": "normal/zero",
+      "call": "return X2Util:CheckAvailableName('aBc',0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": "416263"
+        }
+      ]
+    },
+    {
+      "name": "normal/nonzero",
+      "call": "return X2Util:CheckAvailableName('aBc',-1)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": "614263"
+        }
+      ]
+    },
+    {
+      "name": "normal/nan_true",
+      "call": "return X2Util:CheckAvailableName('aBc',0/0)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": "614263"
+        }
+      ]
+    },
+    {
+      "name": "normal/empty",
+      "call": "return X2Util:CheckAvailableName('',false)",
+      "arity": 1,
+      "values": [
+        {
+          "type": "string",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "name": "normal/missing_bool",
+      "call": "return X2Util:CheckAvailableName('aBc')",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "normal/string_bool",
+      "call": "return X2Util:CheckAvailableName('aBc','false')",
+      "arity": 0,
+      "values": []
+    },
+    {
+      "name": "normal/numeric_text",
+      "call": "return X2Util:CheckAvailableName(123,false)",
+      "arity": 0,
+      "values": []
+    }
+  ]
+}

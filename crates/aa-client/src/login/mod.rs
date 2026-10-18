@@ -46,6 +46,7 @@ pub mod create;
 pub mod gameapi;
 pub mod host;
 pub mod loading;
+pub(crate) mod name_policy;
 pub mod stage3d;
 pub mod world_select;
 

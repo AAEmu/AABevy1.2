@@ -6,6 +6,17 @@ and lane-server protocol are the sources. A window opening with fallback data is
 feature. Each row requires real data, input/actions, lifecycle/error behavior, and appropriate
 live or visual validation. No overall completion percentage is inferred from script counts.
 
+Latest checked milestone: client230 passed/36 intentional probes ignored, plus the
+separate original pet control probe. Shared original English name metadata,
+validation and formatting now cover every name-policy kind in login/create/HUD;
+original character typing and IME plus pet/chat/portal captures passed. Native
+SetEnglish login behavior passed61 UI checks and51 native oracle groups; complete
+skill-result/identity parsing passed438 network tests; global authored fog passed
+192 world tests/9 existing probes ignored. Owning docs retain exact captures and
+limits. Achievement receive/UI integration, local chat-tab configuration and the
+remaining native cooldown producers are the next active gaps; overall1.2 parity
+is still unfinished.
+
 | Area | Current evidence | Remaining work |
 |---|---|---|
 | World selection and login | Live Trion login, world list/queue, connect; original Lua, zero-error captures | Other regional authentication, premium/house lobby info, reconnect policy |

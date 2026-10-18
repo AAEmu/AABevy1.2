@@ -40,20 +40,7 @@ X2Ability.GetBuffTooltip = function(self, buffType, level)
   return { tipType = "passive", name = name or "", path = path or "", description = description or "" }
 end
 
--- Name field: letters and digits (the server's rule), at most 18 of them; the displayed policy
--- is the client's own ("Enter 2-26 characters.").
-X2Util.GetNamePolicyInfo = function(self, kind)
-  return { local_min = 2, local_max = 26, eng_min = 2, eng_max = 26 }
-end
-X2Util.CheckAvailableName = function(self, text, composing)
-  text = text or ""
-  if composing then return text end
-  return string.sub((string.gsub(text, "[^%w]", "")), 1, 18)
-end
-X2Util.IsValidName = function(self, text, kind)
-  text = text or ""
-  return #text >= 2 and #text <= 18 and string.find(text, "^%w+$") ~= nil
-end
+-- Name policies, normalization and validation are installed natively by base.rs.
 
 -- Step 1 --------------------------------------------------------------------------------------
 X2LoginCharacter.GetEditUnitRace = function(self) return CC.edit_race() end

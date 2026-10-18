@@ -24,6 +24,15 @@ when the server answers `CharacterCreated`, goes to `Screen::CharacterSelect` (t
 the list by itself). `CharacterCreateFailed` reasons 3, 4, 5 (pending, duplicate, format) show the
 client's own message boxes (`error_char_name_*`).
 
+The shared original en_us name adapter now replaces the old18-character,
+alphanumeric-only create fallback. The original field uses its native2-26 policy,
+preserves accepted punctuation and applies native initial-uppercase/rest-lowercase
+formatting through its own OnTextChanged handler. Metadata/validation/formatting
+are shared with login deletion and HUD name dialogs. The server remains responsible
+for availability and final acceptance; no local check reports creation success.
+Exact executed-source golden cases and malformed UTF-8 limits are documented in
+aa-client-hud.md under shared original English name rules.
+
 ## Flags
 
 `--goto create`, `--race nuian|elf|ferre|hariharan`, `--gender male|female`, `--step 1|2|3`,
@@ -184,8 +193,9 @@ full `resolve`.
   silhouette height and position match.
 * Lighting / materials differ from the captures (flatter skin, hair specular: dark hair renders grey,
   no ambient occlusion); that is aa-cry / aa-anim.
-* Name validation is the client's (2-18 letters and digits in this build, server reasons 3, 4, 5 for
-  the rest); the protocol has no separate name check.
+* Name validation/formatting now uses the original English2-26 policy and native case maps,
+  including accepted punctuation. Server reasons3/4/5 remain authoritative; the protocol has
+  no separate availability check. The source and original-input checks are in aa-client-hud.md.
 * Race / gender stay Nuian male on entering the screen (the real client does too), not the last pick.
 
 ## Authored facial integration (2026-10-17)
