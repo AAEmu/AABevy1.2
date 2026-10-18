@@ -85,11 +85,41 @@ pub struct Snapshot {
 }
 
 /// Supply native buffers before raising the original UPDATE/CLEAR/REMOVE events.
-/// Injection alone does not replace the widgets' cached rows; Update*Info reads its
-/// corresponding published channel. There is no aa-net dependency or Lua getter.
+/// This advances shared manager rows even without any Map widgets. Injection alone
+/// does not replace widgets' displayed rows; Update*Info copies its manager channel.
+/// There is no aa-net dependency or Lua getter.
 pub fn set_snapshot(lua: &Lua, snapshot: Snapshot) {
+    for channel in 0..3 {
+        let source = published(&snapshot, channel);
+        cached(lua, channel, |rows| {
+            rows.retain(|row| source.iter().any(|c| c.obj_id == row.obj_id));
+            for c in source.iter() {
+                if let Some(row) = rows.iter_mut().find(|row| row.obj_id == c.obj_id) {
+                    row.position = c.position;
+                } else {
+                    rows.push(Row {
+                        obj_id: c.obj_id,
+                        position: c.position,
+                        symbol: c.symbol,
+                    });
+                }
+            }
+        });
+    }
     lua.set_app_data(Arc::new(snapshot));
 }
+
+/// Native Map manager rows contain position, first-appearance symbol and object ID.
+/// Tooltip strings/health are read separately from the current published buffers.
+#[derive(Clone, Debug, PartialEq)]
+struct Row {
+    obj_id: u32,
+    position: [f32; 2],
+    symbol: Symbol,
+}
+
+#[derive(Default)]
+struct Cache([Arc<Vec<Row>>; 3]);
 
 #[derive(Clone, Debug, PartialEq)]
 struct Applied {
@@ -100,7 +130,7 @@ struct Applied {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
-    rows: [Arc<Vec<Contact>>; 3],
+    rows: [Arc<Vec<Row>>; 3],
     drawables: [Vec<Id>; 3],
     generation: u64,
     applied: Option<Applied>,
@@ -111,6 +141,33 @@ fn snapshot(lua: &Lua) -> Arc<Snapshot> {
     lua.app_data_ref::<Arc<Snapshot>>()
         .map(|s| Arc::clone(&s))
         .unwrap_or_default()
+}
+
+fn published(source: &Snapshot, channel: usize) -> &Arc<Vec<Contact>> {
+    match channel {
+        0 => &source.ships,
+        1 => &source.transfers,
+        _ => &source.fish,
+    }
+}
+
+fn cached(lua: &Lua, channel: usize, f: impl FnOnce(&mut Vec<Row>)) -> Arc<Vec<Row>> {
+    if lua.app_data_ref::<Cache>().is_none() {
+        lua.set_app_data(Cache::default());
+    }
+    let mut cache = lua.app_data_mut::<Cache>().expect("aa-ui: radar cache");
+    f(Arc::make_mut(&mut cache.0[channel]));
+    cache.0[channel].clone()
+}
+
+fn set_rows(lua: &Lua, id: Id, channel: usize, rows: Arc<Vec<Row>>) {
+    with(lua, id, |v| {
+        if v.rows[channel] != rows {
+            v.rows[channel] = rows;
+            v.generation = v.generation.wrapping_add(1);
+        }
+    });
+    update_map(lua, id);
 }
 
 fn view(lua: &Lua, id: Id) -> Option<View> {
@@ -220,6 +277,7 @@ pub(crate) fn has_tooltip(lua: &Lua, id: Id) -> bool {
 }
 
 fn update_tooltip(lua: &Lua, id: Id, d: &View) {
+    let source = snapshot(lua);
     let (hover, worldmap) = {
         let u = ui(lua);
         let worldmap = u.tree.widget(id).is_some_and(|w| w.worldmap.is_some());
@@ -236,8 +294,12 @@ fn update_tooltip(lua: &Lua, id: Id, d: &View) {
         if pickable {
             for channel in (0..3).rev() {
                 for (i, &dr) in d.drawables[channel].iter().enumerate().rev() {
-                    if let Some(c) = d.rows[channel].get(i).filter(|c| c.tooltip.is_some())
-                        && u.tree.visible(dr)
+                    if let Some(c) = d.rows[channel].get(i).and_then(|row| {
+                        published(&source, channel)
+                            .iter()
+                            .find(|c| c.obj_id == row.obj_id)
+                            .filter(|c| c.tooltip.is_some())
+                    }) && u.tree.visible(dr)
                         && u.tree.rect(dr).contains(u.cursor.0, u.cursor.1)
                     {
                         hover = Some((channel, i, c.clone()));
@@ -354,19 +416,8 @@ pub(crate) fn methods(lua: &Lua, methods: &Table) -> mlua::Result<()> {
         methods.raw_set(
             update,
             method(lua, move |lua, id, _| {
-                let snapshot = snapshot(lua);
-                let rows = match channel {
-                    0 => &snapshot.ships,
-                    1 => &snapshot.transfers,
-                    _ => &snapshot.fish,
-                };
-                with(lua, id, |v| {
-                    if v.rows[channel] != *rows {
-                        v.rows[channel] = rows.clone();
-                        v.generation = v.generation.wrapping_add(1);
-                    }
-                });
-                update_map(lua, id);
+                let rows = cached(lua, channel, |_| {});
+                set_rows(lua, id, channel, rows);
                 none()
             })?,
         )?;
@@ -383,15 +434,10 @@ pub(crate) fn methods(lua: &Lua, methods: &Table) -> mlua::Result<()> {
                     _ => None,
                 };
                 if let Some(object_id) = object_id {
-                    with(lua, id, |v| {
-                        let rows = Arc::make_mut(&mut v.rows[channel]);
-                        let previous = rows.len();
+                    let rows = cached(lua, channel, |rows| {
                         rows.retain(|c| c.obj_id != object_id);
-                        if rows.len() != previous {
-                            v.generation = v.generation.wrapping_add(1);
-                        }
                     });
-                    update_map(lua, id);
+                    set_rows(lua, id, channel, rows);
                 }
                 none()
             })?,
@@ -399,13 +445,8 @@ pub(crate) fn methods(lua: &Lua, methods: &Table) -> mlua::Result<()> {
         methods.raw_set(
             clear,
             method(lua, move |lua, id, _| {
-                with(lua, id, |v| {
-                    if !v.rows[channel].is_empty() {
-                        v.rows[channel] = Arc::default();
-                        v.generation = v.generation.wrapping_add(1);
-                    }
-                });
-                update_map(lua, id);
+                let rows = cached(lua, channel, Vec::clear);
+                set_rows(lua, id, channel, rows);
                 none()
             })?,
         )?;

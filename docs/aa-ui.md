@@ -2072,8 +2072,12 @@ The toolkit has no aa-net dependency and adds no Lua row-getter API. Pending
 network chunks, classification, localization and relationships remain app-owned.
 
 Original `UpdateTelescopeInfo`, `UpdateTransferTelescopeInfo`, and
-`UpdateFishSchoolInfo` copy only their own published channel into each widget's
-cache. Injection alone does not replace displayed rows. `Remove*Info(id)` accepts
+`UpdateFishSchoolInfo` copy only their own shared manager channel into each widget's
+cache. `set_snapshot` advances that manager cache even before either map exists:
+existing runtime IDs retain their first symbol and list position, duplicates update
+the last received position, absent IDs retire, and new IDs append. The manager stores
+only ID, position and symbol. Tooltip metadata reads the current published contact
+separately. Injection alone does not replace displayed rows. `Remove*Info(id)` accepts
 the numeric runtime identity without a lossy f32 conversion; `Clear*Info()` clears
 only its channel. Drawable pools are reused. Markers reproject when map bounds,
 current map or size changes. World-map and roadmap positions both anchor to the
@@ -2128,3 +2132,73 @@ exit 0 with automatic closure. Common framing was compared with
 `reference/ingame/worldmap_zone/real.png`; the fixture deliberately uses full-map
 zoom 1, while that reference uses zoom 3 and contains no radar rows. It omits the
 3D scene, and no font/layout calibration was changed.
+
+### Shared radar cache and native enemy relation follow-up
+
+The cache distinction is backed by `3904bd90`: the Map manager's ship list at
+`+0x4e0` contains no tooltip strings. The existing-ID branch `3904bed1`–`3904beed`
+overwrites only position, while `3904bef7`–`3904bf59` resolves relation/kind only for
+a new ID. Transfer/fish observers use the same identity pattern. The shared aa-ui
+cache now follows this distinction rather than freezing tooltip metadata or
+reclassifying an existing icon. A tooltip's current kind/enemy can consequently
+differ from the retained icon when the same received ID changes classification.
+Clearing or retiring the ID allows its next appearance to use a new symbol.
+
+Radar's native enemy test is **relation byte 0 ==1**, not the attackability bit.
+The source `39027f40` -> `39838880` accepts two polymorphic facades. All combat
+permission branches after `398389d6` modify byte 1/byte 2 only and therefore cannot
+change the radar icon's enemy classification. For a valid player/ship pair the
+relevant precedence is:
+
+1. Either facade's virtual `+0x30` forces relation 3. ShipRow always returns false;
+   the player's `39356c90` tests raw kind 0 and byte `unit+0x3afe`. That byte's
+   gameplay name remains unresolved.
+2. Try owner-character-ID versus other effective-faction override (`39838740`),
+   then the reverse direction, then sorted effective-faction pair override
+   (`398387e0`). Relation 0 means continue. The two override maps are manager
+   `+4` and `+0x14`; packet-facing setters `39027e30` / `39027e70` remain separate
+   network integration work.
+3. Try regional callback `390280a0`, then base faction callback `392f81f0`.
+
+Normal effective-faction policy `398379b0` returns nonzero expedition ID unless
+virtual `+0x44` is true, otherwise raw faction ID. ShipRow's flag is false; the
+player flag is byte `unit+0x3bec`, whose gameplay name remains unresolved. Policy
+registration `390281c0` instead chooses faction-only `39837750` when global mode
+`3a16efd8` is 4..8. ShipRow validity `39196920` requires nonzero faction or
+expedition; its direct character ID is zero, its owner-character ID is received
+summoner ID `+8`, faction is `+0x30`, expedition `+0x4b8`, raw kind `+0x0c` and
+packed position `+0x18`. Module-verified read-only runtime inspection confirmed
+all corresponding invalid-ID sentinels are zero. The later forced-hostility
+helper `39358ab0` cannot apply to ShipRow: its virtual `+0x2c` is always zero,
+but equality with that value is reachable only after rejecting zero on the player.
+
+The regional callback resolves both positions to zones and requires the same
+`zones.group_id` (`397a6c60` -> zone template `+0x10`; native SQL column order
+confirms this field). It finds that group's controller through `392f3510`, requires
+controller state `+0xd8 ==4`, and requires both positions inside its primary or
+secondary circle (`39839b40`). `39839820` resolves a side from direct character ID,
+then owner-character ID for raw kinds 2/5, then expedition ID, then faction ID.
+Unresolved side returns relation 0; matching sides return 3, opposite sides 1
+(`39839900`). Circle coordinates/radii and side-membership records must come from
+the actual regional state; they are not derivable from a ship's faction alone.
+
+Base faction `398a4130` returns 0 for either zero effective ID and 3 for equal IDs,
+otherwise follows each faction's mother chain repeatedly (`398a37a0`). The final
+root comparison `398a3660` returns 3 for equal roots, then checks either root 3
+(hostile), either root 2 (neutral), either root 1 (friendly), then the stored
+unordered pair or default neutral. Read-only runtime inspection confirmed these
+special root constants are exactly 1/2/3. This is stronger evidence than an
+ordered, single-parent server approximation, but dynamic expedition/faction maps,
+character/faction override messages and regional controller inputs still belong
+to the app. `Contact.symbol` already accepts its resolved result; no extra Lua or
+network-facing aa-ui API is needed. Source excerpts and module verification are
+in ignored `data/extract/aa-ui/native-radar-relation-runtime-20261018.txt` and
+`native-radar-relation-source-20261018.txt`.
+
+All 14 tests across `map_radar`, `map_markers`, `map_ping_original` and
+`event_handlers` pass, including first classification before map construction,
+shared world/road classification, duplicate ID/last position, retirement and
+reappearance, and fresh tooltip metadata without an icon update. The unique
+aa-dev capture `shots/aa-ui/native-radar-shared-cache-20261018.png` was inspected:
+same original map/tooltip rendering, zero script errors, startup 251 FPS and
+387–508 FPS afterward, automatic closure and exit 0.

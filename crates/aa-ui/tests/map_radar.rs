@@ -118,7 +118,7 @@ fn native_radar_symbols_hide_on_world_and_reproject_for_continent_and_resize() {
 #[test]
 fn original_ship_tooltip_receives_numeric_identity_and_live_health_metadata() {
     let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
-    radar_fixture::install(&mut ui);
+    let mut source = radar_fixture::install(&mut ui);
     ui.exec(
         "@capture_radar_tooltip",
         r#"
@@ -149,10 +149,99 @@ fn original_ship_tooltip_receives_numeric_identity_and_live_health_metadata() {
         and mapTooltip:IsVisible() and mapTooltip.targetId==201
     "#
     ));
+    // The native cached map row contains no tooltip strings or health. Metadata
+    // comes from the latest published row even before another map Update*Info.
+    let ship = &mut std::sync::Arc::make_mut(&mut source.ships)[0];
+    ship.symbol = radar::Symbol::EnemyShipyard;
+    let radar::Tooltip::Ship(info) = ship.tooltip.as_mut().unwrap() else {
+        panic!("ship metadata")
+    };
+    info.name = Some("Renamed shipyard".into());
+    info.owner = Some("New owner".into());
+    info.hp = Some(400.);
+    radar::set_snapshot(&ui.lua, source);
+    lua::tick(&ui.lua, 16.);
+    assert!(eval::<bool>(
+        &ui,
+        "radarTooltip.tooltipType=='shipyard' and radarTooltip.enemy==true \
+         and radarTooltip.name=='Renamed shipyard' and radarTooltip.owner=='New owner' \
+         and radarTooltip.hp==400 and radarTooltip.maxHp==1000"
+    ));
     lua::fire_ui_event(
         &ui.lua,
         "REMOVE_TELESCOPE_INFO",
         vec![mlua::Value::Integer(201)],
     );
     assert!(!eval::<bool>(&ui, "mapTooltip:IsVisible()"));
+}
+
+#[test]
+fn shared_native_cache_retains_first_symbol_before_widgets_and_deduplicates_runtime_ids() {
+    let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    let mut seed = radar_fixture::snapshot();
+    std::sync::Arc::make_mut(&mut seed.ships)[0].symbol = radar::Symbol::EnemyShipyard;
+    radar::set_snapshot(&ui.lua, seed);
+    let mut source = radar_fixture::install(&mut ui);
+    let maps = [id(&ui, "worldmap"), id(&ui, "roadmap")];
+    for map in maps {
+        let drawn = icons(&ui, map);
+        assert_eq!(drawn.len(), 8);
+        assert_eq!(
+            drawn
+                .iter()
+                .filter(|(c, _)| *c == [168., 144., 24., 24.])
+                .count(),
+            2
+        );
+        assert!(!drawn.iter().any(|(c, _)| *c == [144., 0., 24., 24.]));
+    }
+    let mut duplicate = source.ships[0].clone();
+    duplicate.symbol = radar::Symbol::Ship;
+    duplicate.position[0] += 200.;
+    std::sync::Arc::make_mut(&mut source.ships).push(duplicate);
+    radar::set_snapshot(&ui.lua, source.clone());
+    lua::fire_ui_event(&ui.lua, "UPDATE_TELESCOPE_INFO", vec![]);
+    for map in maps {
+        let drawn = icons(&ui, map);
+        assert_eq!(
+            drawn.len(),
+            8,
+            "duplicate runtime ID must share one native row"
+        );
+        assert_eq!(
+            drawn
+                .iter()
+                .filter(|(c, _)| *c == [168., 144., 24., 24.])
+                .count(),
+            2
+        );
+        let bounds = source
+            .maps
+            .iter()
+            .find(|m| m.level == 2 && m.id == 5)
+            .unwrap();
+        let r = lua::ui(&ui.lua).tree.rect(map);
+        let center_x = r.x + r.w * (0.32 + 200. / bounds.rect[2]);
+        assert!(
+            drawn.iter().any(|(cell, rect)| {
+                *cell == [168., 144., 24., 24.] && (rect.x + 12. - center_x).abs() < 0.01
+            }),
+            "last duplicate must update position without replacing the first symbol"
+        );
+    }
+    // An absent ID is retired; a later appearance receives its new classification.
+    std::sync::Arc::make_mut(&mut source.ships).retain(|row| row.obj_id != 201);
+    radar::set_snapshot(&ui.lua, source.clone());
+    lua::fire_ui_event(&ui.lua, "UPDATE_TELESCOPE_INFO", vec![]);
+    std::sync::Arc::make_mut(&mut source.ships).push(radar_fixture::snapshot().ships[0].clone());
+    radar::set_snapshot(&ui.lua, source);
+    lua::fire_ui_event(&ui.lua, "UPDATE_TELESCOPE_INFO", vec![]);
+    for map in maps {
+        assert_eq!(icons(&ui, map).len(), 8);
+        assert!(
+            icons(&ui, map)
+                .iter()
+                .any(|(c, _)| *c == [144., 0., 24., 24.])
+        );
+    }
 }
