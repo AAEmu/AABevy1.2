@@ -164,9 +164,13 @@ impl Families {
             }
             FamilyEvent::MemberRemoved { family_id, character_id, .. } => {
                 let Some(roster) = self.rosters.get_mut(family_id) else { return false };
-                let before = roster.members.len();
-                roster.members.retain(|m| m.character_id != *character_id);
-                before != roster.members.len()
+                let Some(index) = roster.members.iter().position(|m| m.character_id == *character_id) else { return false };
+                // Native398a8160 removes the first matching row, preserving the order of duplicates.
+                roster.members.remove(index);
+                if roster.members.len() < 2 {
+                    self.rosters.remove(family_id);
+                }
+                true
             }
             FamilyEvent::OwnerChanged { family_id, character_id } => {
                 let Some(roster) = self.rosters.get_mut(family_id) else { return false };
