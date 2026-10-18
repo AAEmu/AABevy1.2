@@ -109,7 +109,7 @@ resource! {
         /// Source-hydrated local GM mode byte1; absent until actual PlayerSpawn.
         pub native_gm_mode1: Option<u8>,
         /// Static skill?primary cooldown tag routing; prefer set_cooldown_catalog.
-        pub cooldown_catalog: HashMap<u32,u32>,
+        pub cooldown_catalog: std::sync::Arc<HashMap<u32,u32>>,
         /// The last refused skill (not enough mana, too far ...).
         pub last_failure: Option<SkillFailure>,
     }

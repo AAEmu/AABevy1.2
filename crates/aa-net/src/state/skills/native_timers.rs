@@ -30,7 +30,7 @@ impl Skills {
     /// Catalog query: SELECT id,cooldown_tag_id FROM skills. Present zero means a direct timer;
     /// missing entries remain unknown. Static catalog survives character/connection lifecycle.
     pub fn set_cooldown_catalog(&mut self, catalog: HashMap<u32, u32>) {
-        self.cooldown_catalog = catalog;
+        self.cooldown_catalog = std::sync::Arc::new(catalog);
     }
     pub fn native_cooldown(&self, skill_id: u32, tags: &[u32]) -> Option<(Duration, Duration)> {
         self.native_cooldown_at(skill_id, tags, Instant::now())
@@ -86,7 +86,11 @@ impl Skills {
         let Some(&tag) = self.cooldown_catalog.get(&cast.skill_id) else {
             return false;
         };
-        let id = if tag == 0 { cast.skill_id } else { tag };
+        let skill_id = cast.skill_id;
+        // A genuine admitted stop replaces this app-only cast/DB observation, even when
+        // native insertion keeps an already longer first row. Do not revive it on expiry.
+        let estimate_removed = self.last_used.remove(&skill_id).is_some();
+        let id = if tag == 0 { skill_id } else { tag };
         let rows = if tag == 0 {
             &mut self.native_skill_cooldowns
         } else {
@@ -97,7 +101,7 @@ impl Skills {
         } else {
             NativeCooldownOrigin::CastingStopped { tl }
         };
-        insert(rows, id, duration_ms, origin, now)
+        insert(rows, id, duration_ms, origin, now) || estimate_removed
     }
     pub(super) fn reset_native_timer(&mut self, skill_id: u32, tag_id: u32) {
         if let Some(row) = self.native_skill_cooldowns.iter_mut().find(|row| row.cooldown.id == skill_id) {
@@ -279,6 +283,7 @@ mod tests {
             });
             assert!(state.native_skill_cooldowns.is_empty() && state.native_tag_cooldowns.is_empty(), "case{case}");
             assert!(state.casting.is_empty(), "existing cast teardown remains compatible");
+            assert!(state.last_used.contains_key(&17), "unadmitted stop keeps prior observation, case{case}");
         }
     }
     #[test]
@@ -423,4 +428,39 @@ mod tests {
         assert_eq!(cloned.skills.native_skill_cooldowns[0].cooldown.remaining_ms, 7000);
         assert_eq!(cloned.skills.native_skill_cooldowns[0].origin, NativeCooldownOrigin::CastingStopped { tl: 5 });
     }
+    #[test]
+    fn admitted_stop_invalidates_only_resolved_estimate_even_when_longer_timer_wins() {
+        for (skill,tag) in [(17,0),(18,77)] {
+            let mut state=ready();state.apply(&start(skill,3,7));
+            let at=Instant::now();state.last_used.insert(999,at);
+            let timer=row(if tag==0 {skill}else{tag},8000,10000,at);
+            if tag==0 {state.native_skill_cooldowns.push(timer);}else{state.native_tag_cooldowns.push(timer);}
+            assert!(state.cooldown_with_total_at(skill,tag,60000,at).is_some());
+            assert!(state.fold_stop_timer(3,1000,false,at),"estimate removal is a state change despite insertion no-op");
+            assert!(!state.last_used.contains_key(&skill));assert!(state.last_used.contains_key(&999));
+            assert_eq!(if tag==0 {state.native_skill_cooldowns[0]}else{state.native_tag_cooldowns[0]},timer);
+            assert_eq!(state.native_cooldown_at(skill,&[tag],at),Some((Duration::from_millis(8000),Duration::from_millis(10000))));
+            let expired=at+Duration::from_millis(8001);
+            assert!(state.native_cooldown_at(skill,&[tag],expired).is_none());
+            assert!(state.cooldown_with_total_at(skill,tag,60000,expired).is_none(),"expired real timer must not reveal stale estimate");
+            state.apply(&start(skill,4,7));
+            assert!(state.last_used.contains_key(&skill));
+            assert!(state.cooldown_with_total_at(skill,tag,60000,Instant::now()).is_some(),"later genuine Started can create a new observation");
+        }
+    }
+
+    #[test]
+    fn static_catalog_clone_and_lifecycle_share_one_allocation() {
+        let mut state=ready();let snapshot=state.clone();
+        assert!(std::sync::Arc::ptr_eq(&state.cooldown_catalog,&snapshot.cooldown_catalog));
+        for event in [Event::PlayerSpawn(Box::new(PlayerSpawn{obj_id:7,state:Default::default(),unit:unit(7)})),Event::CharacterSelected(Box::default()),Event::Disconnected{message:String::new()}] {
+            state.apply(&event);
+            assert!(std::sync::Arc::ptr_eq(&state.cooldown_catalog,&snapshot.cooldown_catalog));
+            assert_eq!(state.cooldown_catalog.get(&18),Some(&77));
+        }
+        state.set_cooldown_catalog([(17,0),(18,77)].into());
+        assert!(!std::sync::Arc::ptr_eq(&state.cooldown_catalog,&snapshot.cooldown_catalog));
+        assert_eq!(state.cooldown_catalog,snapshot.cooldown_catalog,"value equality does not require pointer identity");
+    }
+
 }
