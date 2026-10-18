@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "canvas_px": [
+    2560,
+    1440
+  ],
+  "coordinates": "top_left_x_right_y_down",
+  "blend": "straight_alpha_srgb",
+  "fit": "cover",
+  "mouse_clamp_px": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "file": "bg_far.png",
+      "z": 0,
+      "position_px": [
+        1280,
+        720
+      ],
+      "parallax": 0.012,
+      "drift_px_s": [
+        0,
+        0
+      ],
+      "alpha": 1,
+      "scale": 1.04,
+      "tile_x": false,
+      "breathing": {
+        "period_s": 24,
+        "scale_amplitude": 0.004,
+        "alpha_amplitude": 0,
+        "phase_rad": 0
+      }
+    },
+    {
+      "file": "bg_mid.png",
+      "z": 10,
+      "position_px": [
+        1280,
+        720
+      ],
+      "parallax": 0.03,
+      "drift_px_s": [
+        0,
+        0
+      ],
+      "alpha": 1,
+      "scale": 1.05,
+      "tile_x": false,
+      "breathing": {
+        "period_s": 20,
+        "scale_amplitude": 0.003,
+        "alpha_amplitude": 0,
+        "phase_rad": 1.2
+      }
+    },
+    {
+      "file": "mist_a.png",
+      "z": 20,
+      "position_px": [
+        1280,
+        1080
+      ],
+      "parallax": 0.018,
+      "drift_px_s": [
+        7,
+        0
+      ],
+      "alpha": 0.23,
+      "scale": 1.4,
+      "tile_x": true,
+      "breathing": {
+        "period_s": 16,
+        "scale_amplitude": 0,
+        "alpha_amplitude": 0.035,
+        "phase_rad": 0
+      }
+    },
+    {
+      "file": "mist_b.png",
+      "z": 30,
+      "position_px": [
+        1280,
+        1210
+      ],
+      "parallax": 0.024,
+      "drift_px_s": [
+        -4,
+        0
+      ],
+      "alpha": 0.18,
+      "scale": 1.6,
+      "tile_x": true,
+      "breathing": {
+        "period_s": 21,
+        "scale_amplitude": 0,
+        "alpha_amplitude": 0.03,
+        "phase_rad": 1.8
+      }
+    }
+  ],
+  "motes": {
+    "file": "glow.png",
+    "z": 40,
+    "count": 28,
+    "seed": 1202,
+    "spawn_area_px": [
+      160,
+      340,
+      2340,
+      1460
+    ],
+    "rise_speed_px_s": [
+      9,
+      20
+    ],
+    "sway_amplitude_px": [
+      12,
+      30
+    ],
+    "sway_period_s": [
+      5,
+      9
+    ],
+    "lifetime_s": [
+      18,
+      32
+    ],
+    "fade_in_s": 2,
+    "fade_out_s": 3,
+    "size_px": [
+      7,
+      17
+    ],
+    "tint_rgba": [
+      1,
+      0.84,
+      0.53,
+      0.55
+    ],
+    "blend": "alpha",
+    "prewarm": true
+  },
+  "panel": {
+    "file": "panel.png",
+    "z": 100,
+    "anchor": "center",
+    "offset_px": [
+      440,
+      -20
+    ],
+    "size_px": [
+      720,
+      560
+    ],
+    "alpha": 1,
+    "parallax": 0,
+    "content_inset_px": [
+      85,
+      75,
+      85,
+      70
+    ]
+  },
+  "preview": {
+    "file": "preview.gif",
+    "duration_s": 6,
+    "fps": 10,
+    "size_px": [
+      480,
+      270
+    ],
+    "loop_crossfade_s": 0.6
+  }
+}
