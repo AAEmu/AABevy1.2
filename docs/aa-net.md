@@ -6125,3 +6125,33 @@ NaviTeleport391dc8c0 reach mode3 through3930c9e0. Loading-start callback390f1e80
 clears actors, but invokes mode0 only when levelInfo.GetType()==2; the type producer and
 remaining mode1/2 engine callback identities remain open. No new Fired/GCD timers or guessed
 TL replacement/reset events are introduced by the frame-clock change.
+
+### Retained TL references and movie reset correction (2026-10-18)
+
+The primary object at39afe2b8 is constructed by3916ad80 with vtable399b0a90; its embedded
+member at+8 has399b0a38. Thus3915b960 is PRIMARY virtual+4, not primary+5c.3916bbd0 registers
+the primary object with gEnv+3c movie system virtual+4. Read-only verified runtime setter
+340207a0 stores it at movie+8; movie-play3400e42b..445 obtains sequence flags through
+sequence virtual+2c and invokes listener virtual+4(sequence,flags). Resetmode2 therefore
+comes from this movie-sequence-begin callback, only first nested invocation and flags&8.
+It is not a generic world/session reset. Mode1 MainGame virtual+1e8 remains unmapped; a
+CryAction executable-section scan found no virtual+1e8 call and does not prove an event.
+
+Original ref helpers393953e0/39395440/393954a0 independently decrement304/308/30c with wrapping
+arithmetic. A no-hook Unicorn oracle executes the actual map lookup39394e70 and helpers on
+a synthetic one-node native tree: each1?0?ffffffff, root/count unchanged throughout six calls.
+The constructor primary reference becomes1 at3939a50d. Visual queue acquisitions391574a4 and
+391579ea increment308; their release paths include3915606d. Fired3939b342 increments30c after
+projectile setup;393f0b17 decrements it when projectile+2ac==2 before projectile destruction.
+These owners cannot be represented by network End/Stop alone.
+
+Physical removal3939a0e0 has one direct caller3939c785 (TL frame cleanup); bulk clear3939a2d0
+has one39171966 (reset). Actual3939a0e0/map erase executes in a second oracle: count1?0,
+root?sentinel, exact node freed, even when actor resolution returns0. External projectile/effect
+cleanup, actor resolver and allocator are explicit mocks in that oracle; tree instructions are
+original. Cleanup resolves retained caster ID FRESH at3939a17c before modifying current actor
+cast/channel/effect state. A missing/replaced actor neither proves TL removal nor preserves an
+old actor pointer. Artifacts: `timeline_reference_oracle.py`, `timeline_erase_oracle.py`, their
+`native-timeline-*-oracle-20261018.json` outputs and `native-movie-begin-runtime-20261018.txt`.
+Generic Fired production still requires full visual/projectile reference lifetime, retained-node
+admission and remaining reset caller closure; no replacement-on-Started or erase-on-End is added.
