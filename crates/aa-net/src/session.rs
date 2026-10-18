@@ -492,6 +492,7 @@ pub enum Event {
     Party(crate::party::PartyEvent),
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
+    Mate(crate::mate::MateEvent),
     Auction(crate::auction::AuctionEvent),
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
@@ -1373,6 +1374,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
+            M::Mate(e) => self.emit(Event::Mate(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
             M::Trade(e) => {
                 if let crate::trade::TradeEvent::Made(tasks) = &e {
@@ -1573,6 +1575,90 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn owned_mate_and_slave_metadata_reach_resources_before_following_points() {
+        use crate::mate::{DynamicUnitState, MateEvent, MateSpawn, SlaveState};
+        let spawn = MateSpawn {
+            tl_id: 12,
+            id: 17,
+            item_id: 0x1122334455667788,
+            user_state: 1,
+            experience: 300,
+            mileage: 5,
+            spawn_delay_time: 1000,
+            skills: [11, 0, 12, 0, 0, 0, 0, 0, 0, 13],
+        };
+        let dynamic = DynamicUnitState {
+            skills: vec![[u32::MAX, 2, 3]],
+            tags: vec![[4, 5, 0x80000000]],
+        };
+        let slave = SlaveState {
+            obj_id: 81,
+            tl_id: 9,
+            raw_type: u64::MAX,
+            dynamic: dynamic.clone(),
+            creator_name: "Someone".into(),
+            owner_obj_id: 0xf1234567,
+            db_id: 55,
+        };
+        let packets = vec![
+            MateEvent::Spawned(spawn.clone()),
+            MateEvent::State {
+                obj_id: 71,
+                dynamic: dynamic.clone(),
+            },
+            MateEvent::SlaveState(slave),
+        ];
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut batch: Vec<_> = packets.iter().cloned().map(game::ServerMsg::Mate).collect();
+        batch.push(game::ServerMsg::UnitPoints {
+            obj_id: 71,
+            hp: 123,
+            mp: 456,
+        });
+        session.game_msg(Ok(game::ServerMsg::Batch(batch))).await;
+        let mut state = crate::state::WorldState::default();
+        let mut selected = CharacterState::default();
+        selected.character.id = 42;
+        state.apply(&Event::CharacterSelected(Box::new(selected)));
+        let mut mate = crate::state::tests::unit(71);
+        mate.kind = crate::model::UnitKind::Mate {
+            tl_id: 12,
+            template_id: 100,
+            owner_id: 42,
+        };
+        state.apply(&Event::UnitSpawned(Box::new(mate)));
+        for expected in packets {
+            let event = events.try_recv().unwrap();
+            assert!(matches!(&event, Event::Mate(actual) if actual == &expected));
+            state.apply(&event);
+        }
+        let points = events.try_recv().unwrap();
+        assert!(matches!(
+            &points,
+            Event::UnitPoints {
+                obj_id: 71,
+                hp: 123,
+                mp: 456
+            }
+        ));
+        state.apply(&points);
+        let own = state.mates.own.as_ref().unwrap();
+        assert_eq!(own.spawn, spawn);
+        assert_eq!(own.obj_id, Some(71));
+        assert_eq!(own.dynamic, Some(dynamic));
+        assert_eq!(
+            (state.units.by_id[&71].hp, state.units.by_id[&71].mp),
+            (123, 456)
+        );
+        assert!(
+            !state.units.by_id.contains_key(&81),
+            "slave metadata is not a UnitSpawned or local ownership proof"
+        );
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn doodad_mutation_events_preserve_signed_data_stored_owner_faction_and_sound() {
