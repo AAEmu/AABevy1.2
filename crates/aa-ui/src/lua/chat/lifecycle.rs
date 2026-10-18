@@ -222,15 +222,7 @@ pub fn hydrate_window(lua: &Lua, widget: Id, info: &ChatWindowInfo) -> mlua::Res
     if let Ok(index) = usize::try_from(info.selected) {
         select_inner(lua, widget, index, true);
     }
-    if let Some(c) = ui(lua)
-        .tree
-        .widget_mut(widget)
-        .and_then(|w| w.chat.as_mut())
-    {
-        c.method = info.method;
-        c.whisper.clear();
-    }
-    super::super::chat_input::show_method(lua, widget);
+    super::super::chat_input::set_method(lua, widget, info.method, "");
     Ok(true)
 }
 

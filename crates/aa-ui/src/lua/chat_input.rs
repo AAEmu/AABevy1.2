@@ -27,6 +27,10 @@
 //! then empties the edit, drops the focus and hides the edit (the client's input closes after a
 //! line). A bare command before Enter (`/p`) only switches the channel. The channel stays for the
 //! next line. Without `AAUI.ChatSend` the line is dropped.
+//!
+//! Optional `AAUI.ChatMethod(raw_tab_id, method)` persists the input method before
+//! its selector display changes. The app resolves native raw-ID ownership and saves
+//! only a known row, preserving the owner's selected index. Unknown IDs still display.
 
 use mlua::{Function, Lua, Table, Value};
 
@@ -163,6 +167,10 @@ fn edit_text(lua: &Lua, edit: Id) -> String {
 /// Show the input's channel: the selector's text, the edit's whisper prefix, and the selector's
 /// `OnContentUpdated` for the scripts.
 pub(crate) fn show_method(lua: &Lua, window: Id) {
+    show_method_inner(lua, window, false);
+}
+
+fn show_method_inner(lua: &Lua, window: Id, persist: bool) {
     let Some(c) = ui(lua).tree.widget(window).and_then(|w| w.chat.clone()) else {
         return;
     };
@@ -174,9 +182,6 @@ pub(crate) fn show_method(lua: &Lua, window: Id) {
     };
     {
         let mut u = ui(lua);
-        if let Some(t) = u.tree.get_mut(c.selector).text_mut() {
-            t.text = name;
-        }
         if let Some(e) = u.tree.widget_mut(c.edit).and_then(|w| w.edit.as_mut()) {
             e.prefix = prefix;
         } else if let Some(w) = u.tree.widget_mut(c.edit) {
@@ -187,6 +192,25 @@ pub(crate) fn show_method(lua: &Lua, window: Id) {
         }
         u.tree.touch();
     }
+    if persist {
+        // Native39510390 resolves input +e70 through the application's global tab model.
+        // Save failure is ignored; display and OnContentUpdated continue unchanged.
+        let hook = lua.globals().raw_get::<Option<Table>>("AAUI").ok().flatten()
+            .and_then(|t| t.raw_get::<Option<Function>>("ChatMethod").ok().flatten());
+        if let Some(hook) = hook {
+            if let Err(error) = hook.call::<()>((c.input_tab_id, c.method)) {
+                bevy::log::warn!("aa-ui: AAUI.ChatMethod: {error}");
+            }
+            super::flush(lua);
+        }
+    }
+    {
+        let mut u = ui(lua);
+        if let Some(t) = u.tree.get_mut(c.selector).text_mut() {
+            t.text = name;
+        }
+        u.tree.touch();
+    }
     let kind = lua
         .create_string("chat_method_changed")
         .map(Value::String)
@@ -194,7 +218,7 @@ pub(crate) fn show_method(lua: &Lua, window: Id) {
     call_handler(lua, c.selector, "OnContentUpdated", vec![kind]);
 }
 
-fn set_method(lua: &Lua, window: Id, ch: i64, target: &str) {
+pub(crate) fn set_method(lua: &Lua, window: Id, ch: i64, target: &str) {
     if let Some(c) = ui(lua)
         .tree
         .widget_mut(window)
@@ -207,7 +231,7 @@ fn set_method(lua: &Lua, window: Id, ch: i64, target: &str) {
             String::new()
         };
     }
-    show_method(lua, window);
+    show_method_inner(lua, window, true);
 }
 
 /// A leading command in `text`: `(channel, whisper target, rest of the text)`. The command (and a
