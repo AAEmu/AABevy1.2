@@ -103,6 +103,8 @@ pub enum ClientMsg {
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
     StopCasting { tl: u16, plot_tl: u16, obj_id: u32 },
+    /// Exact native/lane CS055; explicit user cancellation uses reason0.
+    RemoveBuff { obj_id: u32, buff_index: u32, reason: u8 },
     /// `CSExecuteCraft`: submit the whole recipe batch once. The session validates IDs/count.
     ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
     /// `CSLootOpenBag`: open the loot of the corpse `obj_id` (`loot_all`: take everything at once; the server sends
@@ -185,6 +187,7 @@ impl ClientMsg {
             Self::SetForceAttack { .. } => cs::CSSetForceAttackPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
+            Self::RemoveBuff { .. } => cs::CSRemoveBuffPacket,
             Self::ExecuteCraft { .. } => cs::CSExecuteCraft,
             Self::LootOpenBag { .. } => cs::CSLootOpenBagPacket,
             Self::LootItem { .. } => cs::CSLootItemPacket,
@@ -280,6 +283,9 @@ impl ClientMsg {
             }
             Self::StopCasting { tl, plot_tl, obj_id } => {
                 w.u16(*tl).u16(*plot_tl).bc(*obj_id);
+            }
+            Self::RemoveBuff { obj_id, buff_index, reason } => {
+                w.bc(*obj_id).u32(*buff_index).u8(*reason);
             }
             Self::ExecuteCraft { craft_id, doodad_obj_id, count } => {
                 w.u32(*craft_id).bc(*doodad_obj_id).i32(*count);
@@ -2056,6 +2062,18 @@ mod tests {
         batch.u16(0).u16(sc::SCSetBreathPacket).u32(8);
         assert!(matches!(ServerMsg::decode_batch(&batch.finish(),3).as_slice(),
             [ServerMsg::SetBreath{breath:7},ServerMsg::DecodeFailed{..}]));
+    }
+
+    #[test]
+    fn remove_buff_native_lane_wire_golden() {
+        for (obj_id,buff_index,reason,expected) in [
+            (0x010203,0x89abcdef,0,vec![3,2,1,239,205,171,137,0]),
+            (0xffffff,0,9,vec![255,255,255,0,0,0,0,9]),
+            (1,u32::MAX,255,vec![1,0,0,255,255,255,255,255])] {
+            let packet=ClientMsg::RemoveBuff{obj_id,buff_index,reason};
+            assert_eq!(packet.opcode(),0x55);
+            assert_eq!(packet.encode_body(),expected);
+        }
     }
 
 }

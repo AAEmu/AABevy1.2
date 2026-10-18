@@ -282,6 +282,8 @@ pub enum Command {
     Ranking { character_id:u32,command:crate::RankingCommand },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
+    /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
+    RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
@@ -560,6 +562,8 @@ pub enum Event {
     TrialRequestRejected { character_id:u32,command:crate::TrialCommand,message:String },
     BountyRequested { character_id:u32,command:crate::BountyCommand },
     BountyRequestRejected { character_id:u32,command:crate::BountyCommand,message:String },
+    BuffRemovalRequested { character_id:u32, obj_id:u32, buff_index:u32 },
+    BuffRemovalRequestRejected { character_id:u32, obj_id:u32, buff_index:u32, message:String },
     JuryWaitingNumberRequested { character_id:u32 },
     JuryWaitingNumberRequestRejected { character_id:u32, message:String },
     Achievement(crate::achievement::AchievementEvent),
@@ -1085,6 +1089,19 @@ impl Session {
                     self.emit(Event::ExpeditionRequested { character_id, command });
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
+                }
+            }
+            Command::RemoveBuff { character_id, obj_id, buff_index } => {
+                let message = if self.phase != Phase::InWorld || character_id == 0 || self.selected != character_id
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != character_id)
+                    || obj_id == 0 || obj_id > 0x00ff_ffff || self.self_obj != obj_id {
+                    Some("buff cancellation belongs to an inactive character or actor")
+                } else if self.send_game(game::ClientMsg::RemoveBuff { obj_id, buff_index, reason:0 }).await {
+                    self.emit(Event::BuffRemovalRequested { character_id, obj_id, buff_index });
+                    None
+                } else { Some("buff cancellation was not written to the game connection") };
+                if let Some(message) = message {
+                    self.emit(Event::BuffRemovalRequestRejected { character_id, obj_id, buff_index, message:message.into() });
                 }
             }
             Command::Ranking{character_id,command}=>{
@@ -4742,6 +4759,37 @@ mod tests {
         s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;let n=peer.read_u16_le().await.unwrap();let mut raw=vec![0;n as usize];peer.read_exact(&mut raw).await.unwrap();let mut expected=command.opcode().to_le_bytes().to_vec();expected.extend(game::ClientMsg::Auction(command.clone()).encode_body());assert_eq!(&raw[4..],expected);assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::Requested(actual)))if actual==command));assert!(events.try_recv().is_err());
         s.game.as_mut().unwrap().shutdown().await;s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::Auction(AuctionEvent::Requested(_))));rejected|=matches!(e,Event::Auction(AuctionEvent::RequestRejected{..}));}assert!(rejected);
         s.command(Command::Auction(command)).await;assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::RequestRejected{..}))));
+    }
+
+    #[tokio::test]
+    async fn remove_buff_captures_character_actor_and_only_reports_actual_transport() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        session.phase=Phase::InWorld;session.selected=42;session.self_obj=0x010203;
+        let mut header=crate::model::CharacterState::default();header.character.id=42;session.selected_state=Some(header);
+        let request=||Command::RemoveBuff{character_id:42,obj_id:0x010203,buff_index:7};
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        for (character_id,obj_id) in [(0,0x010203),(41,0x010203),(42,0),(42,0x010204),(42,0x1000000)] {
+            session.command(Command::RemoveBuff{character_id,obj_id,buff_index:7}).await;
+            assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
+        }
+        session.selected_state.as_mut().unwrap().character.id=41;session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
+        session.selected_state.as_mut().unwrap().character.id=42;
+        session.phase=Phase::Idle;session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));session.phase=Phase::InWorld;
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        for buff_index in [0,7,u32::MAX] {
+            session.command(Command::RemoveBuff{character_id:42,obj_id:0x010203,buff_index}).await;
+            let n=peer.read_u16_le().await.unwrap();let mut frame=vec![0;n as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(&frame[4..6],&[0x55,0]);assert_eq!(&frame[6..],game::ClientMsg::RemoveBuff{obj_id:0x010203,buff_index,reason:0}.encode_body());
+            assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequested{character_id:42,obj_id:0x010203,buff_index:i})if i==buff_index));
+            assert!(events.try_recv().is_err(),"no fabricated BuffRemoved acknowledgement");
+        }
+        session.game.as_mut().unwrap().shutdown().await;session.command(request()).await;
+        let mut rejected=false;while let Ok(event)=events.try_recv(){assert!(!matches!(event,Event::BuffRemovalRequested{..}));rejected|=matches!(event,Event::BuffRemovalRequestRejected{..});}assert!(rejected);
     }
 
 }

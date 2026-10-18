@@ -121,6 +121,7 @@ opcodes! {
         CSSetForceAttackPacket = 0x04f,
         CSStartSkillPacket = 0x052,
         CSStopCastingPacket = 0x054,
+        CSRemoveBuffPacket = 0x055,
         CSSendChatMessagePacket = 0x063,
         CSInteractNPCPacket = 0x065,
         CSInteractNPCEndPacket = 0x066,
