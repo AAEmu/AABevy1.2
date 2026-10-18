@@ -397,6 +397,8 @@ pub enum Event {
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
+    /// Received local dive/surface report. No Lua event or breathing timer is synthesized.
+    UnderWater { start: bool },
     /// World-level report; raw state and timestamp bits, independent of own spawn.
     ConflictZoneState(crate::conflict::ConflictZoneState),
     ForceAttackSet { obj_id: u32, on: bool },
@@ -1476,6 +1478,7 @@ impl Session {
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
             M::SetBreath { breath } => self.emit(Event::SetBreath { breath }),
+            M::UnderWater { start } => self.emit(Event::UnderWater { start }),
             M::ConflictZoneState(state) => self.emit(Event::ConflictZoneState(state)),
             M::ForceAttackSet { obj_id, on } => self.emit(Event::ForceAttackSet { obj_id, on }),
             M::UnitInvisible { obj_id, invisible } => self.emit(Event::UnitInvisible { obj_id, invisible }),
@@ -3561,6 +3564,45 @@ mod tests {
         assert_eq!(state.combat_status.breath, Some(77));
         assert!(state.player.spawn.is_none() && state.units.by_id.is_empty());
         assert_eq!(session.self_obj, 0);
+    }
+
+    #[tokio::test]
+    async fn underwater_reports_preserve_repeats_without_synthetic_lua_or_capacity_events() {
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::UnderWater { start: false },
+                game::ServerMsg::UnderWater { start: true },
+                game::ServerMsg::UnderWater { start: true },
+                game::ServerMsg::SetBreath { breath: 12345 },
+                game::ServerMsg::UnderWater { start: false },
+                game::ServerMsg::SetBreath { breath: 777 },
+            ])))
+            .await;
+        let mut state = crate::state::WorldState::default();
+        for index in 0..6 {
+            let event = events.try_recv().unwrap();
+            match (index, &event) {
+                (0 | 4, Event::UnderWater { start: false }) => {}
+                (1 | 2, Event::UnderWater { start: true }) => {}
+                (3, Event::SetBreath { breath: 12345 }) => {}
+                (5, Event::SetBreath { breath: 777 }) => {}
+                other => panic!("wrong event order: {other:?}"),
+            }
+            state.apply(&event);
+            if index < 3 {
+                assert_eq!(state.combat_status.breath, None);
+            }
+        }
+        assert!(events.try_recv().is_err());
+        assert_eq!(state.combat_status.under_water, Some(false));
+        assert_eq!(
+            state.combat_status.breath,
+            Some(777),
+            "raw counter does not fabricate a DIVE_START"
+        );
+        assert!(state.combat_status.by_unit.is_empty() && state.player.spawn.is_none());
     }
 
 }

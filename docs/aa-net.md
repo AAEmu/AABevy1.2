@@ -2812,3 +2812,78 @@ sockets, grants or server changes were used.
 Validation: `cargo test -p aa-net --features bevy --quiet` passed 258 library tests and two
 loopback integration tests; nine lane-dependent tests stayed ignored.
 `cargo check -p aa-net --features bevy --examples --quiet` and `git diff --check` passed.
+
+
+## Local underwater reports (`SCUnderWater 0x187`)
+
+`ServerMsg::UnderWater { start: bool }` / `Event::UnderWater { start: bool }` consume exactly
+one bool, with no object/character ID or extra tail. Native factory assignment `391b3aeb` uses
+vtable `399b3d74`; body reader `397afb00` reads bool through stream slot `+0x78`. Lane
+`packets/g2c_misc.rs` writes the same single bool. Actual sender
+`systems/skills/water.rs::set_player_under_water` reports changes of the local player's
+underwater state. The lane derives that from its water/position checks, including ship-deck
+probe and surface hysteresis; aa-net does not manufacture the flag from an arbitrary Z value.
+
+`CombatStatus.under_water: Option<bool>` retains the latest local report independently of the
+raw `breath` counter. `None` is unknown, `Some(false)` is an explicitly reported surface state.
+It accepts reports even before a unit is known and does not create a unit. Repeated values leave
+resource change detection alone, but **every repeated network event is forwarded**. No timer,
+capacity, refill, dive Lua event or HP change is synthesized. A zero `SetBreath` does not end a
+dive; a surface report does not overwrite the raw breath counter. The field clears together
+with existing local CombatStatus state on `CharacterSelected`, `LeftWorld` and `Disconnected`.
+No new Unit fields, command or default capacity are needed by this receive boundary.
+
+Native `OnUnderWater` (`391dde80`, string `399b9360`) calls manager `3930b600(start)` and then
+fires **zero-argument** `DIVE_START` for true (event index `0x151`) or `DIVE_END` for false
+(`0x152`) through `39424220`, even for repeated reports. It does not test a previous cached
+boolean before dispatch. `SCSetBreath` (`391ddf30`) is a separate handler and does not emit
+these Lua events. Net forwards the two packet families separately; aa-client owns that exact
+Lua bridge and presentation controller.
+
+### Read-only native breath/capacity contract
+
+Original `x2ui/unitframe/player_breath_bar.lua` calls **`X2Player:GetBreathTime()`**, with no
+target argument, receiving `(totalTime, leftTime)`. `DIVE_START` calls ShowAll, `DIVE_END` calls
+HideAll, and `LEFT_LOADING` hides then shows if total is nonzero. OnUpdate sets the bar range
+`0..total` and its value to `left`. Registration `39499367` binds wrapper `39495d10`, which
+calls manager `3930b660` and returns total then remaining via `3905aca0`. Both numbers are
+native unsigned-u32 -> f32 -> Lua number, including f32 rounding, not integer seconds.
+
+The manager at current connection+`0x40` holds start/reference counter S at+`0xb24` and cached
+capacity C at+`0xb28`. `3930b600(true)` requires an existing current actor, then records S=now
+and C=actor attribute `0x5b` (91); false clears S, retaining the cached C. With no current
+actor the helper does not alter the timer, although its caller still dispatches the dive event.
+`3930b660` returns `(0,0)` when S is zero or there is no actor. Otherwise it re-queries current
+capacity. If capacity changed, it preserves the **elapsed fraction** by rebasing
+`S = now - trunc(((now-S) as u32 / oldC) * newC)` and records newC. Its remaining counter is
+`(C - now + S) as u32`, with total C. Native `SCSetBreath` handling calls `3930b050`, which
+separately rebases `S = now - cachedC + receivedBreath`; it does not itself prove diving.
+
+This getter contains no visible lower/upper clamp on the final arithmetic and no explicit
+zero-old-capacity division guard. These edge behaviors remain explicit; this milestone does
+not claim an independently safe native countdown or insert a guessed timer into aa-net.
+Native timer start/rebase/rescale and Lua event delivery belong to later aa-client presentation.
+
+Native mapping `3956e961..976` identifies `lung_capacity` as attribute 91. The unit getter
+`390b3a80` calls attribute component `398a0bc0`. For characters, dispatcher `398b4e80` case91
+falls through to generic `398a0d60`; table `398a11a4[91]` selects branch `398a10e5`, returning
+`0xea60` = **60,000 ms base capacity**. Outer `398a0bc0` then applies additive and percentage
+bonuses and calls final attribute-limit helper `395729f0`. Thus 60,000 is a proved native base,
+not a universal final capacity. The read-only compact database has no explicit
+`unit_attribute_limits` row91; native default limit initialization was not inferred here.
+
+The lane agrees on attribute 91 and base: `skills/stats.rs` computes
+`cwb(60000, LungCapacity) as u32`. `skills/regen.rs::breath_tick` runs each second, subtracts
+1000 while underwater and alive, then sends `SCSetBreath`; at zero it sends drowning damage
+separately. Surfacing refills its internal breath to calculated capacity and sends UnderWater
+false, without manufacturing a SetBreath refill packet. `AddBreath` updates the server's
+counter under water without an immediate counter packet; a later regular tick reports it.
+These server behaviors do not justify inferred client HP changes or a fake maximum in net.
+
+Offline tests cover true/false one-byte native bodies, truncation and DD04 tails, repeated
+reports, unknown versus explicit false, independent breath values, local lifecycle cleanup and
+session order without synthetic entry/unit/capacity/Lua events. No lane sockets were opened.
+
+Validation: `cargo test -p aa-net --features bevy --quiet` passed 261 library tests and two
+loopback integration tests; nine lane-dependent tests stayed ignored.
+`cargo check -p aa-net --features bevy --examples --quiet` and `git diff --check` passed.

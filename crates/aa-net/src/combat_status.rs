@@ -41,12 +41,15 @@ pub struct UnitCombatFlags {
 }
 
 /// Received-only flags for announced units (including the player), and the latest local breath
-/// value. Breath has no object ID or maximum on this wire and is not advanced with elapsed time.
+/// value and underwater report. Neither local report contains an object ID or maximum, and no
+/// timer or capacity is inferred.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct CombatStatus {
     pub by_unit: HashMap<u32, UnitCombatFlags>,
     pub breath: Option<u32>,
+    /// Latest local SCUnderWater report: None unknown, Some(false) explicitly surfaced.
+    pub under_water: Option<bool>,
 }
 
 impl CombatStatus {
@@ -90,6 +93,13 @@ impl CombatStatus {
                 flags.invisible = Some(*invisible);
                 true
             }
+            Event::UnderWater { start } => {
+                if self.under_water == Some(*start) {
+                    return false;
+                }
+                self.under_water = Some(*start);
+                true
+            }
             Event::SetBreath { breath } => {
                 if self.breath == Some(*breath) {
                     return false;
@@ -105,7 +115,9 @@ impl CombatStatus {
                 changed
             }
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                let changed = !self.by_unit.is_empty() || self.breath.is_some();
+                let changed = !self.by_unit.is_empty()
+                    || self.breath.is_some()
+                    || self.under_water.is_some();
                 *self = Self::default();
                 changed
             }
@@ -406,4 +418,97 @@ mod tests {
         assert_eq!(state.stats.hp, 5);
         assert_eq!(state.units.get(8).unwrap().hp, 4);
     }
+    #[test]
+    fn underwater_native_bool_frames_preserve_breath_and_following_dd04_packets() {
+        for (start, body) in [(false, vec![0]), (true, vec![1])] {
+            assert_eq!(
+                dd01(sc::SCUnderWaterPacket, &body).unwrap(),
+                ServerMsg::UnderWater { start }
+            );
+            let bytes = [u8::from(start), 0xab];
+            let mut r = Reader::new(&bytes);
+            assert_eq!(r.bool().unwrap(), start);
+            assert_eq!(r.rest(), &[0xab]);
+        }
+        assert_eq!(ServerMsg::UnderWater { start: true }.name(), "SCUnderWater");
+        assert!(dd01(sc::SCUnderWaterPacket, &[]).is_err());
+        let packets = [
+            (sc::SCUnderWaterPacket, vec![1]),
+            (sc::SCSetBreathPacket, vec![0; 4]),
+            (sc::SCUnderWaterPacket, vec![1]),
+            (sc::SCUnderWaterPacket, vec![0]),
+            (sc::SCOnOffSnowPacket, vec![1]),
+        ];
+        assert_eq!(
+            dd04(&packets).unwrap(),
+            ServerMsg::Batch(vec![
+                ServerMsg::UnderWater { start: true },
+                ServerMsg::SetBreath { breath: 0 },
+                ServerMsg::UnderWater { start: true },
+                ServerMsg::UnderWater { start: false },
+                ServerMsg::Snow(true)
+            ])
+        );
+    }
+
+    #[test]
+    fn underwater_cache_distinguishes_unknown_false_and_repeats_without_inventing_breath() {
+        let mut state = crate::state::WorldState::default();
+        assert_eq!(state.combat_status.under_water, None);
+        assert!(
+            state
+                .combat_status
+                .apply(&Event::UnderWater { start: false })
+        );
+        assert_eq!(state.combat_status.under_water, Some(false));
+        assert!(
+            !state
+                .combat_status
+                .apply(&Event::UnderWater { start: false })
+        );
+        assert!(
+            state
+                .combat_status
+                .apply(&Event::UnderWater { start: true })
+        );
+        assert_eq!(state.combat_status.under_water, Some(true));
+        assert_eq!(
+            state.combat_status.breath, None,
+            "no default capacity/refill"
+        );
+        state.apply(&Event::SetBreath { breath: 0 });
+        assert_eq!(
+            state.combat_status.under_water,
+            Some(true),
+            "zero breath does not end the dive"
+        );
+        assert!(
+            state
+                .combat_status
+                .apply(&Event::UnderWater { start: false })
+        );
+        assert_eq!(
+            state.combat_status.breath,
+            Some(0),
+            "surface report does not fabricate a refill counter"
+        );
+        assert!(state.units.by_id.is_empty() && state.player.spawn.is_none());
+        for lifecycle in [
+            Event::CharacterSelected(Box::default()),
+            Event::LeftWorld { target: 0 },
+            Event::Disconnected {
+                message: String::new(),
+            },
+        ] {
+            let mut status = CombatStatus::default();
+            status.apply(&Event::UnderWater { start: false });
+            assert!(
+                status.apply(&lifecycle),
+                "explicit false is received state to clear"
+            );
+            assert_eq!(status.under_water, None);
+            assert!(!status.apply(&lifecycle));
+        }
+    }
+
 }
