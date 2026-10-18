@@ -12,7 +12,8 @@
 //!                    then an octree: node { u32 version, f32 box[6], u32 objectsBlockSize, u8 childMask },
 //!                    objects block = repeated { u32 type, payload }, then one child node per mask bit.
 //!                    types: 1 brush (128 B), 2 vegetation (64 B), 9 decal (111 B), 13 road (63 B + 12 n),
-//!                    11 water volume (the rest of the block, see [`Water`]), 6 and 14 (rest of block, ignored).
+//!                    11 water volume (119 B + two float3 arrays), 6 voxel (compiled records skipped),
+//!                    14 distant cloud (79 B, skipped).
 //! ```
 //!
 //! Brush record (128 B, the engine's `SBrushChunk`): `f32 bbox[6]` @0, `f32 maxViewDist` @28, `u32 rndFlags` @32,
@@ -171,13 +172,14 @@ fn read_road(head: &[u8], points: &[u8]) -> Road {
     }
 }
 
-/// A water volume (object type 11, the whole objects block): rivers are chains of 4-point quads, lakes and
+/// A water volume (object type 11): rivers are chains of 4-point quads, lakes and
 /// ponds a ring of 8..30 points. Cell-local, cry space.
 ///
 /// ```text
 /// f32 bbox[6] @0 (z range = [surface - depth, surface]), f32 maxViewDist @28, u8 viewDistRatio,lodRatio @36,
 /// u32 @39, u64 editor guid @43, ... header up to @71, then 12-byte records:
 ///   (0,0,1) plane normal | (-surface, ?, ?) | (uv scale x, y, 0) | (depth, 0, 0) | polygon points (x, y, z)...
+/// u32 point counts @103 and @115 delimit the two arrays following the 119-byte fixed header.
 /// ```
 ///
 /// Lakes list their ring twice and some variants append more data after the points; the points are read while
@@ -448,38 +450,71 @@ pub fn parse_object_dat(data: &[u8]) -> Result<CellObjects, PlacementError> {
 }
 
 fn walk_node(r: &mut Reader, out: &mut CellObjects) -> Option<()> {
-    let _version = r.u32().ok()?;
+    walk_node_depth(r, out, 0)
+}
+
+fn walk_node_depth(r: &mut Reader, out: &mut CellObjects, depth: usize) -> Option<()> {
+    if depth >= 64 || r.u32().ok()? != 2 {
+        return None;
+    }
     r.skip(24).ok()?;
-    let block = r.u32().ok()? as usize;
+    let bytes = r.u32().ok()? as usize;
     let mask = r.u8().ok()?;
-    let end = r.pos().checked_add(block)?;
-    while r.pos() < end {
-        let t = r.u32().ok()?;
+    // A short object record must never consume its node's children.
+    let mut block = Reader::new(r.bytes(bytes).ok()?);
+    while block.remaining() != 0 {
+        let t = block.u32().ok()?;
         match t {
-            1 => out.brushes.push(read_brush(r.bytes(128).ok()?, Vec3::ZERO)),
-            2 => out.vegetation.push(read_vegetation(r.bytes(64).ok()?, Vec3::ZERO)),
-            9 => out.decals.push(read_decal(r.bytes(111).ok()?)),
+            1 => out.brushes.push(read_brush(block.bytes(128).ok()?, Vec3::ZERO)),
+            2 => out.vegetation.push(read_vegetation(block.bytes(64).ok()?, Vec3::ZERO)),
+            6 => skip_voxel(&mut block)?,
+            9 => out.decals.push(read_decal(block.bytes(111).ok()?)),
             13 => {
-                let head = r.bytes(63).ok()?;
+                let head = block.bytes(63).ok()?;
                 let points = u32_at(head, 39) as usize;
                 let bytes = points.checked_mul(12)?;
-                if bytes > end.checked_sub(r.pos())? {
-                    return None;
-                }
-                out.roads.push(read_road(head, r.bytes(bytes).ok()?));
+                out.roads.push(read_road(head, block.bytes(bytes).ok()?));
             }
             11 => {
-                let rest = end.checked_sub(r.pos())?;
-                out.water.extend(parse_water(r.bytes(rest).ok()?));
+                // Native 301F6AB0: 119-byte header and two counted float3 arrays.
+                let start = block.pos();
+                let head = block.bytes(119).ok()?;
+                let count = (u32_at(head, 103) as usize).checked_add(u32_at(head, 115) as usize)?;
+                let size = 119usize.checked_add(count.checked_mul(12)?)?;
+                block.seek(start).ok()?;
+                out.water.extend(parse_water(block.bytes(size).ok()?));
             }
+            // Native 301F7680 consumes this exact SDistanceCloudChunk size, even when disabled.
+            14 => block.skip(79).ok()?,
             // unknown payload size: the rest of this block is unreadable, the tree continues
-            _ => r.seek(end).ok()?,
+            _ => break,
         }
     }
-    r.seek(end).ok()?;
     for bit in 0..8 {
         if mask >> bit & 1 != 0 {
-            walk_node(r, out)?;
+            walk_node_depth(r, out, depth + 1)?;
+        }
+    }
+    Some(())
+}
+
+/// Native 301F5E30/3019D570: a version-5 voxel record, optionally followed by compiled
+/// CGF memory blocks. Do not decompress or retain them until native voxel materials/atlases
+/// are supported; consuming their exact boundaries preserves subsequent placed objects.
+fn skip_voxel(r: &mut Reader) -> Option<()> {
+    let header = r.bytes(198_775).ok()?;
+    if u32_at(header, 39) != 5 {
+        return None;
+    }
+    // SVoxelChunkVer5 begins at +39; nFlags at +28, bit5 = compiled meshes present.
+    if u32_at(header, 67) & 0x20 != 0 {
+        let count = r.u32().ok()? as usize;
+        if count > r.remaining() / 4 {
+            return None;
+        }
+        for _ in 0..count {
+            let size = r.u32().ok()? as usize;
+            r.skip(size).ok()?;
         }
     }
     Some(())
@@ -534,10 +569,10 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.roads = o.roads;
         objects.water = o.water;
     }
-    // Interior brushes are not the exterior octree's duplicate export. Keep their own table
+    // Interior placements are not the exterior octree's duplicate export. Keep their own table
     // indices until parsing succeeds, then remap once on this cell's existing placement worker.
     if let Some(interior) = read("visareas.dat").and_then(|d| parse_visareas_dat(&d).ok()) {
-        visareas::append_brushes(&mut objects, interior);
+        visareas::append_objects(&mut objects, interior);
     }
     if let Some(xml) = read("entities.xml") {
         let xml = String::from_utf8_lossy(&xml);

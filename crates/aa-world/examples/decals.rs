@@ -3,13 +3,25 @@
 //! `--straw` visits cell (14,11); `--planar` visits the Ferre decals; `--stream-check --exit-after 18`
 //! verifies that unloading removes every decal entity. Uses only the original placement/assets.
 //! `--siege` visits the 81 authored deferred decals; `--glass` adds a near translucent test pane.
+//! `--interior` visits the original visarea cave/prop dirt decals; `--off` hides decals as a control.
 
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::prelude::*;
 
 fn main() {
     let flag = |name: &str| std::env::args().any(|a| a == name);
-    let (mut pos, mut look) = if flag("--siege") {
+    let (mut pos, mut look) = if flag("--interior") {
+        let data = aa_pak::Pak::global()
+            .read("game/worlds/main_world/cells/020_008/client/visareas.dat")
+            .unwrap();
+        let objects = aa_world::placement::parse_visareas_dat(&data).unwrap();
+        let decal = &objects.decals[0];
+        let center = aa_world::coords::cell_origin(20, 8) + decal.pos;
+        (
+            center + decal.basis.z_axis.normalize() * 3.5 - decal.basis.y_axis.normalize() * 0.8,
+            center,
+        )
+    } else if flag("--siege") {
         let objects = aa_world::placement::load_cell_objects("main_world", 2, 29);
         let decal = objects
             .decals
@@ -19,7 +31,10 @@ fn main() {
         let center = aa_world::coords::cell_origin(2, 29) + decal.pos;
         (center + Vec3::new(10.0, -14.0, 12.0), center)
     } else if flag("--straw") {
-        (Vec3::new(14575.0, 11385.0, 150.0), Vec3::new(14575.5, 11391.0, 134.7))
+        (
+            Vec3::new(14575.0, 11385.0, 150.0),
+            Vec3::new(14575.5, 11391.0, 134.7),
+        )
     } else if flag("--planar") {
         let objects = aa_world::placement::load_cell_objects("main_world", 23, 10);
         let decal = objects
@@ -29,11 +44,15 @@ fn main() {
             .expect("original planar decal");
         let center = aa_world::coords::cell_origin(23, 10) + decal.pos;
         (
-            center + decal.basis.z_axis.normalize() * (decal.radius * 0.8) - decal.basis.y_axis * (decal.radius * 0.25),
+            center + decal.basis.z_axis.normalize() * (decal.radius * 0.8)
+                - decal.basis.y_axis * (decal.radius * 0.25),
             center,
         )
     } else {
-        (Vec3::new(19088.0, 8148.0, 224.0), Vec3::new(19064.0, 8172.0, 203.5))
+        (
+            Vec3::new(19088.0, 8148.0, 224.0),
+            Vec3::new(19064.0, 8172.0, 203.5),
+        )
     };
     let vector = |name: &str| -> Option<Vec3> {
         let args: Vec<String> = std::env::args().collect();
@@ -70,7 +89,8 @@ fn main() {
             move |mut commands: Commands,
                   mut meshes: ResMut<Assets<Mesh>>,
                   mut materials: ResMut<Assets<StandardMaterial>>| {
-                let transform = Transform::from_translation(cry_to_bevy(pos)).looking_at(cry_to_bevy(look), Vec3::Y);
+                let transform = Transform::from_translation(cry_to_bevy(pos))
+                    .looking_at(cry_to_bevy(look), Vec3::Y);
                 if glass {
                     commands.spawn((
                         Mesh3d(meshes.add(Rectangle::new(5.0, 3.0))),
@@ -102,16 +122,35 @@ fn main() {
                 ));
             },
         )
-        .add_systems(Update, (stats, stream_check))
+        .add_systems(Update, (stats, stream_check, decal_control))
         .run();
 }
 
-fn stats(time: Res<Time>, objects: Res<aa_world::objects::ObjectState>, names: Query<&Name>, mut elapsed: Local<f32>) {
+fn decal_control(mut decals: Query<(&Name, &mut Visibility), Added<Name>>) {
+    if !std::env::args().any(|a| a == "--off") {
+        return;
+    }
+    for (name, mut visibility) in &mut decals {
+        if matches!(
+            name.as_str(),
+            "Terrain/object decal" | "Deferred terrain/object decal"
+        ) {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+fn stats(
+    time: Res<Time>,
+    objects: Res<aa_world::objects::ObjectState>,
+    names: Query<&Name>,
+    mut elapsed: Local<f32>,
+) {
     *elapsed += time.delta_secs();
     if *elapsed > 2.0 {
         *elapsed = 0.0;
         info!(
-            "decals={} deferred={} roads={} object_parts={} models_pending={}",
+            "decals={} deferred={} roads={} object_parts={} models_pending={} models_failed={} sectors={}",
             objects.stats.decals,
             names
                 .iter()
@@ -119,7 +158,9 @@ fn stats(time: Res<Time>, objects: Res<aa_world::objects::ObjectState>, names: Q
                 .count(),
             objects.stats.roads,
             objects.stats.entities,
-            objects.stats.models_pending
+            objects.stats.models_pending,
+            objects.stats.models_failed,
+            objects.stats.sectors,
         );
     }
 }
@@ -127,11 +168,13 @@ fn stats(time: Res<Time>, objects: Res<aa_world::objects::ObjectState>, names: Q
 fn stream_check(
     time: Res<Time>,
     objects: Res<aa_world::objects::ObjectState>,
+    collision: Res<aa_world::WorldCollision>,
     names: Query<&Name>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     mut stage: Local<u8>,
 ) {
-    if !std::env::args().any(|a| a == "--stream-check") || *stage == 2 || time.elapsed_secs() < 10.0 {
+    if !std::env::args().any(|a| a == "--stream-check") || *stage == 2 || time.elapsed_secs() < 10.0
+    {
         return;
     }
     if *stage == 0
@@ -143,11 +186,17 @@ fn stream_check(
         info!("decal stream check: moved outside world");
     } else if *stage == 1 && time.elapsed_secs() > 14.0 {
         assert_eq!(objects.stats.decals, 0);
-        assert!(
-            !names
-                .iter()
-                .any(|n| matches!(n.as_str(), "Terrain/object decal" | "Deferred terrain/object decal"))
-        );
+        assert_eq!(objects.stats.sectors, 0);
+        assert_eq!(objects.stats.entities, 0);
+        assert_eq!(objects.stats.models_pending, 0);
+        assert_eq!(objects.stats.roads, 0);
+        assert_eq!(objects.stats.water_cells, 0);
+        assert_eq!(collision.stats().cells, 0);
+        assert_eq!(collision.stats().loading, 0);
+        assert!(!names.iter().any(|n| matches!(
+            n.as_str(),
+            "Terrain/object decal" | "Deferred terrain/object decal"
+        )));
         info!("decal stream check: verified no decal entities remain");
         *stage = 2;
     }

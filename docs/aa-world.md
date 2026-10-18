@@ -125,7 +125,7 @@ tiles got the stair material's untextured proxy slab (overexposed white under th
 
 Interior brushes are additional placement, not another exterior `object.dat` export.
 `placement/visareas.rs` reads their independent model/material tables and appends the
-brushes to `load_cell_objects`, remapping nonnegative indices by the existing table
+supported objects to `load_cell_objects`, remapping nonnegative indices by the existing table
 lengths. Negative native indices remain null/fallback; cell origin is applied once
 by the ordinary render/collision path. This restores rooms, walls, floors and props
 that were absent when only the exterior files were read.
@@ -155,10 +155,11 @@ for each record:
 
 All table/count/block/tree reads are bounded by their container; malformed records
 fail atomically. A 64-level defensive stack limit rejects pathological mask chains.
-The supported slice imports type-1 brushes, skips known vegetation/decal/road record
-lengths, and skips the remaining object block for unknown-sized kinds while retaining
-its child trees. It does **not** render other visarea record kinds, traverse portals
-for occlusion, apply area sky/light/fog flags or implement visarea light confinement.
+The supported slice imports brushes, vegetation, decals, roads and water through the
+existing renderers. Voxel/distant-cloud records have exact skip boundaries; unknown-sized
+kinds still end their object block while retaining child trees. It does **not** render
+voxel surfaces or distant clouds, traverse portals for occlusion, apply area sky/light/fog
+flags or implement visarea light confinement.
 Repeated instances inside an authored area are preserved. Exterior `brush.dat` versus
 `object.dat` selection is unchanged, so their duplicate export is still selected once.
 
@@ -197,6 +198,89 @@ errors and close their own windows. There is no matching original-client library
 capture under `reference/`, so absolute native appearance remains uncalibrated;
 projector falloff remains the explicit approximation described under Local lights.
 
+**Mixed interior records and native boundaries.** A bounded read-only survey of 13
+cells (28,014,280 bytes read through `aa-pak`, metadata plus one targeted CGF sample retained) covers the six
+largest main-world interior exports, main-world (18,7)/(10,14)/(20,10)/(15,15)/(9,14),
+login2 (0,1) and library (0,4). Its complete trees contain 36,076 brushes, 40 vegetation
+records, 98 decals, seven water volumes and **77 voxel records**, with no unknown-sized
+blocks after the following native boundaries were recovered:
+
+* `301F5E30` is `_LoadVoxelObject`, not a fog/light record. It requires voxel version 5
+  at +39 and consumes the **198,775-byte** `SVoxelObjectChunkVer5` header. Nested
+  `SVoxelChunkVer5` begins at +39: flags +28 (overall +67), compiled-mesh-present bit
+  `0x20`, volume `u16[32768]` +32, surface names `char[32][64]` +65568, colours +67616.
+  The object matrix is at **198727**, 48 bytes. With compiled data present, `3019D570`
+  reads `u32 blockCount`, then repeated `u32 byteCount; bytes[byteCount]`;
+  `30194B70` confirms total byte length `4 + sum(4+byteCount)`. The parser skips these
+  buffers without decompressing, copying, retaining or uploading them.
+* `301F6AB0` is `_LoadWaterVolume`: **119 fixed bytes**, then two float3 arrays whose
+  counts are at +103/+115. Even its disabled branch advances both counts. The old
+  whole-object-block assumption lost later records; the existing water parser now
+  receives exactly that bounded record.
+* `301F7680` is `_LoadDistanceCloud` and advances **79 bytes** before its enabled/quality
+  checks. Rendering that object type remains unsupported.
+
+The same checked object decoder serves exterior `object.dat` and interior trees;
+known records cannot read into children. Count multiplication, voxel blob sizes,
+water arrays and stack depth are bounded. Original six-cell regressions assert:
+
+| main-world cell | interior brushes | vegetation | decals | water |
+|---|---:|---:|---:|---:|
+| 17,8 | 2157 | 28 | 0 | 3 |
+| 8,13 | 588 | 2 | 22 | 2 |
+| 12,15 | 625 | 9 | 72 | 0 |
+| 21,12 | 289 | 0 | 0 | 2 |
+| 22,25 | 1311 | 0 | 0 | 0 |
+| 20,8 | 115 | 1 | 4 | 0 |
+
+Exact skips recover **69 additional brushes** beyond the initial brush-only slice.
+Interior decals/roads/water remap their own material table; vegetation keeps the
+native world vegetation-group index. Merge regressions compare actual source paths,
+projection/depth/basis/sort fields, positions, groups and water rings after remapping.
+No authoring transform or light value is changed. Work/lifetime remain the existing
+two placement jobs, sector/model budgets, decal receiver limits and cell unload.
+CPU fixtures prepare 18/45/4 supported decal meshes in (8,13)/(12,15)/(20,8), all
+finite and within the existing per-mesh triangle bound. Missing voxel receivers
+explain why not every authored interior decal can currently render.
+
+Voxel rendering is a concrete remaining gap, not a missing marching-cubes algorithm:
+the first surveyed compiled blob is a length-prefixed zlib stream containing a valid
+`CryTek` 0x745 CGF (2,901 vertices / 5,642 triangles). Native `301A0790` calls
+`301A0D30` for compressed memory blocks, then `30192D40`/`3019FFE0` load that CGF.
+The original `voxterrain.cfx` samples generated diffuse/normal atlases with per-atlas
+range restoration. The CGF also contains `COLORS2` and `VERT_MATS` streams, which
+`aa-cry::Model` currently does not retain. Native palette-to-atlas generation,
+surface blending, collision and render flags need their own supported path; drawing
+the mesh with guessed vertex colours, terrain UVs or a generic rock material is not
+implemented. Read-only audit outputs are under ignored `lights/visarea-*` and
+`lights/voxel-*`; the original shader is extracted under ignored `voxel/`.
+
+Area flags are a separate unresolved rendering contract. Exact `30170860` maps
+header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`
+to +73 (`bSkyOnly`), `0x20` to +75 (`bDoubleSide`), `0x40` to +77 (`bUseInIndoors`),
+`0x80` to +81 and `0x4` to +82. Bit `0x2` or an `ignoresky` name sets +79;
+`vAmbColor` +244 is copied to area +140. The packed flags supersede the legacy bool
+bytes at +256..259. Their spatial/portal visibility, ambient conversion and per-light
+receiver behavior remain unimplemented; the audit does not justify hiding the sky
+or changing global light intensity merely because a camera is inside a polygon.
+
+Mixed-record QA: **148 library tests pass**, nine existing ignored; the eight
+visarea source/remap tests and the final malicious voxel/water-count test pass,
+and all examples check. `decals --interior --no-vegetation` uses the original cell
+(20,8) first dirt decal at local Cry `(718.37158,894.16431,444.93076)`, radius 1.46,
+material `tr_decal_dirt_600a`. Inspected 1920x1080
+`shots/aa-world/decals/interior_close_{on,off}.png` show its real stone/campfire
+receiver, with only decal visibility changed for `--off`. The missing voxel cave
+floor is conspicuous in both images; this is receiver validation, not a complete
+cave or original-client appearance match. Original particles animate between runs.
+The streamed view has 84 decal meshes (70 deferred), 12 roads, 588 object parts,
+65 sectors and zero pending/failed models. Final on logs 84-150 FPS, off 108-175 FPS;
+earlier wider views log 147-175 FPS (shared GPU and simultaneous builds, not a
+controlled performance comparison). `--stream-check` moves the actual camera
+outside the world and asserts zero sectors, object parts, decals, roads, water,
+pending models and collision cells/loading jobs. `interior_unload.png` is inspected;
+all three runs exit zero, no GPU errors, and every fixture window closes.
+
 ### client/vegetation.dat, vegetation/NN_NN.dat
 
 `vegetation.dat`: `u32 version (1)`, `u32 offset[16]`, `u32 size[16]` (4 x 4 sectors of 256 m, `sx * 4 + sy`), 64 byte records:
@@ -218,8 +302,9 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 2 | vegetation, 64 B |
 | 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
-| 11 | water volume, the rest of the block |
-| 6, 14 | the rest of the block, not decoded (fog volumes / auto cubemaps, probably) |
+| 11 | water volume, 119 B + 12 times the two counts at +103/+115 |
+| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; skipped |
+| 14 | distant cloud, 79 B; skipped |
 
 Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
 63-byte header: common render-node data through byte 38, `u32 vertexCount` at 39,
@@ -1958,7 +2043,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
-  Interior visarea brushes render/collide, but portal occlusion, area sky/fog/light flags, light confinement and other interior object kinds remain unsupported.
+  Interior supported placements render/collide through the existing paths, but voxel surfaces/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).

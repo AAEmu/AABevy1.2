@@ -1,9 +1,9 @@
 //! The compiled visarea container, recovered from the 1.2 engine's 3017A020/30170860.
-//! Only brush placement is imported: portal visibility and area lighting remain separate work.
+//! Supported placements use the ordinary cell streamer; portal visibility and area lighting
+//! remain separate work. Compiled voxel/distant-cloud payloads are only skipped.
 
-use super::{CellObjects, PlacementError, read_brush};
+use super::{CellObjects, PlacementError, walk_node};
 use crate::reader::{Reader, cstr, u32_at};
-use bevy::math::Vec3;
 
 fn table(r: &mut Reader) -> Option<Vec<String>> {
     let count = r.u32().ok()? as usize;
@@ -16,12 +16,12 @@ fn table(r: &mut Reader) -> Option<Vec<String>> {
     )
 }
 
-/// Interior brush placements in cell-local Cry coordinates. The two path tables belong to
+/// Interior placements in cell-local Cry coordinates. The two path tables belong to
 /// this file, independently of `statobjs.dat` and `object.dat`. Native 301F2CA0 adds the cell
 /// origin to the serialized matrix/bounds; our ordinary brush renderer/collision does that.
 ///
-/// Area/portal/occlusion records are consumed in their serialized order. Other object kinds
-/// are skipped, with an unknown-sized kind ending its object block, never its child trees.
+/// Area/portal/occlusion records are consumed in their serialized order, using the same
+/// bounds-checked object decoder as the exterior octree. Unsupported render kinds are skipped.
 pub fn parse_visareas_dat(data: &[u8]) -> Result<CellObjects, PlacementError> {
     parse(data).ok_or(PlacementError::Malformed("visareas.dat"))
 }
@@ -57,7 +57,7 @@ fn parse(data: &[u8]) -> Option<CellObjects> {
         let bytes = r.bytes(u32_at(head, 84) as usize).ok()?;
         if bytes.len() > 4 {
             let mut tree = Reader::new(bytes);
-            walk(&mut tree, &mut out, 0)?;
+            walk_node(&mut tree, &mut out)?;
             if tree.remaining() != 0 {
                 return None;
             }
@@ -68,49 +68,25 @@ fn parse(data: &[u8]) -> Option<CellObjects> {
             ((b.model as i32) >= 0 && b.model as usize >= out.models.len())
                 || (b.material >= 0 && b.material as usize >= out.materials.len())
         })
+        || out
+            .decals
+            .iter()
+            .any(|d| d.material as usize >= out.materials.len())
+        || out
+            .roads
+            .iter()
+            .any(|d| d.material as usize >= out.materials.len())
+        || out
+            .water
+            .iter()
+            .any(|d| d.material as usize >= out.materials.len())
     {
         return None;
     }
     Some(out)
 }
 
-fn walk(r: &mut Reader, out: &mut CellObjects, depth: usize) -> Option<()> {
-    // A malformed mask chain cannot exhaust the worker's stack. Real cell trees are shallow;
-    // this is a resource guard, not an authored visibility or geometry limit.
-    if depth >= 64 || r.u32().ok()? != 2 {
-        return None;
-    }
-    r.skip(24).ok()?;
-    let block_bytes = r.u32().ok()? as usize;
-    let mask = r.u8().ok()?;
-    let mut block = Reader::new(r.bytes(block_bytes).ok()?);
-    while block.remaining() != 0 {
-        match block.u32().ok()? {
-            1 => out
-                .brushes
-                .push(read_brush(block.bytes(128).ok()?, Vec3::ZERO)),
-            2 => block.skip(64).ok()?,
-            9 => block.skip(111).ok()?,
-            13 => {
-                let road = block.bytes(63).ok()?;
-                block
-                    .skip((u32_at(road, 39) as usize).checked_mul(12)?)
-                    .ok()?;
-            }
-            // These records have no recovered common byte-size field. In particular water
-            // is variable-sized. Keep the next octree child independent of this block.
-            _ => break,
-        }
-    }
-    for bit in 0..8 {
-        if mask >> bit & 1 != 0 {
-            walk(r, out, depth + 1)?;
-        }
-    }
-    Some(())
-}
-
-pub(super) fn append_brushes(out: &mut CellObjects, mut interior: CellObjects) {
+pub(super) fn append_objects(out: &mut CellObjects, mut interior: CellObjects) {
     let model_base = out.models.len() as u32;
     let material_base = out.materials.len() as i32;
     for brush in &mut interior.brushes {
@@ -122,17 +98,31 @@ pub(super) fn append_brushes(out: &mut CellObjects, mut interior: CellObjects) {
             brush.material += material_base;
         }
     }
+    for decal in &mut interior.decals {
+        decal.material += material_base as u32;
+    }
+    for road in &mut interior.roads {
+        road.material += material_base as u32;
+    }
+    for water in &mut interior.water {
+        water.material += material_base as u32;
+    }
     // Preserve authored instances, including byte-identical repeats within one area. Native
     // 301F8420 constructs each brush; neither an exterior fallback nor a second file copy
     // is loaded here. Model/texture caches still share identical paths after this remap.
     out.models.extend(interior.models);
     out.materials.extend(interior.materials);
     out.brushes.extend(interior.brushes);
+    out.vegetation.extend(interior.vegetation);
+    out.decals.extend(interior.decals);
+    out.roads.extend(interior.roads);
+    out.water.extend(interior.water);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::math::Vec3;
 
     fn tables() -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -197,6 +187,206 @@ mod tests {
         bytes
     }
 
+    fn voxel(compiled: bool) -> Vec<u8> {
+        let mut bytes = vec![0; 4 + 198_775];
+        bytes[..4].copy_from_slice(&6u32.to_le_bytes());
+        bytes[43..47].copy_from_slice(&5u32.to_le_bytes());
+        if compiled {
+            bytes[71..75].copy_from_slice(&0x20u32.to_le_bytes());
+            bytes.extend(2u32.to_le_bytes());
+            for blob in [&b"CryTek fixture"[..], &b"compressed fixture"[..]] {
+                bytes.extend((blob.len() as u32).to_le_bytes());
+                bytes.extend(blob);
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn native_voxel_and_cloud_boundaries_preserve_later_brushes_and_children() {
+        for compiled in [false, true] {
+            let mut block = voxel(compiled);
+            block.extend(14u32.to_le_bytes());
+            block.extend([0; 79]);
+            block.extend(brush(0));
+            let bytes = file(&[record(2, &node(&block, &node(&brush(-1), &[])))]);
+            assert_eq!(parse_visareas_dat(&bytes).unwrap().brushes.len(), 2);
+            // The exterior tree shares this decoder, not another whole-block skip.
+            let mut exterior = tables();
+            exterior.extend(node(&block, &[]));
+            assert_eq!(
+                super::super::parse_object_dat(&exterior)
+                    .unwrap()
+                    .brushes
+                    .len(),
+                1
+            );
+        }
+        let mut truncated = voxel(true);
+        truncated.truncate(truncated.len() - 1);
+        assert!(
+            parse_visareas_dat(&file(&[record(
+                2,
+                &node(&truncated, &node(&brush(0), &[]))
+            )]))
+            .is_err()
+        );
+        let mut bad_count = voxel(true);
+        bad_count[198_779..198_783].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(parse_visareas_dat(&file(&[record(2, &node(&bad_count, &[]))])).is_err());
+        for count_offset in [103, 115] {
+            let mut water = vec![0; 123];
+            water[..4].copy_from_slice(&11u32.to_le_bytes());
+            water[4 + count_offset..8 + count_offset].copy_from_slice(&u32::MAX.to_le_bytes());
+            // The next child is valid but cannot be borrowed as water's claimed point array.
+            assert!(
+                parse_visareas_dat(&file(&[record(2, &node(&water, &node(&brush(0), &[])))]))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn supported_interior_record_tables_remap_without_changing_projection_or_group() {
+        let mut block = Vec::new();
+        let mut decal = vec![0; 111];
+        decal[107..111].copy_from_slice(&0x1100_0000u32.to_le_bytes());
+        block.extend(9u32.to_le_bytes());
+        block.extend(decal);
+        let mut veg = vec![0; 64];
+        veg[55..57].copy_from_slice(&7u16.to_le_bytes());
+        veg[39..43].copy_from_slice(&32.0f32.to_le_bytes());
+        block.extend(2u32.to_le_bytes());
+        block.extend(veg);
+        let mut road = vec![0; 63];
+        road[59..63].copy_from_slice(&0x1200_0000u32.to_le_bytes());
+        block.extend(13u32.to_le_bytes());
+        block.extend(road);
+        let mut water = vec![0; 119];
+        water[12..24].copy_from_slice(
+            &[2.0f32, 2.0, 2.0]
+                .into_iter()
+                .flat_map(f32::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        water[79..83].copy_from_slice(&1.0f32.to_le_bytes());
+        water[83..87].copy_from_slice(&(-2.0f32).to_le_bytes());
+        water[103..107].copy_from_slice(&3u32.to_le_bytes());
+        water[107..111].copy_from_slice(&4.0f32.to_le_bytes());
+        for p in [[0.0f32, 0.0, 2.0], [2.0, 0.0, 2.0], [0.0, 2.0, 2.0]] {
+            water.extend(p.into_iter().flat_map(f32::to_le_bytes));
+        }
+        block.extend(11u32.to_le_bytes());
+        block.extend(water);
+        block.extend(brush(0));
+        let source = parse_visareas_dat(&file(&[record(2, &node(&block, &[]))])).unwrap();
+        assert_eq!(
+            (
+                source.decals.len(),
+                source.vegetation.len(),
+                source.roads.len(),
+                source.water.len(),
+                source.brushes.len()
+            ),
+            (1, 1, 1, 1, 1)
+        );
+        let mut out = CellObjects {
+            materials: vec!["outside".into(), "other".into()],
+            ..Default::default()
+        };
+        append_objects(&mut out, source);
+        assert_eq!(
+            (
+                out.decals[0].material,
+                out.roads[0].material,
+                out.water[0].material
+            ),
+            (2, 2, 2)
+        );
+        assert_eq!(
+            (out.decals[0].sort_priority, out.roads[0].sort_priority),
+            (17, 18)
+        );
+        assert_eq!(out.vegetation[0].group, 7);
+        assert_eq!(out.vegetation[0].pos, Vec3::new(32.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn original_mixed_voxel_cells_retain_records_after_compiled_meshes() {
+        if !crate::pak_available() {
+            return;
+        }
+        for (x, y, brushes, vegetation, decals, water) in [
+            (17, 8, 2157, 28, 0, 3),
+            (8, 13, 588, 2, 22, 2),
+            (12, 15, 625, 9, 72, 0),
+            (21, 12, 289, 0, 0, 2),
+            (22, 25, 1311, 0, 0, 0),
+            (20, 8, 115, 1, 4, 0),
+        ] {
+            let path = format!(
+                "{}/client/visareas.dat",
+                crate::world::cell_dir("main_world", x, y)
+            );
+            let data = aa_pak::Pak::global().read(&path).unwrap();
+            let source = parse_visareas_dat(&data).unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(
+                (
+                    source.brushes.len(),
+                    source.vegetation.len(),
+                    source.decals.len(),
+                    source.water.len()
+                ),
+                (brushes, vegetation, decals, water),
+                "{path}"
+            );
+            let merged = super::super::load_cell_objects("main_world", x, y);
+            let tail = &merged.decals[merged.decals.len() - source.decals.len()..];
+            for (a, b) in tail.iter().zip(&source.decals) {
+                assert_eq!(
+                    merged.materials[a.material as usize],
+                    source.materials[b.material as usize]
+                );
+                assert_eq!(
+                    (
+                        a.pos,
+                        a.basis,
+                        a.projection,
+                        a.deferred,
+                        a.sort_priority,
+                        a.depth
+                    ),
+                    (
+                        b.pos,
+                        b.basis,
+                        b.projection,
+                        b.deferred,
+                        b.sort_priority,
+                        b.depth
+                    )
+                );
+            }
+            let tail = &merged.vegetation[merged.vegetation.len() - source.vegetation.len()..];
+            for (a, b) in tail.iter().zip(&source.vegetation) {
+                assert_eq!(
+                    (a.pos, a.group, a.scale, a.angle_z),
+                    (b.pos, b.group, b.scale, b.angle_z)
+                );
+            }
+            let tail = &merged.water[merged.water.len() - source.water.len()..];
+            for (a, b) in tail.iter().zip(&source.water) {
+                assert_eq!(
+                    merged.materials[a.material as usize],
+                    source.materials[b.material as usize]
+                );
+                assert_eq!(
+                    (a.surface, a.depth, &a.points),
+                    (b.surface, b.depth, &b.points)
+                );
+            }
+        }
+    }
+
     #[test]
     fn separate_tables_remap_without_touching_exterior_or_double_cell_offset() {
         let source = file(&[
@@ -209,7 +399,7 @@ mod tests {
             materials: vec!["outside".into(), "other".into()],
             ..Default::default()
         };
-        append_brushes(&mut out, interior);
+        append_objects(&mut out, interior);
         assert_eq!(out.models, ["outside.cgf", "room.cgf"]);
         assert_eq!(out.materials, ["outside", "other", "room_floor"]);
         assert_eq!(out.brushes[0].model, 1);
@@ -223,7 +413,7 @@ mod tests {
     #[test]
     fn object_blocks_cannot_consume_children_and_unknown_kinds_keep_children() {
         let child = node(&brush(0), &[]);
-        let unknown = node(&[6, 0, 0, 0, 1, 2, 3], &child);
+        let unknown = node(&[127, 0, 0, 0, 1, 2, 3], &child);
         assert_eq!(
             parse_visareas_dat(&file(&[record(2, &unknown)]))
                 .unwrap()
@@ -271,7 +461,7 @@ mod tests {
             models: vec!["outside.cgf".into()],
             ..Default::default()
         };
-        append_brushes(&mut out, null_model);
+        append_objects(&mut out, null_model);
         assert_eq!(out.brushes[0].model, u32::MAX);
     }
 
