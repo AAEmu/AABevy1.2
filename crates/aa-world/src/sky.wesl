@@ -104,6 +104,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let disc = smoothstep(0.99985, 0.99995, mu);
     col = col + sky.sun_color.rgb * sky.sun_color.w * disc * sky.sun_dir.w;
 
+    // Native 380C3E40 adds the atmosphere after stars/moons; the alpha Sky box
+    // is dispatched later by 38179EB0. Keep the existing combined RGB exactly,
+    // and output its box opacity: ONE/INV_SRC_ALPHA gives G*(1-A)+box*A+C*(1-A).
+    var box_alpha = 0.0;
     // sky box textures
     if h > 0.0 && sky.box_params.w > 0.5 {
         let c = sky.box_params.y;
@@ -118,7 +122,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let a = t.a * sky.box_sky.w * pow(opacity, sky.box_params.x);
         // faint near the horizon where the haze takes over
         let fade = smoothstep(0.0, 0.08, h);
-        col = mix(col, t.rgb * shade, clamp(a * fade, 0.0, 1.0));
+        box_alpha = clamp(a * fade, 0.0, 1.0);
+        col = mix(col, t.rgb * shade, box_alpha);
     }
-    return vec4<f32>(col, 1.0);
+    return vec4<f32>(col, box_alpha);
 }

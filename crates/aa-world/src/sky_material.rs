@@ -1,4 +1,5 @@
-//! The sky dome material (`sky.wesl`) and the zone's sky box.
+//! Sky background, late atmosphere composition (`sky.wesl`) and the zone's sky box.
+//! `SkyMaterial` retains the environment inputs; [`composite`] draws them after the celestial layers.
 //!
 //! A zone's `env.xml` names a `SkyBoxMaterial` (`Materials/sky/sky_solzreed_cbt1`): a `Sky` shader material whose
 //! diffuse map is `box_12.dds`; its siblings `box_34.dds` and `box_5.dds` complete a five sided box. Layout (found
@@ -15,8 +16,11 @@ use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, Shade
 use bevy::shader::ShaderRef;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 
+#[path = "sky_composite.rs"]
+pub mod composite;
+
 /// Uniform of `sky.wesl`.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct SkyParams {
     pub horizon: Vec4,
     pub zenith: Vec4,
@@ -61,8 +65,12 @@ pub struct SkyMaterial {
 }
 
 impl Material for SkyMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://aa_world/sky_background.wesl".into()
+    }
+
     fn fragment_shader() -> ShaderRef {
-        "embedded://aa_world/sky.wesl".into()
+        "embedded://aa_world/sky_background.wesl".into()
     }
 
     fn enable_prepass() -> bool {
@@ -84,6 +92,7 @@ impl Material for SkyMaterial {
         // A sky background must not fill depth: the catalogue stars are drawn at the far plane.
         if let Some(depth) = &mut descriptor.depth_stencil {
             depth.depth_write_enabled = Some(false);
+            depth.depth_compare = Some(bevy::render::render_resource::CompareFunction::GreaterEqual);
         }
         Ok(())
     }
@@ -91,7 +100,15 @@ impl Material for SkyMaterial {
 
 pub(crate) fn build(app: &mut App) {
     embedded_asset!(app, "sky.wesl");
+    embedded_asset!(app, "sky_background.wesl");
     app.add_plugins(MaterialPlugin::<SkyMaterial>::default());
+    composite::build(app);
+}
+
+/// Sky background/composition materials, also usable by bounded renderer fixtures.
+pub struct SkyMaterialPlugin;
+impl Plugin for SkyMaterialPlugin {
+    fn build(&self, app: &mut App) { build(app); }
 }
 
 /// A zone's sky box: the three textures and the `Sky` material parameters.

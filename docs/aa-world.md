@@ -2230,6 +2230,131 @@ pane in the existing moon harness. `night/sky_glass_before.png` shows untinted d
 errors). The rangefinder regression passes; native relative sky order is preserved. The later night-direction capture
 `night/moons_light.png` was also inspected (171-206 FPS). All capture windows close automatically.
 
+**Daytime Moon / atmosphere composition**: the black primary disc observed in
+`terrain_detail/forest.png` was a pass-order error, not a missing texture or an authored
+daytime alpha fade. Main-world `env.xml` uses `big_moon_df.dds` (512 square, original
+centre RGBA 214/182/140/255) and `small_moon_df.dds` (256 square, centre 29/55/46/255).
+`x2moon.cfx` uses straight SRC_ALPHA / ONE_MINUS_SRC_ALPHA; its alpha is the maximum
+of texture alpha and the squared corona ratio, independently of Moon RGB. The port's
+Moon shader already matches that contract. At the forest camera, dominant zone **140**,
+hour 10 maps to spline t **0.462784912**. Executing the original x86 spline routines
+returns Moon multiplier **-0.212660789**, clamped to zero by the native variable limits;
+inner/outer corona multipliers are 0.040900636 / 0.013520208. A nearly black opaque disc
+therefore correctly occludes catalogue stars, but must not replace the later atmosphere.
+An earlier separate zone-129 oracle also clamps RGB/multiplier to zero; it is not this
+camera's containing zone. The exact forest oracle is ignored `night/moon-forest-colour-oracle.json`.
+
+Native **380C3E40** draws stars, then **380BDAC0** moons, then the HDR atmosphere
+mesh. At **380C4451** it ORs render state **0x22**. This is source-closed ONE / ONE:
+**38213FE0** registers token ONE at index 0x135; source translator **38211310** returns
+2 and destination translator **38211430** returns 0x20 for that token. The original
+`skyhdr.cfx` contributes scattering plus its night gradient after the Moon draw.
+The zone `Sky` alpha box follows that atmosphere. Its producer **30150D40 / 3014CF50**
+initially submits SkyHDR as GENERAL2/group1 and the zone box as GENERAL2/group0;
+submission order alone is insufficient. **38239570** marks technique +20 with 0x40000
+when every pass has `RenderState & 0x800FF != 0`. The original `sky.cfx` alpha pass
+qualifies, while unblended SkyHDR does not. **38178CD0** returns batch flags 3 for this
+alpha technique; **38179EB0** moves GENERAL2 to TRANSPARENT7. **380D2A00** processes
+the unblended GENERAL/HDR draws before **380D6AF0** dispatches TRANSP_BW list7/group0.
+Thus the source-backed order is **stars → moons → additive atmosphere → alpha baked box**.
+These draws precede water list 8. Distant cloud sprites are a separate boundary:
+**300B4410 / 300B4D07** calls **301121C0** with list 6 and a computed water-half flag;
+**380D6AF0** draws group 0 before water and group 1 after it. The current distant
+`CloudMaterial` remains after water; the native half split is not implemented.
+Proof exports: ignored `night/moon-native-order.txt`, `moon-blend-values.txt`,
+`moon-sky-batch.txt`, `moon-sky-flags.txt`, `moon-renderer-table.txt`,
+`moon-sky-relist.txt`, `moon-sky-drawphase.txt` and `moon-sky-submit-asm.txt`.
+
+The existing `SkyMaterial` now supplies an opaque black far-depth background and
+continues to receive the same environment parameters and texture handles. One child
+draw/material (`sky_material::composite::SkyComposite`) performs the late composition.
+Let G be the unchanged calibrated gradient/sun RGB, T the unchanged box RGB and A its
+unchanged opacity. `sky.wesl` still computes **B = mix(G,T,A)**; it now returns alpha A.
+ONE / INV_SRC_ALPHA blending gives **B + celestial*(1-A)**, exactly equivalent to
+adding G to the celestial layers and then alpha-blending T over the result. With no
+celestial contribution, RGB is unchanged. The child sorts after the at-origin moons
+and before distant cloud sprites / world glass. Both sky draws use native far-plane
+depth (native z=w, reverse-Z z=0), no depth writes, and retain opaque receiver occlusion.
+There is no Moon-colour/alpha change or new brightness calibration. All existing
+gradient, sun, skybox RGB and opacity calculations remain intact; `sky.rs` is untouched.
+
+The composition material reuses its source mesh/transform/visibility, render layers
+and texture handles;
+there are no duplicate meshes, textures, workers or world-wide searches. Production
+has one source dome / one child / one late material. Updates compare the bounded
+source values; changing source parameters or material handles updates that same late
+material. Parent removal, source-marker/handle loss or missing source asset removes
+the child and its material. Focused regressions cover parameter/material rebinding,
+parent cleanup, native blend algebra and Bevy's real sort keys at positive/negative
+world positions and four view bearings. `SkyMaterialPlugin` exposes the same setup
+to the standalone fixture; no client integration change is required.
+
+The celestial layers and composition draw now use a narrow early pass after opaque
+receivers and before Bevy's transmissive pass. This matters because
+`WaterMaterial::reads_view_transmission_texture()` requests the colour copy made
+before the ordinary transparent phase. Leaving the sky there would make that copy
+black even though the final window sky looked correct. `SkyPass` tags only catalogue
+stars, moons and the composition child, and requires `NoAutomaticBatching`. The
+render adapter selects by the extracted `MainEntity` using a small reused set:
+Bevy 0.20 PBR phase items carry `(Entity::PLACEHOLDER, MainEntity)`, not the extracted
+render ID. It copies their already prepared `Transparent3d` items into a per-view
+phase, preserving GPU instance ranges, dynamic offsets and indexed state. It suppresses
+those ranges in the later phase and restores them before the following queue/batching
+step; it does not change the shared GPU buffers or copy any extra textures. Draws use
+the original view colour/depth attachments and viewport. Bevy's existing per-view
+visibility/layer filtering is retained; this adds no portal-containment approximation.
+Removed views discard their retained phase. A four-frame/two-view regression verifies
+the actual placeholder/main-ID keys, range restoration, foreground exclusion, prepared
+offsets, marker retirement and view
+removal. Source-layer changes also update the child without allocating another material.
+Water SSR requires a nonzero scene-depth hit, so far-depth sky is not an SSR hit;
+the existing analytic/cubemap sky fallback remains unchanged.
+
+`cargo run -p aa-world --example sky_composite -- --shot shots/aa-world/sky_composite/numeric.png`
+uses the production sky materials and shader over a deliberately nonblack clear colour.
+Twelve independent CPU/GPU cases cover empty skies, a zero-RGB opaque Moon hiding stars,
+lit and overlapping Moons, box opacity 0/.5/1, physical foreground glass and an opaque
+depth receiver. All cases agree within one display value. `--world` frames original
+cell 12,14 at Cry camera (12842.47,14535.70,172.27849), target
+(12812.47,14575.70,158.27849), hour 10; `--night` changes only the hour to zero.
+`--unload-check` removes the source dome at 16 seconds and verifies every added child
+and material is gone after 19 seconds. The original cell remains loaded: sky resources
+have a dome/world lifetime, not a terrain-cell lifetime. The day capture's ground rows
+400..1080 are byte-identical to `terrain_detail/forest.png`; the former disc centre
+changes from 9/9/9 to 208/233/235. Captures and limits
+below retain the existing atmosphere/scattering approximation; no matching native-client
+camera PNG is available, so this establishes native pass semantics, not fitted sky colours.
+
+`--transmission` adds twelve depth-writing capture receivers and enables the camera's
+`ScreenSpaceTransmission`; its shader samples the real `ViewTransmissionTexture`.
+All twelve cases retain the same CPU result, within one display value. The render-side
+check confirms **33 tagged / 33 queued / 33 suppressed** celestial/composition items,
+a live transmission texture and twelve capture items. `--transmission --late-control`
+deliberately removes `SkyPass` before extraction: the copy becomes black while the
+foreground glass/opaque controls survive, and all twelve negative-control expectations
+pass. `--transmission --two-views` repeats the real copy through two physical viewports;
+all **24** CPU/GPU checks pass. The control shader distinguishes its capture material
+explicitly because Bevy's transmission shader definition applies to the entire view.
+
+Final validation: **197 library tests passed, 9 existing tests ignored**, all-example
+check passed, and `sky_composite`, `moons` and `water_motion` rebuilt. The original
+zone-133 Moon and behind-origin glass captures were inspected again through the early
+pass; their RGB differs by at most one display value from the previous composition
+capture. The original pond capture and its real cell-unload assertion passed; the
+sky source/child/material cleanup checks also passed for one original dome and twelve
+numeric sources. All capture processes closed with no shader/validation errors. The
+behind-origin scene retains the existing unsupported non-cube water environment-map
+warning for `textures/cubemaps/fleettest.dds`. Captures are under
+`shots/aa-world/sky_composite/`: `numeric`, `transmission`,
+`late_control`, `two_views`, `day`, `night`, `unload`, `numeric_unload`, `moons_night`,
+`moons_glass`, `pond` and `pond_unload`. Last-four-sample FPS ranges under concurrent
+shared builds: direct controls **230-318**, transmission **262-279**, dual view
+**184-227**, original day **185-215**, night **221-252**, visible Moons **191-262**,
+glass **222-246**, pond **117-144**. These are shared-load capture measurements, not
+an isolated performance comparison. The native cloud water-half split, native full
+atmospheric scattering and the existing water reflection/falloff approximations remain
+outside this slice; no matching native-client camera capture was available for fitting.
+
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
 `CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
 `T(0, 0, -sin axis) x Rz((hour + 12) / 24 turn) x Rx(latitude - 90) x Ry(-rotation)` are multiplied and inverted and the point (0, 1, 0) is
