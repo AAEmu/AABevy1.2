@@ -187,3 +187,27 @@ full `resolve`.
 * Name validation is the client's (2-18 letters and digits in this build, server reasons 3, 4, 5 for
   the rest); the protocol has no separate name check.
 * Race / gender stay Nuian male on entering the screen (the real client does too), not the last pick.
+
+## Authored facial integration (2026-10-17)
+
+Character select/create `stage3d::spawn_subject` and the in-world local player's
+`spawn_with_locomotion` now opt into aa-anim's verified facial overlays. Login and direct-entry
+plugin paths each ensure FacialPlugin is present once. Matching CAL facial entries follow
+the selected CAF's clock, including idle changes; customization rebuilding still uses the
+same preview cache and original assembled character. Unproved head mappings remain neutral
+with diagnostics. Automatic voice lip sync, facial bone controllers, expression normal/tangent
+deformation and remote-unit opt-in remain separate gaps; see aa-anim's compatibility evidence.
+
+`cargo build -p aa-client --example client --example facial_client` passed. The inspected
+`shots/hud/sol61-facial/client-paths.png` renders through both actual client spawn helpers:
+stage open at0.7s and local-player blink at its authored1.10122s peak. The harness asserts both
+resolve the original FSQ, remain on the body clock and deliver blink weight1 to GPU morphs.
+It measured222-237FPS before capture,203FPS during capture, and exited normally. This is a
+two-character isolated render with no network or streamed world, not a live gameplay claim.
+
+The refreshed playable copy `target/debug/aa-client-play.exe` includes expansion and the
+same-batch/deferred breath correction, SHA256
+`15D057BD68E48B1FC25D659BFB33D0B1127C09A615F54EB86CA3F2CAB4FF0B3E`.
+Its inspected `shots/hud/sol61-facial/world-select.png` shows the live Lane-bevy list;
+334-423FPS, zero script errors, automatic exit. Game-session validation remains constrained
+by the existing lane stall; no server process was restarted.

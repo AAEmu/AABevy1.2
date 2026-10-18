@@ -38,7 +38,7 @@ pub(crate) mod enter;
 mod flow;
 mod idle;
 mod mount;
-mod player;
+pub(crate) mod player;
 mod prepare;
 mod prewarm;
 mod remote;
@@ -71,6 +71,9 @@ impl Plugin for InGamePlugin {
         }
         if !app.is_plugin_added::<AnimPlugin>() {
             app.add_plugins(AnimPlugin);
+        }
+        if !app.is_plugin_added::<aa_anim::facial::FacialPlugin>() {
+            app.add_plugins(aa_anim::facial::FacialPlugin);
         }
         if !app.is_plugin_added::<AaWorldPlugin>() {
             app.add_plugins(AaWorldPlugin::new(WORLD));

@@ -148,6 +148,9 @@ impl Plugin for LoginPlugin {
         if !app.is_plugin_added::<aa_anim::AnimPlugin>() {
             app.add_plugins(aa_anim::AnimPlugin);
         }
+        if !app.is_plugin_added::<aa_anim::facial::FacialPlugin>() {
+            app.add_plugins(aa_anim::facial::FacialPlugin);
+        }
         app.add_plugins(aa_ui::UiPlugin { config: Some(host::ui_config()) })
             .insert_resource(args)
             .insert_resource(Credentials::from_args())

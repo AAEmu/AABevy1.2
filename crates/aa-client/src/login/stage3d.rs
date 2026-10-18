@@ -31,7 +31,7 @@
 //! // OnExit: commands.entity(stage.root).despawn();
 //! ```
 
-use aa_anim::{Animator, CharacterAssets, ClipLibrary, Gender, Race, spawn_character};
+use aa_anim::{Animator, CharacterAssets, ClipLibrary, Gender, Race, spawn_character_with_facial};
 use aa_cry::scene::CryAssets;
 use aa_cry::stage::{StageLighting, login_color_grading};
 use bevy::camera::visibility::RenderLayers;
@@ -300,7 +300,7 @@ pub fn spawn_subject(
     stage_root: Entity,
 ) -> Option<Entity> {
     let name = assets.desc.race;
-    match spawn_character(commands, cry, clips, assets, slot.transform()) {
+    match spawn_character_with_facial(commands, cry, clips, assets, slot.transform()) {
         Ok(e) => {
             commands.entity(e).insert((StageSubject, RenderLayers::layer(STAGE_LAYER), ChildOf(stage_root)));
             Some(e)
