@@ -5,6 +5,7 @@
 //! Neither channel folders nor the editor's selected/expanded flags affect playback.
 
 mod curve;
+mod remap;
 mod runtime;
 
 use std::collections::HashMap;
@@ -364,26 +365,14 @@ mod tests {
                 let face = assets.parts.iter().find(|p| p.kind == crate::PartKind::Face).unwrap();
                 let path = face.path.replace("_face01.chr", "_face00.chr");
                 let neutral = aa_cry::Model::load(&face.path).unwrap();
-                let expected = !matches!(
-                    (race, gender),
-                    (crate::Race::Hariharan, crate::Gender::Female) | (crate::Race::Ferre, _)
-                );
-                let set = match runtime::expression_set(&face.path, &neutral) {
-                    Ok(set) => {
-                        assert!(expected, "newly supported {race:?} {gender:?}: update coverage");
-                        supported += 1;
-                        set
-                    }
-                    Err(error) => {
-                        assert!(!expected, "{race:?} {gender:?}: {error}");
-                        continue;
-                    }
-                };
+                let set = remap::expression_set(&face.path, &neutral).unwrap_or_else(|e| panic!("{race:?} {gender:?}: {e}"));
+                supported += 1;
+                assert_eq!(set.targets.len(), if race == crate::Race::Ferre { 33 } else { 28 });
                 assert!(set.find("eye_close_l").is_some(), "{path}");
                 assert!(set.find("eye_close_r").is_some(), "{path}");
                 assert!(set.find("m_a").is_some(), "{path}");
             }
         }
-        assert_eq!(supported, 5);
+        assert_eq!(supported, 8);
     }
 }
