@@ -199,7 +199,7 @@ fn expected(c: &Control, index: usize, changed: bool) -> Vec3 {
         && !(changed && flag("--lose-ocean"));
     // Native deferred diffuse is already on the opaque receiver. Forced-late
     // overlays miss the copy and fail depth behind the diagnostic receiver.
-    let scene = if (flag("--decal-control") || flag("--road-control")) && !flag("--late-decal-control") {
+    let scene = if (flag("--decal-control") || flag("--road-control") || flag("--forward-control")) && !flag("--late-decal-control") {
         BACK.lerp(DECAL, 0.6)
     } else {
         BACK
@@ -281,18 +281,20 @@ fn setup(
         Transform::from_xyz(0.0, height, c.wall),
     ));
     let capture = captures.add(CaptureMaterial { color: Vec4::ZERO });
-    if flag("--decal-control") || flag("--road-control") {
+    if flag("--decal-control") || flag("--road-control") || flag("--forward-control") {
         let mut decal = commands.spawn((
             Mesh3d(meshes.add(Rectangle::new(200.0, 200.0))),
             MeshMaterial3d(overlays.add(OverlayMaterial {
                 color: DECAL.extend(0.6),
-                road: flag("--road-control"),
+                road: flag("--road-control") || flag("--forward-control"),
             })),
             Transform::from_xyz(0.0, height, c.wall + 0.01),
         ));
         if !flag("--late-decal-control") {
             if flag("--road-control") {
                 decal.insert(aa_world::sky_material::composite::RoadSurfacePass);
+            } else if flag("--forward-control") {
+                decal.insert(aa_world::sky_material::composite::ForwardDecalPass);
             } else {
                 decal.insert(aa_world::sky_material::composite::DeferredDecalPass);
             }

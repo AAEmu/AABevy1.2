@@ -555,6 +555,7 @@ pub fn stream_objects(
         let mut entities = Vec::new();
         for decal in decals {
             let deferred = decal.deferred.is_some();
+            let forward = decal.early_forward_overlay();
             let Some(material) = decal.material(&mut cry, &mut road_materials) else { continue };
             let end = decal.distance.min(cfg.brush_distance).max(0.0) + decal.radius;
             let mut entity = commands.spawn((
@@ -566,6 +567,7 @@ pub fn stream_objects(
                 NotShadowCaster,
             ));
             if deferred { entity.insert(crate::sky_material::composite::DeferredDecalPass); }
+            else if forward { entity.insert(crate::sky_material::composite::ForwardDecalPass); }
             entities.push(entity.id());
         }
         if !entities.is_empty() { state.decals.insert(c, entities); }

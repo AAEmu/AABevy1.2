@@ -106,6 +106,8 @@ pub(crate) struct RoadMesh {
     pub distance: f32,
     pub attenuation: Vec4,
     pub deferred: Option<DeferredParams>,
+    /// Planar/static forward producer only; terrain decals have a distinct native water path.
+    pub forward_overlay: bool,
     source_road: bool,
 }
 
@@ -145,6 +147,7 @@ impl RoadAssets {
             distance,
             attenuation,
             deferred: None,
+            forward_overlay: false,
             source_road: false,
         })
     }
@@ -155,6 +158,15 @@ impl RoadMesh {
     pub(crate) fn early_surface(&self) -> bool {
         self.source_road && self.material.get().and_then(Option::as_ref)
             .is_some_and(|data| data.source.shader.eq_ignore_ascii_case("Illum"))
+    }
+
+    pub(crate) fn early_forward_overlay(&self) -> bool {
+        // illum.ext %DECAL -> shader Flags1 bit0x80; both native mesh and quad
+        // adapters select list5. Terrain and non-DECAL quads do not share this contract.
+        !self.source_road && self.forward_overlay && self.deferred.is_none()
+            && self.material.get().and_then(Option::as_ref).is_some_and(|data| {
+                data.source.shader.eq_ignore_ascii_case("Illum") && data.source.gen_mask & 0x0200_0000 != 0
+            })
     }
 
     /// Moves prepared images into Bevy once; subsequent road objects reuse the handles.
@@ -179,7 +191,7 @@ impl RoadMesh {
         if !matches!(material.alpha_mode, AlphaMode::Add) {
             material.alpha_mode = AlphaMode::Blend;
         }
-        let early_surface = self.early_surface();
+        let early_surface = self.early_surface() || self.early_forward_overlay();
         material.depth_bias = if early_surface { -600_000.0 } else { 0.0 } + self.priority as f32;
         let opacity = data
             .source
@@ -333,6 +345,7 @@ pub(crate) fn prepare_cell(
             distance: road.max_view_dist,
             attenuation: Vec4::ZERO,
             deferred: None,
+            forward_overlay: false,
             source_road: true,
         });
     }
@@ -640,7 +653,7 @@ mod tests {
                 let road = RoadMesh {
                     mesh: Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD),
                     material: material.clone(), priority: 17, radius: 1.0, distance: 100.0,
-                    attenuation: Vec4::ZERO, deferred: None, source_road,
+                    attenuation: Vec4::ZERO, deferred: None, forward_overlay: false, source_road,
                 };
                 assert_eq!(road.early_surface(), source_road && shader.eq_ignore_ascii_case("Illum"));
             }
@@ -666,6 +679,32 @@ mod tests {
                 assert!(key(-600_000.0 + 255.0) < key(-500_000.0));
                 assert!(key(-500_000.0 + 255.0) < key(-300_000.0));
                 assert!(key(-300_000.0) < key(0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn forward_pass_requires_authored_decal_shader_and_nonterrain_provenance() {
+        for shader in ["Illum", "Water"] {
+            for mask in [0, 0x0200_0000] {
+                let material = Arc::new(OnceLock::new());
+                material.set(Some(MaterialData {
+                    source: Arc::new(Material::parse(&format!(r#"<Material Shader="{shader}" MtlFlags="524288" GenMask="{mask:x}"/>"#)).unwrap()),
+                    images: Mutex::new(None), handles: Mutex::new(HashMap::new()), textures: Mutex::new(HashMap::new()),
+                })).ok().unwrap();
+                let mut mesh = RoadMesh {
+                    mesh: Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD),
+                    material, priority: 0, radius: 1.0, distance: 100.0,
+                    attenuation: Vec4::ZERO, deferred: None, forward_overlay: false, source_road: false,
+                };
+                assert!(!mesh.early_forward_overlay(), "terrain/unknown producer remains late");
+                mesh.forward_overlay = true;
+                assert_eq!(mesh.early_forward_overlay(), shader == "Illum" && mask != 0);
+                mesh.deferred = Some(default());
+                assert!(!mesh.early_forward_overlay(), "deferred remains a separate native pass");
+                mesh.deferred = None;
+                mesh.source_road = true;
+                assert!(!mesh.early_forward_overlay(), "roads retain their own producer contract");
             }
         }
     }
