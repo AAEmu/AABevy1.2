@@ -693,6 +693,32 @@ mod tests {
     }
 
     #[test]
+    fn original_visarea_decals_reach_supported_receivers() {
+        if !crate::pak_available() {
+            return;
+        }
+        let terrain = TerrainQuery::new("main_world");
+        let loader = loader();
+        for (cell, expected) in [((8, 13), 18), ((12, 15), 45), ((20, 8), 4)] {
+            let path = format!("{}/client/visareas.dat", crate::world::cell_dir("main_world", cell.0, cell.1));
+            let data = aa_pak::Pak::global().read(&path).unwrap();
+            let mut objects = crate::placement::load_cell_objects("main_world", cell.0, cell.1);
+            let interior = crate::placement::parse_visareas_dat(&data).unwrap();
+            // Keep the merged independent material table and just the interior decals.
+            let start = objects.decals.len() - interior.decals.len();
+            objects.decals.drain(..start);
+            let prepared = prepare_cell("main_world", &objects, cell, &terrain, &loader, &RoadAssets::default());
+            println!("interior {cell:?}: {} source decals, {} supported receiver meshes", objects.decals.len(), prepared.len());
+            assert_eq!(prepared.len(), expected);
+            for mesh in &prepared {
+                let positions = positions(&mesh.mesh);
+                assert!(positions.iter().all(|p| p.is_finite()));
+                assert!(mesh.mesh.indices().unwrap().len() / 3 <= MAX_DEFERRED_MESH_TRIANGLES);
+            }
+        }
+    }
+
+    #[test]
     fn real_forward_decals_use_terrain_and_visible_brush_receivers() {
         if !crate::pak_available() {
             return;
