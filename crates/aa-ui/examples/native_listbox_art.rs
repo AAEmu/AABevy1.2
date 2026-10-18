@@ -15,13 +15,20 @@ fn main() {
             fake::install_ingame(ui);
             ui.run_stage(aa_ui::Stage::World); fake::enter_world(ui);
             ui.exec("@listbox_art", include_str!("fixtures/listbox_art.lua")).unwrap();
+            let item_sources = std::env::args().any(|arg| arg == "--item-sources-48");
+            if item_sources {
+                ui.exec("@native_48px_sources",r#"
+                    icons:AppendItem('Healing potion',44,'ui/icon/icon_item_potion01.dds')
+                    icons:AppendItem('Mana potion',55,'ui/icon/icon_item_potion02.dds')
+                "#).unwrap();
+            }
             let mut mouse = Default::default();
-            for (name,row) in [("tree",3),("icons.list",0)] {
+            for (name,row) in [("tree",3),("icons.list",if item_sources {3} else {0})] {
                 let p=ui.lua.load(format!("local x,y={name}:GetOffset();local l,t={name}:GetInset();return x+l+12,y+t+{name}:GetHeight()*({row}+.5)")).eval().unwrap();
                 aa_ui::input::update(&ui.lua,&mut mouse,Some(p),true,false,false,0.);
                 aa_ui::input::update(&ui.lua,&mut mouse,Some(p),false,true,false,0.);
             }
-            ui.exec("@listbox_art_ready","assert(tree:IsItemOpened(3) and counts:ItemCount()==12 and icons.list:GetSelectedValue()==11)").unwrap();
+            ui.exec("@listbox_art_ready",&format!("assert(tree:IsItemOpened(3) and counts:ItemCount()==12 and icons.list:GetSelectedValue()=={})",if item_sources {44} else {11})).unwrap();
             let p=ui.lua.load("local x,y=icons.list:GetOffset();local l,t=icons.list:GetInset();return x+l+12,y+t+icons.list:GetHeight()*1.5").eval().unwrap();
             aa_ui::input::update(&ui.lua,&mut mouse,Some(p),false,false,false,0.);
             fake::report(ui,"native_listbox_art");

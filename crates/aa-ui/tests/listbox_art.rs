@@ -54,7 +54,7 @@ fn exact_icon_overloads_cached_sources_native_anchor_and_tree_suppression() {
         list:AppendItem('Period',22,1,0,0,1,'ui/ranking/period.dds')
         list:AppendItem('Invalid icon type',88,false)
         list:AppendItem('Invalid RGBA',99,{},0,0,1,'ui/ranking/period.dds')
-        list:AppendItem('Unresolved source conversion',33,'ui/icon/icon_item_potion01.dds')
+        list:AppendItem('Native rejected source size',33,'ui/icon/icon_item_potion01.dds')
         assert(list:ItemCount()==3);list:Select(1);assert(list:GetSelectedValue()==22)
         list:UseConsistentTextColor(false)
     "#,
@@ -176,6 +176,17 @@ fn original_achievement_separator_toggle_counts_scroll_and_flat_wrapper_icons() 
     );
     assert_eq!(image(&q, "screenshot_mode.dds").len(), 1);
     assert_eq!(image(&q, "period.dds").len(), 1);
+    exec(&ui, r#"
+        icons:AppendItem('Healing potion',44,'ui/icon/icon_item_potion01.dds')
+        icons:AppendItem('Mana potion',55,'ui/icon/icon_item_potion02.dds')
+        assert(icons.list:ItemCount()==5)
+    "#);
+    click(&ui, &mut mouse, "icons.list", 3);
+    exec(&ui, "assert(icons.list:GetSelectedValue()==44 and icons.list:GetSelectedText()=='Healing potion')");
+    let q = quads(&ui);
+    assert!(image(&q, "icon_item_potion01.dds").is_empty());
+    assert!(image(&q, "icon_item_potion02.dds").is_empty());
+    assert_eq!(image(&q, "screenshot_mode.dds").len(), 1);
     // A root at viewport index zero never receives a separator, even after scrolling.
     exec(
         &ui,
