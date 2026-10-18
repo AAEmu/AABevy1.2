@@ -6016,3 +6016,46 @@ and keyed-cache lookup3900db70 are mocked. They verify parent/signed priority,
 unsigned negative timestamp ordering, f32 ratio tie/priority fallback, objective
 count fallback and both-zero denominator non-strict behavior. No full sort output
 is claimed from pairwise comparator execution.
+
+### Optional native UI-data text tree (bounded supported grammar)
+
+`ui_data::{NativeData, NativeDataNode, NativeDataError}` is an opt-in codec; the received
+`UiDataResponse.payload` and raw trailer remain opaque and unchanged. Nodes hold byte values
+and ordered children, preserving duplicate names and unrelated ordinary subtrees. Parsing is
+atomic. The initial supported forms are unquoted/single-/double-quoted values, the native
+quote/backslash escapes, CRLF/LF quoted values, chains, parenthesis/comma groups, aligned
+space-indented trees and the UTF-8 BOM. Comments, root metadata (`#?`), backslash block
+strings, tabs and unmatched indentation levels are explicitly refused; callers must retain
+the original payload and decline edits on refusal. This is a supported subset, not a claim
+that every refused input is invalid to the native parser. No partial tree is returned.
+
+The writer follows `xlcommon::Data::SaveToBuffer`33002ce0 through33002bc0/33002a90:
+compact trees use a raw-value length budget below78 and depth below3, single children use
+a space, siblings use ` ( ... , ... )`, expanded children indent four spaces, and every
+root line ends CRLF. Empty values and signed-byte whitespace/delimiters are quoted; native
+quote/backslash escaping and multiline CRLF output are retained. NULs, leading comment/block
+tokens and non-roundtrippable leading quotes are refused rather than emitted ambiguously.
+The application8191-byte bound is checked independently of native output-stream truncation.
+`encode` returns text bytes without a trailing NUL; converting arbitrary byte values to the
+existing UTF-8 `UiDataCommand::Save.payload` remains an explicit caller validation.
+
+Ignored `achievement_trace_save_oracle.py` executes ORIGINAL33002ce0 and all native stream/
+formatting helpers without mocked imports. Its six goldens cover trace6+version, empty,
+nested compact, quoted/non-ASCII/escape values, long expanded and multiline trees. Those
+expected bytes are embedded in the crate tests. `achievement_data_load_oracle.py` executes
+ORIGINAL33004af0/all lexer/parser helpers with only allocation/reallocation/free and
+memcpy/memset primitives mocked; it confirms the ordinary tree and quote handling. Native
+Load accepts further comments/metadata/block forms; these remain outside the initial codec.
+Its source is `D:/aa-re/client12/ida/xlcommon.c`330023e0..33004be0.
+
+Tracing3900cac0 edits type5 Data in memory; it does not immediately send CS118. Runtime
+storage descriptors establish type5 network-backed/version1. `SaveAll`392178d0's sole direct
+caller390f455d is inside leave-world action390f4420, before it constructs/sends CS001 via
+397ab390. Adjacent390f45d0 constructs cancel-leave CS002. Generic save39217640 captures
+`[game+40]+18`, serializes the entire type5 root (including unrelated subtrees/version),
+then sends CS118; no save acknowledgement exists. Further identity-field producer closure
+and root integration are separate from codec success. UI's source audit establishes
+session+7b as selected world ID, not account ID; local key scope must preserve that distinction.
+
+Codec validation: focused3 tests passed; the same freshly built aa-net library binary then
+passed all447 tests (0 failed/ignored). No network traffic or persistence claim was involved.
