@@ -333,3 +333,30 @@ fn next_room_requeue_is_received_only_and_session_reset_clears_join() {
         s.apply(&event); assert_eq!(s,Battlefield::default());
     }
 }
+
+
+#[test]
+fn world_ready_requires_current_successfully_sent_acceptance_and_keeps_received_state() {
+    let mut s=invited_state();
+    assert!(s.world_ready(invite()).is_err());
+    let decline=s.respond_to_invitation(invite(),false).unwrap();
+    fold(&mut s,BattlefieldEvent::Requested(decline));
+    assert!(s.world_ready(invite()).is_err());
+    let mut s=invited_state();
+    let accept=s.respond_to_invitation(invite(),true).unwrap();
+    fold(&mut s,BattlefieldEvent::Requested(accept));
+    let mut stale=invite(); stale.qualified_id+=1;
+    assert!(s.world_ready(stale).is_err());
+    let ready=s.world_ready(invite()).unwrap();
+    let mut w=Writer::new();ready.write(&mut w);
+    assert_eq!(ready.opcode(),0xe4);
+    assert_eq!(w.finish(),invite().qualified_id.to_le_bytes());
+    let before=s.clone();
+    fold(&mut s,BattlefieldEvent::Requested(ready));
+    assert_eq!(s,before); // Not a join receipt or an invented native state transition.
+    assert!(s.world_ready(invite()).is_ok()); // Native remains state4; explicit retry allowed.
+    fold(&mut s,BattlefieldEvent::Requested(BattlefieldCommand::Cancel));
+    assert!(s.world_ready(invite()).is_err());
+    fold(&mut s,BattlefieldEvent::Cancelled{raw:0});
+    assert!(s.world_ready(invite()).is_err());
+}

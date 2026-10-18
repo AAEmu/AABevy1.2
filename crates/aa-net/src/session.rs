@@ -2237,6 +2237,13 @@ mod tests {
         let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
         assert_eq!(&frame[6..],game::ClientMsg::Battlefield(reply).encode_body());
         assert!(session.battlefield.borrow().joined.is_none());
+        let ready=session.battlefield.borrow().world_ready(invite).unwrap();
+        session.command(Command::Battlefield(ready)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::Requested(c))) if c==ready));
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();
+        let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[6..],game::ClientMsg::Battlefield(ready).encode_body());
+        assert!(session.battlefield.borrow().joined.is_none());
         session.command(Command::Battlefield(reply)).await;
         assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{..}))));
         assert!(tokio::time::timeout(Duration::from_millis(30),peer.read_u8()).await.is_err());
