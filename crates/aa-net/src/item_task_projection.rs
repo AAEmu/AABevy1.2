@@ -429,7 +429,7 @@ fn qualified_detail(
 /// Owner15 never bypasses. Grade copies output before changing
 /// the grade; Update copies output after replacing supported normalized detail fields.
 /// Update requires a complete 128-byte received block consistent with its parsed fields.
-/// Security11 nonzero unpack remains unsupported without its static provider.
+/// Security11 nonzero unpack of equipment remains unsupported without its static provider.
 pub fn project_native_item_task(
     task: &ItemTask,
     context: NativeItemTaskContext<'_>,
@@ -537,11 +537,6 @@ pub fn project_native_item_task_with_recharge(
     if matches!(task, ItemTask::Remove { item_id: 0, .. }) {
         return Some(untouched(false));
     }
-    if matches!(task, ItemTask::Security { is_unpack, .. } if *is_unpack != 0)
-        && known_recharge_buff.is_none()
-    {
-        return None;
-    }
     let (location, item) = match context {
         NativeItemTaskContext::Unknown => return None,
         NativeItemTaskContext::Missing => return Some(untouched(false)),
@@ -564,8 +559,8 @@ pub fn project_native_item_task_with_recharge(
                 changed.flags = *bits;
                 changed.unsecure_time = *unsecure_time;
                 changed.unpack_time = *unpack_time;
-                if *is_unpack != 0 && known_recharge_buff? != 0 {
-                    if changed.detail.kind() == 1 {
+                if *is_unpack != 0 && changed.detail.kind() == 1 {
+                    if known_recharge_buff? != 0 {
                         let crate::model::ItemDetail::Equip(equip) = &mut changed.detail else {
                             return None;
                         };
@@ -1567,7 +1562,7 @@ mod tests {
             if let ItemTask::Security { is_unpack, .. } = &mut task {
                 *is_unpack = value;
             }
-            assert!(project_native_item_task(&task, context).is_none());
+            assert_eq!(project_native_item_task(&task, context), project_native_item_task(&security, context));
         }
         let mut wrong = flags.clone();
         if let ItemTask::Flags { slot, .. } = &mut wrong {
@@ -1766,6 +1761,58 @@ mod tests {
             .unwrap()
             .admitted
         );
+    }
+
+    #[test]
+    fn unpack_non_equipment_and_missing_pre_row_skip_static_recharge_provider() {
+        use crate::model::ItemDetail;
+        let task = ItemTask::Security {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            bits: 4,
+            is_unsecure_excess: 0,
+            is_unsecure_set: 0,
+            is_unpack: 255,
+            unsecure_time: -7,
+            unpack_time: -9,
+        };
+        for detail in [
+            ItemDetail::None,
+            ItemDetail::Other(3),
+            ItemDetail::Other(4),
+            ItemDetail::Other(255),
+        ] {
+            let mut original = item(5);
+            original.detail = detail;
+            let context = NativeItemTaskContext::Found {
+                location: location(3),
+                item: &original,
+            };
+            let output = project_native_item_task(&task, context).unwrap();
+            let mut expected = original.clone();
+            expected.flags = 4;
+            expected.unsecure_time = -7;
+            expected.unpack_time = -9;
+            assert!(output.admitted);
+            assert_eq!(output.output, Some(expected.clone()));
+            assert_eq!(
+                output.mutation,
+                NativeItemTaskMutation::Replace {
+                    location: location(3),
+                    item: expected
+                }
+            );
+        }
+        assert_eq!(
+            project_native_item_task(&task, NativeItemTaskContext::Missing),
+            Some(NativeItemTaskProjection {
+                admitted: false,
+                output: None,
+                mutation: NativeItemTaskMutation::None
+            })
+        );
+        assert!(project_native_item_task(&task, NativeItemTaskContext::Unknown).is_none());
     }
 
     #[test]

@@ -551,3 +551,29 @@ fn owner_lifecycle_and_headers_do_not_promote_unknown_rows_or_reset_loss_by_same
     chunk(&mut records, 2, 0, vec![None; 20]);
     assert!(records.complete_bag());
 }
+
+#[test]
+fn non_equipment_unpack_keeps_full_record_known_without_recharge_catalog() {
+    let mut records = seed();
+    records.bag[0] = Some(item(42, 28299, 2));
+    let row = ItemTask::Security {
+        container: 2,
+        slot: 0,
+        item_id: 999,
+        bits: 4,
+        is_unsecure_excess: 0,
+        is_unsecure_set: 0,
+        is_unpack: 255,
+        unsecure_time: -7,
+        unpack_time: -9,
+    };
+    let output = records.apply_row(&row).unwrap();
+    assert!(output.admitted);
+    let current = records.item(2, 0).unwrap();
+    assert_eq!(
+        (current.flags, current.unsecure_time, current.unpack_time),
+        (4, -7, -9)
+    );
+    assert_eq!(output.item.as_ref(), Some(current));
+    assert!(records.complete_bag());
+}
