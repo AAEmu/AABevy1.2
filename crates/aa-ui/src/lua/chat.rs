@@ -1604,9 +1604,13 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?)?;
     }
     def("AllowTabSwitch", method(lua, |lua, id, a| {
-        if let Value::Boolean(allowed) = a.v(1) {
-            set_allow_tab_switch(lua, id, allowed);
-        }
+        let allowed = match a.v(1) {
+            Value::Boolean(value) => value,
+            Value::Integer(value) => value != 0,
+            Value::Number(value) => value != 0.0,
+            _ => return none(),
+        };
+        set_allow_tab_switch(lua, id, allowed);
         none()
     })?)?;
     for (name, blink) in [("SetMaxNotifyTime", false), ("SetNotifyBlinkingFreq", true)] {

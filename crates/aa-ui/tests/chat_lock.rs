@@ -83,7 +83,7 @@ fn release(ui: &UiRuntime, mouse: &mut MouseState, p: (f32, f32)) {
 }
 
 #[test]
-fn constructor_and_strict_setters_match_native_types_and_f32_edges() {
+fn constructor_and_typed_setters_match_native_numeric_bool_conversion_and_f32_edges() {
     let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
     run(
         &ui,
@@ -98,11 +98,17 @@ fn constructor_and_strict_setters_match_native_types_and_f32_edges() {
     );
     run(
         &ui,
-        "window:AllowTabSwitch(true);window:AllowTabSwitch();window:AllowTabSwitch(0);window:AllowTabSwitch('false');window:SetMaxNotifyTime('3000');window:SetNotifyBlinkingFreq(false)",
+        "window:AllowTabSwitch(true);window:AllowTabSwitch(0)",
     );
+    assert!(!data(&ui, window).allow_tab_switch);
+    run(&ui, "window:AllowTabSwitch(-2);window:AllowTabSwitch();window:AllowTabSwitch('false');window:SetMaxNotifyTime('3000');window:SetNotifyBlinkingFreq(false)");
     assert!(data(&ui, window).allow_tab_switch);
     assert_eq!(data(&ui, window).notify_max_ms, 2000.);
     assert_eq!(data(&ui, window).notify_blink_ms, 500.);
+    run(&ui, "window:AllowTabSwitch(-0.0)");
+    assert!(!data(&ui, window).allow_tab_switch);
+    run(&ui, "window:AllowTabSwitch(0/0)");
+    assert!(data(&ui, window).allow_tab_switch);
     run(
         &ui,
         "window:AllowTabSwitch(false);window:SetMaxNotifyTime(-9);window:SetNotifyBlinkingFreq(-0.0)",
