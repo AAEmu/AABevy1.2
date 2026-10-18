@@ -40,7 +40,9 @@ use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock
 mod lifecycle;
 pub(crate) mod alpha;
 pub use alpha::set_alpha_options;
-pub use lifecycle::{ChatTabInfo, ChatWindowInfo, append_tab, hydrate_window, remove_tab, update_tab};
+pub use lifecycle::{
+    ChatTabInfo, ChatWindowInfo, append_tab, hydrate_window, remove_tab, reset_windows, update_tab,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MessageData {

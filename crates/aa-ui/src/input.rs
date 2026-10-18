@@ -196,6 +196,17 @@ pub fn update_buttons(
     buttons: MouseButtons,
     wheel: f32,
 ) {
+    // Native destruction clears the GUI manager's captured widget references
+    // immediately (392aa7e0). MouseState lives outside Lua: discard its retired
+    // references before dispatching another frame, including a release edge.
+    {
+        let u = ui(lua);
+        let alive = |id: Id| u.tree.objects.get(id as usize).is_some_and(|o| o.alive);
+        mouse.pressed = mouse.pressed.filter(|&id| alive(id));
+        mouse.last_click = mouse.last_click.filter(|&(id, _)| alive(id));
+        mouse.slider = mouse.slider.filter(|&id| alive(id));
+        mouse.drag = mouse.drag.filter(|d| alive(d.src));
+    }
     let MouseButtons {
         press: down,
         release: up,

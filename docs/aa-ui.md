@@ -4476,3 +4476,84 @@ was compared with `reference/ingame/character_info/real.png`, which has zero
 crime data and therefore lacks those extra rows. The example reports zero Lua
 errors, no runtime warnings/errors and **493.9-499.5 FPS**, and self-closes after
 the screenshot. Its build passes.
+
+### Native all-chat-window reset and retirement (2026-10-18)
+
+`aa_ui::lua::chat::reset_windows(&Lua) -> usize` immediately retires all live
+chat windows, including hidden and unconfigured windows, then clears shared tab
+history. It returns the retired window count. The application owns the four
+local configuration keys, default model and subsequent original
+`OnResetAllChatWindow()` callback. No additional native Lua method or callback
+is invented. Ordinary tab removal continues to retain history.
+
+The actual InitChatWindow registration at `3945b33d` binds `394581f0`, which calls
+`395083e0 -> 39507410` and returns **zero Lua results**. This is distinct from
+`39508050` (ClearChatTab). `39507410` immediately destroys each registered live
+window through `392aa9a0`, attempts the four local-key deletions, calls
+`395072c0` to clear/reload manager configuration and history, then invokes
+`OnResetAllChatWindow`. Failed key construction/deletion does not abort reset.
+The callback has **zero arguments**: the stack bool pointer passed into
+`39286650 -> 390243b0` is result storage for the script VM's EndCallAny, rather
+than a Lua argument. Original chat_window.alb recreates its configured windows,
+then restores the first window's bottom-left anchor and 430x350 extent.
+
+`392aa9a0` unregisters the widget, removes it from its parent, clears GUI input
+references through `392aa7e0`, then calls its deleting destructor. The toolkit
+clears owned movement/resize capture and derived retirement/clip indices, and
+prunes dead MouseState IDs before the next input dispatch. Unrelated focus,
+movement capture and held items remain intact. Window destruction does not
+invent an OnHide event for the destroyed window or a separate attached widget.
+
+A preliminary source note confused the input-cleanup call at `3927e3c1` with
+attachment hiding. That call is `392aa7e0`, not `3927f9b0`. Attachment hiding is
+reached by native OnHide `3927ff20 -> 3927f9b0`; it is not a direct destruction
+step in the traced chat/widget destructors. The direct programmatic reset of an
+open attached popup remains an unresolved observer/geometry lifetime boundary.
+The actual original context popup dismisses itself on the outside press
+that opens another control, restoring its alpha state before reset. The example
+exercises that physical dismissal. Direct programmatic reset while leaving an
+unrelated top-level attached popup open does not gain an invented hide callback.
+
+Native manager reload `395072c0` clears its history tree with `39506800` before
+loading defaults/options/locks/selection. The history destructor destroys each
+message vector and clears its pointers. Missing persisted extra info defaults
+to selected 0/method 0; option fallback is 0.7/0.5 and locks default to zero.
+Those configuration and persistence responsibilities stay with the app.
+The tab, option, lock and extra-info loads are independent: missing tab data
+constructs default tabs but still attempts saved extra info at `3950739c`.
+`39507060 -> 39506c40` default construction populates the in-memory maps without
+saving tab configuration. The extra key must not be ignored merely because the
+tab key is absent.
+
+`data/extract/aa-ui/chat_reset_oracle.py` and
+`native-chat-reset-oracle-20261018.json` execute **14 native groups**, with the PE
+hash: actual Init binding/order, empty/two-window trees, failed key construction,
+disabled/missing callback, configuration load/default branches (including missing
+tabs with independently loaded saved extra info), matching versus
+unrelated/null input references, actual history-vector destruction and the
+actual base-widget destructor with a shown attachment (no hide callback before
+its geometry-base endpoint), plus full geometry/base-object destruction with
+and without a top-level anchored dependent. The latter removes its anchor and
+dependency while leaving its shown flag intact. Registry, parent detach/deleting destructor, local
+storage, map/load/default, geometry-base destruction, vector/memory primitives
+and script VM operations are captured endpoints. The deleting-destructor endpoint
+does not mutate the fixture RB tree; the iterator instructions run unchanged.
+Instructions are in `native-chat-reset-source-20261018.txt`. These are offline
+oracles with no writes to the original client or its local configuration.
+
+All **86 selected tests** passed (one existing ignored font-metrics test), across
+the library, chat lifecycle/context/locking, generic attachments, keyboard,
+popups, dragging, resizing and HUD widgets. After removing the unsupported
+attachment-hide addition, all **35 affected tests** passed again. Seven reset
+tests cover immediate descendant/focus/IME/event retirement, hidden/unconfigured
+windows, retained-history clearing without live windows, dead pointer release,
+owned versus unrelated move/resize capture, preservation of held items, and the
+unchanged original popup/recreation/physical-tab-click lifecycle.
+
+The aa-dev `native_chat_reset` example builds and self-closes after each capture.
+The inspected `shots/aa-ui/native-chat-reset-720-20261018.png` shows the recreated
+original 430x350 chat at 1280x720/UI scale 0.85, with only fresh messages and no
+old popup; it reports **241.2-297.6 FPS**. A separate inspected 1920x1080/scale 1
+capture (`native-chat-reset-20261018.png`) reports **250.5-308.0 FPS**. Both log
+zero script errors and no runtime warnings/errors. No matching original reset
+reference screenshot is available; original-script geometry is preserved.
