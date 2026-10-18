@@ -47,6 +47,8 @@ pub struct ItemInfo {
     pub honor_price: i64,
     pub living_price: i64,
     pub level_limit: i64,
+    /// Native ItemDesc tag29 membership, independent of display category.
+    pub pet_only: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -442,8 +444,18 @@ impl GameData {
                         honor_price: any_int(r, 15)?,
                         living_price: any_int(r, 16)?,
                         level_limit: any_int(r, 13)?,
+                        pet_only: false,
                     },
                 );
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT item_id FROM tagged_items WHERE tag_id=29")?;
+            let mut rows = q.query([])?;
+            while let Some(row) = rows.next()? {
+                if let Some(item) = data.items.get_mut(&row.get::<_, u32>(0)?) {
+                    item.pet_only = true;
+                }
             }
         }
         {

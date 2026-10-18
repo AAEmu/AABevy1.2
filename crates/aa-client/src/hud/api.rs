@@ -77,6 +77,8 @@ pub struct HudData {
     pub passive_buffs: Vec<u32>,
     /// Timed received cooldowns and cast observations; read at widget tick time.
     pub cooldowns: aa_net::state::Skills,
+    /// Received initial-config bytes1/8; unknown differs from a received zero.
+    pub feature_limits: (Option<u8>, Option<u8>),
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
@@ -134,6 +136,7 @@ impl Default for HudData {
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
             cooldowns: Default::default(),
+            feature_limits: Default::default(),
             local_combat: false,
             pvp: Default::default(),
             radar: Default::default(),
@@ -238,6 +241,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
     super::cooldown::install(lua, bridge)?;
+    install_feature_limits(lua, bridge)?;
     super::tips::install_native_lookup(lua, bridge)?;
     super::markers::load_script(lua)?;
     super::drag::load_script(lua)?;
@@ -259,6 +263,25 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::pets::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::sorting::install(lua, bridge)
+}
+
+/// Native39496b20 returns numeric feature bytes, never the fallback's boolean placeholders.
+fn install_feature_limits(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    let player: Table = lua.globals().get("X2Player")?;
+    let previous: mlua::Function = player.get("GetFeatureSet")?;
+    let state = bridge.clone();
+    player.set(
+        "GetFeatureSet",
+        lua.create_function(move |_, this: Value| {
+            let (level, mate) = state.borrow().feature_limits;
+            let out: Table = previous.call(this)?;
+            // Until initial configuration arrives, zero leaves the original tooltip's upper
+            // restriction unset. Do not invent a positive cap from experience-table length.
+            out.set("levelLimit", f64::from(level.unwrap_or(0)))?;
+            out.set("mateLevelLimit", f64::from(mate.unwrap_or(0)))?;
+            Ok(out)
+        })?,
+    )
 }
 
 /// The Rust functions of the `HUD` table.
@@ -502,6 +525,12 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 
 /// Recompute the snapshot from the Bevy world.
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
+    bridge.borrow_mut().feature_limits = world
+        .get_resource::<aa_net::GameConfig>()
+        .and_then(|config| config.received.as_ref())
+        .map_or((None, None), |config| {
+            (config.player_level_limit(), config.mate_level_limit())
+        });
     let Some(spawn) = world.resource::<Player>().spawn.clone() else {
         bridge.borrow_mut().pvp = Default::default();
         bridge.borrow_mut().radar = Default::default();
@@ -911,6 +940,26 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_feature_level_caps_are_numeric_and_preserve_zero_without_xp_defaults()
+    -> mlua::Result<()> {
+        let lua = Lua::new();
+        lua.load("X2Player={GetFeatureSet=function()return{levelLimit=false,mateLevelLimit=false,premium=false}end}").exec()?;
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install_feature_limits(&lua, &bridge)?;
+        lua.load("local f=X2Player:GetFeatureSet();assert(f.levelLimit==0 and f.mateLevelLimit==0 and f.premium==false)").exec()?;
+        bridge.borrow_mut().feature_limits = (Some(55), Some(50));
+        lua.load(
+            "local f=X2Player:GetFeatureSet();assert(f.levelLimit==55 and f.mateLevelLimit==50)",
+        )
+        .exec()?;
+        bridge.borrow_mut().feature_limits = (Some(0), Some(255));
+        lua.load(
+            "local f=X2Player:GetFeatureSet();assert(f.levelLimit==0 and f.mateLevelLimit==255)",
+        )
+        .exec()
+    }
 
     #[test]
     fn chat_requests_apply_native_transport_encoding_once() {

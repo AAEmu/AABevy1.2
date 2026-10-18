@@ -11,6 +11,7 @@ pub(super) struct Tables {
     levels: Vec<(u32, i32)>,
     skills: HashMap<u32, Skill>,
     seats: HashMap<u32, (bool, bool)>,
+    equipment: HashMap<u32, [bool; 4]>,
 }
 
 struct Skill {
@@ -23,6 +24,19 @@ struct Skill {
 impl Tables {
     pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut out = Self::default();
+        let mut query = conn.prepare("SELECT n.id,p.head,p.chest,p.waist,p.feet FROM npcs n JOIN mate_equip_slot_packs p ON p.id=n.mate_equip_slot_pack_id")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            out.equipment.insert(
+                any_int(row, 0)? as u32,
+                [
+                    any_flag(row, 1)?,
+                    any_flag(row, 2)?,
+                    any_flag(row, 3)?,
+                    any_flag(row, 4)?,
+                ],
+            );
+        }
         let mut query = conn.prepare("SELECT id,total_mate_exp FROM levels ORDER BY id")?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
@@ -91,6 +105,8 @@ struct Pet {
     spawn: MateSpawn,
     object: u32,
     model: u32,
+    template: u32,
+    equipment: aa_net::model::Equipment,
     name: String,
     owner_name: String,
     level: u8,
@@ -184,6 +200,8 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             spawn,
             object: unit.obj_id,
             model: unit.model_id,
+            template: unit.kind.template_id(),
+            equipment: unit.equipment.clone(),
             name,
             owner_name: unit.owner_name.clone(),
             level: unit.level,
@@ -229,6 +247,7 @@ fn table(lua: &Lua, pet: &Pet) -> mlua::Result<Table> {
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     info::install(lua, bridge)?;
+    equipment::install(lua, bridge)?;
     let mate: Table = lua.globals().get("X2Mate")?;
     for name in [
         "IsPlayerPetExists",
@@ -484,6 +503,7 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
         }
     }
     if identity_changed { info::push(rt, bridge); }
+    equipment::push(rt, old.as_ref(), next.as_ref(), identity_changed);
     if let Err(error) = rt.refresh_slots() {
         warn!("hud: pet slots: {error}");
     }
@@ -551,4 +571,10 @@ pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates
             net.write(NetCommand(Command::Mate(command)));
         }
     }
+}
+
+mod equipment;
+
+pub(super) fn equipment_slots(data: &HudData, event: &Event) -> Vec<i64> {
+    equipment::slots(data, event)
 }

@@ -111,12 +111,86 @@ pub(super) fn modified(rt: &UiRuntime, bridge: &Shared, player: &Player, units: 
     buffs
 }
 
+pub(super) fn equipped(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    player: &Player,
+    units: &mut Units,
+    mates: &mut Mates,
+    battle: bool,
+) -> aa_net::state::Buffs {
+    let _ = native(rt, bridge, player, units, mates);
+    let unit = units.by_id.get_mut(&201).unwrap();
+    let (template, model, name) = if battle {
+        (10814, 1208, "Brown Wolfhound")
+    } else {
+        (10027, 1070, "Coalmane Snowlion")
+    };
+    unit.kind = aa_net::model::UnitKind::Mate {
+        tl_id: 12,
+        template_id: template,
+        owner_id: 47,
+    };
+    unit.model_id = model;
+    unit.name = name.into();
+    unit.equipment = default();
+    for (slot, template_id) in [
+        (0, 23090),
+        (
+            if battle { 2 } else { 3 },
+            if battle { 25303 } else { 23091 },
+        ),
+        (6, 23092),
+    ] {
+        unit.equipment.slots[slot] = Some(aa_net::model::Item {
+            template_id,
+            id: 0x200000000000001 + slot as u64,
+            grade: 1,
+            flags: 1,
+            count: 1,
+            detail: ItemDetail::Equip(aa_net::model::EquipDetail {
+                durability: 42,
+                temper_physical: 117,
+                temper_magical: 100,
+                ..default()
+            }),
+            ..default()
+        });
+    }
+    // An explicit new received mate identity reconstructs the original slot-pack layout.
+    mates.own.as_mut().unwrap().spawn.id += 1;
+    let mut buffs = aa_net::state::Buffs::default();
+    buffs
+        .native
+        .set_catalog(bridge.borrow().game.get().unwrap().native_buffs.clone());
+    buffs.apply(&Event::UnitSpawned(Box::new(unit.clone())));
+    let mut world = World::new();
+    world.insert_resource(player.clone());
+    world.insert_resource(units.clone());
+    world.insert_resource(mates.clone());
+    world.insert_resource(buffs.clone());
+    super::refresh(&world, &mut bridge.borrow_mut());
+    super::push(rt, bridge);
+    buffs
+}
+
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let mut app = App::new();
-    app.add_plugins((aa_dev::default_plugins("aa-client: original owned pet HUD"), aa_dev::DevPlugin));
+    app.add_plugins((aa_dev::default_plugins("aa-client: original owned pet HUD"), aa_dev::DevPlugin,
+    ));
     let (rt, bridge, path, player, mut units, mut mates) = runtime(width as f32, height as f32).unwrap();
     let mut buffs = aa_net::state::Buffs::default();
+    if std::env::args().any(|a| a == "--equipment" || a == "--battle-equipment") {
+        buffs = equipped(
+            &rt,
+            &bridge,
+            &player,
+            &mut units,
+            &mut mates,
+            std::env::args().any(|a| a == "--battle-equipment"),
+        );
+    }
     if std::env::args().any(|a| a == "--native-pools" || a == "--info" || a == "--modified") {
         buffs = native(&rt, &bridge, &player, &mut units, &mut mates);
         rt.lua.load(r#"
@@ -125,7 +199,9 @@ pub(crate) fn run() {
             assert(petFrame:IsVisible() and petBar:IsVisible())
         "#).exec().unwrap();
     }
-    if std::env::args().any(|a| a == "--info" || a == "--modified") {
+    if std::env::args().any(|a| {
+        a == "--info" || a == "--modified" || a == "--equipment" || a == "--battle-equipment"
+    }) {
         super::super::expansion::fixture::click(&rt, "petBar.command.buttons[PET_CMD_EQUIP]").unwrap();
         rt.lua.load("assert(petBar.equip:IsVisible() and X2Unit:UnitInfo('playerpet'))").exec().unwrap();
     }
