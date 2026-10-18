@@ -6221,8 +6221,8 @@ Native audience name buffers cap128; safe cache admission refuses longer names w
 retaining the complete raw event. Native malformed overlength behavior is not claimed.
 
 `Trials` records actual PlayerSpawn object identity, optional waiting order/counts/sentence,
-and only the source-closed `defendant_context`. It deliberately does not expose a partially
-modeled general current trial ID or isJury flag. Some(0) is a true defendant flag. Native
+and the source-closed `defendant_context`. The follow-up below adds the independently
+closed general trial ID/isJury/phase fields. Some(0) is a true defendant flag. Native
 manager3907f570 initializes role flags and trial ID to zero but does not initialize the four
 wait fields, so absence stays None until a receipt. Actor removal clears actual object identity,
 not the defendant flag. Character/session lifecycle resets are stronger app isolation. Native
@@ -6257,3 +6257,90 @@ Other trial callbacks, invitations/seats/records/verdicts, ReloadUI replay and g
 getter state remain separate gaps. Native SummonJury additionally sends CS072; this
 receive-only slice intentionally does not implement that handshake or any jury choice.
 No timers, eligibility, automatic response or successful outcome is fabricated.
+
+
+### Trial defendant data, evidence batches and phase receipts (2026-10-18)
+
+The received family additionally covers SC176/177/178 as
+TrialEvent::DefendantData(TrialDefendantData), Records(TrialRecords), and
+PhaseChanged { trial_id, phase:u8, current_jury:i32, remaining_time_ms:u32 }.
+Native factories391b31d0/3150/32d0 use vtables399b3ca8/3cb4/3ccc and readers
+397c3940/397c3aa0/397b6a70. Exact lane bodies match the native field sequence.
+SC176 is u32 defendant,blob name,u8 race,u32 faction,u32 trial,i32 sentence,BC judge.
+SC177 is u32 trial,u32 unknown,i32 total,i32 count then count full evidence rows.
+SC178 is u32 trial,u8 phase,i32 current jury,u32 remaining milliseconds.
+
+TrialCrimeRecord preserves id/victim/reporter/faction/expedition/doodad/skill IDs,
+raw victim/reporter names, u8 crime kind, original i64 X/Y fixed-point values, f32 Z bits,
+raw message and original i64 report timestamp. No DateTime/Unix conversion is performed.
+Native record reader397be730 caps names128 and message200 bytes. Native inline packet
+holds FIVE rows:397c3b01 selects min(count,5), but callback390811d0 still uses original
+count. Complete lane rows therefore parse and remain in forwarded Event/last_receipt;
+the native cache safely refuses counts>5 or oversized strings instead of copying invalid
+native memory or truncating framing. Count is checked against minimum63-byte row body
+before allocation. Negative count preserves its bits and reads no rows, as the native loop.
+The lane's reporter_name=None writes no string length and is malformed relative to the
+native schema; no heuristic attempts to repair such a body or fabricate an absent name.
+
+Trials now exposes trial_id(default0),is_jury(false),phase(0),remaining_time_ms(0),
+current_jury:Option<i32>, defendant:Option<TrialDefendantData>, ordered records and
+optional records_received/records_total/records_raw_unknown. These defaults follow
+3907f570 exactly; uninitialized header fields stay optional. Existing defendant_context
+and wait APIs remain compatible. current_jury can become known before total, so the
+pair jury_counts stays unknown until both are known. No elapsed clock is inferred.
+
+Native3907f660 adopts a changed general trial ID, clears role flags/evidence/counters,
+invalidates defendant identity and emits UPDATE_INGAME_BEAUTYSHOP_STATUS(), event23c.
+The coherent optional defendant projection is invalidated rather than exposing mixed
+stale name/race fields after native ID invalidation. Sentence/count wait fields and phase
+are retained across this adoption. RulingClosed/Canceled/local AudienceLeft instead reset
+roles/trial/phase/raw remaining/judge; they retain evidence and wait fields. App session
+isolation still clears all runtime state. AudienceJoined compares actual local object then
+adopts the received general trial, including zero. SummonJury establishes is_jury and
+SummonDefendant establishes defendant_context; neither uses first-row inference.
+
+SC177 callback391dd590/390812d0/390811d0 adopts trial only while BOTH role flags are
+clear; trial0 in that branch returns before batch headers. An active juror/defendant still
+appends records even for another raw trial ID. It stores unknown/total, wrapping-adds
+count into received count and appends rows in receipt order, retaining duplicates. There
+is no invented snapshot-complete or clearing marker. Unknown initial received count
+stays unknown until a genuine changed-context reset establishes0.
+
+SC176391dd4f0/3907dea0/3907dd70 IGNORES its received trial ID, stores actual defendant
+details/judge/sentence, recounts crime kinds over existing evidence and emits
+SHOW_CRIME_RECORDS(current phase), event13d. The juror-only replay3907bec0 then emits
+TRIAL_STATUS(phase,current jury),147, and another SHOW_CRIME_RECORDS if general trial
+is nonzero. The app omits numeric callback arguments that depend on genuinely unknown
+uninitialized native fields. No placeholder totals or sentence are invented.
+
+SC178391dd6b0/390809e0 first emits TRIAL_STATUS(received phase,current jury) BEFORE
+39080000 checks context or updates cache. A mismatched active-role trial then refuses
+phase/cache updates but retains that first callback. An inactive role adopts the trial.
+Admitted phases always store phase/current jury/raw remaining; phase2 additionally emits
+SHOW_DEPENDANT_WAIT_JURY only for defendant with known total/sentence, then
+SHOW_CRIME_RECORDS. Phases3/4 emit SHOW_CRIME_RECORDS. Phase5 emits SHOW_VERDICTS
+only for jurors with known sentence. Notices are returned in this exact source order;
+BeautyshopStatus represents the actual event23c name, not a trial-window close.
+
+Verdicts.minutes:[i32;5] contains INTEGRAL minute values for sentence factors
+20%,50%,80%,100%,120%. Native39080201..303 converts unsigned sentence to f32, multiplies
+each factor then1/60000f32, CVTTSS2SI then CVTSI2SS. The100% branch instead performs
+unsigned integer /60000 then CVTSI2SS. Lua receives those integers converted to f32;
+the factors themselves are not the callback arguments. UINT_MAX yields
+[14316,35791,57266,71582,85899], verified by executed original x86.
+
+Ignored native-trial-phase-data-source-20261018.txt archives readers/callbacks.
+trial_phase_oracle.py/native-trial-phase-oracle-20261018.json execute original
+390809e0,39080000,3907f660 over42 role/trial/phase cases. Only Lua dispatch recording,
+a fixed time import and task-call observations are mocked; no task behavior or real clock
+is claimed. Tests embed those callback/cache results, signed extremes, every truncation,
+complete lane6-row preservation/native refusal and DD04 following-packet alignment.
+Phase-triggered tasks, jury handshakes/choices, records UI formatting/locations, elapsed
+trial timers and full GetCrimeData table remain explicit client/protocol gaps.
+
+Crime getter domain refinement: GetCrimeInfo39496420 always dereferences the selected
+character HEADER at client+40 and returns its three signed fields; actual world actor
+absence does not select zeros. There is no native missing-header return path. A safe
+startup empty table is an app accommodation for that undefined native domain, not a
+native default. GetJuryPoint394969c0 explicitly returns one0 only if global client pointer
+is absent; otherwise it reads header+660 without a separate missing-header guard.
