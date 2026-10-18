@@ -5,7 +5,7 @@
 //! charge count used by the active lane convenience view. Native stacks require static catalog
 //! rules and received history; see `state::NativeBuffs`. Charge alone is not a native stack count.
 
-use crate::wire::{Reader, Result};
+use crate::{skill::SkillCasterData, wire::{Reader, Result}};
 
 /// `SkillCasterType` of the unit that applied a buff.
 pub mod caster_kind {
@@ -26,14 +26,22 @@ pub struct BuffCaster {
 impl BuffCaster {
     /// `SkillCaster.Write`: kind byte, object id, and the extra fields of item and mount casters.
     pub fn read(r: &mut Reader) -> Result<Self> {
+        Self::read_full(r).map(|(projection, _)| projection)
+    }
+
+    fn read_full(r: &mut Reader) -> Result<(Self, Option<SkillCasterData>)> {
         let kind = r.u8()?;
         let obj_id = r.bc()?;
-        match kind {
-            caster_kind::ITEM => r.skip(8 + 4 + 1 + 4)?, // item id, template id, type 1, type 2
-            caster_kind::MOUNT => r.skip(4)?,            // mount skill template id
-            _ => {}
-        }
-        Ok(Self { kind, obj_id })
+        let raw = match kind {
+            0 => Some(SkillCasterData::Unit(obj_id)),
+            1 => Some(SkillCasterData::Unk1(obj_id)),
+            2 => Some(SkillCasterData::Item { obj_id, item_id:r.u64()?, template_id:r.u32()?, type1:r.u8()?, type2:r.u32()? }),
+            3 => Some(SkillCasterData::Mount { obj_id, mount_skill_id:r.u32()? }),
+            4 => Some(SkillCasterData::Doodad(obj_id)),
+            // Preserve legacy kind+BC acceptance, without inventing a typed identity.
+            _ => None,
+        };
+        Ok((Self { kind, obj_id }, raw))
     }
 }
 
@@ -56,6 +64,8 @@ pub struct Buff {
     /// `buffs.id` (icon, name and description come from that table).
     pub buff_id: u32,
     pub caster: BuffCaster,
+    /// Complete source-closed caster0..4; unknown legacy discriminants remain None.
+    pub raw_caster: Option<SkillCasterData>,
     /// Character id of the caster (0 for NPCs).
     pub caster_char_id: u32,
     pub caster_level: u8,
@@ -89,7 +99,7 @@ impl Buff {
     pub fn read_net(r: &mut Reader, kind: BuffKind) -> Result<Self> {
         let index = r.u32()?;
         let buff_id = r.u32()?;
-        let caster = BuffCaster::read(r)?;
+        let (caster, raw_caster) = BuffCaster::read_full(r)?;
         let caster_char_id = r.u32()?;
         let caster_level = r.u8()?;
         let ability_level = r.i16()?;
@@ -104,6 +114,7 @@ impl Buff {
             index,
             buff_id,
             caster,
+            raw_caster,
             caster_char_id,
             caster_level,
             ability_level,
@@ -134,7 +145,7 @@ impl Buff {
 
     /// Body of `SCBuffCreatedPacket`: the buff and the unit it is on.
     pub fn read_created(r: &mut Reader) -> Result<(u32, Self)> {
-        let caster = BuffCaster::read(r)?;
+        let (caster, raw_caster) = BuffCaster::read_full(r)?;
         let caster_char_id = r.u32()?;
         let owner = r.bc()?;
         let index = r.u32()?;
@@ -150,6 +161,7 @@ impl Buff {
                 index,
                 buff_id,
                 caster,
+                raw_caster,
                 caster_char_id,
                 caster_level,
                 ability_level,
@@ -190,6 +202,31 @@ pub(crate) mod tests {
         w.u32(77).u8(5).i16(3); // caster char id, level, ability level
         w.i32(30_000).u32(5_000).u32(1_000); // duration, elapsed, tick
         w.i32(0).i32(2).i32(0).u32(0); // tick index, stack, charged, cooldown skill
+    }
+
+    #[test]
+    fn buff_receipts_retain_complete_casters_without_changing_unknown_kind_compatibility() {
+        let mut cases=Vec::new();
+        for (kind,raw) in [(0,Some(SkillCasterData::Unit(0x010203))),(1,Some(SkillCasterData::Unk1(0x010203))),
+            (4,Some(SkillCasterData::Doodad(0x010203))),(255,None)] {
+            let mut w=Writer::new();w.u8(kind).bc(0x010203);cases.push((kind,raw,w.finish()));
+        }
+        let mut w=Writer::new();w.u8(2).bc(0x010203).u64(u64::MAX).u32(77).u8(255).u32(0x89abcdef);
+        cases.push((2,Some(SkillCasterData::Item{obj_id:0x010203,item_id:u64::MAX,template_id:77,type1:255,type2:0x89abcdef}),w.finish()));
+        let mut w=Writer::new();w.u8(3).bc(0x010203).u32(u32::MAX);
+        cases.push((3,Some(SkillCasterData::Mount{obj_id:0x010203,mount_skill_id:u32::MAX}),w.finish()));
+        for (kind,raw,caster_bytes) in cases {
+            let mut base=Writer::new();net_buff(&mut base,2,77);let base=base.finish();
+            let mut snapshot=base[..8].to_vec();snapshot.extend_from_slice(&caster_bytes);snapshot.extend_from_slice(&base[12..]);snapshot.push(0xa5);
+            let mut r=Reader::new(&snapshot);let b=Buff::read_net(&mut r,BuffKind::Hidden).unwrap();
+            assert_eq!((b.raw_caster,b.caster),(raw,BuffCaster{kind,obj_id:0x010203}));assert_eq!(r.u8().unwrap(),0xa5);
+            for n in 0..snapshot.len()-1 {assert!(Buff::read_net(&mut Reader::new(&snapshot[..n]),BuffKind::Hidden).is_err());}
+            let mut w=Writer::new();w.raw(&caster_bytes).u32(11).bc(44).u32(2).u32(77).u8(3).i16(4).u32(5).pisc(&[0,100,0,0]).u8(0xa5);
+            let created=w.finish();let mut r=Reader::new(&created);let(owner,b)=Buff::read_created(&mut r).unwrap();
+            assert_eq!(owner,44);assert_eq!((b.raw_caster,b.caster),(raw,BuffCaster{kind,obj_id:0x010203}));assert_eq!(r.u8().unwrap(),0xa5);
+            for n in 0..created.len()-1 {assert!(Buff::read_created(&mut Reader::new(&created[..n])).is_err());}
+        }
+        assert_eq!(Buff::default().raw_caster,None);
     }
 
     #[test]

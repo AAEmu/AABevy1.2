@@ -186,6 +186,20 @@ mod tests {
         }
     }
     #[test]
+    fn per_unit_source_matching_uses_persistent_caster_not_item_or_mount_identity() {
+        use crate::skill::SkillCasterData;
+        let item=SkillCasterData::Item{obj_id:10,item_id:99,template_id:77,type1:1,type2:2};
+        let mount=SkillCasterData::Mount{obj_id:20,mount_skill_id:33};
+        let mut v=view(4,true);let mut event=created(1,0,1);
+        let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.raw_caster=Some(item);buff.caster=item.projection();
+        v.apply(&event);
+        let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.index=2;buff.raw_caster=Some(mount);buff.caster=mount.projection();
+        v.apply(&event);let list=v.of(9).unwrap();assert_eq!(list.len(),1);
+        assert_eq!((list[0].buff.index,list[0].buff.stacks,list[0].buff.raw_caster),(2,2,Some(item)));
+        let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.index=3;buff.caster_char_id=11;
+        v.apply(&event);assert_eq!(v.of(9).unwrap().len(),2);
+    }
+    #[test]
     fn cooldown_skill_preserves_constructor_identity_across_repeat_and_snapshot() {
         let mut v=view(4,false);let mut event=created(1,10,1);
         let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.raw_cooldown_skill=Some(77);
