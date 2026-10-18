@@ -22,16 +22,18 @@ const SILENT: [u8; 6] = [3, 4, 5, 6, 7, 8];
 /// `ItemTaskType`s of items used up by a skill: "Used:".
 const CONSUME: [u8; 4] = [13, 40, 41, 45];
 
-/// What the bag held when the last events were handled: `item id -> (template, count, grade)`, for the
-/// lines of items that left without their count.
-type Known = HashMap<u64, (u32, i32, u8)>;
+/// Previous bag instances preserve item details for links of removed/consumed items.
+type Known = HashMap<u64, aa_net::model::Item>;
 
-/// The item as the scripts write it: its name in brackets, coloured by its grade.
-fn link(game: Option<&GameData>, template_id: u32, grade: u8) -> Option<String> {
+/// Native links when instance details survive; otherwise a plain colored label.
+fn link(game: Option<&GameData>, template_id: u32, grade: u8, item: Option<&aa_net::model::Item>) -> Option<String> {
     let game = game?;
     let info = game.items.get(&template_id)?;
     if info.named.name.is_empty() {
         return None;
+    }
+    if let Some(text) = item.and_then(super::itemlinks::link) {
+        return Some(text);
     }
     let grade = i64::from(super::store::ui_grade(grade));
     let color = game.grades.get(&grade).map_or("FFFFFFFF", |g| g.1.as_str());
@@ -56,14 +58,15 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
         for task in &changes.tasks {
             match task {
                 ItemTask::Add { container: c, item, .. } if *c == container::INVENTORY => {
-                    if let Some(text) = link(game, item.template_id, item.grade) {
+                    if let Some(text) = link(game, item.template_id, item.grade, Some(item)) {
                         if changes.reason == 54 { rt.fire_event("STORE_BUY", (text.clone(), i64::from(item.count))); }
                         rt.fire_event("ADDED_ITEM", (text, i64::from(item.count), reason, ""));
                     }
                 }
                 ItemTask::Count { container: c, item_id, delta, template_id, .. } if *c == container::INVENTORY && *delta != 0 => {
-                    let grade = known.get(item_id).map_or(0, |k| k.2);
-                    if let Some(text) = link(game, *template_id, grade) {
+                    let item = known.get(item_id).or_else(|| inventory.bag_items().find_map(|(_, item)| (item.id == *item_id).then_some(item)));
+                    let grade = item.map_or(0, |item| item.grade);
+                    if let Some(text) = link(game, *template_id, grade, item) {
                         if *delta > 0 {
                             if changes.reason == 54 { rt.fire_event("STORE_BUY", (text.clone(), i64::from(*delta))); }
                             rt.fire_event("ADDED_ITEM", (text, i64::from(*delta), reason, ""));
@@ -74,8 +77,9 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
                     }
                 }
                 ItemTask::Remove { container: c, item_id, template_id, .. } if *c == container::INVENTORY => {
-                    let (count, grade) = known.get(item_id).map_or((1, 0), |k| (k.1.max(1), k.2));
-                    if let Some(text) = link(game, *template_id, grade) {
+                    let item = known.get(item_id);
+                    let (count, grade) = item.map_or((1, 0), |item| (item.count.max(1), item.grade));
+                    if let Some(text) = link(game, *template_id, grade, item) {
                         if changes.reason == 53 { rt.fire_event("STORE_SELL", (text.clone(), i64::from(count))); }
                         rt.fire_event("REMOVED_ITEM", (text, -i64::from(count), state, reason, ""));
                     }
@@ -86,6 +90,6 @@ pub fn route_items(mut events: MessageReader<NetEvent>, rt: Option<NonSend<aa_ui
     }
     if inventory.is_changed() {
         known.clear();
-        known.extend(inventory.bag_items().map(|(_, it)| (it.id, (it.template_id, it.count, it.grade))));
+        known.extend(inventory.bag_items().map(|(_, it)| (it.id, it.clone())));
     }
 }
