@@ -333,6 +333,8 @@ opcodes! {
         SCInstantGameJoinedPacket = 0x190,
         SCInstantGameStartPacket = 0x191,
         SCInstantGameEndPacket = 0x192,
+        SCInstantGameAddPointPacket = 0x193,
+        SCInstantGameKillstreakPacket = 0x195,
         SCActabilityPacket = 0x136,
         SCGimmicksCreatedPacket = 0x13c,
         SCGimmicksRemovedPacket = 0x13d,

@@ -423,3 +423,29 @@ fn lane_result_count_preserves_all_255_members_instead_of_native_inline_clamp() 
     assert_eq!(e.teams[0].members.len(),255); assert_eq!(e.teams[1].members[254].character_id,254);
     assert!(BattlefieldEvent::read(0x192,&mut Reader::new(&body[..body.len()-1])).is_err());
 }
+
+
+fn point() -> BattlefieldPoint { BattlefieldPoint {zone_id:8,instance_id:9,corps:1,points:-4,scores:[-30,99],character_name:"source".into()} }
+fn skill_enable() -> BattlefieldSkillEnable { BattlefieldSkillEnable {zone_id:8,instance_id:9,killstreak:23,skill_id:323,enabled:true} }
+#[test]
+fn progress_packet_goldens_signed_index_truncations_and_compressed_tail() {
+    let p=point(); let mut w=Writer::new();w.u32(8).u32(9).u8(1).i32(-4).i32(-30).i32(99).string("source");
+    check(0x193,&w.finish(),BattlefieldEvent::Point(p));
+    for index in [-128,-1,0,23,24,127] {let mut u=skill_enable();u.killstreak=index;let mut w=Writer::new();w.u32(8).u32(9).i8(index).u32(323).bool(true);check(0x195,&w.finish(),BattlefieldEvent::SkillEnable(u));}
+}
+#[test]
+fn scores_are_received_totals_and_enable_requires_matching_slot_identity_phase_and_change() {
+    let mut s=active_state();assert_eq!(s.scores,[0;2]);assert_eq!(s.skills_enabled,[false;24]);
+    fold(&mut s,BattlefieldEvent::Point(point()));assert_eq!(s.scores,[0;2]);assert_eq!(s.last_point,Some(point()));
+    fold(&mut s,BattlefieldEvent::Started(start()));
+    assert!(s.accepts_point(&point()));fold(&mut s,BattlefieldEvent::Point(point()));assert_eq!(s.scores,[-30,99]);
+    fold(&mut s,BattlefieldEvent::Point(point()));assert_eq!(s.scores,[-30,99]); // overwrite, never add delta
+    let mut stale=point();stale.instance_id+=1;fold(&mut s,BattlefieldEvent::Point(stale));assert_eq!(s.scores,[-30,99]);
+    fold(&mut s,BattlefieldEvent::SkillEnable(skill_enable()));assert!(!s.skills_enabled[23]);
+    s.advance_server_time(14000);
+    for field in 0..5 {let mut u=skill_enable();match field {0=>u.zone_id+=1,1=>u.instance_id+=1,2=>u.killstreak=-1,3=>u.killstreak=24,_=>u.skill_id+=1};assert!(!s.accepts_skill_change(&u));fold(&mut s,BattlefieldEvent::SkillEnable(u));assert_eq!(s.skills_enabled,[false;24]);}
+    assert!(s.accepts_skill_change(&skill_enable()));fold(&mut s,BattlefieldEvent::SkillEnable(skill_enable()));assert!(s.skills_enabled[23]);assert!(!s.accepts_skill_change(&skill_enable()));
+    let mut off=skill_enable();off.enabled=false;fold(&mut s,BattlefieldEvent::SkillEnable(off));assert!(!s.skills_enabled[23]);
+    fold(&mut s,BattlefieldEvent::Ended(end()));let mut late=point();late.scores=[123,456];fold(&mut s,BattlefieldEvent::Point(late));assert_eq!(s.scores,[-30,99]);
+    s.apply(&Event::Disconnected{message:String::new()});assert_eq!(s,Battlefield::default());
+}
