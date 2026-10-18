@@ -184,6 +184,9 @@ pub(super) fn remove_hidden(lua: &Lua) {
 
 /// Retire a native composite, including its input/event registrations and children.
 pub(super) fn remove_subtree(lua: &Lua, root: Id) {
+    if !ui(lua).tree.get(root).alive {
+        return;
+    }
     let ids = {
         let u = ui(lua);
         let mut ids = std::collections::BTreeSet::new();
@@ -218,7 +221,10 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
         u.widget_sounds.remove(&id);
         u.keyboard.removed(id);
         u.drag.registered.remove(&id);
+        u.retiring.remove(&id);
+        u.auto_clip_widgets.remove(&id);
     }
+    u.drag.removed(&ids);
     for events in u.events.values_mut() {
         events.retain(|id| !ids.contains(id));
     }

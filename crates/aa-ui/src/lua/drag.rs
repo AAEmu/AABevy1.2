@@ -89,6 +89,22 @@ struct Moving {
     sizing: Option<Point>,
 }
 
+impl DragState {
+    /// Native 392aa7e0 clears only input references to the destroyed widget.
+    pub(super) fn removed(&mut self, ids: &std::collections::BTreeSet<Id>) {
+        if self.moving.as_ref().is_some_and(|m| ids.contains(&m.id)) {
+            self.moving = None;
+            if self.held.as_ref().is_some_and(|h| h.kind == "image") {
+                self.held = None;
+                self.held_gen += 1;
+            }
+        }
+        if self.resize_hover.is_some_and(|id| ids.contains(&id)) {
+            self.resize_hover = None;
+        }
+    }
+}
+
 pub(crate) fn start_sizing(lua: &Lua, id: Id, point: Point) {
     let mut u = ui(lua);
     if u.tree.widget(id).is_none() {

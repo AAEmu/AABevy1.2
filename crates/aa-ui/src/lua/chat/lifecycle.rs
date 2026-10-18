@@ -28,6 +28,21 @@ pub struct ChatWindowInfo {
 #[derive(Default)]
 struct History(std::collections::BTreeMap<i64, MessageData>);
 
+/// Immediately retire every live chat window and clear shared tab history.
+/// The application resets its configuration before invoking the original zero-argument
+/// `OnResetAllChatWindow` callback. Native 39507410 destroys windows before 395072c0
+/// clears history; ordinary tab removal deliberately retains that history instead.
+pub fn reset_windows(lua: &Lua) -> usize {
+    let windows = ui(lua).tree.of_class("chatwindow");
+    for &window in &windows {
+        super::super::widget::remove_subtree(lua, window);
+    }
+    if let Some(mut history) = lua.app_data_mut::<History>() {
+        history.0.clear();
+    }
+    windows.len()
+}
+
 fn retain_history(lua: &Lua, tab: &ChatTab) {
     let data = ui(lua)
         .tree
