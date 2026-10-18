@@ -1437,6 +1437,39 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 })?,
             )?;
         }
+        for (name, index, state) in [
+            ("SetNormalColor", 0usize, ButtonState::Normal),
+            ("SetHighlightColor", 1, ButtonState::Highlight),
+            ("SetPushedColor", 2, ButtonState::Pushed),
+        ] {
+            def(
+                name,
+                method(lua, move |lua, id, a| {
+                    if !(1..=4).all(|i| a.is_num(i)) {
+                        return none();
+                    }
+                    let mut u = ui(lua);
+                    let Some(w) = u.tree.widget(id) else { return none() };
+                    let Some(button) = w.button.as_ref() else { return none() };
+                    // Native392806c0 first applies to the existing background, then
+                    //39282f30 visits existing extras of this state, even while hidden.
+                    // There is no stored palette for artwork created/bound later.
+                    let targets: Vec<_> = button.bg[index].into_iter().chain(
+                        w.drawables.iter().copied().filter(|&d| {
+                            u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(state))
+                        }),
+                    ).collect();
+                    let color = [a.f(1), a.f(2), a.f(3), a.f(4)];
+                    for d in targets {
+                        let object = u.tree.get(d);
+                        if object.alive && object.drawable().is_some_and(|dr| dr.color != color) {
+                            u.tree.drawable_mut(d).unwrap().color = color;
+                        }
+                    }
+                    none()
+                })?,
+            )?;
+        }
         for (name, state) in [
             ("SetTextColor", 0usize),
             ("SetHighlightTextColor", 1),
