@@ -81,6 +81,7 @@ fn send_commands(client: Option<Res<NetClient>>, mut commands: MessageReader<Net
 }
 
 fn receive_events(client: Option<Res<NetClient>>, mut out: MessageWriter<NetEvent>, mut state: NetState) {
+    state.advance_battlefield_clock();
     let Some(client) = client else { return };
     let mut client = client.0.lock().expect("net client poisoned");
     while let Some(event) = client.try_recv() {
@@ -109,17 +110,27 @@ macro_rules! net_state {
 
         #[derive(SystemParam)]
         struct NetState<'w> {
+            battlefield: ResMut<'w, crate::battlefield::Battlefield>,
             $($field: ResMut<'w, $t>,)*
         }
 
         impl NetState<'_> {
+            fn advance_battlefield_clock(&mut self) {
+                if let Some(now)=self.server_clock.mapped_now() {
+                    if self.battlefield.bypass_change_detection().advance_server_time(now) {self.battlefield.set_changed();}
+                }
+            }
             fn apply(&mut self, event: &Event) {
+                self.advance_battlefield_clock();
                 // `apply` reports whether anything changed, so change detection stays meaningful.
                 $(
                     if self.$field.apply_if_changed(event) {
                         self.$field.set_changed();
                     }
                 )*
+                let now=self.server_clock.mapped_now();
+                if self.battlefield.bypass_change_detection().apply_with_time(event,now) {self.battlefield.set_changed();}
+                self.advance_battlefield_clock();
                 if self.units.bypass_change_detection().apply_mate_equipment_flags(event, &self.mates) {
                     self.units.set_changed();
                 }
@@ -133,6 +144,7 @@ macro_rules! net_state {
         }
 
         fn init_state(app: &mut App) {
+            app.init_resource::<crate::battlefield::Battlefield>();
             $(app.init_resource::<$t>();)*
         }
     };
@@ -163,7 +175,7 @@ net_state! {
     trade: Trade,
     auction: Auction,
     loot_rolls: LootRolls,
-    battlefield: crate::battlefield::Battlefield,
+    server_clock: crate::clock::ServerClock,
     actabilities: Actabilities,
     mates: Mates,
     slaves: Slaves,
@@ -227,4 +239,21 @@ mod equipment_flags_tests {
         }
         assert_eq!(app.world().resource::<Units>().by_id[&51].equipment.slots[1].as_ref().unwrap().flags, 0xa5);
     }
+    #[test]
+    fn plugin_clock_samples_survive_delivery_delay_and_advance_battlefield_without_wire_commands() {
+        use crate::{clock::{ClockSample,ServerClock},proxy::ProxyPong,battlefield::{Battlefield,BattlefieldPhase,BattlefieldStart}};
+        let mut app=App::new();init_state(&mut app);
+        {
+            let mut bf=app.world_mut().resource_mut::<Battlefield>();bf.phase=Some(BattlefieldPhase::Opening);
+            bf.start=Some(BattlefieldStart{zone_id:8,instance_id:9,now_ms:0,start_ms:6000});
+        }
+        let at=std::time::Instant::now();
+        let sample=ClockSample{pong:ProxyPong{tm:0,when:0,elapsed:0,remote:5000000,local:1000,world:5000},local_receive_ms:1011,received_at:at,local_origin:at-std::time::Duration::from_millis(1011)};
+        app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ClockSample(sample))).unwrap();
+        assert!(app.world().resource::<ServerClock>().mapped_now().is_some());
+        assert_eq!(app.world().resource::<Battlefield>().phase,Some(BattlefieldPhase::Playing));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert_eq!(app.world().resource::<ServerClock>().mapped_now(),None);
+    }
+
 }

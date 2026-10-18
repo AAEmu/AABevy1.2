@@ -483,3 +483,18 @@ fn kill_team_totals_replace_only_killer_corps_and_join_does_not_reset_local_stre
     let load=Event::LoadInstance(crate::world_msg::InstanceLoad{raw_id:1,zone_id:2,pos:Default::default(),angles:[0.;3]});s.apply(&load);
     assert_eq!(s.local_character_id,Some(77));assert!(!s.in_instant_game());assert_eq!(s.kill_scores,[0;2]);assert_eq!(s.my_killstreak_point,0);
 }
+
+#[test]
+fn clocked_receive_keeps_native_timestamps_and_distinct_start_vs_frame_branches() {
+    let mut s=active_state();
+    s.apply_with_time(&Event::Battlefield(BattlefieldEvent::Started(start())),Some(19500));
+    assert_eq!(s.opening_at_ms,Some(25500));assert_eq!(s.phase,Some(BattlefieldPhase::Opening));
+    assert!(s.advance_server_time(19500)); // Frame uses now+6000; immediate packet branch did not.
+    let mut stale=end();stale.instance_id+=1;
+    s.apply_with_time(&Event::Battlefield(BattlefieldEvent::Ended(stale)),Some(21000));assert_eq!(s.ending_at_ms,None);
+    s.apply_with_time(&Event::Battlefield(BattlefieldEvent::Ended(end())),Some(21000));assert_eq!(s.ending_at_ms,Some(21000));
+    let mut late=active_state();late.apply_with_time(&Event::Battlefield(BattlefieldEvent::Started(start())),Some(20000));
+    assert_eq!(late.phase,Some(BattlefieldPhase::Playing));assert_eq!(late.opening_at_ms,Some(26000));
+    let mut unknown=active_state();unknown.apply_with_time(&Event::Battlefield(BattlefieldEvent::Started(start())),None);
+    assert_eq!(unknown.phase,Some(BattlefieldPhase::Opening));assert_eq!(unknown.opening_at_ms,None);
+}
