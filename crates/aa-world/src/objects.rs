@@ -599,7 +599,10 @@ pub fn stream_objects(
                 }
                 let nodes = loaded.parts.iter().map(|(ni, _)| Mat4::from(node_world(&loaded.model, *ni))).collect();
                 let ao_meshes = vegetation_color::ao::finish(ao, &mut cry.meshes, &mut state.ao_mirrors);
-                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &mut state.color_mirrors, &mut vegetation_materials);
+                // Once per prepared model, include only authored matching group variants.
+                let key = &state.models.keys[id as usize];
+                let brightnesses = groups.brightnesses(&key.path, key.material.as_deref());
+                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &brightnesses, &mut state.color_mirrors, &mut vegetation_materials);
                 ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials, ao_meshes }))
             }
             Err(e) => {
@@ -911,13 +914,17 @@ fn spawn_instance(
             };
             if no_ordinary_shadow { entity.insert(NotShadowCaster); }
             if matches!(kind, Kind::Vegetation | Kind::Trees)
-                && groups.groups.get(&data.objects.vegetation[idx].group).is_some_and(|g| g.material_layers == 0)
-                && let Some(material) = inst.color_materials.get(&part.material.id())
+                && let Some(group) = groups.groups.get(&data.objects.vegetation[idx].group)
+                && group.material_layers == 0
+                && let Some(material) = inst.color_materials.get(&(part.material.id(), group.supported_brightness().unwrap_or(1.0).to_bits()))
             {
                 let bgr = data.objects.vegetation[idx].color_variation;
                 let tag = if material.variation { vegetation_color::pack(bgr) } else { vegetation_color::NO_COLOR_VARIATION };
                 entity.insert((MeshMaterial3d(material.material.clone()), MeshTag::with_type::<vegetation_color::VegetationColor>(tag)));
                 if material.variation { entity.insert(VegetationColorPart { cell, bgr }); }
+                if material.brightness != 1.0 {
+                    entity.insert(vegetation_color::VegetationBrightnessPart { cell, group: group.id, brightness: material.brightness });
+                }
                 if let Some(ao) = inst.ao_meshes.get(&part.mesh.id()) {
                     entity.insert((Mesh3d(ao.mesh.clone()), vegetation_color::VegetationAoPart { cell, min_alpha: ao.min_alpha }));
                 }

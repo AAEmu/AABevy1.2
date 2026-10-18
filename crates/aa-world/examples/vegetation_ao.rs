@@ -94,7 +94,7 @@ fn numeric(
                 },
                 ..default()
             },
-            extension: VegetationColor,
+            extension: VegetationColor::default(),
         });
         for (i, alpha) in [0u8, 64, 153, 255].into_iter().enumerate() {
             let p = Vec2::new(i as f32 * 2.0 - 3.0, 3.0 - row as f32 * 2.0);

@@ -105,7 +105,7 @@ fn numeric(
         };
         let shared = materials.add(VegetationMaterial {
             base,
-            extension: VegetationColor,
+            extension: VegetationColor::default(),
         });
         for (i, bgr) in bgrs.into_iter().enumerate() {
             let p = Vec2::new(i as f32 * 2.0 - 3.0, 2.5 - row as f32 * 2.2);
