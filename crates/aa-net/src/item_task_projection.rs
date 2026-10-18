@@ -376,6 +376,18 @@ pub fn project_native_item_task(
     task: &ItemTask,
     context: NativeItemTaskContext<'_>,
 ) -> Option<NativeItemTaskProjection> {
+    project_native_item_task_with_recharge(task, context, None)
+}
+
+/// Optional source-complete static result for Security11 unpack. Some(0) means
+/// known no recharge (including genuinely missing static descriptor/class row),
+/// Some(nonzero) is the resolved recharge buff ID; None remains unknown.
+/// It must describe the actual PRE-row item's template, not the packet ID.
+pub fn project_native_item_task_with_recharge(
+    task: &ItemTask,
+    context: NativeItemTaskContext<'_>,
+    known_recharge_buff: Option<u32>,
+) -> Option<NativeItemTaskProjection> {
     if matches!(task, ItemTask::RemoveCrafting { .. }) {
         return Some(NativeItemTaskProjection {
             admitted: false,
@@ -467,7 +479,9 @@ pub fn project_native_item_task(
     if matches!(task, ItemTask::Remove { item_id: 0, .. }) {
         return Some(untouched(false));
     }
-    if matches!(task, ItemTask::Security { is_unpack, .. } if *is_unpack != 0) {
+    if matches!(task, ItemTask::Security { is_unpack, .. } if *is_unpack != 0)
+        && known_recharge_buff.is_none()
+    {
         return None;
     }
     let (location, item) = match context {
@@ -485,12 +499,31 @@ pub fn project_native_item_task(
             if let ItemTask::Security {
                 unsecure_time,
                 unpack_time,
+                is_unpack,
                 ..
             } = task
             {
                 changed.flags = *bits;
                 changed.unsecure_time = *unsecure_time;
                 changed.unpack_time = *unpack_time;
+                if *is_unpack != 0 && known_recharge_buff? != 0 {
+                    if changed.detail.kind() == 1 {
+                        let crate::model::ItemDetail::Equip(equip) = &mut changed.detail else {
+                            return None;
+                        };
+                        let mut payload = changed.detail_payload.clone()?;
+                        let mut reader = crate::wire::Reader::new(&payload);
+                        let decoded = crate::model::ItemDetail::read(&mut reader, 1).ok()?;
+                        if decoded != item.detail || !reader.is_empty() {
+                            return None;
+                        }
+                        payload
+                            .get_mut(11..19)?
+                            .copy_from_slice(&unpack_time.to_le_bytes());
+                        equip.charge_time = *unpack_time;
+                        changed.detail_payload = Some(payload);
+                    }
+                }
             } else {
                 changed.flags |= *bits;
             }
@@ -1598,5 +1631,153 @@ mod tests {
         assert!(!result.admitted);
         assert_eq!(result.output, None);
         assert_eq!(result.mutation, NativeItemTaskMutation::None);
+    }
+    #[test]
+    fn unpack_recharge_matches_original_static_branch_and_preserves_reserved_payload() {
+        use crate::model::{EquipDetail, ItemDetail};
+        let mut original = item(5);
+        let mut payload = vec![0; 55];
+        payload[5] = 0xa5;
+        payload[6] = 0xf2;
+        payload[11..19].copy_from_slice(&102i64.to_le_bytes());
+        original.detail = ItemDetail::Equip(EquipDetail {
+            charge_time: 102,
+            ..Default::default()
+        });
+        original.detail_payload = Some(payload.clone());
+        let context = NativeItemTaskContext::Found {
+            location: location(3),
+            item: &original,
+        };
+        let task = ItemTask::Security {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            bits: 4,
+            is_unsecure_excess: 0,
+            is_unsecure_set: 0,
+            is_unpack: 255,
+            unsecure_time: -7,
+            unpack_time: -9,
+        };
+        assert!(project_native_item_task(&task, context).is_none());
+        for recharge in [0, 42, u32::MAX] {
+            let result =
+                project_native_item_task_with_recharge(&task, context, Some(recharge)).unwrap();
+            assert!(result.admitted);
+            let expected_charge = if recharge == 0 { 102 } else { -9 };
+            let mut expected = original.clone();
+            expected.flags = 4;
+            expected.unsecure_time = -7;
+            expected.unpack_time = -9;
+            if let ItemDetail::Equip(detail) = &mut expected.detail {
+                detail.charge_time = expected_charge;
+            }
+            expected.detail_payload.as_mut().unwrap()[11..19]
+                .copy_from_slice(&expected_charge.to_le_bytes());
+            assert_eq!(result.output, Some(expected.clone()));
+            assert_eq!(
+                result.mutation,
+                NativeItemTaskMutation::Replace {
+                    location: location(3),
+                    item: expected
+                }
+            );
+        }
+        assert_eq!(original.detail_payload, Some(payload));
+        assert!(
+            !project_native_item_task_with_recharge(
+                &task,
+                NativeItemTaskContext::Missing,
+                Some(42)
+            )
+            .unwrap()
+            .admitted
+        );
+        let mut no_detail = item(5);
+        no_detail.detail = ItemDetail::None;
+        assert!(
+            project_native_item_task_with_recharge(
+                &task,
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &no_detail
+                },
+                Some(42)
+            )
+            .unwrap()
+            .admitted
+        );
+    }
+
+    #[test]
+    fn unpack_recharge_refuses_unknown_or_inconsistent_equipment_payload_only_when_needed() {
+        use crate::model::{EquipDetail, ItemDetail};
+        let mut original = item(5);
+        original.detail = ItemDetail::Equip(EquipDetail::default());
+        let task = ItemTask::Security {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            bits: 4,
+            is_unsecure_excess: 0,
+            is_unsecure_set: 0,
+            is_unpack: 1,
+            unsecure_time: i64::MIN,
+            unpack_time: i64::MAX,
+        };
+        for bad in [
+            None,
+            Some(vec![]),
+            Some(vec![0; 54]),
+            Some(vec![0; 56]),
+            Some(vec![0xff; 55]),
+        ] {
+            original.detail_payload = bad;
+            let context = NativeItemTaskContext::Found {
+                location: location(3),
+                item: &original,
+            };
+            assert!(project_native_item_task_with_recharge(&task, context, None).is_none());
+            assert!(project_native_item_task_with_recharge(&task, context, Some(42)).is_none());
+            let known_absent =
+                project_native_item_task_with_recharge(&task, context, Some(0)).unwrap();
+            assert!(known_absent.admitted);
+            assert_eq!(
+                known_absent.output.unwrap().detail_payload,
+                original.detail_payload
+            );
+        }
+        original.detail = ItemDetail::Other(1);
+        original.detail_payload = Some(vec![0; 55]);
+        assert!(
+            project_native_item_task_with_recharge(
+                &task,
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &original
+                },
+                Some(42)
+            )
+            .is_none()
+        );
+        original.detail = ItemDetail::Equip(EquipDetail::default());
+        original.detail_payload = Some(vec![0; 55]);
+        let result = project_native_item_task_with_recharge(
+            &task,
+            NativeItemTaskContext::Found {
+                location: location(3),
+                item: &original,
+            },
+            Some(42),
+        )
+        .unwrap();
+        let changed = result.output.unwrap();
+        assert_eq!(changed.unsecure_time, i64::MIN);
+        assert_eq!(changed.unpack_time, i64::MAX);
+        assert_eq!(
+            &changed.detail_payload.unwrap()[11..19],
+            &i64::MAX.to_le_bytes()
+        );
     }
 }
