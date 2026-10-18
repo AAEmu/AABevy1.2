@@ -1079,7 +1079,7 @@ Repeated or stale callbacks cannot consume a new quote, including after characte
 No item, capacity or balance changes locally: received InventoryExpanded updates capacity and
 raises original BAG_EXPANDED/BANK_EXPANDED; separate item/money reports retain their own reducers.
 
-The auto-AA checkbox is a local session value forwarded in the request. Premium purchase and
+The auto-AA checkbox now uses the received setting, as described in the later AA milestone. Premium purchase and
 persistence are not implemented. The navigation-context producer remains unresolved, so the
 explicit unset tail is zero; it is not a guessed NPC ID. The lane currently ignores that tail,
 AA and currency ID, and does not send MoneyChange for positive-price expansion. All18 current
@@ -1158,3 +1158,29 @@ during capture. No character creation request was submitted. The rebuilt client-
 fixture (`client-paths-final.png`) again passed body-clock/FSQ/GPU-blink assertions;201-315FPS
 before capture/101FPS in its capture interval. These shared-machine captures exited normally;
 none establishes natural game-session repair/expansion while the existing lane stall persists.
+
+## Received auto-use AA Points (2026-10-17)
+
+`X2Bag:GetAutoUseAAPoint` now reads the character's received value. The setter queues aa-net's
+native CS0133 one-byte request only when the value differs and no send is queued or pending;
+it never changes the getter or emits CHANGED_AUTO_USE_AAPOINT on a send. Failed/inactive
+transport releases the local queue latch through the setting-specific rejection event.
+Expansion confirmation forwards this received value instead of an invented session preference.
+
+Native394e758c/394e75af emits each action18 change after writing its raw byte; raw1 alone means
+true, including when the same value repeats. The inline3920fcf0 listener path means a coalesced
+true/false pair must expose each action's new getter during its own callback. A temporary getter
+overlay provides that behavior while the resource contains the final batch snapshot. Native
+pending key0xf000 remains locked through the callbacks and is released after the batch
+(394f021b/397d22b0), or by the separate received SC00f5 unlock with kindf0/slot0. Unrelated
+unlocks, requests and rejection notifications emit no changed-setting event. Initial HUD
+hydration uses the received snapshot and does not replay loading history.
+
+The full client suite passed142 tests with22 ignored. Six exact-name original-script probes
+(expansion, sorting, Options, mail, trade and breath) each ran and passed in an isolated process;
+logs are in `shots/hud/sol61-auto-aa/`. The expansion probe verifies duplicate setters send once,
+the getter stays unchanged until a received item task, and both bag and bank confirmations
+forward the confirmed true value. The focused callback test covers repeated/coalesced values,
+raw2, pending-before-callback release, unrelated/matching unlocks and rejection cleanup.
+The current lane does not register the setting packet, so live persistence remains unverified;
+these tests supply explicit received fixtures and do not fabricate a server acknowledgement.

@@ -1,11 +1,8 @@
 -- The original task dialog supplies its authored cost/item layout and buttons.
-local autoUseAA, active = false, nil
-X2Bag.GetAutoUseAAPoint = function() return autoUseAA end
+local active = nil
+X2Bag.GetAutoUseAAPoint = function() return HUD.auto_aa_point() end
 X2Bag.SetAutoUseAAPoint = function(self, use)
-  use = use == true
-  if autoUseAA == use then return end
-  autoUseAA = use
-  FAKE.fire_now("CHANGED_AUTO_USE_AAPOINT", use)
+  HUD.set_auto_aa_point(use == true)
 end
 X2Bag.ExpansionMaxSlotCount = function() return HUD.expansion_max(2) end
 X2Bank.ExpansionMaxSlotCount = function() return HUD.expansion_max(3) end
@@ -29,7 +26,7 @@ local function expand(container)
   if not wnd then HUD.expansion_cancel(token); return end
   active = { wnd = wnd, token = token }
   wnd.OkProc = function()
-    HUD.expansion_confirm(token, autoUseAA)
+    HUD.expansion_confirm(token, X2Bag:GetAutoUseAAPoint())
     if active and active.token == token then active = nil end
   end
   wnd.CancelProc = function()
