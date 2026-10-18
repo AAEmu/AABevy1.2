@@ -7,12 +7,16 @@ use crate::{
 };
 
 mod joined;
+mod phases;
+pub use phases::{BattlefieldPhase, BattlefieldStart, BattlefieldEnd, BattlefieldTeamResult, BattlefieldMemberResult};
 pub use joined::BattlefieldJoined;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BattlefieldCommand {
     Apply { battlefield_id: u32, corps: u8 },
     Cancel,
+    /// Native result-screen leave request; state clears only on received instance load.
+    Leave,
     /// Captured received invitation, checked again against current session state before send.
     RespondToInvitation { invitation: BattlefieldInvitation, accept: bool },
     /// Explicit caller-owned world-ready continuation; never emitted automatically.
@@ -31,6 +35,7 @@ impl BattlefieldCommand {
         match self {
             Self::Apply { .. } => cs::CSApplyToInstantGamePacket,
             Self::Cancel => cs::CSCancelInstantGamePacket,
+            Self::Leave => cs::CSLeaveInstantGamePacket,
             Self::RespondToInvitation { .. } => cs::CSJoinInstantGamePacket,
             Self::EnteredWorld { .. } => cs::CSEnteredInstantGameWorldPacket,
         }
@@ -40,7 +45,7 @@ impl BattlefieldCommand {
             Self::Apply { battlefield_id, corps } => { w.u32(battlefield_id).u8(corps); }
             Self::RespondToInvitation { invitation, accept } => { w.bool(accept).u64(if accept { invitation.qualified_id } else { 0 }); }
             Self::EnteredWorld { invitation } => { w.u64(invitation.qualified_id); }
-            Self::Cancel => {}
+            Self::Cancel | Self::Leave => {}
         }
     }
 }
@@ -72,6 +77,8 @@ pub enum BattlefieldEvent {
     QueueState(BattlefieldQueue),
     Invited(BattlefieldInvitation),
     Joined(BattlefieldJoined),
+    Started(BattlefieldStart),
+    Ended(BattlefieldEnd),
     InviteTimedOut {
         zone_id: u32,
         instance_id: u32,
@@ -91,7 +98,7 @@ impl BattlefieldEvent {
         r.i16()
     }
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x18b..=0x190)
+        matches!(op, 0x18b..=0x192)
     }
     pub fn name(&self) -> &'static str {
         match self {
@@ -100,6 +107,8 @@ impl BattlefieldEvent {
             Self::QueueState(_) => "SCInstantGameState",
             Self::Invited(_) => "SCInviteToInstantGame",
             Self::Joined(_) => "SCInstantGameJoined",
+            Self::Started(_) => "SCInstantGameStart",
+            Self::Ended(_) => "SCInstantGameEnd",
             Self::InviteTimedOut { .. } => "SCInstantGameInviteTimeout",
             Self::Requested(_) => "BattlefieldRequested",
             Self::RequestRejected { .. } => "BattlefieldRequestRejected",
@@ -126,6 +135,8 @@ impl BattlefieldEvent {
                 qualified_id: r.u64()?,
             }),
             sc::SCInstantGameJoinedPacket => Self::Joined(BattlefieldJoined::read(r)?),
+            sc::SCInstantGameStartPacket => Self::Started(BattlefieldStart::read(r)?),
+            sc::SCInstantGameEndPacket => Self::Ended(BattlefieldEnd::read_lane(r)?),
             sc::SCInstantGameInviteTimeoutPacket => Self::InviteTimedOut {
                 zone_id: r.u32()?,
                 instance_id: r.u32()?,
@@ -148,8 +159,16 @@ pub struct Battlefield {
     pub cancel_pending: bool,
     /// Successful local reply write, not a received join or queue transition.
     pub response_pending: Option<(BattlefieldInvitation, bool)>,
-    /// Last matching genuine joined packet; later gameplay phases are outside this slice.
+    /// Last matching genuine joined packet.
     pub joined: Option<BattlefieldJoined>,
+    /// Ruleset identity retained from the matching received invitation.
+    pub joined_ruleset_id: Option<u32>,
+    pub phase: Option<BattlefieldPhase>,
+    pub start: Option<BattlefieldStart>,
+    /// Phase-admitted matching result (native state7 only).
+    pub result: Option<BattlefieldEnd>,
+    /// Last genuine raw End receipt, including unmatched or clock-gated context.
+    pub last_end: Option<BattlefieldEnd>,
     pub last_error: Option<u16>,
     pub last_rejection: Option<String>,
 }
@@ -157,6 +176,9 @@ impl Battlefield {
     /// Recheck a captured invitation before writing a response. No local state is changed.
     pub fn validate_command(&self, command: BattlefieldCommand) -> std::result::Result<(), &'static str> {
         command.validate()?;
+        if command == BattlefieldCommand::Leave && self.phase != Some(BattlefieldPhase::Ending) {
+            return Err("battlefield leave requires the received results phase");
+        }
         if let BattlefieldCommand::RespondToInvitation { invitation, .. } = command {
             if self.invitation != Some(invitation) || self.response_pending.is_some() || self.cancel_pending || self.joined.is_some() {
                 return Err("battlefield invitation is stale or already answered");
@@ -181,6 +203,18 @@ impl Battlefield {
         Ok(command)
     }
 
+    /// Original IsInInstantGame includes joined, opening, playing and results phases.
+    pub fn in_instant_game(&self) -> bool { self.phase.is_some() }
+
+    /// Explicit native frame-clock input. No wall-clock timer or fabricated packet is used.
+    /// Caller must supply the original mapped server clock, not a packet's `now_ms` field.
+    pub fn advance_server_time(&mut self, mapped_now_ms:u32) -> bool {
+        if self.phase == Some(BattlefieldPhase::Opening)
+            && self.start.is_some_and(|s| mapped_now_ms.wrapping_add(6000) >= s.start_ms) {
+            self.phase=Some(BattlefieldPhase::Playing); return true;
+        }
+        false
+    }
     /// Capped received queue getter; constructor default is (0,0,-1).
     /// Pending requested corps stays in `requesting`, separate from received `applied`.
     pub fn joined_infos(&self) -> (u32, u32, i32) {
@@ -198,7 +232,9 @@ impl Battlefield {
     }
     pub fn apply(&mut self, e: &Event) -> bool {
         let before = self.clone();
+        if let Event::Battlefield(BattlefieldEvent::Ended(end)) = e { self.last_end=Some(end.clone()); }
         match e {
+            Event::LoadInstance(_) if self.in_instant_game() => *self = Self::default(),
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => *self = Self::default(),
             Event::Battlefield(BattlefieldEvent::Requested(c)) => {
                 self.last_rejection = None;
@@ -207,7 +243,7 @@ impl Battlefield {
                         self.requesting = Some((battlefield_id, corps));
                     }
                     BattlefieldCommand::Cancel => self.cancel_pending = true,
-                    BattlefieldCommand::EnteredWorld { .. } => {},
+                    BattlefieldCommand::EnteredWorld { .. } | BattlefieldCommand::Leave => {},
                     BattlefieldCommand::RespondToInvitation { invitation, accept } => {
                         if self.validate_command(*c).is_ok() { self.response_pending = Some((invitation, accept)); }
                     }
@@ -251,9 +287,19 @@ impl Battlefield {
             }
             Event::Battlefield(BattlefieldEvent::Joined(joined)) if !self.cancel_pending
                 && self.response_pending.is_some_and(|(i, accept)| accept && i.zone_id == joined.zone_id && i.instance_id == joined.instance_id && i.corps == joined.corps) => {
+                self.joined_ruleset_id = self.response_pending.map(|(i, _)| i.ruleset_id);
                 self.joined = Some(*joined);
+                self.phase = Some(BattlefieldPhase::Joined);
                 self.response_pending = None;
                 self.invitation = None;
+            }
+            Event::Battlefield(BattlefieldEvent::Started(start)) if self.phase == Some(BattlefieldPhase::Joined)
+                && self.joined.is_some_and(|j|j.zone_id==start.zone_id && j.instance_id==start.instance_id) => {
+                self.start=Some(*start); self.phase=Some(BattlefieldPhase::Opening);
+            }
+            Event::Battlefield(BattlefieldEvent::Ended(end)) if self.phase == Some(BattlefieldPhase::Playing)
+                && self.joined.is_some_and(|j|j.zone_id==end.zone_id && j.instance_id==end.instance_id) => {
+                self.result=Some(end.clone()); self.phase=Some(BattlefieldPhase::Ending);
             }
             Event::Battlefield(BattlefieldEvent::InviteTimedOut {
                 zone_id,

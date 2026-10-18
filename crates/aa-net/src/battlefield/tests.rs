@@ -360,3 +360,66 @@ fn world_ready_requires_current_successfully_sent_acceptance_and_keeps_received_
     fold(&mut s,BattlefieldEvent::Cancelled{raw:0});
     assert!(s.world_ready(invite()).is_err());
 }
+
+
+fn active_state() -> Battlefield {
+    let mut s=invited_state();
+    let reply=s.respond_to_invitation(invite(),true).unwrap();
+    fold(&mut s,BattlefieldEvent::Requested(reply));
+    fold(&mut s,BattlefieldEvent::Joined(joined())); s
+}
+fn start() -> BattlefieldStart { BattlefieldStart {zone_id:8,instance_id:9,now_ms:123,start_ms:20000} }
+fn end() -> BattlefieldEnd {
+    BattlefieldEnd {zone_id:8,instance_id:9,reason:3,teams:std::array::from_fn(|i| BattlefieldTeamResult {
+        state:i as u8,faction_id:100+i as u32,score:-123,total_kills:-2,total_deaths:7,
+        members:vec![BattlefieldMemberResult {character_id:77,name:"??".into(),score:-9,bonus:10,bonus_set:0xfedcba98,killstreak:2,kills:3,assists:4,deaths:5}]
+    })}
+}
+#[test]
+fn later_phase_wire_goldens_truncations_and_tail_alignment() {
+    let a=start(); let mut w=Writer::new();
+    w.u32(a.zone_id).u32(a.instance_id).u32(a.now_ms).u32(a.start_ms);
+    check(0x191,&w.finish(),BattlefieldEvent::Started(a));
+    let e=end(); let mut w=Writer::new();
+    w.u32(e.zone_id).u32(e.instance_id).u8(e.reason);
+    for t in &e.teams {
+        w.u8(t.state).u32(t.faction_id).i32(t.score).i16(t.total_kills).i16(t.total_deaths).u8(t.members.len() as u8);
+        for m in &t.members {w.u32(m.character_id).string(&m.name).i32(m.score).i32(m.bonus).u32(m.bonus_set).u16(m.killstreak).u16(m.kills).u16(m.assists).u16(m.deaths);}
+    }
+    check(0x192,&w.finish(),BattlefieldEvent::Ended(e));
+}
+#[test]
+fn phases_require_matching_identity_clock_and_received_reset() {
+    let mut s=active_state(); assert!(s.in_instant_game()); assert_eq!(s.joined_ruleset_id,Some(10));
+    assert!(s.validate_command(BattlefieldCommand::Leave).is_err());
+    fold(&mut s,BattlefieldEvent::Ended(end())); assert!(s.result.is_none()); assert_eq!(s.last_end,Some(end()));
+    let mut stale=start(); stale.instance_id+=1;
+    fold(&mut s,BattlefieldEvent::Started(stale)); assert!(s.start.is_none());
+    fold(&mut s,BattlefieldEvent::Started(start())); assert_eq!(s.phase,Some(BattlefieldPhase::Opening));
+    assert!(!s.advance_server_time(13999)); assert!(s.advance_server_time(14000));
+    assert!(!s.advance_server_time(14001));
+    let mut stale=end(); stale.zone_id+=1;
+    fold(&mut s,BattlefieldEvent::Ended(stale)); assert!(s.result.is_none());
+    fold(&mut s,BattlefieldEvent::Ended(end())); assert_eq!(s.phase,Some(BattlefieldPhase::Ending));
+    assert!(s.in_instant_game()); assert!(s.validate_command(BattlefieldCommand::Leave).is_ok());
+    fold(&mut s,BattlefieldEvent::Requested(BattlefieldCommand::Leave)); assert!(s.in_instant_game());
+    assert_eq!(BattlefieldCommand::Leave.opcode(),0xe5);
+    assert!(ClientMsg::Battlefield(BattlefieldCommand::Leave).encode_body().is_empty());
+    let load=Event::LoadInstance(crate::world_msg::InstanceLoad {raw_id:1,zone_id:2,pos:Default::default(),angles:[0.;3]});
+    s.apply(&load); assert_eq!(s,Battlefield::default());
+    let mut accepted=invited_state(); let reply=accepted.respond_to_invitation(invite(),true).unwrap();
+    fold(&mut accepted,BattlefieldEvent::Requested(reply)); accepted.apply(&load);
+    assert!(accepted.world_ready(invite()).is_ok());
+}
+#[test]
+fn lane_result_count_preserves_all_255_members_instead_of_native_inline_clamp() {
+    let mut w=Writer::new(); w.u32(8).u32(9).u8(0);
+    for _ in 0..2 {
+        w.u8(0).u32(1).i32(0).i16(0).i16(0).u8(255);
+        for id in 0..255 {w.u32(id).string("").i32(0).i32(0).u32(0).u16(0).u16(0).u16(0).u16(0);}
+    }
+    let body=w.finish();
+    let BattlefieldEvent::Ended(e)=BattlefieldEvent::read(0x192,&mut Reader::new(&body)).unwrap() else {panic!()};
+    assert_eq!(e.teams[0].members.len(),255); assert_eq!(e.teams[1].members[254].character_id,254);
+    assert!(BattlefieldEvent::read(0x192,&mut Reader::new(&body[..body.len()-1])).is_err());
+}
