@@ -160,23 +160,37 @@ impl TimeOfDay {
         } else { return None };
         let Some(block) = block else { return Some(tod) };
         tod.default_hour = block.attribute("Time").and_then(|v| v.parse().ok()).unwrap_or(12.0);
+        let legacy = block.attribute("sRGB").and_then(|value| value.parse::<i32>().ok()).unwrap_or(0) != 1;
         for v in block.children().filter(|n| n.has_tag_name("Variable")) {
             let Some(name) = v.attribute("Name") else { continue };
             let name = if name == "HDR blueshift" { "Blueshift" } else { name };
             let Some(spline) = tod.variables.get_mut(name) else { continue };
+            // Native 300A8190 leaves these initialized when migrating pre-sRGB XML.
+            if legacy && (name.eq_ignore_ascii_case("HDR dynamic power factor") || name.to_ascii_lowercase().contains("film")) {
+                continue;
+            }
             if spline.is_color && let Some(c) = v.attribute("Color") {
                 let f = parse_floats(c);
                 if f.len() >= 3 { spline.value = [f[0], f[1], f[2]]; }
             } else if !spline.is_color && let Some(value) = v.attribute("Value").and_then(|x| x.parse().ok()) {
                 spline.value[0] = value;
             }
-            if let Some(keys) = v
+            if let Some(mut keys) = v
                 .children()
                 .find(|n| n.has_tag_name("Spline"))
                 .and_then(|s| s.attribute("Keys"))
                 .map(|k| parse_spline(k, spline.is_color))
                 && !keys.is_empty()
             {
+                if legacy && ["Sun color", "Sun color multiplier", "Sun specular multiplier",
+                    "Sky color", "Sky color multiplier", "Global Rim Amount"].contains(&name)
+                {
+                    // Native converts each stored key via double pow, then rounds to
+                    // float, with the f32 exponent at 3025B3F8 promoted to double.
+                    for key in &mut keys {
+                        key.value = key.value.map(|value| f64::from(value).powf(f64::from(2.2_f32)) as f32);
+                    }
+                }
                 spline.keys = keys;
             }
         }
@@ -669,7 +683,7 @@ mod tests {
         let absent = TimeOfDay::parse_layer(xml, 1).unwrap();
         assert_eq!(absent.scalar("Sun color multiplier", 0.0), 2.4);
         assert!(TimeOfDay::parse_layer(xml, 2).is_none());
-        let limited = TimeOfDay::parse(r#"<TimeOfDay>
+        let limited = TimeOfDay::parse(r#"<TimeOfDay sRGB="1">
             <Variable Name="Saturation"><Spline Keys="0:99:0,1:99:0,"/></Variable>
             <Variable Name="Sun color"><Spline Keys="0:(-1:2:0.5):0,1:(-1:2:0.5):0,"/></Variable>
             <Variable Name="Color balance"><Spline Keys="0:(0:0:0):0,1:(0:0:0):0,"/></Variable>
@@ -710,8 +724,65 @@ mod tests {
     }
 
     #[test]
+    fn legacy_xml_migrates_only_native_six_key_sets() {
+        let names = ["Sun color", "Sun color multiplier", "Sun specular multiplier",
+            "Sky color", "Sky color multiplier", "Global Rim Amount"];
+        let mut variables = String::new();
+        for name in names {
+            let color = name == "Sun color" || name == "Sky color";
+            let value = if color { "(0.5:0.5:0.5)" } else { "0.5" };
+            variables.push_str(&format!(r#"<Variable Name="{name}" Value="0.8" Color="0.8,0.8,0.8"><Spline Keys="0:{value}:65536,1:{value}:0,"/></Variable>"#));
+        }
+        variables.push_str(r#"<Variable Name="Fog color"><Spline Keys="0:(0.5:0.5:0.5):0,1:(0.5:0.5:0.5):0,"/></Variable>
+            <Variable Name="HDR dynamic power factor"><Spline Keys="0:2:0,1:2:0,"/></Variable>
+            <Variable Name="Film curve whitepoint"><Spline Keys="0:3:0,1:3:0,"/></Variable>"#);
+        let legacy = TimeOfDay::parse(&format!("<TimeOfDay>{variables}</TimeOfDay>")).unwrap();
+        let modern = TimeOfDay::parse(&format!("<TimeOfDay sRGB=\"1\">{variables}</TimeOfDay>")).unwrap();
+        for name in names {
+            assert_eq!(legacy.variables[name].keys[0].value[0].to_bits(), 0.21763763_f32.to_bits());
+            assert_eq!(modern.variables[name].keys[0].value[0], 0.5);
+            assert_eq!(legacy.variables[name].keys[0].flags, 65536);
+            assert_eq!(legacy.variables[name].value[0], 0.8, "editor metadata is not migrated");
+        }
+        assert_eq!(legacy.color("Fog color", 0.0), Vec3::splat(0.5));
+        assert_eq!(legacy.scalar("HDR dynamic power factor", 0.0), 0.0);
+        assert_eq!(legacy.scalar("Film curve whitepoint", 0.0), 1.0);
+        assert_eq!(modern.scalar("HDR dynamic power factor", 0.0), 2.0);
+        assert_eq!(modern.scalar("Film curve whitepoint", 0.0), 3.0);
+    }
+
+    #[test]
+    fn real_login_area_legacy_keys_match_native_curve_evaluation() {
+        if !crate::pak_available() { return }
+        let xml = aa_pak::Pak::global().read_string("worlds/login2/cells/001_000/client/entities.xml").unwrap();
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let entity = doc.descendants().find(|n| n.has_tag_name("Entity") && n.attribute("Name") == Some("login_224_oktop_2")).unwrap();
+        let block = entity.descendants().find(|n| n.has_tag_name("TimeOfDay")).unwrap();
+        assert_eq!(block.attribute("sRGB"), None);
+        let tod = TimeOfDay::parse(&xml[block.range()]).unwrap();
+        // Original x86 spline routines run on the source-proved migrated f32 keys.
+        for (name, t, expected) in [
+            ("Sun color", 0.25, [0.74623096, 0.7083347, 0.6329001]),
+            ("Sun color", 0.5, [0.7817514, 0.7817514, 0.76674455]),
+            ("Sun color", 0.7, [0.7575028, 0.73163223, 0.67537344]),
+            ("Sky color", 0.25, [0.35865396, 0.5859734, 0.87013614]),
+            ("Sky color", 0.5, [0.35865393, 0.5859734, 0.86713576]),
+            ("Sky color", 0.7, [0.35865393, 0.5859734, 0.8691841]),
+        ] {
+            assert!((tod.color(name, t) - Vec3::from(expected)).abs().max_element() < 3e-6, "{name} at {t}");
+        }
+        for (name, expected) in [("Sun color multiplier", 6.8622217), ("Sun specular multiplier", 1.0),
+            ("Sky color multiplier", 1.2332863), ("Global Rim Amount", 0.0)]
+        {
+            assert!((tod.scalar(name, 0.5) - expected).abs() < 3e-6, "{name}");
+        }
+        assert_eq!(tod.scalar("HDR dynamic power factor", 0.5), 0.0);
+        assert!((tod.scalar("Film curve whitepoint", 0.5) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn parse_variables() {
-        let xml = r#"<TimeOfDayList><TimeOfDay Time="12">
+        let xml = r#"<TimeOfDayList><TimeOfDay Time="12" sRGB="1">
             <Variable Name="Sun color multiplier" Value="8"><Spline Keys="0:8:0,0.5:4:0,1:8:0,"/></Variable>
             <Variable Name="Sun color" Color="0.5,0.5,0.5"><Spline Keys="0:(0.1:0.2:0.3):0,1:(0.1:0.2:0.3):0,"/></Variable>
             </TimeOfDay></TimeOfDayList>"#;
@@ -768,7 +839,7 @@ mod tests {
     fn native_zone_blending_precedes_color_conversion_and_hdr_products() {
         let tod = |color: f32, multiplier: f32, hdr: f32| {
             TimeOfDay::parse(&format!(
-                r#"<TimeOfDay>
+                r#"<TimeOfDay sRGB="1">
             <Variable Name="Sun color" Color="{color},{color},{color}"><Spline Keys="0:({color}:{color}:{color}):0,1:({color}:{color}:{color}):0,"/></Variable>
             <Variable Name="Sun color multiplier" Value="{multiplier}"><Spline Keys="0:{multiplier}:0,1:{multiplier}:0,"/></Variable>
             <Variable Name="Night sky: Moon color" Color="{color},{color},{color}"><Spline Keys="0:({color}:{color}:{color}):0,1:({color}:{color}:{color}):0,"/></Variable>
@@ -797,7 +868,7 @@ mod tests {
 
     #[test]
     fn moon_raw_rgb_hdr_factor_and_zone_blending() {
-        let xml = r#"<TimeOfDayList><TimeOfDay>
+        let xml = r#"<TimeOfDayList><TimeOfDay sRGB="1">
             <Variable Name="Night sky: Moon color" Color="0.5,0.4,0.3"><Spline Keys="0:(0.5:0.4:0.3):0,1:(0.5:0.4:0.3):0,"/></Variable>
             <Variable Name="Night sky: Moon color multiplier" Value="3"><Spline Keys="0:3:0,1:3:0,"/></Variable>
             <Variable Name="HDR dynamic power factor" Value="1"><Spline Keys="0:1:0,1:1:0,"/></Variable>

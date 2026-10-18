@@ -341,8 +341,8 @@ points, material `lake_tank`, density 0.6) is a unit test. 3182 type 11 items ex
 ### zone/<id>/time_of_day.xml, lighting.xml
 
 CryEngine 3 time of day: `<TimeOfDay>` with `<Variable Name=".." Value=".."|Color="r,g,b"><Spline Keys="t:v:flags,..."/>` (`t` in `0..1` of the
-day, colours `t:(r:g:b):flags`, sRGB; `* multiplier` variables carry the HDR scale: sun about 6 to 8, sky 2 to 6). Evaluated with linear
-interpolation and day wrap-around (`env::Spline`). Used: `Sun color` x `Sun color multiplier`, `Sky color`, `Ambient ground color`, `Fog color` x
+day, colours `t:(r:g:b):flags`, sRGB; `* multiplier` variables carry the HDR scale: sun about 6 to 8, sky 2 to 6). Evaluated with native Bezier
+controls, preserved tangent flags and clamped endpoints (`env::Spline`); legacy XML is migrated at load (see Environment). Used: `Sun color` x `Sun color multiplier`, `Sky color`, `Ambient ground color`, `Fog color` x
 multiplier, `Volumetric fog: Global density / Ramp start / Ramp influence` and the fog layer (`Fog height (bottom / top)`, `Fog layer density
 (bottom / top)`, `Fog color (top)`), `Night sky: Horizon / Zenith color` (these are the sky's gradient colours all day long: the data has
 no separate day sky, the engine adds scattering), `Cloud shading: Sun / Sky light multiplier`, `Skybox multiplier`, and the post processing:
@@ -818,8 +818,52 @@ dusk. These are controlled comparisons against the old sampler; no matching orig
 dawn/dusk frame was available. Original native numeric outputs provide the correctness
 check, without fitting new exposure or color constants. All four windows exited normally.
 
-Limits: legacy XML's `sRGB != 1` color/HDR migration remains an adapter boundary; the real
-numeric curve fixtures use authored `sRGB="1"` data. XML contains no custom control values
+**Legacy XML migration**: native **300A8190** treats absent `sRGB`, or an integer other
+than 1, as the older format. Only the stored spline keys of `Sun color`, `Sun color
+multiplier`, `Sun specular multiplier`, `Sky color`, `Sky color multiplier` and
+`Global Rim Amount` are raised to **2.200000047683716** (the double at **3025B3F8**).
+The native code promotes each f32 key value to double, calls pow, then rounds back to f32
+before updating tangent controls. Editor Value/Color metadata and other variable keys are
+unchanged. Serialized `HDR dynamic power factor` and any recognized variable containing
+`Film` are ignored for legacy input, retaining the native initialized defaults. Modern
+`sRGB="1"` curves bypass all these migrations. This is load-time work only.
+
+The real `login2` cell `001_000` AreaShape `login_224_oktop_2` contains a nonempty legacy
+`Area/TimeOfDay`. Original x86 spline evaluation on its source-proved migrated keys supplies
+numeric regressions for all six variable families. Noon Sun RGB is
+`(.7817514,.7817514,.76674455)`, multiplier `6.8622217`; Sky RGB is
+`(.35865393,.5859734,.86713576)`, multiplier `1.2332863`. Legacy HDR dynamic stays zero.
+The `legacy_tod` aa-dev example renders these actual raw curves as controlled RGB/scalar
+strips. `--old-parser-control` marks the same input sRGB=1 to reproduce the previous
+parser's behavior; it is a numerical/visual control, not a production area override.
+Original sRGB=1 zone-179 goldens remain unchanged.
+
+Validation: all 127 library tests pass (nine existing ignored), including 18 environment
+tests, and all examples pass `cargo check`. Inspected `legacy_area_before.png` /
+`legacy_area_after.png` under `shots/aa-world/environment/` show the source-specified
+Sun/Sky and HDR changes. The Fog and Film-whitepoint strips are pixel-identical controls.
+The viewer uses raw spline time, before the world's clock warp; it does not activate an
+area in production or claim a world-render/reference match. The 2D controls logged
+368–387 / 477–540 FPS under shared-machine activity; these are fixture rates, not a world
+performance comparison. Both windows exited normally. No brightness calibration changed.
+
+Further producer audit: original `cryentitysystem.dll` **32084070** reads the serialized
+Area attributes, polygon and nested ToD. **3208ECB0** creates/loads that ToD only for
+area Group 14; **32083A10** transforms its points with the entity matrix. Proxy
+**32085470** returns the master weight at CArea +244 (initialized to 1). Seamless native
+slot +148 (**365F1290**) accepts area registration inputs, then **365EEC20** resolves
+priorities and normalized area/zone weights. The registration-event producer and exact
+numerator/falloff input semantics are still unresolved, so automatic area activation is
+not exposed as a speculative public API. Read-only exports are under ignored
+`data/extract/aa-world/environment/area-*.txt`.
+
+Weighted `env.xml` LDR loading/blending is also proved by **365F8DD0**, **365F0210** and
+engine **30122CC0**. However, **30128050** bypasses Sun/Sky LDR multipliers when renderer
+query 19 reports HDR enabled. They must not be applied indiscriminately to HDR lighting;
+the sampled original zone LDR inputs were also all 1. No new brightness multiplier is
+introduced from this audit.
+
+Limits: XML contains no custom control values
 to restore for free tangents. Malformed/empty key lists retain initialized defaults rather
 than reproducing the native empty-spline undefined output. No subjective color/exposure
 calibration is part of the curve correction.
@@ -1631,7 +1675,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
 * The real client's time-of-day hour warp, spatial raw-curve zone blending and discrete skybox/cloud fades are implemented (see Environment). Remaining transition gaps:
-  area-ToD overrides, per-zone relic layer weights, legacy sRGB XML migration and weighted `env.xml` multipliers. The plateau of
+  area-ToD overrides, per-zone relic layer weights and weighted `env.xml` multipliers. The plateau of
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
