@@ -405,6 +405,7 @@ pub enum ServerMsg {
     LoadInstance(crate::world_msg::InstanceLoad),
     /// Movement directive only; distinct from a completed transform or `SCTeleportUnit`.
     BlinkUnit(crate::world_msg::BlinkUnit),
+    Gimmick(crate::gimmick::GimmickEvent),
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
     ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
@@ -613,6 +614,7 @@ impl ServerMsg {
             Self::Teleport { .. } => "SCTeleportUnit",
             Self::LoadInstance(_) => "SCLoadInstance",
             Self::BlinkUnit(_) => "SCBlinkUnit",
+            Self::Gimmick(e) => e.name(),
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
@@ -915,6 +917,7 @@ impl ServerMsg {
             sc::SCLoadInstancePacket => Self::LoadInstance(crate::world_msg::InstanceLoad::read(r)?),
             sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
             sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
+            opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,
                 sub_type: r.i16()?,

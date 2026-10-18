@@ -506,6 +506,7 @@ pub enum Event {
     BlinkUnit(crate::world_msg::BlinkUnit),
     /// Raw item timer metadata; does not change inventory contents or guess an expiry.
     ItemLifespan(crate::items::ItemLifespan),
+    Gimmick(crate::gimmick::GimmickEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
@@ -1424,6 +1425,7 @@ impl Session {
             M::LoadInstance(e) => self.emit(Event::LoadInstance(e)),
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
+            M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Mate(e) => self.emit(Event::Mate(e)),
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
@@ -1626,6 +1628,94 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn gimmick_batch_reaches_metadata_in_order_without_phantom_motion_or_reply() {
+        use crate::gimmick::{GimmickEvent, GimmickMovement};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        let mut spawn = crate::gimmick::tests::spawn();
+        spawn.obj_id = 0x10203;
+        let motion = GimmickMovement {
+            obj_id: spawn.obj_id,
+            ..crate::gimmick::tests::movement()
+        };
+        let created = GimmickEvent::Created {
+            raw_count: 1,
+            gimmicks: vec![spawn.clone()],
+        };
+        let joints = GimmickEvent::JointsBroken {
+            raw_count: 0,
+            entries: vec![],
+        };
+        let moved = GimmickEvent::Moved(motion);
+        let removed = GimmickEvent::Removed {
+            raw_count: 1,
+            obj_ids: vec![spawn.obj_id],
+        };
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::Gimmick(created.clone()),
+                game::ServerMsg::Gimmick(joints.clone()),
+                game::ServerMsg::Gimmick(moved.clone()),
+                game::ServerMsg::UnitPoints {
+                    obj_id: 8,
+                    hp: 123,
+                    mp: 456,
+                },
+                game::ServerMsg::Gimmick(removed.clone()),
+                game::ServerMsg::Snow(true),
+            ])))
+            .await;
+        let mut state = crate::state::WorldState::default();
+        state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(8))));
+        let before = state.units.by_id.clone();
+        for (index, expected) in [created, joints, moved].into_iter().enumerate() {
+            let event = events.try_recv().unwrap();
+            assert!(matches!(&event, Event::Gimmick(actual) if actual == &expected));
+            state.apply(&event);
+            assert_eq!(state.gimmicks.by_id[&spawn.obj_id].spawn, spawn);
+            assert_eq!(
+                state.gimmicks.by_id[&spawn.obj_id].last_movement,
+                if index == 2 { Some(motion) } else { None }
+            );
+            assert_eq!(state.units.by_id, before);
+        }
+        let points = events.try_recv().unwrap();
+        assert!(matches!(
+            &points,
+            Event::UnitPoints {
+                obj_id: 8,
+                hp: 123,
+                mp: 456
+            }
+        ));
+        state.apply(&points);
+        assert_eq!(state.units.by_id[&8].hp, 123);
+        let event = events.try_recv().unwrap();
+        assert!(matches!(&event, Event::Gimmick(actual) if actual == &removed));
+        state.apply(&event);
+        assert!(state.gimmicks.by_id.is_empty());
+        let snow = events.try_recv().unwrap();
+        assert!(matches!(&snow, Event::Snow(true)));
+        state.apply(&snow);
+        assert!(state.world.snow);
+        assert!(state.player.spawn.is_none());
+        assert!(events.try_recv().is_err());
+        let mut extra = [0];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), peer.read(&mut extra))
+                .await
+                .is_err(),
+            "gimmick announcements/reports must not fabricate any movement response"
+        );
+    }
 
     #[tokio::test]
     async fn raw_instance_blink_and_item_lifespan_keep_batch_order_without_ack_or_fake_state() {
