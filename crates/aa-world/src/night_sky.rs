@@ -101,7 +101,7 @@ fn star_mesh(stars: &[Star]) -> Mesh {
 
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct StarParams {
-    /// x: exposed intensity, y: native flicker clock (seconds/2), z: pixel diameter.
+    /// x: exposed intensity, y: native flicker clock (seconds/2), z: native r_stars_size (default 1).
     pub values: Vec4,
 }
 
@@ -263,7 +263,7 @@ fn update(
         material.into_inner().params.values = Vec4::new(
             stats.intensity * tuning.radiance * view_exposure(&exposure),
             time.elapsed_secs() * 0.5,
-            5.0,
+            1.0,
             0.0,
         );
     }

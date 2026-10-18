@@ -567,10 +567,13 @@ and elevation) pin the sun direction instead of the sun path).
 
 **Original stars** (`night_sky.rs`, `stars.wesl`): `libs/sky/stars.dat` is 106,956 bytes: `STAR`, version `0x00010001`,
 count 8,912, then 12-byte records (`f32` right ascension in hours, `f32` declination in degrees, four bytes RGB / magnitude).
-The matching catalogue reader in public Lumberyard [`CRESky.cpp`](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/RenderDll/Common/RendElements/CRESky.cpp) confirms the Cry direction
+Original 1.2 catalogue reader `381B7150` confirms the Cry direction
 `(-cos(dec) sin(15 RA), cos(dec) cos(15 RA), sin(dec))`. The original `shaders/hwscripts/cryfx/stars.cfx` supplies the magnitude
-conversion, eight-entry flicker table, Gaussian colour / hot-core falloff and additive blend. Its geometry shader expands
-the screen-facing quads; the matching [`CStars::Render`](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/RenderDll/XRenderD3D9/D3DRenderRE.cpp) uses five pixels, reduced below 1280 x 720, and half-speed flicker time.
+conversion, eight-entry flicker table, Gaussian colour / hot-core falloff and additive blend. Native draw `380BCF50` computes
+sprite diameter **`max(3, floor(min(viewportWidth, viewportHeight)/96)) * r_stars_size`**, with native cvar default 1,
+and half-speed flicker time. This direct 1.2 evidence supersedes the earlier public Lumberyard five-pixel fallback.
+The shader's `StarSize` is diameter / viewport, expanded by +/- that value in NDC: the actual rasterized diameter is in
+render-viewport pixels, not Windows logical pixels or UI scale units. Bevy's physical `view.viewport.zw` supplies those dimensions.
 One bounded asset-worker request builds a single cached mesh (35,648 vertices, 53,472 indices), with no per-frame geometry or
 per-star entities. Camera translation is excluded; reverse-depth testing keeps terrain and opaque props in front. The sky
 background now leaves depth unwritten so stars at the far plane remain visible. `StarSettings.enabled` or `AA_NO_STARS=1`
@@ -585,6 +588,17 @@ coloured stars with no dark sprite rectangles, correct hill occlusion, no stars 
 these separate runs are not a controlled GPU benchmark. No matching real-client night capture exists under `reference/`, so
 the sky brightness has not been calibrated against a nighttime reference. The real-catalogue test validates Sirius / Arcturus,
 native magnitude bytes, normalized directions, mesh counts, truncation rejection and nighttime / daytime spline interpolation.
+
+`--example star_size` is a GPU pixel regression using the actual Sirius record, ungraded black background, MSAA off and high
+test-only intensity to make the complete sprite footprint visible. Its screenshot observer asserts independent fixed answers:
+1920 x 1080 -> **11 x 11 / 121 pixels**, 1280 x 720 -> **7 x 7 / 49 pixels**, 320 x 180 -> **3 x 3 / 9 pixels**.
+These exercise the actual shader/rasterizer rather than a CPU copy of its sizing math. Captures are
+`night/star_size_1920x1080.png`, `star_size_1280x720.png`, `star_size_320x180.png`; aa-dev fixes window scale to 1.0.
+All three screenshot assertions passed. These short pixel-only runs logged 422-423 / 42-289 / 221-228 FPS respectively,
+including capture/readback work; they are not world-performance measurements. All-example check passes.
+The real-catalogue regression still passes. Updated normal-intensity scene `night/moons_native_stars.png` was inspected:
+larger native stellar footprints, both textured moons still occlude stars, no rectangular sprite borders (160-261 FPS).
+No matching real-client night reference exists, so no additional brightness calibration was introduced.
 
 **Original moon discs / coronas** (`moons.rs`, `moons.wesl`): the original 1.2 renderer now resolves the CPU sizing gap.
 Read-only inputs are `data/extract/aa-cry/ida/render/cryrenderd3d10.dll`, `render.i64` and
