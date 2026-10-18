@@ -537,6 +537,7 @@ pub enum ServerMsg {
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
+    InitialConfig(crate::initial_config::InitialConfig),
     CraftItemUnlocked(crate::craft::CraftItemUnlock),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
@@ -665,6 +666,7 @@ impl ServerMsg {
             Self::LootRoll(e) => e.name(),
             Self::Actability(e) => e.name(),
             Self::CraftFailureNotice(_) => "SCCraftFailed",
+            Self::InitialConfig(_) => "SCInitialConfig",
             Self::CraftItemUnlocked(_) => "SCCraftItemUnlock",
             Self::Mate(e) => e.name(),
             Self::Slave(e) => e.name(),
@@ -754,6 +756,7 @@ impl ServerMsg {
                 stream_port: r.u16()?,
                 world_time: r.i64()?,
             },
+            sc::SCInitialConfigPacket => Self::InitialConfig(crate::initial_config::InitialConfig::read(r)?),
             sc::SCReconnectAuthPacket => Self::ReconnectAuth { token: r.u32()? },
             sc::SCGetSlotCountPacket => Self::SlotCount(r.u8()?),
             sc::SCAccountInfoPacket => Self::AccountInfo {

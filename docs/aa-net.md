@@ -3024,6 +3024,56 @@ No pet was killed, revived, granted, or transacted against the stalled lane for 
 
 Validation: the built aa-net test executable was copied to the ignored aa-net extraction
 directory and run directly, avoiding another shared cargo lock; all271 library tests pass.
-The focused `cargo test -p aa-net --features bevy --lib stablehand` also passes. The full
-cargo library invocation remains queued behind another session's build and is not claimed
-as completed yet. Earlier full crate verification covered both local login loopbacks.
+The focused `cargo test -p aa-net --features bevy --lib stablehand` also passes.
+Earlier full crate verification covered both local login loopbacks.
+
+### Raw initial configuration and received feature bytes (2026-10-17)
+
+`ServerMsg::InitialConfig` / `Event::InitialConfig(InitialConfig)` decode SC006.
+`WorldState.game_config` and the Bevy `GameConfig` resource retain an optional received
+snapshot. There are no synthetic feature/service defaults. Host bytes and all feature
+bytes are preserved, including NUL/non-UTF-8 host bytes and unknown feature bits; service
+flags remain seven raw bytes rather than inferred application permissions. Missing
+feature bytes stay missing. `player_level_limit()` / `mate_level_limit()` expose optional
+received bytes1/8 according to the lane `FeatureSet` schema, retaining explicit zero.
+The resource resets on a new login/account/game connection, kick or disconnection. It
+retains the config across character selection, spawn and return to the connected lobby.
+Identical received reports are forwarded as events even when the snapshot is unchanged.
+
+Native factory391849b0 sets opcode6/vtable399b3024, whose serializer is397b2a00. It reads
+host string with a0x103-byte limit, then the fset blob with0xb-byte limit. Both are
+u16-length-prefixed fields, matching the lane `packets/g2c.rs::SCInitialConfigPacket`.
+Nested397b1c20 reads signed candidate count and clamps values>=100 to the static100 at
+39a12604; negative counts read zero entries. Each code uses the u32 primitive. The raw
+signed count is retained alongside exactly max(0,min(count,100)) code values. Nested
+397b1fb0 reads signed initLp and seven bool-width bytes, named by the original strings:
+canPlaceHouse, canPayTax, canUseAuction, canTrade, canSendMail, canUseBank, canUseCopper.
+Serializer397b2ab6 then reads secondPriceType(u8), secondPasswordMaxFailCount(u8), and
+idleKickTime(u16). Oversize host/fset payloads reject before exposing a snapshot. Native
+constructor defaults are not silently inserted for short received feature arrays.
+
+The lane `data/features.rs` sets FeatureSet byte1 from player max level and byte8 from
+mate max level, supplied by `data/experience.rs`. This does not yet prove how the native
+runtime field is populated: `OnInitialConfig`391d1d20 contains a protected body between
+391d1d69 and391d1f5a, guarded by39181fb0/39181fc0. The unprotected serializer proves the
+complete packet boundaries independently, but the protected handler's copy into runtime
+client+1C remains unresolved. No cap-aware pet XP fold or guessed50-level limit is added.
+
+The downstream original pet XP path is concrete: `OnExpChanged`391d9bd0 resolves the
+announced unit and calls39356f40. Its mate-kind5 branch requires a current owned mate and
+matching object ID, then3933a890 updates manager+3C using3989a480 and the limit obtained
+by3989a4d0(runtime client+1C). For delta<=0,3989a480 performs wrapping addition; for positive
+delta, a value already>=cap is retained, otherwise wrapping addition is signed-clamped
+to cap. Lookup3989a4d0 calls39620cc0(level) and reads record+8. The catalog mapping is also proven: loader39620b7c uses SQL399fa2ec,
+`SELECT id, skill_points, total_exp, total_mate_exp FROM levels`;39620c1b reads column3
+and39620c39 stores it at record+8. Thus the XP cap is `levels.total_mate_exp` at the
+runtime max-mate-level. The remaining proof is the protected initial-config runtime-level
+assignment. A naive accumulation would overcount at the cap because
+the lane sends the original unclipped positive delta. `Mates.spawn.experience` therefore
+remains spawn metadata pending the source-proven cap-aware integration, rather than
+silently claiming a correct current XP total.
+
+Validation: `cargo test -p aa-net --features bevy --lib` passes all275 tests, including
+raw config count/buffer bounds, every payload truncation, DD04 continuation, repeated
+session event ordering, optional feature limits, snapshot replacement and account/game
+connection lifecycle. This includes the plugin/resource integration under the Bevy feature.

@@ -44,6 +44,7 @@ pub use crate::slave::Slaves;
 pub use crate::trade::Trade;
 pub use crate::gimmick::Gimmicks;
 pub use crate::ui_data::UiData;
+pub use crate::initial_config::GameConfig;
 pub use crate::combat_status::CombatStatus;
 pub use crate::conflict::ConflictZones;
 
@@ -347,6 +348,7 @@ pub struct WorldState {
     pub slaves: Slaves,
     pub gimmicks: Gimmicks,
     pub ui_data: UiData,
+    pub game_config: GameConfig,
     pub combat_status: CombatStatus,
     pub conflict_zones: ConflictZones,
 }
@@ -382,6 +384,7 @@ impl WorldState {
         self.slaves.apply(e);
         self.gimmicks.apply(e);
         self.ui_data.apply(e);
+        self.game_config.apply(e);
         self.combat_status.apply(e);
         self.conflict_zones.apply(e);
         self.trade.apply(e);
