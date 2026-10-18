@@ -114,6 +114,31 @@ its small signed values, with positive peak 0.040279. The inspected capture is
 `shots/aa-client/facial-creature/cdf-body-clock.png`, with 266–277 FPS after startup and no
 GPU errors; the screenshot process exited normally.
 
-This adds playback to supported bound NPC heads. CDF bone attachments (including the chef's
-separate eyes), blank customization-slot assembly, PC-shaped remote units and voice-driven
+This adds playback to supported bound NPC heads. The following milestone also handles rigid
+bone attachments and explicit received body items. PC-shaped remote units and voice-driven
 sequence selection remain separate work. No procedural mouth movement or voice lip sync is claimed.
+
+## Received NPC body slots and rigid attachments (2026-10-18)
+
+The creature preparation path applies explicit received Equipment slots19..25 to the original
+actor CDF's matching declared skin slots. Each item must resolve to the same model and its
+matching native body slot23..29. Empty or incompatible items preserve the authored definition.
+The worker's model list and main-thread spawn share this effective CDF; neither substitutes
+an `_base.cdf` or infers an outfit. This fixes blank actor CDF slots previously ignoring received
+face/hair/body items. Initial spawn is covered; later appearance-change rebuilding is still open.
+
+Declared visible CA_BONE bindings now load alongside skin parts, including material overrides
+and CDF wrappers, and parent to the existing animated joints using aa-anim's source-proven
+alignment helper. Bone-aligned attachments ignore XML absolute offsets; model-aligned ones
+use inverse joint bind transforms. Skin-aligned projection remains unsupported. Missing joints
+or unsupported bindings skip that attachment without breaking the body. The loader preserves
+authored eye-path choices, including a duplicate left-eye path in the chef's actor CDF.
+
+`facial_creature --packet` exercises the actual blank chef actor CDF with explicit original
+face14478/hair14475/body14479 items, the same configuration helper and spawn path as production.
+The inspected `shots/aa-client/facial-creature/packet-cdf-eyes.png` shows seated eyes, clothing,
+hair and authored neutral/A/return poses. Each figure has one independent facial subset and
+five ordinary subsets; body-clock and owner assertions pass. It measured223–256 FPS while the
+HUD fixture also used the shared GPU, with no GPU errors and normal screenshot exit.
+The client suite passes150 tests /24 ignored, including model/slot incompatibility and worker
+model-list checks. This is offline visual/source verification; live lane game connections remain stalled.

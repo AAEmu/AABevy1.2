@@ -32,7 +32,7 @@ pub enum UnitBuild {
     /// Drawn like a player character.
     Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>>, pose: Option<BoundClip> },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
-    Creature { file: String, models: Vec<PreparedModel> },
+    Creature { file: String, cdf: Option<Box<aa_anim::Cdf>>, models: Vec<PreparedModel> },
     /// Nothing we can draw, and why (logged once by [`super::units`]).
     None(String),
 }
@@ -102,8 +102,15 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
         let pose = super::idle::pose_clip(db, unit.anim_action, &assets.skeleton, &assets.cal, clips);
         UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set, pose }
     } else if let Some(file) = file {
+        let cdf = if file.ends_with(".cdf") {
+            let game = db.game.lock().unwrap_or_else(|e| e.into_inner());
+            match creature::configured_cdf(&game, &file, unit.model_id, &unit.equipment) {
+                Ok(cdf) => Some(Box::new(cdf)),
+                Err(e) => return UnitBuild::None(format!("cannot prepare {file}: {e}")),
+            }
+        } else { None };
         let mut models = Vec::new();
-        for (path, material) in creature::model_files(&file) {
+        for (path, material) in creature::model_files(&file, cdf.as_deref()) {
             let options = ModelOptions { material, cry_space: true, ..default() };
             if let Ok(m) = loader.prepare_model(&path, &options) {
                 models.push(m);
@@ -112,7 +119,7 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
         if models.is_empty() {
             return UnitBuild::None(format!("no model could be loaded from {file} (model {})", unit.model_id));
         }
-        UnitBuild::Creature { file, models }
+        UnitBuild::Creature { file, cdf, models }
     } else {
         UnitBuild::None(format!("model {} has no actor model file", unit.model_id))
     }

@@ -17,13 +17,13 @@ fn authored_face(path: &str) -> bool {
 }
 
 /// The model files (with their material override) [`spawn`] loads for `file`, to prepare them ahead on a worker thread.
-pub fn model_files(file: &str) -> Vec<(String, Option<String>)> {
+pub fn model_files(file: &str, definition: Option<&Cdf>) -> Vec<(String, Option<String>)> {
     let (main, main_material, attachments) = if file.ends_with(".cdf") {
-        let Ok(cdf) = Cdf::load(file) else { return Vec::new() };
+        let Some(cdf) = definition.cloned().or_else(|| Cdf::load(file).ok()) else { return Vec::new() };
         let parts = cdf
             .attachments
             .iter()
-            .filter(|a| a.kind == aa_anim::cdf::AttachmentKind::Skin && !a.binding.is_empty() && a.flags & 1 == 0)
+            .filter(|a| matches!(a.kind, aa_anim::cdf::AttachmentKind::Skin | aa_anim::cdf::AttachmentKind::Bone) && !a.binding.is_empty() && a.flags & 1 == 0)
             .map(|a| (a.binding.clone(), a.material.clone()))
             .collect::<Vec<_>>();
         (cdf.model, cdf.material, parts)
@@ -46,13 +46,28 @@ pub fn model_files(file: &str) -> Vec<(String, Option<String>)> {
     out
 }
 
+/// Apply only explicit received body items to matching slots declared by the original actor CDF.
+/// Native wire19..25 correspond to item_body_parts slot23..29. Missing items preserve authored slots.
+pub(crate) fn configured_cdf(db: &aa_anim::GameDb, file: &str, model: u32, equipment: &aa_net::model::Equipment) -> aa_anim::Result<Cdf> {
+    let mut cdf = Cdf::load(file)?;
+    for slot in aa_net::model::slot::FACE..=aa_net::model::slot::BEARD {
+        let Some(item) = equipment.get(slot).filter(|item| item.template_id != 0) else { continue };
+        let Ok(part) = db.body_part(item.template_id) else { continue };
+        if part.model_id == model && part.slot_type == slot as u32 + 4 {
+            cdf.bind_body_part(&part);
+        }
+    }
+    Ok(cdf)
+}
+
 /// Spawns the model at `file` (`.cdf`, `.chr` or `.cgf`, pak path). Returns the root entity with
 /// `transform` (feet at the origin, facing Bevy -Z at identity rotation like game north), or `None`
 /// when the file cannot be loaded.
-pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, file: &str, transform: Transform) -> Option<Entity> {
+/// `definition` is the same effective CDF used by the worker's model prewarm.
+pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, file: &str, definition: Option<&Cdf>, transform: Transform) -> Option<Entity> {
     // the base skin and the extra skin attachments
-    let (main, main_material, attachments) = if file.ends_with(".cdf") {
-        let cdf = match Cdf::load(file) {
+    let (main, main_material, attachments, rigid) = if file.ends_with(".cdf") {
+        let cdf = match definition.cloned().map(Ok).unwrap_or_else(|| Cdf::load(file)) {
             Ok(c) => c,
             Err(e) => {
                 debug!("creature {file}: {e}");
@@ -60,16 +75,21 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
             }
         };
         let mut parts = Vec::new();
+        let mut rigid = Vec::new();
         for a in &cdf.attachments {
-            // `Flags = 1` marks an empty slot; weapons on bones (CA_BONE) are not drawn
-            if a.kind != aa_anim::cdf::AttachmentKind::Skin || a.binding.is_empty() || a.flags & 1 != 0 {
+            // `Flags = 1` marks an empty / hidden slot.
+            if a.binding.is_empty() || a.flags & 1 != 0 {
                 continue;
             }
-            parts.push((a.binding.clone(), a.material.clone()));
+            match a.kind {
+                aa_anim::cdf::AttachmentKind::Skin => parts.push((a.binding.clone(), a.material.clone())),
+                aa_anim::cdf::AttachmentKind::Bone => rigid.push(a.clone()),
+                aa_anim::cdf::AttachmentKind::Other => {},
+            }
         }
-        (cdf.model, cdf.material, parts)
+        (cdf.model, cdf.material, parts, rigid)
     } else {
-        (file.to_string(), None, Vec::new())
+        (file.to_string(), None, Vec::new(), Vec::new())
     };
     if main.is_empty() {
         return None;
@@ -121,6 +141,18 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
         }
     }
 
+    for attachment in rigid {
+        let Ok((joint, local)) = attachment.bone_binding(&skeleton) else { continue };
+        let (path, material) = if attachment.binding.ends_with(".cdf") {
+            let Ok(cdf) = Cdf::load(&attachment.binding) else { continue };
+            (cdf.model, cdf.material.or(attachment.material))
+        } else { (attachment.binding, attachment.material) };
+        let options = ModelOptions { material, cry_space: true, ..default() };
+        let Ok(loaded) = cry.load_model(&path, &options) else { continue };
+        let part = spawn_loaded(commands, &path, &loaded, &options);
+        commands.entity(part).insert((Transform::from_matrix(Mat4::from(local)), ChildOf(bones[joint])));
+    }
+
     // animations: `<model>.cal` next to the skeleton file
     let mut animator = Animator::new(rig.clone(), bones);
     let mut entity = commands.entity(root);
@@ -135,4 +167,35 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
     entity.insert((animator, Motion::default()));
     if let Some(facial) = facial { entity.insert(facial); }
     Some(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn received_npc_body_items_fill_declared_slots_and_worker_models_without_defaults() {
+        if !aa_cry::pak_available() { return; }
+        let db = aa_anim::GameDb::open().unwrap();
+        let file = "objects/characters/people/npc_chef01/nude/npc_chef01.cdf";
+        let mut equipment = aa_net::model::Equipment::default();
+        let empty = configured_cdf(&db,file,631,&equipment).unwrap();
+        assert!(empty.attachment("face").unwrap().binding.is_empty());
+        for (slot,template_id) in [(aa_net::model::slot::FACE,14478),(aa_net::model::slot::HAIR,14475),(aa_net::model::slot::BODY,14479)] {
+            equipment.slots[slot] = Some(aa_net::model::Item { template_id, ..default() });
+        }
+        let effective = configured_cdf(&db,file,631,&equipment).unwrap();
+        assert_eq!(effective.model,empty.model);
+        for name in ["face","hair","body"] {
+            let part=effective.attachment(name).unwrap();assert!(!part.binding.is_empty());assert_eq!(part.flags&1,0);
+            assert!(model_files(file,Some(&effective)).iter().any(|(path,_)|path==&part.binding));
+        }
+        for original in empty.attachments.iter().filter(|a|a.kind==aa_anim::cdf::AttachmentKind::Bone) {
+            assert_eq!(effective.attachment(&original.name),Some(original),"authored rigid attachments must remain unchanged");
+        }
+        let incompatible=configured_cdf(&db,file,11,&equipment).unwrap();
+        assert_eq!(incompatible,empty,"items for another model must not change the actor");
+        equipment.slots[aa_net::model::slot::FACE].as_mut().unwrap().template_id=14475;
+        assert!(configured_cdf(&db,file,631,&equipment).unwrap().attachment("face").unwrap().binding.is_empty(),"a hair item in the face wire slot is incompatible");
+    }
 }
