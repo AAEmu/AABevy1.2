@@ -270,6 +270,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Request only; getter changes on the received action 18 item task.
     SetAutoUseAaPoint(bool),
+    UnpackItem(crate::unpack::UnpackItemRequest),
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
@@ -525,6 +526,8 @@ pub enum Event {
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
     Family(crate::family::FamilyEvent),
+    UnpackItemRequested(crate::unpack::UnpackItemRequest),
+    UnpackItemRequestRejected { request:crate::unpack::UnpackItemRequest,message:String },
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
     InitialConfig(crate::initial_config::InitialConfig),
@@ -679,6 +682,7 @@ struct Session {
     self_obj: u32,
     battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
     server_clock: std::cell::RefCell<crate::clock::ServerClock>,
+    received_inventory: std::cell::RefCell<crate::state::Inventory>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -728,6 +732,7 @@ impl Session {
             self_obj: 0,
             battlefield: Default::default(),
             server_clock: Default::default(),
+            received_inventory: Default::default(),
             waiting: None,
         }
     }
@@ -772,6 +777,8 @@ impl Session {
         if let Some(now)=self.server_clock.borrow().mapped_now() {self.battlefield.borrow_mut().advance_server_time(now);}
     }
     fn emit(&self, e: Event) {
+        if matches!(e,Event::Kicked{..}) {*self.received_inventory.borrow_mut()=Default::default();}
+        self.received_inventory.borrow_mut().apply(&e);
         self.server_clock.borrow_mut().apply(&e);
         self.advance_battlefield_clock();
         self.battlefield.borrow_mut().apply_with_time(&e,self.server_clock.borrow().mapped_now());
@@ -1006,6 +1013,13 @@ impl Session {
                 } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
                     self.emit(Event::UiData(UiDataEvent::Requested(command)));
                 }
+            }
+            Command::UnpackItem(request) => {
+                let invalid=if self.phase!=Phase::InWorld || self.selected==0 {Some("unpack requires an active selected character")}
+                    else {request.recheck(&self.received_inventory.borrow()).err()};
+                if let Some(message)=invalid {self.emit(Event::UnpackItemRequestRejected{request,message:message.into()});}
+                else if self.send_game(game::ClientMsg::UnpackItem(request)).await {self.emit(Event::UnpackItemRequested(request));}
+                else {self.emit(Event::UnpackItemRequestRejected{request,message:"unpack request was not sent".into()});}
             }
             Command::SetAutoUseAaPoint(value) => {
                 if self.phase != Phase::InWorld {
@@ -2326,6 +2340,44 @@ mod tests {
         assert!(matches!(events.try_recv(),Ok(Event::Pong(p)) if p==pong));
         assert!(session.server_clock.borrow().mapped_now().is_some());
         assert_eq!(*session.battlefield.borrow(),before);assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn unpack_checks_current_received_identity_at_write_and_waits_for_security_receipt() {
+        use crate::{UnpackItemRequest,items::{ItemTask,ItemTasks},model::Item};
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        let request=UnpackItemRequest::new(2,0,55).unwrap();
+        session.command(Command::UnpackItem(request)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::UnpackItemRequestRejected{request:actual,..}) if actual==request));
+        session.phase=Phase::InWorld;session.selected=42;
+        session.emit(Event::InventoryInit{bag_slots:1,bank_slots:0});
+        let add=|id|ItemTasks{tasks:vec![ItemTask::Add{action:1,container:2,slot:0,item:Item{id,template_id:99,flags:0x80,unpack_time:7,..Default::default()}}],..Default::default()};
+        session.emit(Event::ItemsChanged(add(55)));while events.try_recv().is_ok(){}
+        // Valid snapshot, missing transport: reject with no local unpack success.
+        session.command(Command::UnpackItem(request)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::UnpackItemRequestRejected{..})));
+        assert_eq!(session.received_inventory.borrow().bag[0].as_ref().unwrap().flags,0x80);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        session.emit(Event::ItemsChanged(add(56)));while events.try_recv().is_ok(){}
+        session.command(Command::UnpackItem(request)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::UnpackItemRequestRejected{..})));
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.emit(Event::ItemsChanged(add(55)));while events.try_recv().is_ok(){}
+        session.command(Command::UnpackItem(request)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::UnpackItemRequested(actual)) if actual==request));
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[6..],&[2,0,55,0,0,0,0,0,0,0]);
+        assert_eq!(session.received_inventory.borrow().bag[0].as_ref().unwrap().unpack_time,7);
+        let update=ItemTasks{reason:114,tasks:vec![ItemTask::Security{container:2,slot:0,item_id:55,bits:0x11,is_unsecure_excess:0,is_unsecure_set:0,is_unpack:1,unsecure_time:0,unpack_time:99}],..Default::default()};
+        session.game_msg(Ok(game::ServerMsg::ItemTasks(update.clone()))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::ItemsChanged(actual)) if actual==update));
+        assert_eq!(session.received_inventory.borrow().bag[0].as_ref().unwrap().unpack_time,99);
+        // The unpack acknowledgement never emits an automatic equipment request.
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.game.as_mut().unwrap().shutdown().await;
+        session.command(Command::UnpackItem(request)).await;
+        let mut rejected=false;while let Ok(e)=events.try_recv(){if matches!(e,Event::UnpackItemRequestRejected{..}){rejected=true}assert!(!matches!(e,Event::UnpackItemRequested(_)));}assert!(rejected);
     }
 
     #[tokio::test]

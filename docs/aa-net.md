@@ -5136,8 +5136,10 @@ invented as zero or an overflow slot.
 The shared planner has TWO distinct dialogs. Static item field+10==4/5 with received
 flags bit0x10 clear creates task47 ITEM_UNPACK, vtable399e62e8; accepted394ea8e0 sends
 CS134 CSThisTimeUnpackItemPacket, not equipment0a9. Original DialogUnpackItemHandler
-uses isSoulBound from received flags bit0. The lane defines134 but has no located
-handler/writer; unpack continuation remains unsupported. Otherwise397cc300 can create
+uses isSoulBound from received flags bit0. The lane registers134 in systems/economy/item_handlers.rs77 and implements
+CSThisTimeUnpackItemPacket::read_body/unwrap_item at525+. It validates actual owner,
+item DBID and exact container/slot, then reports reason114 action11; a wider source
+search corrected the initial opcode-only conclusion. Unpack is separate from equip. Otherwise397cc300 can create
 task16 SOUL_BIND_ITEM(vtable399e6268); accepted394ea430 invokes394e8b30 with bts=true
 (or394e88e0 for the invalid-owner sentinel branch). Rejection sends neither request.
 Both constructors mark a captured packed slot pending394e8590; completion clears it
@@ -5224,3 +5226,62 @@ truncation, impossible/negative counts, raw roles/NUL/non-UTF8 text, a nine-memb
 followed by an actual DD04 packet, native owner/title changes, wrong family/member IDs,
 repeated Session forwarding, both WorldState/Bevy folds and lifecycle resets. Full
 `cargo test -p aa-net --features bevy --lib`:374 passed; own feature check passed.
+
+
+### Guarded unpack request and received security fields (2026-10-18)
+
+UnpackItemRequest::new(container,rawSlot,itemDatabaseID) rejects zero identity and
+encodes original CS134 as EXACTLY u8 container,u8 slot,u64 item ID. Fields have read-only
+accessors; no caller can mutate a validated ID. Native task47 constructor394ea7c0
+captures packed source location, item DBID low/high and isSoulBound for presentation;
+callback394ea8e0 clears the dialog pending key and sends134 only on acceptance.
+Serializer397bc950 reads packedlocation byte+0d and byte+0f, then item ID at+10.
+The request contains NO mate, target equipment slot or second item. Neither native
+callback nor server unpack flow can automatically continue a remembered equipment
+move from these fields. No automatic0a9 is sent by aa-net.
+
+Command::UnpackItem rechecks the CURRENT received owned inventory identity/location
+at socket-write time. Session now mirrors Inventory from genuine events for this check;
+selection/leave/disconnect and Kicked discard that mirror. Its physical bag/bank/player
+equipment lookup never creates items. Unknown containers, changed DBID/location, missing
+items and inactive selection reject locally. This exact-ID app preflight is stronger
+than native task47's captured-slot-only preflight and is explicitly not native proof.
+The encoder still preserves any u8 wire location; stronger admitted-location checks
+belong to the app/session. UnpackItemRequested means a successful transport write;
+UnpackItemRequestRejected includes inactive, stale, missing-connection and failed-write
+paths. Neither is an ACK, reservation, flags update or local equipment change.
+
+Actual lane unwrap_item sets unpack_time from the server clock, ORs UNPACKED0x10 and
+also SOUL_BOUND0x01 for BIND_ON_UNPACK, then emits SCItemTaskSuccess reason114 with
+ItemUpdateSecurity action11. Optional received ItemLifespan remains a separate existing
+notice. The previous reader collapsed actions10/11 into Flags and discarded action11's
+three native bool bytes and both timestamps. Additive ItemTask::Security now preserves
+container/slot/DBID/bits, raw u8 is_unsecure_excess/is_unsecure_set/is_unpack, signed i64
+unsecure_time/unpack_time. Only an exact EXISTING owned physical item receives the full
+flags and both timestamps; unknown/moved/reused identities do not manufacture slots or
+items. All three raw flag bytes remain in the receipt without normalization.
+
+Native action11 dispatch397d1168->397cdd00 unconditionally assigns flags at+d and both
+i64 times at+b0/+b8, independent of those bool bytes. It also has an optional is_unpack
+nonzero/detailkind1/catalog397cd100 charge-time path; catalog-dependent EquipDetail
+charge_time and its retained payload are NOT guessed by this timestamp milestone.
+Native action10 dispatch397d114b->397cdc90 ORs bits at397cdce7, rather than replacing
+all flags. The existing Flags fold is corrected to OR; Security does full replacement.
+The source flag/time bytes remain the only authority for the unpack result.
+
+Lane mate binding has a separate limitation: change_mate_equipment reads/logs bts but
+does not use it to bind; Container::apply_bind_rules_task binds BIND_ON_EQUIP only for
+player EQUIPMENT1, excluding MateFC. Thus task16 acceptance/0a9 bts=true is not evidence
+of a received soul-bound pet item. No server change or fabricated flag repairs this.
+Native397cc300 with an unbound item returns true for static bindtypes2/5, the caller's
+isEquip for3, and caller's final flag for4; the shared equipment planner passes1/0.
+Unpack-type4/5 handling occurs before that check when received UNPACKED is clear.
+
+Validation: six additional tests verify native/lane CS134 golden bytes, every action11
+truncation, raw noncanonical bool bytes and signed times, following DD04 alignment,
+action10 OR versus action11 replacement, pending unlock, missing/reused/moved items
+without vector growth, WorldState/Bevy folding, and Session loopback stale/current
+identity plus missing/failed writes. Actual unpack receipts update timestamps without
+sending equipment continuation. `cargo test -p aa-net --features bevy --lib`:380 passed;
+feature check passed. Exact native excerpts are retained in
+`data/extract/aa-net/mate-equipment-native/unpack-security-source-20261018.txt`.

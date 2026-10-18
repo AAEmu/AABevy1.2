@@ -107,3 +107,6 @@ pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, Battlef
 
 pub mod family;
 pub use family::{Families, FamilyEvent, FamilyInvitation, FamilyMember, FamilyRoster, FamilyTitle};
+
+pub mod unpack;
+pub use unpack::UnpackItemRequest;

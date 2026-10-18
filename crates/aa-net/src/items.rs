@@ -279,6 +279,8 @@ pub enum ItemTask {
     Update { container: u8, slot: u8, item_id: u64, detail: ItemDetail, detail_payload: Option<Vec<u8>> },
     /// New flag bits (`ItemFlag`: secure, soulbound ...).
     Flags { container: u8, slot: u8, item_id: u64, bits: u8 },
+    /// Action11 replaces flags and both timestamps. All native bool bytes remain raw.
+    Security { container:u8,slot:u8,item_id:u64,bits:u8,is_unsecure_excess:u8,is_unsecure_set:u8,is_unpack:u8,unsecure_time:i64,unpack_time:i64 },
 }
 
 /// Body of `SCItemTaskSuccess`.
@@ -374,11 +376,10 @@ impl ItemTask {
                 r.skip(8)?;
                 t
             }
-            action::UPDATE_FLAGS => {
-                let t = Self::Flags { container: r.u8()?, slot: r.u8()?, item_id: r.u64()?, bits: r.u8()? };
-                r.skip(3 + 8 + 8)?; // three flags, unsecure time, unpack time
-                t
-            }
+            action::UPDATE_FLAGS => Self::Security {
+                container:r.u8()?,slot:r.u8()?,item_id:r.u64()?,bits:r.u8()?,
+                is_unsecure_excess:r.u8()?,is_unsecure_set:r.u8()?,is_unpack:r.u8()?,unsecure_time:r.i64()?,unpack_time:r.i64()?,
+            },
             other => return Err(WireError::Invalid(format!("item task action {other}"))),
         })
     }

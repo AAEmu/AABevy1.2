@@ -95,6 +95,7 @@ opcodes! {
         CSDeleteMailPacket = 0x0a1,
         CSTakeAllAttachmentItemPacket = 0x139,
         CSChangeAutoUseAAPointPacket = 0x133,
+        CSThisTimeUnpackItemPacket = 0x134,
         CSSpawnSlavePacket = 0x02e,
         CSDespawnSlavePacket = 0x02f,
         CSDestroySlavePacket = 0x030,
