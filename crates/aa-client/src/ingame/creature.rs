@@ -8,6 +8,14 @@ use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion};
 
+/// The original head CAL declares its facial library. This avoids parsing body/clothing
+/// geometry as expression targets for every member of a crowd; CAL results are shared.
+fn authored_face(path: &str) -> bool {
+    let stem = path.rsplit_once('.').map_or(path, |(stem, _)| stem);
+    let cal = format!("{stem}.cal");
+    aa_pak::Pak::global().exists(&cal) && aa_anim::Cal::shared(&cal).is_ok_and(|cal| cal.face_library.is_some())
+}
+
 /// The model files (with their material override) [`spawn`] loads for `file`, to prepare them ahead on a worker thread.
 pub fn model_files(file: &str) -> Vec<(String, Option<String>)> {
     let (main, main_material, attachments) = if file.ends_with(".cdf") {
@@ -81,6 +89,8 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
     let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
     let model_root = commands.spawn((Name::new("model"), Transform::from_rotation(CRY_TO_BEVY), Visibility::default(), ChildOf(root))).id();
     let bones = spawn_bones(commands, model_root, &rig);
+    let cal_path = format!("{}.cal", main.trim_end_matches(".chr"));
+    let mut facial = None;
 
     let mut paths = vec![(main.clone(), main_material)];
     paths.extend(attachments);
@@ -101,12 +111,17 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
             ..default()
         };
         let Ok(loaded) = cry.load_model(&path, &options) else { continue };
-        let part = spawn_loaded(commands, &path, &loaded, &options);
+        let prepared = if facial.is_none() && authored_face(&path) {
+            aa_anim::facial::prepare_loaded_face(cry, &path, &cal_path, &loaded).ok()
+        } else { None };
+        let part = spawn_loaded(commands, &path, prepared.as_ref().map_or(loaded.as_ref(), |(model, _, _)| model), &options);
         commands.entity(part).insert(ChildOf(model_root));
+        if let Some((_, face, weights)) = prepared {
+            facial = Some((face, weights));
+        }
     }
 
     // animations: `<model>.cal` next to the skeleton file
-    let cal_path = format!("{}.cal", main.trim_end_matches(".chr"));
     let mut animator = Animator::new(rig.clone(), bones);
     let mut entity = commands.entity(root);
     if let Some(set) = super::anim::shared_clip_set(&main, &cal_path, clips) {
@@ -118,5 +133,6 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, 
         entity.insert(Locomotion::new((*set).clone()));
     }
     entity.insert((animator, Motion::default()));
+    if let Some(facial) = facial { entity.insert(facial); }
     Some(root)
 }

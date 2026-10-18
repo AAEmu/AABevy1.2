@@ -93,3 +93,27 @@ second figure.
 * Mount and rider placement is unverified against the real client; there are no mount skills, no mount dismount animation.
 * `SCUnitMovements` entries are all read as unit movements (the real client takes the type from the object).
 * Units beyond 140 m are not drawn.
+
+## Authored NPC facial playback (2026-10-18)
+
+`creature::spawn` now prepares a supported CDF head before spawning its skin subsets and
+puts the returned facial state and morph weights on the same root as the body Animator.
+The head's own CAL must declare a facial library; this inexpensive shared-CAL check avoids
+parsing every body/clothing part in a crowd as expression geometry. Unsupported or missing
+head data keeps the existing ordinary skin path. Cached models remain unchanged, and each
+prepared instance receives private mesh handles so its weights cannot affect another NPC.
+The existing FacialPlugin follows the body's authored CAL-to-FSQ mapping.
+
+`cargo build -p aa-client --example facial_creature` passed. The unattended example exercises
+the actual client CDF loader with `npc_chef01_base.cdf` (bound clothing/face/hair), not the
+blank customization slots in `npc_chef01.cdf`. Three independent instances use the original
+`fist_ac_talk_11` CAF at 0, 1.7218 and 3 seconds. Runtime assertions verify 23 targets, the
+body clock, private mesh handles, correct owner references, and one facial versus three
+ordinary skin subsets per instance. Speech peaks at 0.6935022; the authored return retains
+its small signed values, with positive peak 0.040279. The inspected capture is
+`shots/aa-client/facial-creature/cdf-body-clock.png`, with 266–277 FPS after startup and no
+GPU errors; the screenshot process exited normally.
+
+This adds playback to supported bound NPC heads. CDF bone attachments (including the chef's
+separate eyes), blank customization-slot assembly, PC-shaped remote units and voice-driven
+sequence selection remain separate work. No procedural mouth movement or voice lip sync is claimed.
