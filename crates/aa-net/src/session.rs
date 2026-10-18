@@ -270,6 +270,7 @@ pub enum Command {
     LootRoll(crate::loot_roll::LootRollCommand),
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
+    Slave(crate::slave_control::SlaveCommand),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -439,6 +440,7 @@ pub enum Event {
     CombatFirstHit { victim: u32, hitter: u32, hit_type: u32 },
     /// The hostile units on an NPC's aggro list; empty when the NPC left combat.
     AiAggro { npc: u32, hostiles: Vec<AggroEntry> },
+    UnitNameChanged { obj_id: u32, name: String },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
     /// The game clock: `hour` 0..24, `speed` in game hours per real second when the server sent it
     /// (the first packet after spawning; later ones only move `hour`).
@@ -968,6 +970,13 @@ impl Session {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::Requested(command)));
                 }
             }
+            Command::Slave(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Slave(crate::slave::SlaveEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::Slave(command.clone())).await {
+                    self.emit(Event::Slave(crate::slave::SlaveEvent::Requested(command)));
+                }
+            }
             Command::Mate(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: message.into() }));
@@ -1363,6 +1372,7 @@ impl Session {
             M::BmPoint(bm_point) => self.emit(Event::LoyaltyChanged { bm_point }),
             M::CombatEngaged { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: true }),
             M::CombatCleared { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: false }),
+            M::UnitNameChanged { obj_id, name } => self.emit(Event::UnitNameChanged { obj_id, name }),
             M::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary } => {
                 self.emit(Event::UnitFactionChanged { obj_id, name, faction_id, faction_id2, temporary });
             }
@@ -1607,6 +1617,134 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn slave_controls_validate_and_emit_requests_without_authoritative_mutation() {
+        use crate::slave::{SlaveCreated, SlaveEvent};
+        use crate::slave_control::SlaveCommand;
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stub = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            for expected in [
+                vec![0xdd, 1, 0, 0, 0x31, 0, 2, 1],
+                vec![0xdd, 1, 0, 1, 0x34, 0, 2, 1, 4, 0, b'B', b'o', b'a', b't'],
+                vec![0xdd, 1, 0, 2, 0x30, 0, 2, 1],
+            ] {
+                let mut length = [0; 2];
+                tokio::time::timeout(Duration::from_secs(2), sock.read_exact(&mut length))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut raw = vec![0; usize::from(u16::from_le_bytes(length))];
+                sock.read_exact(&mut raw).await.unwrap();
+                assert_eq!(
+                    raw, expected,
+                    "invalid/out-of-world requests must not reach the socket"
+                );
+            }
+            let reply = vec![
+                0xdd, 1, 0, 0, 0x70, 0, 81, 0, 0, 4, 0, b'B', b'o', b'a', b't',
+            ];
+            sock.write_all(&(reply.len() as u16).to_le_bytes())
+                .await
+                .unwrap();
+            sock.write_all(&reply).await.unwrap();
+            let mut extra = [0];
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), sock.read(&mut extra))
+                    .await
+                    .is_err()
+            );
+        });
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session
+            .command(Command::Slave(SlaveCommand::Bind { tl_id: 0x102 }))
+            .await;
+        assert!(
+            events.try_recv().is_err(),
+            "no connection is not a successful local send"
+        );
+        session.game = Some(GameConn::connect(&addr).await.unwrap());
+        session.phase = Phase::CharacterSelect;
+        session
+            .command(Command::Slave(SlaveCommand::Bind { tl_id: 0x102 }))
+            .await;
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        let mut state = crate::state::WorldState::default();
+        state.slaves.own = Some(SlaveCreated {
+            owner_obj_id: 7,
+            tl_id: 0x102,
+            obj_id: 81,
+            hide_spawn_effect: false,
+            raw_id: 0,
+            creator_name: "Owner".into(),
+        });
+        let mut unit = crate::state::tests::unit(81);
+        unit.name = "OldBoat".into();
+        unit.kind = crate::model::UnitKind::Slave {
+            id: 1,
+            tl_id: 0x102,
+            template_id: 68,
+            summoner_id: 42,
+        };
+        state.units.by_id.insert(81, unit);
+        let units_before = state.units.by_id.clone();
+        let before = state.slaves.clone();
+        for command in [
+            SlaveCommand::Bind { tl_id: 0 },
+            SlaveCommand::Despawn { obj_id: 0x1000000 },
+            SlaveCommand::Rename {
+                tl_id: 1,
+                name: " ".into(),
+            },
+        ] {
+            session.command(Command::Slave(command.clone())).await;
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(&event, Event::Slave(SlaveEvent::RequestRejected { command: actual, .. }) if actual == &command)
+            );
+            state.apply(&event);
+        }
+        for command in [
+            SlaveCommand::Bind { tl_id: 0x102 },
+            SlaveCommand::Rename {
+                tl_id: 0x102,
+                name: "Boat".into(),
+            },
+            SlaveCommand::Dismiss { tl_id: 0x102 },
+        ] {
+            session.command(Command::Slave(command.clone())).await;
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(&event, Event::Slave(SlaveEvent::Requested(actual)) if actual == &command)
+            );
+            state.apply(&event);
+        }
+        assert_eq!(state.slaves, before);
+        assert_eq!(state.units.by_id, units_before);
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            session.game.as_mut().unwrap().recv(),
+        )
+        .await
+        .unwrap();
+        session.game_msg(response).await;
+        let renamed = events.try_recv().unwrap();
+        assert!(matches!(&renamed, Event::UnitNameChanged { obj_id: 81, name } if name == "Boat"));
+        state.apply(&renamed);
+        assert_eq!(state.units.by_id[&81].name, "Boat");
+        assert_eq!(state.slaves, before);
+        assert!(
+            events.try_recv().is_err(),
+            "server silence cannot fabricate control success"
+        );
+        stub.await.unwrap();
+    }
 
     #[tokio::test]
     async fn mate_controls_and_explicit_cast_wait_for_real_server_events() {

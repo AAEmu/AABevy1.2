@@ -1227,6 +1227,12 @@ Original `trade/trade.lua` and `logic/trade.lua` contracts:
 `TakeDownTradeItemByInventoryIdx` is called with inventoryIdx-1 (zero-based) in original Lua.
 Other calls: CanStartTrade/StartTrade/CannotStartTrade, CancelTrade(reason), IsTradeLocked/IsOtherTradeLocked, LockTrade(),
 OkTrade(), GetCurrencyForUserTrade(). The lane uses copper only, no AA-point trade currency.
+`LockTrade()` is a toggle of the authoritative own lock, not an unconditional true. Native
+registration394b4cd5 binds wrapper394b40d0 -> sender394fd5b0; it compares byte3a5ba538 with zero,
+uses `sete` and writes CS0f3 with that bool. `IsTradeLocked` wrapper394b4280 reads the same manager
+base3a5ba508+0x30; the other-lock wrapper394b4300 reads+0x18. Bind zero-argument Lua LockTrade to
+`TradeCommand::Lock(!trade.my_locked)` and wait for a received lock update. The sender does not
+flip its local byte; absent an active trade it emits native error0xec and sends nothing.
 All original item lookup/tooltip addresses must respect bag sorting's virtual-to-physical map.
 
 Lane limitations are explicit: faction/distance eligibility is TODO; several silent refusals
@@ -2008,9 +2014,10 @@ Use the actual Units resource for visibility; these notifications do not invent 
 remove Unit instances. An old timeline removal cannot clear a newer replacement.
 
 Existing `MateEvent::SlaveState` (SC1ab) retains its independent exact dynamic state fields; it is
-not ownership proof. SCSlaveBound064, MySlave066, Escape067, owned commands/equipment, HP/position
-UI and native presentation effects remain subsequent work. In particular, no completed summon,
-dismissal or equipment transaction is fabricated while the live lane is unavailable.
+not ownership proof. SlaveBound064 / MySlave066 / Escape067 and explicit controls are now implemented
+under the next receive/control milestone below. Owned equipment, native HP/position UI planning and
+presentation effects remain later work. No completed summon, dismissal or equipment transaction
+is fabricated while the live lane is unavailable.
 
 Offline coverage: all three bodies and every truncation, raw i64 / Unicode creator, combined DD04
 continuation, runtime-vs-stored owner identity, both arrival orders, peer announcements, replacement,
@@ -2051,3 +2058,81 @@ is activated. No server files were changed.
 Tests preserve signed minimum/negative/zero counts and native twenty-entry caps even for i32::MAX,
 compare the lane's existing count-two golden, cut every body byte and append a real following DD04
 packet. Session bridging emits the raw notice in order without mutating inventory or craft state.
+
+
+### Native slave position reports and explicit controls (2026-10-17)
+
+Receive `SlaveEvent::Bound { master_id: u32, obj_id: u32 }` is SC064: full u32 stored master
+character ID plus bc slave object. Native vtable399b32c4 ->397c5c60 and handler391d4760 use that
+master ID independently of the runtime owner/summoner ID; driving another unmarked ship does not
+prove local ownership. Existing authoritative UnitAttached/Detached events remain the attachment
+state. Bound is retained as an exact event without fabricating ownership or an attachment.
+
+`SlaveEvent::Position(SlavePositionInfo)` is SC066 / SCMySlave: bc object, u16 timeline,
+string name, u32 template, i32 HP/maxHP, i64 X/Y and f32 Z. `SlavePositionInfo` exposes all those
+fields, including raw X/Y low bits, and `position() -> Pos` provides the existing coordinate
+conversion for presentation. Native vtable399b32d0 ->397ca080 uses position helper3961e270.
+Handler391d4800 ->39345e10 accepts a report only for its already remembered owned timeline;
+therefore `Slaves.position: Option<SlavePositionInfo>` updates only when that TL matches `own`.
+It neither proves ownership nor creates/moves a Unit. The reported runtime object can change
+while the owned TL stays the same; the raw creation announcement remains unchanged. Position
+reports persist through visibility/effect despawn, and clear with a matched owner/TL removal,
+a replacement timeline, object reuse or session teardown. The lane sends reports to the actual
+summoner after create, on death and every five seconds; stale reports for another TL are ignored.
+
+`SlaveEvent::Escaped(SlaveEscape { obj_id, x: i64, y: i64, z: f32, yaw: f32 })` is SC067:
+bc object, native long position, f32 yaw. Native vtable399b32dc ->397c5cc0 and handler391d48a0
+->39345ea0 apply it only to an existing slave actor. The plain Units reducer likewise updates
+position/yaw only on an existing UnitKind::Slave. It never creates an object, moves a character
+or changes owned metadata; raw received coordinates remain available in the event. It is an
+authoritative incoming transform, not a local movement-request ACK. The lane defines but does
+not currently emit SC067; its Rider's Escape uses despawn/removal/respawn instead.
+
+`Command::Slave(SlaveCommand)` supports exact native requests:
+
+- `Bind { tl_id }`: CS031, u16 TL (native399cfc6c ->397cacc0).
+- `Unbind { tl_id }`: CS032, u16 TL (399cfc78 ->397b9520).
+- `Dismiss { tl_id }`: CS030, u16 TL (399cfc60 ->397b94e0).
+- `Despawn { obj_id }`: CS02f, bc object (399cfc54 ->397c7600).
+- `Rename { tl_id, name }`: CS034, u16 TL then string (399e2470 ->397b9560).
+- `Spawn(SlaveSpawnRequest)`: CS02e, u32 template, i64 X/Y, f32 Z/yaw, u64 item ID,
+  conditional u8 container/u8 slot when item ID is nonzero, then bool hide (399cfc48 ->397cabf0).
+
+High-level session validation requires nonzero TL, a nonzero 24-bit object ID for Despawn,
+nonempty/NUL-free names within the native 128-byte name buffer, nonzero spawn template,
+finite spawn Z/yaw and `item_location: Option<SlaveItemLocation { container, slot }>` present
+exactly when item_id !=0. X/Y are already-native i64 coordinates: the caller owns the position
+planner. Name regex/normalization, ownership, seat availability, loaded-item warnings and actual
+permission remain server decisions; no guessed client whitelist or automatic target/seat selection.
+The native Lua `X2SiegeWeapon:SetSiegeWeaponName(name)` wrapper394aa0c0 normalizes through its
+name helper and sends034; `DiscardSiegeWeapon()` wrapper394aa090 ->39345aa0 chooses an unbind
+path based on current attachment. Dismiss39345bf0 sends030 and clears local native presentation;
+the network resource still waits for actual server lifecycle events. Native UI planning is root work.
+
+Only valid InWorld requests write the socket; success there emits `SlaveEvent::Requested(command)`.
+Invalid fields emit `RequestRejected { command, message }`, and no connection/server silence cannot
+produce a completion. Neither event mutates owned state, attachments, names or transforms. Native
+incoming SC070 / `Event::UnitNameChanged { obj_id, name }` (bc object + string; reader397b36f0,
+handler391d5060) now updates only known Units, closing the actual Rename receive path and DD04
+boundary. SC061 creator_name remains the summoner name, not the vehicle's mutable label.
+
+Important lane gap: CSSpawnSlave is logging-only, and its reader incorrectly always expects four
+item-location bytes (including two skipped bytes). Native sends only container/slot for nonzero
+item and none for zero item; native body lengths are39 /37 versus the lane's41. The native writer
+is preserved verbatim and is explicitly not a functional lane summon. Existing item-skill summon
+flow remains independent. No padding bytes, fake acknowledgement or spawned Unit are invented to
+hide the mismatch. Slave equipment handlers remain stubs; original skill eligibility/planning and
+map/vehicle UI integration are still root work.
+
+Offline checks cover all request goldens, native conditional spawn locations, strict local
+validation, all four receive boundaries including rename, every truncation, DD04 continuation,
+raw position bits, full master IDs, ownership/TL gating and known-unit-only transform/name changes.
+A fresh ephemeral loopback session proves rejected/out-of-world requests never reach the socket,
+valid requests emit only Requested, silence leaves ownership/name/position unchanged and a received
+SC070 alone supplies the authoritative rename. No stalled-lane traffic or server edits were used.
+
+
+Validation for the bounded SC1bf and slave control/position milestones: `cargo test -p aa-net`
+passes all215 library tests and two scripted login tests; all nine live tests remain ignored.
+`cargo check -p aa-net --features bevy --examples` passes on the final production sources.
+Only aa-net and this document changed; the added session fixture uses ephemeral loopback only.

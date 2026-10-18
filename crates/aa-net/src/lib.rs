@@ -38,6 +38,7 @@ pub mod session;
 pub mod skill;
 pub mod shop;
 pub mod slave;
+pub mod slave_control;
 pub mod state;
 pub mod stream;
 pub mod trade;
@@ -63,7 +64,8 @@ pub use state::WorldState;
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
-pub use slave::{SlaveCreated, SlaveEvent, Slaves};
+pub use slave::{SlaveCreated, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
+pub use slave_control::{SlaveCommand, SlaveItemLocation, SlaveSpawnRequest};
 pub use wire::Pos;
 
 #[cfg(feature = "bevy")]

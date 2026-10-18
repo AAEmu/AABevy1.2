@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use crate::model::UnitKind;
 use crate::opcodes::sc;
 use crate::session::Event;
-use crate::wire::{Reader, Result, WireError};
+use crate::slave_control::SlaveCommand;
+use crate::wire::{Pos, Reader, Result, WireError, long_to_coord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlaveCreated {
@@ -18,27 +19,88 @@ pub struct SlaveCreated {
     pub creator_name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// SCMySlave's owner-only position/HP report; raw XY retain the native fixed-point bits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlavePositionInfo {
+    pub obj_id: u32,
+    pub tl_id: u16,
+    pub name: String,
+    pub template_id: u32,
+    pub hp: i32,
+    pub max_hp: i32,
+    pub x: i64,
+    pub y: i64,
+    pub z: f32,
+}
+impl SlavePositionInfo {
+    pub fn position(&self) -> Pos {
+        Pos::new(long_to_coord(self.x), long_to_coord(self.y), self.z)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlaveEscape {
+    pub obj_id: u32,
+    pub x: i64,
+    pub y: i64,
+    pub z: f32,
+    pub yaw: f32,
+}
+impl SlaveEscape {
+    pub fn position(&self) -> Pos {
+        Pos::new(long_to_coord(self.x), long_to_coord(self.y), self.z)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum SlaveEvent {
     /// Broadcast around the summoning owner, not owner-only proof by itself.
     Created(SlaveCreated),
+    /// Stored master character ID, independent of summoner ownership and runtime player ID.
+    Bound {
+        master_id: u32,
+        obj_id: u32,
+    },
+    Position(SlavePositionInfo),
+    Escaped(SlaveEscape),
+    /// Local socket write only; never a completed summon/movement/attachment acknowledgement.
+    Requested(SlaveCommand),
+    RequestRejected {
+        command: SlaveCommand,
+        message: String,
+    },
     /// Raw ID role differs between lane normal deletion and Rider's Escape.
-    Removed { obj_id: u32, tl_id: u16 },
+    Removed {
+        obj_id: u32,
+        tl_id: u16,
+    },
     /// Vehicle object/effect despawn; distinct from the native owned-timeline clear.
-    Despawn { obj_id: u32 },
+    Despawn {
+        obj_id: u32,
+    },
 }
 
 impl SlaveEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCSlaveCreatedPacket | sc::SCSlaveRemovedPacket | sc::SCSlaveDespawnPacket
+            sc::SCSlaveCreatedPacket
+                | sc::SCSlaveRemovedPacket
+                | sc::SCSlaveDespawnPacket
+                | sc::SCSlaveBoundPacket
+                | sc::SCMySlavePacket
+                | sc::SCEscapeSlavePacket
         )
     }
 
     pub fn name(&self) -> &'static str {
         match self {
             Self::Created(_) => "SCSlaveCreated",
+            Self::Bound { .. } => "SCSlaveBound",
+            Self::Position(_) => "SCMySlave",
+            Self::Escaped(_) => "SCEscapeSlave",
+            Self::Requested(_) => "SlaveRequested",
+            Self::RequestRejected { .. } => "SlaveRequestRejected",
             Self::Removed { .. } => "SCSlaveRemoved",
             Self::Despawn { .. } => "SCSlaveDespawn",
         }
@@ -46,6 +108,28 @@ impl SlaveEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCSlaveBoundPacket => Self::Bound {
+                master_id: r.u32()?,
+                obj_id: r.bc()?,
+            },
+            sc::SCMySlavePacket => Self::Position(SlavePositionInfo {
+                obj_id: r.bc()?,
+                tl_id: r.u16()?,
+                name: r.string()?,
+                template_id: r.u32()?,
+                hp: r.i32()?,
+                max_hp: r.i32()?,
+                x: r.i64()?,
+                y: r.i64()?,
+                z: r.f32()?,
+            }),
+            sc::SCEscapeSlavePacket => Self::Escaped(SlaveEscape {
+                obj_id: r.bc()?,
+                x: r.i64()?,
+                y: r.i64()?,
+                z: r.f32()?,
+                yaw: r.f32()?,
+            }),
             sc::SCSlaveCreatedPacket => Self::Created(SlaveCreated {
                 owner_obj_id: r.bc()?,
                 tl_id: r.u16()?,
@@ -68,12 +152,14 @@ impl SlaveEvent {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Slaves {
     /// Last native-owned announcement. Does not imply that a Unit is currently visible.
     /// Cleared by matched owner-ID/timeline removal, replacement, object reuse or teardown.
     pub own: Option<SlaveCreated>,
+    /// Latest SCMySlave report matching the already-announced owned timeline. Never a Unit.
+    pub position: Option<SlavePositionInfo>,
     /// Creation/effect metadata; these are not UnitSpawned objects or transform information.
     pub created: HashMap<u32, SlaveCreated>,
     own_obj_id: u32,
@@ -105,6 +191,12 @@ impl Slaves {
                     .find(|entry| entry.owner_obj_id == player.obj_id && player.obj_id != 0)
                     .cloned();
             }
+            Event::Slave(SlaveEvent::Position(info)) => {
+                if !self.own.as_ref().is_some_and(|own| own.tl_id == info.tl_id) {
+                    return false;
+                }
+                self.position = Some(info.clone());
+            }
             Event::Slave(SlaveEvent::Created(entry)) => {
                 if entry.owner_obj_id != 0 {
                     // The lane CreateForOwner replaces its prior active timeline.
@@ -113,13 +205,21 @@ impl Slaves {
                 }
                 self.created.insert(entry.obj_id, entry.clone());
                 if self.own_obj_id != 0 && entry.owner_obj_id == self.own_obj_id {
+                    if !self
+                        .own
+                        .as_ref()
+                        .is_some_and(|old| old.tl_id == entry.tl_id)
+                    {
+                        self.position = None;
+                    }
                     self.own = Some(entry.clone());
                 } else if self
                     .own
                     .as_ref()
                     .is_some_and(|own| own.obj_id == entry.obj_id)
                 {
-                    self.own = None; // A runtime object ID was reused by another owner.
+                    self.own = None;
+                    self.position = None; // A runtime object ID was reused by another owner.
                 }
             }
             Event::Slave(SlaveEvent::Removed { obj_id, tl_id }) => {
@@ -132,6 +232,7 @@ impl Slaves {
                     && self.own.as_ref().is_some_and(|own| own.tl_id == *tl_id);
                 if matched_own {
                     self.own = None;
+                    self.position = None;
                 }
                 if !matched_own && old_len == self.created.len() {
                     return false;
@@ -168,6 +269,7 @@ impl Slaves {
                 }
                 if stale_own {
                     self.own = None;
+                    self.position = None;
                 }
             }
             _ => return false,
@@ -293,6 +395,200 @@ mod tests {
             assert_eq!(state.slaves.own, Some(fixture()));
             assert!(state.units.by_id.is_empty());
         }
+    }
+
+    fn position_info() -> SlavePositionInfo {
+        SlavePositionInfo {
+            obj_id: 0xaabbcc,
+            tl_id: 0x4567,
+            name: "Boat".into(),
+            template_id: 68,
+            hp: -12,
+            max_hp: 200,
+            x: 0x0102030405060708,
+            y: -0x112233445566778,
+            z: 3.5,
+        }
+    }
+
+    #[test]
+    fn position_bound_escape_and_rename_have_exact_widths_and_dd04_boundaries() {
+        let info = position_info();
+        let escape = SlaveEscape {
+            obj_id: info.obj_id,
+            x: info.x,
+            y: info.y,
+            z: info.z,
+            yaw: 0.5,
+        };
+        let mut pos = Writer::new();
+        pos.bc(info.obj_id)
+            .u16(info.tl_id)
+            .string("Boat")
+            .u32(68)
+            .i32(-12)
+            .i32(200)
+            .i64(info.x)
+            .i64(info.y)
+            .f32(info.z);
+        let mut esc = Writer::new();
+        esc.bc(info.obj_id)
+            .i64(info.x)
+            .i64(info.y)
+            .f32(info.z)
+            .f32(0.5);
+        let mut name = Writer::new();
+        name.bc(info.obj_id).string("NewBoat");
+        let packets = vec![
+            (
+                0x64,
+                vec![0x98, 0xba, 0xdc, 0xfe, 0xcc, 0xbb, 0xaa],
+                ServerMsg::Slave(SlaveEvent::Bound {
+                    master_id: 0xfedcba98,
+                    obj_id: info.obj_id,
+                }),
+            ),
+            (
+                0x66,
+                pos.finish(),
+                ServerMsg::Slave(SlaveEvent::Position(info.clone())),
+            ),
+            (
+                0x67,
+                esc.finish(),
+                ServerMsg::Slave(SlaveEvent::Escaped(escape)),
+            ),
+            (
+                0x70,
+                name.finish(),
+                ServerMsg::UnitNameChanged {
+                    obj_id: info.obj_id,
+                    name: "NewBoat".into(),
+                },
+            ),
+        ];
+        let mut inner = Writer::new();
+        let mut expected = Vec::new();
+        for (opcode, raw, message) in packets {
+            let mut frame = Writer::new();
+            frame.raw(&[0xdd, 1]).u16(0).u16(opcode).raw(&raw);
+            assert_eq!(ServerMsg::decode(&frame.finish()).unwrap(), message);
+            for n in 0..raw.len() {
+                let mut frame = Writer::new();
+                frame.raw(&[0xdd, 1]).u16(0).u16(opcode).raw(&raw[..n]);
+                assert!(
+                    ServerMsg::decode(&frame.finish()).is_err(),
+                    "op {opcode:x} cut {n}"
+                );
+            }
+            inner.u16(0).u16(opcode).raw(&raw);
+            expected.push(message);
+        }
+        inner.u16(0).u16(sc::SCOnOffSnowPacket).bool(true);
+        expected.push(ServerMsg::Snow(true));
+        let inner = inner.finish();
+        let len = inner.len() as u16;
+        let mut outer = Writer::new();
+        outer
+            .raw(&[0xdd, 4])
+            .u16(5)
+            .u8(1)
+            .u16(len)
+            .u16(!len)
+            .raw(&inner);
+        assert_eq!(
+            ServerMsg::decode(&outer.finish()).unwrap(),
+            ServerMsg::Batch(expected)
+        );
+    }
+
+    #[test]
+    fn reports_require_owned_timeline_while_only_real_escape_and_rename_change_existing_units() {
+        let mut state = crate::state::WorldState::default();
+        state.apply(&player());
+        let info = position_info();
+        assert!(
+            !state
+                .slaves
+                .apply(&Event::Slave(SlaveEvent::Position(info.clone())))
+        );
+        state.apply(&Event::Slave(SlaveEvent::Bound {
+            master_id: 42,
+            obj_id: info.obj_id,
+        }));
+        assert!(
+            state.slaves.own.is_none(),
+            "driver identity is not summoner ownership"
+        );
+        state.apply(&Event::Slave(SlaveEvent::Created(fixture())));
+        let mismatch = SlavePositionInfo {
+            tl_id: 1,
+            ..info.clone()
+        };
+        assert!(
+            !state
+                .slaves
+                .apply(&Event::Slave(SlaveEvent::Position(mismatch)))
+        );
+        state.apply(&Event::Slave(SlaveEvent::Position(info.clone())));
+        assert_eq!(state.slaves.position, Some(info.clone()));
+        assert!(state.units.by_id.is_empty());
+        let escape = SlaveEscape {
+            obj_id: info.obj_id,
+            x: info.x,
+            y: info.y,
+            z: info.z,
+            yaw: 0.5,
+        };
+        let mut non_slave = crate::state::Units::default();
+        non_slave.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(
+            info.obj_id,
+        ))));
+        let unchanged = non_slave.by_id[&info.obj_id].pos;
+        assert!(!non_slave.apply(&Event::Slave(SlaveEvent::Escaped(escape.clone()))));
+        assert_eq!(non_slave.by_id[&info.obj_id].pos, unchanged);
+        state.apply(&Event::Slave(SlaveEvent::Escaped(escape.clone())));
+        assert!(state.units.by_id.is_empty());
+        let mut unit = crate::state::tests::unit(info.obj_id);
+        unit.kind = UnitKind::Slave {
+            id: 1,
+            tl_id: info.tl_id,
+            template_id: 68,
+            summoner_id: 42,
+        };
+        let before = unit.pos;
+        state.apply(&Event::UnitSpawned(Box::new(unit)));
+        state.apply(&Event::Slave(SlaveEvent::Position(info.clone())));
+        assert_eq!(
+            state.units.by_id[&info.obj_id].pos, before,
+            "map report is not unit movement"
+        );
+        state.apply(&Event::Slave(SlaveEvent::Escaped(escape)));
+        assert_eq!(state.units.by_id[&info.obj_id].pos, info.position());
+        assert_eq!(state.units.by_id[&info.obj_id].rotation[2], 0.5);
+        state.apply(&Event::UnitNameChanged {
+            obj_id: info.obj_id,
+            name: "NewBoat".into(),
+        });
+        assert_eq!(state.units.by_id[&info.obj_id].name, "NewBoat");
+        assert_eq!(
+            state.slaves.own.as_ref().unwrap().creator_name,
+            fixture().creator_name
+        );
+        state.apply(&Event::UnitNameChanged {
+            obj_id: 99,
+            name: "Unknown".into(),
+        });
+        assert!(!state.units.by_id.contains_key(&99));
+        state.apply(&Event::Slave(SlaveEvent::Despawn {
+            obj_id: info.obj_id,
+        }));
+        assert_eq!(state.slaves.position, Some(info.clone()));
+        state.apply(&Event::Slave(SlaveEvent::Removed {
+            obj_id: fixture().owner_obj_id,
+            tl_id: info.tl_id,
+        }));
+        assert_eq!(state.slaves.position, None);
     }
 
     #[test]
