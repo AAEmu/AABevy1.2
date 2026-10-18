@@ -2364,6 +2364,71 @@ platform is occluded by the tower shell from the exterior QA camera, so this is 
 check, not a clear elevator visual comparison. No exact real-client captures of these two sites
 are available in `reference/`; no pixel-match claim. All own example windows exit automatically.
 
+### Authored initial sleeping RigidBodyEx slots
+
+The bounded30-cell placement audit finds38 previously omitted `RigidBodyEx` CGF
+slots:30 lamp heads,3 galleon props,4 detection machines and1 crusher. All four
+original CGFs are present. Every surveyed slot explicitly authors
+`bPhysicalize=1`, `bRigidBody=1`, `bRigidBodyActive=1` and `bResting=1`; no static
+or nonphysical authored example was found. These remain **dynamic, initially
+sleeping objects**, not static-body conversions.
+
+The original `game/scripts/entities/physics/rigidbodyex.lua` makes the visible
+slot independent of physics setup: `OnSpawn` calls `SetFromProperties`, which
+calls `LoadObject(0, Properties.object_Model)` and `DrawSlot(0,1)`. The optional
+frozen model is loaded into another slot and hidden. Client/server
+`OnStartGame` separately calls `PhysicalizeThis`; `Default.OnBeginState` and
+`OnReset` use `AwakePhysics(1-bResting)`. Damage, activation, break and material
+flow events are separate operations. The inherited `BasicEntity` definitions do
+not turn these authored sleeping rigid bodies into static meshes.
+
+The supported slice draws only their **initial sleeping CGF slot**. All four
+explicit flags must equal1, and the model must be CGF. Missing/unknown flags,
+awake/inactive/nonphysical variants and CGA/character slots are declined here.
+`PlacedProp.sleeping_rigid` preserves that identity alongside the authored
+GUID/name/model, material, parent-composed transform, hidden state and shadow
+request. The existing entity bins apply the same cell origin once, model/material
+cache, worker/sector budgets, distance/LOD policy, hidden filtering and identical
+brush-export suppression. No collision proxy or dynamic actor is added; physics,
+wake, movement, constraints, damage, freeze and flow events remain unsupported.
+
+Tests retain parent/nonuniform transforms and source identity, reject other
+physics/animation states, and check hidden/identical-brush suppression. Actual
+cells9,12 /21,8 /14,13 contribute8 /2 /3 source slots; all four real CGFs parse
+with renderable geometry and each admitted slot appears once in the existing
+sector bins. The lamp's native local position `(347.57556,784.5303,203.06494)`
+becomes global `(9563.575,13072.53,203.06494)` with the cell offset once.
+
+The `rigid_props` aa-dev fixture uses the actual cell streamer and the selected
+source GUID. Default is the lamp head in9,12; `--machine` visits the detection
+machine in21,8. `--off` hides only the selected source parts after verifying that
+they loaded. `--unload-check` tracks the actual part entity IDs, moves outside
+the authored world and asserts all tracked parts disappear. Shared cached assets
+retain the existing streamer lifetime.
+
+All231 library tests pass, with9 existing ignored tests, and the dedicated
+example builds. Six1280x720 captures under `shots/aa-world/rigid_props/` were
+inspected. The lamp head hangs visibly from the original bent tree; the machine
+assembly lies at its authored workshop pose. Matched `--off` captures retain the
+same camera/settings and remove only the selected source slot. The selected lamp
+region changes3,338 pixels by more than3 RGB bytes (max220); the machine region
+changes38,426 (max146). No scene, material or lighting tuning was needed.
+
+Each selected source model produces one actual mesh-part entity. Both unload runs
+verify its captured entity ID no longer exists and the streamer's entity-part
+count is zero. All six runs exit zero and close their windows. The lamp runs log
+no warnings/errors; machine runs log the existing expected
+`textures/cubemaps/fleettest.dds is not a cube map` fallback warning, with no errors
+or panics. Shared-machine FPS spans57-99 lamp-on /79-112 off and31-132 machine-on
+/122-152 off; unloaded runs span92-148 /46-172. Concurrent CPU builds were active,
+so these are observed run ranges, not performance comparisons. The copied
+executable is removed.
+
+Ignored `roads/rigid-props-audit/` retains the original scripts,30-cell survey,
+source XML records and five inherited calibration hashes. There is no exact
+native-client camera reference for these locations; on/off images establish the
+restored authored slot, not complete dynamic-physics or lighting parity.
+
 Remaining entity limits: unsupported CGA curves / named clips, skinned actors, FlowGraph movement/events, rigid-body
 simulation are not implemented by this static-prop path. Local lights have their own path below.
 The elevator is visible at its initial position and does not execute its move/wait graph.
