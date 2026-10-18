@@ -126,4 +126,4 @@ pub mod unpack;
 pub use unpack::UnpackItemRequest;
 
 mod bounty;
-pub use bounty::{Bounties,BountyEvent,BountyNotice,BountyRow};
+pub use bounty::{Bounties,BountyCommand,BountyEvent,BountyNotice,BountyRow};

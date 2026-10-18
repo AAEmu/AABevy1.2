@@ -277,6 +277,7 @@ pub enum Command {
     Family { character_id: u32, command: crate::FamilyCommand },
     /// Captured character and received trial context; never an optimistic state change.
     Trial { character_id:u32,command:crate::TrialCommand },
+    Bounty { character_id:u32,command:crate::BountyCommand },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -546,6 +547,8 @@ pub enum Event {
     JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
     TrialRequested { character_id:u32,command:crate::TrialCommand },
     TrialRequestRejected { character_id:u32,command:crate::TrialCommand,message:String },
+    BountyRequested { character_id:u32,command:crate::BountyCommand },
+    BountyRequestRejected { character_id:u32,command:crate::BountyCommand,message:String },
     JuryWaitingNumberRequested { character_id:u32 },
     JuryWaitingNumberRequestRejected { character_id:u32, message:String },
     Achievement(crate::achievement::AchievementEvent),
@@ -1058,6 +1061,14 @@ impl Session {
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
                 }
+            }
+            Command::Bounty{character_id,command} => {
+                let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || !self.selected_state.as_ref().is_some_and(|s|s.character.id==character_id) {
+                    Some("bounty request requires the actual active captured character header")
+                }else{command.validate().err()};
+                if let Some(message)=invalid {self.emit(Event::BountyRequestRejected{character_id,command,message:message.into()});}
+                else if self.send_game(game::ClientMsg::Bounty(command.clone())).await {self.emit(Event::BountyRequested{character_id,command});}
+                else {self.emit(Event::BountyRequestRejected{character_id,command,message:"bounty request was not sent".into()});}
             }
             Command::Trial{character_id,command} => {
                 let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || !self.selected_state.as_ref().is_some_and(|s|s.character.id==character_id) {
@@ -4290,6 +4301,31 @@ mod tests {
             assert!(matches!(events.try_recv(), Ok(Event::SkillFired(f)) if f.raw_final_flag == 255));
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn bounty_controls_exact_loopback_identity_and_failed_send_no_optimism(){
+        use crate::BountyCommand;
+        async fn frame(peer:&mut tokio::net::TcpStream)->Vec<u8>{let n=peer.read_u16_le().await.unwrap();let mut out=vec![0;n as usize];peer.read_exact(&mut out).await.unwrap();out[4..].to_vec()}
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());session.phase=Phase::InWorld;session.selected=42;
+        let mut header=crate::model::CharacterState::default();header.character.id=42;header.bounty_money=123;session.selected_state=Some(header);
+        let request=BountyCommand::request_set_money(b"N\0tail").unwrap();
+        session.command(Command::Bounty{character_id:42,command:request.clone()}).await;
+        let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::BountyRequested{..}|Event::Bounty(_)));rejected|=matches!(e,Event::BountyRequestRejected{..});}assert!(rejected);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        for command in [request.clone(),BountyCommand::Update{kind:u32::MAX,name:vec![255],money:i32::MIN}]{
+            let mut expected=command.opcode().to_le_bytes().to_vec();expected.extend(game::ClientMsg::Bounty(command.clone()).encode_body());
+            session.command(Command::Bounty{character_id:42,command:command.clone()}).await;assert_eq!(frame(&mut peer).await,expected);
+            assert!(matches!(events.try_recv(),Ok(Event::BountyRequested{character_id:42,command:actual}) if actual==command));assert!(events.try_recv().is_err());assert_eq!(session.selected_state.as_ref().unwrap().bounty_money,123);
+        }
+        session.command(Command::Bounty{character_id:41,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));
+        session.selected_state.as_mut().unwrap().character.id=41;session.command(Command::Bounty{character_id:42,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));session.selected_state.as_mut().unwrap().character.id=42;
+        session.command(Command::Bounty{character_id:42,command:BountyCommand::RequestSetMoney{name:vec![b'X';129]}}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));
+        session.phase=Phase::WorldSelect;session.command(Command::Bounty{character_id:42,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));session.phase=Phase::InWorld;
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.game.as_mut().unwrap().shutdown().await;session.command(Command::Bounty{character_id:42,command:request}).await;
+        let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::BountyRequested{..}|Event::Bounty(_)));rejected|=matches!(e,Event::BountyRequestRejected{..});}assert!(rejected);
     }
 
     #[tokio::test]

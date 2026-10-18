@@ -124,6 +124,8 @@ opcodes! {
         CSInteractNPCEndPacket = 0x066,
         CSStartInteractionPacket = 0x068,
         CSReplyImprisonOrTrialPacket = 0x06f,
+        CSRequestSetBountyMoneyPacket=0x11f,
+        CSSendBountyUpdatePacket=0x120,
         CSSkipFinalStatementPacket = 0x070,
         CSReplyInviteJuryPacket = 0x071,
         CSJurySummonedPacket = 0x072,
