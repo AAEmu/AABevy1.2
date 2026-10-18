@@ -474,7 +474,9 @@ fn removal_waits_for_a_shown_to_hidden_transition_and_fade_completion() {
     ui.exec("@fade_remove", "window:Show(false,100)").unwrap();
     lua::tick(&ui.lua, 50.);
     assert!(lua::ui(&ui.lua).tree.get(window).alive);
-    assert!(lua::ui(&ui.lua).tree.visible(window));
+    assert!(!lua::ui(&ui.lua).tree.visible(window));
+    assert!(lua::ui(&ui.lua).tree.fading_paint_order().contains(&window));
+    assert_ne!(input::pick(&ui.lua, 5., 5.), Some(window));
     ui.fire_event("REMOVAL_PROBE", ());
     assert_eq!(eval::<usize>(&ui, "events"), 1);
     lua::tick(&ui.lua, 60.);

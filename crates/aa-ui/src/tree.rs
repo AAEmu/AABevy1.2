@@ -490,6 +490,9 @@ pub struct Widget {
     pub drawables: Vec<Id>,
     pub layer: Layer,
     pub dynamic_drawable: DynamicDrawableState,
+    /// Native +dc/+e0: manager fade factor and pending fade, separate from base alpha/shown.
+    pub fade_alpha: f32,
+    pub fading: bool,
     pub enabled: bool,
     pub clickable: bool,
     pub text: Option<TextBlock>,
@@ -1214,6 +1217,16 @@ impl Tree {
 
     /// Widgets in paint order (bottom first), with effective visibility, by layer.
     pub fn paint_order(&self) -> Vec<Id> {
+        self.ordered_widgets(false)
+    }
+
+    /// Painting also admits hidden widgets whose native manager fade has not completed.
+    /// Input and public visibility keep using the strict shown flags.
+    pub fn fading_paint_order(&self) -> Vec<Id> {
+        self.ordered_widgets(true)
+    }
+
+    fn ordered_widgets(&self, fading: bool) -> Vec<Id> {
         let mut tops: Vec<Id> = self
             .top
             .iter()
@@ -1224,20 +1237,20 @@ impl Tree {
         tops.sort_by_key(|&t| self.widget(t).map(|w| w.layer).unwrap_or_default());
         let mut out = Vec::with_capacity(self.objects.len());
         for t in tops {
-            self.push_order(t, &mut out);
+            self.push_order(t, &mut out, fading);
         }
         out
     }
 
-    fn push_order(&self, id: Id, out: &mut Vec<Id>) {
+    fn push_order(&self, id: Id, out: &mut Vec<Id>, fading: bool) {
         let o = self.get(id);
-        if !o.alive || !o.shown {
+        if !o.alive || !(o.shown || fading && o.widget().is_some_and(|w| w.fading)) {
             return;
         }
         out.push(id);
         if let Some(w) = o.widget() {
             for &c in &w.children {
-                self.push_order(c, out);
+                self.push_order(c, out, fading);
             }
         }
     }
@@ -1322,6 +1335,8 @@ impl Widget {
             drawables: Vec::new(),
             layer: Layer::Normal,
             dynamic_drawable: Default::default(),
+            fade_alpha: 1.0,
+            fading: false,
             enabled: true,
             text,
             label,

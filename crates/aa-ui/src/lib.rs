@@ -77,6 +77,8 @@ impl UiRuntime {
             pending: Vec::new(),
             retiring: Default::default(),
             fades: Default::default(),
+            fade_clock: 0.0,
+            next_fade_order: 0,
             animations: lua::animation::Animations::with_ui_scale(ui_scale),
             damage: Default::default(),
             time_ms: 0.0,

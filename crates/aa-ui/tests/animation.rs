@@ -25,6 +25,8 @@ fn setup() -> UiRuntime {
     "#,
     )
     .unwrap();
+    // Settle the native zero-duration Show record before animation/cache measurements.
+    lua::tick(&ui.lua, 0.0);
     ui
 }
 
@@ -116,6 +118,7 @@ fn finite_effects_hold_then_finish_and_hidden_loops_do_not_repaint() {
         "effect:SetRepeatCount(0); effect:SetStartEffect(true); window:Show(false)",
     )
     .unwrap();
+    lua::tick(&ui.lua, 0.0);
     lua::ui(&ui.lua).tree.settle();
     let content = lua::ui(&ui.lua).tree.content();
     lua::tick(&ui.lua, 200.0);

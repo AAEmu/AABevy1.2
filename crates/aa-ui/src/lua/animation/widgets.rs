@@ -45,6 +45,7 @@ pub(super) struct Widgets {
 
 struct State {
     alpha: Channel,
+    visible_alpha: Option<f32>,
     scale: Channel,
     pivot: Option<Point>,
     is_root: bool,
@@ -67,6 +68,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             alpha: Default::default(),
+            visible_alpha: None,
             scale: Default::default(),
             pivot: None,
             is_root: false,
@@ -161,7 +163,7 @@ impl State {
 
     fn sample(&self, ui_scale: f32) -> WidgetSample {
         WidgetSample {
-            alpha: self.alpha.started.then_some(self.alpha.current),
+            alpha: self.alpha.started.then_some(self.visible_alpha.unwrap_or(self.alpha.current)),
             scale: self.raw_scale(ui_scale) / if self.is_root { ui_scale } else { 1.0 },
             pivot: if self.scale.started {
                 self.pivot.unwrap_or(Point::Center)
@@ -232,6 +234,14 @@ fn state(u: &mut Ui, id: Id) -> &mut State {
             is_root,
             ..Default::default()
         })
+}
+
+/// Native SetAlpha writes visible +d8 while leaving the running +288 channel untouched.
+pub(crate) fn set_alpha(u: &mut Ui, id: Id, value: f32) {
+    if let Some(s) = u.animations.widgets.states.get_mut(&id) {
+        s.visible_alpha = Some(value);
+    }
+    u.tree.get_mut(id).alpha = value;
 }
 
 pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
@@ -308,6 +318,9 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let state = state(&mut u, id);
             let scale_callback = a.b(2, false) || state.scale.running;
             let before = state.sample(ui_scale);
+            if a.b(1, false) || state.alpha.running {
+                state.visible_alpha = None;
+            }
             state.alpha.start(a.b(1, false));
             state.scale.start(a.b(2, false));
             let scale_changed = state.sample(ui_scale).scale != before.scale;
@@ -369,6 +382,9 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
             scaled.push(id);
         }
         let before = state.sample(ui_scale);
+        if state.alpha.running {
+            state.visible_alpha = None;
+        }
         if state.alpha.tick(positive(dt_ms) as f64) {
             ended.push((id, "OnAlphaAnimeEnd"));
         }

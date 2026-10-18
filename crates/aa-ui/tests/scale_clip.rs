@@ -33,6 +33,8 @@ fn setup() -> UiRuntime {
     "#,
     )
     .unwrap();
+    // Complete the native immediate Show before measuring subsequent layout/cache changes.
+    lua::tick(&ui.lua, 0.0);
     ui
 }
 

@@ -101,7 +101,7 @@ fn top_layer(tree: &Tree, mut id: Id) -> crate::tree::Layer {
 /// (paint order puts them first): those go to the background camera in split mode.
 pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) {
     let mut out = Vec::new();
-    let order = u.tree.paint_order();
+    let order = u.tree.fading_paint_order();
     let scale = u.ui_scale;
     let mut background_end = None;
     for id in order {
@@ -401,17 +401,13 @@ pub fn button_state(u: &Ui, id: Id, pressed: Option<Id>) -> ButtonState {
     }
 }
 
-fn effective_alpha(u: &Ui, mut id: Id) -> f32 {
-    let mut a = 1.0;
-    loop {
-        let o = u.tree.get(id);
-        if !crate::lua::damage::visible(u, id) { return 0.0; }
-        a *= u.animations.widget_sample(id).alpha.unwrap_or(o.alpha);
-        match o.parent {
-            Some(p) => id = p,
-            None => return a,
-        }
-    }
+fn effective_alpha(u: &Ui, id: Id) -> f32 {
+    if !crate::lua::damage::visible(u, id) { return 0.0; }
+    let o = u.tree.get(id);
+    let base = u.animations.widget_sample(id).alpha.unwrap_or(o.alpha);
+    // Native paint forms its own factor*base first, then pushes onto the parent's alpha.
+    let own = o.widget().map_or(1.0, |w| w.fade_alpha) * base;
+    o.parent.map_or(own, |p| effective_alpha(u, p) * own)
 }
 
 /// Whether a button state drawable shows while its owner is in `state`: the background of the
