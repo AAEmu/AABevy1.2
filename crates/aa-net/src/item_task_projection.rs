@@ -50,7 +50,8 @@ pub struct NativeItemTaskInventory<'a> {
     pub bank: NativeItemTaskStorage<'a>,
 }
 
-/// Physical Count/Grade/Update lookup or equipment -> bag -> bank Remove lookup.
+/// Physical task lookup or equipment -> bag -> bank Remove lookup. Owner15 uses
+/// container storage only; original no-lookup branches return Missing.
 /// The caller supplies certainty immediately BEFORE this task and owns all mutations.
 /// Unknown earlier records prevent a later ID match from becoming authoritative.
 /// Equipment indices above 27 are refused as unknown (native physical lookup is unsafe).
@@ -134,6 +135,15 @@ pub fn lookup_native_item_task<'a>(
         }
         | ItemTask::Update {
             container, slot, ..
+        }
+        | ItemTask::Flags {
+            container, slot, ..
+        }
+        | ItemTask::Security {
+            container, slot, ..
+        }
+        | ItemTask::RemoveSlot {
+            container, slot, ..
         } => Some(match container {
             1 | 0xfc | 0xf2 => physical(inventory.equipment, *container, *slot, true),
             2 | 0x64 | 0x65 | 0x66 => physical(inventory.bag, *container, *slot, false),
@@ -154,12 +164,23 @@ pub fn lookup_native_item_task<'a>(
             Some(Context::Missing)
         }
         ItemTask::Add {
-            action: crate::items::action::CREATE,
+            action:
+                crate::items::action::CREATE
+                | crate::items::action::TAKE
+                | crate::items::action::CHANGE_OWNER,
             container,
             slot,
             ..
         } => {
-            if matches!(*container, 4 | 5) {
+            let ItemTask::Add { action, .. } = task else {
+                unreachable!()
+            };
+            if *action == crate::items::action::CHANGE_OWNER
+                && !matches!(*container, 2 | 0x64 | 0x65 | 0x66 | 3)
+            {
+                return Some(Context::Missing);
+            }
+            if *action != crate::items::action::CHANGE_OWNER && matches!(*container, 4 | 5) {
                 return Some(Context::Missing);
             }
             lookup_native_item_task(
@@ -173,6 +194,7 @@ pub fn lookup_native_item_task<'a>(
                 inventory,
             )
         }
+        ItemTask::RemoveCrafting { .. } => Some(Context::Missing),
         _ => None,
     }
 }
@@ -340,18 +362,27 @@ fn qualified_detail(
     (decoded == *detail && payload == Some(&block[1..reader.pos()])).then_some(())
 }
 
-/// Project original Count4/Remove7/Grade14 and qualified Update9. None means unsupported task, unknown context,
+/// Project original supported single-row Item tasks. None means unsupported task, unknown context,
 /// or a supplied context inconsistent with the specified native lookup.
 ///
 /// Count ignores the task's ID/template and preserves zero/negative wrapping counts.
 /// Remove copies the found item before clearing it, then checks the declared location.
-/// Container 4 short-circuits Count/Remove only. Grade copies output before changing
+/// Container 4 short-circuits Count/Remove; Add5/Take6 also bypass container5.
+/// Owner15 never bypasses. Grade copies output before changing
 /// the grade; Update copies output after replacing supported normalized detail fields.
 /// Update requires a complete 128-byte received block consistent with its parsed fields.
+/// Security11 nonzero unpack remains unsupported without its static provider.
 pub fn project_native_item_task(
     task: &ItemTask,
     context: NativeItemTaskContext<'_>,
 ) -> Option<NativeItemTaskProjection> {
+    if matches!(task, ItemTask::RemoveCrafting { .. }) {
+        return Some(NativeItemTaskProjection {
+            admitted: false,
+            output: None,
+            mutation: NativeItemTaskMutation::None,
+        });
+    }
     let (container, slot) = match task {
         ItemTask::Count {
             container, slot, ..
@@ -365,8 +396,20 @@ pub fn project_native_item_task(
         | ItemTask::Update {
             container, slot, ..
         }
+        | ItemTask::Flags {
+            container, slot, ..
+        }
+        | ItemTask::Security {
+            container, slot, ..
+        }
+        | ItemTask::RemoveSlot {
+            container, slot, ..
+        }
         | ItemTask::Add {
-            action: crate::items::action::CREATE,
+            action:
+                crate::items::action::CREATE
+                | crate::items::action::TAKE
+                | crate::items::action::CHANGE_OWNER,
             container,
             slot,
             ..
@@ -379,13 +422,19 @@ pub fn project_native_item_task(
         mutation: NativeItemTaskMutation::None,
     };
     if let ItemTask::Add {
+        action,
         container,
         item,
         raw_detail_block,
         ..
     } = task
     {
-        if matches!(*container, 4 | 5) {
+        if *action == crate::items::action::CHANGE_OWNER
+            && !matches!(*container, 2 | 0x64 | 0x65 | 0x66 | 3)
+        {
+            return Some(untouched(false));
+        }
+        if *action != crate::items::action::CHANGE_OWNER && matches!(*container, 4 | 5) {
             return Some(untouched(true));
         }
         // Native template0 skips the remaining serialized Item fields; the lane's
@@ -418,6 +467,9 @@ pub fn project_native_item_task(
     if matches!(task, ItemTask::Remove { item_id: 0, .. }) {
         return Some(untouched(false));
     }
+    if matches!(task, ItemTask::Security { is_unpack, .. } if *is_unpack != 0) {
+        return None;
+    }
     let (location, item) = match context {
         NativeItemTaskContext::Unknown => return None,
         NativeItemTaskContext::Missing => return Some(untouched(false)),
@@ -425,6 +477,42 @@ pub fn project_native_item_task(
     };
     let declared = NativeItemTaskLocation { container, slot };
     match task {
+        ItemTask::Flags { bits, .. } | ItemTask::Security { bits, .. } => {
+            if location != declared {
+                return None;
+            }
+            let mut changed = item.clone();
+            if let ItemTask::Security {
+                unsecure_time,
+                unpack_time,
+                ..
+            } = task
+            {
+                changed.flags = *bits;
+                changed.unsecure_time = *unsecure_time;
+                changed.unpack_time = *unpack_time;
+            } else {
+                changed.flags |= *bits;
+            }
+            Some(NativeItemTaskProjection {
+                admitted: true,
+                output: Some(changed.clone()),
+                mutation: NativeItemTaskMutation::Replace {
+                    location,
+                    item: changed,
+                },
+            })
+        }
+        ItemTask::RemoveSlot { .. } => {
+            if location != declared {
+                return None;
+            }
+            Some(NativeItemTaskProjection {
+                admitted: true,
+                output: Some(item.clone()),
+                mutation: NativeItemTaskMutation::Clear { location },
+            })
+        }
         ItemTask::Add { item: incoming, .. } => {
             if location != declared {
                 return None;
@@ -1166,7 +1254,7 @@ mod tests {
         }
         let mut task = make(Some(raw));
         if let ItemTask::Add { action, .. } = &mut task {
-            *action = 15;
+            *action = 99;
         }
         assert!(project_native_item_task(&task, context).is_none());
     }
@@ -1306,5 +1394,209 @@ mod tests {
         }
         let (one, two) = lookup_native_item_task_move(&unknown, &inventory).unwrap();
         assert!(project_native_item_task_move(&unknown, one, two).is_none());
+    }
+    #[test]
+    fn physical_flags_security_and_seize_match_original_helper_vectors() {
+        let mut original = item(5);
+        original.flags = 0x81;
+        original.unsecure_time = 66;
+        original.unpack_time = 77;
+        let context = NativeItemTaskContext::Found {
+            location: location(3),
+            item: &original,
+        };
+        let flags = ItemTask::Flags {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            bits: 4,
+        };
+        let security = ItemTask::Security {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            bits: 4,
+            is_unsecure_excess: 255,
+            is_unsecure_set: 255,
+            is_unpack: 0,
+            unsecure_time: -7,
+            unpack_time: -9,
+        };
+        for (task, expected_flags, unsecure, unpack) in
+            [(&flags, 0x85, 66, 77), (&security, 4, -7, -9)]
+        {
+            let result = project_native_item_task(task, context).unwrap();
+            assert!(result.admitted);
+            let mut expected = original.clone();
+            expected.flags = expected_flags;
+            expected.unsecure_time = unsecure;
+            expected.unpack_time = unpack;
+            assert_eq!(result.output, Some(expected.clone()));
+            assert_eq!(
+                result.mutation,
+                NativeItemTaskMutation::Replace {
+                    location: location(3),
+                    item: expected
+                }
+            );
+            assert!(
+                !project_native_item_task(task, NativeItemTaskContext::Missing)
+                    .unwrap()
+                    .admitted
+            );
+            assert!(project_native_item_task(task, NativeItemTaskContext::Unknown).is_none());
+        }
+        let seize = ItemTask::RemoveSlot {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+        };
+        let result = project_native_item_task(&seize, context).unwrap();
+        assert!(result.admitted);
+        assert_eq!(result.output, Some(original.clone()));
+        assert_eq!(
+            result.mutation,
+            NativeItemTaskMutation::Clear {
+                location: location(3)
+            }
+        );
+        let empty = Item::default();
+        let result = project_native_item_task(
+            &seize,
+            NativeItemTaskContext::Found {
+                location: location(3),
+                item: &empty,
+            },
+        )
+        .unwrap();
+        assert!(result.admitted);
+        assert_eq!(result.output, Some(empty));
+        for value in [1, 2, 255] {
+            let mut task = security.clone();
+            if let ItemTask::Security { is_unpack, .. } = &mut task {
+                *is_unpack = value;
+            }
+            assert!(project_native_item_task(&task, context).is_none());
+        }
+        let mut wrong = flags.clone();
+        if let ItemTask::Flags { slot, .. } = &mut wrong {
+            *slot = 4;
+        }
+        assert!(project_native_item_task(&wrong, context).is_none());
+        assert_eq!(original.flags, 0x81);
+    }
+
+    #[test]
+    fn take_and_owner_share_qualified_copy_but_have_distinct_container_admission() {
+        let original = item(5);
+        let mut incoming = item(17);
+        incoming.id = 999;
+        incoming.detail_payload = Some(vec![]);
+        for action in [
+            crate::items::action::TAKE,
+            crate::items::action::CHANGE_OWNER,
+        ] {
+            let make = |container, raw| ItemTask::Add {
+                action,
+                container,
+                slot: 3,
+                item: incoming.clone(),
+                raw_detail_block: raw,
+            };
+            let result = project_native_item_task(
+                &make(2, Some(vec![0; 128])),
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &original,
+                },
+            )
+            .unwrap();
+            assert!(result.admitted);
+            assert_eq!(result.output, Some(incoming.clone()));
+            assert!(
+                project_native_item_task(
+                    &make(2, None),
+                    NativeItemTaskContext::Found {
+                        location: location(3),
+                        item: &original
+                    }
+                )
+                .is_none()
+            );
+            for container in [4, 5] {
+                assert_eq!(
+                    project_native_item_task(
+                        &make(container, None),
+                        NativeItemTaskContext::Unknown
+                    )
+                    .unwrap()
+                    .admitted,
+                    action == crate::items::action::TAKE
+                );
+            }
+            if action == crate::items::action::CHANGE_OWNER {
+                for container in [1, 0xfc, 0xf2] {
+                    assert!(
+                        !project_native_item_task(
+                            &make(container, None),
+                            NativeItemTaskContext::Unknown
+                        )
+                        .unwrap()
+                        .admitted
+                    );
+                }
+                let bank_loc = NativeItemTaskLocation {
+                    container: 3,
+                    slot: 3,
+                };
+                assert!(
+                    project_native_item_task(
+                        &make(3, Some(vec![0; 128])),
+                        NativeItemTaskContext::Found {
+                            location: bank_loc,
+                            item: &original
+                        }
+                    )
+                    .unwrap()
+                    .admitted
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_remove_crafting_is_noop_and_physical_lookup_ignores_packet_identity() {
+        let original = item(5);
+        let rows = [None, None, None, Some(&original)];
+        let inventory = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Unknown,
+            bag: NativeItemTaskStorage::Present {
+                records: &rows,
+                extent: 4,
+                container: 2,
+            },
+            bank: NativeItemTaskStorage::Unknown,
+        };
+        for task in [
+            ItemTask::Flags {
+                container: 2,
+                slot: 3,
+                item_id: 999,
+                bits: 4,
+            },
+            ItemTask::RemoveSlot {
+                container: 2,
+                slot: 3,
+                item_id: 0,
+            },
+        ] {
+            let context = lookup_native_item_task(&task, &inventory).unwrap();
+            assert!(project_native_item_task(&task, context).unwrap().admitted);
+        }
+        let task = ItemTask::RemoveCrafting { item_id: 123 };
+        let result = project_native_item_task(&task, NativeItemTaskContext::Unknown).unwrap();
+        assert!(!result.admitted);
+        assert_eq!(result.output, None);
+        assert_eq!(result.mutation, NativeItemTaskMutation::None);
     }
 }
