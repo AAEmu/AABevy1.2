@@ -4280,3 +4280,59 @@ capture `shots/aa-ui/native-chat-options-named-color-20261018.png` shows its
 retained blue Local palette swatch at 1280x720/UI scale 0.85. It reports zero
 Lua errors, no runtime warnings/errors, **318.9-408.4 FPS**, and self-closes
 after the screenshot. No matching chat-options reference capture is present.
+
+### Native chat method persistence before display (2026-10-18)
+
+The optional application hook **`AAUI.ChatMethod(raw_tab_id, method)`** now
+runs at the native method-save position, before changing the selector label
+and before its original `OnContentUpdated` callback. The input's method and
+whisper-prefix state are already updated. The application resolves the raw
+tab ID through its global configuration, preserves that owner's selected
+index, and saves only when the raw ID exists. It must not substitute the
+current widget's window ID. Unknown IDs still change the visible input method;
+hook failures warn and continue without rolling back the input state.
+
+Native `39510390` resolves input `+e70` through `39503c00`, copies the owner's
+window-extra record, replaces only its method, calls `39505030/395044d0`, then
+updates the display through `39510120` and emits content event `0x20`.
+Missing raw IDs skip saving; a failed save does not skip display. Restore
+`395107d0` calls this same path through virtual `+1c4` (`399e781c`), even for an
+unchanged method. Hydration `3951429f..a6` therefore persists restored methods
+after selection and before display. Empty hydration returns before restoration.
+
+The input identity is distinct from the visible numeric selected index.
+Initialization `3950ffa1..ffb5` sets method zero and raw ID `-1`.
+Selection `3951394b..67 -> 39510e60` binds the selected message's raw ID before
+selected-index persistence. Native row deletion `392cac10` clamps only the row
+index, and clear-for-rehydration `392cb240` clears it to `-1`; both retain input
+`+e70`. A later method change can consequently save through a removed/moved
+raw ID's current model owner, or skip saving when that ID is absent. Invalid
+stored selection during rehydration also retains the previous input raw ID.
+The toolkit now keeps this field explicitly and follows those lifetimes.
+
+`data/extract/aa-ui/chat_method_oracle.py` and
+`native-chat-method-oracle-20261018.json` execute **12 native groups**, with
+the PE hash: actual owner lookup, existing-extra lookup/update, save/display
+order, repeats, failed save, signed fields, restoration, unknown IDs, the
+initializer's exact store block, selected-raw-ID store, deletion/clamping and
+clear-for-rehydration. Prefix/font/content/method-list delivery, widget
+destruction/layout, primitive memmove and LevelDB save endpoints are captured;
+the remaining native control flow and numeric operations execute unchanged.
+Instructions are in `native-chat-method-source-20261018.txt`.
+
+`cargo check -p aa-ui`, the example build and **30 selected tests** pass across
+method persistence, lifecycle, input links, context, alpha and transport.
+Five new tests verify save-before-display/callback order, selection preservation,
+repeat and restored saves, current model ownership after movement, no save for
+unknown IDs, raw-ID retention after removal/invalid rehydration, empty/same-ID
+guards, failure continuation, and original chat restoration plus typed channel
+changes. No additional native Lua game methods or events are introduced; native
+method-list population and the existing command-parser approximation remain
+separate boundaries.
+
+The aa-dev example `native_chat_method` restores an original chat window with
+method 4, opens/focuses its actual edit, and types through the normal input path.
+The inspected `shots/aa-ui/native-chat-method-restored-20261018.png` shows the
+restored party selector and editable text at 1280x720/UI scale 0.85. It reports
+zero Lua errors, no runtime warnings/errors and **517.4-566.5 FPS**, and its
+process self-closes after the screenshot.

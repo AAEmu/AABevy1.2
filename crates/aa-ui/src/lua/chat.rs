@@ -111,6 +111,8 @@ pub struct ChatData {
     /// The input's channel (`CHAT_*`) and whisper target ([`super::chat_input`]).
     pub method: i64,
     pub whisper: String,
+    /// Native input +e70: last selected raw ID, independent of row-index clamping.
+    pub(crate) input_tab_id: i64,
     pub left_line: Id,
     pub right_line: Id,
     pub line_offset: [f32; 2],
@@ -723,6 +725,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             selector: selector_id,
             method: 0,
             whisper: String::new(),
+            input_tab_id: -1,
             left_line,
             right_line,
             line_offset: [0.0; 2],
@@ -940,6 +943,10 @@ fn select_inner(lua: &Lua, id: Id, idx: usize, force: bool) {
     }
     layout(lua, id);
     lifecycle::tint_dividers(lua, id, c.tabs[idx].message);
+    // Native3951394b..67 binds the input raw ID before selected-index persistence.
+    if let Some(ch) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+        ch.input_tab_id = c.tabs[idx].id;
+    }
     // Native395139b4..bb stores/saves the numeric index before OnSelectedChatTab.
     // This app-only hook preserves the application's other window-extra fields.
     let hook = lua.globals().raw_get::<Option<Table>>("AAUI").ok().flatten()
