@@ -538,6 +538,9 @@ pub enum Event {
     GameDecodeFailed { message:String },
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    /// Local successful CS072 transport write, never an authoritative jury/seat response.
+    JurySummonReplyRequested { character_id:u32,trial_id:u32,court:u32,jury_number:i32 },
+    JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
     JuryWaitingNumberRequested { character_id:u32 },
     JuryWaitingNumberRequestRejected { character_id:u32, message:String },
     Achievement(crate::achievement::AchievementEvent),
@@ -1616,7 +1619,21 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Dominion(value) => self.emit(Event::Dominion(value)),
-            M::Trial(e) => self.emit(Event::Trial(e)),
+            M::Trial(e) => {
+                let summon=if let crate::TrialEvent::SummonJury{trial_id,court,jury_number}=&e {Some((*trial_id,*court,*jury_number))}else{None};
+                self.emit(Event::Trial(e));
+                if let Some((trial_id,court,jury_number))=summon {
+                    let character_id=self.selected;
+                    let invalid=self.phase!=Phase::InWorld || character_id==0 || !self.selected_state.as_ref().is_some_and(|s|s.character.id==character_id);
+                    if invalid {
+                        self.emit(Event::JurySummonReplyRejected{character_id,trial_id,court,jury_number,message:"jury summon reply requires the actual active selected character header".into()});
+                    } else if self.send_game(game::ClientMsg::JurySummoned{trial_id,court:court as i32,jury_number}).await {
+                        self.emit(Event::JurySummonReplyRequested{character_id,trial_id,court,jury_number});
+                    } else {
+                        self.emit(Event::JurySummonReplyRejected{character_id,trial_id,court,jury_number,message:"jury summon reply was not sent".into()});
+                    }
+                }
+            },
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
@@ -4259,6 +4276,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn genuine_jury_summons_reply_exactly_once_each_without_choices_and_keep_raw_receipts() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        session.phase=Phase::InWorld;session.selected=42;
+        let mut header=crate::model::CharacterState::default();header.character.id=42;session.selected_state=Some(header);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        let receipt=crate::TrialEvent::SummonJury{trial_id:0,court:u32::MAX,jury_number:i32::MIN};
+        let expected=game::ClientMsg::JurySummoned{trial_id:0,court:-1,jury_number:i32::MIN}.encode_body();
+        let mut received=crate::Trials::default();
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;
+            let raw=events.try_recv().unwrap();assert!(matches!(&raw,Event::Trial(actual) if *actual==receipt));received.apply(&raw);
+            let requested=events.try_recv().unwrap();assert!(matches!(requested,Event::JurySummonReplyRequested{character_id:42,trial_id:0,court:u32::MAX,jury_number:i32::MIN}));
+            let before=received.clone();received.apply(&requested);assert_eq!(received,before,"transport notification never changes received trial state");
+            let n=peer.read_u16_le().await.unwrap();let mut frame=vec![0;n as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(&frame[4..6],&[0x72,0]);assert_eq!(&frame[6..],expected);assert!(events.try_recv().is_err());
+        }
+        assert!(received.is_jury);assert_eq!(received.trial_id,0);
+        session.game.as_mut().unwrap().shutdown().await;
+        session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Trial(actual)) if actual==receipt));
+        let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::JurySummonReplyRequested{..}));rejected|=matches!(e,Event::JurySummonReplyRejected{character_id:42,..});}assert!(rejected);
+    }
+    #[tokio::test]
+    async fn jury_summon_automatic_reply_refuses_inactive_stale_header_and_missing_connection() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let receipt=crate::TrialEvent::SummonJury{trial_id:7,court:1,jury_number:-1};
+        for (phase,selected,header_id) in [(Phase::CharacterSelect,42,42),(Phase::InWorld,0,0),(Phase::InWorld,42,43),(Phase::InWorld,42,42)] {
+            session.phase=phase;session.selected=selected;let mut header=crate::model::CharacterState::default();header.character.id=header_id;session.selected_state=Some(header);
+            session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::Trial(actual)) if actual==receipt));
+            assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRejected{character_id,..}) if character_id==selected));assert!(events.try_recv().is_err());
+        }
+        // With a live socket, a stale actual header still sends no bytes.
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        session.selected_state=None;session.game_msg(Ok(game::ServerMsg::Trial(receipt))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Trial(_))));assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRejected{..})));
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+    }
+
+    #[tokio::test]
     async fn jury_number_request_is_empty_and_rechecks_active_identity_and_failed_writes() {
         let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
         let request=||Command::RequestJuryWaitingNumber{character_id:42};
@@ -4390,14 +4449,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trial_wait_and_gate_receipts_forward_order_duplicates_without_summon_ack() {
+    async fn trial_receipts_forward_order_even_when_summon_reply_is_locally_refused() {
         let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
         let value=crate::TrialEvent::SummonJury{trial_id:7,court:u32::MAX,jury_number:-1};
         for receipt in [value.clone(),value,crate::TrialEvent::JuryWaiting{count:-1,total:0,sentence_time_ms:i32::MIN}] {
             session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;
             assert!(matches!(events.try_recv(),Ok(Event::Trial(actual)) if actual==receipt));
+            if matches!(receipt,crate::TrialEvent::SummonJury{..}) {assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRejected{character_id:0,..})));}
         }
-        assert!(events.try_recv().is_err(),"no inferred trial choice or CS072 success");
+        assert!(events.try_recv().is_err(),"no inferred jury choice or seat response");
     }
 
     #[tokio::test]

@@ -301,6 +301,12 @@ mod tests {
         })));
     }
     #[test]
+    fn jury_summoned_reply_native_lane_opcode_and_twelve_byte_golden(){
+        let m=crate::game::ClientMsg::JurySummoned{trial_id:u32::MAX,court:i32::MIN,jury_number:-1};
+        assert_eq!(m.opcode(),0x72);assert_eq!(m.encode_body(),[255,255,255,255,0,0,0,128,255,255,255,255]);
+        let mut expected=vec![0xdd,crate::game::LEVEL_GAME,0,19,0x72,0];expected.extend([255,255,255,255,0,0,0,128,255,255,255,255]);assert_eq!(m.encode(19),expected);
+    }
+    #[test]
     fn native_lane_layouts_every_truncation_and_raw_dd04_following_packet() {
         let rows = [
             (
