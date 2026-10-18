@@ -3170,7 +3170,7 @@ Its checked byte `owner+3af1` is therefore raw actor `+3af9`, index 1 of a
 four-byte flag array at raw `+3af8`. Handler `39186420` resolves received
 runtime object ID at packet `+c`, then writes packet byte `+14` to
 `actor[3af8 + packet.i32(+10)]`. Registration `391cd2d0` selects factory
-vtable `399b6144`, whose `391b7b50` allocates opcode **203**. This is the
+vtable `399b6144`, whose `391b7b50` allocates opcode **0x203**. This is the
 lane's `SCUnitGmModeChangedPacket`; serializer `397c7270` names its BC
 `unitId`, i32 `mode`, and u8 `value`. Thus received mode 1 controls the
 actual guard on local global/direct cooldown insertion. Other flag names
@@ -3190,3 +3190,67 @@ Sources: `data/extract/aa-ui/native-cooldown-suppression-producer-20261018.txt`
 and `native-cooldown-suppression-default-readonly-20261018.txt`. This audit
 performs no live writes, injection or input and does not introduce an aa-ui
 network-state dependency.
+
+### FeatureSet level-limit field types (2026-10-18 audit)
+
+Original `X2Player:GetFeatureSet` (`39496b20`) reads feature storage at
+game `+14`. `39497025..58` exposes unsigned byte 1 as numeric `levelLimit`;
+`39497071..a4` exposes unsigned byte 8 as numeric `mateLevelLimit`. Both
+convert to the native f32 script number. These fields are not booleans or
+derived from a unit's current level/XP. The received `InitialConfig` already
+retains the feature byte vector and exposes both byte positions through
+the aa-net config getters. Lane `FeatureSet::initialized` writes its actual
+configured maximums to those positions (default player 55, Mate 50).
+
+Source: `data/extract/aa-ui/native-feature-level-caps-20261018.txt`.
+
+### Cached character clipping on original chat tabs (2026-10-18)
+
+The unchanged original `chat/chat_window.lua` calls
+`chatTabButton:SetAutoClipChar(true)` in `OnCreateChatTabButton`. This
+method now draws the native cached fitting prefix while preserving the
+complete `GetText`/text measurement source and original hover tooltip.
+It does not set ellipsis or change font, color, shadow or outline.
+
+Wrapper `3922d490` only stores the boolean at button `+592`; constructor
+`392837fb..3801` initializes the flag and cached count to zero. Enabling
+alone therefore preserves the prior count. Text setter `39281150`,
+auto-resize setter `39281210`, and extent/font callbacks
+`39280850/392808c0/39280930` refresh it for nonempty text. Native inset
+setter `39280730` only copies four floats; changing insets alone retains
+the cached count. Empty text likewise leaves that count intact. aa-ui
+tracks resolved extent changes, including anchor-derived widths, and
+uses the same existing font metrics for the fitting prefix.
+
+Callbacks subtract left and right insets in f32 order; fitter `39274a70`
+-> `392e3760` then accumulates kerning and glyph advances separately in f32.
+Only a width strictly greater than the available width stops fitting, so
+an exact fit is included. It counts Unicode codepoints, not UTF-8 bytes,
+stops at NUL, and preserves the native newline quirk: newlines neither
+count nor reset the pen, while the renderer `39280510` takes the first
+cached-count UTF-32 characters. No alternate wrapping policy is added.
+
+Sources: `data/extract/aa-ui/native-auto-clip-char-source-20261018.txt`,
+`native-auto-clip-font-source-20261018.txt`, and
+`native-auto-clip-lifecycle-closure-20261018.txt`. The offline Unicorn
+oracle `auto_clip_oracle.py` executes the actual native fitting function,
+supplying only glyph/kerning lookup results. Its seven groups in
+`native-auto-clip-oracle-20261018.json` close exact Unicode fit, one-f32-ULP
+exclusion, kerning order, newline behavior, missing-glyph counting, NUL and
+negative width, without live client execution or writes.
+
+Validation: `cargo check -p aa-ui` and **69 selected tests** passed, with
+one existing font-metric test ignored. The final six clipping tests were
+rerun after the callback-order/NUL refinement and all passed. Coverage
+includes original chat construction/full-name hover, literal prefix render
+equality, Unicode and f32 width boundaries, copper coin preservation,
+cached enable/inset/empty-text behavior, anchor-derived extent changes,
+original text decoration, chat transport, scale/clip and pet/tooltip overflow.
+The copied `native_auto_clip` aa-dev example ran with `--shot
+shots/aa-ui/native-auto-clip-hover-20261018.png --shot-after 8`; its existing
+`UiVirtualPointer` holds the original first-tab hover. Inspected the unique
+PNG showing three clipped labels and the complete first-tab tooltip.
+Measured **259.7–294.1 FPS**, zero script errors and no WARN/ERROR;
+process 27004 self-closed. `reference/ingame/spawn/real.png` provides the
+original HUD/tab style context, without a matching long-name clipping
+sample, so no exact pixel-match claim is made.

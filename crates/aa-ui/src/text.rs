@@ -565,6 +565,53 @@ impl FontLib {
         self.layout_size(font, size, text, None, 0.0).0
     }
 
+    /// Native 392e3760 counts literal UTF-32 characters that fit, accumulating
+    /// kerning and advances in f32. Newlines do not reset the pen or count.
+    pub(crate) fn fitting_chars(&mut self, font: &str, size: f32, text: &str, width: f32) -> usize {
+        let image_name = font.to_ascii_lowercase();
+        let chain = if self.image_fonts.contains_key(&image_name) {
+            Vec::new()
+        } else {
+            self.chain_for(font)
+        };
+        let px = size.round().max(1.0) as u16;
+        let mut previous: Option<(usize, u16)> = None;
+        let mut pen = 0.0f32;
+        let mut count = 0;
+        for ch in text.chars() {
+            if ch == '\0' {
+                break;
+            }
+            if ch == '\n' {
+                continue;
+            }
+            let mut advance = 0.0;
+            let mut kern = 0.0;
+            if let Some(f) = self.image_fonts.get(&image_name) {
+                if let Some(&[_, _, left, right]) = f.glyphs.get(&ch) {
+                    let scale = if f.size > 0.0 { size / f.size } else { 1.0 };
+                    advance = ((f.width - left - right).max(0.0) * scale).round();
+                }
+            } else if let Some((face, glyph)) = self.lookup(&chain, ch) {
+                if let Some((prev_face, prev_glyph)) = previous.filter(|(pf, _)| *pf == face) {
+                    let f = &self.faces[prev_face];
+                    if let Some(&v) = f.kern.get(&(prev_glyph, glyph)) {
+                        kern = kern_px(v, px, f.units_per_em);
+                    }
+                }
+                advance = self.advance(face, px, glyph);
+                previous = Some((face, glyph));
+            }
+            pen += kern;
+            pen += advance;
+            if pen > width {
+                break;
+            }
+            count += 1;
+        }
+        count
+    }
+
     /// Lay out `text` from the top-left of its block: lines break at `\n` and, with
     /// `max_width`, at spaces (or anywhere for words longer than a line). Glyphs are rasterised
     /// into the atlas as needed.

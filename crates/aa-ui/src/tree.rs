@@ -363,6 +363,16 @@ impl Default for TextStyle {
     }
 }
 
+/// Native fitting-prefix state, separate from the complete text and ellipsis style.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AutoClipChar {
+    pub enabled: bool,
+    /// Native cached UTF-32 prefix length; enabling alone does not recalculate it.
+    pub count: usize,
+    /// Last resolved extent, so anchor-driven changes take the native size callback path.
+    pub extent: [f32; 2],
+}
+
 /// Text carried by a widget (labels, buttons, textboxes, window titles ...).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextBlock {
@@ -377,6 +387,7 @@ pub struct TextBlock {
     pub lines: Vec<String>,
     /// `SetAutoResize(true)`: the widget width follows the text width.
     pub auto_resize: bool,
+    pub auto_clip: AutoClipChar,
 }
 
 /// Button visual state.
