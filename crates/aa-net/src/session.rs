@@ -222,6 +222,12 @@ pub enum Command {
     /// Cast an interaction/gathering skill with target kind4. No local learned-skill restriction;
     /// the server validates the doodad, range, permissions and requirements.
     UseDoodadSkill { skill_id: u32, doodad_obj_id: u32 },
+    /// Submit a recipe batch once (`CSExecuteCraft`), without sending an additional skill.
+    /// `craft_id` is from the static recipe catalog; count must be positive and the doodad ID
+    /// nonzero and 24-bit. The server validates the bench, materials, labor and proficiency.
+    /// `CraftRequested` only reports a local send, not batch acceptance/completion. Existing
+    /// `StopCasting` cancels an active cast; the lane does not invalidate queued craft tasks.
+    ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
     UseSkillAt { skill_id: u32, pos: Pos },
     /// Cancel the cast or channel of the player: `tl` is the timeline of a plain skill (`SkillStarted::tl`), `plot_tl` the one
@@ -517,6 +523,10 @@ pub enum Event {
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     /// Local command rejection, distinct from an authoritative SkillStarted failure.
     DoodadSkillRejected { skill_id: u32, doodad_obj_id: u32, message: String },
+    /// Local successful send only. The lane has no authoritative batch-completion ACK.
+    CraftRequested { craft_id: u32, doodad_obj_id: u32, count: i32 },
+    /// Local validation failure, not a server crafting result.
+    CraftRejected { craft_id: u32, doodad_obj_id: u32, count: i32, message: String },
     /// The server moved the local player (answered automatically).
     Teleported { pos: Pos },
     Chat(ChatMessage),
@@ -994,6 +1004,22 @@ impl Session {
                 match target {
                     Ok(target) => self.start_skill(skill_id, StartCaster::Unit, target).await,
                     Err(message) => self.emit(Event::DoodadSkillRejected { skill_id, doodad_obj_id, message: message.into() }),
+                }
+            }
+            Command::ExecuteCraft { craft_id, doodad_obj_id, count } => {
+                let error = if craft_id == 0 {
+                    Some("recipe ID must be nonzero")
+                } else if doodad_obj_id == 0 || doodad_obj_id > 0xffffff {
+                    Some("crafting doodad ID must be nonzero and fit in 24 bits")
+                } else if count <= 0 {
+                    Some("craft batch count must be positive")
+                } else {
+                    None
+                };
+                if let Some(message) = error {
+                    self.emit(Event::CraftRejected { craft_id, doodad_obj_id, count, message: message.into() });
+                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::ExecuteCraft { craft_id, doodad_obj_id, count }).await {
+                    self.emit(Event::CraftRequested { craft_id, doodad_obj_id, count });
                 }
             }
             Command::StopCasting { tl, plot_tl } => {
@@ -1592,6 +1618,155 @@ mod tests {
             })
         ));
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn craft_command_validates_before_sending_and_reports_only_local_request_state() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stub = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let expected = [
+                vec![
+                    0xdd, 1, 0, 0, 0xf8, 0, 0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 3, 0, 0, 0,
+                ],
+                vec![
+                    0xdd, 1, 0, 1, 0xf8, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127,
+                ],
+            ];
+            for (index, expected) in expected.into_iter().enumerate() {
+                let mut length = [0u8; 2];
+                tokio::time::timeout(Duration::from_secs(2), sock.read_exact(&mut length))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut request = vec![0u8; u16::from_le_bytes(length) as usize];
+                sock.read_exact(&mut request).await.unwrap();
+                assert_eq!(
+                    request, expected,
+                    "invalid/out-of-world requests or an extra skill packet must not precede the batch"
+                );
+                if index == 0 {
+                    let mut response = crate::wire::Writer::new();
+                    response
+                        .raw(&[0xdd, 1, 0, 0])
+                        .u16(crate::opcodes::sc::SCErrorMsgPacket)
+                        .i16(95)
+                        .i16(95)
+                        .u32(0)
+                        .bool(false);
+                    let response = response.finish();
+                    sock.write_all(&(response.len() as u16).to_le_bytes())
+                        .await
+                        .unwrap();
+                    sock.write_all(&response).await.unwrap();
+                }
+            }
+        });
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session
+            .command(Command::ExecuteCraft {
+                craft_id: 1,
+                doodad_obj_id: 1,
+                count: 1,
+            })
+            .await;
+        assert!(
+            events.try_recv().is_err(),
+            "no connection means no successful local send"
+        );
+        session.game = Some(GameConn::connect(&addr).await.unwrap());
+        for (craft_id, doodad_obj_id, count) in [
+            (0, 1, 1),
+            (1, 0, 1),
+            (1, 0x1000000, 1),
+            (1, u32::MAX, 1),
+            (1, 1, 0),
+            (1, 1, -1),
+            (1, 1, i32::MIN),
+        ] {
+            session
+                .command(Command::ExecuteCraft {
+                    craft_id,
+                    doodad_obj_id,
+                    count,
+                })
+                .await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::CraftRejected { craft_id: id, doodad_obj_id: obj, count: n, message }) if (id,obj,n)==(craft_id,doodad_obj_id,count) && !message.is_empty())
+            );
+        }
+        session.phase = Phase::CharacterSelect;
+        session
+            .command(Command::ExecuteCraft {
+                craft_id: 1,
+                doodad_obj_id: 1,
+                count: 1,
+            })
+            .await;
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        session
+            .command(Command::ExecuteCraft {
+                craft_id: 0x11223344,
+                doodad_obj_id: 0x445566,
+                count: 3,
+            })
+            .await;
+        let requested = events.try_recv().unwrap();
+        assert!(matches!(
+            &requested,
+            Event::CraftRequested {
+                craft_id: 0x11223344,
+                doodad_obj_id: 0x445566,
+                count: 3
+            }
+        ));
+        let mut state = crate::state::WorldState::default();
+        state.stats.labor = 123;
+        state.stats.money = 456;
+        state.inventory.bag.push(None);
+        state.apply(&requested);
+        assert!(
+            events.try_recv().is_err(),
+            "send is not a SkillStarted or completed product"
+        );
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+        let rejected = events.try_recv().unwrap();
+        assert!(matches!(&rejected, Event::ServerError { code: 95 }));
+        state.apply(&rejected);
+        assert!(
+            events.try_recv().is_err(),
+            "generic server error is not a fabricated batch ACK"
+        );
+        session
+            .command(Command::ExecuteCraft {
+                craft_id: u32::MAX,
+                doodad_obj_id: 0xffffff,
+                count: i32::MAX,
+            })
+            .await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::CraftRequested {
+                craft_id: u32::MAX,
+                doodad_obj_id: 0xffffff,
+                count: i32::MAX
+            })
+        ));
+        stub.await.unwrap();
+        assert!(
+            events.try_recv().is_err(),
+            "silent server leaves the actual result unknown"
+        );
+        assert!(state.skills.casting.is_empty());
+        assert!(state.doodads.by_id.is_empty());
+        assert_eq!((state.stats.labor, state.stats.money), (123, 456));
+        assert_eq!(state.inventory.bag, vec![None]);
     }
 
     #[tokio::test]

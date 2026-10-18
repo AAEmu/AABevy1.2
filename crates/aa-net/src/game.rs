@@ -101,6 +101,8 @@ pub enum ClientMsg {
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
     StopCasting { tl: u16, plot_tl: u16, obj_id: u32 },
+    /// `CSExecuteCraft`: submit the whole recipe batch once. The session validates IDs/count.
+    ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
     /// `CSLootOpenBag`: open the loot of the corpse `obj_id` (`loot_all`: take everything at once; the server sends
     /// what is left as a `LootBag`).
     LootOpenBag { obj_id: u32, loot_all: bool },
@@ -166,6 +168,7 @@ impl ClientMsg {
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
+            Self::ExecuteCraft { .. } => cs::CSExecuteCraft,
             Self::LootOpenBag { .. } => cs::CSLootOpenBagPacket,
             Self::LootItem { .. } => cs::CSLootItemPacket,
             Self::LootCloseBag { .. } => cs::CSLootCloseBagPacket,
@@ -246,6 +249,9 @@ impl ClientMsg {
             }
             Self::StopCasting { tl, plot_tl, obj_id } => {
                 w.u16(*tl).u16(*plot_tl).bc(*obj_id);
+            }
+            Self::ExecuteCraft { craft_id, doodad_obj_id, count } => {
+                w.u32(*craft_id).bc(*doodad_obj_id).i32(*count);
             }
             Self::LootOpenBag { obj_id, loot_all } => {
                 // the object, the second object (none) and whether to take everything
@@ -1316,6 +1322,49 @@ mod tests {
         let ServerMsg::ItemTasks(t) = decode(sc::SCItemTaskSuccessPacket, &body) else { panic!() };
         assert_eq!(t.reason, 73);
         assert_eq!(t.tasks, vec![crate::items::ItemTask::Money(-10_000)]);
+    }
+
+    #[test]
+    fn execute_craft_is_one_native_batch_with_an_exact_eleven_byte_body() {
+        let cases = [
+            (1, 1, 1, vec![1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
+            (
+                0x11223344,
+                0x445566,
+                3,
+                vec![0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 3, 0, 0, 0],
+            ),
+            (
+                u32::MAX,
+                0xffffff,
+                i32::MAX,
+                vec![255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127],
+            ),
+        ];
+        for (craft_id, doodad_obj_id, count, expected) in cases {
+            let message = ClientMsg::ExecuteCraft {
+                craft_id,
+                doodad_obj_id,
+                count,
+            };
+            assert_eq!(message.opcode(), 0xf8);
+            assert_eq!(message.name(), "CSExecuteCraft");
+            assert_eq!(message.encode_body(), expected);
+            let mut frame = vec![0xdd, 1, 0, 9, 0xf8, 0];
+            frame.extend_from_slice(&expected);
+            assert_eq!(message.encode(9), frame);
+            // Consume exactly what the lane's CSExecuteCraft reader consumes.
+            let mut reader = Reader::new(&expected);
+            assert_eq!(
+                (
+                    reader.u32().unwrap(),
+                    reader.bc().unwrap(),
+                    reader.i32().unwrap()
+                ),
+                (craft_id, doodad_obj_id, count)
+            );
+            assert_eq!(reader.remaining(), 0);
+        }
     }
 
     #[test]
