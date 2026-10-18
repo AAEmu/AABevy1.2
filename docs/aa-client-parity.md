@@ -23,7 +23,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
 | Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages | Native send-size overflow policy, chat layout persistence, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
-| Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original popup and task pointer checks | Paired live family settlement, overhead family titles and broader interruption coverage; live unblock/offline/restart checks; guild/expedition, nation and management |
+| Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission and title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; guild creation/rename/web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
@@ -129,3 +129,28 @@ actual original equipment-screen probe1 passed/2.38s. Inspected active/ready aa-
 captures run188-268/405-417 FPS without runtime errors. Existing DB/cast-start
 estimates are explicitly retained as estimates; source-closed Fired/Stopped/GCD
 producer gates and skill-specific duration modifiers remain the next work.
+
+### Original guild management and received siege eligibility (2026-10-18)
+
+The original guild roster/permissions window now reads received native caches,
+including native local50-row paging, online locations and Unix offline ages.
+Invite/reply, kick/rank, permission/title editing, leave/disband and leadership
+transfer send captured-character requests and wait for actual server receipts to
+change state. Original Task3/26/27 controls preserve ignore/duplicate handling and
+close on stale character/guild context. Leadership transfer uses the actual
+received Dominion phase/participants; decode gaps refuse unknown eligibility.
+Guild creation/rename, web/siege controls, overhead titles and paired live guild
+settlement remain open. Detailed native/app boundaries are in aa-client-hud.md.
+
+All11 focused guild checks pass; full client219 passed/36 ignored in14.37s.
+Five inspected original-script aa-dev views self-close with zero runtime errors:
+permissions286.8-313.2 FPS, members286.8-424.2, invitation426.5-471.0,
+leave294.4-324.2 and disband388.8-426.6. These fixtures establish original control
+behavior, not paired live settlement or a native guild screenshot comparison.
+Parallel network428 tests pass, native chat internal clipping has56 selected
+checks, and world184 tests/9 ignored plus wind GPU/forest controls passed; each
+owning crate's docs retain its exact scope and remaining source boundaries.
+The integrated main executable `target/debug/aa-client-20261018-guild.exe`
+reaches the live world list at260.3-361.5 FPS with zero script errors; a fresh
+original guild-member example capture runs316.6-450.0 FPS. Both self-close.
+The game-connection timeout remains a live validation blocker.

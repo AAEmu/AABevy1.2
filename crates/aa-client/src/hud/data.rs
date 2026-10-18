@@ -191,6 +191,7 @@ fn parse_sub_zone_areas(text: &str, origin: (f32, f32), out: &mut Vec<SubZoneSha
 /// The static game data the HUD queries.
 #[derive(Default)]
 pub struct GameData {
+    pub(super) expedition: super::expedition::Tables,
     pub skills: HashMap<u32, SkillInfo>,
     pub items: HashMap<u32, ItemInfo>,
     pub buffs: HashMap<u32, BuffInfo>,
@@ -583,6 +584,7 @@ impl GameData {
         data.pets = super::pets::Tables::load(&conn)?;
         data.radar = super::radar::Tables::load(&conn)?;
         data.battlefield = super::battlefield::Tables::load(&conn)?;
+        data.expedition = super::expedition::Tables::load(&conn)?;
         data.native_buffs = super::buffs::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
