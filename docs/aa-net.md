@@ -3110,9 +3110,9 @@ confirmation394d6ab0 can send the same original full-count request after accepta
 
 Manager39affa18 stores remaining signed count at+8. IsWorking394d0bb0 is precisely
 count>0; GetLeftBatchCount394d0bc0 returns that count. Callback394d53e0 accepts only the
-local player's skill carrying CraftEffect kind0e, with matching skill/timeline guards.
+local player's skill carrying CraftEffect kind0e, with nonempty skill metadata/caster guards.
 Started success emits CRAFT_STARTED(remaining) only for the first accepted start. Fired
-success latches completion. Ended decrements once only when Fired succeeded; positive
+success latches completion. Ended decrements when Fired succeeded; positive
 remaining emits CRAFT_ENDED(remaining), exhausted/non-fired emits CRAFT_ENDED() with no
 argument. Non-fired/Stopped readiness resets the batch on the next update. Started
 failure resets immediately and emits CRAFT_ENDED(). Native event IDs are1ef/1f0.
@@ -3634,3 +3634,77 @@ remain pending, so this records no guessed numerical interaction range.
 
 Validation: housing-tail/posture check and full aa-net library suite pass (286 tests).
 No live housing placement, demolition, furnishing or interaction transaction was issued.
+
+### Native world-interaction action lists and cancellation (2026-10-18)
+
+`InteractEvent::WorldSkillList(WorldInteractionSkillList)` now receives SC0x07e, distinct
+from the existing NPC SC0x07b. Native factory391aa870 installs vtable399b36e4/opcode7e;
+serializer397c2d70 calls inner serializer397bef50. Exact wire order is:
+two outer BC IDs, inner BC context object, BC doodad object, u32 interaction type,
+BC pick object, i32 announced count, i32 extra info, up to10 u32 skill IDs, u8 mouse button,
+i32 modifier keys. The two outer IDs retain neutral names because handler391d9080 ignores
+them and passes only the inner context, mouse and modifiers to393b7440. There is no
+NPC-style interactable bool in this packet. Unknown type/ID/skill/mouse values and duplicate
+skill IDs remain raw. Native397bf067 caps transferred skill IDs at10; negative counts
+transfer none. The typed payload preserves raw_count alongside the bounded vector rather
+than allocating from or silently rewriting an untrusted count.
+
+`InteractEvent::WorldCanceled` receives SC0x07f. Factory/vtable399b36f0 uses serializer
+397c6540: interactedUnitId is BC via397b27d0, but interactedDoodadId is FULL u32 via
+virtual+3c. Handler391d9100 selects unit or doodad cancellation using the native invalid-ID
+sentinels. The transport forwards exact IDs without guessing those sentinels, selecting an
+arbitrary current target, clearing an unrelated context, opening crafting or casting a skill.
+
+Native393b7440 uses the received inner doodad ID at+4, validates reach and player state,
+then dispatches the selected received skill through393ba9c0 before its ordinary cast
+fallback. Original interaction.lua populates the choice UI through
+GetInteractionSkillCount/GetInteractionSkillId. This is a genuine action-ID source; merely
+finding CraftStart/Pack static template functions is not equivalent to receiving a selected
+action. The bevy lane declares both opcodes but currently has no matching packet emitter/
+handler implementation (`CLIENT-DB-GAP-AUDIT.md` also records the gap). This client milestone
+adds receive infrastructure only, with no fabricated lane response or new outgoing command.
+
+The compact database's CraftStart rows have func_skill_id NULL (18) or0 (7), and all304
+CraftPack rows have NULL. A skill_effects→effects(actual_type=InteractionEffect)→
+interaction_effects(wi_id21) join finds only skill22678: effect31656→actual3916→wi21, with
+no doodad override. Native effect loading identifies InteractionEffect as kind0d
+(397309a6/3989592e), independently of CraftEffect kind0e. That proves a DB classifier for
+that one skill's declared effect; it does not prove equivalence to every native local
+craft callback or resolve protected action key39ac7868. No global-ID guess is added.
+
+Interaction reach has an unprotected producer:390fa0a1 registers the float at config+2a0
+as `max_interaction_doodad_distance`, default f32 2.0999999046325684 from399a7660, description
+`offset distance (meter)`. Initial393b3fc5, queued393b7561, craft validator394d6e8e and active
+monitor393b7e40 all use it. Caller393b60ed runs the monitor when its timer reaches1000ms.
+Predicate39093800 requires offset strictly greater than computed geometry distance.
+The distance is the minimum geometry-pair result398b1ab0 over doodad virtual+18's shape
+vector and the player's physics shape from390b3ae0; this is not a center-distance<=2.1
+contract. Exact shape dispatch and local action eligibility remain separate app/physics
+integration work, not a guessed net proximity gate.
+
+Batch callback precision:394d53e0 checks resolvable CraftEffect0e and local unit caster,
+and rejects the pair only when BOTH skill/TL equal invalid sentinels. It does not require
+that each callback pair equals manager's saved+14/+18. Successful Started replaces that
+pair, clears Fired latch+12, and emits CRAFT_STARTED(remaining) only while first-start+13
+was true (then clears it). Successful Fired sets+12. Ended without Fired emits
+CRAFT_ENDED() with NO arguments immediately, keeps count unchanged temporarily, clears
+ready+10/waiting+11, then next Update394d32b0 calls reset394d0bf0 and makes count0.
+Stopped similarly emits noarg ENDED immediately and resets on next Update. Failed Started
+calls reset first, then emits noarg ENDED, so count is already0 during the callback.
+Ended with Fired decrements and emits positive remaining or noargs when exhausted;
+Fired latch is cleared by next Started, not by Ended, so no extra duplicate-Ended
+idempotence guard is claimed. Update only toggles waiting for a positive ready batch;
+it never resends ExecuteCraft.
+
+SC0x07e consumer precision:393b75db reads manager+10, the first supplied skill, for its
+immediate special-callback/cast path. This does not prove that the packet itself populates
+the original UI choice manager; the net layer exposes the whole bounded payload without
+choosing an action. Native player-state eligibility393b3d50 remains separate from template
+recipe population, including state checks and mounted-context handling. Its broader
+housing permission predicate393b3510 has a protected prefix and unresolved special action
+keys; this audit does not replace those with zero permission or a guessed generic gate.
+
+Validation: `cargo check -p aa-net --features bevy`, full289 library tests and diff check
+pass. Three new tests cover native field goldens, raw count clipping at0/10 with exact
+following DD04 boundaries, every truncation, FULL32-bit canceled doodad IDs and repeated
+ordered receive forwarding without casting or inventing a workbench.
