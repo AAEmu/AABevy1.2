@@ -71,6 +71,9 @@ pub struct ChatTab {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChatData {
+    /// Native active-window flag, independent of edit keyboard focus.
+    pub(crate) active: bool,
+    pub(crate) links: Vec<super::chat_input::InputLink>,
     pub window_id: i64,
     pub tabs: Vec<ChatTab>,
     pub selected: usize,
@@ -623,6 +626,8 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     }
     if let Some(w) = ui(lua).tree.widget_mut(id) {
         w.chat = Some(ChatData {
+            active: false,
+            links: Vec::new(),
             window_id: 0,
             tabs: Vec::new(),
             selected: 0,
@@ -641,6 +646,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             hovered: None,
         });
     }
+    super::chat_input::activate(lua, id);
     call_global(lua, "OnCreateChatWindow", t.clone());
     super::chat_input::show_method(lua, id);
     Ok(())

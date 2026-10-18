@@ -626,7 +626,6 @@ end
 -- Chat ----------------------------------------------------------------------------------------------------------
 -- Main chat window id; the tabs come from AAUI.ChatTabs.
 X2Chat.AllChatWindowIds = function(self) return { 0 } end
-X2Chat.IsActivatedChatInput = function(self) return false end
 X2Chat.GetChatChannelName = function(self, channel) return nil end
 
 -- X2Unit ----------------------------------------------------------------------------------------------------------
