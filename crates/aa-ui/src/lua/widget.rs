@@ -1218,7 +1218,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "StopMovingOrSizing",
         "SetEscEvent",
         "SetSaveConfig",
-        "UseDynamicDrawableState",
         "UseDynamicContentState",
         "SetMsgToParent",
         "SetMaxTextLength",
@@ -1228,6 +1227,15 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
+    def("UseDynamicDrawableState", method(lua, |lua, id, a| {
+        let (Some(layer), Value::Boolean(on)) = (a.s(1), a.v(2)) else { return none() };
+        let layer = match layer.to_ascii_lowercase().as_str() {
+            "background" => 0, "artwork" => 1, "overlay" => 2, "overoverlay" => 3,
+            _ => return none(),
+        };
+        super::chat::alpha::enable(lua, id, layer, on);
+        none()
+    })?)?;
     def("IsNowAnimation", method(lua, |lua, _, _| ret(lua, false))?)?;
     // Scroll windows: `EnableScroll(true)` clips the children to the widget (and to mouse
     // hits); `ChangeChildAnchorByScrollValue("horz" | "vert", value)` sets how far the children

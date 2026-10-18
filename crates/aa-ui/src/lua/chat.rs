@@ -38,6 +38,8 @@ use super::{call_handler, method, new_object_table, none, object_table, ret, ui,
 use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock};
 
 mod lifecycle;
+pub(crate) mod alpha;
+pub use alpha::set_alpha_options;
 pub use lifecycle::{ChatTabInfo, ChatWindowInfo, append_tab, hydrate_window, remove_tab, update_tab};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -655,6 +657,7 @@ fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Tabl
         set_getter(lua, &t, getter, c)?;
     }
     with_msg(lua, id, |m| m.max_lines = 300);
+    alpha::scroll_pairs(lua, id);
     Ok((id, t))
 }
 
@@ -730,6 +733,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
         });
     }
     super::chat_input::activate(lua, id);
+    alpha::configure(lua, id);
     call_global(lua, "OnCreateChatWindow", t.clone());
     super::chat_input::show_method(lua, id);
     Ok(())
@@ -982,9 +986,7 @@ fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
     Ok(())
 }
 
-/// The client's default chat options on a tab's message frame: font size 15 and a black
-/// background at 45 % (the frame's background drawables are white, tinted by the option; the
-/// darkening in reference/ingame/spawn is 0.54).
+/// Native base/new-tab metadata: font15 and opaque black; global dynamic alpha is separate.
 fn apply_chat_options(lua: &Lua, msg: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
@@ -1000,7 +1002,7 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
         if let Some(dr) = u.tree.drawable_mut(d)
             && dr.layer == DrawLayer::Background
         {
-            dr.color = [0.0, 0.0, 0.0, 0.45];
+            dr.color = [0.0, 0.0, 0.0, 1.0];
         }
     }
 }
@@ -1047,6 +1049,8 @@ pub(crate) fn update(lua: &Lua) {
         .collect();
     for &id in &wins {
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
+        // Native395130e0 applies dynamic state every frame, including newly attached children.
+        alpha::state(u, id, inside);
         let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else {
             continue;
         };

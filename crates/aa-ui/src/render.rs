@@ -447,7 +447,11 @@ pub(crate) fn drawable_quads(
             }
         }
     }
-    let a = alpha * o.alpha * animation.alpha;
+    // Native3927af50 pushes this owner's layer factor and restores it before children.
+    // It does not belong in effective_alpha's whole-subtree product or text opacity.
+    let layer_alpha = o.parent.and_then(|p| u.tree.widget(p))
+        .map_or(1., |w| w.dynamic_drawable.current[dr.layer as usize]);
+    let a = alpha * o.alpha * animation.alpha * layer_alpha;
     let c = animation.color.unwrap_or(dr.color);
     let color = [c[0], c[1], c[2], c[3] * a];
     if (color[3] <= 0.0 || rect.w == 0.0 || rect.h == 0.0) && dr.kind != DrawKind::Text {
