@@ -18,14 +18,24 @@ Execute API in all four modes, then uses one native receipt-ordered item provide
 for result links, per-row consumption and controller restoration. Matching actual
 writes arm completion; raw skill errors/stops do not invent native Timeline
 ownership. SC093 and SC0A0 use their source-qualified ordered lock callbacks.
-The combined build and visual verification pass; the accepted playable alias
-is target/debug/aa-client-20261018-enchant-controller.exe, refreshed idle at16:52
-local and hash verified B4D86DF88E2976114124E62A50BBA4EBD91443C1AF68DAFCE1DC328FF909B8D7.
-The frozen client suite passes328 /38 optional ignores in90.50s, with32 focused
-enchant checks in5.82s. Main and three fixtures build (3m29s, final refresh53.22s),
-and12 original-script/world-list captures are inspected without runtime errors,
-including all four visibly dimmed working states. Later shared native-record
-Session migration and UI health-warning visibility work remain outside this cut.
+The shared native-record implementation now serves both HUD and Session request
+checks, including retries after native rows that leave the legacy reducer stale.
+The startup adapter supplies the same complete readonly recharge catalog to
+both consumers before asynchronous GameData readiness, preserving lifecycle
+resets and unknown-versus-known-zero behavior.
+The combined build and visual verification pass; the latest immutable main is
+target/debug/aa-client-20261018-recharge-clock-hdr.exe, SHA256
+A0901E12A50C66A82B0D4895BD5E3BC06DD9AF6F3DE84E7F499D64B97BAC7798.
+The idle target/debug/aa-client-play.exe alias was refreshed from it at17:13:53
+local and hash-verified equal.
+Its frozen suite passes323 /38 optional ignores in72.11s; nine provider tests
+moved to aa-net, whose full609 tests and actual native retry loopbacks pass.
+Main and enchant build in1m45s. Three original grade idle/working/world-list
+captures are inspected without runtime errors; earlier12 captures include all
+four dimmed working states. This cut includes the UI healthy/low-health warning
+restart and admitted-paint Effect clocks (5194c1a), authored ordinary point HDR
+gain (3dc3010), and shared startup recharge data (networkf674b41). Their original
+health/spinner and dock day/night/unload captures are documented by their owners.
 Protected native planning,
 global selection pending/effect registration and retained-Timeline stop handling
 remain explicit gaps (aa-client-enchant.md).

@@ -14,7 +14,7 @@ use aa_net::{
 use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
 use std::collections::HashSet;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) struct State {
     pub slots: [Option<u8>; 3], // target, source, support; physical zero-based BAG slots
     pub(super) records: Records,
@@ -26,6 +26,27 @@ pub(super) struct State {
     level: u8,
     active: bool,
     auto_use_aa_point: Option<bool>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        let mut records = Records::default();
+        if let Some(catalog) = super::super::data::item_recharge_catalog() {
+            records.set_recharge_catalog(catalog);
+        }
+        Self {
+            slots: [None; 3],
+            records,
+            config: GameConfig::default(),
+            external_pending: HashSet::new(),
+            selected_pending: HashSet::new(),
+            owner: None,
+            actor: 0,
+            level: 0,
+            active: false,
+            auto_use_aa_point: None,
+        }
+    }
 }
 
 pub(super) struct Prepared {
