@@ -5830,3 +5830,49 @@ Ignored source/oracle artifacts: `data/extract/aa-net/native-skill-identity-sour
 `native-skill-identity-oracle-20261018.json`, and `skill_identity_oracle.py`.
 
 Validation: cargo test -p aa-net --features bevy --lib passed all 438 tests (0 failures), including native identity goldens and DD04 alignment coverage. No timer production or retained-timeline policy changed in this slice.
+
+### Native cooldown frame clock and timeline lifetime audit (2026-10-18)
+
+Read-only closure, with no clock or Fired timer implementation: actor update
+3936a750 samples Cry timer0 integer milliseconds through timer virtual+10 at
+3936a7f6, computes wrapping u32 `now - previous` (global3a16e194), substitutes
+zero delta when `now == 0`, then stores now. For every current actor it calls
+3936a0b0(delta), which passes that same delta to cooldown manager39899e50.
+The latter saturating-subtracts unsigned min(delta, remaining) from every ordered
+tag/direct row and global remaining; totals, IDs, counts and ordering are unchanged.
+Direct E8 caller coverage:39173bcb ->3936a750;3936a836 ->3936a0b0;
+3936a280 ->39899e50. This is local frame time, not mapped ServerClock or SC191.now.
+Local Unicorn execution of original39899e50 and39899d10, without hooks/mocks,
+confirms six delta cases including zero, equality and unsigned extremes.
+
+Cooldown initialization39899d10 sets owner/provider pointers, clears global
+remaining/total and both list counts, without clearing stale backing row bytes.
+Its only direct E8 callers are actor construction39366237 and actor hydration
+3936b15b. This actor-manager initialization does not prove global timeline reset.
+Zero computed duration is an explicit no-op in39899f90 at39899fce..fe6.
+
+Global ordinary timeline manager39aff9ac is allocated at391746bb..df and
+constructed by3939c210 with an empty tree/count0. Destructor3939bd20 destroys
+the tree;39175050 then frees the manager and clears the global pointer.
+Explicit tree clear3939a2d0 has one direct E8 caller39171966 in39171800(mode),
+which deliberately skips this clear for mode3. All direct reset callers found:
+390f2b69(mode1),3915bd04(mode2),3917221a(mode0),3930b468(mode3),3930cb4b(mode3).
+Mode-to-app-event semantics and indirect/protected callers remain unclosed:
+CharacterSelected, PlayerSpawn, disconnect or HUD reconstruction must not be
+assumed to establish fresh native timeline history.
+
+Fired3939b12b..151 extracts the actor ID from the retained caster and resolves
+it again through current registry39360020. Its cooldown path uses that current
+actor, not a retained actor pointer. A reused object ID nevertheless may combine
+an old retained skill identity with a newly hydrated actor/provider set; broader
+effect references and timeline lifetimes remain distinct. Native frame391739e0
+runs timeline update through39aff9ac before actor update3936a750. The enclosing
+packet-dispatch ordering is not yet closed, so existing Instant-based timers
+remain unchanged and are not claimed to reproduce native frame quantization.
+GMmode1 admission uses the actual received snapshot/SC203 producer documented
+above; missing context is not assumed zero. No Fired producer is added.
+
+Ignored source/oracle artifacts: `native-cooldown-frame-lifetime-20261018.txt`,
+`native-cooldown-frame-oracle-20261018.json`, `cooldown_frame_oracle.py` under
+`data/extract/aa-net`. Direct E8 scans are caller evidence, not proof against
+indirect/protected paths. No foreign process execution or writes were performed.
