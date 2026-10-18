@@ -1,5 +1,7 @@
-//! Original authored FSQ close-ups: idle open, the stage-idle blink peak, and a speech A peak. `--race nuian|elf|hariharan|ferre --gender m|f`; `--live` runs the idle FSQ.
-use aa_anim::facial::{FacialAnimator, FacialPlugin, FacialSequence};
+//! Original authored FSQ close-ups. `--race nuian|elf|hariharan|ferre --gender m|f`;
+//! `--live` runs the idle FSQ, `--bones` isolates the original Ferre male cry eye controllers.
+//! `--head` previews the PC library's authored head_x effector at -1, 0 and +1 weight.
+use aa_anim::facial::{ExpressionLibrary, FacialAnimator, FacialPlugin, FacialSequence};
 use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, GameDb, Gender, Race, spawn_character_with_facial};
 use aa_cry::scene::{CryAssets, CryPlugin};
 use bevy::prelude::*;
@@ -33,9 +35,13 @@ fn main() {
 struct Preview {
     path: String,
     time: f32,
+    library: Option<String>,
+    head_weight: Option<f32>,
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
+    let bones = std::env::args().any(|a| a == "--bones");
+    let head_preview = std::env::args().any(|a| a == "--head");
     let race = match arg("--race").as_deref() {
         Some("elf") => Race::Elf,
         Some("hariharan") => Race::Hariharan,
@@ -46,6 +52,13 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         Gender::Female
     } else {
         Gender::Male
+    };
+    let (race, gender) = if head_preview {
+        (Race::Nuian, Gender::Male)
+    } else if bones {
+        (Race::Ferre, Gender::Male)
+    } else {
+        (race, gender)
     };
     let db = GameDb::open().expect("game database");
     let dir = format!("animations/{}/{}/facial", race.folder(), gender.folder());
@@ -81,12 +94,27 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         .max_by(|a, b| a.2.total_cmp(&b.2))
         .map(|(path, time, _)| (path, time))
         .expect("authored speech keys");
-    let samples = [
+    let mut samples = [
         ("OPEN / IDLE", idle.clone(), 0.7),
         ("BLINK / IDLE", idle, blink_time),
         ("SPEECH / A", speech_path, speech_time),
     ];
-    let live = std::env::args().any(|a| a == "--live");
+    if bones {
+        let path = "animations/ferre/male/facial/fist_em_cry.fsq";
+        samples = [
+            ("EYES / NEUTRAL", path.into(), 0.0),
+            ("EYES / CRY", path.into(), 0.239096),
+            ("EYES / RETURN", path.into(), 1.67368),
+        ];
+    }
+    if head_preview {
+        samples = [
+            ("FXL HEAD X / -1", String::new(), -1.0),
+            ("FXL HEAD X / 0", String::new(), 0.0),
+            ("FXL HEAD X / +1", String::new(), 1.0),
+        ];
+    }
+    let live = !bones && !head_preview && std::env::args().any(|a| a == "--live");
     for (i, (_, path, time)) in samples.iter().enumerate() {
         let mut desc = CharacterDesc::from_preset(&db, race, gender, 0).unwrap();
         desc.hair = None;
@@ -96,12 +124,16 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
             commands.entity(root).insert(Preview {
                 path: path.clone(),
                 time: *time,
+                library: (bones && !head_preview).then(|| "animations/ferre/male/facial/ferre_m.fxl".into()),
+                head_weight: head_preview.then_some(*time),
             });
         }
     }
     let label = |index: usize| {
         if live {
             "LIVE / BODY FSQ".into()
+        } else if head_preview {
+            samples[index].0.into()
         } else {
             format!("{} {:.2}s", samples[index].0, samples[index].2)
         }
@@ -177,8 +209,19 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
 
 fn freeze(mut commands: Commands, mut faces: Query<(Entity, &Preview, &mut FacialAnimator, &mut Animator)>) {
     for (entity, preview, mut face, mut body) in &mut faces {
-        face.play(FacialSequence::load(&preview.path).unwrap(), true);
-        face.time = preview.time;
+        if let Some(path) = &preview.library {
+            face.library = ExpressionLibrary::load(path).unwrap();
+        }
+        let sequence = if let Some(weight) = preview.head_weight {
+            // An explicit effector diagnostic, not a claim that an original FSQ moves the head.
+            std::sync::Arc::new(FacialSequence::parse(&format!(
+                r#"<FacialSequence EndTime="1"><Channel Name="head_x"><Spline Keys="0:{weight}:0,"/></Channel></FacialSequence>"#
+            )).unwrap())
+        } else {
+            FacialSequence::load(&preview.path).unwrap()
+        };
+        face.play(sequence, true);
+        face.time = if preview.head_weight.is_some() { 0.0 } else { preview.time };
         face.paused = true;
         face.fade_seconds = 0.0;
         body.paused = true;
