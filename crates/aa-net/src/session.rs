@@ -278,6 +278,7 @@ pub enum Command {
     /// Captured character and received trial context; never an optimistic state change.
     Trial { character_id:u32,command:crate::TrialCommand },
     Bounty { character_id:u32,command:crate::BountyCommand },
+    QueryCharacterName { character_id:u32,requested_id:u32 },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -543,6 +544,10 @@ pub enum Event {
     Crime(crate::crime::CrimeEvent),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
+    CharacterName(crate::CharacterName),
+    CharacterNameRequested { character_id:u32,requested_id:u32 },
+    CharacterNameRequestRejected { character_id:u32,requested_id:u32,message:String },
+    CharacterNameStreamClosed,
     /// Local successful CS072 transport write, never an authoritative jury/seat response.
     JurySummonReplyRequested { character_id:u32,trial_id:u32,court:u32,jury_number:i32 },
     JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
@@ -702,6 +707,8 @@ struct Session {
     login: Option<LoginConn>,
     game: Option<GameConn>,
     stream: Option<StreamConn>,
+    stream_joined:bool,
+    pending_names:std::collections::BTreeSet<u32>,
     login_addr: String,
     afs: Option<u64>,
     account: Option<AccountInfo>,
@@ -754,6 +761,8 @@ impl Session {
             login: None,
             game: None,
             stream: None,
+            stream_joined:false,
+            pending_names:Default::default(),
             login_addr: String::new(),
             afs: None,
             account: None,
@@ -848,7 +857,7 @@ impl Session {
             }
             Phase::Connecting => {
                 self.game = None;
-                self.stream = None;
+                self.clear_character_name_stream();self.stream = None;
                 self.set_phase(Phase::ReadyToConnect);
                 self.emit(Event::ConnectFailed { message });
             }
@@ -882,6 +891,12 @@ impl Session {
         }
     }
 
+    fn clear_character_name_stream(&mut self) {
+        let existed=self.stream.is_some() || self.stream_joined || !self.pending_names.is_empty();
+        self.stream_joined=false;self.pending_names.clear();
+        if existed {self.emit(Event::CharacterNameStreamClosed);}
+    }
+
     async fn close_all(&mut self) {
         if let Some(mut c) = self.login.take() {
             c.shutdown().await;
@@ -889,6 +904,7 @@ impl Session {
         if let Some(mut c) = self.game.take() {
             c.shutdown().await;
         }
+        self.clear_character_name_stream();
         if let Some(mut c) = self.stream.take() {
             c.shutdown().await;
         }
@@ -912,7 +928,7 @@ impl Session {
 
     fn game_lost(&mut self, e: NetError) {
         self.game = None;
-        self.stream = None;
+        self.clear_character_name_stream();self.stream = None;
         self.waiting = None;
         let message = format!("game server: {e}");
         if self.phase == Phase::Connecting {
@@ -1061,6 +1077,18 @@ impl Session {
                     self.emit(Event::ExpeditionRequested { character_id, command });
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
+                }
+            }
+            Command::QueryCharacterName{character_id,requested_id}=>{
+                let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id) {Some("character-name request belongs to an inactive character")}
+                else if requested_id==0 {Some("invalid persistent character ID")}
+                else if !self.stream_joined || self.stream.is_none(){Some("stream connection has not accepted the join")}
+                else if self.pending_names.contains(&requested_id){Some("character-name query is already pending")}else{None};
+                if let Some(message)=invalid {self.emit(Event::CharacterNameRequestRejected{character_id,requested_id,message:message.into()});}
+                else {
+                    self.pending_names.insert(requested_id);
+                    let result=self.stream.as_mut().unwrap().send(&stream::ClientMsg::QueryCharacterName{character_id:requested_id}).await;
+                    match result {Ok(())=>self.emit(Event::CharacterNameRequested{character_id,requested_id}),Err(e)=>{self.pending_names.remove(&requested_id);self.emit(Event::CharacterNameRequestRejected{character_id,requested_id,message:e.to_string()});}}
                 }
             }
             Command::Bounty{character_id,command} => {
@@ -1794,8 +1822,11 @@ impl Session {
 
     fn stream_msg(&mut self, r: net::Result<stream::ServerMsg>) {
         match r {
+            Ok(stream::ServerMsg::CharacterName(row)) => {if row.name.len()<=128 {self.pending_names.remove(&row.character_id);}self.emit(Event::CharacterName(row));}
             Ok(stream::ServerMsg::JoinResponse { code }) => {
+                self.stream_joined=code==0;
                 if code != 0 {
+                    self.pending_names.clear();self.emit(Event::CharacterNameStreamClosed);
                     tracing::warn!("stream server refused the join (code {code})");
                 }
             }
@@ -1805,7 +1836,7 @@ impl Session {
             Err(NetError::Wire(e)) => tracing::warn!("undecodable stream packet: {e}"),
             Err(e) => {
                 tracing::debug!("stream connection closed: {e}");
-                self.stream = None;
+                self.clear_character_name_stream();self.stream = None;
             }
         }
     }
@@ -1863,6 +1894,7 @@ impl Session {
         if let Some(mut c) = self.game.take() {
             c.shutdown().await;
         }
+        self.clear_character_name_stream();
         if let Some(mut c) = self.stream.take() {
             c.shutdown().await;
         }
@@ -4640,6 +4672,23 @@ mod tests {
         session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::DecodeFailed{message:"bad compressed tail".into()}]))).await;
         assert!(matches!(events.try_recv(),Ok(Event::GameDecodeFailed{message}) if message=="bad compressed tail"));
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn character_names_stream_join_identity_duplicates_and_failed_write(){
+      let(tx,mut events)=unbounded_channel();let mut s=Session::new(tx,ClientOptions::default());s.phase=Phase::InWorld;s.selected=42;let mut header=CharacterState::default();header.character.id=42;s.selected_state=Some(header);
+      s.clear_character_name_stream();assert!(events.try_recv().is_err());
+      let command=||Command::QueryCharacterName{character_id:42,requested_id:7};
+      s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));
+      let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(connection,accepted)=tokio::join!(StreamConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();s.stream=Some(connection.unwrap());
+      s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));
+      s.stream_msg(Ok(stream::ServerMsg::JoinResponse{code:0}));
+      for bad in [Command::QueryCharacterName{character_id:41,requested_id:7},Command::QueryCharacterName{character_id:42,requested_id:0}]{s.command(bad).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));}
+      s.selected_state.as_mut().unwrap().character.id=41;s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));s.selected_state.as_mut().unwrap().character.id=42;
+      s.command(command()).await;let n=peer.read_u16_le().await.unwrap();let mut bytes=vec![0;n as usize];peer.read_exact(&mut bytes).await.unwrap();assert_eq!(bytes,[10,0,7,0,0,0]);assert!(s.pending_names.contains(&7));assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequested{requested_id:7,..})));
+      s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));assert!(s.pending_names.contains(&7));
+      for name in [b"A".to_vec(),b"B".to_vec(),b"B".to_vec()]{let row=crate::CharacterName{character_id:7,name};s.stream_msg(Ok(stream::ServerMsg::CharacterName(row.clone())));assert!(matches!(events.try_recv(),Ok(Event::CharacterName(actual)) if actual==row));assert!(!s.pending_names.contains(&7));}
+      s.stream.as_mut().unwrap().shutdown().await;s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));assert!(!s.pending_names.contains(&7));
     }
 
 }

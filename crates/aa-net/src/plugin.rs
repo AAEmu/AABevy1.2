@@ -185,6 +185,7 @@ net_state! {
     crimes: crate::crime::Crimes,
     bounties:crate::Bounties,
     rankings:crate::Rankings,
+    character_names:crate::CharacterNames,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
@@ -319,6 +320,13 @@ mod equipment_flags_tests {
         let state=app.world().resource::<crate::Trials>();assert_eq!(state.defendant_context,Some(7));assert_eq!(state.jury_counts,Some([2,5]));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert_eq!(*app.world().resource::<crate::Trials>(),crate::Trials::default());
+    }
+
+    #[test]
+    fn plugin_character_names_and_plain_world_fold_same_raw_receipts(){
+        let mut app=App::new();init_state(&mut app);let mut plain=crate::state::WorldState::default();
+        for event in [Event::CharacterNameRequested{character_id:42,requested_id:7},Event::CharacterName(crate::CharacterName{character_id:7,name:vec![255,0,88]}),Event::CharacterNameRequested{character_id:42,requested_id:8},Event::CharacterNameStreamClosed]{plain.apply(&event);app.world_mut().run_system_once(move |mut state:NetState|state.apply(&event)).unwrap();assert_eq!(app.world().resource::<crate::CharacterNames>(),&plain.character_names);}
+        assert_eq!(plain.character_names.by_id[&7],vec![255]);assert!(plain.character_names.pending.is_empty());
     }
 
     #[test]

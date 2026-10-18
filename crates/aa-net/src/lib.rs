@@ -130,3 +130,6 @@ pub use bounty::{Bounties,BountyCommand,BountyEvent,BountyNotice,BountyRow};
 
 mod ranking;
 pub use ranking::{Rankings,RankingEvent,RankingNotice,RankBoard,RankCharacterRow,RankSnapshot,RankSnapshotEntry,RankSnapshotScope};
+
+mod character_names;
+pub use character_names::{CharacterName,CharacterNames};

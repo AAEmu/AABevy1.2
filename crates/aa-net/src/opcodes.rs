@@ -446,6 +446,7 @@ opcodes! {
     /// Client to stream server (`CT*`).
     pub mod ct {
         CTJoinPacket = 0x001,
+        CTQueryCharNamePacket = 0x00a,
     }
 }
 
@@ -456,6 +457,7 @@ opcodes! {
         TCDoodadStreamPacket = 0x002,
         TCDoodadIdsPacket = 0x003,
         TCDownloadEmblemPacket = 0x004,
+        TCCharNameQueriedPacket = 0x009,
     }
 }
 
