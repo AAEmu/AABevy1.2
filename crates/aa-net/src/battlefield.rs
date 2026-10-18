@@ -9,7 +9,7 @@ use crate::{
 mod joined;
 mod phases;
 mod progress;
-pub use progress::{BattlefieldPoint, BattlefieldSkillEnable};
+pub use progress::{BattlefieldPoint, BattlefieldSkillEnable, BattlefieldKill};
 pub use phases::{BattlefieldPhase, BattlefieldStart, BattlefieldEnd, BattlefieldTeamResult, BattlefieldMemberResult};
 pub use joined::BattlefieldJoined;
 
@@ -82,6 +82,7 @@ pub enum BattlefieldEvent {
     Started(BattlefieldStart),
     Ended(BattlefieldEnd),
     Point(BattlefieldPoint),
+    Kill(BattlefieldKill),
     SkillEnable(BattlefieldSkillEnable),
     InviteTimedOut {
         zone_id: u32,
@@ -102,7 +103,7 @@ impl BattlefieldEvent {
         r.i16()
     }
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x18b..=0x193 | 0x195)
+        matches!(op, 0x18b..=0x195)
     }
     pub fn name(&self) -> &'static str {
         match self {
@@ -114,6 +115,7 @@ impl BattlefieldEvent {
             Self::Started(_) => "SCInstantGameStart",
             Self::Ended(_) => "SCInstantGameEnd",
             Self::Point(_) => "SCInstantGameAddPoint",
+            Self::Kill(_) => "SCInstantGameKill",
             Self::SkillEnable(_) => "SCInstantGameKillstreak",
             Self::InviteTimedOut { .. } => "SCInstantGameInviteTimeout",
             Self::Requested(_) => "BattlefieldRequested",
@@ -144,6 +146,7 @@ impl BattlefieldEvent {
             sc::SCInstantGameStartPacket => Self::Started(BattlefieldStart::read(r)?),
             sc::SCInstantGameEndPacket => Self::Ended(BattlefieldEnd::read_lane(r)?),
             sc::SCInstantGameAddPointPacket => Self::Point(BattlefieldPoint::read(r)?),
+            sc::SCInstantGameKillPacket => Self::Kill(BattlefieldKill::read(r)?),
             sc::SCInstantGameKillstreakPacket => Self::SkillEnable(BattlefieldSkillEnable::read(r)?),
             sc::SCInstantGameInviteTimeoutPacket => Self::InviteTimedOut {
                 zone_id: r.u32()?,
@@ -183,6 +186,12 @@ pub struct Battlefield {
     pub skills_enabled: [bool; 24],
     pub last_point: Option<BattlefieldPoint>,
     pub last_skill_enable: Option<BattlefieldSkillEnable>,
+    pub last_kill: Option<BattlefieldKill>,
+    pub kill_scores: [i32;2],
+    /// Native stored getter value; victim notification independently passes zero.
+    pub my_killstreak_point: i32,
+    /// Actual selected character identity, retained through a match-only instance reset.
+    pub local_character_id: Option<u32>,
     pub last_error: Option<u16>,
     pub last_rejection: Option<String>,
 }
@@ -220,6 +229,20 @@ impl Battlefield {
     /// Original IsInInstantGame includes joined, opening, playing and results phases.
     pub fn in_instant_game(&self) -> bool { self.phase.is_some() }
 
+    fn reset_match(&mut self) {
+        let local_character_id=self.local_character_id;
+        *self=Self::default(); self.local_character_id=local_character_id;
+    }
+    pub fn accepts_kill(&self, kill:&BattlefieldKill) -> bool {
+        matches!(self.phase,Some(BattlefieldPhase::Opening | BattlefieldPhase::Playing))
+            && self.joined.is_some_and(|j|j.zone_id==kill.zone_id && j.instance_id==kill.instance_id)
+    }
+    /// This notification precedes the native phase/instance guard. Killer wins if IDs match both.
+    pub fn local_killstreak_notification(&self, kill:&BattlefieldKill) -> Option<i32> {
+        let id=self.local_character_id?;
+        if id==kill.killer_id {Some(i32::from(kill.killer_killstreak))}
+        else if id==kill.victim_id {Some(0)} else {None}
+    }
     pub fn accepts_point(&self, point:&BattlefieldPoint) -> bool {
         matches!(self.phase,Some(BattlefieldPhase::Opening | BattlefieldPhase::Playing))
             && self.joined.is_some_and(|j|j.zone_id==point.zone_id && j.instance_id==point.instance_id)
@@ -260,12 +283,20 @@ impl Battlefield {
         match e {
             Event::Battlefield(BattlefieldEvent::Ended(end)) => self.last_end=Some(end.clone()),
             Event::Battlefield(BattlefieldEvent::Point(point)) => self.last_point=Some(point.clone()),
+            Event::Battlefield(BattlefieldEvent::Kill(kill)) => {
+                self.last_kill=Some(kill.clone());
+                if self.local_killstreak_notification(kill).is_some() { self.my_killstreak_point=i32::from(kill.killer_killstreak); }
+            },
             Event::Battlefield(BattlefieldEvent::SkillEnable(update)) => self.last_skill_enable=Some(*update),
             _ => {}
         }
         match e {
-            Event::LoadInstance(_) if self.in_instant_game() => *self = Self::default(),
-            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => *self = Self::default(),
+            Event::LoadInstance(_) if self.in_instant_game() => self.reset_match(),
+            Event::CharacterSelected(state) => {
+                *self=Self::default(); self.local_character_id=(state.character.id!=0).then_some(state.character.id);
+            }
+            Event::PlayerSpawn(spawn) => self.local_character_id=(spawn.state.character.id!=0).then_some(spawn.state.character.id),
+            Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => *self = Self::default(),
             Event::Battlefield(BattlefieldEvent::Requested(c)) => {
                 self.last_rejection = None;
                 match *c {
@@ -296,11 +327,11 @@ impl Battlefield {
                     self.invitation = None;
                     self.last_error = None;
                 } else {
-                    *self = Self::default();
+                    self.reset_match();
                     self.last_error = Some(*error);
                 }
             }
-            Event::Battlefield(BattlefieldEvent::Cancelled { .. }) => *self = Self::default(),
+            Event::Battlefield(BattlefieldEvent::Cancelled { .. }) => self.reset_match(),
             Event::Battlefield(BattlefieldEvent::QueueState(q))
                 if self.applied.is_some_and(|(id, _)| id == q.battlefield_id) && self.invitation.is_none() && self.joined.is_none() && !self.cancel_pending =>
             {
@@ -320,9 +351,12 @@ impl Battlefield {
                 self.joined_ruleset_id = self.response_pending.map(|(i, _)| i.ruleset_id);
                 self.joined = Some(*joined);
                 self.phase = Some(BattlefieldPhase::Joined);
-                self.scores=[0;2]; self.skills_enabled=[false;24];
+                self.scores=[0;2]; self.kill_scores=[0;2]; self.skills_enabled=[false;24];
                 self.response_pending = None;
                 self.invitation = None;
+            }
+            Event::Battlefield(BattlefieldEvent::Kill(kill)) if self.accepts_kill(kill) && kill.killer_corps<2 => {
+                self.kill_scores[usize::from(kill.killer_corps)]=kill.killer_corps_kills;
             }
             Event::Battlefield(BattlefieldEvent::Point(point)) if self.accepts_point(point) => self.scores=point.scores,
             Event::Battlefield(BattlefieldEvent::SkillEnable(update)) if self.accepts_skill_change(update) => {

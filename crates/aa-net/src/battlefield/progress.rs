@@ -42,3 +42,35 @@ impl BattlefieldSkillEnable {
         })
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BattlefieldKill {
+    pub zone_id: u32,
+    pub instance_id: u32,
+    pub killer_id: u32,
+    pub victim_id: u32,
+    pub killer_corps: u8,
+    pub victim_corps: u8,
+    pub killer_killstreak: i8,
+    pub killer_name: String,
+    pub victim_name: String,
+    pub killer_corps_kills: i32,
+    pub victim_corps_deaths: i32,
+}
+impl BattlefieldKill {
+    pub(super) fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            zone_id: r.u32()?,
+            instance_id: r.u32()?,
+            killer_id: r.u32()?,
+            victim_id: r.u32()?,
+            killer_corps: r.u8()?,
+            victim_corps: r.u8()?,
+            killer_killstreak: r.i8()?,
+            killer_name: r.string()?,
+            victim_name: r.string()?,
+            killer_corps_kills: r.i32()?,
+            victim_corps_deaths: r.i32()?,
+        })
+    }
+}

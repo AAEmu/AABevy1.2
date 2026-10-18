@@ -4764,3 +4764,43 @@ producer remain a separate bounded follow-up. Native3936e180 updates local
 killstreak when killer or victim matches the local character **before** checking
 phase/instance, then only emits the main kill notification in states6/7 with
 matching instance. This order must not be approximated as the score guard.
+
+
+### Battlefield SC194 kill totals and local streak ordering
+
+`BattlefieldKill` is the exact native397b7250 / active lane
+`SCInstantGameKillPacket` layout: u32 zone,u32 instance,u32 killerCharacterID,
+u32 victimCharacterID,u8 killerCorps,u8 victimCorps,signed i8 killerKillstreak,
+string killerName,string victimName,i32 killerCorpsKills,i32 victimCorpsDeaths.
+Native handler391de7c0 passes these to3936e180. Before any phase or instance
+check, it compares actual local character ID against killer first, then victim.
+Both matches store the received signed killerKillstreak in manager+3cd0. Killer
+emits UPDATE_INSTANT_GAME_KILLSTREAK_COUNT(received as f32); victim emits the
+same callback with0f32 **without** storing zero in the getter. This asymmetry
+is explicit in3936e1ab..3936e228. `local_killstreak_notification` exposes that
+notification value independently from stored `my_killstreak_point`.
+
+Afterward, only states6/7 and exact zone/instance admit the main kill update.
+Native3936e48d overwrites `kill_scores[killerCorps]` (+3c50/54) with cumulative
+killerCorpsKills; victimCorpsDeaths is retained notification data, not a write
+to the other kill-score slot. Safe folding refuses corps indices outside0..1
+instead of reproducing unchecked native array indexing. The whole raw packet
+is retained in `last_kill` even when phase/identity gates refuse the team write.
+`accepts_kill` exposes the pre-fold native main-notification guard.
+
+INSTANT_GAME_KILL(table), event0x15d, contains native string keys `killerCorps`,
+`killer`, `victimCorps`, `victim`, `killerKillstreak`, `killerCorpsKill`, and
+`victimCorpsDeath`; corps values are localized corps names from retained
+ruleset ID. Numeric table values use native i32?f32 conversion. Native local
+streak-count callback precedes that table callback, including when the main
+callback is refused. Killer-invalid sentinel naming remains separate from raw
+ID preservation and is not inferred here.
+
+The resource obtains actual local ID from received CharacterSelected and
+PlayerSpawn state, never from the kill packet or ownership proximity. Match-only
+reset (cancel, application error, received load) retains that selected identity;
+full selection/disconnect/kick/leave-world resets it. Native3936d0d0 zeros
+myKillStreakPoint and team result arrays; Joined3936d890 zeros cumulative score
+and kill-score arrays but does **not** zero myKillStreakPoint. The fold preserves
+that exact Joined distinction. No result team totals or victory state are
+fabricated from kill notifications; they remain in genuine SC192 results.
