@@ -44,6 +44,7 @@ mod chat;
 mod combat;
 mod cooldown;
 mod crafting;
+mod crime;
 mod data;
 mod dialog;
 mod drag;
@@ -172,6 +173,9 @@ pub(crate) fn achievement_fixture() { achievement::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn chat_config_fixture() { chat::config::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn crime_fixture() { crime::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -397,6 +401,7 @@ impl Plugin for HudPlugin {
         expedition::plugin(app);
         achievement::plugin(app);
         chat::config::plugin(app);
+        crime::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);

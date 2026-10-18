@@ -97,8 +97,9 @@ recorded in the parity ledger.
 
 The checked main binary is target/debug/aa-client-20261018-chat.exe,
 SHA2567bd38357598faa45dbfe23d3857392ecca6bf9837ce4fd6df6be102c5bd21a30.
-The same checked bytes are installed as target/debug/aa-client-play.exe after
-verifying no client was running. Full client245 passed/37 optional probes
+At that milestone the same checked bytes were installed as target/debug/aa-client-play.exe
+after verifying no client was running; the later crime build supersedes that alias
+(see aa-client-crime.md). Full client245 passed/37 optional probes
 ignored in57.34s; the separate original equipment-cooldown probe passed in2.05s.
 The reproducible example is:
 
