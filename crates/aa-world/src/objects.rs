@@ -31,6 +31,8 @@ use aa_cry::workers::Workers;
 use aa_cry::{CryAssets, ModelOptions, PreparedModel};
 use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
+use bevy::mesh::MeshTag;
+use crate::vegetation_color::{self, VegetationMaterial, VegetationColorPart};
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureViewDimension;
@@ -173,6 +175,7 @@ struct Instanced {
     loaded: Arc<LoadedModel>,
     nodes: Vec<Mat4>,
     rigid: Option<Arc<rigid::Clip>>,
+    color_materials: vegetation_color::Materials,
 }
 
 enum ModelState {
@@ -237,6 +240,7 @@ pub struct ObjectState {
     decals: HashMap<(i32, i32), Vec<Entity>>,
     voxels: HashMap<(i32, i32), voxels::CellVoxels>,
     road_assets: RoadAssets,
+    color_mirrors: vegetation_color::Mirrors,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
     /// The placed sounds of each cell ([`sounds`]).
@@ -301,6 +305,7 @@ impl ObjectState {
             decals: HashMap::new(),
             voxels: HashMap::new(),
             road_assets: RoadAssets::default(),
+            color_mirrors: vegetation_color::Mirrors::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
             lights: HashMap::new(),
@@ -371,6 +376,7 @@ pub fn stream_objects(
     mut water_materials: ResMut<Assets<WaterMaterial>>,
     mut road_materials: ResMut<Assets<RoadMaterial>>,
     mut voxel_materials: ResMut<Assets<voxels::VoxelMaterial>>,
+    mut vegetation_materials: ResMut<Assets<VegetationMaterial>>,
     terrain: Res<crate::TerrainQuery>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
@@ -589,7 +595,8 @@ pub fn stream_objects(
                     }
                 }
                 let nodes = loaded.parts.iter().map(|(ni, _)| Mat4::from(node_world(&loaded.model, *ni))).collect();
-                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid }))
+                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &mut state.color_mirrors, &mut vegetation_materials);
+                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials }))
             }
             Err(e) => {
                 debug!("aa-world: model {key_path}: {e}");
@@ -730,7 +737,7 @@ pub fn stream_objects(
                 match &models.states[id as usize] {
                     ModelState::Ready(inst) => {
                         let inst = inst.clone();
-                        spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin);
+                        spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin, &groups);
                     }
                     ModelState::Failed => {}
                     _ => {
@@ -761,7 +768,7 @@ pub fn stream_objects(
             match &models.states[id as usize] {
                 ModelState::Ready(inst) => {
                     let inst = inst.clone();
-                    spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin);
+                    spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin, &groups);
                 }
                 ModelState::Failed => {}
                 _ => {
@@ -851,6 +858,7 @@ fn spawn_instance(
     idx: usize,
     inst: &Instanced,
     sector_origin: Vec3,
+    groups: &VegGroups,
 ) {
     let (matrix, view) = match kind {
         Kind::Brush => {
@@ -884,12 +892,21 @@ fn spawn_instance(
         for part in parts {
             let mut entity = commands.spawn((
                 Mesh3d(part.mesh.clone()),
-                MeshMaterial3d(part.material.clone()),
                 transform,
                 part.aabb,
                 VisibilityRange::abrupt(0.0, view),
                 ChildOf(entry.entity),
             ));
+            if matches!(kind, Kind::Vegetation | Kind::Trees)
+                && groups.groups.get(&data.objects.vegetation[idx].group).is_some_and(|g| g.material_layers == 0)
+                && let Some(material) = inst.color_materials.get(&part.material.id())
+            {
+                let bgr = data.objects.vegetation[idx].color_variation;
+                entity.insert((MeshMaterial3d(material.clone()), MeshTag::with_type::<vegetation_color::VegetationColor>(vegetation_color::pack(bgr)),
+                    VegetationColorPart { cell, bgr }));
+            } else {
+                entity.insert(MeshMaterial3d(part.material.clone()));
+            }
             if kind == Kind::Entity {
                 let prop = &data.objects.entity_props[idx];
                 entity.insert((Name::new(prop.name.clone()), StaticEntityPart { cell, guid: prop.guid }));

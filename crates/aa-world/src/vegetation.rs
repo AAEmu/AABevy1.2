@@ -15,6 +15,8 @@ pub struct VegGroup {
     pub use_sprites: bool,
     pub max_view_dist_ratio: f32,
     pub cast_shadow: bool,
+    /// Nonzero authored material-layer variants are not handled by the colour-only extension.
+    pub material_layers: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,6 +50,7 @@ impl VegGroups {
                     use_sprites: flag("bUseSprites"),
                     max_view_dist_ratio: g.attribute("fMaxViewDistRatio").and_then(|v| v.parse().ok()).unwrap_or(1.0),
                     cast_shadow: flag("bCastShadow"),
+                    material_layers: g.attribute("nMaterialLayers").and_then(|v| v.parse().ok()).unwrap_or(0),
                 },
             );
         }

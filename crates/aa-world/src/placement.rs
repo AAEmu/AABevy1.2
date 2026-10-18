@@ -22,8 +22,9 @@
 //! brush.dat the matrix and box are sector-local; in object.dat they are cell-local.
 //!
 //! Vegetation record (64 B, `SVegetationChunk`): same node header (bbox @0, maxViewDist @28, rndFlags @32,
-//! ratios @36), `f32 pos[3]` @39, `f32 scale` @51, `u16 group` @55 (a `vegetation.xml` `<group id>`),
-//! `u8 angleX, angleY` @57, 58, `u8 bright` @59, `u8 angleZ` @60 (256 steps per turn), 61..63 colour/pad.
+//! ratios @36), `f32 pos[3]` @39, `f32 scale` @51, `u32 group` @55 (a `vegetation.xml` `<group id>`).
+//! The existing low-16-bit group and compatibility angle fields@57/58 are unchanged here.
+//! Native ignores byte59, reads yaw@60 (256 steps per turn), and B/G/R color variation@61/62/63.
 //! brush.dat and object.dat carry the same brushes; object.dat additionally holds decals and roads
 //! and (in worlds without the dedicated files, e.g. login2) everything.
 //! `visareas.dat` has independent tables and interior octrees; its brushes are additional instances.
@@ -80,8 +81,11 @@ pub struct Vegetation {
     pub group: u16,
     pub angle_x: u8,
     pub angle_y: u8,
+    /// Legacy serialized byte59; the native loader ignores it (not a lighting multiplier).
     pub bright: u8,
     pub angle_z: u8,
+    /// Native per-instance B/G/R variation (bytes 61/62/63).
+    pub color_variation: [u8; 3],
     pub flags: u32,
     pub max_view_dist: f32,
 }
@@ -388,6 +392,7 @@ fn read_vegetation(rec: &[u8], origin: Vec3) -> Vegetation {
         angle_y: rec[58],
         bright: rec[59],
         angle_z: rec[60],
+        color_variation: [rec[61], rec[62], rec[63]],
         flags: u32_at(rec, 32),
         max_view_dist: f32_at(rec, 28),
     }
@@ -583,6 +588,20 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vegetation_color_tail_is_not_the_legacy_bright_byte() {
+        let mut rec = [0; 64];
+        rec[51..55].copy_from_slice(&2.5f32.to_le_bytes());
+        rec[55..57].copy_from_slice(&799u16.to_le_bytes());
+        rec[59..64].copy_from_slice(&[119, 70, 69, 208, 233]);
+        let v = read_vegetation(&rec, Vec3::ZERO);
+        assert_eq!(v.color_variation, [69, 208, 233]);
+        assert_eq!(v.bright, 119);
+        assert_eq!(v.angle_z, 70);
+        assert_eq!(v.group, 799);
+        assert_eq!(v.scale, 2.5);
+    }
 
     #[test]
     fn water_render_outline_excludes_physics_and_checks_both_counts() {

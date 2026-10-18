@@ -703,11 +703,90 @@ all three runs exit zero, no GPU errors, and every fixture window closes.
 ### client/vegetation.dat, vegetation/NN_NN.dat
 
 `vegetation.dat`: `u32 version (1)`, `u32 offset[16]`, `u32 size[16]` (4 x 4 sectors of 256 m, `sx * 4 + sy`), 64 byte records:
-`bbox @0, maxViewDist @28, rndFlags @32, ratios @36, f32 pos[3] @39, f32 scale @51, u16 group @55, u8 angleX, angleY @57..58, u8 bright @59,
-u8 angleZ @60` (256 steps per turn). `group` is a `<group id>` of `worlds/<world>/vegetation.xml` (2771 groups: `modelFileName`, `matName`,
+`bbox @0, maxViewDist @28, rndFlags @32, ratios @36, f32 pos[3] @39, f32 scale @51, u32 group @55, ignored byte @59, u8 angleZ @60, B/G/R color variation @61..63` (yaw: 256 steps per turn).
+The existing low-16-bit group and compatibility angle fields remain API-compatible; native loader `301F5A90`
+reads all four group bytes, not tilt at57/58. All four audited cells have zero high group bytes. It ignores
+byte59 (usually118/119); this is not a vegetation lighting multiplier. No new tilt transform is inferred. `group` is a `<group id>` of `worlds/<world>/vegetation.xml` (2771 groups: `modelFileName`, `matName`,
 `bUseSprites`, `fMaxViewDistRatio`, `bCastShadow`). Dense forests (976 cells have an empty `vegetation.dat`) keep their trees in
 `vegetation/SX_SY.dat` (`u32 version`, then records, positions sector-local, `SX_SY` = the 256 m sector). The octree of `object.dat` carries
 vegetation too; all three sources are disjoint and are concatenated.
+
+#### Native per-instance vegetation colour (`vegetation_color.rs`)
+
+The original x86 renderer proves the full colour contract: `_LoadVegetation` at
+`301F5A90` copies bytes 61/62/63 into CVegetation+88/+89/+90; constructor
+`300F1300` initializes them to 127. `CVegetation::Render` (`300F1740`, vtable
+`3025FBA0`+8) truncates `byte * (1/255) * 63`, clamps each result to 1..63,
+and packs `B*4096 + G*64 + R`. Original `shaders/vegetation.ext` assigns
+`%COLOR_VARIATION` mask 0x40000. In `vegetation.cfx` the enabled fragment
+branch decodes each channel /63 and multiplies **final lit RGB** by
+`0.8 + 0.4*channel`, before fog/post; alpha is unchanged. Default 127 becomes 31/63,
+so its multiplier is 0.9968254, not precisely1. Byte 59 and the separate native
+brightness/AO term are not repurposed as this colour.
+
+Model completion checks the cached original `.mtl` sub-materials for
+`Shader=Vegetation` and `gen_mask &0x40000`. It reuses the exact Basic/non-UCC
+`CryAssets::material` handles and wraps only matching loaded parts. Original
+NoDraw/proxy decisions and texture conversions remain intact. A typed `MeshTag`
+carries the 18-bit packed colour per instance; one shared bindless
+`ExtendedMaterial<StandardMaterial, VegetationColor>` mirrors each qualifying
+base material. The extension adds no GPU bindings, textures or per-instance
+materials. Lookup and mirror creation happen at bounded model completion;
+spawning adds one tag and constant-time handle lookup to the existing sector
+budget. No per-frame curve/material scan or plant recolouring loop is added.
+Parts despawn with their existing sector/cell; mirror ids are weak, while the
+model cache retains shared assets for its existing lifetime.
+
+The slice handles ordinary authored material layers 0 and forward rendering.
+Nonzero `nMaterialLayers` variants are conservatively left on the existing
+material path (native Render skips packing for material-layer bit 1;
+`300F7190` reads the group's byte+92). Frozen/wet layer rendering, editor-selected
+material overrides, native brightness/AO and terrain-colour runtime blending,
+wind bending, sprites and the unresolved tilt producer are separate gaps.
+Scale remains the exact native 0.1..5 clamp and no rotations are changed.
+
+Original source proof is retained in ignored
+`data/extract/aa-world/lights/vegetation-{loader,setup,render,layer}-native.txt`
+and `vegetation-color-fixtures.txt`. Forest cell(12,14) has 28,368 dedicated
+records; group 799 (`waterweed_b.cgf`, sub-material 0 GenMask 0x80052000) has 7,260,
+of which 6,847 carry nonneutral B/G/R. A real high-ground instance is
+Cry(12812.47,14575.70,158.27849), B/G/R (69,208,233). The NoDraw second
+sub-material and ordinary non-COLOR_VARIATION plants are negative controls.
+
+Validation: `cargo test -p aa-world --lib` passes 170/9 ignored, and all
+examples check. The `vegetation_color` aa-dev example's twelve independent GPU
+pixel controls cover four different per-instance tags sharing each material,
+unlit RGB, genuinely lit emissive and alpha 0.5 over black. Both ordinary and
+`--fog` runs match independent CPU RGB **exactly**, including final-lighting
+rather than albedo tint, unchanged opacity, and fog after colour variation.
+The numeric screenshots are `shots/aa-world/vegetation/native_numeric.png` and
+`native_numeric_fog.png`; 298-322 and 271-349 FPS respectively.
+
+`vegetation_color --world --shot ... --shot-after 18` and `--world --off`
+produce inspected `forest12_14_native.png` / `forest12_14_off.png` in that
+folder, using original geometry/materials/placement, hour 10, camera
+Cry(12807,14566,162). The settled scene contains 2,926 object parts, 2,506
+qualified vegetation parts (2,092 nonneutral), **seven** shared colour
+materials and zero failed/pending models. Native 140.7-150.6 FPS;
+off 130.6-158.2 FPS on the shared machine. The local change is subtle, as the
+native gain is only about 0.806..1.2: foreground crop (450,540)-(1400,1000)
+mean absolute RGB difference 0.55, with 17.4% of pixels differing by more than 2
+in at least one channel. Other moving scene effects prevent treating every
+changed pixel as colour variation. No matching real-client forest-camera
+capture is available; exactness is grounded in the source and GPU controls.
+
+`--world --unload-check --shot ... --shot-after 24` records actual part entity
+ids, moves outside the world at 16s and verifies every recorded entity is gone,
+no qualified parts remain, and object count returns to zero. Shared model/
+material textures keep their existing cache lifetime. `forest12_14_unload_final.png`
+records that state. `--world --reference` also inspects the existing spawn
+reference camera/hour (`spawn_reference.png`, 88-112 FPS), compared against
+`reference/ingame/spawn/real.png`: nearby placement/framing remains aligned,
+with 1,654 qualified parts all using neutral 127. Fixture 150 m object/tree caps
+omit distant reference trees; native lighting/terrain/water grading differences
+and absent actors/UI remain, without brightness tuning. All fixture runs
+exit zero with no shader/GPU errors and close their own windows.
+
 
 ### client/object.dat
 
