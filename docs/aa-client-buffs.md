@@ -68,10 +68,34 @@ session. `--remove` physically clicks the original first icon, checks the typed
 capture and then applies a separately explicit removal receipt; `--system`
 physically clicks the system-buff icon. Neither mode claims a server settlement.
 
-This slice retains the earlier tooltip flag/stack representation. Native getter
-tracing identifies a separate follow-up: stack rules2/3 use positive wrapping
-absolute charged values, rule4 uses a positive runtime stack, other rules expose1,
-and the field is omitted without bit0x10 or a positive selected count. That must
-be integrated with the original omitted/default numeric flag behavior rather
-than merely removing the old display clamp. Full tick/stat and metadata flag
-parity is not claimed by this cancellation milestone.
+The count projection uses rules2/3 to select wrapping absolute
+charged values, rule4 selects runtime stacks, and other rules select1. Only
+positive selected counts are exposed, after native signed f32 conversion.
+Zero/negative counts omit the field rather than displaying a fabricated1.
+The static loader retains the actual stack_rule_id; no charge-to-stack mutation
+or inferred history is added. Twelve executed original numeric branch goldens
+pass alongside the prior six buff/catalog/control checks. The original-stage
+badge/SCBuffUpdated check also passes: actual Insulating Lens1011 shows x5 from
+charge−5, Inspire127 omits a zero stack, and rule1 Bulwark Ballad1000 remains1
+despite received stack77. Signed updates clear/restore x3 and clear nonpositive
+counts while all three icons remain. All eight focused checks pass in 3.28s.
+The full copied client suite passes 283 checks / 38 existing optional probes
+ignored in 62.57s (`data/extract/aa-client/trial/counts-full-tests.log`). Main and
+the count example build. Both 1920x1080 captures in `shots/hud/buff-counts/`
+are inspected: the original x5 charge badge at 328.6–463.0 FPS, and real lane
+world select at 336.0–399.2 FPS. Both processes self-closed without runtime
+warnings, errors or panics. The count example has no network session.
+
+The latest inspected copy is `target/debug/aa-client-20261018-buff-counts.exe`;
+the idle playable alias is refreshed from it. This newer build also includes
+native ordinary-slot edge artwork, factual buff-history invalidation on decode
+loss, and signed heightmap projection/normal frames. Subsequent completion-effect
+or other worker changes require another build.
+Current main-copy/playable SHA256:
+`9DE983213ED1BE99446FB33AFF8285196F04E32E8265083C37192709FD4A3297`.
+
+The unchanged Lua getter's broader flag representation remains a separate
+follow-up: omitted flags default to all, explicit wrong types become0, and the
+native stack field also requires bit0x10. Full tick/stat, time advancement,
+metadata flags and caster-dependent description formatting are not claimed by
+this numeric-count slice.

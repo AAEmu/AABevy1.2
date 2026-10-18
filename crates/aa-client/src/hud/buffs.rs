@@ -8,6 +8,16 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 pub(super) mod cancel;
 
+/// Native39421dcf: positive selected count only, converted through signed CVTSI2SS.
+pub(super) fn stack_count(rule: u32, stacks: i32, charged: i32) -> Option<f64> {
+    let count = match rule {
+        2 | 3 => charged.wrapping_abs(),
+        4 => stacks,
+        _ => 1,
+    };
+    (count > 0).then(|| f64::from(count as f32))
+}
+
 pub(super) fn load(db: &Connection) -> rusqlite::Result<HashMap<u32, NativeBuffRule>> {
     let mut out = HashMap::new();
     let mut query = db.prepare("SELECT id,kind_id,per_unit_creation,stack_rule_id,max_stack,max_charge FROM buffs")?;
@@ -48,6 +58,30 @@ pub(super) fn bind_catalog(mut bound: Local<bool>, bridge: NonSend<super::api::H
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn original_getter_count_goldens_preserve_rule_charge_omission_and_f32_rounding() {
+        // Original39421dcf..e17 +390309f0, archived native-buff-stack-getter-oracle-20261018.json.
+        for (rule, stacks, charged, expected) in [
+            (0, -5, 0, Some(1.)),
+            (1, 99, -20, Some(1.)),
+            (5, 99, -20, Some(1.)),
+            (6, 99, -20, Some(1.)),
+            (2, 99, -5, Some(5.)),
+            (2, 99, 0, None),
+            (3, 99, i32::MIN, None),
+            (3, 99, i32::MAX, Some(2_147_483_648.)),
+            (4, -5, 99, None),
+            (4, 0, 99, None),
+            (4, 1, 99, Some(1.)),
+            (4, i32::MAX, 99, Some(2_147_483_648.)),
+        ] {
+            assert_eq!(
+                stack_count(rule, stacks, charged),
+                expected,
+                "rule={rule} stacks={stacks} charged={charged}"
+            );
+        }
+    }
     #[test]
     fn loading_catalog_retains_raw_rule_zeroes_and_seeds_before_created_packets() -> Result<(), Box<dyn std::error::Error>> {
         let db = Connection::open_in_memory()?;

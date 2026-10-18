@@ -51,6 +51,28 @@ pub(super) fn present(data: &mut HudData, buffs: &Buffs, spawn: &PlayerSpawn) {
         data.start,
     );
 }
+pub(super) fn charges(rt: &UiRuntime, state: &Shared, buffs: &mut Buffs, spawn: &PlayerSpawn) -> mlua::Result<()> {
+    let mut snapshot = spawn.clone();
+    snapshot.unit.buffs = [(21, 1011, 99, -5), (22, 127, 0, 99), (23, 1000, 77, 99)]
+        .into_iter()
+        .map(|(index, buff_id, stacks, charged)| Buff {
+            index,
+            buff_id,
+            stacks,
+            charged,
+            kind: BuffKind::Good,
+            duration_ms: 60_000,
+            ability_level: 1,
+            ..default()
+        })
+        .collect();
+    buffs.apply(&Event::PlayerSpawn(Box::new(snapshot)));
+    present(&mut state.borrow_mut(), buffs, spawn);
+    api::push_changes(rt, state);
+    aa_ui::lua::tick(&rt.lua, 100.);
+    aa_ui::lua::flush(&rt.lua);
+    rt.lua.load("assert(X2Unit:UnitBuff('player',1).stack==5);assert(X2Unit:UnitBuff('player',2).stack==nil);assert(X2Unit:UnitBuff('player',3).stack==1);assert(BUFF_PLAYER_FRAME.buffWindow.button[1].stack:GetText()=='x5');assert(BUFF_PLAYER_FRAME.buffWindow.button[2].stack:GetText()=='');assert(BUFF_PLAYER_FRAME.buffWindow.button[3].stack:GetText()=='')").exec()
+}
 pub(super) fn right_click(rt: &UiRuntime, expression: &str) -> Result<(), Box<dyn std::error::Error>> {
     let object: Value = rt.lua.load(expression).eval()?;
     let id = aa_ui::lua::value_id(&rt.lua, &object).ok_or("buff fixture widget missing")?;
@@ -79,7 +101,9 @@ pub(super) fn right_click(rt: &UiRuntime, expression: &str) -> Result<(), Box<dy
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path, mut buffs, spawn) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--remove") {
+    if std::env::args().any(|arg| arg == "--charges") {
+        charges(&rt, &state, &mut buffs, &spawn).unwrap();
+    } else if std::env::args().any(|arg| arg == "--remove") {
         right_click(&rt, "BUFF_PLAYER_FRAME.buffWindow.button[1]").unwrap();
         assert!(matches!(
             flush(&mut state.borrow_mut()).as_slice(),
