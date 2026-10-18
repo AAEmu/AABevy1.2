@@ -12,12 +12,17 @@ use bevy::prelude::*;
 
 use crate::TerrainQuery;
 use crate::coords::{CELL_SIZE, CELL_UNITS, UNIT_SIZE, cell_origin, cry_to_bevy};
+use crate::decal_projection::DeferredProjection;
 use crate::placement::{CellObjects, Decal, parse_object_dat};
 use crate::roads::{RoadAssets, RoadMesh};
 
 /// The native simple decal is raised 1 mm; a few extra millimetres avoid float precision
 /// fighting with the separately transformed terrain/brush meshes at world coordinates.
 const SURFACE_OFFSET: f32 = 0.005;
+// Deferred receivers are copied once on placement workers, with bounded memory/draw cost.
+const MAX_DEFERRED_MESH_TRIANGLES: usize = 65_536;
+const MAX_DEFERRED_CELL_TRIANGLES: usize = 262_144;
+const MAX_DEFERRED_CELL_MESHES: usize = 256;
 
 #[derive(Clone, Copy)]
 struct Vertex {
@@ -31,6 +36,7 @@ struct Projector {
     basis: Mat3,
     inverse: Mat3,
     radius: f32,
+    deferred: Option<DeferredProjection>,
 }
 
 impl Projector {
@@ -53,6 +59,18 @@ impl Projector {
             basis: decal.basis,
             inverse: decal.basis.inverse(),
             radius: decal.radius,
+            deferred: None,
+        })
+    }
+
+    fn deferred(decal: &Decal) -> Option<Self> {
+        let native = DeferredProjection::new(decal)?;
+        Some(Self {
+            center: native.volume_center,
+            basis: native.volume,
+            inverse: native.volume.inverse(),
+            radius: 1.0,
+            deferred: Some(native),
         })
     }
 
@@ -66,9 +84,13 @@ impl Projector {
     }
 
     /// Native `CDecal` texgen: S = -up / (2r), T = right / (2r), each centred on 0.5.
-    fn uv(self, p: Vec3) -> Vec2 {
+    fn uv(self, p: Vec3, normal: Vec3) -> Vec2 {
+        if let Some(native) = self.deferred {
+            return native.uv(p, normal);
+        }
         let relative = p - self.center;
-        Vec2::new(-self.basis.y_axis.dot(relative), self.basis.x_axis.dot(relative)) / (2.0 * self.radius) + Vec2::splat(0.5)
+        Vec2::new(-self.basis.y_axis.dot(relative), self.basis.x_axis.dot(relative)) / (2.0 * self.radius)
+            + Vec2::splat(0.5)
     }
 }
 
@@ -112,6 +134,7 @@ struct Geometry {
     normals: Vec<[f32; 3]>,
     uv: Vec<[f32; 2]>,
     indices: Vec<u32>,
+    over_budget: bool,
 }
 
 impl Geometry {
@@ -119,12 +142,16 @@ impl Geometry {
         if polygon.len() < 3 {
             return;
         }
+        if projector.deferred.is_some() && self.indices.len() / 3 + polygon.len() - 2 > MAX_DEFERRED_MESH_TRIANGLES {
+            self.over_budget = true;
+            return;
+        }
         let base = self.pos.len() as u32;
         for v in polygon {
             let normal = v.normal.normalize_or_zero();
             self.pos.push(cry_to_bevy(v.pos + normal * SURFACE_OFFSET).to_array());
             self.normals.push(cry_to_bevy(normal).to_array());
-            self.uv.push(projector.uv(v.pos).to_array());
+            self.uv.push(projector.uv(v.pos, normal).to_array());
         }
         for i in 1..polygon.len() - 1 {
             if (polygon[i].pos - polygon[0].pos)
@@ -140,14 +167,14 @@ impl Geometry {
     fn triangle(&mut self, triangle: [Vertex; 3], projector: Projector) {
         let face = (triangle[1].pos - triangle[0].pos).cross(triangle[2].pos - triangle[0].pos);
         // The native receiver walk rejects faces pointing away from the projection direction.
-        if face.dot(projector.basis.z_axis) <= 1e-7 {
+        if projector.deferred.is_none() && face.dot(projector.basis.z_axis) <= 1e-7 {
             return;
         }
         self.polygon(&clip(triangle.to_vec(), projector), projector);
     }
 
     fn mesh(self) -> Option<Mesh> {
-        if self.indices.is_empty() {
+        if self.over_budget || self.indices.is_empty() {
             return None;
         }
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
@@ -189,6 +216,17 @@ fn terrain_projector(mut projector: Projector, cell: (i32, i32), terrain: &Terra
 
 fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) -> Option<Mesh> {
     let (lo, hi) = projector.bounds();
+    if projector.deferred.is_some()
+        && ((hi.x / UNIT_SIZE).ceil() - (lo.x / UNIT_SIZE).floor())
+            * ((hi.y / UNIT_SIZE).ceil() - (lo.y / UNIT_SIZE).floor())
+            > (MAX_DEFERRED_MESH_TRIANGLES / 2) as f32
+    {
+        warn!(
+            "deferred decal terrain receiver exceeds geometry budget at {:?}",
+            projector.center
+        );
+        return None;
+    }
     let mut heights = HashMap::new();
     let mut geometry = Geometry::default();
     for iy in (lo.y / UNIT_SIZE).floor() as i32..(hi.y / UNIT_SIZE).ceil() as i32 {
@@ -201,7 +239,10 @@ fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) 
             else {
                 continue;
             };
-            let (x, y) = (ix.rem_euclid(CELL_UNITS as i32) as usize, iy.rem_euclid(CELL_UNITS as i32) as usize);
+            let (x, y) = (
+                ix.rem_euclid(CELL_UNITS as i32) as usize,
+                iy.rem_euclid(CELL_UNITS as i32) as usize,
+            );
             let q = [(0, 0), (1, 0), (1, 1), (0, 1)].map(|(dx, dy)| Vertex {
                 pos: Vec3::new(
                     (ix + dx as i32) as f32 * UNIT_SIZE,
@@ -212,6 +253,13 @@ fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) 
             });
             geometry.triangle([q[0], q[1], q[2]], projector);
             geometry.triangle([q[0], q[2], q[3]], projector);
+            if geometry.over_budget {
+                warn!(
+                    "deferred decal terrain receiver exceeds geometry budget at {:?}",
+                    projector.center
+                );
+                return None;
+            }
         }
     }
     geometry.mesh()
@@ -219,7 +267,12 @@ fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) 
 
 type Models = HashMap<String, Option<Arc<Model>>>;
 
-fn receiver_mesh(projector: Projector, sources: &[(Vec3, &CellObjects)], loader: &CryLoader, models: &mut Models) -> Option<Mesh> {
+fn receiver_mesh(
+    projector: Projector,
+    sources: &[(Vec3, &CellObjects)],
+    loader: &CryLoader,
+    models: &mut Models,
+) -> Option<Mesh> {
     let mut geometry = Geometry::default();
     let bounds = projector.bounds();
     for &(offset, objects) in sources {
@@ -260,10 +313,17 @@ fn receiver_mesh(projector: Projector, sources: &[(Vec3, &CellObjects)], loader:
                 let normal_transform = transform.inverse().transpose();
                 let mirrored = transform.determinant() < 0.0;
                 for subset in &mesh.subsets {
-                    if material
-                        .as_ref()
-                        .and_then(|m| m.sub(subset.material_id as usize))
-                        .is_some_and(|m| m.no_draw() || m.shader.eq_ignore_ascii_case("cut"))
+                    let receiver_material = material.as_ref().and_then(|m| m.sub(subset.material_id as usize));
+                    if receiver_material.is_some_and(|m| m.no_draw() || m.shader.eq_ignore_ascii_case("cut")) {
+                        continue;
+                    }
+                    // Native deferred decals affect opaque depth-buffer receivers. Their
+                    // alpha-cutout/translucent masks cannot be recovered from bare triangles.
+                    if projector.deferred.is_some()
+                        && receiver_material.is_none_or(|m| {
+                            aa_cry::shade::to_standard_material(m, |_, _| None)
+                                .is_none_or(|m| m.alpha_mode != AlphaMode::Opaque)
+                        })
                     {
                         continue;
                     }
@@ -291,9 +351,25 @@ fn receiver_mesh(projector: Projector, sources: &[(Vec3, &CellObjects)], loader:
                                 .normalize_or_zero(),
                         });
                         let lo = triangle.iter().fold(Vec3::splat(f32::INFINITY), |a, b| a.min(b.pos));
-                        let hi = triangle.iter().fold(Vec3::splat(f32::NEG_INFINITY), |a, b| a.max(b.pos));
+                        let hi = triangle
+                            .iter()
+                            .fold(Vec3::splat(f32::NEG_INFINITY), |a, b| a.max(b.pos));
                         if overlaps(bounds, (lo, hi)) {
                             geometry.triangle(triangle, projector);
+                            if projector.deferred.is_some() && receiver_material.is_some_and(|m| m.two_sided()) {
+                                let mut reverse = [triangle[0], triangle[2], triangle[1]];
+                                for vertex in &mut reverse {
+                                    vertex.normal = -vertex.normal;
+                                }
+                                geometry.triangle(reverse, projector);
+                            }
+                            if geometry.over_budget {
+                                warn!(
+                                    "deferred decal brush receiver exceeds geometry budget at {:?}",
+                                    projector.center
+                                );
+                                return None;
+                            }
                         }
                     }
                 }
@@ -303,8 +379,8 @@ fn receiver_mesh(projector: Projector, sources: &[(Vec3, &CellObjects)], loader:
     geometry.mesh()
 }
 
-/// Native deferred modes are retained in placement data but await the renderer-side projection
-/// matrix/fade implementation. Forward terrain/object projections are complete here.
+/// Geometry is prepared once on the existing bounded placement workers. Native deferred
+/// diffuse/opacity projection uses opaque terrain / brush receivers and per-fragment texgen.
 pub(crate) fn prepare_cell(
     world: &str,
     objects: &CellObjects,
@@ -313,11 +389,23 @@ pub(crate) fn prepare_cell(
     loader: &CryLoader,
     assets: &RoadAssets,
 ) -> Vec<RoadMesh> {
+    let deferred_enabled = std::env::var_os("AA_NO_DEFERRED_DECALS").is_none();
     let mut neighbours = HashMap::new();
     for decal in objects.decals.iter().filter(|d| {
-        !d.deferred && matches!(d.projection, 1 | 3) && objects.materials.get(d.material as usize).is_some_and(|p| !p.is_empty())
+        ((!d.deferred && matches!(d.projection, 1 | 3))
+            || (deferred_enabled && (d.deferred || matches!(d.projection, 4..=7))))
+            && objects
+                .materials
+                .get(d.material as usize)
+                .is_some_and(|p| !p.is_empty())
     }) {
-        let Some(p) = Projector::new(decal) else { continue };
+        let Some(p) = (if decal.deferred || matches!(decal.projection, 4..=7) {
+            Projector::deferred(decal)
+        } else {
+            Projector::new(decal)
+        }) else {
+            continue;
+        };
         let (lo, hi) = p.bounds();
         for dy in (lo.y / CELL_SIZE).floor() as i32..=(hi.y / CELL_SIZE).floor() as i32 {
             for dx in (lo.x / CELL_SIZE).floor() as i32..=(hi.x / CELL_SIZE).floor() as i32 {
@@ -325,7 +413,10 @@ pub(crate) fn prepare_cell(
                     continue;
                 }
                 neighbours.entry((dx, dy)).or_insert_with(|| {
-                    let path = format!("{}/client/object.dat", crate::world::cell_dir(world, cell.0 + dx, cell.1 + dy));
+                    let path = format!(
+                        "{}/client/object.dat",
+                        crate::world::cell_dir(world, cell.0 + dx, cell.1 + dy)
+                    );
                     aa_pak::Pak::global()
                         .read(&path)
                         .ok()
@@ -343,14 +434,66 @@ pub(crate) fn prepare_cell(
     );
     let mut models = Models::new();
     let mut out = Vec::new();
+    let (mut deferred_meshes, mut deferred_triangles) = (0, 0);
+    let mut warned_cell_budget = false;
     for decal in &objects.decals {
         let Some(path) = objects.materials.get(decal.material as usize).filter(|p| !p.is_empty()) else {
             continue;
         };
-        if decal.deferred || decal.projection > 3 {
+        if decal.deferred || matches!(decal.projection, 4..=7) {
+            if !deferred_enabled {
+                continue;
+            }
+            if deferred_meshes >= MAX_DEFERRED_CELL_MESHES || deferred_triangles >= MAX_DEFERRED_CELL_TRIANGLES {
+                if !warned_cell_budget {
+                    warn!("deferred decal cell receiver budget exceeded at {cell:?}");
+                    warned_cell_budget = true;
+                }
+                continue;
+            }
+            let Some(projector) = Projector::deferred(decal) else {
+                continue;
+            };
+            let native = projector.deferred.unwrap();
+            let (lo, hi) = projector.bounds();
+            let radius = (hi - lo).length() * 0.5;
+            for mesh in [
+                terrain_mesh(projector, cell, terrain),
+                receiver_mesh(projector, &sources, loader, &mut models),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let triangles = mesh.indices().map_or(0, |i| i.len() / 3);
+                if deferred_meshes >= MAX_DEFERRED_CELL_MESHES
+                    || deferred_triangles + triangles > MAX_DEFERRED_CELL_TRIANGLES
+                {
+                    if !warned_cell_budget {
+                        warn!("deferred decal cell receiver budget exceeded at {cell:?}");
+                        warned_cell_budget = true;
+                    }
+                    continue;
+                }
+                if let Some(mut mesh) = assets.decal(
+                    loader,
+                    path,
+                    mesh,
+                    decal.sort_priority,
+                    radius,
+                    decal.max_view_dist,
+                    Vec4::ZERO,
+                ) {
+                    mesh.deferred = Some(native.params(cell_origin(cell.0, cell.1), SURFACE_OFFSET));
+                    out.push(mesh);
+                    deferred_meshes += 1;
+                    deferred_triangles += triangles;
+                }
+            }
             continue;
         }
-        let Some(projector) = Projector::new(decal) else { continue };
+        let Some(projector) = Projector::new(decal) else {
+            continue;
+        };
         let mut push = |mesh: Option<Mesh>, p: Projector, fade: bool| {
             let Some(mesh) = mesh else { return };
             let attenuation = if fade {
@@ -358,7 +501,15 @@ pub(crate) fn prepare_cell(
             } else {
                 Vec4::ZERO
             };
-            if let Some(mesh) = assets.decal(loader, path, mesh, decal.sort_priority, p.radius, decal.max_view_dist, attenuation) {
+            if let Some(mesh) = assets.decal(
+                loader,
+                path,
+                mesh,
+                decal.sort_priority,
+                p.radius,
+                decal.max_view_dist,
+                attenuation,
+            ) {
                 out.push(mesh)
             }
         };
@@ -392,7 +543,9 @@ mod tests {
         world.insert_resource(Assets::<StandardMaterial>::default());
         world.insert_resource(Assets::<SkinnedMeshInverseBindposes>::default());
         world.insert_resource(CryCache::default());
-        world.run_system_once(|mut cry: aa_cry::CryAssets| cry.loader()).unwrap()
+        world
+            .run_system_once(|mut cry: aa_cry::CryAssets| cry.loader())
+            .unwrap()
     }
 
     fn projector() -> Projector {
@@ -401,6 +554,7 @@ mod tests {
             basis: Mat3::IDENTITY,
             inverse: Mat3::IDENTITY,
             radius: 2.0,
+            deferred: None,
         }
     }
 
@@ -421,8 +575,12 @@ mod tests {
             inverse: basis.inverse(),
             ..projector()
         };
-        let triangle = [Vec3::new(4.0, 20.0, 24.0), Vec3::new(4.0, 20.0, 36.0), Vec3::new(16.0, 20.0, 30.0)]
-            .map(|pos| Vertex { pos, normal: Vec3::Y });
+        let triangle = [
+            Vec3::new(4.0, 20.0, 24.0),
+            Vec3::new(4.0, 20.0, 36.0),
+            Vec3::new(16.0, 20.0, 30.0),
+        ]
+        .map(|pos| Vertex { pos, normal: Vec3::Y });
         let mut geometry = Geometry::default();
         geometry.triangle(triangle, p);
         let mesh = geometry.mesh().unwrap();
@@ -431,8 +589,8 @@ mod tests {
             let q = p.local(v);
             assert!(q.x.abs() <= 2.00001 && q.y.abs() <= 2.00001);
         }
-        assert_eq!(p.uv(p.center - basis.y_axis * 2.0), Vec2::new(1.0, 0.5));
-        assert_eq!(p.uv(p.center + basis.x_axis * 2.0), Vec2::new(0.5, 1.0));
+        assert_eq!(p.uv(p.center - basis.y_axis * 2.0, Vec3::Y), Vec2::new(1.0, 0.5));
+        assert_eq!(p.uv(p.center + basis.x_axis * 2.0, Vec3::Y), Vec2::new(0.5, 1.0));
         let mut back = Geometry::default();
         back.triangle([triangle[0], triangle[2], triangle[1]], p);
         assert!(back.mesh().is_none(), "back faces must not receive a forward decal");
@@ -450,13 +608,105 @@ mod tests {
     }
 
     #[test]
+    fn real_deferred_and_wrapped_receivers_and_materials() {
+        if !crate::pak_available() {
+            return;
+        }
+        let objects = crate::placement::load_cell_objects("main_world", 2, 29);
+        assert_eq!(objects.decals.iter().filter(|d| d.deferred).count(), 81);
+        let terrain = TerrainQuery::new("main_world");
+        let mut world = World::new();
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(Assets::<crate::roads::RoadMaterial>::default());
+        world.insert_resource(Assets::<SkinnedMeshInverseBindposes>::default());
+        world.insert_resource(CryCache::default());
+        let loader = world
+            .run_system_once(|mut cry: aa_cry::CryAssets| cry.loader())
+            .unwrap();
+        let prepared = prepare_cell(
+            "main_world",
+            &objects,
+            (2, 29),
+            &terrain,
+            &loader,
+            &RoadAssets::default(),
+        );
+        let mut deferred: Vec<_> = prepared.into_iter().filter(|m| m.deferred.is_some()).collect();
+        assert_eq!(
+            deferred.len(),
+            81,
+            "all original siegefield decals must hit real receivers within budget"
+        );
+        let triangles: usize = deferred.iter().map(|m| m.mesh.indices().unwrap().len() / 3).sum();
+        eprintln!("native siegefield: {} meshes, {} triangles", deferred.len(), triangles);
+        assert!(triangles < 200_000, "bounded real-fixture geometry");
+        for mesh in &deferred {
+            assert!(positions(&mesh.mesh).iter().all(|p| p.is_finite()));
+            assert!(mesh.mesh.indices().unwrap().len() / 3 <= MAX_DEFERRED_MESH_TRIANGLES);
+        }
+        let first = deferred.remove(0);
+        let second_index = deferred
+            .iter()
+            .position(|m| m.deferred.unwrap().center != first.deferred.unwrap().center)
+            .unwrap();
+        let second = deferred.swap_remove(second_index);
+        world
+            .run_system_once(
+                move |mut cry: aa_cry::CryAssets, mut materials: ResMut<Assets<crate::roads::RoadMaterial>>| {
+                    let a = first.material(&mut cry, &mut materials).unwrap();
+                    let b = second.material(&mut cry, &mut materials).unwrap();
+                    assert_ne!(
+                        a, b,
+                        "native placement uniforms must not reuse a sort-priority-only material"
+                    );
+                    assert!(materials.get(&a).unwrap().base.normal_map_texture.is_none());
+                    assert_eq!(materials.get(&a).unwrap().base.reflectance, 0.0);
+                },
+            )
+            .unwrap();
+        let wrapped = crate::placement::load_cell_objects("main_world", 23, 10);
+        let authored = wrapped.decals.iter().find(|d| d.projection == 4).unwrap();
+        assert_eq!(
+            wrapped.materials[authored.material as usize],
+            "game/materials/aa_terrain/decals/tr_decal_spider_400b"
+        );
+        let prepared = prepare_cell(
+            "main_world",
+            &wrapped,
+            (23, 10),
+            &terrain,
+            &loader,
+            &RoadAssets::default(),
+        );
+        let receivers: Vec<_> = prepared
+            .iter()
+            .filter(|m| m.deferred.is_some_and(|p| p.center.w == 2.0))
+            .collect();
+        assert_eq!(
+            receivers.len(),
+            2,
+            "original wrapped spiderweb hits terrain and an opaque brush"
+        );
+        assert!(receivers.iter().all(|m| m.mesh.indices().unwrap().len() > 0));
+    }
+
+    #[test]
     fn real_forward_decals_use_terrain_and_visible_brush_receivers() {
         if !crate::pak_available() {
             return;
         }
         let objects = crate::placement::load_cell_objects("main_world", 18, 7);
         assert_eq!(objects.decals.len(), 44);
-        assert_eq!(objects.decals.iter().filter(|d| d.projection == 3 && !d.deferred).count(), 20);
+        assert_eq!(
+            objects
+                .decals
+                .iter()
+                .filter(|d| d.projection == 3 && !d.deferred)
+                .count(),
+            20
+        );
         let terrain = TerrainQuery::new("main_world");
         let loader = loader();
         let mut models = Models::new();
@@ -464,7 +714,11 @@ mod tests {
         for decal in objects.decals.iter().filter(|d| d.projection == 3) {
             let p = Projector::new(decal).unwrap();
             if let Some(mesh) = receiver_mesh(p, &[(Vec3::ZERO, &objects)], &loader, &mut models) {
-                println!("static receiver at {:?}, {} triangles", decal.pos, mesh.indices().unwrap().len() / 3);
+                println!(
+                    "static receiver at {:?}, {} triangles",
+                    decal.pos,
+                    mesh.indices().unwrap().len() / 3
+                );
                 assert!(mesh.indices().unwrap().len() >= 3);
                 receivers += 1;
                 for v in positions(&mesh) {
@@ -477,7 +731,14 @@ mod tests {
             receivers, 5,
             "combined projections mark five visible CGF receivers in this original cell"
         );
-        let prepared = prepare_cell("main_world", &objects, (18, 7), &terrain, &loader, &RoadAssets::default());
+        let prepared = prepare_cell(
+            "main_world",
+            &objects,
+            (18, 7),
+            &terrain,
+            &loader,
+            &RoadAssets::default(),
+        );
         assert_eq!(prepared.len(), 48, "43 terrain + five static receiver meshes");
         assert!(prepared.iter().all(|m| m.attenuation.w > 0.0));
         println!(

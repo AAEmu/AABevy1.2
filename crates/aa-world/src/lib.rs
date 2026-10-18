@@ -7,6 +7,7 @@ pub mod cinema;
 pub mod collide;
 pub mod coords;
 mod decals;
+mod decal_projection;
 pub mod cover;
 pub mod env;
 pub mod entities;

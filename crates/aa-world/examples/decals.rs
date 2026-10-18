@@ -2,13 +2,23 @@
 //! `cargo run -p aa-world --example decals -- --shot shots/aa-world/decals/village.png --shot-after 18`
 //! `--straw` visits cell (14,11); `--planar` visits the Ferre decals; `--stream-check --exit-after 18`
 //! verifies that unloading removes every decal entity. Uses only the original placement/assets.
+//! `--siege` visits the 81 authored deferred decals; `--glass` adds a near translucent test pane.
 
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::prelude::*;
 
 fn main() {
     let flag = |name: &str| std::env::args().any(|a| a == name);
-    let (mut pos, mut look) = if flag("--straw") {
+    let (mut pos, mut look) = if flag("--siege") {
+        let objects = aa_world::placement::load_cell_objects("main_world", 2, 29);
+        let decal = objects
+            .decals
+            .iter()
+            .find(|d| d.deferred)
+            .expect("original siegefield decal");
+        let center = aa_world::coords::cell_origin(2, 29) + decal.pos;
+        (center + Vec3::new(10.0, -14.0, 12.0), center)
+    } else if flag("--straw") {
         (Vec3::new(14575.0, 11385.0, 150.0), Vec3::new(14575.5, 11391.0, 134.7))
     } else if flag("--planar") {
         let objects = aa_world::placement::load_cell_objects("main_world", 23, 10);
@@ -41,6 +51,7 @@ fn main() {
         look = value;
     }
     let mut config = WorldConfig::new("main_world");
+    let glass = flag("--glass");
     config.load_radius = 300.0;
     config.unload_radius = 450.0;
     config.brush_distance = 350.0;
@@ -50,35 +61,65 @@ fn main() {
         .add_plugins(aa_dev::default_plugins("aa-world decals"))
         .add_plugins(aa_dev::DevPlugin)
         .add_plugins(AaWorldPlugin { config })
-        .insert_resource(WorldClock { hour: 10.0, ..default() })
-        .add_systems(Startup, move |mut commands: Commands| {
-            commands.spawn((
-                Camera3d::default(),
-                Transform::from_translation(cry_to_bevy(pos)).looking_at(cry_to_bevy(look), Vec3::Y),
-                Projection::Perspective(PerspectiveProjection {
-                    fov: if std::env::args().any(|a| a == "--planar") {
-                        75.0_f32
-                    } else {
-                        50.0_f32
-                    }
-                    .to_radians(),
-                    near: 0.3,
-                    far: 20000.0,
-                    ..default()
-                }),
-            ));
+        .insert_resource(WorldClock {
+            hour: 10.0,
+            ..default()
         })
+        .add_systems(
+            Startup,
+            move |mut commands: Commands,
+                  mut meshes: ResMut<Assets<Mesh>>,
+                  mut materials: ResMut<Assets<StandardMaterial>>| {
+                let transform = Transform::from_translation(cry_to_bevy(pos)).looking_at(cry_to_bevy(look), Vec3::Y);
+                if glass {
+                    commands.spawn((
+                        Mesh3d(meshes.add(Rectangle::new(5.0, 3.0))),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: Color::linear_rgba(0.02, 0.2, 0.01, 0.75),
+                            alpha_mode: AlphaMode::Blend,
+                            unlit: true,
+                            cull_mode: None,
+                            ..default()
+                        })),
+                        Transform::from_translation(cry_to_bevy(pos).lerp(cry_to_bevy(look), 0.25))
+                            .with_rotation(transform.rotation),
+                    ));
+                }
+                commands.spawn((
+                    Camera3d::default(),
+                    transform,
+                    Projection::Perspective(PerspectiveProjection {
+                        fov: if std::env::args().any(|a| a == "--planar") {
+                            75.0_f32
+                        } else {
+                            50.0_f32
+                        }
+                        .to_radians(),
+                        near: 0.3,
+                        far: 20000.0,
+                        ..default()
+                    }),
+                ));
+            },
+        )
         .add_systems(Update, (stats, stream_check))
         .run();
 }
 
-fn stats(time: Res<Time>, objects: Res<aa_world::objects::ObjectState>, mut elapsed: Local<f32>) {
+fn stats(time: Res<Time>, objects: Res<aa_world::objects::ObjectState>, names: Query<&Name>, mut elapsed: Local<f32>) {
     *elapsed += time.delta_secs();
     if *elapsed > 2.0 {
         *elapsed = 0.0;
         info!(
-            "decals={} roads={} object_parts={} models_pending={}",
-            objects.stats.decals, objects.stats.roads, objects.stats.entities, objects.stats.models_pending
+            "decals={} deferred={} roads={} object_parts={} models_pending={}",
+            objects.stats.decals,
+            names
+                .iter()
+                .filter(|n| n.as_str() == "Deferred terrain/object decal")
+                .count(),
+            objects.stats.roads,
+            objects.stats.entities,
+            objects.stats.models_pending
         );
     }
 }
@@ -102,7 +143,11 @@ fn stream_check(
         info!("decal stream check: moved outside world");
     } else if *stage == 1 && time.elapsed_secs() > 14.0 {
         assert_eq!(objects.stats.decals, 0);
-        assert!(!names.iter().any(|n| n.as_str() == "Terrain/object decal"));
+        assert!(
+            !names
+                .iter()
+                .any(|n| matches!(n.as_str(), "Terrain/object decal" | "Deferred terrain/object decal"))
+        );
         info!("decal stream check: verified no decal entities remain");
         *stage = 2;
     }

@@ -140,7 +140,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 |---|---|
 | 1 | brush, 128 B |
 | 2 | vegetation, 64 B |
-| 9 | decal, 111 B; planar / forward terrain and static-brush projections drawn |
+| 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, the rest of the block |
 | 6, 14 | the rest of the block, not decoded (fog volumes / auto cubemaps, probably) |
@@ -240,23 +240,91 @@ existing non-cube `blue_sky.dds` water warning remains at (14,11). These exact s
 real-client reference capture, so their material lighting is source-backed and visually
 inspected, not a pixel fit to a reference.
 
-Remaining decal limits: deferred volumes and wrapped modes (deferred flag / projection 4..7)
-remain parsed but undrawn; their renderer-side projection matrix, asymmetric depth fade and
-normal/specular accumulation need their own implementation. Most Memoria (10,14) decal records
-name an empty material slot and correctly produce nothing (all 346 in the sampled cell).
-Forward geometry currently uses LOD0 receivers and finest terrain, so coarse distant LODs can
-diverge. Radii above 128 m or projection bounds above a cell width are rejected to bound work.
-Specular/gloss/cubemap effects retain the existing material approximation, and `entities.xml`
-static render props are not yet decal receivers.
+Deferred diffuse/opacity (`decal_projection.rs`): the original 32-bit client and renderer now
+provide both halves of the matrix setup. These are the matching original 1.2 binaries/IDBs
+listed under Moons below; only disposable copies of the databases were modified. Native
+`cry3dengine.dll::30056FD0` scales the authored basis columns XY by radius and Z by
+`radius * max(frontDepth, backDepth)`. `300585A0` copies both depth fractions unchanged;
+`30058040` maps modes 4/5/6/7 to flags 0x12/0x32/0x52/0x72. Renderer
+`cryrenderd3d10.dll::380444C0` independently normalizes those columns and takes their lengths
+as half extents `rx, ry, rz`. Its world-to-decal transform returns physical local distances,
+without reciprocal size. For `local = axes.transpose() * (worldPosition - centre)`:
 
-Follow-up native audit: `sub_3005CA30` scales the deferred projection basis XY by radius and Z by
-`radius * max(frontDepth, backDepth)`; `sub_3005DE50` maps projection 4..7 to flags 0x12 / 0x32 /
-0x52 / 0x72. The original `deferredshading.cfx` contains the wrapped/fake-wrapped UV correction
-and the front/back asymmetric depth attenuation. The missing native renderer CPU matrix setup
-must still connect the two authored depths to `g_mLightProj`, `g_worldToDecal` and `g_decalSize`.
-The newer public single-depth implementation differs, so it has not been used as a substitute.
-A bounded 48-cell sample found 81 mode-0 deferred siegefield decals in (2,29), confirming this is
-real authored content rather than an unused enum. No guessed deferred volumes are emitted.
+* `front = authoredFront * rz`, `back = authoredBack * rz`: the extra max-depth scaling is
+  intentional, not normalized away.
+* Projected UV is `(.5 + local.x/(2*rx), .5 - local.y/(2*ry))` and
+  `projZ = (front - local.z)/(front + back)`.
+* The original `deferredshading.cfx::DecalPassPS` clips UV outside 0..1 and negative `projZ`.
+  Its alpha factor is `saturate(1 - ((projZ-.2) * (projZ<.2 ? 5 : 1))^2)`.
+  Native volume draw `38044070` inverts this projection; renderer initialization `38039700`
+  uses `381672A0`'s eight XYZ corners 0..1. Thus the actual receiver volume also bounds
+  `projZ <= 1`: its physical local depth interval is `[-back, front]`, centred at
+  `(front-back)/2`, rather than the symmetric producer Z column. Geometry uses the inverse
+  native distance transform, preserving this interval even for independently normalized axes.
+* Wrapped modes use `offset = local.z * decalNormal.xy`; fake-wrapped modes additionally
+  multiply by `pow(sqrt(1-dot(nativeZAxis, decalNormal)^2), 8)`, retaining the shader's exact
+  axis/local-normal dot product. UV becomes
+  `saturate((local.xy-offset) * (1/ry,-1/rx) * .5 + .5)`; the swapped extents are native
+  `g_decalSize.zw`, not a typo.
+* An authored opacity texture replaces diffuse alpha with its alpha channel, using projected
+  UV directly. Alpha then includes material opacity, depth attenuation and the alpha reference.
+  The forward material's independent opacity UV/channel-mask behavior remains unchanged.
+
+These formulas run per fragment on clipped real finest-terrain / visible LOD0 opaque-brush
+triangles, retaining receiver vertex normals, winding, mirrored transforms and two-sided
+surfaces. No box or floating quad substitutes for a receiver. Deferred projection does not use
+the forward terrain centre-height gate, radius reduction or spherical fade. It currently
+rejects alpha-cutout/translucent brush subsets rather than drawing across their missing masks.
+`e_decals_force_deferred` / `e_decals_deffered_static` / dynamic counterparts are all registered
+with default 0 in original client `30009E92` onward; non-default forced conversions are not
+reproduced.
+
+Workers and cell unload reuse the existing at-most-two placement tasks. Source textures are
+shared, while each native receiver mesh gets its own projection uniform/material handle;
+these handles are not retained in the priority-only road cache. Geometry limits are 65,536
+triangles per deferred receiver mesh, 262,144 triangles and 256 meshes/material handles per
+cell, in addition to the existing 128 m radius / one-cell-width bounds. A receiver over budget
+is skipped with a diagnostic, not truncated. Native overlays sort before world translucency
+and after the sky; a native-only pipeline specialization clears the raster depth bias so
+their CPU sort offset does not pull them through opaque geometry. World translucency tests
+ordinary receiver depth. This remains Bevy's distance-based overlay sorting, rather than a
+separate native priority-sorted deferred render pass.
+
+Remaining decal limits: this is a diffuse/opacity overlay through the existing PBR shader,
+not native MRT albedo/normal/specular accumulation. In particular native square-root encoded
+buffer blending, receiver normal-map perturbations for wrapping, decal emissive/specular and
+normal-buffer changes are not reproduced; normal/specular modifications are disabled rather
+than invented. The original mode-0 deferred fixture in (2,29) uses
+`materials/decals/siegefield/o_air_deca.mtl` and its real `textures/Decal/o_air_decal.dds`.
+The initial bounded 48-cell sample missed wrapped records; a targeted nine-cell audit around
+the forward regression fixture found a mode-4 spiderweb in (23,10), local
+`(497.16797,995.0664,387.44232)`, radius 2.12895, using
+`materials/aa_terrain/decals/tr_decal_spider_400b`. It produces terrain and opaque-brush
+receiver meshes; the on/off captures show the authored web on the inside floor of a wooden
+hut. Mode-5/7 fake wrapping still has numeric/source checks rather than a real captured fixture.
+Most Memoria (10,14) decal records name an empty material slot and correctly produce nothing
+(all 346 in the sampled cell). All projected geometry uses LOD0 receivers and finest terrain,
+so coarse distant LODs can diverge; `entities.xml` static props, animated/skinned entities,
+vegetation and non-depth/stencil receiver semantics remain outside this slice.
+
+Deferred verification: eight focused decal tests cover packed fields, forward regressions,
+native depth units, transformed volume-to-fragment agreement, wrapped/fake-wrapped UVs and
+original receiver/material preparation. The siegefield's 81 records produce 81 native receiver
+meshes / 97,541 triangles, all inside the runtime budget. Distinct placement centres keep
+distinct material uniforms while texture handles are shared; no decal normal map or specular
+lobe is enabled. `decals --siege` visits the fixture; `AA_NO_DEFERRED_DECALS=1` is its disabled
+control, and `--glass` adds an explicit near translucent test pane. The asserting unload run
+starts at 81 and verifies both `ObjectStats.decals == 0` and no actual decal entities after
+leaving the world. No shader/runtime errors in on, off, glass or unload runs.
+`shots/aa-world/decals/deferred_floor_on.png` / `_off.png` use Cry camera
+`2524,30195,398` looking at `2519.18,30199.78,390.37`; 81 decals / 1,100 object parts,
+about 125–142 FPS enabled and 118–148 disabled on the shared RX 9070 XT at 1920x1080.
+`deferred_glass.png` confirms the soil overlay stays under the green pane, about 129–143 FPS.
+`wrapped_spider_on.png` / `_off.png` use camera `24049.17,11231.06,391.44` looking at
+`24049.17,11235.06,387.44`, about 127–143 FPS enabled. `planar_deferred_regression.png`
+retains the original floor stain, with 39 forward + four streamed native meshes, 143–170 FPS.
+No exact real-client capture exists for either deferred site under `reference/`; these are
+asset-backed on/off and lifecycle checks, not a material-lighting fit to a reference image.
 
 Water volume (type 11), cell-local, cry space: `f32 bbox[6]` @0 (z range = `[surface - depth, surface]`), `f32 maxViewDist` @28, `u8 viewDistRatio,
 lodRatio` @36, `u32` volume type @39 (low 2 bits: 2 = area, 3 = river; 515 / 1027 have flags above), an editor guid @43, `u32` material index @51 (into the
@@ -1304,8 +1372,9 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
   gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak); the weights are bilinear
-  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles; deferred `object.dat` decals
-  remain undrawn; `terrain_tint` is a fudge for the missing exposure. Roads and forward decals are rendered (see placement formats).
+  over the 2 m samples at every distance while the engine interpolates over its (LOD) triangles;
+  `terrain_tint` is a fudge for the missing exposure. Roads, forward decals and the deferred diffuse/opacity slice
+  are rendered (see placement formats); native MRT decal normal/specular blending remains open.
 * Water, differences to the real captures: the pond matches the combat frames within 7 display values (see Water), but the fit is on one pond
   at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
@@ -1313,7 +1382,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: deferred object.dat decals (type 9), types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
+* Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
