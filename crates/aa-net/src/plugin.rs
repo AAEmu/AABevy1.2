@@ -181,6 +181,7 @@ net_state! {
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
     dominion: crate::Dominion,
+    achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
     server_clock: crate::clock::ServerClock,
@@ -302,6 +303,15 @@ mod equipment_flags_tests {
         app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ScheduledEventStarted(start.clone()))).unwrap();
         assert_eq!(app.world().resource::<crate::battlefield::Battlefield>().my_corps_kill_death_ratio,-7);
         assert_eq!(app.world().resource::<crate::scheduled::ScheduledEvents>().starts[&3].open_message,b"notice");
+    }
+
+    #[test]
+    fn plugin_achievement_cache_retains_batch_and_lifecycle() {
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Achievement(crate::AchievementEvent::List{raw_count:1,rows:vec![crate::AchievementProgress{id:7,amount:-1,completed_at:i64::MIN}]}))).unwrap();
+        assert_eq!(app.world().resource::<crate::Achievements>().entries[&7].completed_at,i64::MIN);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert!(app.world().resource::<crate::Achievements>().entries.is_empty());
     }
 
     #[test]

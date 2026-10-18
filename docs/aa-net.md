@@ -5876,3 +5876,91 @@ Ignored source/oracle artifacts: `native-cooldown-frame-lifetime-20261018.txt`,
 `native-cooldown-frame-oracle-20261018.json`, `cooldown_frame_oracle.py` under
 `data/extract/aa-net`. Direct E8 scans are caller evidence, not proof against
 indirect/protected paths. No foreign process execution or writes were performed.
+
+### Received achievements: SC1fc..200 (2026-10-18)
+
+`AchievementEvent` retains full lane List raw i32 count/ordered rows, Changed
+(id/u32,amount/i32), Completed (id,raw i64 timestamp), Reset (id,amount,timestamp),
+and ItemSent (id,raw by-mail byte). Every event is forwarded, including duplicates.
+`AchievementProgress` preserves signed amount bit patterns and raw timestamps.
+Lane `aaemu-commons::PacketStream::write_date_time` writes i64 nonnegative Unix
+seconds; no timestamp normalization, local-time conversion, or success inference
+occurs in aa-net. Native serializers use the ordinary qword primitive. Original
+GetAchievementInfo later calls394245c0 -> xlcommon XlGetLocalTime3301ca30 ->
+MSVCR100 `_localtime64_s`, adding1900 to year and1 to month. Negative/extreme
+wire timestamps are preserved even though the native calendar conversion can fail.
+
+Factories391b77d0/7850/78d0/7950/79d0 establish opcodes1fc/1fd/1fe/1ff/200,
+vtables399b4318/4324/4330/433c/4348. Serializers are397b8f30/89f0/8a30/8a70/8ac0.
+The list serializer reads count then interleaved id/amount/qword timestamp, only
+min(count,50) rows into native inline arrays. The active lane writer emits every
+declared row. Its decoder therefore consumes every lane row for DD04 alignment,
+rejecting counts exceeding available bytes before allocation. Negative counts
+retain the raw count with no rows. Cache admission is separately bounded to the
+first50 declared rows. The native batch callback3900e700 unsafely iterates the
+unclamped declaration; >50 cache admission is an app safety boundary, not a claim
+that native out-of-bounds behavior has a defined result.
+
+`Achievements` is a plain Bevy/WorldState resource with a keyed `entries` map,
+bounded `last_receipt`, and explicit `native_enabled:Option<bool>`. Full receipt
+ordering remains on Event::Achievement rather than an accumulated status history.
+Batch cache inserts are first-wins, including across chunks/repeated snapshots;
+empty batches do not clear prior entries. Batch writes require neither metadata
+nor the scalar feature gate and emit no native update/completion notice.
+
+Scalar callbacks39186250/2a0/2f0 call3900ea70. Native admission requires a known
+AchievementDesc and game+18 bit31 set, except its absent-game-object special case.
+The app does not assume that exception. Actual InitialConfig feature byte7 bit7
+hydrates the gate; missing byte remains unknown and blocks scalar cache writes.
+GetFeatureSet39496f4d..7c reads the SAME bit from feature-storage+4 and exposes
+`achievement`; it is not a second UI availability flag. Static rules are supplied
+through `set_catalog(HashMap<u32,AchievementRule>)`, stored in Arc so HUD clones
+share catalog storage. Rule fields are `complete_num:i32` and
+`objective_count:u32`. Native3975208e loads ALL achievement_objectives rows;
+39752ad0..b6f links each to a known parent regardless of missing record metadata.
+Thus objective_count counts loaded rows for that parent, not only valid record IDs.
+No retroactive scalar replay occurs when a rule/config later arrives.
+
+For timestamp0, scalar cache writes use the received signed amount (Completed's
+native constructor argument is0). For ANY nonzero timestamp, including negative
+raw values, amount becomes positive complete_num, or objective_count when
+complete_num<=0. `apply_with_notices(&Event)` returns `(changed,notices)` with
+Completed(id) then Updated, after the received cache write, per admitted completion
+receipt even when repeated. Timestamp0 emits only Updated. `apply` delegates and
+discards notices; UI consumers must use one fold or the other, not both.
+These represent original COMPLETE_ACHIEVEMENT(id) and ACHIEVEMENT_UPDATE().
+ItemSent391e2490 calls3900e3f0: known metadata emits
+ACHIEVEMENT_ITEM_SENT(localized achievement name), ignoring byMail for that Lua
+callback. The resource returns ItemSent(id) so root can resolve the genuine
+localized name, without fabricating a progress/reward mutation.
+
+Native manager39173e50 constructs an empty progress tree and empty recent-complete
+vector;3900ee50 destroys both at manager teardown39175491. Native completion also
+appends its ID to recent-complete vector+4a8 WITHOUT deduplication, and removes the
+first matching tracing slot among six slots+490 (invalid sentinel0), persisting
+local UI data. Removing a recent ID3900e7a0 removes the first matching entry and
+emits Updated; batch hydration does not mark entries new. This local recent/tracing
+adapter remains root work, separate from this received-progress cache. App
+CharacterSelected clears received cache/last receipt while retaining known feature
+configuration; login/reconnect/disconnect/kick clear received runtime and gate.
+Static catalog survives all these clears. These are explicit character-isolation
+boundaries, not claims that every event invokes native global-manager teardown.
+
+Original getter entry points: GetAchievementInfo390598f0 (numeric adapter39059450),
+GetAchievementList390595d0, GetSubcategoryInfo39059720. Registrations3905a231/28d/2ee
+and tracing/recent methods3905a34a..5ab are archived. Native missing progress lookup
+3900df80 returns zero row39ada858. Info emits current as signed-i32-to-f32,
+complete=(timestamp!=0), and completeDate only when nonzero. Static/filter/category
+and local tracing presentation remain aa-client integration; no outgoing reward
+claim or optimistic completion is introduced.
+
+Validation: all444 aa-net Bevy library tests pass. Coverage includes all five
+layouts/all truncations, signed amount/timestamp extremes, noncanonical raw booleans,
+negative/oversized counts, >50 lane rows followed by a real DD04 packet, first-wins
+chunk/cache behavior, catalog/feature unknown gates, completion normalization and
+repeat notice order, Arc sharing/lifecycle, WorldState/Bevy integration, and Session
+raw receipt forwarding. Existing compression unknown-opcode goldens moved from now
+implemented0x1ff to unsupported0x7fff; the independent Python-zlib generator changed
+only that raw/compressed fixture and its hashes. Ignored native source archive:
+`data/extract/aa-net/native-achievement-source-20261018.txt`. Lane sources:
+`systems/social/packets/misc.rs` and `aaemu-commons/src/packet_stream.rs`.

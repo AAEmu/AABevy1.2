@@ -163,7 +163,7 @@ mod tests {
             messages[1],
             ServerMsg::Unhandled {
                 level: LEVEL_COMPRESSED,
-                opcode: 0x1ff,
+                opcode: 0x7fff,
                 ..
             }
         ));

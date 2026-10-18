@@ -534,6 +534,7 @@ pub enum Event {
     UnhandledGamePacket { level:u8, opcode:u16, len:usize },
     /// Actual wire decode failure; no complete event can be reconstructed from this receipt.
     GameDecodeFailed { message:String },
+    Achievement(crate::achievement::AchievementEvent),
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
@@ -1600,6 +1601,7 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Dominion(value) => self.emit(Event::Dominion(value)),
+            M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
             M::UnitGmModeChanged(e) => self.emit(Event::UnitGmModeChanged(e)),
@@ -4346,6 +4348,14 @@ mod tests {
             session.game_msg(Ok(game::ServerMsg::Expedition(value.clone()))).await;
             assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
         }
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn achievement_receipts_forward_duplicates_and_raw_values_without_state_success() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let receipts=[crate::AchievementEvent::Completed{id:7,completed_at:i64::MIN},crate::AchievementEvent::Completed{id:7,completed_at:i64::MIN},crate::AchievementEvent::ItemSent{id:7,by_mail:255},crate::AchievementEvent::List{raw_count:-1,rows:vec![]}];
+        for receipt in receipts {session.game_msg(Ok(game::ServerMsg::Achievement(receipt.clone()))).await;assert!(matches!(events.try_recv(),Ok(Event::Achievement(actual)) if actual==receipt));}
         assert!(events.try_recv().is_err());
     }
 
