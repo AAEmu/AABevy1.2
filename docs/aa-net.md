@@ -3077,3 +3077,23 @@ Validation: `cargo test -p aa-net --features bevy --lib` passes all275 tests, in
 raw config count/buffer bounds, every payload truncation, DD04 continuation, repeated
 session event ordering, optional feature limits, snapshot replacement and account/game
 connection lifecycle. This includes the plugin/resource integration under the Bevy feature.
+
+### Local outcomes for lost repair/bank/mate transport (2026-10-17)
+
+The existing Bank and Repair command branches already rejected inactive-character use
+but silently dropped a missing/failed transport write. Mate commands also silently
+ignored inactive phases. These paths now emit their existing typed `RequestRejected`
+notifications with the original command. A successful write still emits only Requested;
+no wire bytes or received-state/ACK semantics changed. This includes separate stablehand
+revival and mate rename, so application queue feedback cannot disappear on an unsent
+request. Generic later server errors retain their existing unassociated event behavior.
+
+The offline phase/missing-transport regression covers all three command families across
+idle, lobby and in-world phases, ensuring rejected requests do not create pending repair
+success, bags, or owned mates. Existing connected repair/bank and mate control loopbacks
+continue to assert exact native frames, wrong-phase requests absent from the socket,
+and genuine received-state mutation only.
+
+Validation: `cargo test -p aa-net --features bevy --lib` passes276 tests for the final
+repair/bank/mate rejection followup; `git diff --check` is clean. No lane mutation or
+new wire/result semantics were introduced.

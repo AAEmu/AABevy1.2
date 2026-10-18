@@ -1003,6 +1003,8 @@ impl Session {
                     self.emit(Event::Bank(crate::bank::BankEvent::RequestRejected { command, message: "bank service requires an active character".into() }));
                 } else if self.send_game(game::ClientMsg::Bank(command)).await {
                     self.emit(Event::Bank(crate::bank::BankEvent::Requested(command)));
+                } else {
+                    self.emit(Event::Bank(crate::bank::BankEvent::RequestRejected { command, message: "bank request was not sent".into() }));
                 }
             }
             Command::Party(m) => {
@@ -1052,8 +1054,12 @@ impl Session {
             Command::Mate(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: message.into() }));
-                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::Mate(command.clone())).await {
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: "mate service requires an active character".into() }));
+                } else if self.send_game(game::ClientMsg::Mate(command.clone())).await {
                     self.emit(Event::Mate(crate::mate::MateEvent::Requested(command)));
+                } else {
+                    self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: "mate request was not sent".into() }));
                 }
             }
             Command::LootRoll(command) => {
@@ -1091,6 +1097,8 @@ impl Session {
                     self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: "repair requires an active character".into() }));
                 } else if self.send_game(game::ClientMsg::Repair(command)).await {
                     self.emit(Event::Repair(crate::repair::RepairEvent::Requested(command)));
+                } else {
+                    self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: "repair request was not sent".into() }));
                 }
             }
             Command::UseSkill { skill_id, target_obj_id } => {
@@ -2160,6 +2168,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn repair_bank_and_mate_unsent_paths_report_existing_rejections_without_pending_success() {
+        use crate::bank::{BankCommand, BankEvent};
+        use crate::mate::{MateCommand, MateEvent};
+        use crate::repair::{RepairCommand, RepairEvent};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut state = crate::state::WorldState::default();
+        let bank = BankCommand::Expand { container: 2, auto_use_aa_point: false };
+        let repair = RepairCommand::All { auto_use_aa_point: false };
+        let mate = MateCommand::ReviveItems { npc_obj_id: 7 };
+        for phase in [Phase::Idle, Phase::CharacterSelect, Phase::InWorld] {
+            session.phase = phase;
+            for command in [Command::Bank(bank), Command::Repair(repair), Command::Mate(mate.clone())] {
+                session.command(command.clone()).await;
+                let event = events.try_recv().unwrap();
+                match command {
+                    Command::Bank(expected) => assert!(matches!(&event, Event::Bank(BankEvent::RequestRejected { command, message })
+                        if *command == expected && !message.is_empty())),
+                    Command::Repair(expected) => assert!(matches!(&event, Event::Repair(RepairEvent::RequestRejected { command, message })
+                        if *command == expected && !message.is_empty())),
+                    Command::Mate(expected) => assert!(matches!(&event, Event::Mate(MateEvent::RequestRejected { command, message })
+                        if *command == expected && !message.is_empty())),
+                    _ => unreachable!(),
+                }
+                state.apply(&event);
+                assert!(state.repair.pending.is_empty());
+                assert!(state.repair.last_report.is_none());
+                assert!(state.mates.own.is_none());
+                assert_eq!(state.inventory.bag_slots, 0);
+                assert!(events.try_recv().is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn repair_and_bank_services_validate_locally_and_wait_for_complete_authoritative_acks() {
         use crate::bank::{BankCommand, BankEvent};
         use crate::repair::{RepairCommand, RepairEvent};
@@ -2173,10 +2216,8 @@ mod tests {
             auto_use_aa_point: true,
         };
         session.command(Command::Bank(expand)).await;
-        assert!(
-            events.try_recv().is_err(),
-            "no connection cannot produce a successful send event"
-        );
+        assert!(matches!(events.try_recv(), Ok(Event::Bank(BankEvent::RequestRejected { command, .. })) if command == expand));
+        assert!(events.try_recv().is_err());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
@@ -2803,10 +2844,8 @@ mod tests {
             reason: 4,
         };
         session.command(Command::Mate(mount.clone())).await;
-        assert!(
-            events.try_recv().is_err(),
-            "no connection means no local send notification"
-        );
+        assert!(matches!(events.try_recv(), Ok(Event::Mate(MateEvent::RequestRejected { command, .. })) if command == mount));
+        assert!(events.try_recv().is_err());
         session.game = Some(GameConn::connect(&addr).await.unwrap());
         session.self_obj = 0x112233;
         for command in [
@@ -2824,6 +2863,7 @@ mod tests {
         }
         session.phase = Phase::CharacterSelect;
         session.command(Command::Mate(mount.clone())).await;
+        assert!(matches!(events.try_recv(), Ok(Event::Mate(MateEvent::RequestRejected { command, .. })) if command == mount));
         assert!(events.try_recv().is_err());
         session.phase = Phase::InWorld;
         session.command(Command::Mate(mount.clone())).await;
