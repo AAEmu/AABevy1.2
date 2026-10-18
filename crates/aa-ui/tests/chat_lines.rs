@@ -240,7 +240,8 @@ fn no_selected_tab_hides_lines_and_offset_setters_retain_signed_f32() {
         .clear();
     run(&ui, "window:SetRightLineOffset(-8)");
     assert!(!lua::ui(&ui.lua).tree.get(c.left_line).shown);
-    run(&ui, "window:SetChatWindowId(0)");
+    // Same-ID assignment is a native no-op; assign another window for fresh rows.
+    run(&ui, "window:SetChatWindowId(1)");
     assert!(lua::ui(&ui.lua).tree.get(c.left_line).shown);
     assert!(lua::ui(&ui.lua).tree.get(c.right_line).shown);
     assert_eq!(data(&ui).line_offset, [-0.1, -8.]);

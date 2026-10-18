@@ -178,58 +178,63 @@ pub(super) fn remove_hidden(lua: &Lua) {
             ui(lua).retiring.insert(root);
             continue;
         }
-        let ids = {
-            let u = ui(lua);
-            let mut ids = std::collections::BTreeSet::new();
-            let mut stack = vec![root];
-            while let Some(id) = stack.pop() {
-                if !ids.insert(id) {
-                    continue;
-                }
-                if let Some(w) = u.tree.widget(id) {
-                    stack.extend(w.children.iter().copied());
-                    stack.extend(w.drawables.iter().copied());
-                }
+        remove_subtree(lua, root);
+    }
+}
+
+/// Retire a native composite, including its input/event registrations and children.
+pub(super) fn remove_subtree(lua: &Lua, root: Id) {
+    let ids = {
+        let u = ui(lua);
+        let mut ids = std::collections::BTreeSet::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if !ids.insert(id) {
+                continue;
             }
-            ids
-        };
-        if ui(lua).focus.is_some_and(|id| ids.contains(&id)) {
-            super::edit::set_focus(lua, None);
+            if let Some(w) = u.tree.widget(id) {
+                stack.extend(w.children.iter().copied());
+                stack.extend(w.drawables.iter().copied());
+            }
         }
-        let mut g = ui(lua);
-        let u = &mut *g;
-        if let Some(parent) = u.tree.get(root).parent
-            && let Some(w) = u.tree.widget_mut(parent)
-        {
-            w.children.retain(|id| !ids.contains(id));
-        }
-        for &id in &ids {
-            u.tree.get_mut(id).alive = false;
-            u.animations.remove(id);
-            super::damage::hide(u, id);
-            u.handlers.remove(&id);
-            u.fades.remove(&id);
-            u.widget_sounds.remove(&id);
-            u.keyboard.removed(id);
-            u.drag.registered.remove(&id);
-        }
-        for events in u.events.values_mut() {
-            events.retain(|id| !ids.contains(id));
-        }
-        u.frame_handlers.retain(|(id, _)| !ids.contains(id));
-        u.attachments
-            .retain(|owner, target| !ids.contains(owner) && !ids.contains(target));
-        u.pending.retain(|(id, _, _)| !ids.contains(id));
-        u.entered.retain(|id| !ids.contains(id));
-        if u.hover.is_some_and(|id| ids.contains(&id)) {
-            u.hover = None;
-        }
-        drop(g);
-        let r = reg(lua);
-        for id in ids {
-            let _ = r.handlers.raw_set(id, Value::Nil);
-            let _ = r.objs.raw_set(id, Value::Nil);
-        }
+        ids
+    };
+    if ui(lua).focus.is_some_and(|id| ids.contains(&id)) {
+        super::edit::set_focus(lua, None);
+    }
+    let mut g = ui(lua);
+    let u = &mut *g;
+    if let Some(parent) = u.tree.get(root).parent
+        && let Some(w) = u.tree.widget_mut(parent)
+    {
+        w.children.retain(|id| !ids.contains(id));
+    }
+    for &id in &ids {
+        u.tree.get_mut(id).alive = false;
+        u.animations.remove(id);
+        super::damage::hide(u, id);
+        u.handlers.remove(&id);
+        u.fades.remove(&id);
+        u.widget_sounds.remove(&id);
+        u.keyboard.removed(id);
+        u.drag.registered.remove(&id);
+    }
+    for events in u.events.values_mut() {
+        events.retain(|id| !ids.contains(id));
+    }
+    u.frame_handlers.retain(|(id, _)| !ids.contains(id));
+    u.attachments
+        .retain(|owner, target| !ids.contains(owner) && !ids.contains(target));
+    u.pending.retain(|(id, _, _)| !ids.contains(id));
+    u.entered.retain(|id| !ids.contains(id));
+    if u.hover.is_some_and(|id| ids.contains(&id)) {
+        u.hover = None;
+    }
+    drop(g);
+    let r = reg(lua);
+    for id in ids {
+        let _ = r.handlers.raw_set(id, Value::Nil);
+        let _ = r.objs.raw_set(id, Value::Nil);
     }
 }
 
