@@ -948,9 +948,117 @@ The existing real-client Palace references are taken at camera Z 240.410,
 well above this authored flower patch at Z 194.683, so there is no matching
 native close-view comparison or new brightness calibration. Native terrain
 brightness/terrain-colour runtime blending, special material layers, native
-leaf/back/rim lighting and wind remain open. All deliverable runs exit zero
+leaf/back/rim lighting and full wind parity remain open. All deliverable runs exit zero
 without shader/GPU errors and close their windows. Inherited fly/post/sky/water
 calibration hunks remain unchanged.
+
+#### Native steady global wind / main bending (`vegetation_wind.rs`)
+
+The original 1.2 CPU-to-renderer bridge is recovered. Cry3D `30142970` reads
+`EnvState/WindVector` (missing attribute fallback `1,0,0`; malformed vector zero).
+`C3DEngine` vtable `30263718` slots +772/+776 are `3012B950`/`3012BB80`:
+the setter copies XYZ to engine+284..292; the getter supplies global wind and
+optionally physical wind areas. Main-world `env.xml` authors **(1,1,0)**.
+`e_wind=1`, `e_vegetation_bending=2`, and `e_wind_areas=1` are native defaults
+in `300092F0`; the separate `e_vegetation_wind=0` cvar is not treated as a
+global bending-disable switch.
+
+XML `fBending` travels through `300F76C0` definition+32 / `300F8270` to
+`30130DB0` engine group+16. Ordinary supported values 0..10 receive the
+native .01 lower clamp; missing, negative, >10, nonfinite, complex-bending
+and material-layer variants are declined. `300F4E60` initializes temp+168
+to `group.fBending*.1`. Ordinary `300F36E0` calls `3003E560 SetupBending`
+on the group's LOD0 stat object. Its field+180 is **vertical half-height**,
+`(AABB.max.z-AABB.min.z)*.5`, proved by `3001BA80`; public sphere-radius
+getter `30024D20` reads the different field+172. The steady base is
+`q=wind.xy*.25; b=q*2/(length(q)+2)`.
+
+The two native wave records use phase `objectMatrix.translation.xy*.125`,
+frequency `f=.4/(halfHeight+1)+.2`, Y frequency `f*1.125`, and amplitudes
+`b.xy*.008-b.yx*.002`. `3012EE00` copies exactly 44 bytes into frame-pooled
+render-object data+88. Renderer `SI_BendInfo` semantic5, table `38384054`,
+dispatch `38075A70` -> `38072920`, truncates
+`(frequency*gameSeconds+phase)*1024` to signed integer, masks with1023,
+and reads renderer+31480. Crucially, initializer `380C8050` fills that
+1024-entry table with `sin(f32(i*.3519061505794525)*PI_f32*.0055555556900799274)`:
+**360/1023 degree spacing including both endpoints**, not a 1024-step sine.
+The shader preserves that sampling/spacing, subject to GPU sine precision.
+The result is `XY=scale*(b+50*wave)`, `Z=scale*2*length(b)`,
+`W=.3*length(b+wave)`. Native renderer `38118D70 BeginFrame` samples timer
+vslot+12 into renderer+8280. CrySystem vtable `3660C060` +12 resolves to
+`3656ED30` (game-time int64 microseconds times1e-6); reset `3656F410`
+zeros that counter. Renderer `380767E0` case121 (`PF_Time`) uses the same
+sample. The app supplies its actual Bevy game clock; pauses and resets are
+followed. Integer duration periods retain an epoch across Bevy's wrapped
+shader clock, without per-frame material uploads or instance walks.
+
+Supported streamed parts are static, single identity-node **LOD0** models
+with Vegetation `DETAIL_BENDING` (0x10000) and Grass 0x2000/Leaves 0x100,
+whose original script explicitly enters the bending branch. Native
+`modificatorvt.cfi`1307-1334 rotates the vector by the authored matrix,
+including uniform scale and tilt. Its always-present main branch1088-1124
+applies the .015 factor, quartic bend factor and length-preserving local
+normalization. Forward, depth and shadow vertices use the same deformation;
+normals remain unchanged as in that branch. A conservative origin-centred
+sphere bounds moving tips. Existing AO, brightness, variation, opacity,
+shadow eligibility, worker/spawn budgets and cell lifetime stay in use.
+Materials are shared by base ID, exact brightness bits and wind parameter
+bits; group styles are indexed once with the existing worker-loaded XML.
+The environment vector is read once on that worker, not per frame.
+
+This is a bounded main-bending slice. Packed-RGB leaf/grass detail, physical
+wind areas, dynamic-wind extrapolation, complex skeletal wind, distant-bending
+suppression and sprite wind remain unsupported. Other LODs need retained
+LOD0 root bounds; compound nodes need native subobject-frame proof. The extra
+high-quality main variation1091-1104 uses `length(worldPos)` in the native
+sliding 8-cell world frame. Its producer mapping is unresolved, so streamed
+parts leave that additional term inactive; diagnostic small-coordinate
+fixtures can test its recovered equations. No camera-cell origin is guessed.
+The base XY sine phases are invariant to integer-cell origin shifts in exact
+arithmetic; full-world f32 coordinates can differ at truncation boundaries
+from the native smaller-coordinate frame. This does not claim full wind,
+native timer smoothing/serialization, or bit-exact native GPU output.
+
+Source evidence is retained under ignored `lights/vegetation-wind-*`:
+`setup-bending`, `record-copy`, `bendinfo`, `radius-closed`, `time2`, and
+`native-clock`, plus the original shader files. The renderer/engine artifacts
+are the pinned original 1.2 files already identified above; CrySystem source
+is read-only `D:/aa-re/client12/ida/crysystem.c` and its matching DLL.
+
+Validation: **184 tests pass / 9 ignored**, and all aa-world examples check.
+New regressions cover native lower clamp/declined invalid or complex groups,
+one-node authored bounds, transformed/compound rejection, native endpoint
+spacing, time-dependent source math, origin/radius preservation, shader-clock
+wrap/reset and actual `TimePlugin` virtual pause/reset. Original
+`flower_a.cgf` qualifies with vertical half-height **0.21382287 m**.
+The aa-dev `vegetation_wind` numeric fixture passes **24 GPU controls**:
+12 native-deformed triangle centres against independent CPU calculations,
+and 12 amplified lookup pixels covering negative/wrapped indices and the
+511/512 spacing discriminator. Lookup display error is zero. Geometry cases
+exercise group .01/1/2/10, times 0/3.25/3600.125, grass/leaves, translation,
+tilt and uniform scale, including the HQ branch in the known small frame.
+The rebuilt brightness fixture also retains **32 GPU regressions** with
+AO/colour variation, opacity .5, missing AO, lit/unlit/emissive and fog
+ordering; maximum display error 0 without fog and 1 with fog.
+
+Inspected captures under `shots/aa-world/vegetation_wind/` are `numeric.png`,
+`forest_native.png`, `forest_off.png`, `forest_later.png`,
+`forest_unload.png`, `brightness_regression.png` and
+`brightness_fog_regression.png`. Original forest cell(12,14), camera
+Cry(12807,14566,162) towards(12812.47,14575.70,158.88), hour 10, draws
+**1,404 supported parts / 13 shared meshes / 13 shared materials** among
+2,926 total object parts, zero pending/failed models. The controls change
+only wind time 3.25/7.25 or set its shared scalar to zero. Other environment
+and particle clocks continue, so image differences are not an isolated wind
+pixel oracle; the numeric controls provide that validation. Authored steady
+wind is subtle at this camera, and detail bending remains absent. No matching
+native close-view/animation reference exists, so no motion or colour-match
+claim is made. Native capture intervals are 96-145 FPS, off 118-141 FPS,
+later 102-138 FPS on the shared machine; these are not a performance comparison.
+The ordinary running-clock unload fixture removes all **1,404 recorded IDs**
+and reaches zero wind parts, total objects and pending models after moving
+focus out of the world. All final runs exit zero without shader/GPU errors
+and close their own windows. Inherited five calibration files are unchanged.
 
 #### Native vegetation ordinary-shadow eligibility
 

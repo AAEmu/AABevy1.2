@@ -1,4 +1,5 @@
 // Native vertex-alpha AO / COLOR_VARIATION: final lit RGB, before fog/post. Alpha and material alpha test unchanged.
+import aa_world::vegetation_bindings::parameters;
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_functions::get_tag,
@@ -7,16 +8,6 @@ import bevy_pbr::render::{
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 };
-
-struct VegetationUniform { brightness: vec4<f32> }
-@if(BINDLESS) {
-    struct VegetationBindings { material: u32 }
-    @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> vegetation_indices: array<VegetationBindings>;
-    @group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> vegetation_array: array<VegetationUniform>;
-}
-@else {
-    @group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> vegetation: VegetationUniform;
-}
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
@@ -28,12 +19,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     } else {
         out.color = pbr.material.base_color;
     }
-    @if(BINDLESS)
-    let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
-    @if(BINDLESS)
-    let brightness = vegetation_array[vegetation_indices[slot].material].brightness.x;
-    @else
-    let brightness = vegetation.brightness.x;
+    let brightness = parameters(in.instance_index).brightness.x;
     // Native non-terrain branch: AmbientObjectCol.x multiplies vertex AO before variation/fog.
     out.color = vec4<f32>(out.color.rgb * brightness, out.color.a);
     let packed = get_tag(in.instance_index);
