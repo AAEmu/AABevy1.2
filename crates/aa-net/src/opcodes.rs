@@ -162,6 +162,10 @@ opcodes! {
 opcodes! {
     /// Game server to client, level 1 (`SC*`).
     pub mod sc {
+        SCEnvDamagePacket = 0x0b3,
+        SCSetBreathPacket = 0x1bc,
+        SCForceAttackSetPacket = 0x043,
+        SCUnitInvisiblePacket = 0x078,
         SCResponseUIDataPacket = 0x1ca,
         X2EnterWorldResponsePacket = 0x000,
         SCReconnectAuthPacket = 0x001,

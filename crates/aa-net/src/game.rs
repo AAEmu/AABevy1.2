@@ -380,6 +380,10 @@ pub enum ServerMsg {
     /// `SCUnitMovements`: several units moved at once (read as unit movements, see [`unit_msg::read_unit_movements`]).
     UnitMovements(Vec<(u32, Movement)>),
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
+    EnvDamage(crate::combat_status::EnvironmentDamage),
+    SetBreath { breath: u32 },
+    ForceAttackSet { obj_id: u32, on: bool },
+    UnitInvisible { obj_id: u32, invisible: bool },
     UnitDeath {
         obj_id: u32,
         /// `KillReason`.
@@ -620,6 +624,10 @@ impl ServerMsg {
             Self::BlinkUnit(_) => "SCBlinkUnit",
             Self::Gimmick(e) => e.name(),
             Self::UiData(_) => "SCResponseUIData",
+            Self::EnvDamage(_) => "SCEnvDamage",
+            Self::SetBreath { .. } => "SCSetBreath",
+            Self::ForceAttackSet { .. } => "SCForceAttackSet",
+            Self::UnitInvisible { .. } => "SCUnitInvisible",
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
@@ -923,6 +931,10 @@ impl ServerMsg {
             sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
             sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
             sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
+            sc::SCEnvDamagePacket => Self::EnvDamage(crate::combat_status::EnvironmentDamage::read(r)?),
+            sc::SCSetBreathPacket => Self::SetBreath { breath: r.u32()? },
+            sc::SCForceAttackSetPacket => Self::ForceAttackSet { obj_id: r.bc()?, on: r.bool()? },
+            sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,

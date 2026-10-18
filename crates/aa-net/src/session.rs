@@ -392,6 +392,10 @@ pub enum Event {
     /// An NPC took (`activate`) or left an idle pose: `anim_action` is an `anim_actions.id`, `kind` the `ModelPostureType`.
     UnitPosture { obj_id: u32, kind: u8, anim_action: u32, activate: bool },
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
+    EnvDamage(crate::combat_status::EnvironmentDamage),
+    SetBreath { breath: u32 },
+    ForceAttackSet { obj_id: u32, on: bool },
+    UnitInvisible { obj_id: u32, invisible: bool },
     UnitDeath { obj_id: u32 },
     /// The details of a death (follows [`Event::UnitDeath`] for the same packet).
     DeathDetails {
@@ -1452,6 +1456,10 @@ impl Session {
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
+            M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
+            M::SetBreath { breath } => self.emit(Event::SetBreath { breath }),
+            M::ForceAttackSet { obj_id, on } => self.emit(Event::ForceAttackSet { obj_id, on }),
+            M::UnitInvisible { obj_id, invisible } => self.emit(Event::UnitInvisible { obj_id, invisible }),
             M::Mate(e) => self.emit(Event::Mate(e)),
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
@@ -1654,6 +1662,103 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn combat_status_session_preserves_reports_and_batch_tail_without_predicting_points() {
+        use crate::combat_status::EnvironmentDamage;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        let mut state = crate::state::WorldState::default();
+        let mut character = CharacterState::default();
+        character.character.id = 17;
+        state.apply(&Event::CharacterSelected(Box::new(character.clone())));
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: character,
+            unit: crate::state::tests::unit(7),
+        })));
+        state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(8))));
+        let damage = EnvironmentDamage {
+            source: 2,
+            target_obj_id: 7,
+            amount: u32::MAX,
+            gimmick_id: None,
+        };
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::EnvDamage(damage),
+                game::ServerMsg::ForceAttackSet {
+                    obj_id: 99,
+                    on: true,
+                },
+                game::ServerMsg::UnitInvisible {
+                    obj_id: 8,
+                    invisible: true,
+                },
+                game::ServerMsg::SetBreath { breath: 999 },
+                game::ServerMsg::ForceAttackSet {
+                    obj_id: 7,
+                    on: false,
+                },
+                game::ServerMsg::UnitPoints {
+                    obj_id: 7,
+                    hp: 6,
+                    mp: 2,
+                },
+                game::ServerMsg::Snow(true),
+            ])))
+            .await;
+        for index in 0..7 {
+            let event = events.try_recv().unwrap();
+            match (index, &event) {
+                (0, Event::EnvDamage(actual)) => assert_eq!(*actual, damage),
+                (
+                    1,
+                    Event::ForceAttackSet {
+                        obj_id: 99,
+                        on: true,
+                    },
+                ) => {}
+                (
+                    2,
+                    Event::UnitInvisible {
+                        obj_id: 8,
+                        invisible: true,
+                    },
+                ) => {}
+                (3, Event::SetBreath { breath: 999 }) => {}
+                (
+                    4,
+                    Event::ForceAttackSet {
+                        obj_id: 7,
+                        on: false,
+                    },
+                ) => {}
+                (
+                    5,
+                    Event::UnitPoints {
+                        obj_id: 7,
+                        hp: 6,
+                        mp: 2,
+                    },
+                ) => {}
+                (6, Event::Snow(true)) => {}
+                _ => panic!("unexpected event at {index}: {event:?}"),
+            }
+            state.apply(&event);
+            assert_eq!(state.stats.hp, if index < 5 { 10 } else { 6 });
+        }
+        assert!(events.try_recv().is_err());
+        assert_eq!(state.combat_status.breath, Some(999));
+        assert_eq!(
+            state.combat_status.get(7).unwrap().force_attack,
+            Some(false)
+        );
+        assert_eq!(state.combat_status.get(8).unwrap().invisible, Some(true));
+        assert!(state.combat_status.get(99).is_none());
+        assert!(state.units.get(8).is_some());
+    }
 
     #[tokio::test]
     async fn ui_data_session_validates_save_identity_and_only_caches_received_responses() {
