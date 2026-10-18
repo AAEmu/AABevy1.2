@@ -50,6 +50,7 @@ pub(crate) fn spawn() -> aa_net::PlayerSpawn {
             anim_action: 0,
             attached_to: None,
             house_posture: None,
+            state_attachments: None,
         },
     }
 }
