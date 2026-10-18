@@ -2517,7 +2517,8 @@ give `(1-d²/r²)²`; Bevy uses `(1-(d²/r²)²)²/d²`. Luminous intensity is t
 `0.16 * radius² * WorldConfig.sun_lux_scale` (lumens multiply by `4*pi`), matching diffuse
 illuminance at half-radius. RGB is the authored diffuse product, without arbitrary source colors.
 The exact Cry falloff, legacy `fHDRDynamic`, per-light specular multiplier, ambient-light shader
-mode, style animation, vis-area restrictions and legacy shadow-bias units are not reproduced.
+mode, vis-area restrictions and legacy shadow-bias units are not reproduced.
+Ordinary point-light style animation is implemented below; other consumers retain their stated limits.
 Those fields remain typed data; shadows use Bevy's bias defaults and the bounded shadow budget.
 IndirectLight and cubemap lighting remain separate renderer work. Ordinary RGB 2D projectors
 have a bounded supported path described below.
@@ -2531,6 +2532,86 @@ with and without its 32 original light slots. With lights, 127–149 FPS late; d
 The lamp and nearby wood become visibly lit (a fixed dock sample rises from luma 1.86 to 9.42).
 The unload smoke asserts 32 rendered lights become zero, with no authored data entities left.
 All own windows exit automatically; no exact real-client night reference exists for this dock.
+
+**Native point-light styles** (`objects/lights/styles.rs`): original
+`game/shaders/hwscripts/cryfx/light.cfx` defines37 styles,0-36. Native shader
+initialization38234DB0 requests `Light.LightStyles`; parser3823A950 registers
+`ValueString`/`Speed`, and38239A30 expands pipe-separated keys into RGBA.
+One value replicates RGB with alpha1; two values use B/alpha1; three use alpha1;
+four retain RGBA. Speed defaults to60. The native token registry38213FE0 also
+closes the shipped `shaders/cache/d3d11/light.cfxb`: **all37 compiled Speed/key
+sequences match the source float32 values bit for bit**. The runtime reads that
+small original text once; it does not invent a candle/pulse curve.
+
+The Light/SimpleLight scripts pass `Style.nLightStyle` through `lt.style`.
+Entity parser32043600 truncates the Lua number and stores its low byte at
+`SRenderLight+360`; renderer38179800 reads that same byte. Its time input is
+`GetCurrTime(0)`, the ordinary game clock. Update3822B7E0 computes float32
+`phase=seconds*Speed`, truncates the key index and loops modulo the key count,
+then performs linear RGBA interpolation. The object starts at white/intensity1
+with cached phase0; an unchanged phase does not recompute, including that initial
+zero-time case. Ordinary point lights use **luminance**, not the interpolated
+RGB hue: `(G*0.58999997 + R*0.3) + B*0.11` multiplies every base light RGB channel.
+The separate shader/beam RGB consumer is not applied to point lights.
+
+**666 original update RGBA/luminance controls and666 original DLight colour
+uploads pass bit for bit**, across all37 original tables, key/loop boundaries,
+repeated phases, long time and reset. The consumer oracle supplies exact seconds
+through its native timer-call stub and disables the unrelated HDR branch.
+Six original cell XML files contain20 currently supported Light/SimpleLight slots
+with styles2/4/6/12/19, in addition to117 style0 slots. The38 indirect-light slots
+with style20 remain outside this supported light path.
+
+Selection and cookie admission retain their5Hz cadence and existing64-component /
+2-shadow limits. A separate per-frame query visits only admitted
+`LocalLight + PointLight` components, at most64; dormant authored slots are not
+walked. The sampled table state is shared per style. It uses continuous Bevy
+virtual game seconds, including app pause/reset, independently of the time-of-day
+hour. No per-frame parsing, allocation, model work or material generation occurs.
+Unchanged colours are not uploaded, and animated colour does not force the
+selection pass to reinsert the light component. Existing inverse-square/native
+falloff, HDR, specular, ambient and vis-area limitations are unchanged.
+Nonzero-style RGB projectors remain rejected by their existing eligibility gate.
+
+`LightStyleSettings` defaults to enabled/app-clock input. Its optional fixed
+seconds and disabled/unity controls are for measured fixtures. Style0 and absent
+source styles preserve base RGB; nonfinite/negative diagnostic time is declined.
+Source tables are bounded to256 byte-indexed entries,1024 keys per entry and4096
+keys total (the actual source has2007 keys, maximum483). They retain renderer
+lifetime across cell unload. Tests cover native floats/defaults/value expansion,
+cache/loop/low-byte/reset, per-frame changes between selection ticks, real virtual
+pause/reset and render-component removal.
+
+`light_styles` uses production point lights and neutral PBR receivers; its lower
+row uses independently executed original-upload reference gains. Styles0/2/4/6/12/19
+are tested at0.125s and1s, plus the former unity control. `--world` visits the
+original workshop style6 light (GUID4b43a201d69a1c3f, global
+`21871.63,8249.758,408.02875`), with the same camera for both phases and unity.
+`--world --live` instead follows ordinary game time. The world floor/wall receiver
+is visible; the lamp itself is occluded by the authored lattice. Existing ambient
+and area-confinement approximations remain explicit; this is not a native-client
+camera or full lighting match. `--world --unload-check` verifies zero selected
+light components while retaining the shared source table.
+
+Final validation: **234 library tests pass /9 existing ignored**, all examples
+check, and the dedicated example builds. All18 neutral receiver/reference RGB
+comparisons are **exactly equal**, with meaningful unclipped output. The world
+camera retains25 original selected lights; the0.125s?1s pair changes417,711
+pixels by more than3 bytes (max89), and the former-unity comparison changes419,104
+(max89). The inspected lattice/wall/floor response is visibly different, while
+source transforms and radiometry remain fixed. The real cell unload reaches zero
+selected components and retains the shared37-entry table, as intended.
+
+Observed shared-machine FPS:235-453 across the numeric captures;157-211 for the
+0.125s world view,143-162 at1s and123-198 with unity; unload147-247. These are run
+ranges under concurrent CPU builds, not a benchmark comparison. All seven runs
+exit zero and close their windows. Numeric runs have no warnings/errors; original
+world runs retain the existing expected `fleettest.dds is not a cube map` fallback
+warning, with no errors or panics. The copied executable is removed.
+
+Ignored `roads/light-style-audit/` retains original source/cache, native producer,
+parser/token/update/consumer proof, all executed oracle vectors, the original XML
+survey, capture logs and inherited calibration hashes.
 
 Read-only material finding for aa-cry: the bright RGB sail in this dock is brush model #71,
 `galleon_deco_sail01.cgf`, with cell material #54 `galleon_mahadevi.mtl`, submaterial #3 `ucc`

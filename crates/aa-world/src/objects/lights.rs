@@ -10,6 +10,7 @@ use bevy::light::SpotLightTexture;
 use bevy::prelude::*;
 
 mod projectors;
+pub mod styles;
 
 use crate::coords::{cell_origin, cry_to_bevy};
 use crate::entities::PlacedLight;
@@ -69,8 +70,10 @@ impl Plugin for LocalLightPlugin {
             .init_resource::<LocalLightStats>()
             .init_resource::<projectors::Cookies>()
             .init_resource::<Assets<Image>>()
+            .init_resource::<styles::LightStyles>()
+            .init_resource::<styles::LightStyleSettings>()
             .insert_resource(ProjectorSupport(false))
-            .add_systems(Update, update_lights.after(super::stream_objects));
+            .add_systems(Update, (update_lights, styles::animate).chain().after(super::stream_objects));
     }
 
     fn finish(&self, app: &mut App) {
@@ -288,8 +291,7 @@ fn update_lights(
         let intensity = lumens(p.radius, cfg.sun_lux_scale.max(0.0));
         let shadows = shadowed.contains(&entity);
         if current.is_none_or(|old| {
-            old.color != color
-                || old.range != p.radius
+            old.range != p.radius
                 || old.intensity != intensity
                 || old.shadow_maps_enabled != shadows
         }) {
