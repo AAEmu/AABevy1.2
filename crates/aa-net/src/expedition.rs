@@ -169,8 +169,9 @@ pub struct Expeditions {
     pub members: BTreeMap<u32, ExpeditionMember>,
     /// Last received declared total for each list context. Not a completeness assertion.
     pub totals: BTreeMap<u32, u32>,
-    /// Exact ordered receipts, including empty markers and duplicate rows. Cleared with session.
-    pub receipts: Vec<ExpeditionEvent>,
+    /// Last complete receipt, including its raw row order and duplicates. All receipts are
+    /// delivered in order through Event::Expedition; the cache does not keep a status history.
+    pub last_receipt: Option<ExpeditionEvent>,
 }
 impl Expeditions {
     pub fn apply(&mut self, event: &Event) -> bool {
@@ -197,11 +198,11 @@ impl Expeditions {
                         self.members.insert(member.character_id, member.clone());
                     }
                 }
-                self.receipts.push(receipt.clone());
+                self.last_receipt = Some(receipt.clone());
                 true
             }
             Event::CharacterSelected(_) | Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                let changed = !self.receipts.is_empty();
+                let changed = self.last_receipt.is_some();
                 *self = Self::default();
                 changed
             }
@@ -308,7 +309,8 @@ mod tests {
         s.apply(&event);
         assert_eq!(s.members.len(), 1);
         assert_eq!(s.members[&7], m);
-        assert_eq!(s.receipts.len(), 2);
+        let Event::Expedition(receipt) = &event else { panic!() };
+        assert_eq!(s.last_receipt.as_ref(), Some(receipt));
         s.apply(&Event::Expedition(ExpeditionEvent::Policies(vec![ExpeditionRolePolicy {
             expedition_id: 9,
             role: 4,
@@ -316,10 +318,12 @@ mod tests {
         }])));
         s.apply(&Event::Expedition(ExpeditionEvent::Policies(vec![])));
         assert_eq!(s.policies.len(), 1);
+        assert!(matches!(&s.last_receipt, Some(ExpeditionEvent::Policies(rows)) if rows.is_empty()));
         m.online = 0;
         m.expedition_id = 10;
         s.apply(&Event::Expedition(ExpeditionEvent::MemberStatus { member: m.clone(), flag: 255 }));
         assert_eq!(s.members[&7], m);
+        assert!(matches!(&s.last_receipt, Some(ExpeditionEvent::MemberStatus{member,flag:255}) if member==&m));
         assert_eq!(s.totals[&9], 21);
         let mut world = crate::state::WorldState::default();
         world.apply(&event);
