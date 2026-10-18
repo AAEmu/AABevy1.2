@@ -5364,3 +5364,94 @@ Native list readers397c1820/397c1a90/397c1cf0 cap inline faction/policy/member a
 Getter follow-up: GetMyExpeditionName39472ef0 returns one empty string for invalid own-ID or missing faction metadata; an existing name is a C-string. GetExpeditionRolePolicy39473180 via39473900?394736f0 requires successful ScriptAnyValue numeric type4, narrows to f32 and CVTTSS2SI signed i32, then exact composite-key query392fcea0; invalid/non-numeric/missing rows return zero Lua values. There is no u8 role wrap. GetExpeditionMyRolePolicy39473280?392fcf10 queries the same converter with native own-role. GetExpeditionMembersPerPage binding39474714..758?39473430?392f8330 returns the same39ac729c used for paging division392ff097 and upper bound392ff149; verified original runtime value50, distinct from the original view's10 visible rows. Protected static bytes do not prove a literal50 initializer.
 
 Regression scope includes constructor defaults, explicit CharacterSelected hydration, same-ID spawn ordering, changed identity reset/faction retention, count and policy prerequisites, no retroactive policy/status reconciliation, actual local-row lookup, mismatch contexts, full raw versus safely capped cache rows/text, and connection reset. Outgoing expedition commands and positionInfo formatting remain outside this change. The original Lua sets its derived MEMO permission false; no lane memo request handler was found, so no memo wire contract is invented.
+
+
+### Expedition outgoing controls and invitation receipt (2026-10-18)
+
+`ExpeditionCommand` adds Invite, Reply, Leave, Kick, ChangeMemberRole,
+ChangeOwner, ChangePolicy and Dismiss. `Command::Expedition { character_id,
+command }` requires InWorld and the same nonzero selected persistent character.
+`ExpeditionRequested` means an actual socket write; `ExpeditionRequestRejected`
+covers inactive, stale-character, malformed and failed/missing transport paths.
+Neither notification is a server ACK, and neither changes received membership.
+The UI remains responsible for native permission checks and captured task identity.
+
+Native/lane payload agreement: CS006 is a full policy (u32 expedition, u8 role,
+u16-length name, nine boolean bytes in received policy order); CS007 is **u8
+role then u32 member ID**; CS008 owner and CS00f kick are u32 member ID;
+CS00b dismiss and CS00e leave are empty; CS00c invite is a u16-length name;
+CS00d reply is u32 inviter ID, u32 expedition ID, u8 join. Native constructors
+397ab3d0/3f0/410/450/470/490, serializers397c4b60/80,397b90e0,
+397b04f0,397b9190/1e0 and empty3901c170 agree with the active lane
+`systems/social/packets/expedition.rs` readers. Request validation adds explicit
+nonzero identities, <=128-byte names, and canonical policy boolean bytes. These
+are application bounds, not a recreation of locale-sensitive native Lua parsing.
+Binary names remain exact on the wire; native Lua works on first-NUL C strings.
+
+SC01a now decodes `Invitation { inviter_id, inviter_name, expedition_id,
+expedition_name }` as u32/string/u32/string. Factory391a7f6e sets opcode1a and
+vtable399b30e4; serializer397b2d90 caps each native inline string to128 bytes.
+The lane writer has the same order and complete dynamic strings. Raw events and
+last_receipt preserve all bytes. Receiving an invitation creates no faction,
+member, local membership, automatic reply or speculative timer.
+
+Native wrapper39472700..394727c9 returns no Lua values for actions; no common
+feature-bit gate exists in these bodies. Target lookup398a3480 walks persistent-ID
+ordered cache and returns the FIRST name matched by **XlCompareStringI**
+(IAT38ff6c54), not strcmp. Missing Kick/role target emits135hex; missing Owner
+target emits148hex. Native Invite does not perform this target-cache lookup.
+Admission/error order (all error numbers hexadecimal, passed to39425f50):
+
+* Invite392fdf10 null name returns without send;398a4260 requires own faction
+  (31), then own policy/invite permission (33); accepted name is UTF8-copied.
+* Kick392f91b0 then398a4370: own faction (3e), non-invalid mother_id (3f),
+  policy/expel permission (40), target not self (41), ownRole >= targetRole (40),
+  and if political_system==0 target must not equal cached owner_id (42).
+* Role392f8c50/398a4440: policy/promote, targetRole<ownRole,
+  newRole<ownRole and newRole!=255, otherwise46. Equal-rank kick and role-change
+  eligibility differ. Lua signed numeric conversion must not silently wrap here.
+* Owner392f8cf0/398a3910: own faction exists and ownRole255, otherwise20;
+  then392f4ec0 must return null, otherwise238. This scans a separate context tree
+  for state4 and39839600(expedition,0); its full received producer remains open.
+* Policy392f8bb0: ownRole255 else46; XlIsValidName(name,ValidNameType2)
+  (IAT38ff6e98) else128. The validator dispatches by locale in xlcommon330095c0;
+  a guessed ASCII-only name rule would not reproduce it.
+* Leave392fa4b0: ownID0 emits137.398a38c0 requires own faction (3b) and
+  non-owner role (136). If that helper fails and native member-cache count==1,
+  it invokes Dismiss instead of reporting the Leave error.
+* Dismiss392fa2f0/398a3870 requires own faction (2e), then role255 (30).
+
+Accepted Leave opens Task26 (vtable399ccdf0); accepted Dismiss opens Task27
+(vtable399ccdd0). Title/content are dialogTitle/dialogText keys
+`ask_leave_expedition` and `ask_dismiss_expedition`. Positive callbacks392f9180
+and392f8ff0 send the corresponding empty request; result0 sends nothing.
+Join Task3 ctor392f88b0/vtable399ccd24 captures expedition ID+8, inviter ID+c,
+and inviter name+10 (128 bytes plus NUL). Admission392f8940 rejects a queued
+Task3 or option index2==1. Initial packet callback392f9590 also requires a local
+actor and cached invited faction. Info392f9a00 uses title/text
+`ask_expedition_invite`; text substitutes inviterName and cached factionName;
+buttons common.invite/common.reject. Callback392f8970 rejects any ownID!=0
+with132 even for decline, otherwise sends captured inviter/expedition IDs and the
+result. It does not optimistically populate membership. Source archive:
+`data/extract/aa-net/native-expedition-controls-20261018.txt` (ignored).
+
+PositionInfo source correction:39303db0 receives **id3 first, zone_id second**.
+It appends sub_zones.name from3976ade0(id3), then localized zones.display_text
+from395779f0(zone_id). zones.group_id (row+10 u16) resolves zone_groups;
+zone_groups.target_id (row+30) resolves world_groups.name (row+1c). `none` and
+`main_world` are skipped; other names localize with kind92 and raw-name fallback.
+The +1019c vector is directly indexed; read-only runtime entries correlate with
+zones.zone_key, not zones.id (index0?id31/key0,2?id32/key2,3?id33/key3).
+Its static fill producer remains unclosed; this is recorded runtime evidence,
+not a fabricated worlds table. zones loader3982c100 SQL39a14830 explicitly loads
+both zone_key and display_text; zone_groups3982c350 and world_groups3982f110
+close the rest of the chain.
+
+Offline last_world_leave_time is **Unix epoch seconds**, despite legacy helper
+names: xlcommon XlGetCurrentFileTime3301ca70 calls _time64(NULL), and
+XlDiffTime3301ca80 calls _difftime64. There is no Windows1601/100ns conversion.
+39300c10 compares timestamp/current local CRT wallclock as unsigned u64, clamps
+future values (including negative wire i64 interpreted unsigned) to zero age,
+then394245f0 decomposes365-day years/30-day months/days/hours/minutes/seconds;
+39429b20 exposes all six keyed numeric components. This clock is independent of
+mapped monotonic ServerClock.

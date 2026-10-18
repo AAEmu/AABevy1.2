@@ -108,6 +108,8 @@ impl ExpeditionMember {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExpeditionEvent {
+    /// SC01a: complete raw invitation; task admission belongs to the native UI bridge.
+    Invitation { inviter_id:u32, inviter_name:Vec<u8>, expedition_id:u32, expedition_name:Vec<u8> },
     Factions(Vec<ExpeditionFaction>),
     Policies(Vec<ExpeditionRolePolicy>),
     Members {
@@ -122,10 +124,11 @@ pub enum ExpeditionEvent {
 }
 impl ExpeditionEvent {
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, 0x008 | 0x00b | 0x016 | 0x017)
+        matches!(opcode, 0x008 | 0x00b | 0x016 | 0x017 | 0x01a)
     }
     pub fn read_lane(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            0x01a => Self::Invitation { inviter_id:r.u32()?,inviter_name:r.blob()?.to_vec(),expedition_id:r.u32()?,expedition_name:r.blob()?.to_vec() },
             0x008 => {
                 let count = r.u8()?;
                 let mut rows = Vec::with_capacity(count.into());
@@ -202,6 +205,7 @@ impl Expeditions {
         match event {
             Event::Expedition(receipt) => {
                 match receipt {
+                    ExpeditionEvent::Invitation { .. } => {}
                     ExpeditionEvent::Factions(rows) => {
                         for row in rows.iter().take(20) {
                             let mut row=row.clone();row.name.truncate(128);row.owner_name.truncate(128);
@@ -260,6 +264,15 @@ impl Expeditions {
 mod tests {
     use super::*;
     use crate::wire::Writer;
+    #[test]
+    fn native_lane_invitation_preserves_bytes_and_never_infers_membership() {
+        let bytes=[7,0,0,0,3,0,255,0,65,9,0,0,0,2,0,128,0];
+        let expected=ExpeditionEvent::Invitation{inviter_id:7,inviter_name:vec![255,0,65],expedition_id:9,expedition_name:vec![128,0]};
+        let mut r=Reader::new(&bytes); assert_eq!(ExpeditionEvent::read_lane(0x1a,&mut r).unwrap(),expected); assert!(r.is_empty());
+        for n in 0..bytes.len() {assert!(ExpeditionEvent::read_lane(0x1a,&mut Reader::new(&bytes[..n])).is_err());}
+        let mut state=Expeditions::default();state.apply(&Event::Expedition(expected.clone()));
+        assert_eq!(state.own_id,0);assert!(state.members.is_empty()&&state.factions.is_empty());assert_eq!(state.last_receipt,Some(expected));
+    }
     fn member_bytes() -> Vec<u8> {
         // Independent lane writer field sequence, with binary strings and raw booleans.
         let mut w = Writer::new();
