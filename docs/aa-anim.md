@@ -557,6 +557,41 @@ identity, nonzero original speech evaluation, all eight PC library selections an
 include/override semantics. Hat variants remain unresolved: the DB supplies four alternate
 hair assets, but the helmet-to-variant selection contract has not been proven.
 
+The public loaded-head integration path is now:
+
+```rust,ignore
+let plain = cry.load_model(head_path, &options)?;
+let (loaded, face, weights) = aa_anim::facial::prepare_loaded_face(
+    cry, head_path, body_cal_path, &plain,
+)?;
+let head = aa_cry::scene::spawn_loaded(commands, head_path, &loaded, &options);
+commands.entity(head).insert(ChildOf(model_root));
+commands.entity(body_root).insert((face, weights)); // same entity as body Animator
+```
+
+Call the factory once per independently animated instance, before spawning its head. The
+returned `LoadedModel` has private cloned subset mesh handles with the actual GPU morph
+descriptors/names installed; the cached input's meshes, materials, skeleton, bind poses and
+model remain unchanged. Insert its `FacialAnimator` and `MorphWeights` on the body root;
+`FacialPlugin` binds the new head mesh entities and performs the initial descriptor upload
+refresh. Existing `ModelOptions`/body joint binding and the Cry-to-Bevy model-root transform
+remain the caller's responsibility, as in the ordinary `spawn_loaded` CDF skin path. A
+matching body CAF automatically selects its CAL's same-name FSQ and samples the body's
+clock, including pauses. Unsupported heads return an error and can use the untouched plain
+model. The client's separate NPC path is still awaiting this opt-in integration.
+
+`facial --chef` now uses this public factory directly, without a synthetic CharacterAssets
+wrapper or PC material customization. Inspected factory capture
+`shots/aa-anim/facial_npc_loaded_factory_20261018.png` shows three independently animated
+heads at **256.0–302.1 FPS**. The uncalibrated native skin material is brighter than the
+earlier PC-tinted diagnostic; this does not change target geometry. The PC regression
+`shots/aa-anim/facial_pc_factory_regression_20261018.png` retains open/blink/speech at
+**228.7–278.2 FPS** before capture. Latest tests: **62 passed, 1 ignored**. The factory
+regression verifies descriptor creation, unchanged cached input, distinct output mesh
+handles across two preparations, 23 initial zero weights and original chef CAF/FSQ clock
+following at 1.7218 and 3 seconds. The authored return has small signed values, retained
+without forcing neutral.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/

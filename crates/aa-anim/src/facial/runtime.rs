@@ -227,6 +227,60 @@ mod tests {
     use crate::{ClipLibrary, SampleOptions, pose::shared_rig};
 
     #[test]
+    fn loaded_factory_isolates_meshes_and_follows_original_npc_body_clock() {
+        if !aa_cry::pak_available() { return; }
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<Image>>();
+        world.init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>();
+        world.init_resource::<aa_cry::scene::CryCache>();
+        let mut state = bevy::ecs::system::SystemState::<CryAssets>::new(&mut world);
+        let mut cry = state.get_mut(&mut world).unwrap();
+        let path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
+        let cal_path = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal";
+        let plain = cry.load_model(path, &aa_cry::scene::ModelOptions::default()).unwrap();
+        let (first, mut face, weights) = prepare_loaded_face(&mut cry, path, cal_path, &plain).unwrap();
+        let (second, other_face, _) = prepare_loaded_face(&mut cry, path, cal_path, &plain).unwrap();
+        assert_eq!(face.targets.len(), 23);
+        assert_eq!(weights.weights(), &[0.0; 23]);
+        for (((_, plain), (_, first)), (_, second)) in plain.parts.iter().zip(&first.parts).zip(&second.parts) {
+            for ((plain, first), second) in plain.iter().zip(first).zip(second) {
+                assert_ne!(plain.mesh, first.mesh);
+                assert_ne!(first.mesh, second.mesh);
+                assert!(!cry.meshes.get(&plain.mesh).unwrap().has_morph_targets());
+                let prepared = cry.meshes.get(&first.mesh).unwrap();
+                assert!(prepared.has_morph_targets());
+                assert_eq!(prepared.morph_target_names().unwrap(), &face.targets);
+                assert!(face.meshes.contains(&first.mesh.id()));
+                assert!(!other_face.meshes.contains(&first.mesh.id()));
+            }
+        }
+        let cal = Cal::shared(cal_path).unwrap();
+        let talk = cal.animation("fist_ac_talk_11").unwrap();
+        let rig = shared_rig("objects/characters/people/npc_chef01/nude/npc_chef01_base.chr").unwrap();
+        let bound = ClipLibrary::default().bound(&rig, &talk.path, SampleOptions::default()).unwrap();
+        let mut body = Animator::new(rig, Vec::new());
+        body.play(bound, false, 0.0);
+        body.paused = true;
+        body.current.as_mut().unwrap().time = 1.7218;
+        face.fade_seconds = 0.0;
+        let mut out = vec![0.0; 23];
+        face.update(Some(&body), 0.01, &mut out);
+        assert_eq!(face.time, 1.7218);
+        assert!(out.iter().any(|w| *w > 0.5), "{out:?}");
+        let expected = out.clone();
+        face.update(Some(&body), 5.0, &mut out);
+        assert_eq!(out, expected);
+        body.current.as_mut().unwrap().time = 3.0;
+        face.update(Some(&body), 0.01, &mut out);
+        assert_eq!(face.time, 3.0);
+        // The authored return retains small signed values; do not force neutral.
+        assert!(out.iter().all(|w| w.abs() < 0.1), "{out:?}");
+        assert!(out.iter().any(|w| *w < -0.01), "{out:?}");
+    }
+
+    #[test]
     fn stopping_during_a_fade_keeps_the_displayed_pose() {
         let library = ExpressionLibrary::parse(
             r#"<ExpressionLibrary><AllEffectors><Effector Name="lid" Type="morph"/></AllEffectors></ExpressionLibrary>"#,
@@ -436,14 +490,42 @@ pub(crate) fn prepare_face(
     part: &PartAsset,
     loaded: &LoadedModel,
 ) -> Result<FacialAnimator> {
-    let set = expression_set(&part.path, &loaded.model)?;
+    prepare_face_inner(cry, &part.path, &assets.cal, loaded)
+}
+
+/// Prepare an already loaded head before passing it to `aa_cry::scene::spawn_loaded`.
+/// Returns an isolated model with GPU morph descriptors, its animator and root weights.
+/// Insert the latter two on the entity holding the body `Animator`, and parent the spawned
+/// head below that entity. Requires `FacialPlugin`. The input model/cache stays unchanged;
+/// each result owns distinct mesh handles so independently animated instances cannot alias.
+pub fn prepare_loaded_face(
+    cry: &mut CryAssets,
+    head_path: &str,
+    body_cal_path: &str,
+    loaded: &LoadedModel,
+) -> Result<(LoadedModel, FacialAnimator, MorphWeights)> {
+    let mut isolated = loaded.clone();
+    for (_, parts) in &mut isolated.parts {
+        for part in parts {
+            let mesh = cry.meshes.get(&part.mesh)
+                .ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?.clone();
+            part.mesh = cry.meshes.add(mesh);
+        }
+    }
+    let face = prepare_face_inner(cry, head_path, body_cal_path, &isolated)?;
+    let weights = MorphWeights::new(vec![0.0; face.targets.len()], None).map_err(|e| Error::Format(e.to_string()))?;
+    Ok((isolated, face, weights))
+}
+
+fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str, loaded: &LoadedModel) -> Result<FacialAnimator> {
+    let set = expression_set(head_path, &loaded.model)?;
     if set.targets.len() > bevy::mesh::morph::MAX_MORPH_WEIGHTS {
         return Err(Error::Format("too many facial targets".into()));
     }
     // The playable heads use unprefixed morphs. The older race-specific libraries contain
     // el_m_*/fe_m_* morphs and close_l controllers that do not match these meshes/current FSQs.
-    let library = head_library(&part.path)?;
-    let cal = Cal::shared(&assets.cal)?;
+    let library = head_library(head_path)?;
+    let cal = Cal::shared(body_cal_path)?;
     let sequences = cal
         .animations
         .iter()
