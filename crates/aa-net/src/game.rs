@@ -96,7 +96,7 @@ pub enum ClientMsg {
     /// `CSResurrectCharacter`: stand up where the character died (`in_place`) or at the return
     /// point; the character must be dead.
     Resurrect { in_place: bool },
-    /// `CSStartSkill`: the player's unit (`self_obj_id`) or one of its items casts `skill_id`.
+    /// `CSStartSkill`: a unit, bag item or explicit mount caster starts `skill_id`.
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
@@ -124,6 +124,7 @@ pub enum ClientMsg {
     Bank(crate::bank::BankCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
     Actability(crate::actability::ActabilityCommand),
+    Mate(crate::mate::MateCommand),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -181,6 +182,7 @@ impl ClientMsg {
             Self::Bank(m) => m.opcode(),
             Self::LootRoll(m) => m.opcode(),
             Self::Actability(m) => m.opcode(),
+            Self::Mate(m) => m.opcode(),
             Self::Auction(m) => m.opcode(),
             Self::Trade(m) => m.opcode(),
             Self::Mail(m) => m.opcode(),
@@ -280,6 +282,7 @@ impl ClientMsg {
             Self::Bank(m) => m.write(&mut w),
             Self::LootRoll(m) => m.write(&mut w),
             Self::Actability(m) => m.write(&mut w),
+            Self::Mate(m) => m.write(&mut w),
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),
             Self::Mail(m) => m.write(&mut w),

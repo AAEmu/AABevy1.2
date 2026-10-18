@@ -1,12 +1,108 @@
 //! Owned mate spawn metadata and the mate/slave dynamic state packet boundaries.
-//! Summoning commands, equipment and slave ownership are separate milestones.
+//! Core mate controls use exact requests; equipment and slave ownership remain separate.
 
 use std::collections::HashMap;
 
 use crate::model::UnitKind;
-use crate::opcodes::sc;
+use crate::opcodes::{cs, sc};
 use crate::session::Event;
-use crate::wire::{Reader, Result, WireError};
+use crate::wire::{Reader, Result, WireError, Writer};
+
+/// Exact mate control requests. A local send is not a server acknowledgement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MateCommand {
+    Dismiss {
+        tl_id: u16,
+    },
+    /// Point 1 is driver, 2 passenger. Native mount reason depends on approach geometry.
+    Mount {
+        tl_id: u16,
+        point: u8,
+        reason: u8,
+    },
+    /// Native self unmount uses reason 9; mounted-dismiss first uses 10.
+    Unmount {
+        tl_id: u16,
+        point: u8,
+        reason: u8,
+    },
+    /// Target zero clears the mate's target.
+    Target {
+        tl_id: u16,
+        target_obj_id: u32,
+    },
+    /// Native 0=stand, 1=passive, 2=protective, 3=aggressive; the lane sends no ACK.
+    UserState {
+        tl_id: u16,
+        state: u8,
+    },
+}
+
+impl MateCommand {
+    pub fn validate(self) -> std::result::Result<(), &'static str> {
+        let tl_id = match self {
+            Self::Dismiss { tl_id }
+            | Self::Mount { tl_id, .. }
+            | Self::Unmount { tl_id, .. }
+            | Self::Target { tl_id, .. }
+            | Self::UserState { tl_id, .. } => tl_id,
+        };
+        if tl_id == 0 {
+            return Err("mate timeline ID must be nonzero");
+        }
+        match self {
+            Self::Mount { point, .. } | Self::Unmount { point, .. } if !matches!(point, 1 | 2) => {
+                Err("mate attach point must be driver 1 or passenger 2")
+            }
+            Self::Target { target_obj_id, .. } if target_obj_id > 0xffffff => {
+                Err("mate target ID must fit in 24 bits")
+            }
+            Self::UserState { state, .. } if state > 3 => {
+                Err("mate user state must be 0 through 3")
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn opcode(self) -> u16 {
+        match self {
+            Self::Dismiss { .. } => cs::CSRemoveMatePacket,
+            Self::Mount { .. } => cs::CSMountMatePacket,
+            Self::Unmount { .. } => cs::CSUnMountMatePacket,
+            Self::Target { .. } => cs::CSChangeMateTargetPacket,
+            Self::UserState { .. } => cs::CSChangeMateUserStatePacket,
+        }
+    }
+
+    pub fn write(self, w: &mut Writer) {
+        match self {
+            Self::Dismiss { tl_id } => {
+                w.u16(tl_id);
+            }
+            Self::Mount {
+                tl_id,
+                point,
+                reason,
+            }
+            | Self::Unmount {
+                tl_id,
+                point,
+                reason,
+            } => {
+                w.u16(tl_id).u8(point).u8(reason);
+            }
+            Self::Target {
+                tl_id,
+                target_obj_id,
+            } => {
+                w.u16(tl_id).bc(target_obj_id);
+            }
+            Self::UserState { tl_id, state } => {
+                w.u16(tl_id).u8(state);
+            }
+        }
+    }
+}
 
 /// Native SCMateSpawned has exactly ten slots, including zero/empty slots.
 pub const MATE_SKILL_SLOTS: usize = 10;
@@ -79,6 +175,25 @@ pub enum MateEvent {
         dynamic: DynamicUnitState,
     },
     SlaveState(SlaveState),
+    /// Local socket write only; authoritative unit/skill events follow independently.
+    Requested(MateCommand),
+    RequestRejected {
+        command: MateCommand,
+        message: String,
+    },
+    SkillRequested {
+        skill_id: u32,
+        mate_obj_id: u32,
+        mount_skill_id: u32,
+        target_obj_id: u32,
+    },
+    SkillRejected {
+        skill_id: u32,
+        mate_obj_id: u32,
+        mount_skill_id: u32,
+        target_obj_id: u32,
+        message: String,
+    },
 }
 
 impl MateEvent {
@@ -94,6 +209,10 @@ impl MateEvent {
             Self::Spawned(_) => "SCMateSpawned",
             Self::State { .. } => "SCMateState",
             Self::SlaveState(_) => "SCSlaveState",
+            Self::Requested(_) => "MateRequested",
+            Self::RequestRejected { .. } => "MateRequestRejected",
+            Self::SkillRequested { .. } => "MateSkillRequested",
+            Self::SkillRejected { .. } => "MateSkillRejected",
         }
     }
 
@@ -466,6 +585,138 @@ mod tests {
                 ServerMsg::Snow(true),
             ])
         );
+    }
+
+    #[test]
+    fn explicit_mate_controls_match_lane_bytes_and_never_optimistically_change_owned_state() {
+        let commands = [
+            (MateCommand::Dismiss { tl_id: 0x102 }, 0xa4, vec![2, 1]),
+            (
+                MateCommand::Mount {
+                    tl_id: 0x102,
+                    point: 1,
+                    reason: 4,
+                },
+                0xa7,
+                vec![2, 1, 1, 4],
+            ),
+            (
+                MateCommand::Unmount {
+                    tl_id: 0x102,
+                    point: 2,
+                    reason: 9,
+                },
+                0xa8,
+                vec![2, 1, 2, 9],
+            ),
+            (
+                MateCommand::Target {
+                    tl_id: 0x102,
+                    target_obj_id: 0x112233,
+                },
+                0xa5,
+                vec![2, 1, 0x33, 0x22, 0x11],
+            ),
+            (
+                MateCommand::Target {
+                    tl_id: 0x102,
+                    target_obj_id: 0,
+                },
+                0xa5,
+                vec![2, 1, 0, 0, 0],
+            ),
+            (
+                MateCommand::UserState {
+                    tl_id: 0x102,
+                    state: 3,
+                },
+                0xaa,
+                vec![2, 1, 3],
+            ),
+            (
+                MateCommand::Mount {
+                    tl_id: u16::MAX,
+                    point: 2,
+                    reason: 255,
+                },
+                0xa7,
+                vec![255, 255, 2, 255],
+            ),
+        ];
+        let mut state = Mates::default();
+        state.apply(&select(42));
+        state.apply(&unit(51, 0x102, 42));
+        state.apply(&Event::Mate(MateEvent::Spawned(spawn_fixture())));
+        let before = state.clone();
+        for (command, opcode, body) in commands {
+            assert_eq!(command.validate(), Ok(()));
+            let message = crate::game::ClientMsg::Mate(command);
+            assert_eq!(message.opcode(), opcode);
+            assert_eq!(message.encode_body(), body);
+            let mut expected = vec![0xdd, 1, 0, 7];
+            expected.extend((opcode as u16).to_le_bytes());
+            expected.extend(body);
+            assert_eq!(message.encode(7), expected);
+            assert!(!state.apply(&Event::Mate(MateEvent::Requested(command))));
+            assert!(!state.apply(&Event::Mate(MateEvent::RequestRejected {
+                command,
+                message: "test".into()
+            })));
+            assert_eq!(
+                state, before,
+                "mode/mount/target/dismiss requests do not acknowledge themselves"
+            );
+        }
+        for state in 0..=3 {
+            assert_eq!(
+                MateCommand::UserState { tl_id: 1, state }.validate(),
+                Ok(())
+            );
+        }
+        for command in [
+            MateCommand::Dismiss { tl_id: 0 },
+            MateCommand::Mount {
+                tl_id: 0,
+                point: 1,
+                reason: 1,
+            },
+            MateCommand::Unmount {
+                tl_id: 0,
+                point: 1,
+                reason: 9,
+            },
+            MateCommand::Target {
+                tl_id: 0,
+                target_obj_id: 0,
+            },
+            MateCommand::UserState { tl_id: 0, state: 1 },
+            MateCommand::Mount {
+                tl_id: 1,
+                point: 0,
+                reason: 1,
+            },
+            MateCommand::Unmount {
+                tl_id: 1,
+                point: 3,
+                reason: 9,
+            },
+            MateCommand::Mount {
+                tl_id: 1,
+                point: 255,
+                reason: 1,
+            },
+            MateCommand::Target {
+                tl_id: 1,
+                target_obj_id: 0x1000000,
+            },
+            MateCommand::Target {
+                tl_id: 1,
+                target_obj_id: u32::MAX,
+            },
+            MateCommand::UserState { tl_id: 1, state: 4 },
+        ] {
+            assert!(command.validate().is_err(), "{command:?}");
+        }
     }
 
     fn select(id: u32) -> Event {

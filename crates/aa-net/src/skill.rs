@@ -229,7 +229,7 @@ fn skip_skill_object(r: &mut Reader) -> Result<()> {
     }
 }
 
-/// The unit or item a client starts a skill with (`SkillCaster`).
+/// The unit, bag item or mate/slave a client starts a skill with (`SkillCaster`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartCaster {
     /// The player's own unit (object id filled in by the session).
@@ -237,6 +237,8 @@ pub enum StartCaster {
     /// An item of the bag: `item_id` is its database id (`Item::id`), `template_id` the template;
     /// the skill id must be the item's `use_skill_id`.
     Item { item_id: u64, template_id: u32 },
+    /// A mate/slave runtime object plus the separate mount_skills.id (not combat skill ID).
+    Mount { obj_id: u32, mount_skill_id: u32 },
 }
 
 /// `CSStartSkill`: `skill_id`, caster, target and no skill object.
@@ -248,6 +250,9 @@ pub fn write_start_skill(w: &mut Writer, skill_id: u32, self_obj_id: u32, caster
         }
         StartCaster::Item { item_id, template_id } => {
             w.u8(caster_kind::ITEM).bc(self_obj_id).u64(item_id).u32(template_id).u8(0).u32(0);
+        }
+        StartCaster::Mount { obj_id, mount_skill_id } => {
+            w.u8(caster_kind::MOUNT).bc(obj_id).u32(mount_skill_id);
         }
     }
     target.write(w);
@@ -505,6 +510,42 @@ mod tests {
 
     fn caster(w: &mut Writer, obj: u32) {
         w.u8(caster_kind::UNIT).bc(obj);
+    }
+
+    #[test]
+    fn mount_caster_writes_distinct_actor_mount_template_and_combat_skill_ids() {
+        let message = crate::game::ClientMsg::StartSkill {
+            skill_id: 20001,
+            self_obj_id: 0x112233,
+            caster: StartCaster::Mount {
+                obj_id: 0x445566,
+                mount_skill_id: 77,
+            },
+            target: SkillTarget::unit(0x445566),
+        };
+        // Same separate ID roles as lane handler_permission_tests::mate_cast_packet.
+        let body = message.encode_body();
+        assert_eq!(
+            body,
+            [
+                0x21, 0x4e, 0, 0, 3, 0x66, 0x55, 0x44, 77, 0, 0, 0, 0, 0x66, 0x55, 0x44, 0
+            ]
+        );
+        let mut reader = Reader::new(&body);
+        assert_eq!(reader.u32().unwrap(), 20001);
+        assert_eq!(reader.u8().unwrap(), 3);
+        assert_eq!(
+            reader.bc().unwrap(),
+            0x445566,
+            "caster is the mate, not the player"
+        );
+        assert_eq!(reader.u32().unwrap(), 77);
+        assert_eq!(
+            SkillTarget::read(&mut reader).unwrap(),
+            SkillTarget::unit(0x445566)
+        );
+        assert_eq!(reader.u8().unwrap(), 0);
+        assert!(reader.is_empty());
     }
 
     #[test]
