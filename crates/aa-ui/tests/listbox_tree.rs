@@ -124,7 +124,7 @@ fn authored_child_style_and_open_closed_image_geometry_follow_visible_rows() {
     let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     let icons: Vec<_> = quads
         .iter()
-        .filter(|q| matches!(q.tex, aa_ui::render::Tex::Image(_)))
+        .filter(|q| matches!(&q.tex, aa_ui::render::Tex::Image(p) if p.ends_with("ui/button/grid.dds")))
         .collect();
     assert_eq!(icons.len(), 2);
     let h = eval::<f32>(&ui, "list:GetHeight()");
@@ -140,7 +140,7 @@ fn authored_child_style_and_open_closed_image_geometry_follow_visible_rows() {
     let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     let icons: Vec<_> = quads
         .iter()
-        .filter(|q| matches!(q.tex, aa_ui::render::Tex::Image(_)))
+        .filter(|q| matches!(&q.tex, aa_ui::render::Tex::Image(p) if p.ends_with("ui/button/grid.dds")))
         .collect();
     assert_eq!(icons.len(), 1);
     assert!((icons[0].pos[2] - icons[0].pos[0] - 13.).abs() < 0.01);

@@ -492,6 +492,8 @@ pub struct Drawable {
     /// Native class (`drawable:image`, `drawable:ninepart`, ...).
     pub class: &'static str,
     pub layer: DrawLayer,
+    /// List-owned image template, rendered at each applicable row rather than once at its owner.
+    pub row_template: bool,
     pub texture: Option<String>,
     /// Icon images: textures stacked over `texture` (`AddTexture`: icon, then frame / overlay).
     pub extra_textures: Vec<String>,

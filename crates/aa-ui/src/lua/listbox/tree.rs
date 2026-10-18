@@ -317,9 +317,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                         "drawable:image",
                         crate::tree::DrawLayer::Artwork,
                     );
-                    u.tree.drawable_mut(image).unwrap().texture = a.s(1);
-                    // List-owned templates are painted once per applicable visible row.
-                    u.tree.get_mut(image).shown = false;
+                    let dr = u.tree.drawable_mut(image).unwrap();
+                    dr.texture = a.s(1);
+                    // Keep its actual visibility independent of its repeated row placement.
+                    dr.row_template = true;
                     image
                 };
                 change(lua, id, |d| {
@@ -345,34 +346,29 @@ pub(super) fn image(
     scale: f32,
     out: &mut Vec<Quad>,
 ) {
-    let Some(o) = u.tree.objects.get(id as usize).filter(|o| o.alive) else {
+    let Some(o) = u
+        .tree
+        .objects
+        .get(id as usize)
+        .filter(|o| o.alive && o.shown)
+    else {
         return;
     };
-    let Some(dr) = o.drawable() else { return };
-    let Some(path) = dr.texture.clone() else {
-        return;
+    let base = Rect {
+        x: center.0 - o.width * 0.5,
+        y: center.1 - o.height * 0.5,
+        w: o.width,
+        h: o.height,
     };
-    let (width, height, coords, color, a) = (o.width, o.height, dr.coords, dr.color, o.alpha);
-    let Some(resolved) = u.textures.resolve(&path) else {
-        return;
-    };
-    let Some((tw, th)) = u.textures.size(&path) else {
-        return;
-    };
-    let (tw, th) = (tw as f32, th as f32);
-    let c = coords.unwrap_or([0.0, 0.0, tw, th]);
-    out.push(Quad {
-        tex: Tex::Image(resolved),
-        pos: [
-            (center.0 - width * 0.5) * scale,
-            (center.1 - height * 0.5) * scale,
-            (center.0 + width * 0.5) * scale,
-            (center.1 + height * 0.5) * scale,
-        ],
-        uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
-        color: [color[0], color[1], color[2], color[3] * a * alpha],
-        corners: None,
-        uvs: None,
-        vcolors: None,
-    });
+    // Native row rendering dispatches Image::Render after placing the shared template.
+    // Reuse the normal image pipeline without rewriting anchors for each row/paint.
+    crate::render::drawable_quads(
+        u,
+        id,
+        alpha,
+        crate::tree::ButtonState::Normal,
+        scale,
+        Some(base),
+        out,
+    );
 }

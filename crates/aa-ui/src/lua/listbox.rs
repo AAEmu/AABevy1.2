@@ -577,6 +577,7 @@ pub(crate) fn quads(
         };
         let depth_offset = 10.0 * depth as f32;
         paint::state(
+            u,
             d,
             state,
             Rect {
