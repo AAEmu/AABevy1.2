@@ -1,5 +1,6 @@
 //! Native per-instance vegetation COLOR_VARIATION: shared material GPU controls and original forest.
-//! --world [--off] [--unload-check] : original main_world cell12,14. Default: numeric; --fog adds fog order.
+//! --world [--off] [--unload-check]: original main_world cell12,14. --shadow-view [--all-cast]: shadow eligibility.
+//! Default: numeric; --fog adds fog order.
 
 use aa_world::vegetation_color::{
     self, VegetationColor, VegetationColorPart, VegetationColorPlugin, VegetationMaterial,
@@ -18,6 +19,10 @@ struct Controls(Vec<(Vec2, [u8; 3])>);
 #[derive(Resource, Default)]
 struct Fixture {
     off: bool,
+    all_cast: bool,
+    shadow_view: bool,
+    vegetation: HashSet<Entity>,
+    noncasters: HashSet<Entity>,
     reference: bool,
     unload: bool,
     moved: bool,
@@ -50,11 +55,13 @@ fn main() {
             .insert_resource(Fixture {
                 reference: flag("--reference"),
                 off: flag("--off"),
+                all_cast: flag("--all-cast"),
+                shadow_view: flag("--shadow-view"),
                 unload: flag("--unload-check"),
                 ..default()
             })
             .add_systems(Startup, world_setup)
-            .add_systems(Update, world_check);
+            .add_systems(Update, (shadow_control, world_check).chain());
     } else {
         app.add_plugins(VegetationColorPlugin)
             .insert_resource(ClearColor(Color::BLACK))
@@ -205,9 +212,14 @@ fn world_setup(
     terrain: Res<aa_world::TerrainQuery>,
     water: Res<aa_world::WaterQuery>,
 ) {
-    let target = Vec3::new(12812.47, 14575.70, 158.28);
+    let target = if fixture.shadow_view {
+        Vec3::new(12573.3726, 15202.0869, 151.0248)
+    } else {
+        Vec3::new(12812.47, 14575.70, 158.28)
+    };
     info!(
-        "original forest12,14 authored group799 target={target:?} ground={:?} water={:?}",
+        "original forest12,14 target={target:?} shadow_view={} ground={:?} water={:?}",
+        fixture.shadow_view,
         terrain.height_at(target.x, target.y),
         water.water_at(target)
     );
@@ -220,6 +232,9 @@ fn world_setup(
             aa_world::cry_to_bevy(Vec3::new(-0.3625982, -0.9319457, 0.0)),
             Vec3::Y,
         )
+    } else if fixture.shadow_view {
+        Transform::from_translation(aa_world::cry_to_bevy(target + Vec3::new(-5.5, -10.0, 3.8)))
+            .looking_at(aa_world::cry_to_bevy(target + Vec3::Z * 0.6), Vec3::Y)
     } else {
         Transform::from_translation(aa_world::cry_to_bevy(Vec3::new(12807.0, 14566.0, 162.0)))
             .looking_at(aa_world::cry_to_bevy(target + Vec3::Z * 0.6), Vec3::Y)
@@ -284,18 +299,35 @@ fn world_check(
             objects.stats.models_pending,
             objects.stats.models_failed
         );
+        info!(
+            "vegetation shadow eligibility: original_noncasters={} seen_vegetation_parts={} all_cast_control={}",
+            fixture.noncasters.len(),
+            fixture.vegetation.len(),
+            fixture.all_cast
+        );
     }
     if fixture.unload && !fixture.moved && time.elapsed_secs() > 16.0 {
-        assert!(
-            parts
-                .iter()
-                .any(|(_, p)| p.cell == (12, 14) && p.bgr != [127; 3]),
-            "must draw actual varied forest plants first"
-        );
-        assert!(
-            fixture.parts.len() > fixture.material_ids.len() * 10,
-            "instances must share materials"
-        );
+        if fixture.shadow_view {
+            assert!(
+                !fixture.noncasters.is_empty(),
+                "original non-casting vegetation must be present"
+            );
+            assert!(
+                fixture.vegetation.len() > fixture.noncasters.len(),
+                "original casting vegetation must remain eligible"
+            );
+        } else {
+            assert!(
+                parts
+                    .iter()
+                    .any(|(_, p)| p.cell == (12, 14) && p.bgr != [127; 3]),
+                "must draw actual varied forest plants first"
+            );
+            assert!(
+                fixture.parts.len() > fixture.material_ids.len() * 10,
+                "instances must share materials"
+            );
+        }
         camera.single_mut().unwrap().translation = aa_world::cry_to_bevy(Vec3::splat(-100000.0));
         fixture.moved = true;
     }
@@ -314,6 +346,45 @@ fn world_check(
             fixture.parts.len(),
             fixture.material_ids.len()
         );
+        assert!(
+            fixture.vegetation.iter().all(|&e| all.get(e).is_err()),
+            "every casting and non-casting vegetation part must unload"
+        );
+        info!(
+            "native vegetation shadow unload PASSED: {} original non-casters / {} total vegetation part IDs gone",
+            fixture.noncasters.len(),
+            fixture.vegetation.len()
+        );
         fixture.done = true;
+    }
+}
+
+// Fixture-only comparison: remove the new eligibility component to reproduce the previous all-casting behavior.
+// Added<Mesh3d> keeps the control bounded to newly spawned parts; production has no scan/toggle system.
+fn shadow_control(
+    mut commands: Commands,
+    mut fixture: ResMut<Fixture>,
+    fresh: Query<(Entity, &ChildOf, Has<bevy::light::NotShadowCaster>), Added<Mesh3d>>,
+    sectors: Query<&aa_world::objects::ObjectSector>,
+) {
+    for (entity, parent, excluded) in &fresh {
+        let Ok(sector) = sectors.get(parent.parent()) else {
+            continue;
+        };
+        if !matches!(
+            sector.kind,
+            aa_world::objects::Kind::Vegetation | aa_world::objects::Kind::Trees
+        ) {
+            continue;
+        }
+        fixture.vegetation.insert(entity);
+        if excluded {
+            fixture.noncasters.insert(entity);
+            if fixture.all_cast {
+                commands
+                    .entity(entity)
+                    .remove::<bevy::light::NotShadowCaster>();
+            }
+        }
     }
 }
