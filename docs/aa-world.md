@@ -895,6 +895,17 @@ non-Vegetation/alpha-glow shaders keep their existing path. This does not
 approximate the terrain-colour runtime branch or the separate terrain-derived
 brightness producer.
 
+A bounded original-data audit after the wind milestone found 106 of 2,745 nonempty
+main-world groups authored with `bUseTerrainColor=1`, including 9,493 placements in
+cell (12,14). This path remains unsupported deliberately: original `vegetation.cfx`
+651-660/760-780 samples `fromObjSampler0` terrain cover, re-lights it with native
+terrain NdotL, deferred shadow alpha and diffuse-accumulation ambient, then performs
+the material/distance blend before vertex AO. Engine `300F24E0` derives the cached
+NdotL byte from `300C23D0`'s four-height terrain normal; it is not a ground RGB tint.
+The renderer's terrain-cover binding/transform and deferred receiver inputs must be
+represented before enabling this branch. Evidence: ignored
+`lights/vegetation-terrain-source.txt` / `terrain-colour-prevalence.json`.
+
 One exact f32 scalar travels in a shared bindless material buffer; the
 non-bindless fallback uses the equivalent uniform. Variant lookup keys are
 `(base StandardMaterial ID, brightness.to_bits())`, preserving separate
@@ -1815,6 +1826,94 @@ show the projected stained glass. No same-camera library reference is available 
 report an existing aa-fx material-load warning for
 `materials/effects/velo_particle_volumelights2.mtl`; no lighting values were tuned to
 hide either scene limitation. All own windows close; the user's client is untouched.
+
+### Authored fog volumes (`fog.rs`, `fog.wesl`, `fog_math.wesl`)
+
+Static active `FogVolume` entities now render their authored analytic box or ellipsoid,
+with opaque depth clipping, camera-inside rays and height-dependent density. The
+original `scripts/entities/render/fogvolume.lua` creates its slot only for `bActive=1`.
+Parent transforms/hidden state use the same checked entity hierarchy as static props;
+the cell origin is added once. Inactive, hidden and unsupported colour variants remain
+placement data. Nonfinite/malformed numeric inputs are declined.
+
+The exact 1.2 CryEntitySystem parser **320368F0** clamps VolumeType to 0..1,
+nonpositive Size components to .01, GlobalDensity below zero to zero and SoftEdges
+to 0..1. Engine **300B5810** uses Size/2, and converts longitude/latitude degrees
+to `dir=(cos(long)*sin(90-lat),sin(long)*sin(90-lat),cos(90-lat))`. Its height base
+is the entity world position plus `dir*FallOffShift`; the gradient is
+`dir*FallOffScale`, independent of entity rotation and scale. **300B5070** passes
+raw authored RGB times `engineHDRBase^fHDRDynamic`; supported HDRDynamic zero
+therefore needs no guessed HDR base or sRGB conversion.
+
+Renderer **380BE1C0** uploads density times **1.442695**. Original
+`fogvolume.cfx` clips analytic rays to opaque depth and integrates
+`length*exp(-dot(front-base,gradient))`, multiplied by
+`(1-exp(-heightDifference))/heightDifference` when its magnitude exceeds .001.
+Ellipsoids additionally use the exact high-quality discriminant soft-edge function;
+boxes do not. The implementation retains these equations, including the unit-object
+box division limits, and subtracts world centre before the inverse linear transform
+to avoid large-cell cancellation for small volumes. The native bounds-cube proxy
+is eight vertices/12 triangles for either shape; a far-depth proxy supports inside
+views without writing scene depth. Missing depth prepasses and orthographic cameras
+decline drawing. Depth is sampled from the existing Bevy prepass/view transforms.
+
+The existing world radiance/exposure adapter is reused without new colour gains or
+atmosphere edits. Node **300B7330** puts these draws in transparency list 7 at fixed
+5,000,000 sort distance; renderer **380D6AF0** processes that list in the before/after
+water halves. The supported Bevy path sorts after sky/decal overlays and before
+ordinary transparency, with a separate raster depth state. Native water-half
+partitioning, overlapping-volume priority and per-translucent-object fog tracing
+remain open. Global-fog-colour slots, nonzero HDRDynamic and FlowGraph density fades
+are explicitly unsupported. Native view-distance/cvar fading is also not reproduced;
+frustum and placement-cell lifetime bound this slice. Existing global post fog and
+its calibration remain unchanged.
+
+The existing bounded cell worker parses the slots; arrival creates at most **32 total**
+volume entities, meshes and materials across loaded cells. Oversized sets decline
+whole remaining slots and report `ObjectStats::{fog_volumes,fog_unsupported,
+fog_over_budget}`. No texture loads, new workers, per-frame material uploads or
+per-frame volume allocations are added. Unload explicitly removes every owned
+entity/mesh/material; no global cache owns them. No aa-client hook is required.
+
+A bounded eight-cell main-world survey found three authored active supported slots:
+cell (21,8) `FogVolume_4`, GUID `4133521fcc7b527e`, rotated 60x60x40 box,
+density .01, no height falloff; the same cell's `FogVolume_2`, GUID
+`4a385f802ddf52e0`, 100x100x20 ellipsoid, density .005, vertical falloff 1;
+and cell (20,8) `FogVolume_1`, GUID `4895295161350032`, 300x300x30 ellipsoid,
+density .0001, falloff .35. Its authored SoftEdges 100 correctly clamps to 1.
+Original proof exports live under ignored `lights/fogvolume-{script-*,node,math,
+source-*,order*}.txt`; original shader/Lua bytes are read through aa-pak.
+
+`fog_volume --case 0..12 --shot ...` checks the actual GPU material/opaque depth
+against independent numerical density integration: outside/inside box and ellipsoid,
+front/mid/behind opaque receivers, ray miss, both height-gradient signs, rotated
+nonuniform scale, ellipsoid soft edge, missing depth and foreground alpha pane.
+All 13 controls pass within two bytes, with most exact. The five source/data/lifetime
+tests include 32 slots across two cells and complete immediate asset cleanup.
+
+Final `cargo test -p aa-world --lib` passes **189 tests**, nine existing ignored;
+all examples check and the fixture builds. Inspected 1920x1080 captures under
+`shots/aa-world/fog_volume/` include `control_{0,3,7,10,12}.png`,
+`box_down{,_off}.png`, `green{,_off,_unload}.png`. The original box view looks down
+the chimney from Cry `(22064.125,8376.249,460)` toward `(22065.125,8377.249,430)`;
+the green ellipsoid view uses `(21091.446,8552.923,409.69431)` toward
+`(21070,8552.923,369.69431)`. These use `--world --camera x,y,z --target x,y,z`,
+plus `--off` or `--unload-check`. Original height samples establish the shaft's
+347.1 m floor and the green volume's 373.8 m terrain; no lighting/material changes
+were made to expose the effect. The water-adjacent green view retains the stated
+water-pass limitation, and other water/particle clocks continue between captures.
+No corresponding native cave/chimney screenshot exists in `reference/`; these
+are supported-renderer controls, not a native screenshot comparison.
+
+Numeric controls log roughly 190-240 FPS. The final chimney on run logs 128-141 FPS;
+its separate off run varies 59-142. The same green on pose logs 125-140 FPS before
+the unload move, versus 122-132 off; an earlier separate on capture varied 17-37,
+so these shared-machine runs are not a controlled performance comparison. Moving
+the actual focus out at 16 s proves the original ellipsoid's entity, mesh and
+material all absent by 23 s, with zero fog/object/pending-model counts; unloaded
+frames log 166-187 FPS. All runs exit and close their windows without GPU errors.
+The chimney world run retains the existing warning that `fleettest.dds` is not a
+cube map; the water calibration and fallback are unchanged.
 
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data

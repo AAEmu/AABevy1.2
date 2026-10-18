@@ -11,6 +11,7 @@ mod decals;
 mod decal_projection;
 pub mod cover;
 pub mod env;
+pub mod fog;
 pub mod entities;
 pub mod heightmap;
 pub mod moons;

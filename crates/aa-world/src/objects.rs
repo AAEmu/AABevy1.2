@@ -248,6 +248,7 @@ pub struct ObjectState {
     /// The placed sounds of each cell ([`sounds`]).
     sounds: HashMap<(i32, i32), Vec<Entity>>,
     lights: HashMap<(i32, i32), Vec<Entity>>,
+    fog: HashMap<(i32, i32), crate::fog::CellVolumes>,
     groups_tx: Sender<Option<VegGroups>>,
     /// Counter for [`ObjectStats::entities`] while models are still being prepared.
     busy_ticks: usize,
@@ -281,6 +282,10 @@ pub struct ObjectStats {
     pub entity_props: usize,
     /// Drawn parts of authored playing CGAs, also included in `entities`.
     pub animated_props: usize,
+    pub fog_volumes: usize,
+    /// Active visible slots declined by the static local-colour/HDR0 path.
+    pub fog_unsupported: usize,
+    pub fog_over_budget: usize,
 }
 
 impl ObjectState {
@@ -312,6 +317,7 @@ impl ObjectState {
             effects: HashMap::new(),
             sounds: HashMap::new(),
             lights: HashMap::new(),
+            fog: HashMap::new(),
             groups_tx,
             busy_ticks: 0,
             stats: ObjectStats::default(),
@@ -380,6 +386,7 @@ pub fn stream_objects(
     mut road_materials: ResMut<Assets<RoadMaterial>>,
     mut voxel_materials: ResMut<Assets<voxels::VoxelMaterial>>,
     mut vegetation_materials: ResMut<Assets<VegetationMaterial>>,
+    mut fog_assets: crate::fog::FogAssets,
     terrain: Res<crate::TerrainQuery>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
@@ -421,6 +428,12 @@ pub fn stream_objects(
         if let Some(voxels) = state.voxels.remove(&c) { voxels.release(&mut commands, &mut cry, &mut voxel_materials); }
     }
     let gone: Vec<_> = state.water.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    let fog_gone: Vec<_> = state.fog.keys().filter(|c| !loaded.contains(c)).copied().collect();
+    for c in fog_gone {
+        if let Some(fog) = state.fog.remove(&c) {
+            fog.release(&mut commands, &mut cry.meshes, &mut fog_assets.materials);
+        }
+    }
     for c in gone {
         for e in state.water.remove(&c).unwrap_or_default() {
             commands.entity(e).despawn();
@@ -564,9 +577,18 @@ pub fn stream_objects(
         }
         let placed = lights::spawn_cell(&mut commands, c, &data.objects.lights);
         if !placed.is_empty() { state.lights.insert(c, placed); }
+        if !data.objects.fog.is_empty() {
+            let count = state.fog.values().map(|v| v.entities.len()).sum::<usize>();
+            let fog = crate::fog::spawn_cell(&mut commands, &mut cry.meshes, &mut fog_assets.materials,
+                c, &data.objects.fog, crate::fog::MAX_VOLUMES.saturating_sub(count), fog_assets.atmosphere.radiance);
+            state.fog.insert(c, fog);
+        }
         state.cells.insert(c, Arc::new(data));
     }
     state.stats.water_cells = state.water.len();
+    state.stats.fog_volumes = state.fog.values().map(|v| v.entities.len()).sum();
+    state.stats.fog_unsupported = state.fog.values().map(|v| v.unsupported).sum();
+    state.stats.fog_over_budget = state.fog.values().map(|v| v.over_budget).sum();
     state.stats.roads = state.roads.values().map(Vec::len).sum();
     state.stats.decals = state.decals.values().map(Vec::len).sum();
     state.stats.voxels = state.voxels.values().map(|v| v.base_count).sum();
