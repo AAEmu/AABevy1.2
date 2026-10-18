@@ -38,6 +38,7 @@ pub mod battlefield;
 pub mod interaction;
 pub mod initial_config;
 pub mod items;
+pub mod specialty;
 pub mod item_effect;
 pub mod item_task_projection;
 pub mod native_item_records;
