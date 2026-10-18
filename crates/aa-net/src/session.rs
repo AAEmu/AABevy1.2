@@ -4314,7 +4314,7 @@ mod tests {
         let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::BountyRequested{..}|Event::Bounty(_)));rejected|=matches!(e,Event::BountyRequestRejected{..});}assert!(rejected);
         let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
         let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
-        for command in [request.clone(),BountyCommand::Update{kind:u32::MAX,name:vec![255],money:i32::MIN}]{
+        for command in [request.clone(),BountyCommand::Update{kind:u32::MAX,name:vec![255],money:i32::MIN},BountyCommand::OpenBulletin{doodad_obj_id:0x123456}]{
             let mut expected=command.opcode().to_le_bytes().to_vec();expected.extend(game::ClientMsg::Bounty(command.clone()).encode_body());
             session.command(Command::Bounty{character_id:42,command:command.clone()}).await;assert_eq!(frame(&mut peer).await,expected);
             assert!(matches!(events.try_recv(),Ok(Event::BountyRequested{character_id:42,command:actual}) if actual==command));assert!(events.try_recv().is_err());assert_eq!(session.selected_state.as_ref().unwrap().bounty_money,123);
@@ -4322,6 +4322,7 @@ mod tests {
         session.command(Command::Bounty{character_id:41,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));
         session.selected_state.as_mut().unwrap().character.id=41;session.command(Command::Bounty{character_id:42,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));session.selected_state.as_mut().unwrap().character.id=42;
         session.command(Command::Bounty{character_id:42,command:BountyCommand::RequestSetMoney{name:vec![b'X';129]}}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));
+        session.command(Command::Bounty{character_id:42,command:BountyCommand::OpenBulletin{doodad_obj_id:0x1000000}}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));
         session.phase=Phase::WorldSelect;session.command(Command::Bounty{character_id:42,command:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::BountyRequestRejected{..})));session.phase=Phase::InWorld;
         assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
         session.game.as_mut().unwrap().shutdown().await;session.command(Command::Bounty{character_id:42,command:request}).await;

@@ -6873,3 +6873,43 @@ QA: cargo check passes; nine focused bounty tests and all504 Bevy library tests 
 (0failed/0ignored). Loopback requests use only an ephemeral local TCP peer and verify
 both exact bodies, stale captured/header identity, phase/name refusal, missing/failed
 writes, and absence of synthesized bounty receipts or selected-header changes.
+
+
+### Native bulletin interaction request (2026-10-18)
+
+`BountyCommand::OpenBulletin{doodad_obj_id}` writes CS0ea with a three-byte BC object
+ID, native handler393b1140?constructor397ac8c0, vtable399d2c84 reader397bbb50.
+Unlike CS11f/120, the active lane registers CSNaviOpenBountyPacket; it currently logs
+and returns only an empty SC1d9 list, without populating real bulletin rows.
+
+Native interaction dispatcher393ba9c0 looks up a special handler before ordinary
+fallback (callers393b40df..ee and393b76e6..f8). The final registration393baffc..b021
+maps runtime global39ac7908 to singleton39ac7920, vtable399d3114[0]=393b7bc0.
+That delegates393b1a90, which resolves an actual existing doodad through39035110 and
+returns if missing; its separate handler tree maps39ac7788 to39ac77a0, whose vtable
+399d2c68[0]=393b1140 reads doodad+7c (runtime objectID) and sends CS0ea. Module-verified
+PROCESS_VM_READ of original PID48924 proves both key globals equal20558; the static
+skills row20558 is the bounty-bulletin-view skill. This is an interaction-dispatch path,
+**not a received SkillFired producer**. Earlier interaction eligibility remains outside
+this packet helper; no automatic route, invented range check or always-ready board
+predicate is introduced.
+
+The typed request uses the existing actual selected-header transport guards and local
+Requested/Rejected observations. Its additional nonzero24-bit object-ID refusal is an
+explicit app guard: the inner native handler itself does not reject zero. The caller
+must capture/admit the actual current doodad interaction before requesting. The three
+new local Unicorn cases execute original393b1140/397ac8c0 against synthetic doodad
+objects (sender mocked), confirming0/0x123456/0xffffff unchanged at the packet constructor.
+The packet writer then emits only the low24 bits, as separately proven by397bbb50.
+Wire tests and the existing local TCP test include the third actual request and rejection
+of out-of-range identity without fake bulletin/settlement receipts.
+
+Ignored provenance: native-bounty-navigation-source-20261018.txt,
+native-bounty-navigation-runtime-20261018.txt, read_bounty_navigation.py, and the final
+three cases in native-bounty-outgoing-oracle-20261018.json. The latter extends the prior
+six original bounty-control cases to nine; imported string copy and sender mocks remain
+explicit. Runtime module marker and process image were verified before readonly reads.
+
+QA: cargo check, all10 focused bounty tests and all505 Bevy library tests pass
+(0failed/0ignored). The local TCP test sends all three bounty commands and confirms
+invalid bulletin object IDs produce no wire write or fabricated bulletin receipt.

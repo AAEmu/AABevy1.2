@@ -2,8 +2,18 @@
 use crate::wire::Writer;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BountyCommand {
-    RequestSetMoney { name: Vec<u8> },
-    Update { kind: u32, name: Vec<u8>, money: i32 },
+    /// Captured native bulletin interaction. Caller admits the actual doodad interaction first.
+    OpenBulletin {
+        doodad_obj_id: u32,
+    },
+    RequestSetMoney {
+        name: Vec<u8>,
+    },
+    Update {
+        kind: u32,
+        name: Vec<u8>,
+        money: i32,
+    },
 }
 impl BountyCommand {
     fn cstring(name: &[u8]) -> &[u8] {
@@ -34,8 +44,16 @@ impl BountyCommand {
         Ok(value)
     }
     pub fn validate(&self) -> Result<(), &'static str> {
+        if let Self::OpenBulletin { doodad_obj_id } = self {
+            return if *doodad_obj_id == 0 || *doodad_obj_id > 0x00ff_ffff {
+                Err("bounty bulletin requires a nonzero 24-bit doodad object identity")
+            } else {
+                Ok(())
+            };
+        }
         let name = match self {
             Self::RequestSetMoney { name } | Self::Update { name, .. } => name,
+            Self::OpenBulletin { .. } => unreachable!(),
         };
         if Self::cstring(name).len() > 128 {
             Err("bounty name exceeds the native 128-byte C-string buffer")
@@ -45,12 +63,16 @@ impl BountyCommand {
     }
     pub fn opcode(&self) -> u16 {
         match self {
+            Self::OpenBulletin { .. } => 0xea,
             Self::RequestSetMoney { .. } => 0x11f,
             Self::Update { .. } => 0x120,
         }
     }
     pub fn write(&self, w: &mut Writer) {
         match self {
+            Self::OpenBulletin { doodad_obj_id } => {
+                w.bc(*doodad_obj_id);
+            }
             Self::RequestSetMoney { name } => {
                 w.blob(Self::cstring(name));
             }
@@ -110,5 +132,16 @@ mod tests {
         name.extend_from_slice(&[b'Y'; 200]);
         let cmd = BountyCommand::request_set_money(&name).unwrap();
         assert!(matches!(cmd,BountyCommand::RequestSetMoney{name} if name==vec![b'X';128]));
+    }
+    #[test]
+    fn native_bulletin_object_identity_and_three_byte_wire() {
+        let command = BountyCommand::OpenBulletin { doodad_obj_id: 0x123456 };
+        assert!(command.validate().is_ok());
+        let msg = crate::game::ClientMsg::Bounty(command);
+        assert_eq!(msg.opcode(), 0xea);
+        assert_eq!(msg.encode_body(), vec![0x56, 0x34, 0x12]);
+        for id in [0, 0x1000000, u32::MAX] {
+            assert!(BountyCommand::OpenBulletin { doodad_obj_id: id }.validate().is_err());
+        }
     }
 }
