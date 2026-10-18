@@ -96,11 +96,18 @@ pub struct SkyComposite;
 pub struct SkyPass;
 
 /// Existing diffuse overlays for native opaque deferred decals, before fog/water.
-/// Forward alpha roads and legacy decals do not carry this marker.
+/// Legacy forward decals do not carry this marker.
 #[derive(Component, Clone, Copy, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[require(NoAutomaticBatching)]
 pub struct DeferredDecalPass;
+
+/// Native ordinary Illum type13 roads (list5), before deferred overlays/fog/water.
+/// The placement producer qualifies this marker; sharing RoadMaterial is insufficient.
+#[derive(Component, Clone, Copy, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[require(NoAutomaticBatching)]
+pub struct RoadSurfacePass;
 
 struct Draw {
     parent: Entity,
@@ -195,7 +202,7 @@ fn sync(
 }
 
 mod pass {
-    use super::{DeferredDecalPass, SkyPass};
+    use super::{DeferredDecalPass, RoadSurfacePass, SkyPass};
     use super::cloud_water::{CloudWaterPass, OceanLevel, after_water};
     use crate::fog::FogWaterPass;
     use bevy::camera::{MainPassResolutionOverride, Viewport};
@@ -225,6 +232,7 @@ mod pass {
         app.add_plugins((
             ExtractComponentPlugin::<SkyPass>::default(),
             ExtractComponentPlugin::<DeferredDecalPass>::default(),
+            ExtractComponentPlugin::<RoadSurfacePass>::default(),
         ))
             .add_systems(
                 PostUpdate,
@@ -321,6 +329,7 @@ mod pass {
         clouds: Query<&MainEntity, With<CloudWaterPass>>,
         fog: Query<(&MainEntity, &FogWaterPass)>,
         decals: Query<&MainEntity, With<DeferredDecalPass>>,
+        roads: Query<&MainEntity, With<RoadSurfacePass>>,
         views: Query<&ExtractedView, With<Camera3d>>,
         ocean: Res<OceanLevel>,
         mut entities: Local<MainEntityHashSet>,
@@ -346,6 +355,7 @@ mod pass {
         normal_views.clear();
         decal_entities.clear();
         decal_entities.extend(decals.iter().copied());
+        decal_entities.extend(roads.iter().copied());
         for view in &views {
             let height = view.world_from_view.translation().y;
             // Native recursive/reflection pass IDs have no port input. Decline
@@ -711,6 +721,63 @@ mod pass {
                         .items
                         .is_empty()
                 );
+            }
+        }
+
+        #[test]
+        fn ordinary_roads_keep_prepared_offsets_and_exclude_legacy_and_mirror_views() {
+            use bevy::render::render_resource::TextureFormat;
+            let mut app = App::new();
+            app.init_resource::<SkyPhases>()
+                .init_resource::<OceanLevel>()
+                .init_resource::<ViewSortedRenderPhases<Transparent3d>>()
+                .add_systems(Update, (restore, prepare).chain());
+            let road = app.world_mut().spawn_empty().id();
+            let legacy = app.world_mut().spawn_empty().id();
+            let marker = app.world_mut().spawn((RoadSurfacePass, MainEntity::from(road))).id();
+            assert!(app.world().get::<NoAutomaticBatching>(marker).is_some());
+            let functions = DrawFunctions::<Transparent3d>::default();
+            let draw = functions.write().add(UnusedDraw);
+            let views: Vec<_> = [false, true].into_iter().map(|mirror| {
+                let key = RetainedViewEntity::new(app.world_mut().spawn_empty().id().into(), None, 0);
+                app.world_mut().spawn((Camera3d::default(), ExtractedView {
+                    retained_view_entity: key, clip_from_view: Mat4::IDENTITY,
+                    world_from_view: GlobalTransform::IDENTITY, clip_from_world: None,
+                    target_format: TextureFormat::Rgba8Unorm, viewport: UVec4::new(0,0,128,128),
+                    color_grading: default(), invert_culling: mirror,
+                }));
+                let mut phases = app.world_mut().resource_mut::<ViewSortedRenderPhases<Transparent3d>>();
+                let phase = phases.entry(key).or_default();
+                for (entity, start, bias) in [(road, 19, -600_000.0), (legacy, 24, 17.0)] {
+                    phase.add_retained(Transparent3d {
+                        sorting_info: TransparentSortingInfo3d::Sorted { mesh_center: Vec3::ZERO, depth_bias: bias },
+                        distance: bias, pipeline: CachedRenderPipelineId::INVALID,
+                        entity: (Entity::PLACEHOLDER, entity.into()), draw_function: draw,
+                        batch_range: start..start+1, extra_index: PhaseItemExtraIndex::DynamicOffset(768), indexed: true,
+                    });
+                }
+                key
+            }).collect();
+            for _ in 0..3 {
+                app.update();
+                let early = app.world().resource::<SkyPhases>();
+                let late = app.world().resource::<ViewSortedRenderPhases<Transparent3d>>();
+                let key = (Entity::PLACEHOLDER, road.into());
+                let selected = &early.0[&views[0]].items[&key];
+                assert_eq!(selected.batch_range, 19..20);
+                assert!(matches!(selected.extra_index, PhaseItemExtraIndex::DynamicOffset(768)));
+                assert_eq!(late[&views[0]].items[&key].batch_range, 19..19);
+                assert!(early.0[&views[1]].items.is_empty());
+                for view in &views {
+                    assert_eq!(late[view].items[&(Entity::PLACEHOLDER, legacy.into())].batch_range,24..25);
+                }
+            }
+            app.world_mut().despawn(marker);
+            app.update();
+            for view in views {
+                assert!(app.world().resource::<SkyPhases>().0[&view].items.is_empty());
+                assert_eq!(app.world().resource::<ViewSortedRenderPhases<Transparent3d>>()[&view]
+                    .items[&(Entity::PLACEHOLDER, road.into())].batch_range, 19..20);
             }
         }
 

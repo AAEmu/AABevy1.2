@@ -5,6 +5,9 @@
 
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::prelude::*;
+use aa_world::sky_material::composite::RoadSurfacePass;
+
+fn flag(name: &str) -> bool { std::env::args().any(|a| a == name) }
 
 fn main() {
     let reference = std::env::args().any(|a| a == "--reference");
@@ -23,7 +26,7 @@ fn main() {
             hour: if reference { 19.166172 } else { 10.0 },
             ..default()
         })
-        .add_systems(Startup, move |mut commands: Commands| {
+        .add_systems(Startup, move |mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>| {
             let transform = if reference {
                 Transform::from_translation(cry_to_bevy(Vec3::new(15579.493, 15385.854, 127.979904)))
                     .looking_to(cry_to_bevy(Vec3::new(-0.3625982, -0.9319457, 0.0)), Vec3::Y)
@@ -34,6 +37,17 @@ fn main() {
                 Transform::from_translation(cry_to_bevy(Vec3::new(14780.0, 11520.0, 161.0)))
                     .looking_at(cry_to_bevy(Vec3::new(14710.0, 11480.0, 117.0)), Vec3::Y)
             };
+            if flag("--glass") {
+                commands.spawn((
+                    Mesh3d(meshes.add(Rectangle::new(3.0, 1.8))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::linear_rgba(0.02, 0.2, 0.01, 0.75),
+                        alpha_mode: AlphaMode::Blend, unlit: true, cull_mode: None, ..default()
+                    })),
+                    Transform::from_translation(transform.translation + transform.forward() * 4.0)
+                        .with_rotation(transform.rotation),
+                ));
+            }
             commands.spawn((
                 Camera3d::default(),
                 transform,
@@ -45,7 +59,7 @@ fn main() {
                 }),
             ));
         })
-        .add_systems(Update, (stats, stream_check))
+        .add_systems(Update, (stats, stream_check, controls))
         .run();
 }
 
@@ -53,6 +67,7 @@ fn stream_check(
     time: Res<Time>,
     objects: Res<aa_world::objects::ObjectState>,
     names: Query<&Name>,
+    markers: Query<(), With<RoadSurfacePass>>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     mut stage: Local<u8>,
 ) {
@@ -61,14 +76,23 @@ fn stream_check(
     }
     if *stage == 0 && let Ok(mut transform) = camera.single_mut() {
         assert!(objects.stats.roads > 0, "stream check must load roads before leaving");
+        assert!(!markers.is_empty(), "ordinary Illum roads must enter native list5 pass");
         transform.translation = cry_to_bevy(Vec3::new(-100000.0, -100000.0, 1000.0));
         *stage = 1;
         info!("road stream check: moved outside world; road count must fall to zero");
     } else if *stage == 1 && time.elapsed_secs() > 14.0 {
         assert_eq!(objects.stats.roads, 0, "unloaded placement cells must release roads");
         assert!(!names.iter().any(|n| n.as_str() == "Terrain road"), "road entities must despawn");
+        assert!(markers.is_empty(), "early road markers must unload with cells");
         info!("road stream check: verified no road entities remain");
         *stage = 2;
+    }
+}
+
+fn controls(mut commands: Commands, mut roads: Query<(Entity, &mut Visibility), Added<RoadSurfacePass>>) {
+    for (entity, mut visibility) in &mut roads {
+        if flag("--off") { *visibility = Visibility::Hidden; }
+        if flag("--late-control") { commands.entity(entity).remove::<RoadSurfacePass>(); }
     }
 }
 

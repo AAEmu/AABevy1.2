@@ -44,6 +44,8 @@ pub struct RoadExtension {
     #[texture(101)]
     #[sampler(102)]
     opacity: Option<Handle<Image>>,
+    // CPU pipeline key only: the large transparent sort offset must not bias raster depth.
+    early_surface: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -51,7 +53,7 @@ pub struct RoadKey(bool);
 
 impl From<&RoadExtension> for RoadKey {
     fn from(extension: &RoadExtension) -> Self {
-        Self(extension.params.projection.center.w > 0.0)
+        Self(extension.early_surface || extension.params.projection.center.w > 0.0)
     }
 }
 
@@ -70,7 +72,7 @@ impl MaterialExtension for RoadExtension {
             && let Some(depth) = descriptor.depth_stencil.as_mut()
         {
             // StandardMaterial couples CPU transparent order and raster depth bias. Native
-            // decals precede world transparency; their large sort offset must not move depth.
+            // roads/decals precede world transparency; their sort offset must not move depth.
             depth.bias.constant = 0;
         }
         Ok(())
@@ -104,6 +106,7 @@ pub(crate) struct RoadMesh {
     pub distance: f32,
     pub attenuation: Vec4,
     pub deferred: Option<DeferredParams>,
+    source_road: bool,
 }
 
 impl RoadAssets {
@@ -142,11 +145,18 @@ impl RoadAssets {
             distance,
             attenuation,
             deferred: None,
+            source_road: false,
         })
     }
 }
 
 impl RoadMesh {
+    /// Native type13 ordinary Illum uses list5. Legacy decals/custom shaders retain their pass.
+    pub(crate) fn early_surface(&self) -> bool {
+        self.source_road && self.material.get().and_then(Option::as_ref)
+            .is_some_and(|data| data.source.shader.eq_ignore_ascii_case("Illum"))
+    }
+
     /// Moves prepared images into Bevy once; subsequent road objects reuse the handles.
     pub fn material(&self, cry: &mut CryAssets, materials: &mut Assets<RoadMaterial>) -> Option<Handle<RoadMaterial>> {
         let data = self.material.get()?.as_ref()?;
@@ -169,7 +179,8 @@ impl RoadMesh {
         if !matches!(material.alpha_mode, AlphaMode::Add) {
             material.alpha_mode = AlphaMode::Blend;
         }
-        material.depth_bias = self.priority as f32;
+        let early_surface = self.early_surface();
+        material.depth_bias = if early_surface { -600_000.0 } else { 0.0 } + self.priority as f32;
         let opacity = data
             .source
             .texture(&TextureMap::Opacity)
@@ -202,7 +213,7 @@ impl RoadMesh {
             material.cull_mode = Some(bevy::render::render_resource::Face::Back);
             material.double_sided = false;
         }
-        let extension = RoadExtension { params, opacity };
+        let extension = RoadExtension { params, opacity, early_surface };
         let handle = materials.add(ExtendedMaterial {
             base: material,
             extension,
@@ -322,6 +333,7 @@ pub(crate) fn prepare_cell(
             distance: road.max_view_dist,
             attenuation: Vec4::ZERO,
             deferred: None,
+            source_road: true,
         });
     }
     out
@@ -614,6 +626,48 @@ mod tests {
         assert_eq!(params.mask, Vec4::X);
         assert_eq!(params.uv_x.w, 1.0);
         assert_eq!(opacity_params(&source, false).uv_x.w, 0.0);
+    }
+
+    #[test]
+    fn only_type13_illum_qualifies_and_sort_key_does_not_change_opacity_uniforms() {
+        for shader in ["Illum", "illum", "Decal", "Water", "Terrain.Layer"] {
+            let material = Arc::new(OnceLock::new());
+            material.set(Some(MaterialData {
+                source: Arc::new(Material::parse(&format!(r#"<Material Shader="{shader}"/>"#)).unwrap()),
+                images: Mutex::new(None), handles: Mutex::new(HashMap::new()), textures: Mutex::new(HashMap::new()),
+            })).ok().unwrap();
+            for source_road in [false, true] {
+                let road = RoadMesh {
+                    mesh: Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD),
+                    material: material.clone(), priority: 17, radius: 1.0, distance: 100.0,
+                    attenuation: Vec4::ZERO, deferred: None, source_road,
+                };
+                assert_eq!(road.early_surface(), source_road && shader.eq_ignore_ascii_case("Illum"));
+            }
+        }
+        let source = Material::parse(r#"<Material Shader="Illum" Opacity="0.723"/>"#).unwrap();
+        let params = opacity_params(&source, false);
+        for early_surface in [false, true] {
+            let extension = RoadExtension { params, opacity: None, early_surface };
+            assert_eq!(RoadKey::from(&extension).0, early_surface);
+            assert_eq!(extension.params.projection.center.w, 0.0);
+            assert_eq!(extension.params.attenuation, Vec4::ZERO);
+            assert_eq!(extension.params.mask, params.mask);
+        }
+        use bevy::core_pipeline::core_3d::TransparentSortingInfo3d;
+        use bevy::render::render_phase::ViewRangefinder3d;
+        for position in [Vec3::new(-38000.0, 500.0, -35000.0), Vec3::new(30000.0, 800.0, 10000.0)] {
+            for forward in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
+                let camera = Transform::from_translation(position).looking_to(forward, Vec3::Y);
+                let range = ViewRangefinder3d::from_world_from_view(&camera.compute_affine());
+                let key = |bias| TransparentSortingInfo3d::Sorted {
+                    mesh_center: position + forward * 40.0, depth_bias: bias,
+                }.sort_distance(&range);
+                assert!(key(-600_000.0 + 255.0) < key(-500_000.0));
+                assert!(key(-500_000.0 + 255.0) < key(-300_000.0));
+                assert!(key(-300_000.0) < key(0.0));
+            }
+        }
     }
 
     #[test]
