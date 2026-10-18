@@ -109,6 +109,9 @@ fn start(id: u32, tl: u16) -> aa_net::Event {
         synergy: 0,
         result: 0,
         result_value: 0,
+        raw_result: Default::default(),
+        raw_caster: aa_net::SkillCasterData::Unit(100),
+        raw_target: aa_net::SkillTargetData::Unit(100),
     })
 }
 

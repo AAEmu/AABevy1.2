@@ -380,6 +380,9 @@ mod tests {
             synergy: 0,
             result,
             result_value: 0,
+            raw_result: aa_net::SkillResult { raw_flags: 1, code: result, ..Default::default() },
+            raw_caster: aa_net::SkillCasterData::Unit(100),
+            raw_target: aa_net::SkillTargetData::Doodad(300),
         })
     }
     fn fired(tl: u16) -> Event {
@@ -392,6 +395,9 @@ mod tests {
             channeling_ms: 0,
             fire_anim_id: 0,
             raw_final_flag: 0,
+            result: Default::default(),
+            raw_caster: aa_net::SkillCasterData::Unit(100),
+            raw_target: aa_net::SkillTargetData::Doodad(300),
         })
     }
     #[test]
