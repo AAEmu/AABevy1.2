@@ -528,6 +528,7 @@ pub enum Event {
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
     Family(crate::family::FamilyEvent),
+    UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
     FamilyRequested { character_id: u32, command: crate::FamilyCommand },
     FamilyRequestRejected { character_id: u32, command: crate::FamilyCommand, message: String },
     UnpackItemRequested(crate::unpack::UnpackItemRequest),
@@ -1576,6 +1577,7 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Family(e) => self.emit(Event::Family(e)),
+            M::UnitGmModeChanged(e) => self.emit(Event::UnitGmModeChanged(e)),
             M::ScheduledEventStarted(e) => self.emit(Event::ScheduledEventStarted(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::InitialConfig(config) => self.emit(Event::InitialConfig(config)),
@@ -4245,6 +4247,15 @@ mod tests {
             rejected |= matches!(event,Event::FamilyRequestRejected {..});
         }
         assert!(rejected);
+    }
+
+    #[tokio::test]
+    async fn gm_mode_reports_preserve_repeats_unknown_indices_and_raw_values() {
+        let (tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let raw=crate::unit_msg::UnitGmModeChanged{obj_id:7,mode:-1,value:255};
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::UnitGmModeChanged(raw),game::ServerMsg::UnitGmModeChanged(raw)]))).await;
+        for _ in 0..2 {assert!(matches!(events.try_recv(),Ok(Event::UnitGmModeChanged(value)) if value==raw));}
+        assert!(events.try_recv().is_err());assert_eq!(session.self_obj,0);
     }
 
 }
