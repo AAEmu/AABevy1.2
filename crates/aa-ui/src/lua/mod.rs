@@ -12,6 +12,7 @@
 
 pub mod animation;
 mod attachment;
+pub(crate) mod auto_clip;
 mod bounds;
 pub mod chat;
 pub mod chat_input;

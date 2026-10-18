@@ -78,6 +78,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         if alpha <= 0.0 {
             continue;
         }
+        crate::lua::auto_clip::geometry(u, id);
         let Some(w) = u.tree.widget(id).cloned() else {
             continue;
         };
@@ -163,6 +164,10 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                     text_quads(u, &p, rect, c, alpha, scale, &mut out);
                     d.inset[0] += pi[0] + pw + pi[2];
                 }
+                std::borrow::Cow::Owned(d)
+            } else if t.auto_clip.enabled {
+                let mut d = t.clone();
+                d.text = crate::lua::auto_clip::shown_text(&t.text, t.auto_clip.count).to_string();
                 std::borrow::Cow::Owned(d)
             } else {
                 std::borrow::Cow::Borrowed(t)

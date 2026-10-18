@@ -473,6 +473,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             o.width = a.f(1);
             o.height = a.f(2);
             drop(u);
+            super::auto_clip::geometry(&mut ui(lua), id);
             scale_event(lua, id);
             none()
         })?,
@@ -481,6 +482,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetWidth",
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).width = a.f(1);
+            super::auto_clip::geometry(&mut ui(lua), id);
             none()
         })?,
     )?;
@@ -488,6 +490,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetHeight",
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).height = a.f(1);
+            super::auto_clip::geometry(&mut ui(lua), id);
             none()
         })?,
     )?;
@@ -984,6 +987,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetText",
         method(lua, |lua, id, a| {
+            super::auto_clip::geometry(&mut ui(lua), id);
             let s = a.s(1).unwrap_or_default();
             {
                 let mut u = ui(lua);
@@ -1002,6 +1006,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 }
             }
             auto_size(lua, id);
+            super::auto_clip::refresh(&mut ui(lua), id);
             none()
         })?,
     )?;
@@ -1011,6 +1016,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             let on = a.b(1, true);
             text_of(lua, id, |t| t.auto_resize = on);
             auto_size(lua, id);
+            super::auto_clip::refresh(&mut ui(lua), id);
+            none()
+        })?,
+    )?;
+    def(
+        "SetAutoClipChar",
+        method(lua, |lua, id, a| {
+            super::auto_clip::set(lua, id, a.b(1, true));
             none()
         })?,
     )?;
@@ -1041,6 +1054,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetInset",
         method(lua, |lua, id, a| {
+            super::auto_clip::geometry(&mut ui(lua), id);
             let inset = [a.f(1), a.f(2), a.f(3), a.f(4)];
             text_of(lua, id, |t| t.inset = inset);
             none()
@@ -1754,7 +1768,12 @@ fn scale_event(_lua: &Lua, _id: Id) {}
 /// Text style methods (`widget.style`, `window.titleStyle`, text drawables).
 pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
     let m = lua.create_table()?;
-    fn with_style(lua: &Lua, this: &Value, f: impl FnOnce(&mut TextBlock)) -> mlua::Result<()> {
+    fn with_style(
+        lua: &Lua,
+        this: &Value,
+        refresh_clip: bool,
+        f: impl FnOnce(&mut TextBlock),
+    ) -> mlua::Result<()> {
         let Value::Table(t) = this else { return Ok(()) };
         let Some(code) = reg(lua).styles.raw_get::<Option<i64>>(t)? else {
             return Ok(());
@@ -1774,15 +1793,19 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         drop(u);
         if which == 0 {
             auto_size(lua, owner);
+            if refresh_clip {
+                super::auto_clip::refresh(&mut ui(lua), owner);
+            }
         }
         Ok(())
     }
     let sm = |name: &str, f: fn(&mut TextBlock, &Args)| -> mlua::Result<()> {
+        let refresh_clip = matches!(name, "SetFont" | "SetFontSize");
         m.raw_set(
             name,
             lua.create_function(move |lua, mv: MultiValue| {
                 let a = Args::new(mv);
-                with_style(lua, &a.v(0), |tb| f(tb, &a))?;
+                with_style(lua, &a.v(0), refresh_clip, |tb| f(tb, &a))?;
                 Ok(())
             })?,
         )
@@ -1819,7 +1842,7 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         lua.create_function(|lua, mv: MultiValue| {
             let a = Args::new(mv);
             let mut style = None;
-            with_style(lua, &a.v(0), |tb| {
+            with_style(lua, &a.v(0), false, |tb| {
                 style = Some((tb.style.clone(), tb.text.clone()))
             })?;
             let Some((st, text)) = style else {
@@ -1834,7 +1857,7 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         lua.create_function(|lua, mv: MultiValue| {
             let a = Args::new(mv);
             let mut style = None;
-            with_style(lua, &a.v(0), |tb| style = Some(tb.style.clone()))?;
+            with_style(lua, &a.v(0), false, |tb| style = Some(tb.style.clone()))?;
             let Some(st) = style else { return Ok(0.0) };
             Ok(ui(lua).fonts.metrics(&st.font, st.size).1)
         })?,
@@ -1844,7 +1867,7 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
         lua.create_function(|lua, mv: MultiValue| {
             let a = Args::new(mv);
             let mut c = [1.0f32; 4];
-            with_style(lua, &a.v(0), |tb| c = tb.style.color)?;
+            with_style(lua, &a.v(0), false, |tb| c = tb.style.color)?;
             Ok((c[0], c[1], c[2], c[3]))
         })?,
     )?;
