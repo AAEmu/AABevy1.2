@@ -160,6 +160,7 @@ fn setup(
                         normal_map: Some(image.clone()),
                         foam_map: None,
                         env_map: None,
+                        environment_2d: None,
                     })),
                     Transform::from_translation(point)
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),

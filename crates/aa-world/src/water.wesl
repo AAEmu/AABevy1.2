@@ -61,10 +61,14 @@ struct WaterParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var foam_map_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(5) var env_map: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(6) var env_map_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(7) var environment_2d: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(8) var environment_2d_sampler: sampler;
 
 // Matches water_material::AUTHORED_WATER_CUBE: actual authored static cube,
 // ENVIRONMENT_MAP+BUMP_MAP, no REALTIME_REFLECTIONS, successful source load.
 const AUTHORED_WATER_CUBE: f32 = 2.0;
+// Same source gate, loaded ordinary 2D DDS: native TT3_TCUBE is absent.
+const AUTHORED_WATER_ENVIRONMENT_2D: f32 = 3.0;
 
 // Static authored water and ocean meshes use the standard Bevy world transform.
 // Native WaterSurfaceVS carries endpoint alpha twice: RGB untouched and A near-faded.
@@ -281,6 +285,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var r = reflect(-v, nr);
     // Isolated original-DDS cube sampling controls inject a known reflected Bevy ray.
     if inspect_mode == 8.0 { r = water.sky_h.xyz; }
+    // Varying signed Cry XY controls verify implicit mip derivatives.
+    if inspect_mode == 9.0 { r = vec3<f32>(in.uv.x,0.0,-in.uv.y); }
     let folded_rdir = normalize(vec3<f32>(r.x, abs(r.y), r.z));
     // The native cube sampler consumes the reflected Cry vector without folding its Z.
     // The analytic sky, optional SSR and every fallback keep their existing hemisphere.
@@ -288,8 +294,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let rdir = select(folded_rdir,r,native_cube);
     // the engine reflects a fixed cube map (Cry axes: x east, y north, z up) lit by the sun and the sky colour
     let cube = textureSample(env_map, env_map_sampler, vec3<f32>(rdir.x, -rdir.z, rdir.y)).rgb * water.env_lit.rgb;
-    if inspect_mode == 8.0 { return vec4<f32>(cube,1.0); }
-    let sky = mix(sky_color(folded_rdir), cube, water.env_lit.a);
+    var environment = cube;
+    if water.motion.x == AUTHORED_WATER_ENVIRONMENT_2D && water.misc.x <= 0.5 && water.motion.w != -4.0 {
+        // WaterSurfacePS441: signed reflected Cry XY, no remap/fold. Native
+        // tex2D uses implicit mip derivatives and the ordinary default SRV.
+        environment = textureSample(environment_2d,environment_2d_sampler,vec2<f32>(r.x,-r.z)).rgb * water.env_lit.rgb;
+    }
+    if inspect_mode == 8.0 || inspect_mode == 9.0 { return vec4<f32>(environment,1.0); }
+    let sky = mix(sky_color(folded_rdir), environment, water.env_lit.a);
     var refl = sky;
     if water.misc.x > 0.5 && dist < 160.0 {
         // rough water smears the reflection vertically: two rays above and below the mirror direction

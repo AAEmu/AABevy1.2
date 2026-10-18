@@ -4104,8 +4104,8 @@ models. No original-client camera reference exists for this controlled lake view
 
 All seven deliverable runs self-close without errors. Explicit existing warnings
 are retained: `swamp_rescue` authors a **2D** `probe_env04` environment source,
-so its existing cube-only loader logs the fallback in numeric/Farm runs; that
-material variant remains unsupported. Solzreed logs the existing deferred-decal
+so the then cube-only loader logs the fallback in those numeric/Farm runs.
+That specific loader boundary is closed by the following 2D environment slice. Solzreed logs the existing deferred-decal
 receiver budget for neighbour(14,13) in both captures; the budget is unchanged.
 **225 library tests pass /9 existing ignored**; all examples check and both
 feature/motion examples build. The inherited material LOD patch payload and the
@@ -4115,6 +4115,108 @@ Ignored `roads/water-flags-audit/` retains the corrected material/placement
 surveys, source notes and separate pre-edit calibration archive. Native high-
 quality foam selection and SUN_SHADING's unity-versus-sun+sky light conversion
 remain separate gaps; no new light conversion or brightness fitting is bundled.
+
+### Native static 2D water environment maps
+
+Original `WaterSurfacePS`438-442 branches on `%_TT3_TCUBE`: cubes sample the signed
+Cry reflection vector, ordinary 2D maps sample **its signed XY directly**. There is
+no .5 remap, hemisphere fold or projector transform. The native bridge is closed
+through original renderer instructions: DDS image classifier **381C39D0** assigns
+CTexture+84 type1 for ordinary 2D, type3 for six faces; **3822FB30 /3822BEB0** set
+SEfResTexture+44 bit0x10 for type3/4 and OR `flags<<slot` into renderer+11448 for
+slots0..3. Slot3 therefore sets0x80 only for cubes. **3807C6B0** copies that byte into
+ShaderIdent+20. Generator **38092090** tests `16<<slot`, emitting define token
+481+slot; token484 is `%_TT3_TCUBE` at **382144A7**. `$Env` resolves slot3 in
+**38257800**. Original x86 controls execute30 type/slot cases and all1024 combinations
+of the eight-bit mask/four slots; token generation matches exactly.
+
+The ordinary sampler is also source-backed. `watersurface.cfx` leaves filter,
+address and sRGBLookup unspecified. **38242DA0** defaults address bytes0 and
+sRGBLookup0; **380FA2C0** maps address0 to WRAP. Material constructor **380D9D50**
+initializes load flags0, repeat U/V true and Filter=-1. Resource loading
+**38259790 /38258930** preserves ordinary flags. **380FA400(-1)** uses the active
+texture filter; native registered defaults are `d3d9_TextureFilter=TRILINEAR`
+(**38117900**) and anisotropy1 (**38005330**). The supported profile therefore uses
+repeat plus linear min/mag/mip filtering, anisotropy1 and implicit derivative LOD.
+The inherited cube LOD calibration is deliberately not applied to `tex2D`.
+
+Sampler sRGBLookup0 does **not** imply encoded sampling for every texture. The
+DDS CRYF header0x800 flows through **381D6740 /381C39D0** to CTexture+60 bit0x8000.
+For supported ordinary BC formats **38100230** preserves that bit, selects
+DXGI71->72,74->75,77->78 via **380F8B20**, and builds the default SRV at CTexture+132
+with that format. **380FB9C0** selects+132; alternate+136 needs both dual-view
+load flag0x10 and sampler byte18 nonzero. Thus the metadata-selected default view
+remains active with sampler sRGBLookup0. Eighteen executed original format-branch
+controls and the native sampler constructor check confirm the supported profile.
+This reuses the earlier projector view proof; no transfer function is inferred
+from filenames or texture appearance.
+
+The bounded131 ocean-material audit finds64 qualified static environment entries,
+six using four actual2D images: `swamp_rescue` and `river_waterfall_harbour` use
+probe_env04; `rescue_watertank` and `river_mesa` use probe_env01; `river` uses
+blue_sky; `fleet_watervolume` uses fleet_test_refl3. Both probes are linear 512x512 BC1
+with10 mips; blue_sky is tagged-sRGB 256x256 BC1 with9; fleet is tagged-sRGB 512x512 BC2
+with10. All six author only Map/File and empty TexMod, without material sRGB
+attributes. Missing sources still follow the existing fallback.
+
+`WaterMaterial.environment_2d` adds optional texture/sampler bindings7/8 and named
+motion mode3. Only WaterSurface+BUMP_MAP+ENVIRONMENT_MAP, without REALTIME_REFLECTIONS,
+qualifies. Raw XML must have no environment sampler/type/amount overrides, no
+material sRGB override and an empty/absent TexMod. Only complete single-face,
+depth1 BC1/2/3 DDS up to1024 on either axis and 512x512 pixels qualifies; normal-image
+variants and truncated mip chains are declined. Encoded BC blocks and all original
+mips stay byte-identical. At most16 new path entries, including failures, are
+retained; successfully loaded cubes do not consume that2D budget. Styles share each
+image and one unchanged fallback cube. Image creation
+and source parsing happen only on cached style creation, with no per-frame image
+work. Existing cube, sea, analytic and optional SSR paths retain their formulas and
+samplers. Unsupported/full cases retain the previous fallback. `--environment-2d`
+and `--legacy-environment-2d` isolate the new branch with frozen wave time.
+
+`water_environment2d` exercises all four real images through cached production
+styles. Signed/repeated UV pairs, seams and original negative receiver-ray controls
+use native implicit LOD0; varying UV controls verify implicit LOD2 and, with
+`--fractional`, trilinear LOD1.5. CPU controls decode individual source BC texels,
+apply the native per-texel transfer function before bilinear filtering, then blend
+mips. The cube LOD uniform is intentionally7 throughout, proving it does not affect
+the new2D sampler. All128 GPU controls pass within **one byte**. The original DDS
+content and independent thin CPU swatches are visible in the inspected captures.
+
+Numeric final captures log **307-426 FPS** (integer mips) and **327-392 FPS**
+(fractional mips). The existing36 cube controls and four sea compositing controls
+also pass. Their entire1280 cube and1920 sea PNGs are **pixel-identical** to the
+previous milestones (maximum channel difference0), at241-368 and227-343 FPS.
+
+Original Hadir Farm cell0,0 binds the new image only to the real `swamp_rescue`
+style (mode3); the other three streamed styles retain mode2/cube. The original
+six-point outline, position, level136.13449 and camera described above are unchanged.
+Both on/off captures were inspected: authored daytime fog still obscures the
+surface (maximum difference1 byte, mean0.00067). There is no original-client camera
+reference or visible scene-fidelity claim for that view; no fog/light values were
+changed. Native/legacy runs log140-186 /158-172 FPS. The original unload run logs
+146-229 FPS and releases all four water entities/cell mesh IDs after camera
+movement; the bounded style/image cache retains its existing world lifetime.
+All seven final runs self-close without warnings/errors, including removal of the
+previous expected non-cube warning for this now-supported2D source. Copied capture
+executables are removed after exit. A final rebuilt cache-admission regression
+also releases all four meshes/entities and self-closes without errors; its shared-load
+FPS is59-148, so it is a lifetime check rather than a performance comparison.
+
+**227 library tests pass /9 existing optional tests ignored**, all examples check,
+and the three affected rendering fixtures build. Tests cover override refusal,
+original compressed bytes/mips/default view, image sharing, cube admission isolation
+and full-cache fallback.
+The previous MTL parser's lossy UTF-8/repaired-XML behaviour is preserved; strict
+raw-XML validation limits only new2D admission.
+
+Ignored `roads/water-env2d-audit/` retains original source/decompilation, executed
+oracles, the corrected raw material survey, logs and separate five-file pre-edit
+calibration archives. Only owned shader/material patches are staged. Their inherited
+added/removed line payloads and operation semantics remain exact, and the other
+three calibration files retain their original hashes. Native nondefault texture
+filter CVars, TexMod/type/view overrides, dynamic/realtime sources and full native
+water lighting remain explicit boundaries. In particular SUN_SHADING's unity versus
+sun+sky radiometry is unchanged by this sampler slice; no colour tuning is bundled.
 
 ### Native river endpoint opacity and counted outlines
 
@@ -4273,7 +4375,7 @@ use and cached (64, least recently used). `None` on dry land and outside the map
 -> `(127.0, Lake)`, a river in cell (9, 12), the map corner `(100, 100)` -> `(100.0, Sea)`.
 
 Not done: flow along rivers, caustics, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
-`Foam`-less materials (gen mask bits are not read: every volume with foam parameters gets foam), `TransparencyRatio` above 1.
+unsupported non-BUMP_MAP feature variants and `TransparencyRatio` above 1. Native ordinary FOAM/glint eligibility is implemented above.
 
 ### Streaming (`stream.rs`)
 
