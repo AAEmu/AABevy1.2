@@ -99,6 +99,7 @@ pub enum ClientMsg {
     /// Explicit Bloodlust state request; only SCForceAttackSet updates received state.
     SetForceAttack { on: bool },
     /// `CSStartSkill`: a unit, bag item or explicit mount caster starts `skill_id`.
+    ItemEffect { self_obj_id:u32, request:crate::item_effect::ItemEffectRequest },
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
@@ -185,6 +186,7 @@ impl ClientMsg {
             Self::DestroyItem { .. } => cs::CSDestroyItemPacket,
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::SetForceAttack { .. } => cs::CSSetForceAttackPacket,
+            Self::ItemEffect { .. } => cs::CSStartSkillPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
             Self::RemoveBuff { .. } => cs::CSRemoveBuffPacket,
@@ -278,6 +280,7 @@ impl ClientMsg {
             Self::Resurrect { in_place } => {
                 w.bool(*in_place);
             }
+            Self::ItemEffect { self_obj_id,request } => request.write(&mut w,*self_obj_id),
             Self::StartSkill { skill_id, self_obj_id, caster, target } => {
                 crate::skill::write_start_skill(&mut w, *skill_id, *self_obj_id, *caster, target);
             }
