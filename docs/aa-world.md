@@ -4278,6 +4278,83 @@ baselines. Only the owned shader patch is staged. Native vertex-versus-fragment
 float interpolation details, high-quality foam selection, SUN_SHADING radiometry
 and the other previously stated water limitations remain open.
 
+### Native static water SUN_SHADING light
+
+`WaterSurfacePS`377-379 initializes `cSunShading` to unity; only authored
+**SUN_SHADING0x2000** selects `g_PS_SunColor + g_PS_SkyColor`. That exact RGB
+multiplies static environment samples at438-442 and foam at529-531. The realtime
+reflection branch precedes static ENV and does not use this multiplier. The
+bounded131-material survey finds68 WaterSurface+BUMP_MAP materials,47 with the
+flag and21 without. Of64 static ENV candidates,18 omit it;17 have an original DDS
+present. `lake_tank` is a real static-cube/SUN-off/FOAM-on example.
+
+The raw input chain is closed against the original binaries. Native ToD
+**300A729D /300A7362** multiplies each raw RGB by its authored multiplier times
+**2^HDR power**, after the existing raw layer blend. Engine factory30217DF0 calls
+constructor30131190, installing vtable30263718. Setters **30123410 /30123340**
+(slots0x178 /0x174) preserve sun/sky RGB at ObjManager+0xD8 /+0xCC; getters
+**30123860 /30123810** (slots0x2A0 /0x29C) copy it back unchanged. Renderer
+PF/PB_SunColor enum0x77 and PF_SkyColor0x78, registered at383848EC /38384914,
+reach **38077AA8 /3806FD90**. Their ordinary RGB upload introduces no IEC decode.
+**54 executed original ToD SSE -> setter -> getter -> renderer RGB controls**
+match bit-for-bit; both absent-manager getter cases return zero.
+
+The optional sky addition is specifically a night-vision path. Renderer
+**38074190** reads `NightVision_Active` via3825E4B0 and writes renderer+0x10BF0
+at38074608. Sky3806FD90 adds0.25 only when that byte is active,
+`r_PostProcessEffects != 0` and `r_NightVision == 1`. The supported path has
+inactive night vision; no editor-only assumption or new night-vision state is
+introduced. Native full exposure matching remains outside this slice.
+
+`EnvSample.native_sun_sky` retains the separate raw products and their sum,
+including the component interpolation utility. Existing calibrated `sun`/`sky`
+and every other consumer are unchanged. Only successfully admitted static native
+cube/2D modes2/3 select the new raw sum or unity by the authored flag. The same
+existing radiance/exposure conversion and foam gain are applied afterward.
+Mode1, missing/full caches, realtime/unknown sources, sea, glint and all other
+radiometry retain their previous paths. No new material variants, textures,
+workers or per-frame allocations are introduced.
+
+Tests replay original numeric uploads, raw layer/HDR order, defaults, interpolation,
+static flag/unity selection, signed gains and fallback preservation. `water_lighting`
+uses actual cached material styles, then isolates ENV and foam using white diagnostic
+textures. Day/black-night/HDR controls include SUN-off unity, SUN-on raw products,
+2D/no-FOAM and mode1 fallback. The existing feature fixture retains its signed
+eligibility controls with the corrected static light expectation.
+
+The final day/black-night/HDR fixture gives **72/72 GPU controls within one
+RGB byte**; the existing feature fixture gives another48/48 within one byte.
+Four sea controls pass and the **entire sea PNG is byte-identical** to the previous
+2D ENV milestone. The54 original binary vectors test the native SSE product,
+setter/getter and renderer upload order with the already-proven HDR factor seeded;
+they do not execute the native power function. All229 library tests pass, with9
+existing ignored tests; the library and every example check, and all three
+relevant examples build.
+
+`shots/aa-world/water_lighting/` retains the inspected controls and matched original
+pond day/night pairs (`water_motion --world --shore --light-shading`, with
+`--legacy-light-shading` as the old-colour control). At the same native pond camera
+and hour, the day pair differs in404,814 pixels by more than3 bytes (max120),
+and the night pair in220,871 pixels (max68). The native night result removes the
+former purple foam/reflection multiplier for the authored SUN-off material.
+A sampled dry-bank region is identical; the sky differs by at most1 byte from
+existing temporal rendering. This is a source-backed comparison against the
+previous implementation, **not a native-client camera match** or full radiometric
+calibration. No gains or RGB artistic formulas were tuned.
+
+Observed shared-machine FPS is172-255 for the three new numeric fixtures,
+152-224 for the existing feature controls,157-186 day-native /146-186 day-legacy,
+and147-164 settled night-native /98-155 night-legacy (first-load samples87 /100).
+The real pond unload control releases its one8-vertex mesh and all water entities,
+while retaining the existing shared style cache lifetime; settled FPS145-199.
+The sea control records161-234 FPS. All eleven final runs exit zero, close their
+windows and log no runtime warnings/errors. The copied executables are removed.
+
+Ignored `roads/water-light-audit/` contains original shader source, getter/setter
+and renderer disassembly, executed oracle/goldens, the corrected survey and
+separate five-file calibration archives. Only the owned material patch is staged;
+all inherited calibration payloads remain outside the commit.
+
 ### Native river endpoint opacity and counted outlines
 
 Exact `_LoadWaterVolume` **301F6AB0** reads byte40 bits2/4, equivalently

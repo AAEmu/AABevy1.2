@@ -149,6 +149,7 @@ struct StyleBase {
     no_flow: bool,
     native_cube: bool,
     native_environment_2d: bool,
+    sun_shading: bool,
 }
 
 fn static_cube_candidate(material: &aa_cry::material::Material) -> bool {
@@ -182,6 +183,7 @@ impl StyleBase {
             no_flow: false,
             native_cube: false,
             native_environment_2d: false,
+            sun_shading: false,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -207,6 +209,7 @@ impl StyleBase {
         let Ok(mtl) = aa_cry::material::Material::parse(&text) else { return (base, normal_map) };
         base.native_uv = mtl.shader.eq_ignore_ascii_case("WaterSurface") && mtl.gen_mask & 1 != 0;
         base.no_flow = base.native_uv && mtl.gen_mask & 0x200 != 0;
+        base.sun_shading = mtl.gen_mask & 0x2000 != 0;
         base.native_cube = static_cube_candidate(&mtl);
         base.native_environment_2d = base.native_cube && plain_environment_sampler(&text);
         let param = |name: &str, default: f32| mtl.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
@@ -244,6 +247,14 @@ impl StyleBase {
         // authored multiplier sign/value. Preserve every other style parameter.
         if mask & (0x20 | 0x2000) == 0 { self.sun_multiplier = 0.0; }
         if mask & 0x1000 == 0 { self.foam = 0.0; }
+    }
+
+    fn surface_light(&self, sample: &crate::env::EnvSample) -> Vec3 {
+        // WaterSurfacePS377 /438 /529. Restrict this slice to actually admitted
+        // static images; realtime/missing/mode1 and sea keep their calibrated path.
+        if self.native_cube || self.native_environment_2d {
+            if self.sun_shading { sample.native_sun_sky } else { Vec3::ONE }
+        } else { sample.sun + sample.sky }
     }
 
     fn motion_mode(&self) -> f32 {
@@ -464,9 +475,8 @@ pub fn update_water(
     let sun_up = ((cur.sun_dir.z + 0.04) / 0.1).clamp(0.0, 1.0);
     let sky_h = (cur.horizon * rs * tuning.sky_gain).extend(tuning.sky_exp);
     let sky_z = (cur.zenith * rs * tuning.sky_gain).extend(0.0);
-    // foam and the surface shading use the engine's `sun + sky` colour
-    let foam_light = (cur.sun + cur.sky) * rs;
     for (handle, base) in &styles.bases {
+        let foam_light = base.surface_light(cur) * rs;
         let density = if base.density > 0.0 { base.density } else { 0.2 };
         let (body, f0, weight, amount, foam, sun_gain, ssr, cube) = if base.sea {
             let body = sea_color(&env, cur, &tuning, rs).extend(density * tuning.sea_absorb);
@@ -565,6 +575,31 @@ mod tests {
         assert!(materials.get(&h).unwrap().environment_2d.is_none());
         assert_eq!(materials.get(&h).unwrap().params.motion.x,AUTHORED_WATER_UV);
         assert_eq!(bounded.environment_2d.len(),MAX_ENVIRONMENT_2D);
+    }
+
+    #[test]
+    fn static_native_light_uses_sun_shading_or_unity_without_changing_fallbacks() {
+        let (template, _) = StyleBase::of(&WaterStyle::new(SEA, 0, [0.0; 3], 0.0));
+        let mut sample = crate::env::TimeOfDay::default().sample(10.0, crate::env::Lighting::default());
+        sample.sun = Vec3::new(0.1, 0.2, 0.3);
+        sample.sky = Vec3::new(0.4, 0.3, 0.2);
+        sample.native_sun_sky = Vec3::new(1.25, 0.75, 0.25);
+        for mode in 0..4 {
+            for sun_shading in [false, true] {
+                let mut base = template.clone();
+                base.native_uv = mode != 0;
+                base.native_cube = mode == 2;
+                base.native_environment_2d = mode == 3;
+                base.sun_shading = sun_shading;
+                let expected = if mode >= 2 {
+                    if sun_shading { sample.native_sun_sky } else { Vec3::ONE }
+                } else { sample.sun + sample.sky };
+                assert_eq!(base.surface_light(&sample), expected);
+                for multiplier in [-2.0, 0.0, 3.0] {
+                    assert_eq!(base.surface_light(&sample) * multiplier, expected * multiplier);
+                }
+            }
+        }
     }
 
     #[test]

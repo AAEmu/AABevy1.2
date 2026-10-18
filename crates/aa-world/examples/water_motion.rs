@@ -31,6 +31,8 @@ struct Fixture {
     old_refraction: bool,
     features: bool,
     old_features: bool,
+    light_shading: bool,
+    old_light_shading: bool,
     foam_uv: bool,
     old_foam_uv: bool,
     environment_2d: bool,
@@ -67,6 +69,8 @@ fn main() {
                     2.80975842
                 } else if flag("--reference10") {
                     3.76261711
+                } else if flag("--night") {
+                    22.0
                 } else {
                     10.0
                 },
@@ -94,6 +98,8 @@ fn main() {
                 old_refraction: flag("--legacy-refraction"),
                 features: flag("--features") || flag("--legacy-features"),
                 old_features: flag("--legacy-features"),
+                light_shading: flag("--light-shading") || flag("--legacy-light-shading"),
+                old_light_shading: flag("--legacy-light-shading"),
                 foam_uv: flag("--foam-uv") || flag("--legacy-foam-uv"),
                 old_foam_uv: flag("--legacy-foam-uv"),
                 environment_2d: flag("--environment-2d") || flag("--legacy-environment-2d"),
@@ -397,7 +403,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features || fixture.environment_2d || fixture.foam_uv)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features || fixture.environment_2d || fixture.foam_uv || fixture.light_shading)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -443,6 +449,19 @@ fn world_check(
                         control.params.sun=(cur.sun*rs*value("SunMultiplier",0.1)*tuning.water_sun).extend(control.params.sun.w);
                         control.params.foam_col=((cur.sun+cur.sky)*rs*value("FoamMultiplier",0.75)*tuning.water_foam).extend(0.0);
                     }
+                }
+                if fixture.light_shading {
+                    control.params.motion.z=0.0;
+                    if fixture.old_light_shading && control.params.motion.x>=2.0 {
+                        let style=styles.style_for(material.id()).expect("cached source style");
+                        let mtl=CryMaterial::load(&format!("{}.mtl",style.material.trim_end_matches(".mtl"))).unwrap();
+                        let foam=mtl.public_param("FoamMultiplier").and_then(|v|v.parse::<f32>().ok()).unwrap_or(0.75);
+                        let cur=environment.sample.as_ref().unwrap();
+                        let rs=tuning.radiance*exposure.iter().next().flatten().map_or(bevy::camera::Exposure::BLENDER.exposure(),|e|e.exposure());
+                        control.params.env_lit=((cur.sun+cur.sky)*rs).extend(control.params.env_lit.w);
+                        if mtl.gen_mask&0x1000!=0 { control.params.foam_col=((cur.sun+cur.sky)*rs*foam*tuning.water_foam).extend(0.0); }
+                    }
+                    info!("water light shading: source_mode={} legacy={}",control.params.motion.x,fixture.old_light_shading);
                 }
                 if fixture.foam_uv {
                     control.params.motion.z=0.0;

@@ -301,6 +301,10 @@ pub struct EnvSample {
     /// Native SetFogColor RGB: raw sampled colour * (multiplier * 2^HDR power).
     /// Kept separate from the calibrated, IEC-decoded `fog` surface/post sample.
     pub native_fog: Vec3,
+    /// Native ordinary-game SunColor + SkyColor RGB, before the existing renderer-unit
+    /// conversion: raw colours * (their multipliers * 2^HDR power), then summed.
+    /// Kept separate from the calibrated IEC-decoded surface/post colours.
+    pub native_sun_sky: Vec3,
     pub fog_density: f32,
     pub ocean_fog: Vec3,
     /// Raw sRGB colours (before multipliers), for sky gradients.
@@ -433,7 +437,7 @@ impl EnvSample {
             };
         }
         mix!(
-            sun, sky, ambient_ground, fog, native_fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
+            sun, sky, ambient_ground, fog, native_fog, native_sun_sky, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
             color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
             char_back, char_back_shadow, ocean_under
@@ -482,13 +486,18 @@ impl TimeOfDay {
             let m = if mul.is_empty() { 1.0 } else { scalar(mul) };
             (c, srgb_to_linear(c) * m)
         };
-        let (_, sun) = col("Sun color", "Sun color multiplier");
+        let (sun_raw, sun) = col("Sun color", "Sun color multiplier");
         let (sky_srgb, sky) = col("Sky color", "Sky color multiplier");
         let (_, ambient_ground) = col("Ambient ground color", "Ambient ground color multiplier");
         let (fog_srgb, fog) = col("Fog color", "Fog color multiplier");
         // 300A5DD0 computes this product after raw layer blending, then 301235E0
         // stores all three floats unchanged. HDR renderer base (30121B70) is 2.
         let native_fog = fog_srgb * (scalar("Fog color multiplier") * scalar("HDR dynamic power factor").exp2());
+        // 300A729D /300A7362 -> setters30123410 /30123340 -> getters30123860
+        // /30123810 -> renderer38077AA8 /3806FD90 preserve this RGB without IEC decode.
+        let native_hdr = scalar("HDR dynamic power factor").exp2();
+        let native_sun_sky = sun_raw * (scalar("Sun color multiplier") * native_hdr)
+            + sky_srgb * (scalar("Sky color multiplier") * native_hdr);
         let (_, ocean_fog) = col("Ocean fog color", "Ocean fog color multiplier");
         let (nh, horizon) = col("Night sky: Horizon color", "Night sky: Horizon color multiplier");
         let (nz, zenith) = col("Night sky: Zenith color", "Night sky: Zenith color multiplier");
@@ -517,6 +526,7 @@ impl TimeOfDay {
             ambient_ground,
             fog,
             native_fog,
+            native_sun_sky,
             fog_density: scalar("Volumetric fog: Global density"),
             ocean_fog,
             sky_srgb,
@@ -871,6 +881,50 @@ mod tests {
         let single = TimeOfDay::sample_blended(&[(&a, 0.2)], 3.8, lighting);
         assert_eq!(single.sun, a.sample(3.8, lighting).sun);
         assert_eq!(single.moons[0].color, a.sample(3.8, lighting).moons[0].color);
+    }
+
+    #[test]
+    fn native_sun_sky_rgb_upload_goldens_and_raw_layer_order() {
+        let tod = |sun: &str, sky: &str, sm: f32, am: f32, hdr: f32| TimeOfDay::parse(&format!(
+            r#"<TimeOfDay sRGB="1">
+            <Variable Name="Sun color"><Spline Keys="0:({sun}):0,1:({sun}):0,"/></Variable>
+            <Variable Name="Sky color"><Spline Keys="0:({sky}):0,1:({sky}):0,"/></Variable>
+            <Variable Name="Sun color multiplier"><Spline Keys="0:{sm}:0,1:{sm}:0,"/></Variable>
+            <Variable Name="Sky color multiplier"><Spline Keys="0:{am}:0,1:{am}:0,"/></Variable>
+            <Variable Name="HDR dynamic power factor"><Spline Keys="0:{hdr}:0,1:{hdr}:0,"/></Variable>
+            </TimeOfDay>"#)).unwrap();
+        let lighting = Lighting::default();
+        // Original ToD SSE -> native setters/getters -> renderer PF/PB upload,
+        // executed against the two original DLLs. No IEC decode occurs there.
+        for (sm, hdr, expected) in [
+            (0.4, -1.0, [0.34, 0.2875, 0.23500001]),
+            (0.4, 0.0, [0.68, 0.575, 0.47000003]),
+            (0.4, 0.6, [1.0306873, 0.87153703, 0.7123868]),
+            (2.4, -1.0, [1.34, 1.2875, 1.235]),
+            (2.4, 0.0, [2.68, 2.575, 2.47]),
+            (2.4, 0.6, [4.0621204, 3.9029703, 3.7438202]),
+        ] {
+            let sample = tod("0.2:0.5:0.8", "0.8:0.5:0.2", sm, sm + 0.35, hdr).sample(10.0, lighting);
+            assert!(sample.native_sun_sky.abs_diff_eq(Vec3::from_array(expected), 1e-6));
+            assert!(sample.sun.abs_diff_eq(srgb_to_linear(Vec3::new(0.2, 0.5, 0.8)) * sm, 1e-6));
+        }
+        let a = tod("0.2:0.4:0.6", "0.1:0.3:0.5", 2.0, 1.0, 1.0);
+        let b = tod("0.8:0.6:0.4", "0.7:0.5:0.3", 6.0, 3.0, 3.0);
+        let mixed = TimeOfDay::sample_blended(&[(&a, 1.0), (&b, 3.0)], 10.0, lighting);
+        let expected = Vec3::new(0.65, 0.55, 0.45) * (5.0 * 2.5_f32.exp2())
+            + Vec3::new(0.55, 0.45, 0.35) * (2.5 * 2.5_f32.exp2());
+        assert!(mixed.native_sun_sky.abs_diff_eq(expected, 5e-6));
+        let sa = a.sample(10.0, lighting);
+        let sb = b.sample(10.0, lighting);
+        let late = sa.lerp(&sb, 0.75);
+        assert_eq!(late.native_sun_sky, sa.native_sun_sky.mix(sb.native_sun_sky, 0.75));
+        assert!((late.native_sun_sky - mixed.native_sun_sky).length() > 5.0);
+        let default = TimeOfDay::default();
+        let d = default.sample(10.0, lighting);
+        let t = spline_hour(10.0, lighting.dawn_hour) / 24.0;
+        let expected = default.color("Sun color", t) * default.scalar("Sun color multiplier", t)
+            + default.color("Sky color", t) * default.scalar("Sky color multiplier", t);
+        assert!(d.native_sun_sky.abs_diff_eq(expected, 1e-6));
     }
 
     #[test]
