@@ -3614,3 +3614,87 @@ formatting. Measured **166.6–185.1 FPS**, zero script errors and no WARN/ERROR
 owned process 12052 self-closed. `reference/ingame/spawn/real.png` supplies the
 original HUD/chat style context; no matching overflow fixture or pixel-parity
 claim.
+
+### Active tab counts and original guild sponsors (2026-10-18)
+
+Original `create_expedition_view.lua` allocates seven sponsor tabs, then its
+Lua `FillAllianceInfo` -> `InitSponsorsTab` calls `SetActivateTabCount(#info)`:
+six sponsors for Nuia alliance 148, five for Haranya alliance 149. The method
+was previously a no-op in aa-ui, so blank inactive sponsor buttons stayed
+visible. `FillAllianceInfo` itself is original Lua, not a missing game getter.
+
+Registration `3925a38a..a3a0` -> `39258680` -> `392c8760` stores a separate
+signed count at `+2f0`, upper-bounded only by the allocated vector length
+`(+2d4 - +2d0) / 16`. It does not change visibility, layout, selection or Lua
+callbacks. `GetActivateTabCount` (`39259290` -> `392c84d0`) returns that field
+through f32 rather than recomputing allocated rows. Native signed-number
+adapter `3925995a` converts f32 with CVTTSS2SI. aa-ui now preserves the
+independent count and delayed visibility update.
+
+`SelectTab` binding `392586c0` subtracts one and calls `392c8790`. This stores
+the requested index without a range guard. Active rows show either selected
+or unselected buttons; only the selected active pane shows. Inactive rows
+hide both buttons and their pane. Operations visit selected button, unselected
+button, then pane, in row order; shared `AddNewTab` panes retain that native
+sequential behavior. Afterward event `0x26` delivers `OnTabChanged` with the
+requested one-based index as f32 on every call, including repeats, zero and
+past-end requests. Selecting zero clears all panes, as the original sponsor
+initializer requires. The previous keep-selection-on-invalid-index regression
+encoded the wrong contract and has been corrected.
+
+Native button dispatcher `392c8940` selects only a matching unselected button
+(`row+8`). Clicking a selected button (`row+4`) does not repeat selection or
+that callback; the separate `392c89c0` path accepts both for the tab sound.
+This remains distinct from explicit repeated Lua `SelectTab` calls.
+Layout `392c8a80` still lays out every allocated row, so inactive rows retain
+their anchors and do not collapse remaining button/pane geometry.
+
+Constructor `392c8450..84a8` initializes active count zero and native selected
+index zero, exposed by `GetSelectedTab` as one even before allocation.
+`AddSimpleTab` (`392cd2a4..2c9`) and `AddNewTab` (`392cd0d5..0fa`) restore active
+count to allocated count, lay out and select the first tab on every successful
+insertion. `RemoveAllTabs` (`392cd338`) resets count zero while retaining the
+last selection field. aa-ui now matches those lifetimes. The native negative
+count setter is retained by its getter, but aa-ui refuses selection while the
+count is negative: native selection would index before the allocated vector.
+No invalid native memory access is reproduced. `RemoveTab` remains outside
+this bounded implementation.
+
+Source: `data/extract/aa-ui/native-tab-active-source-20261018.txt`.
+Offline `tab_active_oracle.py` executes actual count setter/getter, selection
+and button-ID dispatch instructions. Only Show and Lua event delivery are
+captured. Eleven passing groups in `native-tab-active-oracle-20261018.json`
+cover six/five active rows, upper/zero/negative setter values, repeated/zero/
+past-end selection, selected-outside-active and selected/unselected clicks.
+Negative-count selection is not executed. No live-client execution or writes
+are involved.
+
+The adjacent application-owned guild name-policy audit is recorded in
+`data/extract/aa-ui/native-name-policy-table-20261018.txt`: `394c8ca0` returns
+zero results for unsigned kind >6 or a missing Xl policy record. Fields `+0`,
+`+4`, `+8`, `+c` map to signed-number `local_min`, `local_max`, `eng_min`,
+`eng_max`; the low byte at `+10` maps to numeric `limit_space_cnt`. Flag bits
+0/1/2/4 at `+14` map to boolean `is_allow_space`, `is_allow_mix_lang`,
+`is_allow_mix_case`, `is_allow_special_letter`. This is source evidence for
+aa-client's utility adapter; aa-ui does not replace game policy data.
+
+Validation: `cargo check -p aa-ui`, the example build and **70 selected tests**
+passed: six new active-tab tests, 21 native-widget and two borrowed-tab tests,
+plus 41 original friend/mail, clipboard, selection, IME, keyboard, HUD and
+tooltip checks. The synthetic pointer fixture explicitly shows its parent tab.
+Tests verify delayed count effects, allocated identity/geometry, numeric type
+and f32 truncation, safe negative-count refusal, callback values/repetition,
+zero/out-of-range selection, insertion/reset lifetime, selected-button clicks
+and actual original sponsor controls through physical pointer input.
+
+Built and copied the aa-dev `native_guild_sponsors` example and inspected both
+unique original creation-window captures at 1280-by-720/UI scale 0.85:
+`shots/aa-ui/native-guild-sponsors-nuia-20261018.png` shows six sponsor icons
+after physical selection of Noryette Family (**243.7–285.6 FPS**), and
+`shots/aa-ui/native-guild-sponsors-harihara-20261018.png` shows five after
+physical selection of Wandering Winds (**264.7–287.1 FPS**). Both log zero
+script errors and no WARN/ERROR; owned processes 8800 and 6824 self-closed.
+The examples retain existing game-data fixtures, including their name guide;
+these captures verify active controls and original artwork/layout, not the
+application-owned name-policy adapter. `reference/ingame/spawn/real.png`
+supplies HUD style context; no matching sponsor reference or pixel-parity claim.

@@ -295,7 +295,7 @@ fn textbox_line_count_and_grid_rows() {
 }
 
 #[test]
-fn tab_select_out_of_range_keeps_selection() {
+fn tab_select_none_and_out_of_range_retain_requested_index_and_notify() {
     let ui = runtime();
     ui.exec(
         "@setup",
@@ -312,9 +312,12 @@ fn tab_select_out_of_range_keeps_selection() {
         "#,
     )
     .unwrap();
-    assert_eq!(eval::<i64>(&ui, "#changed"), 1);
+    assert_eq!(eval::<i64>(&ui, "#changed"), 3);
     assert_eq!(eval::<i64>(&ui, "changed[1]"), 2);
-    assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 2);
+    assert_eq!(eval::<i64>(&ui, "changed[2]"), 0);
+    assert_eq!(eval::<i64>(&ui, "changed[3]"), 5);
+    assert_eq!(eval::<i64>(&ui, "tab:GetSelectedTab()"), 5);
+    assert!(eval::<bool>(&ui, "not tab.window[1]:IsVisible() and not tab.window[2]:IsVisible()"));
 }
 
 #[test]

@@ -16,18 +16,35 @@ use super::widget::{create_child, show};
 use super::{call_handler, method, none, ret, ui, value_id};
 use crate::tree::{Anchor, Id, Point};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TabData {
     /// (window, selected button, unselected button) per tab.
     pub tabs: Vec<(Id, Id, Id)>,
     /// Parallel to `tabs`: the widgets belong to the script (`AddNewTab` with its own buttons).
     pub borrowed: Vec<bool>,
-    /// 1-based, 0 = none.
-    pub selected: usize,
+    /// Independent signed count; the native setter only upper-bounds by allocation.
+    pub active: i32,
+    /// Lua's 1-based selection, including 0 (none) and out-of-range requests.
+    pub selected: i32,
     pub vertical: bool,
     pub corner_right: bool,
     pub gap: f32,
     pub offset: f32,
+}
+
+impl Default for TabData {
+    fn default() -> Self {
+        Self {
+            tabs: Vec::new(),
+            borrowed: Vec::new(),
+            active: 0,
+            selected: 1,
+            vertical: false,
+            corner_right: false,
+            gap: 0.0,
+            offset: 0.0,
+        }
+    }
 }
 
 fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut TabData) -> R) -> Option<R> {
@@ -46,28 +63,36 @@ fn apply_selection(lua: &Lua, id: Id) {
         return;
     };
     for (i, &(win, sel, unsel)) in td.tabs.iter().enumerate() {
-        let on = i + 1 == td.selected;
-        show(lua, win, on, None);
+        let active = (i as i32) < td.active;
+        let on = active && i as i32 + 1 == td.selected;
         show(lua, sel, on, None);
-        show(lua, unsel, !on, None);
+        show(lua, unsel, active && !on, None);
+        show(lua, win, on, None);
     }
 }
 
-pub(crate) fn select(lua: &Lua, id: Id, index: usize, fire: bool) {
-    // Out of range (`SelectTab(0)`, `SelectTab(X2Bag:TabCount())` past the tabs) keeps the
-    // selection: the inventory's `OnTabChanged` indexes per-tab tables by the new index.
-    let changed = with(lua, id, |t| {
-        if index < 1 || index > t.tabs.len() {
+pub(crate) fn select(lua: &Lua, id: Id, index: i32, fire: bool) {
+    let accepted = with(lua, id, |t| {
+        // Native392c8790 indexes before its vector for negative active counts.
+        // Retain the exact setter/getter value but refuse that unsafe selection.
+        if t.active < 0 {
             return false;
         }
-        let changed = index != t.selected;
         t.selected = index;
-        changed
+        true
     })
     .unwrap_or(false);
+    if !accepted {
+        return;
+    }
     apply_selection(lua, id);
-    if fire && changed {
-        call_handler(lua, id, "OnTabChanged", vec![Value::Integer(index as i64)]);
+    if fire {
+        call_handler(
+            lua,
+            id,
+            "OnTabChanged",
+            vec![Value::Number(f64::from(index as f32))],
+        );
     }
 }
 
@@ -82,13 +107,15 @@ pub(crate) fn button_clicked(lua: &Lua, id: Id) -> bool {
         u.tree
             .widget(parent)
             .and_then(|w| w.tab.as_ref())
-            .and_then(|t| t.tabs.iter().position(|&(_, s, un)| s == id || un == id))
+            // 392c8940 switches only the unselected button (+8), whereas
+            // 392c89c0 accepts both button kinds for the shared click sound.
+            .and_then(|t| t.tabs.iter().position(|&(_, _, un)| un == id))
             .map(|i| (parent, i + 1))
     };
     let Some((tab, index)) = found else {
         return false;
     };
-    select(lua, tab, index, true);
+    select(lua, tab, index as i32, true);
     true
 }
 
@@ -195,12 +222,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                         t.tabs.push((win, sel, unsel));
                         t.borrowed.resize(t.tabs.len() - 1, false);
                         t.borrowed.push(true);
-                        if t.selected == 0 {
-                            t.selected = 1;
-                        }
+                        t.active = t.tabs.len() as i32;
                     });
-                    apply_selection(lua, id);
                     relayout_all(lua);
+                    select(lua, id, 1, true);
                     return ret(lua, a.v(4));
                 }
                 let i = with(lua, id, |t| t.tabs.len() + 1).unwrap_or(1) as i64;
@@ -217,16 +242,12 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                         }
                     }
                 }
-                let first = with(lua, id, |t| {
+                with(lua, id, |t| {
                     t.tabs.push((ids[0], ids[1], ids[2]));
-                    t.selected == 0
-                })
-                .unwrap_or(false);
-                if first {
-                    with(lua, id, |t| t.selected = 1);
-                }
-                apply_selection(lua, id);
+                    t.active = t.tabs.len() as i32;
+                });
                 relayout_all(lua);
+                select(lua, id, 1, true);
                 ret(lua, win)
             })?,
         )?;
@@ -234,21 +255,32 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SelectTab",
         method(lua, |lua, id, a| {
-            let i = a.f(1).max(0.0) as usize;
-            select(lua, id, i, true);
+            if a.is_num(1) {
+                select(lua, id, cvtt(a.f(1)), true);
+            }
             none()
         })?,
     )?;
     def(
         "GetSelectedTab",
         method(lua, |lua, id, _| {
-            ret(lua, with(lua, id, |t| t.selected as i64).unwrap_or(0))
+            ret(lua, with(lua, id, |t| t.selected as f32).unwrap_or(1.0))
         })?,
     )?;
     def(
         "GetActivateTabCount",
         method(lua, |lua, id, _| {
-            ret(lua, with(lua, id, |t| t.tabs.len() as i64).unwrap_or(0))
+            ret(lua, with(lua, id, |t| t.active as f32).unwrap_or(0.0))
+        })?,
+    )?;
+    def(
+        "SetActivateTabCount",
+        method(lua, |lua, id, a| {
+            if a.is_num(1) {
+                // 392c8760 stores only; the next SelectTab applies visibility.
+                with(lua, id, |t| t.active = cvtt(a.f(1)).min(t.tabs.len() as i32));
+            }
+            none()
         })?,
     )?;
     def(
@@ -293,7 +325,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "RemoveAllTabs",
         method(lua, |lua, id, _| {
             let (tabs, borrowed) = with(lua, id, |t| {
-                t.selected = 0;
+                t.active = 0;
                 (std::mem::take(&mut t.tabs), std::mem::take(&mut t.borrowed))
             })
             .unwrap_or_default();
@@ -317,8 +349,15 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    for name in ["SetActivateTabCount", "RemoveTab"] {
-        def(name, method(lua, |_, _, _| none())?)?;
-    }
+    def("RemoveTab", method(lua, |_, _, _| none())?)?;
     Ok(())
+}
+
+/// Script number adapter3925995a uses f32/CVTTSS2SI.
+fn cvtt(value: f32) -> i32 {
+    if value.is_finite() && (-2147483648.0..2147483648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
+    }
 }
