@@ -1,11 +1,16 @@
 //! Received trial wait cache and every received producer of its defendant callback gate.
-//! Does not implement general trial information, invitations, votes or automatic CS072.
+//! Does not implement elapsed trial clocks, invitations, votes or automatic CS072.
+mod data;
+pub use data::{TrialCrimeRecord, TrialDefendantData, TrialRecords};
 use crate::{
     session::{Event, Phase},
     wire::{Reader, Result, WireError},
 };
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialEvent {
+    DefendantData(TrialDefendantData),
+    Records(TrialRecords),
+    PhaseChanged { trial_id:u32,phase:u8,current_jury:i32,remaining_time_ms:u32 },
     SummonJury { trial_id: u32, court: u32, jury_number: i32 },
     SummonDefendant { trial_id: u32 },
     Waiting { order: u32, sentence_time_ms: i32 },
@@ -17,11 +22,14 @@ pub enum TrialEvent {
 }
 impl TrialEvent {
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x173 | 0x175 | 0x17b | 0x17c | 0x17e | 0x17f | 0x180 | 0x183)
+        matches!(op, 0x173 | 0x175 | 0x176 | 0x177 | 0x178 | 0x17b | 0x17c | 0x17e | 0x17f | 0x180 | 0x183)
     }
     /// Native and active lane bodies agree; consume complete raw names, including NULs.
     pub fn read(op: u16, r: &mut Reader) -> Result<Self> {
         Ok(match op {
+            0x176 => Self::DefendantData(TrialDefendantData::read(r)?),
+            0x177 => Self::Records(TrialRecords::read(r)?),
+            0x178 => Self::PhaseChanged{trial_id:r.u32()?,phase:r.u8()?,current_jury:r.i32()?,remaining_time_ms:r.u32()?},
             0x173 => Self::SummonJury {
                 trial_id: r.u32()?,
                 court: r.u32()?,
@@ -54,6 +62,14 @@ impl TrialEvent {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrialNotice {
+    /// UPDATE_INGAME_BEAUTYSHOP_STATUS(), emitted when native trial availability changes.
+    BeautyshopStatus,
+    /// TRIAL_STATUS(phase,current jury), before phase cache admission.
+    Status{phase:u8,current_jury:i32},
+    /// SHOW_CRIME_RECORDS(phase).
+    ShowCrimeRecords{phase:u8},
+    /// SHOW_VERDICTS(minutes for 20%,50%,80%,100%,120%).
+    Verdicts{minutes:[i32;5]},
     /// Event141: SHOW_DEPENDANT_WAIT_TRIAL(order as i32 then f32, sentence bits as u32 then f32).
     Waiting { order: u32, sentence_time_ms: i32 },
     /// Event142: SHOW_DEPENDANT_WAIT_JURY(signed count,total, unsigned sentence bits).
@@ -65,8 +81,21 @@ pub struct Trials {
     /// Actual PlayerSpawn object, never inferred from an audience row or persistent ID.
     pub local_obj_id: Option<u32>,
     /// Native byte2 is true only while this captured defendant context is present.
-    /// This is NOT the manager's general current trial ID or its separate isJury byte.
+    /// Retained compatibility projection; trial_id/is_jury are separate native fields.
     pub defendant_context: Option<u32>,
+    pub trial_id:u32,
+    pub is_jury:bool,
+    pub phase:u8,
+    /// Raw last received phase duration; this resource does not advance a trial clock.
+    pub remaining_time_ms:u32,
+    /// Last coherent details projection; invalidated when native resets defendant identity.
+    pub defendant:Option<TrialDefendantData>,
+    pub records:Vec<TrialCrimeRecord>,
+    pub records_received:Option<i32>,
+    pub records_total:Option<i32>,
+    pub records_raw_unknown:Option<u32>,
+    /// Native count+100 can be known before its separate total+104.
+    pub current_jury:Option<i32>,
     /// Native constructor does not initialize these wait fields. Unknown until a receipt.
     pub waiting_order: Option<u32>,
     pub jury_counts: Option<[i32; 2]>,
@@ -104,6 +133,7 @@ impl Trials {
                     TrialEvent::Waiting { order, sentence_time_ms } => {
                         self.waiting_order = Some(*order);
                         self.jury_counts = Some([0, 0]);
+                        self.current_jury=Some(0);
                         self.sentence_time_ms = Some(*sentence_time_ms);
                         notices.push(TrialNotice::Waiting {
                             order: *order,
@@ -116,6 +146,7 @@ impl Trials {
                         sentence_time_ms,
                     } => {
                         self.jury_counts = Some([*count, *total]);
+                        self.current_jury=Some(*count);
                         self.sentence_time_ms = Some(*sentence_time_ms);
                         if self.is_defendant() {
                             notices.push(TrialNotice::JuryWaiting {
@@ -125,17 +156,63 @@ impl Trials {
                             });
                         }
                     }
-                    TrialEvent::SummonDefendant { trial_id } => self.defendant_context = Some(*trial_id),
-                    TrialEvent::SummonJury { .. } | TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.defendant_context = None,
+                    TrialEvent::SummonDefendant { trial_id } => {
+                        self.adopt_trial(*trial_id,&mut notices);self.defendant_context=Some(*trial_id);self.is_jury=false;
+                    }
+                    TrialEvent::SummonJury { trial_id,.. } => {
+                        self.adopt_trial(*trial_id,&mut notices);self.defendant_context=None;self.is_jury=true;
+                    }
+                    TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.reset_role(&mut notices),
+                    TrialEvent::DefendantData(data) => {
+                        if data.name.len()<=128 {
+                            self.defendant=Some(data.clone());self.sentence_time_ms=Some(data.sentence_time_ms);
+                            notices.push(TrialNotice::ShowCrimeRecords{phase:self.phase});
+                            if !self.is_defendant()&&self.is_jury&&self.trial_id!=0 {
+                                if let Some(count)=self.current_jury {notices.push(TrialNotice::Status{phase:self.phase,current_jury:count});}
+                                notices.push(TrialNotice::ShowCrimeRecords{phase:self.phase});
+                            }
+                        }
+                    }
+                    TrialEvent::Records(data) => {
+                        if data.native_safe() {
+                            if !self.is_jury&&!self.is_defendant() {
+                                self.adopt_trial(data.trial_id,&mut notices);
+                                if data.trial_id==0 {return (*self!=before,notices)}
+                            }
+                            self.records_raw_unknown=Some(data.raw_unknown);
+                            self.records_total=Some(data.total_count);
+                            self.records_received=self.records_received.map(|n|n.wrapping_add(data.count));
+                            self.records.extend(data.records.iter().cloned());
+                        }
+                    }
+                    TrialEvent::PhaseChanged{trial_id,phase,current_jury,remaining_time_ms} => {
+                        notices.push(TrialNotice::Status{phase:*phase,current_jury:*current_jury});
+                        if *trial_id==self.trial_id || (!self.is_jury&&!self.is_defendant()) {
+                            self.adopt_trial(*trial_id,&mut notices);
+                            self.phase=*phase;self.remaining_time_ms=*remaining_time_ms;self.current_jury=Some(*current_jury);
+                            let total=self.jury_counts.map(|v|v[1]);self.jury_counts=total.map(|v|[*current_jury,v]);
+                            match *phase {
+                                2 => {
+                                    if self.is_defendant() {if let (Some(total),Some(sentence_time_ms))=(total,self.sentence_time_ms) {
+                                        notices.push(TrialNotice::JuryWaiting{count:*current_jury,total,sentence_time_ms});
+                                    }}
+                                    notices.push(TrialNotice::ShowCrimeRecords{phase:*phase});
+                                }
+                                3|4 => notices.push(TrialNotice::ShowCrimeRecords{phase:*phase}),
+                                5 if self.is_jury => {if let Some(ms)=self.sentence_time_ms {notices.push(TrialNotice::Verdicts{minutes:verdict_minutes(ms as u32)});}},
+                                _=>{}
+                            }
+                        }
+                    }
                     TrialEvent::AudienceJoined { trial_id, obj_id, name } => {
                         // Native fallback39ade6a8 is0 when client has no local actor.
-                        if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) && self.defendant_context.is_some_and(|id| id != *trial_id) {
-                            self.defendant_context = None;
+                        if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
+                            self.adopt_trial(*trial_id,&mut notices);
                         }
                     }
                     TrialEvent::AudienceLeft { obj_id, name } => {
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
-                            self.defendant_context = None
+                            self.reset_role(&mut notices)
                         }
                     }
                 }
@@ -144,8 +221,26 @@ impl Trials {
         }
         (*self != before, notices)
     }
+    fn adopt_trial(&mut self,id:u32,notices:&mut Vec<TrialNotice>){
+        if self.trial_id==id{return}
+        self.trial_id=id;self.defendant_context=None;self.is_jury=false;
+        self.defendant=None;self.records.clear();self.records_received=Some(0);self.records_total=Some(0);
+        notices.push(TrialNotice::BeautyshopStatus);
+    }
+    fn reset_role(&mut self,notices:&mut Vec<TrialNotice>){
+        self.trial_id=0;self.defendant_context=None;self.is_jury=false;self.phase=0;self.remaining_time_ms=0;
+        if let Some(data)=self.defendant.as_mut(){data.judge_obj_id=0;}
+        notices.push(TrialNotice::BeautyshopStatus);
+    }
+
 }
 
+/// Native39080201..303: each f32 product narrows, except the100% integer division.
+fn verdict_minutes(ms:u32)->[i32;5]{
+    let n=ms as f32;let minute=f32::from_bits(0x378bcf65);
+    let cvtt=|x:f32| if x>=2147483648.0 || x< -2147483648.0 || !x.is_finite(){i32::MIN}else{x as i32};
+    [cvtt((n*f32::from_bits(0x3e4ccccd))*minute),cvtt((n*0.5)*minute),cvtt((n*f32::from_bits(0x3f4ccccd))*minute),(ms/60000) as i32,cvtt((n*f32::from_bits(0x3f99999a))*minute)]
+}
 #[cfg(test)]
 mod tests {
     use super::*;
