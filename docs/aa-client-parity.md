@@ -13,23 +13,23 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest checked milestone: client249 passed/38 optional probes ignored, plus the
-separate original crime/jury physical-hover and tooltip probe. Native local chat tabs, filters,
-palette, selection and opacity persist per selected world/character; original
-Save/Cancel/Reset controls and seven chat/cooldown/world-list captures pass.
-Received cooldown rows advance once per process frame before HUD reads, keeping
-queries side-effect free. Earlier achievement tracing/detail/persistence and
-native list geometry checks remain passed. Network463 tests pass, including
-crime/jury and first trial receipts. World197 tests/9 existing probes ignored,
-direct/transmission/dual-viewport GPU controls and original scene/unload checks
-pass with sky composition before the water transmission copy. Received crime/jury
-header getters, native ordered callbacks and the guarded CS079 request now drive
-original character labels and the waiting tooltip. Three captures are inspected;
-the native dishonor rich-text icon remains an identified toolkit gap. Network474
-tests now pass, including trial history/progress and automatic native CS072 replies.
-Owning docs retain
-exact evidence and limits. Remaining native cooldown producers and further
-rendering/gameplay gaps stay active; overall1.2 parity is unfinished.
+Latest checked milestone: client251 passed/38 optional probes ignored. All nine
+chat-configuration checks pass, including original Save/Cancel/Reset, physical
+context Lock/Unlock, blocked dragging, warning timing and fresh-stage persistence.
+Native tab metadata, selection, method, opacity and eight owner-window locks
+persist per world/character. Five latest chat-lock/crime/world-list captures are
+inspected. The native dishonor token now displays its red skull; the original
+jury waiting tooltip and the earlier separate physical probe pass. Received
+cooldowns advance once per frame before HUD reads; queries remain side-effect free.
+Earlier achievement tracing/detail/persistence and list-geometry checks remain passed.
+Network485 tests pass, including trial history/progress, automatic native CS072,
+Confirm/Cancel/Verdict requests and callback-stage snapshots. World199 tests/9
+existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
+oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
+now reach the transmission copy in their source order. Owning docs retain exact
+evidence and limits. Native full chat reset, trial HUD integration, remaining
+cooldown producers and further rendering/gameplay gaps stay active; overall1.2
+parity is unfinished.
 
 | Area | Current evidence | Remaining work |
 |---|---|---|
@@ -46,7 +46,7 @@ rendering/gameplay gaps stay active; overall1.2 parity is unfinished.
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions | Natural repair service routing/live repair and expansion, native premium repair payment, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original stablehand quote/confirmation over received Bag+Bank summon details; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
-| Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method and hover/idle opacity persist per world/character; original settings Save/Cancel/Reset and context dispatch | Native send-size overflow policy, remaining lock/position/tear-off persistence and full reset, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |
+| Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method, hover/idle opacity and owner-window locks persist per world/character; original settings Save/Cancel/Reset, context Lock/Unlock, blocked drag warning and first-tab window movement | Native send-size overflow policy, window position persistence, other-tab splitting/reparenting and full reset, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
@@ -54,7 +54,7 @@ rendering/gameplay gaps stay active; overall1.2 parity is unfinished.
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
-| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury header fields and native callbacks, captured-identity jury queue request, original character labels/physical hover/localized waiting tooltip | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; dishonor inline icon; ranking, remaining trial/jury/crime reporting/prison and racing flows; paired live crime/jury settlement |
+| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury header fields and native callbacks, captured-identity jury queue request, original character labels/physical hover/localized waiting tooltip and native dishonor glyph | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking, remaining trial/jury/crime reporting/prison and racing flows; paired live crime/jury settlement |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
 | Options and UI toolkit | Applied account-local options/sound/key bindings and bag persistence; original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, graphics application, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
 
