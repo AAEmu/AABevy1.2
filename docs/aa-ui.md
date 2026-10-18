@@ -1032,7 +1032,7 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 
 Per native class: methods implemented natively (including deliberate no-ops such as sounds and
 animations), methods present as logging stubs, and the client's total. Generated with
-`cargo run -p aa-ui --example native_listbox -- --coverage` (2026-10-17).
+`cargo run -p aa-ui --example native_crafting_tree -- --coverage` (2026-10-17).
 
 | class | native | stub | listed |
 |---|---|---|---|
@@ -1059,7 +1059,7 @@ animations), methods present as logging stubs, and the client's total. Generated
 | `gametooltip` | 81 | 26 | 107 |
 | `grid` | 94 | 54 | 148 |
 | `label` | 74 | 24 | 98 |
-| `listbox` | 99 | 39 | 138 |
+| `listbox` | 104 | 34 | 138 |
 | `listctrl` | 81 | 28 | 109 |
 | `listctrlitem` | 102 | 1940 | 2042 |
 | `message` | 92 | 27 | 119 |
@@ -1442,11 +1442,11 @@ selected-value scan `392a0020`, clear `392a2ae0`, row height `392a00c0` / `3929f
 view count `392a0210`, clamped top `392a1d30`, and row renderer `392a0d78`. Native defaults are
 white text; transparent gray normal backing and gray hover/selected backing at alpha 0.5.
 
-The bounded slice leaves tree rows (`SetItemTrees` / `GetViewItemsInfo`), icon append
-overloads, state textures/borders and row tooltips as explicit gaps. Flat
+The flat slice leaves icon append overloads, state textures/borders and row tooltips as
+explicit gaps; the subsequent tree milestone below adds recursive rows. Flat
 `GetOpenedItemCount` equals row count. The native selected-text getter also converts through
 a 512-byte UTF-8 output buffer; its overflow policy is not reproduced by the current getter.
-Crafting category hierarchy therefore still needs a separate recovered tree contract.
+The selected-text output-buffer policy remains pending for both flat and tree records.
 
 `tests/listbox.rs` covers native indexing and return counts, event order/reentrancy, repeated
 selection without repaint, row metrics, scroll limits, clipping and colors. Original World
@@ -1490,3 +1490,72 @@ Whether rasterization/metrics or the reference process's effective font configur
 the observed body/menu shape difference still needs a direct glyph comparison; the audit
 does not establish pixel parity. Targeted font extracts are under
 `data/extract/aa-ui/font-audit/`.
+
+## Native listbox tree hierarchy
+
+`lua/listbox/tree.rs` adds the recursive path used by original crafting categories.
+`SetItemTrees` accepts a 1-based array of nodes with required string `text`, numeric `value`
+(default 0), numeric `colorR`/`colorG`/`colorB`/`colorA` (each default 1), boolean `opened`
+(default false), and recursive `child` arrays. An invalid node stops its sibling array after
+the valid prefix, matching the native reader. A cyclic table or more than 64 nested arrays
+is rejected by a toolkit guard; authored trees are acyclic. `iconPath` remains an unsupported
+variant. `SetItemTrees` replaces storage and resets selection, hover and top, without a
+selection event. Appending any valid tree node enables tree mode, even a leaf-only tree;
+clearing storage returns to flat mode.
+
+`ItemCount` counts roots. `GetOpenedItemCount` counts visible preorder rows, descending only
+into opened nodes. `GetViewItemsInfo` returns only the current rounded viewport starting at
+`GetTop`, as a fresh 1-based array of `{value=..., opened=...}` records. It does not return
+the whole hierarchy or text fields. Top and maximum top are measured in visible rows.
+The renderer now also uses the native rounded viewport row count, rather than painting an
+extra partial row for every fractional viewport.
+
+Tree `Select` is a native no-op. A pointer click records the visible preorder index; a parent
+toggles across the whole row and emits `OnListboxToggled` without arguments before selection
+notification. With `EnableSelectParent(false)`, the toggle handler sees index -1, then the
+prior index is restored, selected flags remain intact and no `OnSelChanged` is emitted.
+Consequently a hidden selected leaf can retain its value and old index after collapse.
+With parent selection enabled, closing an open parent clears selection; opening it selects
+the parent. Leaf clicks notify selection, including repeated clicks. Storage replacement from
+a toggle callback is checked before continuing, so old row paths cannot select replacement
+records. `ClearAllSelected` in tree mode clears flags, closes every branch and resets index -1.
+`InitializeSelect` still addresses a root, sets its selected flag, toggles its branch, and
+emits selection notification without a toggle event. The native text getter's root-index
+lookup remains distinct from the recursive selected-value lookup; it is not reinterpreted as
+a visible-row text getter.
+
+`UseChildStyle(true)` copies the current item style, then original `childStyle` setters can
+change descendant font/size/color; row height continues to use the parent item font plus
+padding. `SetTreeTypeIndent` controls the extra text inset (row height by default, or the
+authored amount). Native text starts at left inset + 5 + 10 per depth + that inset, with the
+extra inset also subtracted at the right. Opened/closed image templates use authored texture
+coordinates, extents and color. Their centers are left inset + 10 + 15 per depth, and top
+inset + (viewport row + 0.5) times row height. They are painted for visible parents without
+creating per-row widget objects or changing anchors. Independent template animation/visibility,
+separator placement, icon-path rows, state textures/borders and tooltips remain pending.
+There is no listbox tick; unchanged hover does not mutate widget state.
+
+Native evidence: recursive node reader `392454c0`, tree append/flag `392a35e0`, opened count
+`3929fad0`, visible viewport `392a1fb0`, view-info result `392a26e0`, tree pointer branch
+`392a240c`–`392a269b`, toggle `392a0490`, recursive close/clear `3929fbd0`, root initialize
+`392a1260`, child style `392a0370`, indent `3929f7b0`, and row/icon geometry
+`392a07a0`–`392a0de8`.
+
+`tests/listbox_tree.rs` covers recursive viewport/scroll contracts, event ordering, hidden
+selection, callback replacement, child styles and authored image geometry. Its original
+crafting fixture instantiates `CreateCraftingWindowRenewal` from World-stage bytecode, clicks
+the original Alchemy group, expands its categories, selects recipes, scrolls and collapses.
+The original `OnListboxToggled` / slider callbacks keep the separate count list aligned;
+the original leaf-selection handler requests recipe 10101 and then 10104 after scrolling.
+`examples/fixtures/crafting_tree.lua` supplies only small game-data responses; widget handlers
+and row-table generation remain original bytecode.
+
+`examples/native_crafting_tree.rs` uses `aa_dev` and the same original handlers. The inspected
+capture `shots/aa-ui/native-crafting-tree.png` shows two opened categories, one closed category,
+the authored arrow images, child indentation, selection and matching recipe counts. It logged
+439–450 FPS, zero script errors and closed itself. Product/material details are deliberately
+empty fixture data; this validates the tree and original selection requests, not crafting
+transactions. There is no supplied Folio reference capture, so shared window art and scale
+were checked against the existing Options reference without claiming pixel parity. Font
+rendering is unchanged. Full `cargo test -p aa-ui` passed, including all 10 flat/tree listbox
+tests and both doctests; the existing font-metrics test remains ignored.
