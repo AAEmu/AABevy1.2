@@ -38,6 +38,7 @@ pub mod battlefield;
 pub mod interaction;
 pub mod initial_config;
 pub mod items;
+pub mod item_effect;
 pub mod login;
 pub mod loot_roll;
 pub mod mail;
