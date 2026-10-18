@@ -1,8 +1,11 @@
-//! Stablehand service over received summon-item details; no optimistic revival.
+//! The original current-pet HUD and stablehand service over received units/item details.
 #[allow(dead_code)]
 pub(super) mod fixture;
+#[allow(dead_code)]
+pub(super) mod active_fixture;
 #[cfg(test)]
 mod tests;
+pub(super) mod owned;
 use super::api::{HudBridge, HudData, Shared};
 use super::data::{any_flag, any_int};
 use aa_net::interaction::InteractEvent;
@@ -18,13 +21,14 @@ use std::collections::HashSet;
 
 #[derive(Default)]
 pub(super) struct Tables {
+    owned: owned::Tables,
     summons: HashSet<u32>,
     pub(super) stables: HashSet<u32>,
 }
 
 impl Tables {
     pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
-        let mut out = Self::default();
+        let mut out = Self { owned: owned::Tables::load(conn)?, ..default() };
         let mut query = conn.prepare("SELECT item_id,npc_id FROM item_summon_mates ORDER BY id")?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
@@ -45,6 +49,7 @@ impl Tables {
 
 #[derive(Default)]
 pub(super) struct View {
+    owned: owned::View,
     owner: u32,
     inventory: Option<Inventory>,
     service: Option<(u32, u32)>,
@@ -63,6 +68,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             data.pets.inventory = Some((*inventory).clone());
         }
     }
+    owned::refresh(world, data);
 }
 
 /// Native x87 pow constant, followed by separately rounded single-precision additions.
@@ -98,6 +104,7 @@ fn quote(data: &HudData) -> f64 {
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    owned::install(lua, bridge)?;
     let x2: Table = lua.globals().get("X2")?;
     let state = bridge.clone();
     x2.set(
@@ -119,6 +126,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     Ok(())
 }
 
+pub(super) fn push(rt: &UiRuntime, bridge: &Shared) { owned::push(rt, bridge); }
+
 fn valid_stable(data: &HudData, units: &Units, npc: (u32, u32)) -> bool {
     units
         .get(npc.0)
@@ -132,6 +141,7 @@ pub(super) fn update(
     bridge: NonSend<HudBridge>,
     player: Res<Player>,
     units: Res<Units>,
+    mates: Option<Res<aa_net::Mates>>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else {
@@ -142,6 +152,7 @@ pub(super) fn update(
     let owner = player.spawn.as_ref().map_or(0, |s| s.character().id);
     let mut starts = Vec::new();
     let mut errors = Vec::new();
+    let mut combat = Vec::new();
     {
         let mut data = bridge.0.borrow_mut();
         if owner == 0 {
@@ -150,6 +161,7 @@ pub(super) fn update(
             return;
         }
         for NetEvent(event) in events.read() {
+            if let Some(change)=owned::event(&mut data, event) { combat.push(change); }
             if let Event::Mate(aa_net::mate::MateEvent::RequestRejected {
                 command: MateCommand::ReviveItems { .. },
                 message,
@@ -190,13 +202,16 @@ pub(super) fn update(
                 net.write(NetCommand(Command::Mate(MateCommand::ReviveItems { npc_obj_id: npc.0 })));
             }
         }
+        if let Some(mates)=mates { owned::commands(&mut data,&player,&units,&mates,&mut net); }
     }
+    owned::push(&rt,&bridge.0);
     for object in starts {
         rt.fire_event("NPC_INTERACTION_START", ("stabler", "", object.to_string()));
     }
     for message in errors {
         rt.fire_event("SYSMSG", message);
     }
+    for (engaged,object) in combat { rt.fire_event("UNIT_COMBAT_STATE_CHANGED",(engaged,object.to_string())); }
 }
 
 pub(super) fn plugin(app: &mut App) {

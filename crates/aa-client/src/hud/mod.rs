@@ -140,6 +140,9 @@ pub(crate) fn stablehand_fixture() {
     pets::fixture::run();
 }
 
+#[allow(dead_code)]
+pub(crate) fn owned_pet_fixture() { pets::active_fixture::run(); }
+
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
 use aa_ui::{UiConfig, UiRuntime};

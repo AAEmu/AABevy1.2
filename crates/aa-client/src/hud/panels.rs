@@ -205,7 +205,7 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
     }
 }
 
-fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::BuffEntry], start: Instant) -> BuffLists {
+pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::BuffEntry], start: Instant) -> BuffLists {
     let mut lists = BuffLists::default();
     for e in entries {
         let b = &e.buff;
@@ -393,7 +393,7 @@ fn buff_table(lua: &Lua, b: &BuffSnap) -> mlua::Result<Table> {
     Ok(t)
 }
 
-fn buffs_table(lua: &Lua, l: &BuffLists) -> mlua::Result<Table> {
+pub(super) fn buffs_table(lua: &Lua, l: &BuffLists) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.raw_set("good", lua.create_sequence_from(l.good.iter().map(|b| buff_table(lua, b)).collect::<mlua::Result<Vec<_>>>()?)?)?;
     t.raw_set("bad", lua.create_sequence_from(l.bad.iter().map(|b| buff_table(lua, b)).collect::<mlua::Result<Vec<_>>>()?)?)?;

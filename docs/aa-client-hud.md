@@ -1386,3 +1386,53 @@ The refreshed playable copy target/debug/aa-client-play.exe has SHA256
 Its inspected world-select.png in the same folder reaches the live Lane-bevy list at268-317FPS
 while the stablehand fixture was also rendering. Both processes exited normally. This checks
 login/world listing and does not establish that the lane game-connection stall is resolved.
+
+## Current owned-pet frame and controls (2026-10-18)
+
+The original single-pet frame/bar now hydrate from Mates::own only after a received Unit matches
+its runtime object, nonzero timeline and local stored owner ID. No roster or unit is fabricated
+from inventory summon items. playerpet and its object-ID string resolve through the existing
+unit getters; GetUnitType returns the specific mate/slave/housing detail while GetUnitTypeString
+retains its native broad-kind/detail pair. The pet owner tooltip reads received owner_name.
+
+Capabilities use actual model point1/2 bindings and the received ten mount-skill IDs. Displayed
+slots preserve received order, require real mount/combat records, and consult only each mount
+record's first attached row in native query cursor order. Passenger-only skills are excluded;
+driver context is1 only on this owned pet's point1. IsPlayerMounting separately recognizes any
+mate attachment, including another owner's/passenger seat. PetState is a string, suppressed for
+any seat on the same owned pet. GetMountSkill returns BOOL learned/needdiver and NUMBER skillUsable;
+required level is source-proven skills.ability_level. Only the target_type_id6 display-usability
+bypass is represented as ready; the general protected validator remains unimplemented/dark.
+
+Rename uses the original dialog and sends the current mate timeline, with character/object/TL/
+stored-mate identity checked again at dispatch. Receipt remains name authority. Passive requests
+always invoke as native; Stand/Protective/Aggressive retain attackable and duplicate-state guards.
+Their active commanded raw mount-skill field is separate local client state, initially0 while
+the native manual action/AI planner remains unwired. These calls never mutate received Mates.
+
+GetPetExpToNextLevel returns four f32 Lua numbers from received spawn XP and levels.total_mate_exp,
+deriving its own level with equality at thresholds, bounded100 and the real level101 next delta.
+It reproduces the arithmetic SSE/x87 clamp rather than substituting a host clamp. With no pet
+it returns zero values. Configured-cap XP delta folding is still open; the native getter itself
+does not consult that cap. Current HP/MP/level/name are received; maximum pools still use the
+existing observed lower-bound fallback until native Mate5 formula/item/buff integration lands.
+Full pet-stat tooltips currently retain player-attribute limitations and are not a fidelity claim.
+
+Validation:160 client tests /27 ignored (5.31s), plus the exact original pet probe passes in1.89s.
+It requires both original widgets and completed250x105 bar sizing, exercises physical rename
+Cancel/OK and passive mode, checks native getter types/XP thresholds, and rejects a queued rename
+after runtime-ID reuse. Twelve existing original HUD probes passed under the additive global-event
+fix. The inspected native-frame-and-bar-final.png in shots/hud/sol61-owned-pet/ shows the frame
+and bar at304-399 FPS; the process exited normally. Its log exposes one newly reachable original
+battlefield ENTERED_WORLD counter error (nil maxCount); no zero-error claim is made.
+
+The source fix initializes X2BattleField:GetJoinedInfos to the native manager constructor's
+three values(0,0,-1), with IsInInstantGame=false for initial state0. This is the local unqueued
+default, not a received queue report. The original-stage fixture now requires no entrance alarm.
+Actual battlefield queue requests/receipts and state changes are being implemented separately.
+
+This integration exposed and depends on aa-ui's additive global event registration: the original
+frame and bar both register SPAWN_PET. The previous implementation replaced the first callback and
+repeated the second. Native listener order/release/mutation and empty unbound GetHotKey are now
+covered by original pet spawn/dismiss/respawn regressions. Full pet gear/stat controls, actual skill
+planning/auto-use, mount/dismiss eligibility and live world validation remain active work.

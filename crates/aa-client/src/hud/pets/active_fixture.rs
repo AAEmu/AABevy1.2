@@ -1,0 +1,109 @@
+//! Original single-pet frame/bar over explicit received metadata and an actual correlated unit.
+use super::*;
+use aa_net::mate::{MateEvent, MateSpawn, Mates};
+use bevy::window::PrimaryWindow;
+
+pub(super) fn received() -> (Player, Units, Mates) {
+    let player = Player {
+        spawn: Some(super::super::expansion::fixture::spawn()),
+    };
+    let mut unit = player.spawn.as_ref().unwrap().unit.clone();
+    unit.obj_id = 201;
+    unit.name = "Stormmane".into();
+    unit.owner_name = "Pet fixture".into();
+    unit.kind = aa_net::model::UnitKind::Mate {
+        tl_id: 12,
+        template_id: 504,
+        owner_id: 47,
+    };
+    unit.model_id = 139;
+    unit.level = 30;
+    unit.hp = 720;
+    unit.max_hp = 1000;
+    unit.mp = 260;
+    unit.max_mp = 400;
+    let mut units = Units::default();
+    units.by_id.insert(100, player.spawn.as_ref().unwrap().unit.clone());
+    units.by_id.insert(201, unit.clone());
+    let mut mates = Mates::default();
+    mates.apply(&Event::PlayerSpawn(Box::new(player.spawn.as_ref().unwrap().clone())));
+    mates.apply(&Event::Mate(MateEvent::Spawned(MateSpawn {
+        tl_id: 12,
+        id: 71,
+        item_id: 9001,
+        user_state: 2,
+        experience: 426_750,
+        skills: [5, 1, 3, 4, 6, 2, 8, 0, 0, 0],
+        ..default()
+    })));
+    mates.apply(&Event::UnitSpawned(Box::new(unit)));
+    (player, units, mates)
+}
+
+pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std::path::PathBuf, Player, Units, Mates), Box<dyn std::error::Error>> {
+    let (rt, bridge, path) = super::super::breath::fixture::runtime(width, height)?;
+    let (player, units, mates) = received();
+    {
+        let mut world = World::new();
+        world.insert_resource(player.clone());
+        world.insert_resource(units.clone());
+        world.insert_resource(mates.clone());
+        let mut data = bridge.borrow_mut();
+        data.character_id = 47;
+        super::refresh(&world, &mut data);
+    }
+    super::super::api::push_changes(&rt, &bridge);
+    rt.lua
+        .load(
+            r#"
+        assert(X2Mate:IsPlayerPetExists()==true)
+        local joined,capacity,corps=X2BattleField:GetJoinedInfos()
+        assert(joined==0 and capacity==0 and corps==-1 and not X2BattleField:IsInInstantGame())
+        assert(battlefield.entranceAlarm==nil,'no queue must not create an entrance alarm')
+        assert(X2Unit:GetUnitId('playerpet')=='201' and X2Unit:UnitName('201')=='Stormmane')
+        assert(X2Unit:GetUnitType('playerpet')=='mate' and X2Unit:GetUnitInfoById('201').owner_name=='Pet fixture')
+        assert(X2Unit:UnitHealth('playerpet')==720 and X2Unit:UnitMaxHealth('playerpet')==1000)
+        assert(petFrame and petFrame:IsVisible(),'original pet frame missing: '..tostring(petFrame)..'; bar='..tostring(petBar))
+        assert(petBar and petBar:IsVisible(),'original pet bar missing: '..tostring(petBar))
+        assert(X2Mate:PetState()=='protective' and X2Mate:GetNumMountSkills()==5)
+        assert(X2Mate:IsMountablePet() and X2Mate:IsHavePassengerSeat() and not X2Mate:IsAttackablePet())
+        assert(petBar:GetWidth()==250 and petBar:GetHeight()==105,'original spawn handler must finish sizing the bar')
+        petFrame:UpdateAll()
+        ADDON:ShowContent(UIC_BAG,false)
+    "#,
+        )
+        .set_name("@active_pet_fixture")
+        .exec()?;
+    Ok((rt, bridge, path, player, units, mates))
+}
+
+pub(crate) fn run() {
+    let (width, height) = aa_dev::DevArgs::from_env().size;
+    let mut app = App::new();
+    app.add_plugins((aa_dev::default_plugins("aa-client: original owned pet HUD"), aa_dev::DevPlugin));
+    let (rt, bridge, path, player, units, mates) = runtime(width as f32, height as f32).unwrap();
+    app.add_plugins(aa_ui::UiPlugin {
+        config: Some(crate::login::host::ui_config()),
+    })
+    .insert_non_send(rt)
+    .insert_non_send(HudBridge(bridge))
+    .insert_resource(player)
+    .insert_resource(units)
+    .insert_resource(mates)
+    .add_message::<NetEvent>()
+    .add_message::<NetCommand>()
+    .add_systems(Startup, physical_pixels)
+    .add_systems(Update, super::update)
+    .run();
+    if path.exists() {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+fn physical_pixels(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let (width, height) = aa_dev::DevArgs::from_env().size;
+    for mut window in &mut windows {
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set_physical_resolution(width, height);
+    }
+}
