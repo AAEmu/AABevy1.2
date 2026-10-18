@@ -1419,6 +1419,9 @@ impl Session {
             M::UnitDetached { obj_id, reason } => self.emit(Event::UnitDetached { obj_id, reason }),
             M::UnitPosture { obj_id, posture } => {
                 self.emit(Event::UnitPosture { obj_id, kind: posture.kind, anim_action: posture.anim_action, activate: posture.activate });
+                if let Some(house) = posture.house {
+                    self.emit(Event::Housing(crate::housing::HousingEvent::UnitPosture { obj_id, posture: house }));
+                }
             }
             M::CombatFirstHit { victim, hitter, hit_type } => self.emit(Event::CombatFirstHit { victim, hitter, hit_type }),
             M::AiAggro { npc, hostiles } => self.emit(Event::AiAggro { npc, hostiles }),
@@ -2079,6 +2082,21 @@ mod tests {
                 mp: 6
             })
         ));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn native_house_posture_reports_preserve_the_old_event_and_raw_housing_event() {
+        use crate::unit_msg::Posture;
+        use crate::housing::HousingEvent;
+        let raw=[1,0,1,0,2,3,4,5,6,7];
+        let posture=Posture::read(&mut crate::wire::Reader::new(&raw)).unwrap();
+        let (evt,mut events)=unbounded_channel();
+        let mut session=Session::new(evt,ClientOptions::default());
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::UnitPosture{obj_id:99,posture},game::ServerMsg::Snow(true)]))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::UnitPosture{obj_id:99,kind:1,anim_action:0,activate:false})));
+        assert!(matches!(events.try_recv(),Ok(Event::Housing(HousingEvent::UnitPosture{obj_id:99,posture:house})) if house == posture.house.unwrap()));
+        assert!(matches!(events.try_recv(),Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
 

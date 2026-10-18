@@ -171,6 +171,12 @@ impl Units {
             Event::UnitPosture { obj_id, kind, anim_action, activate } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.anim_action = if *kind == 4 && *activate { *anim_action } else { 0 };
+                if *kind != 1 { u.house_posture = None; }
+            }
+            Event::Housing(crate::housing::HousingEvent::UnitPosture { obj_id, posture }) => {
+                let Some(unit) = self.by_id.get_mut(obj_id) else { return false; };
+                if unit.house_posture == Some(*posture) { return false; }
+                unit.house_posture = Some(*posture);
             }
             Event::UnitsRemoved(ids) => {
                 for id in ids {
@@ -570,6 +576,7 @@ pub(crate) mod tests {
             active_abilities: Vec::new(),
             buffs: Vec::new(),
             anim_action: 0,
+            house_posture: None,
             attached_to: None,
             max_hp: 10,
             max_mp: 0,

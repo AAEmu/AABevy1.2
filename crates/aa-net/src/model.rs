@@ -808,6 +808,8 @@ pub struct Unit {
     /// `anim_actions.id` of the idle pose an NPC stands in (a merchant's, a guard's); 0 for none. Changes arrive as
     /// `Event::UnitPosture`.
     pub anim_action: u32,
+    /// Received house posture; absent until a full unit tail or house posture report supplies it.
+    pub house_posture: Option<crate::unit_msg::HousePosture>,
     /// What the unit sits on (a mount, a vehicle, a ship) and where, set while `UnitAttached` is in force.
     pub attached_to: Option<Attachment>,
 }
@@ -943,12 +945,19 @@ impl Unit {
             active_abilities: Vec::new(),
             buffs: Vec::new(),
             anim_action: 0,
+            house_posture: None,
             attached_to: None,
         };
         let mut tail_read = false;
         if tail_ok {
-            // Ignore failures: a short or unexpected tail only costs the optional fields.
-            tail_read = unit.read_tail(r, kind_byte).is_ok();
+            // Housing has a proven complete lane tail. Reject truncation rather than
+            // leaving its unread bytes where the next DD04 opcode is expected.
+            tail_read = if kind_byte == 3 {
+                unit.read_tail(r, kind_byte)?;
+                true
+            } else {
+                unit.read_tail(r, kind_byte).is_ok()
+            };
         }
         (unit.max_hp, unit.max_mp) = (unit.hp, unit.mp);
         // a character or monster announced with no health is a corpse (a failed tail leaves the health at 0 as well)
@@ -964,7 +973,10 @@ impl Unit {
         let attach1 = r.u8()?;
         // Slaves and transfers add an attach target to the first attach point; only characters,
         // NPCs and mates have the plain form decoded here.
-        if !matches!(kind_byte, 0 | 1 | 5) || (attach1 != 255 && kind_byte != 0) {
+        if kind_byte == 3 && attach1 != 255 {
+            return Err(WireError::Invalid(format!("housing first attach point {attach1}")));
+        }
+        if !matches!(kind_byte, 0 | 1 | 3 | 5) || (attach1 != 255 && kind_byte != 0) {
             return Ok(());
         }
         // Second attach point: -1, or (characters) a 13 byte bond, or (NPCs) a bc.
@@ -973,16 +985,17 @@ impl Unit {
             r.skip(if kind_byte == 0 { 12 } else { 2 })?;
         }
         let posture = r.u8()?;
-        r.skip(1)?; // looted flag
+        let has_loot_left = r.bool()?;
         match posture {
             0 => {}
-            1 => r.skip(8)?,
+            1 => self.house_posture = Some(crate::unit_msg::HousePosture::read(r, has_loot_left)?),
             4 => {
                 self.anim_action = r.u32()?;
                 r.skip(1)?; // activate
             }
             7 => r.skip(14)?,
             8 => r.skip(8)?,
+            other if kind_byte == 3 => return Err(WireError::Invalid(format!("housing model posture {other}"))),
             _ => return Ok(()),
         }
         r.skip(1)?; // active weapon
@@ -995,6 +1008,10 @@ impl Unit {
             for _ in 0..passives {
                 self.passive_buffs.push(r.u32()?);
             }
+        } else if kind_byte == 3 {
+            let skills = r.u8()?;
+            let buffs = r.i32()?;
+            if skills != 0 || buffs != 0 { return Err(WireError::Invalid(format!("housing learned counts {skills}/{buffs}"))); }
         } else {
             r.skip(1 + 4)?; // learned skill and buff counts (always 0)
         }

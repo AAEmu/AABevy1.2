@@ -3588,3 +3588,49 @@ received at each point in that stream.
 
 Validation after the attachment/lifecycle follow-up: full aa-net library suite283 passed;
 `git diff --check` passes. No live placement or furnishing transaction was performed.
+
+### Housing unit-tail alignment and raw door/window posture (2026-10-18)
+
+The complete lane `SCUnitState` housing tail is now consumed rather than returning after
+its first attachment byte. Previously kind3 hit the early return for unsupported kinds,
+leaving the second attach point, posture, weapon/counts, rotation, faction and buff lists
+at the next compressed-packet boundary. The active kind3 parser now follows
+`world/unit_state.rs::{house_unit_state,write_net_unit}`: System attach255, one-byte
+unbound marker (or the remaining two bytes of a BC bond), posture, active weapon,
+zero learned skill/buff counts, three signed rotation bytes, race/gender, appellation/
+faction/honor PISC groups, flags and three complete buff lists. Housing truncation,
+unsupported first attachment, unknown posture and nonzero lane-only learned counts fail
+instead of exposing an apparently complete partial house. Other unit-kind behavior is
+not broadened by this change.
+
+Native shared posture serializer397bda20 reads type and isLooted; type1 selects
+397b1d90, which loops exactly two `door` bytes then six `window` bytes using boolean
+virtual+78. It is called by397c6750 and397c96b6. The lane writes the same eight fields in
+`write_model_posture` (currently all true). `unit_msg::HousePosture` retains the two and
+six raw byte arrays plus the loot bool; `Unit.house_posture` is None until a received full
+unit tail or posture update supplies it. Raw byte values are not normalized away.
+
+`Posture.house` carries this payload for SC103. The existing `Event::UnitPosture`
+remains unchanged; the session additionally forwards
+`HousingEvent::UnitPosture { obj_id, posture }` after it when the payload exists. The
+Units reducer changes an existing unit only, and a later non-house posture clears the
+house payload. There is no fabricated unit, door animation, interaction or outgoing ACK.
+Two explicit aa-client test fixtures require their new optional Unit field initialized to
+None; root handles those owned integration paths.
+
+The independent lane housing-unit fixture now proves complete SCUnitState followed by
+SCHouseState and a third DD04 packet remains aligned. It checks every unit truncation,
+raw house posture byte preservation, delta ordering and unknown-unit rejection. Rotation
+64 decodes using the existing source-backed TAU/127 quantization, rather than incorrectly
+assuming its rounded byte is exactly pi. The earlier focused test expectation was
+corrected accordingly; no rotation decoder change was needed.
+
+Additional workbench source clarification:394dc210 enumerates all static template
+function groups at+24..28, not only the received phase func_group. Its shared active
+interaction monitor393b7e40 resolves the active doodad and calls39093800 with player,
+doodad, global39aefb98+2a0 float and false; missing object or a false result closes through
+393b7aa0 and clears active kind/object. The float's producer and exact reach predicate
+remain pending, so this records no guessed numerical interaction range.
+
+Validation: housing-tail/posture check and full aa-net library suite pass (286 tests).
+No live housing placement, demolition, furnishing or interaction transaction was issued.

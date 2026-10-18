@@ -102,6 +102,8 @@ fn house_string(r: &mut Reader, lane: bool) -> Result<String> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HousingEvent {
+    /// House doors/windows from SCUnitModelPostureChanged, not a fabricated snapshot.
+    UnitPosture { obj_id: u32, posture: crate::unit_msg::HousePosture },
     State(HouseSnapshot),
     BuildProgress {
         tl_id: u16,
@@ -127,6 +129,7 @@ impl HousingEvent {
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::UnitPosture { .. } => "SCUnitModelPostureChanged(House)",
             Self::State(_) => "SCHouseState",
             Self::BuildProgress { .. } => "SCHouseBuildProgress",
             Self::PermissionChanged { .. } => "SCHousePermissionChanged",
@@ -498,4 +501,60 @@ pub(crate) mod tests {
             assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 0);
         }
     }
+    fn house_unit_body() -> Vec<u8> {
+        // Lane world/unit_state_tests.rs::house_unit_state_bytes source fixture.
+        let mut w=Writer::new();
+        w.raw(&hex("300000 0400 486f6d65 03 0400 2c010000 fdff 0000"));
+        w.position(Pos::new(10.0,20.0,30.0)).raw(&hex("0000c03f 05 4d000000"));
+        w.raw(&[0;112]).u8(0); // 28 empty full-item equipment slots; model params none.
+        w.raw(&hex("000000 10270000 88130000 ff ff 01 00 0101010101010101 00 00 00000000 000040 00 0000000000 000d000000 000000 0020 000000"));
+        w.finish()
+    }
+
+    #[test]
+    fn complete_housing_unit_tail_keeps_house_snapshot_and_following_dd04_aligned() {
+        use crate::model::{Unit,UnitKind};
+        let body=house_unit_body();
+        let mut reader=Reader::new(&body);
+        let unit=Unit::read(&mut reader).unwrap();
+        assert!(reader.is_empty(),"house unit tail must consume complete posture/rotation/faction/buff suffix");
+        assert_eq!(unit.kind,UnitKind::Housing{tl_id:4,template_id:300,build_step:-3});
+        assert_eq!((unit.hp,unit.mp,unit.faction_id,unit.flags),(100,50,13,0x2000));
+        assert_eq!(unit.rotation,[0.0,0.0,64.0*(std::f32::consts::TAU/127.0)]);
+        assert_eq!(unit.house_posture,Some(crate::unit_msg::HousePosture{has_loot_left:false,doors:[1;2],windows:[1;6]}));
+        assert!(!unit.dead);
+        let snapshot_body=lane_body();
+        let mut inner=Writer::new();
+        inner.u16(0).u16(sc::SCUnitStatePacket).raw(&body).u16(0).u16(sc::SCHouseStatePacket).raw(&snapshot_body).u16(0).u16(sc::SCOnOffSnowPacket).bool(true);
+        let raw=inner.finish();let len=raw.len() as u16;
+        let mut frame=Writer::new();
+        frame.raw(&[0xdd,4]).u16(3).u8(1).u16(len).u16(!len).raw(&raw);
+        assert_eq!(ServerMsg::decode(&frame.finish()).unwrap(),ServerMsg::Batch(vec![ServerMsg::UnitState(Box::new(unit)),ServerMsg::Housing(HousingEvent::State(snapshot())),ServerMsg::Snow(true)]));
+        for cut in 0..body.len() { assert!(Unit::read(&mut Reader::new(&body[..cut])).is_err(),"house unit cut {cut}"); }
+        // Strict housing parse must never accept an unknown tail length as a complete unit.
+        let tail_start=body.len()-51;
+        let mut bad=body.clone();bad[tail_start+11]=1;
+        assert!(Unit::read(&mut Reader::new(&bad)).is_err());
+    }
+
+    #[test]
+    fn house_posture_preserves_raw_bytes_without_fabricating_unknown_units() {
+        use crate::unit_msg::{HousePosture,Posture};
+        let raw=hex("01 01 00 01 02 ff 01 00 80 01");
+        let mut reader=Reader::new(&raw);
+        let posture=Posture::read(&mut reader).unwrap();
+        assert!(reader.is_empty());
+        let house=HousePosture{has_loot_left:true,doors:[0,1],windows:[2,255,1,0,128,1]};
+        assert_eq!(posture.house,Some(house));
+        for cut in 0..raw.len() { assert!(Posture::read(&mut Reader::new(&raw[..cut])).is_err()); }
+        let event=Event::Housing(HousingEvent::UnitPosture{obj_id:33,posture:house});
+        let mut state=crate::state::WorldState::default();
+        assert!(!state.units.apply(&event));
+        state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(33))));
+        assert!(state.units.apply(&event));assert!(!state.units.apply(&event));
+        assert_eq!(state.units.by_id[&33].house_posture,Some(house));
+        state.apply(&Event::UnitPosture{obj_id:33,kind:0,anim_action:0,activate:false});
+        assert_eq!(state.units.by_id[&33].house_posture,None);
+    }
+
 }
