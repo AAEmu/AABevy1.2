@@ -4306,6 +4306,15 @@ mod tests {
             assert_eq!(frame(&mut peer).await,[0x73,0,7,0,0,0,255,255,255,255]);assert!(matches!(events.try_recv(),Ok(Event::TrialRequested{character_id:42,command}) if command==confirm));
             assert_eq!(*session.received_trials.borrow(),before,"transport writes never add an OK count or pending receipt");
         }
+        // Verdict uses the captured native seat but does not invent a role/phase gate.
+        session.received_trials.borrow_mut().is_jury=false;
+        let verdict=TrialCommand::ChooseVerdict{trial_id:7,jury_number:-1,choice:6};
+        for _ in 0..2 {
+            let before=session.received_trials.borrow().clone();session.command(Command::Trial{character_id:42,command:verdict}).await;
+            assert_eq!(frame(&mut peer).await,[0x75,0,7,0,0,0,255,255,255,255,6]);assert!(matches!(events.try_recv(),Ok(Event::TrialRequested{command,..}) if command==verdict));assert_eq!(*session.received_trials.borrow(),before);
+        }
+        session.command(Command::Trial{character_id:42,command:TrialCommand::ChooseVerdict{trial_id:7,jury_number:-1,choice:0}}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        session.received_trials.borrow_mut().is_jury=true;
         let cancel=TrialCommand::CancelTrial{trial_id:7};session.command(Command::Trial{character_id:42,command:cancel}).await;
         assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
         session.game_msg(Ok(game::ServerMsg::Trial(TrialEvent::Waiting{order:1,sentence_time_ms:0}))).await;assert!(matches!(events.try_recv(),Ok(Event::Trial(_))));
