@@ -9,6 +9,8 @@ use serde_json::{Map, Value as Json, json};
 mod bindings;
 #[path = "settings/input.rs"]
 mod input;
+#[path = "settings/inventory_order.rs"]
+mod inventory_order;
 pub use input::Actions;
 pub(crate) use input::update as update_input;
 
@@ -265,7 +267,7 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
             })?,
         )?;
     }
-    Ok(())
+    inventory_order::install(lua, net, store)
 }
 
 pub fn install_hud(lua: &Lua) -> mlua::Result<()> {

@@ -195,8 +195,9 @@ Character select/create `stage3d::spawn_subject` and the in-world local player's
 plugin paths each ensure FacialPlugin is present once. Matching CAL facial entries follow
 the selected CAF's clock, including idle changes; customization rebuilding still uses the
 same preview cache and original assembled character. Unproved head mappings remain neutral
-with diagnostics. Automatic voice lip sync, facial bone controllers, expression normal/tangent
-deformation and remote-unit opt-in remain separate gaps; see aa-anim's compatibility evidence.
+with diagnostics. Exact authored baseline/topology proofs in aa-anim a299df2 now cover all eight
+playable heads. Automatic voice lip sync, facial bone controllers and remote-unit opt-in remain
+separate gaps; see aa-anim's compatibility evidence and its original XYZ-only morph-stream audit.
 
 `cargo build -p aa-client --example client --example facial_client` passed. The inspected
 `shots/hud/sol61-facial/client-paths.png` renders through both actual client spawn helpers:

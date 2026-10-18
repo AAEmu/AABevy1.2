@@ -269,7 +269,7 @@ fn hold_world(mouse: Res<ButtonInput<MouseButton>>, mut over: ResMut<HudPointerO
 }
 
 /// The scripts' requests as aa-net commands.
-fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inventory>, bar: Res<ActionBar>, mut net: MessageWriter<NetCommand>) {
+pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inventory>, bar: Res<ActionBar>, mut net: MessageWriter<NetCommand>) {
     let Some(rt) = rt else { return };
     let Some(queue) = rt.lua.app_data_ref::<Queue>().map(|q| q.clone()) else { return };
     let requests = std::mem::take(&mut *queue.0.borrow_mut());

@@ -35,6 +35,8 @@ pub struct ItemInfo {
     pub desc: String,
     /// `item_groups.id` the item's category belongs to (the bag tabs filter by it), 0 when unknown.
     pub group: u32,
+    /// `item_categories.category_order`, the native inventory-view sort key.
+    pub category_order: i64,
     /// The item category's English name ("Book"), for the tooltip.
     pub category: String,
     /// `items.impl_id` (`ItemImplEnum`): the tooltip's `item_impl` ("portal", "weapon", ...).
@@ -398,7 +400,7 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id, i.category_id, i.bind_id, i.sellable, i.price, i.refund, i.level_limit, i.impl_id, i.honor_price, i.living_point_price FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
+            let mut q = conn.prepare("SELECT i.id, i.name, i.icon_id, i.max_stack_size, i.level_requirement, i.fixed_grade, i.use_skill_id, c.item_group_id, i.category_id, i.bind_id, i.sellable, i.price, i.refund, i.level_limit, i.impl_id, i.honor_price, i.living_point_price, c.category_order FROM items i LEFT JOIN item_categories c ON c.id = i.category_id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -412,6 +414,7 @@ impl GameData {
                         use_skill: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
                         desc: fill_placeholders(&name("items_desc", id, None), |_| None),
                         group: r.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u32,
+                        category_order: any_int(r, 17)?,
                         category: name("item_categories", any_int(r, 8)?.max(0) as u32, None),
                         impl_id: any_int(r, 14)?,
                         sellable: any_flag(r, 10)?,

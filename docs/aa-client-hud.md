@@ -1095,3 +1095,56 @@ compatibility passed in2.43/1.72/1.72s after the latest toolkit geometry changes
 its original count label is refreshed through the same BAG_UPDATE as the production drag system.
 It measured430-483FPS at1920x1080 with zero script errors and exited normally.
 The earlier `native-verified.png` exposed that missing fixture event and is superseded.
+
+## Native inventory view sorting and higher-capacity cells (2026-10-17)
+
+Bag/bank ManualSort now changes a local virtual-to-physical permutation. Its default-tab keys
+are category_order ascending, grade_order descending, localized name by unsigned bytes to NUL,
+then physical slot ascending; empty slots follow items. Category order is loaded from the real
+item_categories rows. Native391f2d50 default Sort is a literal return: ordinary Sort only emits
+the tab event and does not reset or comparator-sort the default view. Received inventory changes
+sort only the physical numbers in positions currently empty, retaining occupied positions.
+This follows391f4480, not an invented automatic-compaction flag. Filter tabs rebuild their
+item-ID list in unsigned-u64 order (39202350), and their ManualSort is a no-op (391f2a30).
+IDs stay decimal strings across Lua, including values above2^53. Native390105e0 confirms byte
+comparison rather than case folding or locale collation; the bridge compares bytes explicitly.
+
+Dragging, use, selling, links and tooltips still read received physical slots. An empty All-tab
+cell now resolves through the permutation too, including bag-to-bank and bank-to-bag drops.
+No sort packet, item movement, stack merge, money change or repair is fabricated. The separate
+bag/bank tab event carries its current one-based index. Filtered rows use the same physical-slot
+contract and choose a free physical slot only for an empty filtered destination.
+
+Orders save independently by account-file/character/container without applying pending options.
+On a new manager, every currently occupied physical slot/UID must match its saved pair before
+the saved permutation is accepted; otherwise the initial identity view is used. Ordinary item
+updates never run that reload validation. Native394dd090 uses fixed0xad8 LevelDB records and
+391f3a90's130-slot record; this app uses its existing account-local JSON, with an explicit256-slot
+input budget and extension for received capacity above130. It does not claim binary compatibility
+with the original LevelDB keys or character synchronization of that file.
+
+The database permits150 bag slots, while shipped SetViewOfItemSlots creates13x10 buttons and
+its Update/UpdateAt iterate received capacity. The bridge now extends the existing bag pool
+before publishing higher capacity. Actual original-stage probes proved the private factory is
+the named CreateInvenCoolDownActionButton upvalue of SetViewOfItemSlots, and the existing first
+button's Update carries its adapter/injector upvalues. Extra cells reuse that original factory,
+skin, click/drag/cooldown handlers and row spacing. Allocation occurs at HUD entry or capacity
+change, not every frame. The original expansion probe passed with a received150-slot report,
+all150 buttons present and the final cell visible; no live character was expanded by the fixture.
+
+Validation so far: full client140 passed/22 intentional probes ignored. The isolated original
+mouse test passed in2.62s: sorting moves displayed bag slot5 and bank slot8 to each first cell,
+then real clicks queue the correct physical SwapItems for bag/bank internal and both cross-
+container empty destinations. Received UIDs/items remain unchanged. The expansion150-slot
+probe passed in2.89s. Unit checks cover exact keys, default-vs-filter sort semantics, empty-only
+updates, >2^53 identities, stale/matching reloads, separate owners/containers and pending options.
+
+Final compatibility caught and fixed an ownerless-HUD fallback: the sorting destination hook
+must defer to the existing physical/filtered bag behavior until character identity is known.
+The original trade fixture covers that path; its first offer failed before the guard was added.
+After the fix the full suite passed140/22 in1.28s, and isolated sorting/expansion/Options/mail/
+trade/breath tests passed in3.35/2.10/2.45/2.03/1.87/1.82s. Each exact-name run asserted that
+one test actually ran. The inspected sorted bag+bank capture `shots/hud/sol61-sorting/native.png`
+measured324-423FPS. `native-150.png` shows2/150, the disabled maximum-expansion button and a
+real item at physical147 in the added final row;265-301FPS. Both use explicit synthetic inventory,
+have zero script errors, and exited normally. The client and sorting examples built successfully.

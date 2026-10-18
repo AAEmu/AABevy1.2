@@ -16,6 +16,7 @@ local function free(items,capacity)
   for i=1,capacity do if items[i]==nil then return i end end
 end
 local function real(virtual)
+  if HUD.inventory_dest and HUD.inventory_owner()~=0 then return HUD.inventory_dest(BANK,virtual) end
   if selected==1 then return virtual end
   local tab=tabs[selected-1]
   if not tab then return nil end
@@ -111,6 +112,7 @@ X2Bag.HandleClick=function(self,v)
   local h=X2Cursor:GetHeld()
   if h and h.kind=='bank' and IsActivatedBank() then
     local dest=X2Bag:SlotByIdx(v)
+    if HUD.inventory_dest and HUD.inventory_owner()~=0 then dest=HUD.inventory_dest(BAG,v) end
     if not dest then dest=X2Bag:CurrentTabIdx()==1 and v or free(HUD.bag,HUD.bag_slots) end
     if dest and dest>=1 and dest<=HUD.bag_slots and not X2Bag:IsLocked(dest) then
       local target=HUD.bag[dest]

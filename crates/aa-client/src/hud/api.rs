@@ -237,7 +237,8 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::pvp::install(lua, bridge)?;
     super::breath::install(lua, bridge)?;
     super::expansion::install(lua, bridge)?;
-    crate::settings::install_hud(lua)
+    crate::settings::install_hud(lua)?;
+    super::sorting::install(lua, bridge)
 }
 
 /// The Rust functions of the `HUD` table.
@@ -665,6 +666,7 @@ fn dev_sim(s: &mut Snapshot) {
 /// The events the client raises when the player has entered the world and the loading screen closed,
 /// then the chat channels joined and the lines received so far.
 pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) {
+    super::expansion::extend_slots(rt, bridge.borrow().panels.bag_slots);
     if let Err(e) = rt.exec("@enter_world", "HUD.enter_world()") {
         warn!("hud: enter world events: {e}");
     }
@@ -772,6 +774,9 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
         (d.panels_pushed.replace(new.clone()), new)
     };
     let Some(old) = old else { return };
+    if old.bag_slots != new.bag_slots {
+        super::expansion::extend_slots(rt, new.bag_slots);
+    }
     // which action bar slots are dark and why (`usable.rs`)
     let dark = |p: &Panels| -> Vec<(usize, &'static str)> {
         p.actions.iter().enumerate().filter_map(|(i, s)| Some((i + 1, super::usable::result_name(s.as_ref()?.blocked?)))).collect()
