@@ -2,6 +2,8 @@
 //! Does not implement elapsed trial clocks, invitations, votes or automatic CS072.
 mod data;
 mod progress;
+#[cfg(test)]
+mod dispatch_tests;
 pub use progress::{TrialHistory, TrialRulingStatus};
 pub use data::{TrialCrimeRecord, TrialDefendantData, TrialRecords};
 use crate::{
@@ -133,12 +135,21 @@ impl Trials {
         self.defendant_context.is_some()
     }
     pub fn apply(&mut self, e: &Event) -> bool {
-        self.apply_with_notices(e).0
+        self.fold(e,&mut |_,_|{})
     }
-    /// Use instead of apply when dispatching wait callbacks. Other trial UI callbacks are not synthesized.
-    pub fn apply_with_notices(&mut self, e: &Event) -> (bool, Vec<TrialNotice>) {
+    /// Use instead of apply when only ordered notices are required, without callback snapshots.
+    pub fn apply_with_notices(&mut self,e:&Event)->(bool,Vec<TrialNotice>){
+        let mut notices=Vec::new();let changed=self.fold(e,&mut |notice,_|notices.push(notice));(changed,notices)
+    }
+    /// Each owned snapshot is captured at the native callback point, before subsequent mutations.
+    /// The resource itself holds final received state. Present snapshots only while dispatching Lua.
+    pub fn apply_with_dispatch(&mut self,e:&Event)->(bool,Vec<(TrialNotice,Self)>){
+        let mut dispatch=Vec::new();let changed=self.fold(e,&mut |notice,state|dispatch.push((notice,state.clone())));(changed,dispatch)
+    }
+    fn fold(&mut self,e:&Event,emit:&mut impl FnMut(TrialNotice,&Self))->bool {
+        // Most network events cannot affect this manager; do not clone evidence on every movement.
+        if !matches!(e,Event::Trial(_)|Event::PlayerSpawn(_)|Event::UnitsRemoved(_)|Event::CharacterSelected(_)|Event::LoginSucceeded(_)|Event::LeftWorld{..}|Event::Disconnected{..}|Event::Kicked{..}|Event::PhaseChanged(Phase::Authenticating|Phase::Connecting)){return false}
         let before = self.clone();
-        let mut notices = Vec::new();
         match e {
             Event::PlayerSpawn(spawn) => self.local_obj_id = Some(spawn.obj_id),
             Event::UnitsRemoved(ids) => {
@@ -157,16 +168,16 @@ impl Trials {
                 match receipt {
                     TrialEvent::JuryOkCount{count,total} => {
                         self.jury_ok_count=Some(*count);self.jury_ok_total=Some(*total);
-                        notices.push(TrialNotice::JuryOkCount{count:*count,total:*total});
+                        emit(TrialNotice::JuryOkCount{count:*count,total:*total},self);
                     }
                     TrialEvent::VerdictCount{count,total} => {
                         self.verdict_counts=Some([*count,*total]);
                         if let Some(status)=self.ruling.as_mut(){status.count=*count;status.total=*total;}
-                        notices.push(TrialNotice::VerdictCount{count:*count,total:*total});
+                        emit(TrialNotice::VerdictCount{count:*count,total:*total},self);
                     }
                     TrialEvent::RulingStatus(status) => {
                         self.verdict_counts=Some([status.count,status.total]);self.ruling=Some(*status);self.has_ruling=Some(true);
-                        notices.push(TrialNotice::RulingStatus(*status));
+                        emit(TrialNotice::RulingStatus(*status),self);
                     }
                     TrialEvent::History(history) => self.history=Some(history.clone()),
                     TrialEvent::Waiting { order, sentence_time_ms } => {
@@ -174,10 +185,10 @@ impl Trials {
                         self.jury_counts = Some([0, 0]);
                         self.current_jury=Some(0);
                         self.sentence_time_ms = Some(*sentence_time_ms);
-                        notices.push(TrialNotice::Waiting {
+                        emit(TrialNotice::Waiting {
                             order: *order,
                             sentence_time_ms: *sentence_time_ms,
-                        });
+                        },self);
                     }
                     TrialEvent::JuryWaiting {
                         count,
@@ -188,20 +199,20 @@ impl Trials {
                         self.current_jury=Some(*count);
                         self.sentence_time_ms = Some(*sentence_time_ms);
                         if self.is_defendant() {
-                            notices.push(TrialNotice::JuryWaiting {
+                            emit(TrialNotice::JuryWaiting {
                                 count: *count,
                                 total: *total,
                                 sentence_time_ms: *sentence_time_ms,
-                            });
+                            },self);
                         }
                     }
                     TrialEvent::SummonDefendant { trial_id } => {
-                        self.adopt_trial(*trial_id,&mut notices);self.defendant_context=Some(*trial_id);self.is_jury=false;
+                        self.adopt_trial(*trial_id,emit);self.defendant_context=Some(*trial_id);self.is_jury=false;
                     }
                     TrialEvent::SummonJury { trial_id,.. } => {
-                        self.adopt_trial(*trial_id,&mut notices);self.defendant_context=None;self.is_jury=true;
+                        self.adopt_trial(*trial_id,emit);self.defendant_context=None;self.is_jury=true;
                     }
-                    TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.reset_role(&mut notices),
+                    TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.reset_role(emit),
                     TrialEvent::DefendantData(data) => {
                         if data.name.len()<=128 {
                             self.defendant=Some(data.clone());self.sentence_time_ms=Some(data.sentence_time_ms);
@@ -209,18 +220,18 @@ impl Trials {
                                 let i=match record.crime_kind {3=>0,2=>1,4=>2,_=>3};counts[i]=counts[i].wrapping_add(1);
                             }
                             self.crime_kind_counts=Some(counts);
-                            notices.push(TrialNotice::ShowCrimeRecords{phase:self.phase});
+                            emit(TrialNotice::ShowCrimeRecords{phase:self.phase},self);
                             if !self.is_defendant()&&self.is_jury&&self.trial_id!=0 {
-                                if let Some(count)=self.current_jury {notices.push(TrialNotice::Status{phase:self.phase,current_jury:count});}
-                                notices.push(TrialNotice::ShowCrimeRecords{phase:self.phase});
+                                if let Some(count)=self.current_jury {emit(TrialNotice::Status{phase:self.phase,current_jury:count},self);}
+                                emit(TrialNotice::ShowCrimeRecords{phase:self.phase},self);
                             }
                         }
                     }
                     TrialEvent::Records(data) => {
                         if data.native_safe() {
                             if !self.is_jury&&!self.is_defendant() {
-                                self.adopt_trial(data.trial_id,&mut notices);
-                                if data.trial_id==0 {return (*self!=before,notices)}
+                                self.adopt_trial(data.trial_id,emit);
+                                if data.trial_id==0 {return *self!=before}
                             }
                             self.records_raw_unknown=Some(data.raw_unknown);
                             self.records_total=Some(data.total_count);
@@ -229,20 +240,20 @@ impl Trials {
                         }
                     }
                     TrialEvent::PhaseChanged{trial_id,phase,current_jury,remaining_time_ms} => {
-                        notices.push(TrialNotice::Status{phase:*phase,current_jury:*current_jury});
+                        emit(TrialNotice::Status{phase:*phase,current_jury:*current_jury},self);
                         if *trial_id==self.trial_id || (!self.is_jury&&!self.is_defendant()) {
-                            self.adopt_trial(*trial_id,&mut notices);
+                            self.adopt_trial(*trial_id,emit);
                             self.phase=*phase;self.remaining_time_ms=*remaining_time_ms;self.current_jury=Some(*current_jury);
                             let total=self.jury_counts.map(|v|v[1]);self.jury_counts=total.map(|v|[*current_jury,v]);
                             match *phase {
                                 2 => {
                                     if self.is_defendant() {if let (Some(total),Some(sentence_time_ms))=(total,self.sentence_time_ms) {
-                                        notices.push(TrialNotice::JuryWaiting{count:*current_jury,total,sentence_time_ms});
+                                        emit(TrialNotice::JuryWaiting{count:*current_jury,total,sentence_time_ms},self);
                                     }}
-                                    notices.push(TrialNotice::ShowCrimeRecords{phase:*phase});
+                                    emit(TrialNotice::ShowCrimeRecords{phase:*phase},self);
                                 }
-                                3|4 => notices.push(TrialNotice::ShowCrimeRecords{phase:*phase}),
-                                5 if self.is_jury => {if let Some(ms)=self.sentence_time_ms {notices.push(TrialNotice::Verdicts{minutes:verdict_minutes(ms as u32)});}},
+                                3|4 => emit(TrialNotice::ShowCrimeRecords{phase:*phase},self),
+                                5 if self.is_jury => {if let Some(ms)=self.sentence_time_ms {emit(TrialNotice::Verdicts{minutes:verdict_minutes(ms as u32)},self);}},
                                 _=>{}
                             }
                         }
@@ -250,32 +261,32 @@ impl Trials {
                     TrialEvent::AudienceJoined { trial_id, obj_id, name } => {
                         // Native fallback39ade6a8 is0 when client has no local actor.
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
-                            self.adopt_trial(*trial_id,&mut notices);
+                            self.adopt_trial(*trial_id,emit);
                         }
                     }
                     TrialEvent::AudienceLeft { obj_id, name } => {
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
-                            self.reset_role(&mut notices)
+                            self.reset_role(emit)
                         }
                     }
                 }
             }
             _ => {}
         }
-        (*self != before, notices)
+        *self != before
     }
-    fn adopt_trial(&mut self,id:u32,notices:&mut Vec<TrialNotice>){
+    fn adopt_trial(&mut self,id:u32,emit:&mut impl FnMut(TrialNotice,&Self)){
         if self.trial_id==id{return}
         self.trial_id=id;self.defendant_context=None;self.is_jury=false;
         self.defendant=None;self.records.clear();self.records_received=Some(0);self.records_total=Some(0);
         self.jury_ok_count=Some(0);self.verdict_counts=Some([0,0]);self.has_ruling=Some(false);self.crime_kind_counts=Some([0;4]);
         if let Some(status)=self.ruling.as_mut(){status.count=0;status.total=0;}
-        notices.push(TrialNotice::BeautyshopStatus);
+        emit(TrialNotice::BeautyshopStatus,self);
     }
-    fn reset_role(&mut self,notices:&mut Vec<TrialNotice>){
+    fn reset_role(&mut self,emit:&mut impl FnMut(TrialNotice,&Self)){
         self.trial_id=0;self.defendant_context=None;self.is_jury=false;self.phase=0;self.remaining_time_ms=0;
         if let Some(data)=self.defendant.as_mut(){data.judge_obj_id=0;}
-        notices.push(TrialNotice::BeautyshopStatus);
+        emit(TrialNotice::BeautyshopStatus,self);
     }
 
 }

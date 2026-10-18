@@ -5452,7 +5452,7 @@ names: xlcommon XlGetCurrentFileTime3301ca70 calls _time64(NULL), and
 XlDiffTime3301ca80 calls _difftime64. There is no Windows1601/100ns conversion.
 39300c10 compares timestamp/current local CRT wallclock as unsigned u64, clamps
 future values (including negative wire i64 interpreted unsigned) to zero age,
-then394245f0 decomposes365-day years/30-day months/days/hours/minutes/seconds;
+then394245f0 decomposes360-day years/30-day months/days/hours/minutes/seconds;
 39429b20 exposes all six keyed numeric components. This clock is independent of
 mapped monotonic ServerClock.
 
@@ -6507,3 +6507,41 @@ return. A changed-context BeautyshopStatus callback precedes role assignment, wh
 same-trial existing defendant flag clears after the send (no intervening Lua callback).
 Future UI dispatch should preserve the callback-time pre-role view for that23c notice;
 local transport observations are not replacements for any native Lua callback.
+
+
+### Callback-time trial getter views (2026-10-18)
+
+Trials::apply_with_dispatch(&Event) returns (changed, Vec<(TrialNotice, Trials)>).
+Each owned snapshot is captured at the actual native callback point while the canonical
+resource finishes folding the receipt. Present a snapshot only during that Lua callback;
+do not replace final backend state or interpret a snapshot as a new wire receipt.
+apply() and apply_with_notices() use the same private fold without collecting snapshots;
+unrelated events return before cloning evidence. No extra temporal mode/framework exists.
+
+TRIAL_STATUS snapshots precede phase admission/mutation, even when an active-role trial
+mismatch later refuses the phase. Changed-context UPDATE_INGAME_BEAUTYSHOP_STATUS
+sees adopted trial ID/cleared roles/evidence/counters, with old retained phase/wait data,
+BEFORE SummonJury/SummonDefendant establishes its final role. Records adoption likewise
+emits this callback before new record-type/header/rows are written. Its GetTrialType and
+GetCrimeData.totalRecords branch can therefore differ from the final cache. Later wait,
+record and verdict callbacks see their assigned native fields. No callback is reconstructed
+by merely replaying final state across a notice list.
+
+Tests query source-equivalent GetCrimeData role/first-NUL name/unsigned sentence/kind
+counts/totalRecords and ordered record IDs from each view: old Status -> adopted
+Beautyshop -> updated ShowCrimeRecords; wrong-trial active refusal; same-trial wait;
+pre-role jury transition; records pre-header transition; duplicate method equivalence and
+owned snapshot isolation. Native executable phase/summon/getter oracles provide the
+independent callback/cache contracts. Lua integration and reentrant action admission
+remain aa-client responsibilities; these snapshots supply factual getter inputs only.
+
+
+Shared native period correction from executed original394245f0 (NO hooked callees):
+the year divisor is0x1da9c00=31,104,000 seconds=360days, not365. Months are30days.
+MSVC helper398b5810 divides unsigned64; each quotient's low32 bits becomes a signed
+field, and subtraction occurs only when that stored signed field ispositive. Thus raw
+negative i64 inputs are not a conventional negative period: -1bits yields
+{year361130748,month1,day11,hour7,minute0,second15}. Caller-specific clamping must remain
+separate. period_time_oracle.py/native-period-time-oracle-20261018.json archive executed
+positive/zero/negative cases and the360-year boundary. Prior365-day wording is corrected;
+this source milestone still adds no trial timer behavior.
