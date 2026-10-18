@@ -68,11 +68,13 @@ impl AutoEnter {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Startup, login.run_if(resource_exists::<AutoEnter>))
+    app.init_resource::<crate::login::NativeLoginStarted>()
+        .add_systems(Startup, login.run_if(resource_exists::<AutoEnter>))
         .add_systems(Update, drive.run_if(resource_exists::<AutoEnter>));
 }
 
-fn login(auto: Res<AutoEnter>, mut out: MessageWriter<NetCommand>) {
+fn login(auto: Res<AutoEnter>, mut started: ResMut<crate::login::NativeLoginStarted>, mut out: MessageWriter<NetCommand>) {
+    started.0 = true;
     info!("enter-world: logging in as {} at {}", auto.credentials.user, auto.credentials.login);
     out.write(NetCommand(auto.credentials.command()));
 }
