@@ -88,6 +88,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         let state = button_state(u, id, pressed);
         let quads_start = out.len();
         let mut physical_text = None;
+        let mut divider_ranges = Vec::new();
         let mut ds: Vec<Id> = w
             .drawables
             .iter()
@@ -111,7 +112,11 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 .is_some_and(|x| x.layer != crate::tree::DrawLayer::Overlay)
         });
         for d in below {
+            let first = out.len();
             drawable_quads(u, d, alpha, state, scale, None, &mut out);
+            if w.chat.as_ref().is_some_and(|c| d == c.left_line || d == c.right_line) {
+                divider_ranges.push((first..out.len(), d));
+            }
         }
         if let Some(dg) = w.diagram.as_ref() {
             diagram_quads(u, id, dg, alpha, scale, &mut out);
@@ -215,7 +220,11 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
         }
         for d in above {
+            let first = out.len();
             drawable_quads(u, d, alpha, state, scale, None, &mut out);
+            if w.chat.as_ref().is_some_and(|c| d == c.left_line || d == c.right_line) {
+                divider_ranges.push((first..out.len(), d));
+            }
         }
         // A widget's scale animation carries its text, art and descendants together.
         let mut owner = Some(id);
@@ -242,12 +251,36 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             owner = u.tree.get(ancestor).parent;
         }
         // Clip after animation transforms, in the scaled ancestors' screen rectangles.
-        if let Some(c) = u.animations.widget_clip_rect(&u.tree, id) {
-            clip::quads(&mut out, quads_start, px(c, scale));
+        let ancestor_clip = u.animations.widget_clip_rect(&u.tree, id).map(|c| px(c, scale));
+        for (range, d) in divider_ranges.into_iter().rev() {
+            if let Some(c) = crate::lua::chat::tab_clip(u, d) {
+                let c = ancestor_clip.map_or(c, |old| crate::lua::chat::intersect_clip(c, old));
+                clip_range(&mut out, range, c);
+            }
+        }
+        let bounds = match (crate::lua::chat::tab_clip(u, id), ancestor_clip) {
+            (Some(c), Some(old)) => Some(crate::lua::chat::intersect_clip(c, old)),
+            (c, old) => c.or(old),
+        };
+        if let Some(c) = bounds {
+            clip::quads(&mut out, quads_start, c);
         }
     }
     let n = background_end.unwrap_or(out.len());
     (out, n)
+}
+
+/// Internal dividers share their owner's paint range with unclipped content.
+/// Clip only their own quads after transforms, including rotated/gradient art.
+fn clip_range(out: &mut Vec<Quad>, range: std::ops::Range<usize>, bounds: [f32; 4]) {
+    if out[range.clone()].iter().all(|q| q.corners.is_none() && q.uvs.is_none() && q.vcolors.is_none()) {
+        clip_rectangles(&mut out[range], bounds);
+    } else {
+        let start = range.start;
+        let mut part: Vec<Quad> = out.drain(range).collect();
+        clip::quads(&mut part, 0, bounds);
+        out.splice(start..start, part);
+    }
 }
 
 /// Native button39280510/392218a0 draws an ordinary physical face with scale1.

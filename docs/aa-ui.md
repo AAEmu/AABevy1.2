@@ -3306,8 +3306,8 @@ Remaining chat layout gaps are explicit: native add availability
 slots outlive a constructed chat widget. The current per-window
 `AAUI.ChatTabs` bridge has no complete global configuration lifetime, so
 aa-ui retains its existing requested add visibility rather than inventing
-a visible-widget capacity rule. Native tab clipping/sliding remains
-separate open work; four-float message content offsets are covered below.
+a visible-widget capacity rule. Native tab clipping and four-float message
+content offsets are covered below; native sliding remains open work.
 
 Validation: `cargo check -p aa-ui` and the final selected library/native,
 chat-layout, character-clipping, chat-link/transport, screen-bounds and
@@ -3515,9 +3515,8 @@ preserve custom drawable heights, signed outer offsets and the native
 asymmetry when the tab has a bottom inset. aa-ui expresses the internal
 tab area's two outer points as equivalent window-top corner anchors;
 it does not add a new public widget.
-The native internal tab clipping/sliding area remains the separate open
-boundary recorded above; these divider anchor/offset changes do not
-claim its complete overflow-raster behavior.
+The internal tab area's clipping is covered by the following milestone;
+native sliding remains a separate open boundary.
 
 Sources: `data/extract/aa-ui/native-chat-lines-source-20261018.txt`.
 Offline `chat_lines_oracle.py` executes actual `392ca420`, capturing only
@@ -3547,3 +3546,71 @@ That run measured **85.4–198.2 FPS**, again zero script errors and no
 WARN/ERROR; owned process 52988 self-closed.
 `reference/ingame/spawn/real.png` supplies the original HUD/chat style
 context; no matching signed-offset reference or pixel-parity claim.
+
+### Native internal chat tab clipping (2026-10-18)
+
+Fixed-width tabs, their descendants, the add control and the two selected-tab
+dividers now crop at the native internal tab area. Previously overflow could
+draw and accept pointer input outside the chat window. The message frames,
+edit control, caret and lock notifier retain their separate native membership;
+clipping the whole chat window would incorrectly crop these controls.
+Public Lua `GetParent` identities remain unchanged.
+
+Constructor `392cba29..bacb` creates `tab_cliping_area` at `+370` and sets
+its clipping marker `+a4`. Its initial top-left anchor is `(0,3)` and bottom-right
+anchor is the window top-right plus `(0,20)`; `3999edbc` contains f32 `3`.
+Nonempty tab layout `392c9966..99e1` changes those anchors to `(0,0)` and
+`(0,tab_area_height)`. The zero-tab guard at `392c97fe` leaves existing
+area anchors intact. aa-ui caches those two vertical anchor offsets separately
+from the current configured height, preserving that update lifetime.
+
+Tab construction `392cc18c` -> `392c8520` -> `392c8574..8589` passes the internal
+area as native parent. Add-control construction `392cbc7d..cbcd3` and divider
+construction `392cbae1..cbb58` use the same area. Caret construction
+`392cbe01..be46` instead uses the chat window, as do message frames and the
+lock notifier. aa-ui models this paint/input membership without introducing
+another public widget or changing existing content anchors.
+
+Nearest clipping-ancestor lookup `39277a10` walks `+c0` parent links until
+the `+a4` marker, then physical rectangle getter `392754a0` returns
+`[x,y,x+w,y+h]` from physical position/extent, without pixel rounding.
+Renderer `3927b010` uses this lookup before painter push `3921f480` and pop
+`3921f1e0`. Nested pushes intersect max left/top and min right/bottom;
+disjoint bounds remain disjoint rather than clamping to an empty point.
+The new tab bounds retain physical f32 edges through widget/parent/UI scale.
+Divider quads crop after transforms within their own paint ranges, including
+rotated artwork, while other drawables belonging to the chat window stay
+outside that range. Existing ancestor clipping also intersects the tab area.
+
+Pointer traversal `3927c743..c790` applies the corresponding clipping ancestor.
+Comparisons `3927c795..7bc` reject only coordinates strictly outside the
+rectangle, so its edges are inclusive. aa-ui uses those comparisons for tab
+members and descendants. Ordinary widget hit bounds retain their existing
+contract. This milestone covers the original ordinary member path; native
+sliding, escape/skip flags `+26c/+26d` and the painter's behavior beyond its
+16 cached clip rectangles remain open.
+
+Source: `data/extract/aa-ui/native-chat-clip-source-20261018.txt`.
+Offline `chat_clip_oracle.py` executes actual nearest-ancestor, physical-rect,
+painter-push/pop and pointer-comparison instructions without mocked calls.
+Seven passing groups in `native-chat-clip-oracle-20261018.json` cover self,
+parent and root markers, no marker, nested/disjoint intersections and exact
+inclusive corners versus coordinates outside each edge. No live-client
+execution or writes are involved.
+
+Validation: `cargo check -p aa-ui` and **56 selected tests** passed: seven new
+clipping tests plus divider/content anchors, tab layout, scaled text clipping,
+native widgets and existing scale/clip coverage. Regressions include fixed-tab
+overflow, one-f32-ULP pointer boundaries, member descendants, untouched message
+and sibling paint, rotated divider ranges, nested areas, widget/parent/UI scale,
+zero-tab anchor lifetime and actual original physical selection at UI scales
+0.85 and 0.93. Full tab text and original tooltip values remain intact.
+
+Built and copied the aa-dev `native_chat_clip` example and inspected unique
+`shots/aa-ui/native-chat-clip-20261018.png` at 1280-by-720/default scale 0.85.
+It shows original fixed-width tabs cropped at the chat edge after physical
+selection, a complete selected-tab tooltip and unchanged original conversation
+formatting. Measured **166.6–185.1 FPS**, zero script errors and no WARN/ERROR;
+owned process 12052 self-closed. `reference/ingame/spawn/real.png` supplies the
+original HUD/chat style context; no matching overflow fixture or pixel-parity
+claim.

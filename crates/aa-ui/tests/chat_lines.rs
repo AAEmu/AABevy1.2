@@ -264,12 +264,15 @@ fn original_dividers_follow_physical_selection_and_render_with_original_one_pixe
     for line in [c.left_line, c.right_line] {
         let r = rect(&ui, line);
         let scale = lua::ui(&ui.lua).ui_scale;
+        let window = rect(&ui, id(&ui, "window"));
         assert_eq!(r.h, 1.);
         let expected = [
-            (r.x * scale).round(),
-            (r.y * scale).round(),
-            (r.right() * scale).round(),
-            (r.bottom() * scale).round(),
+            (r.x * scale).round().max(window.x * scale),
+            (r.y * scale).round().max(window.y * scale),
+            (r.right() * scale).round().min(window.right() * scale),
+            (r.bottom() * scale)
+                .round()
+                .min((window.y + c.tab_area_height) * scale),
         ];
         assert!(
             quads.iter().any(|q| q.pos == expected),

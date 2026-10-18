@@ -91,6 +91,13 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             if u.animations.widget_clip_rect(&u.tree, id).is_some_and(|c| !c.contains(x, y)) {
                 continue;
             }
+            if lua::chat::tab_clip(&u, id).is_some_and(|c| {
+                let (x, y) = (x * u.ui_scale, y * u.ui_scale);
+                // Native 3927c795..7bc rejects only strictly outside the area.
+                x < c[0] || y < c[1] || x > c[2] || y > c[3]
+            }) {
+                continue;
+            }
             let in_list = u
                 .tree
                 .get(id)
