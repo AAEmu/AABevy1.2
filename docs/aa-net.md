@@ -3953,3 +3953,75 @@ Area centering/render scale remains an aa-ui native Map widget contract to trace
 
 Fishfinder validation: cargo check and all 308 aa-net library tests passed, including
 session receive ordering and publication through the registered Bevy resources.
+
+
+### Pet displayed skills, XP edges and invocation boundary (2026-10-18)
+
+Combat descriptor+8 is definitively `skills.ability_level`. SQL39a06a90 selects
+id,ability_id,ability_level,... FROM skills.39731963..3973197a reads column2 to
+temporary descriptor base(ebp-2c8)+8;39732d82..39732db2 copies through39719df0,
+whose39719e04..07 preserves+8. Range index+26d8 is the396f6390 lookup. Example
+compact rows: mountskill1/combat11016 requires10, mountskill3/combat11309 requires25.
+Descriptor+1b0 is `skills.target_type_id`, SQL column132/0x84:397327a6..397327bd
+stores it at temporarybase+1b0. Calling it channel6 is incorrect.3933b7a7 skips the
+general displayed-usability validator only when target_type_id==6. The resulting
+skillUsable is NUMBER1; learned remains independently compared to runtime mate level.
+Other contexts use393a0a80, an obfuscated general validator; resource/cooldown policy
+is not proven by a generic ready default. Context failure uses native result0x2c.
+
+Attached records preserve cursor order, not an explicit native ID sort. SQL399ff650
+SELECT id,attach_point_id,mount_skill_id,skill_id FROM mount_attached_skills has no
+ORDER BY;3967a87f..a8df stores cursor sequence and3967ab30 iterates that raw array
+before appending39644670 into parent vectors. Current compact schema id int PRIMARY
+KEY is not a rowid alias; full-table scan starts IDs105,106,107,118,123,12. Only one
+current parent has multiple records and that parent already happens to have ID order.
+Thus no current first-row regression is claimed, but an ID-order source contract
+would be false. First attached-point matching and unknown entries stay explicit.
+
+XP-derived level3989a760 starts1 and advances on signed XP >= next level threshold,
+including equality. It scans through record101 then caps return at100. The getter
+394425f0 does not consult configured max-mate-level.3989a530 returns next-current
+threshold delta, zero only if a required record is missing. Compact levels100/101
+have total_mate_exp16417500/16917500, so level100 still has delta500000: XP exactly
+16417500 yields0 percent; XP>=16917500 yields100 percent while level stays100.
+Configured cap50 does not make the getter invent100 percent at threshold50.
+Percent3989a620 performs f32 ratio*100 then arithmetic clamp0..100; the four Lua
+returns are percent,totalXP,currentThreshold,nextDelta, with integer values converted
+through f32 by394411f0. Missing-threshold zero denominators are not a guessed full bar.
+
+Received delta cap producer remains unresolved at protected initial-config handler
+391d1d69..391d1f5a.39357022 reads runtime client+1c and passes it to3933a890 only for
+the matching current owned mate. That function caches ceiling3a168328 ONCE under
+static guard3a16832c, using levels.total_mate_exp at the first supplied max level.
+Later deltas use that cached ceiling.3989a480 wraps nonpositive additions, and for
+positive delta preserves already-at/above-cap values, otherwise signed-clamps the
+wrapped sum. Raw SCInitialConfig byte8 is not yet proven assigned to client+1c;
+no optimistic received-XP accumulator or arbitrary cap is supplied by aa-net.
+
+IsPlayerMounting3906a880 (registered3906b666..b6aa) tests local actor+3af0 resolving
+to actual UnitKind5. It does not require ownership or a particular seat. PetState
+3906a070 suppresses state only when that attached object equals current own mate+20,
+without a seat test. Any seat on the same pet suppresses; riding another mate does
+not suppress the current pet's mode state.
+
+Pet action vtable399bb0e0 click39208ff0 button1 invokes39209040?3933e630 using raw
+mountskillID at slot+0c; button3 toggles local AI auto-use3933c750.3933e630 requires
+that raw ID in the ten received slots, learned level and matching attached context.
+Driver context1 builds casterkind3 with pet objectID and RAW mountskillID, and passes
+default mount_skills.skill_id to39399630?393989e0. No attached override substitution
+is performed at this point; general target planning remains separate. Unmounted use
+requires attackability and follows protected validation plus local AI/script commands,
+not an unconditional direct CSStartSkill. Displayed target_type6 usability bypass is
+therefore not permission to invent self-targeted casts or successful completion.
+At3933eb0b..11 the ORIGINAL raw mountskill argument is stored at mate+58;3933ec0b
+looks it up with3963b5d0. This is active commanded mountskill identity, not a target
+object ID, and must not be folded from Unit.target_obj_id for mode duplicate gates.
+
+
+Manual-use target input is independently closed:3933e7a8 queries local actor+1aa0
+property4 and writes a target-kind0 objectID payload (+8), copied by39094150.
+Native UnitTarget setter394270a0 (diagnostic399d875c) reads old property4 at
+394270f5..39427103, resolves39360020, then writes its new target argument to that
+same property at39427130..3942713d. Thus this is the LOCAL PLAYER selected-target
+object ID, not mana/HP. Subsequent393989e0 still performs genuine target planning,
+validation and39396e20, so knowing this input does not establish an always-send API.
