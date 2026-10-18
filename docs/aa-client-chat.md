@@ -83,7 +83,7 @@ lifecycle/selection and alpha execution artifacts are archived under
 palette/filter provenance and PE SHA256.
 
 Remaining boundaries: provider-specific extra name filtering at39507e18,
-InitChatWindow full reset, window geometry persistence and other-tab splitting/
+window geometry persistence and other-tab splitting/
 tearing off require their remaining toolkit/source integration.
 Original physical right-click context dispatch is implemented in aa-ui, including
 the protected rawID0 clear action without changing selection. Legacy fallbacks for the remaining
@@ -142,3 +142,58 @@ capture; its off phase at8s is also retained. Main
 target/debug/aa-client-20261018-locks.exe has SHA256
 6f8a31022ccdad799604d2282f0a75b887ab395b281d9fd64d74514991a3e400 and
 supersedes the playable alias after checking no client is running.
+
+## Native full reset and independent extra loading
+
+InitChatWindow now follows3945b33d ->394581f0 ->395083e0 ->39507410:
+retire every actual chat window through aa-ui, clear shared history, delete the
+current world/character's tabs/extra/locks/options, reload the manager model, then
+call original OnResetAllChatWindow with zero arguments. The API returns zero Lua
+values and ignores the callback's return value. The original callback recreates
+the default All/Party/Trade window at430x350 with its bottom-left anchor. Identity
+and the current option-default font survive; locks and opacity return to their
+native defaults. Other characters/worlds, future unknown record keys and pending
+option edits remain intact. A local save error is logged and reset continues;
+the current process sees deleted keys, while a failed file replacement can leave
+the old records on the next process's disk load. Missing/failed script callbacks
+do not undo window retirement.
+The four keys are absent before the callback. Creating the original window then
+restores method0 through395107d0 ->39510390 and saves default extra info even
+when the method is unchanged; that extra key is expected to reappear afterward.
+
+The original All-tab settings exposes Reset Chat. Other tabs hide that control
+and expose only Reset Tab, so physical integration checks open rawID0 rather
+than overriding hidden controls. Direct programmatic reset of a separately
+attached open top-level popup retains the documented native observer/geometry
+lifetime boundary; destruction does not invent OnHide. The real settings flow
+dismisses the original context popup on its outside press.
+
+Native395072c0 loads tab data, options, locks and extras independently. In
+particular, failed/missing tab data builds defaults through39507060 without
+saving tabs, then still attempts extra loading at3950739c. The app now restores
+saved selection/input method even if a user has only changed these defaults and
+there is no tabs key. Invalid extra rows fall back to window0 selected0/method0
+without discarding valid tab metadata; an admitted empty extra list stays empty.
+
+The reset example is the existing aa-dev chat_config example with --reset.
+Native toolkit execution provenance and its14-group reset oracle are in
+docs/aa-ui.md and data/extract/aa-ui/native-chat-reset-*.
+
+All12 configuration checks pass, including the real original All-tab reset
+button, four-key deletion observed before callback, recreated default extra,
+history clearing, font/identity retention, other-world/character/future-key and
+pending-option preservation, fresh-stage defaults, and missing/failed callback
+zero-result behavior. Full client255 passed/38 optional probes ignored in46.56s.
+The period oracle and updated365-day guild-age check also pass in that suite.
+
+Three inspected aa-dev captures in shots/hud/chat-reset self-close without
+runtime warnings/errors: original reset at1920x1080 runs398.0-456.6 FPS,
+1280x720 runs277.0-392.0, and the live world list269.2-325.4. Both reset images
+show only fresh messages and the restored All/Party/Trade tabs. They establish
+local original-script behavior; live in-world settlement remains unverified.
+The reproducible runner is data/extract/aa-client/chat/reset-qa.ps1.
+
+Checked main: target/debug/aa-client-20261018-reset.exe, SHA256
+6d90dcca0da162bb4700fcaa417cad16c2de1ba9d13c5136936e96f7c23afba3.
+The playable aa-client-play.exe alias now has the same bytes, refreshed after
+confirming no client process was running. The trial HUD bridge remains pending.

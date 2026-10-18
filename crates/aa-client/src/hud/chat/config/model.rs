@@ -179,7 +179,7 @@ impl Model {
         )
     }
 
-    /// Atomic app-file admission. All200 filter/palette fields survive the narrower Lua getter.
+    /// Tab records admit atomically; extras load independently. All200 palette/filter fields survive.
     pub fn load(tabs: &Json, extra: Option<&Json>) -> Option<Self> {
         let rows = tabs.as_array()?;
         if rows.is_empty() || rows.len() > 8 {
@@ -217,17 +217,25 @@ impl Model {
             out.windows.entry(window).or_default().push(id);
             out.tabs.insert(id, tab);
         }
-        if let Some(rows) = extra {
+        out.load_extra(extra);
+        Some(out)
+    }
+
+    /// Native loads extras even when tab loading failed and defaults were constructed.
+    pub fn load_extra(&mut self, extra: Option<&Json>) {
+        let parsed = (|| {
+            let rows = extra?;
             let rows = rows.as_array()?;
             if rows.len() > 8 {
                 return None;
             }
+            let mut out = BTreeMap::new();
             for row in rows {
                 let id = i32::try_from(row.get("id")?.as_i64()?).ok()?;
-                if !(0..8).contains(&id) || out.extra.contains_key(&id) {
+                if !(0..8).contains(&id) || out.contains_key(&id) {
                     return None;
                 }
-                out.extra.insert(
+                out.insert(
                     id,
                     Extra {
                         selected: i32::try_from(row.get("selected")?.as_i64()?).ok()?,
@@ -235,8 +243,9 @@ impl Model {
                     },
                 );
             }
-        }
-        Some(out)
+            Some(out)
+        })();
+        self.extra = parsed.unwrap_or_else(|| BTreeMap::from([(0, Extra::default())]));
     }
 }
 
@@ -287,5 +296,26 @@ mod tests {
         let mut bad = m.tabs_json();
         bad[1]["filters"] = json!([200]);
         assert!(Model::load(&bad, None).is_none());
+    }
+
+    #[test]
+    fn extras_load_independently_without_invalidating_valid_tab_metadata() {
+        let mut m = model();
+        m.rename(1, "Crew");
+        for extra in [
+            json!(null),
+            json!({}),
+            json!([{"id":0,"selected":1}]),
+            json!([{"id":0,"selected":1,"method":4},{"id":0,"selected":2,"method":7}]),
+        ] {
+            let loaded = Model::load(&m.tabs_json(), Some(&extra)).unwrap();
+            assert_eq!(loaded.tabs, m.tabs);
+            assert_eq!(loaded.extra, BTreeMap::from([(0, Extra::default())]));
+        }
+        let mut defaults = model();
+        defaults.load_extra(Some(&json!([{"id":0,"selected":2,"method":4}])));
+        assert_eq!(defaults.extra[&0], Extra { selected: 2, method: 4 });
+        defaults.load_extra(Some(&json!([])));
+        assert!(defaults.extra.is_empty(), "an admitted empty record is distinct from a missing key");
     }
 }

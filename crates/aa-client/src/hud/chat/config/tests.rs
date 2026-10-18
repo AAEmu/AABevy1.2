@@ -1,4 +1,157 @@
 use super::*;
+
+fn restart(state: &Shared, path: &std::path::Path) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
+    let mut next = UiRuntime::new("en_us", 1280., 720.)?;
+    next.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    let other = std::rc::Rc::new(std::cell::RefCell::new(super::super::super::api::HudData::default()));
+    {
+        let source = state.borrow();
+        let mut target = other.borrow_mut();
+        target.game = source.game.clone();
+        target.snapshot = source.snapshot.clone();
+        target.feature_limits = source.feature_limits;
+        target.panels = source.panels.clone();
+        target.chat_config.identity(source.chat_config.world, source.chat_config.owner);
+    }
+    super::super::super::api::install(&mut next, &other)?;
+    crate::settings::reopen_fixture(&next, path.to_path_buf())?;
+    next.run_stage(aa_ui::Stage::World);
+    locks::restore(&next.lua, &other);
+    assert!(next.errors.is_empty(), "{:?}", next.errors);
+    Ok((next, other))
+}
+
+#[test]
+fn default_tabs_restart_restores_independently_saved_selection_and_input_method() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = super::super::super::breath::fixture::runtime(1280., 720.)?;
+    state.borrow_mut().chat_config.identity(Some(17), 12345);
+    ensure(&rt.lua, &state)?;
+    let window = object_table(&rt.lua, live_window(&rt.lua, 0).unwrap())?.unwrap();
+    window.call_method::<()>("SelectTab", 3)?;
+    let edit: Table = window.call_method("GetChatEdit", ())?;
+    edit.call_method::<()>("Show", true)?;
+    edit.call_method::<()>("SetFocus", ())?;
+    rt.type_text("/p ");
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    assert!(saved["chat"]["17:12345"].get("tabs").is_none());
+    assert_eq!(saved["chat"]["17:12345"]["extra"][0], json!({"id":0,"selected":2,"method":4}));
+    let (next, _) = restart(&state, &path)?;
+    let window = live_window(&next.lua, 0).unwrap();
+    let u = ui(&next.lua);
+    let chat = u.tree.widget(window).unwrap().chat.as_ref().unwrap();
+    assert_eq!(chat.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(), [0, 1, 2]);
+    assert_eq!((chat.selected, chat.method), (2, 4));
+    drop(u);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn original_full_reset_retires_history_deletes_only_four_owner_keys_and_recreates_defaults() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime(1280., 720.)?;
+    let old = live_window(&rt.lua, 0).unwrap();
+    rt.lua.globals().set(
+        "RESET_STORE_CHECK",
+        rt.lua.create_function(|lua, ()| {
+            for key in ["tabs", "extra", "locks", "options"] {
+                assert!(
+                    crate::settings::chat_read(lua, "17:12345", key).is_none(),
+                    "{key} must be deleted before callback"
+                );
+            }
+            Ok(())
+        })?,
+    )?;
+    rt.lua
+        .load(
+            r#"
+        assert(X2Chat:LockChatWindowByTabId(3,true))
+        X2Chat:SetOptionDefaultFontSize(18)
+        X2Chat:UpdateChatOption({overAlpha=.8,leaveAlpha=.2})
+        NET.option_set('reset_pending_probe',99)
+        local recreate=OnResetAllChatWindow
+        RESET_CALLS=0
+        OnResetAllChatWindow=function(...)
+            assert(select('#',...)==0)
+            RESET_STORE_CHECK()
+            RESET_CALLS=RESET_CALLS+1
+            assert(#X2Chat:AllChatWindowIds()==1)
+            assert(X2Chat:GetChatTabInfoTable(1).name=='Party')
+            assert(X2Chat:GetChatTabInfoTable(1).fontSize==18)
+            assert(not X2Chat:IsLockedChatWindowByChatTabId(0))
+            assert(select('#',X2Chat:GetChatTabInfoTable(3))==0)
+            return recreate(...)
+        end
+    "#,
+        )
+        .exec()?;
+    assert!(crate::settings::chat_save(&rt.lua, "17:12345", "future", json!({"keep":true})));
+    assert!(crate::settings::chat_save(&rt.lua, "18:12345", "tabs", json!(["other world"])));
+    assert!(crate::settings::chat_save(&rt.lua, "17:54321", "extra", json!(["other character"])));
+    fixture::show_options_for(&rt, 0)?;
+    super::super::super::expansion::fixture::click(&rt, "CHAT_OPTIONS_FIXTURE.chatResetButton")?;
+    aa_ui::lua::tick(&rt.lua, 600.);
+    assert!(!ui(&rt.lua).tree.get(old).alive);
+    rt.lua
+        .load(
+            r#"
+        assert(RESET_CALLS==1)
+        assert(NET.option_get('reset_pending_probe')==99)
+        assert(not CHAT_OPTIONS_FIXTURE:IsVisible())
+        local o=X2Chat:GetChatOption()
+        assert(math.abs(o.overAlpha-.7)<.00001 and math.abs(o.leaveAlpha-.5)<.00001)
+    "#,
+        )
+        .exec()?;
+    let new = live_window(&rt.lua, 0).unwrap();
+    let u = ui(&rt.lua);
+    let chat = u.tree.widget(new).unwrap().chat.as_ref().unwrap();
+    assert_eq!(chat.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(), [0, 1, 2]);
+    assert_eq!((chat.selected, chat.method), (0, 0));
+    for tab in &chat.tabs {
+        assert!(u.tree.widget(tab.message).unwrap().message.as_ref().unwrap().lines.is_empty());
+    }
+    drop(u);
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    // Native hydration restores method0 and saves extra even when it did not change.
+    assert_eq!(
+        saved["chat"]["17:12345"],
+        json!({"future":{"keep":true},"extra":[{"id":0,"selected":0,"method":0}]})
+    );
+    assert_eq!(saved["chat"]["18:12345"]["tabs"], json!(["other world"]));
+    assert_eq!(saved["chat"]["17:54321"]["extra"], json!(["other character"]));
+    assert!(saved["options"].get("s:reset_pending_probe").is_none());
+    assert_eq!(
+        (
+            state.borrow().chat_config.world,
+            state.borrow().chat_config.owner,
+            state.borrow().chat_config.font
+        ),
+        (Some(17), 12345, 18)
+    );
+    let (next, _) = restart(&state, &path)?;
+    next.lua
+        .load("assert(X2Chat:GetChatTabInfoTable(1).name=='Party' and not X2Chat:IsLockedChatWindowByChatTabId(0))")
+        .exec()?;
+    // Native ignores callback return values and a failed/missing script callback does not undo retirement.
+    rt.lua
+        .load(
+            r#"
+        assert(select('#',X2Chat:InitChatWindow('ignored'))==0)
+        assert(RESET_CALLS==2)
+        OnResetAllChatWindow=function() error('reset callback probe') end
+        assert(select('#',X2Chat:InitChatWindow())==0)
+        OnResetAllChatWindow=nil
+        assert(select('#',X2Chat:InitChatWindow())==0)
+    "#,
+        )
+        .exec()?;
+    assert!(ui(&rt.lua).tree.of_class("chatwindow").is_empty());
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
 #[test]
 fn original_context_lock_unlock_persists_and_drag_feedback_does_not_move_the_window() -> Result<(), Box<dyn std::error::Error>> {
     let (rt, state, path) = fixture::runtime(1280., 720.)?;
