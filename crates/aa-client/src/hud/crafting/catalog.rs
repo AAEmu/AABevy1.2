@@ -291,7 +291,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                     .borrow()
                     .game
                     .get()
-                    .map(|g| g.crafting.groups.keys().copied().collect::<Vec<_>>())
+                    .map(|g| g.crafting.groups.keys().copied().filter(|id| *id != 20).collect::<Vec<_>>())
                     .unwrap_or_default(),
             )
         })?,

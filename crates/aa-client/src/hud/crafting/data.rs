@@ -89,6 +89,7 @@ pub(in crate::hud) struct Tables {
     pub(super) experts: BTreeMap<u32, Expert>,
     /// SHOW rows only, assigned consecutive grades in native up_limit order.
     pub(super) grades: Vec<u32>,
+    pub(super) raw_limits: Vec<i32>,
     /// Received expanded_expert is the current count, these keys are the next target count.
     pub(super) expansions: BTreeMap<u32, Expansion>,
     pub(super) recipes: BTreeMap<u32, Recipe>,
@@ -164,6 +165,7 @@ impl Tables {
         while let Some(row) = rows.next()? {
             let id = any_int(row, 0)? as u32;
             let visible = any_flag(row, 8)?;
+            out.raw_limits.push(any_int(row, 2)? as i32);
             if visible {
                 out.grades.push(id);
             }
