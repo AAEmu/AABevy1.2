@@ -88,6 +88,16 @@ pub(crate) fn trade_fixture() {
     trade::fixture::run();
 }
 
+pub(crate) fn keybindings_runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
+    loot_roll::fixture::runtime(width, height)
+}
+
+#[allow(dead_code)]
+pub(crate) fn keybindings_fixture() {
+    let (width, height) = aa_dev::DevArgs::from_env().size;
+    crate::settings::bindings_fixture(keybindings_runtime(width as f32, height as f32).unwrap());
+}
+
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
 use aa_ui::{UiConfig, UiRuntime};
@@ -312,6 +322,7 @@ impl Plugin for HudPlugin {
             .init_resource::<HudBuilt>()
             .init_resource::<PrebuildState>()
             .init_resource::<HudPointerOverUi>()
+            .init_resource::<crate::settings::Actions>()
             .insert_resource(chat::ScriptedKeys::from_args())
             .insert_resource(alerts::ScriptedFails::from_args())
             .add_message::<alerts::UseFailed>()
@@ -319,6 +330,7 @@ impl Plugin for HudPlugin {
             .insert_resource(cameras::DevFov::from_args())
             .insert_non_send(api::HudBridge::default())
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
+            .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())
             .add_systems(Update, prebuild_hud.run_if(in_state(Screen::Loading)))
             // a stage built ahead for a game that did not start (the connection dropped while loading)
@@ -333,7 +345,7 @@ impl Plugin for HudPlugin {
                     .after(bevy::input::InputSystems)
                     .run_if(in_state(Screen::InGame)),
             )
-            .add_systems(Update, (mirror_keyboard_focus, input::swallow_keys, input::hotkeys).chain().after(aa_ui::UiInput).in_set(HudInputReady).run_if(in_state(Screen::InGame)))
+            .add_systems(Update, (mirror_keyboard_focus, input::swallow_keys, crate::settings::update_input, input::hotkeys).chain().after(aa_ui::UiInput).in_set(HudInputReady).run_if(in_state(Screen::InGame)))
             .add_systems(
                 Update,
                 (

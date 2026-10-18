@@ -572,7 +572,7 @@ fn begin_talk(d: &mut HudData, facts: &PlayerFacts, npc: (u32, u32), target: Opt
 /// A right click on an NPC or F near one starts the talk; D / F / G drive the dialog while it is up.
 #[allow(clippy::too_many_arguments)]
 pub fn talk_input(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     pointer: Pointer,
     time: Res<Time>,
@@ -637,13 +637,13 @@ pub fn talk_input(
         script.talk_at = None;
     }
     let typing = focus.0 || rt.keyboard_captured();
-    let pressed = |code: KeyCode, c: char| scripted_key == Some(c) || (!typing && keys.just_pressed(code));
+    let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     let picked = right_click_pick(&pointer, &units, own, &mut pressed_at);
 
     let mut d = bridge.0.borrow_mut();
     if d.dialog.directing {
-        for (code, c, arg) in [(KeyCode::KeyD, 'd', 1), (KeyCode::KeyF, 'f', 2), (KeyCode::KeyG, 'g', 3)] {
-            if pressed(code, c) {
+        for (c, arg) in [('d', 1), ('f', 2), ('g', 3)] {
+            if pressed("quest_directing_interaction", arg, c) {
                 debug!("hud: dialog key {c}");
                 drop(d);
                 rt.fire_event("QUEST_DIRECTING_MODE_HOT_KEY", arg);
@@ -666,7 +666,7 @@ pub fn talk_input(
         })
     } else if scripted_talk {
         nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
-    } else if pressed(KeyCode::KeyF, 'f') && d.loot.nearest.is_none() {
+    } else if pressed("do_interaction_1", 0, 'f') && d.loot.nearest.is_none() {
         nearest_npc(&d, &units, own, own_faction, &player_facts, TALK_RANGE, false)
     } else {
         None

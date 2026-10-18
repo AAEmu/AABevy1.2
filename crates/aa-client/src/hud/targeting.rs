@@ -26,7 +26,7 @@ fn unit_centre(pos: aa_net::Pos, scale: f32) -> Vec3 {
 /// client's "target nearest enemy"; with no enemy in range, any unit).
 #[allow(clippy::too_many_arguments)]
 pub fn tab_target(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
@@ -35,9 +35,19 @@ pub fn tab_target(
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<NetCommand>,
 ) {
-    if focus.0 || !(keys.just_pressed(KeyCode::Tab) || script.take_tab()) {
+    let scripted = script.take_tab();
+    let mode = [
+        ("cycle_hostile_forward", false, false),
+        ("cycle_hostile_backward", true, false),
+        ("cycle_friendly_forward", false, true),
+        ("cycle_friendly_backward", true, true),
+    ]
+    .into_iter()
+    .find(|(name, _, _)| actions.just_pressed(name, 0));
+    if focus.0 || !(scripted || mode.is_some()) {
         return;
     }
+    let (_, backwards, friendly) = mode.unwrap_or(("cycle_hostile_forward", false, false));
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     let (me, shared) = {
         let d = bridge.0.borrow();
@@ -47,7 +57,10 @@ pub fn tab_target(
     let mut near: Vec<(f32, u32, bool)> = units
         .iter()
         .filter(|u| u.obj_id != own)
-        .map(|u| (me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)), u.obj_id, !u.dead && super::plates::relation_of(shared.get(), own_faction, u) == "hostile"))
+        .filter(|u| !friendly || (!u.dead && super::plates::relation_of(shared.get(), own_faction, u) == "friendly"))
+        .map(|u| {
+            (me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)), u.obj_id, !u.dead && super::plates::relation_of(shared.get(), own_faction, u) == "hostile")
+        })
         .filter(|(d, _, _)| *d <= TAB_RANGE)
         .collect();
     if near.iter().any(|n| n.2) {
@@ -58,8 +71,8 @@ pub fn tab_target(
         return;
     }
     let next = match target.obj_id.and_then(|t| near.iter().position(|(_, id, _)| *id == t)) {
-        Some(i) => near[(i + 1) % near.len()].1,
-        None => near[0].1,
+        Some(i) => near[(i + if backwards { near.len() - 1 } else { 1 }) % near.len()].1,
+        None => near[if backwards { near.len() - 1 } else { 0 }].1,
     };
     net.write(NetCommand(Command::Target { obj_id: next }));
 }
@@ -88,7 +101,8 @@ pub fn click_target(
     if start.distance(end) > CLICK_SLOP || over_ui.0 {
         return;
     }
-    let Some((camera, transform)) = cameras.iter().find(|(c, _)| c.is_active) else { return };
+    let Some((camera, transform)) = cameras.iter().find(|(c, _)| c.is_active) else { return;
+    };
     let Ok(ray) = camera.viewport_to_world(transform, end) else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     let mut best: Option<(f32, u32)> = None;
@@ -112,6 +126,7 @@ pub fn click_target(
 /// the toolkit opens the system menu.
 pub fn escape_key(
     keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     rt: Option<NonSend<UiRuntime>>,
     target: Res<Target>,
@@ -119,8 +134,17 @@ pub fn escape_key(
     mut script: ResMut<super::chat::ScriptedKeys>,
 ) {
     let Some(rt) = rt else { return };
-    let escape = script.take_escape() || keys.just_pressed(KeyCode::Escape);
+    let scripted = script.take_escape();
+    let mapped = actions.just_pressed("open_config", 0);
+    let physical = keys.just_pressed(KeyCode::Escape);
+    let escape = scripted || physical || mapped;
     if focus.0 || rt.keyboard_captured() || !escape {
+        return;
+    }
+    if mapped && !physical && !scripted {
+        if let Err(e) = rt.hotkey("open_config") {
+            warn!("hud: open_config: {e}");
+        }
         return;
     }
     if rt.holding() {
@@ -133,7 +157,9 @@ pub fn escape_key(
     };
     if !window_open && target.obj_id.is_some() {
         net.write(NetCommand(Command::Target { obj_id: 0 }));
-    } else if let Err(e) = rt.escape() {
+    } else if window_open || mapped || scripted {
+        if let Err(e) = rt.escape() {
         warn!("hud: escape: {e}");
     }
+}
 }

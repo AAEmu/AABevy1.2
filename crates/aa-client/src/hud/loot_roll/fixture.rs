@@ -7,7 +7,7 @@ use bevy::window::PrimaryWindow;
 
 use super::*;
 
-pub(super) fn runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
+pub(crate) fn runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
     let mut rt = UiRuntime::new("en_us", width, height)?;
     rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
     let bridge = Rc::new(RefCell::new(super::super::api::HudData::default()));

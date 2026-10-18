@@ -5,12 +5,24 @@ use std::sync::{Arc, Mutex, OnceLock};
 use mlua::{Lua, Table, Value};
 use serde_json::{Map, Value as Json, json};
 
+#[path = "settings/bindings.rs"]
+mod bindings;
+#[path = "settings/input.rs"]
+mod input;
+pub use input::Actions;
+pub(crate) use input::update as update_input;
+
+pub(crate) fn bindings_fixture(rt: aa_ui::UiRuntime) {
+    bindings::fixture::run(rt);
+}
+
 #[derive(Default)]
 struct Store {
     path: PathBuf,
     data: Map<String, Json>,
     pending: Map<String, Json>,
     dirty: bool,
+    bindings: Option<Arc<Mutex<bindings::Keymap>>>,
 }
 
 impl Store {
@@ -41,6 +53,7 @@ impl Store {
             data,
             pending: Map::new(),
             dirty: false,
+            bindings: None,
         }
     }
 
@@ -122,7 +135,11 @@ pub fn install(lua: &Lua, net: &Table) -> mlua::Result<()> {
     install_store(lua, net, shared())
 }
 
+#[derive(Clone)]
+struct LuaStore(Arc<Mutex<Store>>);
+
 fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Result<()> {
+    lua.set_app_data(LuaStore(store.clone()));
     let s = store.clone();
     net.raw_set(
         "option_get",
@@ -250,7 +267,9 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
 pub fn install_hud(lua: &Lua) -> mlua::Result<()> {
     lua.load(include_str!("settings.lua"))
         .set_name("@settings.lua")
-        .exec()
+        .exec()?;
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    bindings::install(lua, store)
 }
 
 pub fn install_options(lua: &Lua) -> mlua::Result<()> {

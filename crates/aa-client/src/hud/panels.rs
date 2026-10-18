@@ -477,22 +477,6 @@ pub struct Changed {
     pub target: bool,
 }
 
-/// Number keys use the action bar slots: 1..9, 0, -, = are slots 1..12, with Shift 13..24.
-const SLOT_KEYS: [KeyCode; 12] = [
-    KeyCode::Digit1,
-    KeyCode::Digit2,
-    KeyCode::Digit3,
-    KeyCode::Digit4,
-    KeyCode::Digit5,
-    KeyCode::Digit6,
-    KeyCode::Digit7,
-    KeyCode::Digit8,
-    KeyCode::Digit9,
-    KeyCode::Digit0,
-    KeyCode::Minus,
-    KeyCode::Equal,
-];
-
 /// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
 /// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]).
 pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
@@ -541,7 +525,7 @@ fn use_item(item: &aa_net::model::Item, env: &Env, target_obj_id: u32, net: &mut
 /// The action bar's number keys.
 #[allow(clippy::too_many_arguments)]
 pub fn action_keys(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     bridge: NonSend<HudBridge>,
     bar: Res<ActionBar>,
@@ -561,12 +545,11 @@ pub fn action_keys(
     if focus.0 {
         return;
     }
-    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    for (i, key) in SLOT_KEYS.iter().enumerate() {
-        if keys.just_pressed(*key) {
+    for (action, slot, button) in actions.hotkeys() {
+        if !button && action == "action_bar_button" && (1..=58).contains(&slot) {
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-            use_slot(i + if shift { 12 } else { 0 }, &env, &bar, &inventory, &target, &mut net, &mut failed);
+            use_slot(slot as usize - 1, &env, &bar, &inventory, &target, &mut net, &mut failed);
         }
     }
 }

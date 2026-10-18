@@ -358,12 +358,4 @@ X2Quest.IsNextQuestAcceptableForDirecting = function(self, qtype)
   return false, 0
 end
 
--- The dialog's keys: D back, F next / confirm, G the reward panel's button.
-do
-  local prev = X2Hotkey.GetOptionBinding
-  local keys = { [1] = "D", [2] = "F", [3] = "G" }
-  X2Hotkey.GetOptionBinding = function(self, action, manager, withModifier, index)
-    if action == "quest_directing_interaction" then return keys[index or 0] end
-    return prev(self, action, manager, withModifier, index)
-  end
-end
+-- Quest-directing bindings come from the original default_binding.g and saved X2Hotkey state.
