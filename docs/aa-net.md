@@ -6091,3 +6091,37 @@ The empty-string/raw_length1 case is an additional boundary: executed native Loa
 failure and leaves a partial0xff-valued node, with no tracing subtree; the observer still
 reloads zero trace slots. Treating it as an application empty state or refusing it must be
 explicit, not described as a successful native empty parse. raw_length0 retains prior state.
+
+### Native snapshot/stop frame clock (2026-10-18)
+
+`Skills::advance_native_frame(now_ms)` replaces continuous Instant projection for mutable
+snapshot/stop manager rows. Call ONCE after queued received-event folds and before HUD
+queries, using one wrapping u32 timer0 millisecond clock. `native_last_frame_ms` starts0;
+nonzero now uses wrapping(now-last), zero now uses delta0, and both store now. Every direct
+and tag row saturating-subtracts the unsigned delta; totals, order, expired rows, origins and
+receipt timestamps remain unchanged. Last-frame time survives existing character/connection
+resets and PlayerSpawn, although runtime rows still follow the existing resource resets.
+`native_cooldown_at`/`remaining_ms_at` retain their signatures but ignore Instant: queries
+observe stored frame remainder. `updated_at` is receipt/insertion metadata, not a timebase.
+Raw SCCooldowns receipt history and app DB/cast estimates retain their separate APIs.
+No automatic tick occurs in Session/Bevy receipt reducers: the outer app owns frame order.
+
+Source order is now closed for ordinary Fired: MainGame390f6a20 calls framework306f61b0,
+which calls CSystem365459b0 and Network SyncWithGame1622ae8d before391739e0. Network stage0
+post1622a4a4 calls proxy16264c7e?16269b63?actual client listener391e63e0?FIFO drain391e5b60.
+Fired0xa2 registration391ec0dd uses immediate=false; wrapper399b6678 invokes391d58a0.
+Only after returning does391739e0 update TL manager39173aeb and actors3936a750 at39173bcb.
+The latter samples timer0, reads/writes process global3a16e194, and39899e50 subtracts delta.
+Targeted verified runtime artifacts are `native-outer-frame-runtime-20261018.json` and
+`native-network-{sync-workers,proxy-dispatch}-runtime-20261018.txt` under ignored aa-net data.
+Six no-hook original39899e50 Unicorn cases (0,1,999,1000,INT_MAX,UINT_MAX) are embedded tests;
+frame-zero/wrap, newly received rows, no query projection and lifecycle clock retention are
+also tested. Native outer activity gates still belong to the app, not this explicit tick API.
+
+This does not close generic Fired admission/TL lifetime:39397ff0 ends/decrements rather than
+physically erasing a TL; equal-key reconstruction can retain its old node until frame cleanup.
+39171800 modes0/1/2 clear ordinary TLs; mode3 skips tree clearing. TeleportUnit391d6ed0 and
+NaviTeleport391dc8c0 reach mode3 through3930c9e0. Loading-start callback390f1e80?391721f0
+clears actors, but invokes mode0 only when levelInfo.GetType()==2; the type producer and
+remaining mode1/2 engine callback identities remain open. No new Fired/GCD timers or guessed
+TL replacement/reset events are introduced by the frame-clock change.
