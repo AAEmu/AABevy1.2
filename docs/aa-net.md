@@ -6202,3 +6202,58 @@ matching nonzero captured persistent ID and a successful write. These are strong
 identity/transport guards, not additional native jury eligibility. `JuryWaitingNumberRequested`
 and `JuryWaitingNumberRequestRejected` are local transport observations, never native/UI ACKs.
 Only genuine SC182 can supply the displayed number; no request changes Crimes/cache/notices.
+
+
+### Received trial wait cache and defendant callback gates (2026-10-18)
+
+`TrialEvent`, `Event::Trial`, and the Bevy/plain `Trials` resource cover native/lane
+SC173 SummonJury,175 SummonDefendant,17b TrialWaiting,17c JuryWaiting,17e RulingClosed,
+17f AudienceJoined,180 AudienceLeft and183 TrialCanceled. The exact bodies are respectively
+(u32 trial,u32 court,i32 jury number), u32 trial, (u32 order,i32 sentence),
+(i32 count,i32 total,i32 sentence), empty, (u32 trial,BC object,raw blob name),
+(BC object,raw blob name), and u32 trial. All signed fields preserve their original bits;
+complete names, duplicates and order survive the forwarded receipt, including embedded NUL
+and invalid UTF-8. `last_receipt` is bounded to one raw receipt, not a growing history.
+Lane source: systems/social/packets/trial.rs. Native factories391b2fd0/30d0/3450/34d0/
+35d0/3750/37d0/38d0 allocate those exact opcodes. Readers397af830/8e0/980/9c0,
+39184540,397b6ba0/6c60,397afa30 establish framing independently of the lane writer.
+Native audience name buffers cap128; safe cache admission refuses longer names while
+retaining the complete raw event. Native malformed overlength behavior is not claimed.
+
+`Trials` records actual PlayerSpawn object identity, optional waiting order/counts/sentence,
+and only the source-closed `defendant_context`. It deliberately does not expose a partially
+modeled general current trial ID or isJury flag. Some(0) is a true defendant flag. Native
+manager3907f570 initializes role flags and trial ID to zero but does not initialize the four
+wait fields, so absence stays None until a receipt. Actor removal clears actual object identity,
+not the defendant flag. Character/session lifecycle resets are stronger app isolation. Native
+ruling/cancel/audience resets preserve initialized wait fields.
+
+SC17b handler391dd830 calls3907c6a0/3907c320, stores order at manager+fc, clears counts
++100/+104, writes sentence+108, then emits event141 SHOW_DEPENDANT_WAIT_TRIAL.
+SC17c391dd8b0 calls3907c6c0/3907c3f0, always writes counts/sentence, but emits event142
+SHOW_DEPENDANT_WAIT_JURY only when manager byte2 is nonzero. `apply_with_notices`
+returns those notices once per genuine admitted receipt, even unchanged; use it instead of
+apply, not in addition. Convert order as signed i32 then f32, counts as signed i32 then f32,
+and sentence bits as unsigned u32 then f32. GetCrimeData390786d0/3907e830 returns
+one table whose defaultSentenceTime uses that same unsigned conversion at3907eb00;
+order/counts are callback inputs, not fields of that getter. The spelling DEPENDANT is native.
+
+The complete active-defendant gate producers are retained:175 sets byte2 even for trial0;
+173 clears it;17e and183 clear unconditionally (183 ignores the received trial ID).
+AudienceJoined39080850 clears only for the actual local object and a changed trial;
+AudienceLeft3907c940 clears for the actual local object. Native missing-actor sentinel
+39ade6a8 was read-only verified zero. Other callers of3907f660, phase3908003e and
+crime records390811e7, call only while both role flags are already clear, so they cannot
+invalidate an active defendant context. No stale-ID guard is invented for cancellation.
+
+Source and executable evidence live in ignored data/extract/aa-net/native-trial-wait-*
+and trial_wait_oracle.py. The oracle executes original3907c320/3907c3f0; only Lua dispatch
+is mocked to record arguments and cache state. It verifies UINT_MAX sentence rounds to
+4294967296.0f, signed order/count extremes, cache-before-callback and duplicate delivery.
+Tests cover every truncation, all eight exact bodies, DD04 batch plus following packet,
+actual/foreign/missing object gates, zero context, lifecycle and Session/plugin/WorldState.
+
+Other trial callbacks, invitations/seats/records/verdicts, ReloadUI replay and general trial
+getter state remain separate gaps. Native SummonJury additionally sends CS072; this
+receive-only slice intentionally does not implement that handshake or any jury choice.
+No timers, eligibility, automatic response or successful outcome is fabricated.
