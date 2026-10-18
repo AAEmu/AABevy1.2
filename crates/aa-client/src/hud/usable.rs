@@ -540,7 +540,14 @@ impl Env<'_> {
     /// The skill's own cooldown is running (the global cooldown is not counted: the server holds that one back quietly).
     pub fn cooldown(&self, skill: u32) -> Option<Fail> {
         let info = self.game?.skills.get(&skill)?;
-        let left = self.skills?.cooldown_left(skill, info.tag, info.cooldown_ms)?;
+        let skills = self.skills?;
+        let tags = if info.tag == 0 { &[][..] } else { std::slice::from_ref(&info.tag) };
+        // Explicit skill/tag timers are own cooldowns even when the DB duration is zero or
+        // shorter than a GCD. Their wire total does not determine whether they are active.
+        if skills.received_cooldown(skill, tags).is_some_and(|(left, _)| left.as_millis() > 0) {
+            return Some(fail(code::COOLDOWN_TIME));
+        }
+        let left = skills.cooldown_left(skill, info.tag, info.cooldown_ms)?;
         (left.as_millis() > 0 && info.cooldown_ms > info.gcd_ms).then_some(fail(code::COOLDOWN_TIME))
     }
 }
@@ -746,6 +753,32 @@ mod tests {
         assert_eq!(e.slot_blocked(&slot_of("skill", 2, 0)), None);
         assert_eq!(e.precheck(2), Some(fail(code::COOLDOWN_TIME)));
         assert_eq!(e.cooldown(1), None);
+    }
+
+    #[test]
+    fn received_own_cooldowns_refuse_clicks_independently_of_db_and_gcd_duration() {
+        let mut g = game(Rules::default().with_skill(1, SkillRules::default()));
+        g.skills.insert(1, crate::hud::data::SkillInfo { tag: 9, gcd_ms: 1000, ..Default::default() });
+        let me = me();
+        let mut skills = Skills::default();
+        skills.received_skill_cooldowns.push(aa_net::state::ReceivedCooldown {
+            cooldown: aa_net::Cooldown { id: 1, total_ms: 0, remaining_ms: 30_000 },
+            received_at: Instant::now(), reset: false,
+        });
+        let check = |skills: &Skills| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.precheck(1);
+        assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)));
+        // Native sweep conveys a cooldown; it does not introduce a separate dark-slot reason.
+        let slot = SlotSnap { kind: "skill", id: 1, ..Default::default() };
+        assert_eq!(Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) }.slot_blocked(&slot), None);
+        skills.received_skill_cooldowns[0].reset = true;
+        assert_eq!(check(&skills), None);
+        skills.received_tag_cooldowns.push(aa_net::state::ReceivedCooldown {
+            cooldown: aa_net::Cooldown { id: 9, total_ms: 500, remaining_ms: 30_000 },
+            received_at: Instant::now(), reset: false,
+        });
+        assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)));
+        skills.received_tag_cooldowns[0].received_at = Instant::now() - Duration::from_secs(31);
+        assert_eq!(check(&skills), None);
     }
 
     /// The rules as the game database has them (skipped where the database is not installed).

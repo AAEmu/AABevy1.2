@@ -33,6 +33,7 @@
 //! `HudKeyboardFocus.0` is true.
 
 mod alerts;
+mod breath;
 pub(crate) mod api;
 mod cameras;
 mod cast;
@@ -102,6 +103,11 @@ pub(crate) fn keybindings_fixture() {
 #[allow(dead_code)]
 pub(crate) fn pvp_fixture() {
     pvp::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn breath_fixture() {
+    breath::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -310,6 +316,7 @@ impl Plugin for HudPlugin {
         plates::plugin(app);
         combat::plugin(app);
         pvp::plugin(app);
+        breath::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);

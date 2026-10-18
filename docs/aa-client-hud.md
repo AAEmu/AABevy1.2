@@ -1003,3 +1003,54 @@ npc, as target.lua requires; it asserts both parent frames are shown. The inspec
 world-select smoke in the same folder has zero script errors and300-370FPS. All root QA
 windows exited. The playable copy `target/debug/aa-client-play.exe` is refreshed, SHA256
 `42E330CBCA7C38C059D5B011A055AD394864945BB5B07CD90D41609536F8076C`.
+
+## Received cooldowns and the original breath bar (2026-10-17)
+
+Action-bar snapshots now preserve the winning `(remaining,total)` from aa-net's received
+skill/tag timers instead of replacing a received duration with the database's duration. An
+explicit zero total remains zero. The longer existing cast/DB estimate or global cooldown
+still wins where appropriate; the existing quarter-second end-time quantization remains.
+Active received own timers also refuse a use request when the database duration is zero or
+no longer than the GCD. The original cooldown sweep conveys this state; target, mana,
+casting and other restriction gates still supply their separate dark-slot reasons.
+The lane currently has only an empty SCCooldowns writer and no runtime emitter, so this
+does not establish live cooldown recovery on re-entry.
+
+`breath.rs` binds `X2Player:GetBreathTime()` to a local controller and processes received
+events even during Loading. Every SCUnderWater report emits the original no-argument
+DIVE_START/DIVE_END while the world HUD is active, including repeats. Start/end mutate
+the timer only when the local actor exists. SCSetBreath independently rebases the timer
+without emitting DIVE or inferring underwater status. Original player_breath_bar.lua
+handles visibility, LEFT_LOADING restoration, fill and its authored 200ms hide fade.
+No damage, HP change, movement packet or client-side drowning is invented.
+
+Native proofs are recorded in docs/aa-net.md: handler391dde80, controller3930b600,
+correction3930b050 and getter3930b660; Lua registration39499367/wrapper39495d10 returns
+TOTAL then LEFT. Character attribute91 resolves to the source-backed60000ms base
+(398b4e80/398a0d60/table398a11a4/398a10e5). The existing cached gear/buff modifier
+calculation now includes attribute91, so capacity is not fixed at that base. Inactive or
+missing-actor queries return0,0 before touching cached capacity. Capacity changes preserve
+the elapsed fraction; correction and remaining calculations retain native u32 wrapping.
+Native3905aca0 converts each unsigned result to f32 before Lua's number representation.
+
+Explicit limits: the original clock's epoch is unresolved, so the app uses a local
+millisecond origin with the same modular differences. Native fraction rescaling uses
+x87 registers with unrecovered ambient precision; the app uses f64 for that finite
+calculation. An old capacity of zero explicitly restarts elapsed time rather than
+claiming native floating-point exception behavior. Existing modifier math and Rust's
+bounded u32 capacity conversion do not reproduce the unrecovered final native attribute
+limit helper. Natural live underwater/drowning validation remains pending while the lane
+game connection is stalled. Raw network counters and reports remain unchanged.
+
+Validation: full client suite135 passed/20 intentional probes ignored in0.98s. Focused
+checks cover received duration/zero-total/reset and click refusal, native breath correction
+order, repeated starts/end, capacity fractions, missing actors, wraparound and attribute91
+bonuses/removal. The isolated original-stage breath test passed in2.54s, including real
+bar range/fill, zero-argument event handlers, repeated reports, loading restoration and
+hide fade. `shots/hud/sol61-breath/native.png` was inspected at1920x1080: original Breath
+Remaining bar visibly counts down from an explicit fixture correction;223–238FPS, zero
+Lua errors. This fixture uses no connection or3D world. Both client and breath examples
+built successfully. The refreshed playable copy SHA256 is
+`D1FD79D8523DFBD9CD8CB83CB180E7C4D7BC0904C0970145EFBDE77E824E615E`.
+The inspected world-select smoke in the same folder shows the live Lane-bevy list,
+307–409FPS and zero script errors. Both root QA windows exited normally.

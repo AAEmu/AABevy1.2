@@ -79,6 +79,7 @@ pub struct HudData {
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
     pub(super) pvp: super::pvp::View,
+    pub(super) breath: super::breath::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
@@ -126,6 +127,7 @@ impl Default for HudData {
             passive_buffs: Vec::new(),
             local_combat: false,
             pvp: Default::default(),
+            breath: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
@@ -231,6 +233,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::loot_roll::install(lua)?;
     super::trade::install(lua, bridge)?;
     super::pvp::install(lua, bridge)?;
+    super::breath::install(lua, bridge)?;
     crate::settings::install_hud(lua)
 }
 
