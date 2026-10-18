@@ -3306,8 +3306,8 @@ Remaining chat layout gaps are explicit: native add availability
 slots outlive a constructed chat widget. The current per-window
 `AAUI.ChatTabs` bridge has no complete global configuration lifetime, so
 aa-ui retains its existing requested add visibility rather than inventing
-a visible-widget capacity rule. Native tab clipping/sliding and the
-four-float message `SetContentOffset` remain separate open work.
+a visible-widget capacity rule. Native tab clipping/sliding remains
+separate open work; four-float message content offsets are covered below.
 
 Validation: `cargo check -p aa-ui` and the final selected library/native,
 chat-layout, character-clipping, chat-link/transport, screen-bounds and
@@ -3421,3 +3421,56 @@ tooltip after the option change. Measured **164.9–222.0 FPS** at 0.85 and
 errors and no WARN/ERROR. Owned processes 44000 and 19844 self-closed.
 `reference/ingame/spawn/real.png` supplies the original HUD/tab style
 context; no matching scaled long-name reference or pixel-parity claim.
+
+### Independent chat content anchors (2026-10-18)
+
+Original message frames now use the complete chat-window width. The
+previous layout reused the tab area's right inset, subtracting another
+10 local units even though original `OnCreateChatMessage` already sets
+its own 10-unit text inset. This unnecessarily wrapped messages and
+their clickable links earlier than the native client.
+
+Constructor `392cb932..992` initializes four content offsets to zero.
+Binding `39258a50` -> `392cad90` stores the four f32 values at `+324..330`
+without clamping, negation or conversion to tab offsets, then immediately
+calls content layout `392ca610`. Each non-null message frame receives
+these anchors relative to its chat window:
+
+```
+TOPLEFT     = (offset[0], f32(tab_area_height + offset[1]))
+BOTTOMRIGHT = (offset[2], offset[3])
+```
+
+Positive right/bottom offsets extend the frame; negative values pull
+those corners inward. This layout visits hidden frames too. It also runs
+after tab insertion (`392cc240/392cc349`). Ordinary tab layout
+`392c97e0`, including selection, tab-area-height and geometry callbacks,
+does not call it. aa-ui now preserves that independent anchor lifetime:
+tab-area-height changes retain the prior message top offset until a
+content setter or tab insertion refreshes it. Window resize still moves
+the anchored right/bottom corners normally.
+
+Sources: `data/extract/aa-ui/native-chat-content-source-20261018.txt`.
+Offline `chat_content_oracle.py` executes actual `392cad90` -> `392ca610`,
+capturing only anchor removal/attachment. The five passing groups in
+`native-chat-content-oracle-20261018.json` cover zero defaults, signed
+offsets, positive corner extension, null entries/empty vectors and f32
+top-offset addition. No live-client execution or writes are involved.
+
+Five focused regressions cover default/full-width layout, independent
+tab insets, hidden frames, same-offset refresh, selection and height
+callback lifetime, zero-tab insertion, f32 addition, and the actual
+original message formatter/link picker at the previously lost right-edge
+width boundary. The original link remains on one line and pickable at
+both 430- and 345-unit window widths.
+Validation: `cargo check -p aa-ui` and **64 selected tests** passed,
+including character clipping/scaling, tab layout, chat links/transport,
+native widgets, scale/clip and pet/tooltip overflow. Built and copied the
+aa-dev `native_chat_content` example; inspected the unique
+`shots/aa-ui/native-chat-content-20261018.png` capture at 1280-by-720.
+It shows the unchanged original constructors/conversation at default
+offsets (430-by-170 message frame) beside signed offsets (402-by-150).
+Measured **356.9–488.0 FPS**, zero script errors and no WARN/ERROR; owned
+process 21236 self-closed. `reference/ingame/spawn/real.png` supplies the
+original HUD/chat style context; no matching offset demonstration or
+pixel-parity claim.
