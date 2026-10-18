@@ -123,7 +123,10 @@ impl ZoneSky {
     /// `variant` is the element name to read (`Zone` is the normal one, `Zone_Dominion_Normal` another).
     pub fn parse(xml: &str, variant: &str) -> ZoneSky {
         let Ok(doc) = roxmltree::Document::parse(xml) else { return ZoneSky::default() };
-        let Some(zone) = doc.descendants().find(|n| n.has_tag_name(variant)).or_else(|| doc.descendants().find(|n| n.tag_name().name().starts_with("Zone")))
+        // 365F3830 loads a standalone Zone into both native layers; a list loads
+        // exact element names and leaves an absent layer at its initialized defaults.
+        let root = doc.root_element();
+        let Some(zone) = (if root.has_tag_name("Zone") { Some(root) } else { root.children().find(|n| n.has_tag_name(variant)) })
         else {
             return ZoneSky::default();
         };
@@ -185,6 +188,8 @@ mod tests {
         assert_eq!(z.angle, 130.0);
         assert_eq!(z.ocean_fog, Some(([21.0, 74.0, 155.0], 0.025)));
         assert_eq!(ZoneSky::parse(xml, "Zone_Dominion_Normal").material.as_deref(), Some("Materials/sky/y"));
+        assert!(ZoneSky::parse(r#"<Env><Zone SkyBoxMaterial="x"/></Env>"#, "Zone_Dominion_Normal").material.is_none());
+        assert_eq!(ZoneSky::parse(r#"<Zone SkyBoxMaterial="x"/>"#, "Zone_Dominion_Normal").material.as_deref(), Some("x"));
         assert!(ZoneSky::parse("not xml", "Zone").material.is_none());
     }
 

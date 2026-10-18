@@ -26,6 +26,7 @@ use bevy::shader::ShaderRef;
 use crate::coords::cry_to_bevy;
 use crate::post::PostUniform;
 use crate::sky::{AtmosphereTuning, Environment, view_exposure};
+use crate::sky_transition::SkySelection;
 use crate::stream::{WorldConfig, WorldFocus};
 
 /// One `<Cloud>` of a `clouds.xml`.
@@ -208,8 +209,8 @@ fn cloud_pose(def: &CloudDef, bearing: f32, camera: Vec3) -> Transform {
 #[derive(Resource, Default)]
 pub struct CloudState {
     world: Option<String>,
-    /// The zone the sprites were built for (`None` = nothing built yet).
-    zone: Option<Option<u16>>,
+    /// Loaded zone/layer (`None` = nothing built yet). Native reapplies clouds at a layer switch.
+    zone: Option<(Option<u16>, u32)>,
     entities: Vec<Entity>,
     bases: Vec<(Handle<CloudMaterial>, CloudBase)>,
     textures: HashMap<String, Option<Handle<Image>>>,
@@ -254,6 +255,7 @@ pub fn update_clouds(
     cfg: Res<WorldConfig>,
     settings: Res<CloudSettings>,
     env: Res<Environment>,
+    selection: Res<SkySelection>,
     tuning: Res<AtmosphereTuning>,
     mut state: ResMut<CloudState>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -273,14 +275,15 @@ pub fn update_clouds(
     }
     let Some(cur) = &env.sample else { return };
     let state = &mut *state;
-    if state.zone != Some(env.zone) || state.world.as_deref() != Some(cfg.world.as_str()) {
+    let key = (selection.zone, selection.layer);
+    if state.zone != Some(key) || state.world.as_deref() != Some(cfg.world.as_str()) {
         state.world = Some(cfg.world.clone());
-        state.zone = Some(env.zone);
+        state.zone = Some(key);
         for e in state.entities.drain(..) {
             commands.entity(e).despawn();
         }
         state.bases.clear();
-        let xml = env.zone.and_then(|z| {
+        let xml = selection.zone.and_then(|z| {
             aa_pak::Pak::global()
                 .read_string(&format!("worlds/{}/zone/{z}/clouds.xml", cfg.world))
                 .ok()
@@ -363,7 +366,7 @@ pub fn update_clouds(
     let light = if cur.sun_dir.z > 0.0 { cur.sun_dir } else { cur.moon_dir };
     let sun = cry_to_bevy(light).normalize();
     for (handle, base) in &state.bases {
-        let visible = if tuning.cloud_gain > 0.0 { 1.0 } else { 0.0 };
+        let visible = if tuning.cloud_gain > 0.0 { selection.opacity } else { 0.0 };
         let shade_sky = (cur.cloud_sky * base.sky_multiplier * rs).extend(visible);
         let shade_sun = (cur.cloud_sun * base.sun_multiplier * rs).extend(1.0);
         let sun_dir = sun.extend(1.0);
@@ -514,6 +517,7 @@ mod tests {
             })
             .insert_resource(AtmosphereTuning::default())
             .insert_resource(CloudSettings { enabled: true })
+            .init_resource::<SkySelection>()
             .init_resource::<CloudState>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<Image>>()
@@ -522,9 +526,24 @@ mod tests {
             .add_systems(PostUpdate, place_clouds);
         app.world_mut()
             .spawn((Camera3d::default(), Transform::from_xyz(12000.0, 200.0, -21000.0)));
+        app.world_mut().resource_mut::<SkySelection>().update("main_world", &[(179, 1.0)], 0, 0.0);
+        app.world_mut().resource_mut::<SkySelection>().update("main_world", &[(179, 1.0)], 0, 2.0);
         app.update();
         let count = |app: &mut App| app.world_mut().query::<&CloudSprite>().iter(app.world()).count();
         assert_eq!(count(&mut app), 4);
+        assert!(app.world().resource::<Assets<CloudMaterial>>().iter()
+            .all(|(_, m)| m.params.shade_sky.w == 1.0));
+        // A same-zone relic switch reapplies the shared authored cloud list at zero,
+        // then both skybox and cloud alpha use the native frame-time fade.
+        app.world_mut().resource_mut::<SkySelection>().update("main_world", &[(179, 1.0)], 1, 2.0);
+        app.update();
+        assert_eq!(count(&mut app), 4);
+        assert!(app.world().resource::<CloudState>().bases.iter().all(|(handle, _)|
+            app.world().resource::<Assets<CloudMaterial>>().get(handle).unwrap().params.shade_sky.w == 0.0));
+        app.world_mut().resource_mut::<SkySelection>().update("main_world", &[(179, 1.0)], 1, 1.0);
+        app.update();
+        assert!(app.world().resource::<CloudState>().bases.iter().all(|(handle, _)|
+            app.world().resource::<Assets<CloudMaterial>>().get(handle).unwrap().params.shade_sky.w == 0.5));
         let angle = |app: &mut App| {
             app.world_mut()
                 .query::<&CloudSprite>()
@@ -563,6 +582,7 @@ mod tests {
         app.update();
         assert!(angle(&mut app) > paused);
         app.world_mut().resource_mut::<Environment>().zone = Some(186);
+        app.world_mut().resource_mut::<SkySelection>().update("main_world", &[(186, 1.0)], 0, 0.0);
         app.update();
         assert_eq!(count(&mut app), 7);
         assert!(app.world().resource::<CloudState>().textures.len() <= 7);

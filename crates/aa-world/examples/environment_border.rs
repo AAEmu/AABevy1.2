@@ -1,10 +1,14 @@
 //! Native zone-179 / zone-210 ToD blending at a real Solzreed / Silent Sea sector border.
 //! --offset <metres> selects a fixed border position; --motion-check crosses it over 12s.
 //! --zone179 / --zone210 force single-zone controls. --unload-check disables the environment.
+//! --layer-check switches the authored relic sky at 5s. --fade-check verifies shared sky/cloud alpha.
 use std::sync::Arc;
 
 use aa_world::sky::{Environment, update_environment};
+use aa_world::sky_clouds::CloudMaterial;
 use aa_world::sky_clouds::CloudSprite;
+use aa_world::sky_material::SkyMaterial;
+use aa_world::sky_transition::SkySelection;
 use aa_world::stream::WorldInfo;
 use aa_world::{AaWorldPlugin, World, WorldClock, WorldConfig, WorldFocus, cry_to_bevy};
 use bevy::prelude::*;
@@ -86,6 +90,7 @@ fn advance(
     time: Res<Time>,
     mut cameras: Query<(&mut Transform, &mut GlobalTransform), With<BorderCamera>>,
     mut config: ResMut<WorldConfig>,
+    mut clock: ResMut<WorldClock>,
 ) {
     if flag("--motion-check") {
         let travelled = ((time.elapsed_secs() - 2.0) / 12.0).clamp(0.0, 1.0);
@@ -99,6 +104,9 @@ fn advance(
     if flag("--unload-check") && time.elapsed_secs() > 10.0 {
         config.environment = false;
     }
+    if flag("--layer-check") && time.elapsed_secs() > 5.0 {
+        clock.layer = 1;
+    }
 }
 
 fn verify(
@@ -106,12 +114,18 @@ fn verify(
     config: Res<WorldConfig>,
     info: Res<WorldInfo>,
     env: Res<Environment>,
+    clock: Res<WorldClock>,
+    selection: Res<SkySelection>,
+    sky_assets: Res<aa_world::sky::SkyAssets>,
+    sky_materials: Res<Assets<SkyMaterial>>,
+    cloud_materials: Res<Assets<CloudMaterial>>,
     cameras: Query<&Transform, With<BorderCamera>>,
-    clouds: Query<&CloudSprite>,
+    clouds: Query<(&CloudSprite, &MeshMaterial3d<CloudMaterial>)>,
     mut previous: Local<Option<(f32, Vec3, Vec3)>>,
     mut crossed: Local<bool>,
     mut logged: Local<bool>,
     mut unloaded: Local<bool>,
+    mut previous_sky: Local<Option<(Option<u16>, u32, f32)>>,
 ) {
     let Some(camera) = cameras.iter().next() else {
         return;
@@ -119,16 +133,76 @@ fn verify(
     if flag("--unload-check") && time.elapsed_secs() > 14.0 && !*unloaded {
         assert!(!config.environment && env.sample.is_none());
         assert_eq!(clouds.iter().count(), 0);
+        assert_eq!((selection.zone, selection.opacity), (None, 0.0));
+        assert!(
+            sky_materials
+                .get(&sky_assets.dome_material)
+                .unwrap()
+                .box_12
+                .is_none()
+        );
         *unloaded = true;
         info!("environment unload: no active sample or cloud entities");
     }
     let Some(sample) = &env.sample else { return };
     let pos = aa_world::bevy_to_cry(camera.translation);
     let weights = info.0.environment_weights(pos);
+    if flag("--fade-check") {
+        let weights = if let Some(zone) = clock.zone {
+            vec![(zone, 1.0)]
+        } else {
+            weights.clone()
+        };
+        let total: f32 = weights.iter().map(|(_, weight)| weight).sum();
+        let strongest = weights
+            .iter()
+            .map(|(_, weight)| *weight)
+            .fold(0.0, f32::max);
+        let spatial = (2.0 * strongest - total).clamp(0.0, 1.0);
+        assert!(selection.opacity <= spatial + 1e-5);
+        if let Some((zone, layer, opacity)) = *previous_sky {
+            if zone != selection.zone || layer != selection.layer {
+                assert!(
+                    selection.opacity < 1e-5,
+                    "native asset changes occur at zero opacity"
+                );
+            } else {
+                // Fixed poses isolate the native two-second real frame-time fade.
+                if !flag("--motion-check") {
+                    assert!(
+                        (selection.opacity - opacity).abs() <= time.delta_secs() * 0.501 + 1e-5
+                    );
+                }
+            }
+        }
+        *previous_sky = Some((selection.zone, selection.layer, selection.opacity));
+        for (_, material) in &clouds {
+            let cloud = cloud_materials.get(&material.0).unwrap();
+            assert!((cloud.params.shade_sky.w - selection.opacity).abs() < 1e-5);
+        }
+        if selection.opacity == 0.0 {
+            assert_eq!(
+                sky_materials
+                    .get(&sky_assets.dome_material)
+                    .unwrap()
+                    .params
+                    .box_sky
+                    .w,
+                0.0
+            );
+        }
+        if time.elapsed_secs() > 11.0 && flag("--layer-check") {
+            assert_eq!(selection.layer, 1);
+            assert!((selection.opacity - spatial).abs() < 1e-4);
+        }
+    }
     if time.elapsed_secs() > 5.0 && !*logged {
         info!(
-            "environment border: at {pos:?}, sector {:?}, weights {weights:?}, sun {:?}, fog {:?}",
-            env.zone, sample.sun, sample.fog
+            "environment border: at {pos:?}, sector {:?}, weights {weights:?}, sky {:?}, sun {:?}, fog {:?}",
+            env.zone,
+            (selection.zone, selection.layer, selection.opacity),
+            sample.sun,
+            sample.fog
         );
         *logged = true;
     }
