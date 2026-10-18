@@ -543,7 +543,7 @@ impl Env<'_> {
         let skills = self.skills?;
         // Explicit skill/tag timers are own cooldowns even when the DB duration is zero or
         // shorter than a GCD. Their wire total does not determine whether they are active.
-        if super::cooldown::received_at(info, skills, skill, std::time::Instant::now()).0 > 0 {
+        if super::cooldown::native_at(info, skills, skill, std::time::Instant::now()).0 > 0 {
             return Some(fail(code::COOLDOWN_TIME));
         }
         let (left, _) = super::cooldown::observed_at(info, skills, skill, std::time::Instant::now());
@@ -760,23 +760,23 @@ mod tests {
         g.skills.insert(1, crate::hud::data::SkillInfo { tag: 9, tags: vec![9], gcd_ms: 1000, ..Default::default() });
         let me = me();
         let mut skills = Skills::default();
-        skills.received_skill_cooldowns.push(aa_net::state::ReceivedCooldown {
+        skills.native_skill_cooldowns.push(aa_net::state::NativeCooldown {
             cooldown: aa_net::Cooldown { id: 1, total_ms: 0, remaining_ms: 30_000 },
-            received_at: Instant::now(), reset: false,
+            updated_at: Instant::now(), origin: aa_net::state::NativeCooldownOrigin::Snapshot, reset: false,
         });
         let check = |skills: &Skills| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.precheck(1);
         assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)));
         // Native sweep conveys a cooldown; it does not introduce a separate dark-slot reason.
         let slot = SlotSnap { kind: "skill", id: 1, ..Default::default() };
         assert_eq!(Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) }.slot_blocked(&slot), None);
-        skills.received_skill_cooldowns[0].reset = true;
+        skills.native_skill_cooldowns[0].reset = true;
         assert_eq!(check(&skills), None);
-        skills.received_tag_cooldowns.push(aa_net::state::ReceivedCooldown {
+        skills.native_tag_cooldowns.push(aa_net::state::NativeCooldown {
             cooldown: aa_net::Cooldown { id: 9, total_ms: 500, remaining_ms: 30_000 },
-            received_at: Instant::now(), reset: false,
+            updated_at: Instant::now(), origin: aa_net::state::NativeCooldownOrigin::Snapshot, reset: false,
         });
         assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)));
-        skills.received_tag_cooldowns[0].received_at = Instant::now() - Duration::from_secs(31);
+        skills.native_tag_cooldowns[0].updated_at = Instant::now() - Duration::from_secs(31);
         assert_eq!(check(&skills), None);
     }
 

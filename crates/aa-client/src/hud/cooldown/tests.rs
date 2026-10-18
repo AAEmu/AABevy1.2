@@ -1,5 +1,5 @@
 use super::*;
-use aa_net::state::ReceivedCooldown;
+use aa_net::state::NativeCooldown;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -24,10 +24,11 @@ fn game() -> GameData {
     game
 }
 
-fn entry(id: u32, remaining_ms: u32, total_ms: u32, at: Instant) -> ReceivedCooldown {
-    ReceivedCooldown {
+fn entry(id: u32, remaining_ms: u32, total_ms: u32, at: Instant) -> NativeCooldown {
+    NativeCooldown {
         cooldown: aa_net::Cooldown { id, remaining_ms, total_ms },
-        received_at: at,
+        updated_at: at,
+        origin: aa_net::state::NativeCooldownOrigin::Snapshot,
         reset: false,
     }
 }
@@ -41,19 +42,19 @@ fn every_tag_and_raw_skill_use_native_order_and_unsigned_strict_greater() {
         last_cast_skill: 8,
         ..Default::default()
     };
-    skills.received_tag_cooldowns = vec![entry(10, 5000, 11_000, now), entry(20, 5000, 22_000, now), entry(999, 60_000, 60_000, now)];
-    skills.received_skill_cooldowns.push(entry(7, 5000, 33_000, now));
+    skills.native_tag_cooldowns = vec![entry(10, 5000, 11_000, now), entry(20, 5000, 22_000, now), entry(999, 60_000, 60_000, now)];
+    skills.native_skill_cooldowns.push(entry(7, 5000, 33_000, now));
     // Equal remaining preserves global before tags and raw IDs, regardless of total.
     assert_eq!(combined_at(&game, &skills, 7, now), Some((5000, 5000)));
     skills.last_cast = None;
     assert_eq!(combined_at(&game, &skills, 7, now), Some((5000, 22_000)));
-    skills.received_tag_cooldowns[0].cooldown.remaining_ms = 6000;
+    skills.native_tag_cooldowns[0].cooldown.remaining_ms = 6000;
     assert_eq!(combined_at(&game, &skills, 7, now), Some((6000, 11_000)));
-    skills.received_skill_cooldowns[0].cooldown.remaining_ms = u32::MAX;
-    skills.received_skill_cooldowns[0].cooldown.total_ms = 0;
+    skills.native_skill_cooldowns[0].cooldown.remaining_ms = u32::MAX;
+    skills.native_skill_cooldowns[0].cooldown.total_ms = 0;
     assert_eq!(combined_at(&game, &skills, 7, now), Some((u32::MAX, 0)));
     // A reset keeps the original row but removes its timer from selection.
-    skills.received_skill_cooldowns[0].reset = true;
+    skills.native_skill_cooldowns[0].reset = true;
     assert_eq!(combined_at(&game, &skills, 7, now), Some((6000, 11_000)));
     assert_eq!(
         observed_at(game.skills.get(&7).unwrap(), &skills, 7, now),
@@ -72,7 +73,7 @@ fn global_exemption_and_clock_sampling_preserve_the_winning_duration() {
         last_cast_skill: 8,
         ..Default::default()
     };
-    skills.received_tag_cooldowns.push(entry(20, 4000, 17_000, now));
+    skills.native_tag_cooldowns.push(entry(20, 4000, 17_000, now));
     let later = now + Duration::from_millis(1234);
     assert_eq!(combined_at(&game, &skills, 7, later), Some((3766, 5000)));
     game.skills.get_mut(&7).unwrap().ignore_gcd = true;
@@ -94,6 +95,60 @@ fn own_cast_estimate_stays_separate_and_respects_its_existing_reset() {
     assert_eq!(display_at(&game, &skills, 7, now), Some((0, 0)));
 }
 
+fn start(id: u32, tl: u16) -> aa_net::Event {
+    aa_net::Event::SkillStarted(aa_net::skill::SkillStarted {
+        skill_id: id,
+        tl,
+        caster: aa_net::buff::BuffCaster {
+            obj_id: 100,
+            ..Default::default()
+        },
+        target: aa_net::skill::SkillTarget::unit(100),
+        cast_ms: 100,
+        base_cast_ms: 100,
+        synergy: 0,
+        result: 0,
+        result_value: 0,
+    })
+}
+
+#[test]
+fn bound_descriptor_catalog_routes_real_stop_duration_and_supersedes_only_its_old_estimate() {
+    use bevy::prelude::*;
+    let mut catalog = game();
+    catalog.skills.get_mut(&7).unwrap().tag = 20;
+    let data = super::super::api::HudData::default();
+    assert!(data.game.0.set(catalog).is_ok());
+    let bridge = Rc::new(RefCell::new(data));
+    let mut app = App::new();
+    app.init_resource::<Skills>()
+        .insert_non_send(super::super::api::HudBridge(bridge.clone()))
+        .add_systems(First, bind_catalog);
+    app.update();
+    let mut skills = app.world_mut().resource_mut::<Skills>();
+    skills.apply(&aa_net::Event::PlayerSpawn(Box::new(super::super::expansion::fixture::spawn())));
+    skills.apply(&start(7, 3));
+    assert!(skills.apply(&aa_net::Event::CastingStopped { tl: 3, duration_ms: 7000 }));
+    let timer = skills.native_tag_cooldowns[0];
+    assert_eq!(timer.cooldown.id, 20);
+    assert!(
+        !skills.last_used.contains_key(&7),
+        "an admitted stop supersedes the old app estimate at the actual state boundary"
+    );
+    assert!(skills.received_tag_cooldowns.is_empty(), "a stop does not rewrite the snapshot receipt log");
+    let data = bridge.borrow();
+    let game = data.game.get().unwrap();
+    assert_eq!(combined_at(game, &skills, 7, timer.updated_at), Some((7000, 7000)));
+    assert_eq!(display_at(game, &skills, 7, timer.updated_at), Some((7000, 7000)));
+    assert_eq!(display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(8)), Some((0, 0)));
+    skills.last_used.insert(7, timer.updated_at + Duration::from_secs(9));
+    assert_eq!(
+        display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(9)),
+        Some((30_000, 30_000)),
+        "a later cast keeps the existing fallback until its own source timer"
+    );
+}
+
 #[test]
 fn lua_hook_distinguishes_missing_descriptor_from_ready_or_missing_actor() -> Result<(), Box<dyn std::error::Error>> {
     let rt = aa_ui::UiRuntime::new("en_us", 1920., 1080.)?;
@@ -111,7 +166,7 @@ fn lua_hook_distinguishes_missing_descriptor_from_ready_or_missing_actor() -> Re
     {
         let mut data = bridge.borrow_mut();
         data.cooldowns.obj_id = 100;
-        data.cooldowns.received_tag_cooldowns.push(entry(20, 8000, 12_000, Instant::now()));
+        data.cooldowns.native_tag_cooldowns.push(entry(20, 8000, 12_000, Instant::now()));
     }
     rt.lua.load("local a,b=AAUI.SkillCooldown(7);assert(a>7900 and a<=8000 and b==12000)").exec()?;
     Ok(())
@@ -135,12 +190,29 @@ fn original_equipment_handler_reads_received_cooldowns_without_changing_its_icon
         assert_eq!(after.button.as_ref().unwrap().bg, before.button.as_ref().unwrap().bg);
         assert_eq!(after.slot, before.slot);
     }
-    bridge.borrow_mut().cooldowns.received_tag_cooldowns[0].reset = true;
+    bridge.borrow_mut().cooldowns.native_tag_cooldowns[0].reset = true;
     aa_ui::lua::tick(&rt.lua, 16.);
     assert!(aa_ui::lua::ui(&rt.lua).tree.widget(id).unwrap().cooldown.is_none());
     // The other actual item's separate tag continues counting down.
     let back = aa_ui::lua::value_id(&rt.lua, &rt.lua.load("equippedItem.slot[9]").eval()?).unwrap();
     assert!(aa_ui::lua::ui(&rt.lua).tree.widget(back).unwrap().cooldown.is_some());
+    {
+        let mut data = bridge.borrow_mut();
+        data.cooldowns.apply(&start(13419, 8));
+        data.cooldowns.apply(&aa_net::Event::CastingStopped { tl: 8, duration_ms: 7000 });
+    }
+    aa_ui::lua::tick(&rt.lua, 16.);
+    let ui = aa_ui::lua::ui(&rt.lua);
+    let sweep = ui
+        .tree
+        .widget(id)
+        .unwrap()
+        .cooldown
+        .as_ref()
+        .expect("original equipment handler uses the received stop duration");
+    assert_eq!(sweep.total_ms, 7000.);
+    assert!((6500. ..=7000.).contains(&(sweep.end_ms - ui.time_ms)));
+    drop(ui);
     assert!(rt.errors.is_empty());
     if path.exists() {
         std::fs::remove_file(path)?;
