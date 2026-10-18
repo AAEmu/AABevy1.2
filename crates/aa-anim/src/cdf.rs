@@ -274,6 +274,40 @@ mod tests {
     }
 
     #[test]
+    fn original_explicit_dwarf_beard_and_missing_ferre_beard_inventory() {
+        if !aa_cry::pak_available() { return; }
+        let db = crate::GameDb::open().unwrap();
+        let beard = db.body_part(392).unwrap();
+        assert_eq!((beard.slot_type, beard.model_id, beard.asset_ids), (29, 14, [180, 0, 0, 181, 0]));
+        let original = Cdf::load("objects/characters/dwarf/male/nude/dw_m_base.cdf").unwrap();
+        let mut received = original.clone();
+        assert!(received.bind_body_part(&beard));
+        let bound = received.attachment("beard").unwrap();
+        assert_eq!(bound.kind, AttachmentKind::Skin);
+        assert_eq!(bound.binding, beard.path);
+        assert_eq!(bound.flags & 1, 0);
+        assert!(aa_pak::Pak::global().exists(&bound.binding));
+        for (before, after) in original.attachments.iter().zip(&received.attachments) {
+            if before.name != "beard" { assert_eq!(before, after); }
+        }
+        let skeleton = aa_cry::Skeleton::load(&original.model).unwrap();
+        assert!(!skeleton.bones.is_empty());
+        for variant in [crate::hair::HairVariant::Default, crate::hair::HairVariant::Type1,
+            crate::hair::HairVariant::Type2, crate::hair::HairVariant::Type4] {
+            assert_eq!(beard.variant_path(variant), Some(beard.path.as_str()));
+        }
+        assert_eq!(beard.variant_path(crate::hair::HairVariant::Hidden), None);
+        assert_eq!(beard.variant_path(crate::hair::HairVariant::Type3), Some(db.asset_path(181).unwrap().as_str()));
+        assert!(!aa_pak::Pak::global().exists(beard.variant_path(crate::hair::HairVariant::Type3).unwrap()));
+        // These DB rows do not establish availability in this original 1.2 client.
+        for (item, model, asset) in [(564, 20, 229), (584, 40, 246)] {
+            let missing = db.body_part(item).unwrap();
+            assert_eq!((missing.slot_type, missing.model_id, missing.asset_ids[0]), (29, model, asset));
+            assert!(!aa_pak::Pak::global().exists(&missing.path), "{}", missing.path);
+        }
+    }
+
+    #[test]
     fn original_blank_actor_cdf_accepts_explicit_packet_body_items_only() {
         if !aa_cry::pak_available() { return; }
         let db = crate::GameDb::open().unwrap();
