@@ -22,6 +22,8 @@ struct Fixture {
     ray_checked: bool,
     exterior: bool,
     detail_off: bool,
+    normal_off: bool,
+    detail_normal_off: bool,
     meshes: HashSet<AssetId<Mesh>>,
     materials: HashSet<AssetId<VoxelMaterial>>,
     images: HashSet<AssetId<Image>>,
@@ -57,6 +59,8 @@ fn main() {
                 unload: flag("--unload-check"),
                 exterior: flag("--exterior"),
                 detail_off: flag("--detail-off"),
+                normal_off: flag("--normal-off"),
+                detail_normal_off: flag("--detail-normal-off"),
                 ..default()
             })
             .add_systems(Startup, world_camera)
@@ -122,7 +126,7 @@ fn verify(
         Without<VoxelSurface>,
     >,
     meshes: Res<Assets<Mesh>>,
-    materials: Res<Assets<VoxelMaterial>>,
+    mut materials: ResMut<Assets<VoxelMaterial>>,
     images: Res<Assets<Image>>,
 ) {
     for (_, mesh, material, mut visibility) in &mut surfaces {
@@ -142,11 +146,28 @@ fn verify(
         fixture.meshes.insert(mesh.id());
         fixture.materials.insert(material.id());
         if let Some(material) = materials.get(material.id()) {
-            for image in [&material.extension.cover, &material.extension.diffuse]
-                .into_iter()
-                .flatten()
+            for image in [
+                &material.extension.cover,
+                &material.extension.diffuse,
+                &material.extension.normal,
+                &material.extension.detail_normal,
+            ]
+            .into_iter()
+            .flatten()
             {
                 fixture.images.insert(image.id());
+            }
+        }
+        let change_normal = materials.get(material.id()).is_some_and(|m| {
+            (fixture.normal_off && m.extension.params.normals.x != 0.0)
+                || (fixture.detail_normal_off && m.extension.params.normals.y != 0.0)
+        });
+        if change_normal && let Some(mut material) = materials.get_mut(material.id()) {
+            if fixture.normal_off {
+                material.extension.params.normals.x = 0.0;
+            }
+            if fixture.detail_normal_off {
+                material.extension.params.normals.y = 0.0;
             }
         }
         if fixture.off || fixture.detail_off {
@@ -193,6 +214,24 @@ fn verify(
     }
     if time.elapsed_secs() > fixture.last + 2.0 {
         fixture.last = time.elapsed_secs();
+        let normal_materials = fixture
+            .materials
+            .iter()
+            .filter_map(|id| materials.get(*id))
+            .filter(|m| m.extension.normal.is_some())
+            .count();
+        let detail_materials = fixture
+            .materials
+            .iter()
+            .filter_map(|id| materials.get(*id))
+            .filter(|m| m.extension.detail_normal.is_some())
+            .count();
+        info!(
+            "voxel normal resources: captured_images={} normal_materials={} detail_normal_materials={}",
+            fixture.images.len(),
+            normal_materials,
+            detail_materials
+        );
         info!(
             "voxel base: meshes={} triangles={} unsupported={} captured_mesh_assets={} captured_material_assets={} models_pending={} failed={} layers={} layer_unsupported={}",
             objects.stats.voxels,
@@ -232,7 +271,7 @@ fn verify(
         assert_eq!(details.iter().count(), 0);
         assert_eq!((collision.stats().cells, collision.stats().loading), (0, 0));
         info!(
-            "voxel base unload PASSED: entities/cell collision/jobs/owned mesh+material+cover assets = 0"
+            "voxel base unload PASSED: entities/cell collision/jobs/owned mesh+material+cover/diffuse/normal/detail assets = 0"
         );
         fixture.verified = true;
     }

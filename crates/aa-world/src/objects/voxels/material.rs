@@ -23,6 +23,12 @@ pub struct VoxelParams {
     pub v: Vec4,
     pub origin: Vec4,
     pub colour: Vec4,
+    /// base encoding (0/BC1/ATI2), detail present, authored detail strength, diagnostic output.
+    pub normals: Vec4,
+    pub bump_u: Vec4,
+    pub bump_v: Vec4,
+    pub detail_u: Vec4,
+    pub detail_v: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -36,6 +42,12 @@ pub struct VoxelExtension {
     #[texture(103)]
     #[sampler(104)]
     pub diffuse: Option<Handle<Image>>,
+    #[texture(105)]
+    #[sampler(106)]
+    pub normal: Option<Handle<Image>>,
+    #[texture(107)]
+    #[sampler(108)]
+    pub detail_normal: Option<Handle<Image>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -55,9 +67,16 @@ impl VoxelExtension {
                 v: Vec4::ZERO,
                 origin: Vec4::ZERO,
                 colour: Vec4::ONE,
+                normals: Vec4::ZERO,
+                bump_u: Vec4::ZERO,
+                bump_v: Vec4::ZERO,
+                detail_u: Vec4::ZERO,
+                detail_v: Vec4::ZERO,
             },
             cover,
             diffuse: None,
+            normal: None,
+            detail_normal: None,
         }
     }
 }
@@ -94,6 +113,7 @@ impl Plugin for VoxelMaterialPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "material.wesl");
         embedded_asset!(app, "vertex.wesl");
+        bevy::shader::load_shader_library!(app, "io.wesl");
         app.add_plugins(MaterialPlugin::<VoxelMaterial>::default());
     }
 }

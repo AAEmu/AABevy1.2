@@ -532,12 +532,12 @@ Ignored exact-source notes: `lights/voxel-layer-{contract,params,build}.txt`,
 `voxel-detail-cvars.txt`, `voxel-normal-pack.txt`, plus original `terrain.cfx`.
 
 Each active cell retains at most **96 diffuse draws /32 MiB layer vertex+index
-bytes /32 MiB decoded diffuse texture bytes**, separate from the existing bounded
+bytes /32 MiB decoded diffuse/normal/detail texture bytes**, separate from the existing bounded
 base meshes. It shares materials by cover node/surface/projection and textures by
 path, uploads only textures actually referenced by accepted draws and drops the
 worker copies afterwards. There are no new threads, distant cell requests or
 per-frame geometry/material work. Cell unload removes all owned layer entities,
-meshes, materials and diffuse/cover images. `ObjectStats::voxel_layers` and
+meshes, materials and diffuse/cover/normal/detail images. `ObjectStats::voxel_layers` and
 `voxel_layers_unsupported` are additive; base mesh/triangle statistics keep their
 meaning. The `VoxelDetail` marker allows isolated on/off controls.
 
@@ -583,9 +583,96 @@ pass after the native seam-overlap bound correction; the earlier full library
 suite is 161 passed /9 ignored, and all examples check. A matching native cave
 capture is still absent, so this does not claim full original appearance.
 
-Normal/detail-bump/specular/gloss maps, native AO/rim/environment accumulation,
-runtime atlas generation, deformation, further voxel LODs, clipped/procedural
-materials and area/portal receiver lighting remain explicit limits.
+The next normal/detail-normal follow-up is described below. Native specular/gloss,
+AO/rim/environment accumulation, runtime atlas generation, deformation, further
+voxel LODs, clipped/procedural materials and area/portal receiver lighting remain
+explicit limits.
+
+#### Projected voxel normals and detail normals
+
+The original `terrain.ext` enables `BUMP_MAP` with mask `0x4` and
+`DETAIL_BUMP_MAPPING` with `0x8000`. `TerrainLayerVS` in `terrain.cfx` normalizes
+LayerTexGen U and V, projects each independently with `t -= dot(t,N)*N`, then
+normalizes each **at vertices before interpolation**. They generally are not
+orthogonal; a Mikk tangent and handedness would lose that native frame. The voxel
+vertex/fragment pair now carries both independent vectors. Renderer `38205AE0`
+packs normals as `trunc(n*127.5+128)`; `ModificatorVT.cfi::streamPos_FromGeneral`
+expands the bytes for `TEMP_TERRAIN` without normalizing them, and `Pos_VS_Terrain`
+does not change that normal. Layer meshes retain that exact nonunit input for
+frame projection and fragment interpolation. Base mesh geometry/depth are unchanged.
+
+`Common.cfi::GetNormalMap` expands **BC1 XYZ directly**, retaining its authored Z.
+On D3D10 the ATI2 path reads **raw YX**, expands XY and reconstructs
+`sqrt(saturate(1-dot(XY,XY)))`. By contrast, `FragLib.cfi` reads the detail sampler's
+**raw XY**, expands it and adds `XY*DetailBumpScale` to the base normal **after**
+base Z reconstruction. It does not reconstruct Z again. The transformed world
+normal is normalized after combining the interpolated U/V/N vectors. This
+preserves a native channel-order quirk rather than applying the base normal's
+semantic XY swap to every texture.
+
+The own-crate loader retains original BC1/ATI2 blocks, dimensions and mip chains
+as non-sRGB repeat data and disables aa-cry's automatic ATI2 block swap only for
+these explicitly raw inputs. Semantic diffuse and raw normal cache keys are
+separate. Normal UVs use their own supported static bump TexMod tiling; detail UVs
+use the diffuse projection times authored `DetailBumpTillingU/V`. Fractional
+world-cell phase is resolved after the detail tiling, so noninteger tiling does
+not reset at cell boundaries. The shader does not apply a TS_DETAIL TexMod, matching
+the original direct `detailMapSampler` sample. Default detail scale/tiling are 1,
+from `terrain.cfx` declarations.
+
+The same **32 MiB total cell image budget** now covers diffuse, normal and detail
+textures; existing diffuse inputs load first. Unsupported normal formats, displaced
+POM/offset-bump variants, unsupported bump TexMods or exhausted normal budget retain
+the already supported diffuse receiver and its vertex normal. Layer draw/mesh
+budgets and the two placement workers are unchanged. Images are shared by raw
+path and uploaded only for accepted draws; cell unload drops all normal/detail
+handles with the existing owned assets. No aa-cry fields or aa-client hook is
+required, and no normal material work is added per frame.
+
+This is a projected normal-input slice within the existing Bevy lighting path.
+Native terrain BRDF/Phong or HQ specular, gloss, deferred normal/specular MRT
+accumulation, AO/rim/environment lighting and quality-dependent normal buffers
+remain unsupported. No shininess-to-roughness guess or lighting/brightness tuning
+is introduced. `voxel_surfaces --normal-off` and `--detail-normal-off` preserve the
+same diffuse/depth receiver for controlled comparisons; the unload fixture tracks
+all cover/diffuse/normal/detail image IDs.
+
+**162 library tests pass /9 existing ignored**, and all examples check. Native
+fixtures verify original ATI2 block identity, exact signed UV scales/detail tiling,
+packed nonunit normals, native reconstruction/addition order and declined offset/
+POM/exhausted-budget inputs. `voxel_normals` uses the original rock ATI2 first texel
+`(86,98)` in raw order, original detail first texel `(113,123)`, and original dirt
+BC1 texel `(10,311)=(173,57,247)`. That BC1 texel deliberately separates authored Z
+from reconstructed Z. Its varying packed vertex normals exercise projection before
+interpolation. Inspected `native_normals_numeric.png` gives panel-centre GPU sRGB
+**`[159,238,234]`, `[149,237,231]`, `[207,245,226]`**, within one display value of
+independent CPU native vectors; 327-382 FPS. The lower flat patches are those
+panel-centre controls, not an interpolation image reference.
+
+Inspected `native_normals_exterior_on.png` / `_off.png` use the previous original
+neighbour camera and unchanged authored lighting. Four base meshes /3590 triangles
+and 28 layer draws have **16 normal /11 detail-normal materials** and 35 captured
+image IDs. Settled intervals are 119-161 FPS on /116-164 off; separate shared-GPU
+runs do not establish a reliable cost delta. Original cave `native_normals_cave_on.png`
+/ `_off.png` preserve the floor ray at `454.91745` m, nine bases /47347 triangles,
+50 layer draws and **12 normal /8 detail-normal materials**, with zero unsupported
+slots/layers, pending models or failures. Final settled intervals are 68-76 FPS on
+(with a shared-load dip to 51 earlier) /64-88 off. Normal lighting differences are
+subtle in these mostly ambient-lit views; the numeric oracle isolates the actual
+normal math. Native cave reference/portal-lighting and complete BRDF parity are
+still unavailable, so these captures are controlled own-renderer comparisons.
+
+`native_normals_unload.png` verifies actual camera movement removes all **32 mesh
+IDs /18 material IDs /35 cover/diffuse/normal/detail image IDs**, all base/detail
+entities and collision cells/jobs; 214-256 FPS after release. The old diffuse/fade
+oracle remains `[81,66,59]`, `[69,55,50]`, `[63,50,46]` (`native_normals_diffuse_regression.png`,
+153-407 FPS), and the cover-only oracle remains `[17,18,6]`, `[59,49,41]`,
+`[81,66,59]` (`native_normals_cover_regression.png`, 284-403 FPS). All eight runs
+exit zero, produce no GPU errors and close their windows.
+Original source inputs are retained in the ignored voxel shader extracts; numeric
+DDS audit is `lights/voxel_normal_inputs.py`, and tests/build/capture logs are
+`lights/voxel-normals-*.log`.
+
 
 Area flags are a separate unresolved rendering contract. Exact `30170860` maps
 header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`
@@ -635,7 +722,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, 119 B + 12 times the two counts at +103/+115 |
-| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD native cover/baked base, projected diffuse and serialized collision supported; normal/specular detail/atlases open |
+| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD native cover/baked base, projected diffuse/normal/detail-normal and serialized collision supported; specular/atlases open |
 | 14 | distant cloud, 79 B; skipped |
 
 Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
@@ -2374,8 +2461,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: native MRT normal/specular decal effects, voxel projected normal/specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
-  Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse; voxel normal/specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
+* Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
+  Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
