@@ -248,6 +248,7 @@ mod tests {
             surface: 10.0,
             depth: 2.0,
             uv_scale: [0.2, 0.2],
+            river_u: [0.0,1.0],
             points: vec![Vec3::new(0.0, 0.0, 10.0), Vec3::new(10.0, 0.0, 10.0), Vec3::new(10.0, 10.0, 10.0), Vec3::new(5.0, 4.0, 10.0), Vec3::new(0.0, 10.0, 10.0)],
             kind: 3,
             material: 0,

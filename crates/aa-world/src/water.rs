@@ -10,6 +10,12 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 
 use crate::placement::Water;
 
+mod authored;
+
+/// Streamed authored water mesh; the ocean is a separate renderer.
+#[derive(bevy::prelude::Component)]
+pub struct WaterSurface { pub cell: (i32,i32) }
+
 fn cross(a: Vec2, b: Vec2, c: Vec2) -> f32 {
     (b - a).perp_dot(c - a)
 }
@@ -124,15 +130,25 @@ pub(crate) fn ring(points: &[Vec3]) -> Vec<Vec2> {
 }
 
 fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>, indices: &mut Vec<u32>) {
-    let ring = ring(&w.points);
     let base = positions.len() as u32;
-    let scale = if w.uv_scale[0].abs() > 1e-3 { w.uv_scale[0].abs() } else { 0.2 };
-    for q in &ring {
-        positions.push([q.x, w.surface, -q.y]);
-        uvs.push([q.x * scale, q.y * scale]);
-    }
-    for t in triangulate(&ring) {
-        indices.extend(t.iter().map(|&i| base + i as u32));
+    if w.kind & 3 == 3 {
+        let Some((points,coordinates))=authored::river(w) else {return};
+        for (point,uv) in points.iter().zip(coordinates) {
+            positions.push([point.x,w.surface,-point.y]);
+            uvs.push(uv.to_array());
+        }
+        // Native centre fan: all four bank segments retain their own UV interpolation.
+        indices.extend([0,1,4,1,3,4,3,2,4,0,4,2].map(|i|base+i));
+    } else {
+        let ring = ring(&w.points);
+        let Some(origin)=w.points.first() else {return};
+        if !w.uv_scale.iter().all(|v|v.is_finite()) {return}
+        for q in &ring {
+            positions.push([q.x,w.surface,-q.y]);
+            // Native CreateArea anchors both independent scales at its first outline vertex.
+            uvs.push([(q.x-origin.x)*w.uv_scale[0],(q.y-origin.y)*w.uv_scale[1]]);
+        }
+        for t in triangulate(&ring) {indices.extend(t.iter().map(|&i|base+i as u32));}
     }
 }
 
@@ -198,6 +214,7 @@ mod tests {
             surface: 10.0,
             depth: 1.0,
             uv_scale: [0.2, 0.2],
+            river_u: [0.0,1.0],
             points: vec![Vec3::new(x, 0.0, 10.0), Vec3::new(x + 10.0, 0.0, 10.0), Vec3::new(x + 10.0, 10.0, 10.0), Vec3::new(x, 10.0, 10.0)],
             kind: 2,
             material,

@@ -1,3 +1,4 @@
+import aa_world::water_motion::coordinates;
 // Water volumes and the sea, see `water_material.rs`.
 //
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
@@ -45,6 +46,8 @@ struct WaterParams {
     // rgb: the engine's `sun + sky` colour (pre-exposed), a: 1 = the reflection is the environment cube map times it
     // (ponds, lakes, rivers), 0 = the analytic sky (the sea)
     env_lit: vec4<f32>,
+    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output
+    motion: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
@@ -93,13 +96,16 @@ fn sky_color(d: vec3<f32>) -> vec3<f32> {
 }
 
 // The four layers of the bump map the engine adds up: two big ones and two small ones, drifting.
-fn wave_normal(p: vec2<f32>, time: f32) -> vec3<f32> {
-    let uv = p * water.waves.w;
-    let drift = vec2<f32>(time * water.waves.z * 0.012, 0.0);
-    let a = textureSample(normal_map, normal_map_sampler, uv * 4.0 + drift * 2.0).xy;
-    let b = textureSample(normal_map, normal_map_sampler, uv * 2.0 + drift * 3.0).xy;
-    let c = textureSample(normal_map, normal_map_sampler, uv * 8.0 + drift * 2.0).xy;
-    let d = textureSample(normal_map, normal_map_sampler, uv * 16.0 + drift * 3.0).xy;
+fn wave_normal(p: vec2<f32>, mesh_uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let native = water.motion.x > 0.5;
+    let uv = select(p * water.waves.w, mesh_uv, native);
+    let sample_time = select(time,water.motion.z,water.motion.z >= 0.0);
+    let drift = vec2<f32>(sample_time * water.waves.z * select(0.012,0.0125,native),0.0);
+    let taps = coordinates(uv,drift,native && water.motion.y > 0.5);
+    let a = textureSample(normal_map,normal_map_sampler,taps[0]).xy;
+    let b = textureSample(normal_map,normal_map_sampler,taps[1]).xy;
+    let c = textureSample(normal_map,normal_map_sampler,taps[2]).xy;
+    let d = textureSample(normal_map,normal_map_sampler,taps[3]).xy;
     let low = (a + b) * water.waves.x - vec2<f32>(water.waves.x);
     let high = (c + d) * water.waves.y - vec2<f32>(water.waves.y);
     let t = (low + high) * water.refl.z;
@@ -151,6 +157,9 @@ fn trace(p: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.world_position.xyz;
+    if water.motion.w > 0.5 {
+        return vec4<f32>(wave_normal(p.xz,in.uv,globals.time)*0.5+0.5,1.0);
+    }
     // from below the surface is the post pass's business (the window to the sky, the mirror beyond it)
     if view.world_position.y < p.y {
         discard;
@@ -165,7 +174,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // far away the ripples would only shimmer: flatten them
     let detail = 1.0 - smoothstep(60.0, 260.0, dist);
     let up = vec3<f32>(0.0, 1.0, 0.0);
-    let n = normalize(mix(up, wave_normal(p.xz, globals.time), detail));
+    let n = normalize(mix(up, wave_normal(p.xz,in.uv,globals.time), detail));
     // the reflection sees a flatter surface (the engine clamps the bump to 0.15)
     let nr = normalize(mix(up, n, 0.2));
     let ndotv = clamp(abs(dot(v, nr)), 0.0, 1.0);
