@@ -3126,7 +3126,8 @@ event77, inside the loop. This is neither a joined item list nor a batch complet
 notification. The exact item-link markup produced by the formatter remains untraced.
 
 GetCraftMaterialInfo39462600 walks every material of a known recipe without a12-row
-cap or grade-alternative filter. Missing item descriptors are skipped. Each returned
+cap or grade-alternative filter. A missing item descriptor logs and returns nil for the
+entire getter. Each returned
 row has amount/count/mainGrade/item_info; required grade-1 accepts all grades, otherwise
 matching is exact. Counts sum physical eligible bag stacks. Predicate397cc350 excludes
 an item only when item flag04 and received feature bit45 (feature byte5 bit20) are both
@@ -3136,7 +3137,7 @@ are not children of any real recipe; the largest known valid recipe has8 materia
 
 GetCraftBaseInfo39461860 reports ac_type from crafts.ac_id (recipe+4), independently
 of the skill's proficiency-group field+C. Labor uses skill consume_lp(+78), received
-proficiency points plus unit_attr_id bonus and equipped-state modifier3932a190, and
+proficiency points plus unit_attr_id bonus and spatial/context modifier3932a190, and
 received grade. Helper397a9420 selects current grade only when effective points reach
 that row's up_limit; otherwise it selects previous u8 grade. It computes native f32
 floor((1-f32(advantage)*0.01)*f32(baseLP)+0.5), minimum1, with zero only for the invalid
@@ -3159,7 +3160,7 @@ currency-1) rather than nil; transport state may still legitimately be unknown.
 
 GetMyActabilityInfo3930c730 returns nil for an unknown static group. point is the
 received proficiency point; modifyPoint is the additional unit_attr_id bonus plus
-3932a190 equipped/current-state modifier, not another copy of received points. Native
+3932a190 spatial/context modifier, not another copy of received points. Native
 missing received map values default0, while aa-net deliberately retains loaded/None
 information for an integration to distinguish absent authoritative state.
 CanUpgrade397a8e60 requires the current row up_limit, a next visible grade, then checks
@@ -3235,3 +3236,19 @@ Existing aa_ui::item_link::format directly matches394e4ef0, including its alphab
 constructs synthetic flags1/world_idff/zero detail and timing before formatting. Its
 grade3a5ad89c and maker3a5ad898 are zero-filled image values with direct read-only xrefs;
 indirect initialization was not excluded, so those defaults remain a stated boundary.
+
+Material/lifetime precision followup:39462600 replaces the representative descriptor
+while accumulated eligible stack count is zero, then retains the first positive eligible
+stack descriptor. If final count is zero, it always replaces any prior physical descriptor
+with synthesized required-grade item_info. Missing any material descriptor logs and
+returns nil for the entire getter at39462a2c. Shared interaction close393b7b50(kind3)
+emits INTERACTION_END eventd2 and clears active kind/object, but393b7aa0 has no craft-map
+clear branch; CURRENT maps are rebuilt on next394dc210. Closing must not fabricate a
+batch completion or assume native getters necessarily become empty.
+
+Modifier refinement:3932a190 queries enclosing spatial object39328630 with the player
+position390b3850 and radius0, checks permission393257e0, then reads matching group bonus
+from object vector+1a8..1ac (20-byte entries, value+4). The prior equipped-state wording
+was too strong; no equipment-only assumption is justified. Exact spatial object type and
+its authoritative bonus population remain untraced. Missing player/object/permission/
+group/bonus yields native0, independently of received proficiency-point availability.
