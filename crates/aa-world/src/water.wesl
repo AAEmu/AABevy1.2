@@ -48,7 +48,7 @@ struct WaterParams {
     // rgb: the engine's `sun + sky` colour (pre-exposed), a: 1 = the reflection is the environment cube map times it
     // (ponds, lakes, rivers), 0 = the analytic sky (the sea)
     env_lit: vec4<f32>,
-    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output (1 normal, 2 alpha)
+    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output (1 normal, 2 alpha, -1 legacy softness)
     motion: vec4<f32>,
 }
 
@@ -270,12 +270,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // transparent where the water is thin
     let soft = clamp(water.sun.a * thickness, 0.0, 1.0);
-    colour = mix(colour, refl * water.misc.w, fresnel * soft);
+    // Native WaterSurfacePS applies softIntersect once to final alpha. The sea keeps
+    // its existing shading path; negative diagnostic mode is the isolated old control.
+    let native_soft = water.motion.x > 0.5 && water.motion.w > -0.5;
+    let contribution_soft = select(soft,1.0,native_soft);
+    colour = mix(colour, refl * water.misc.w, fresnel * contribution_soft);
 
     // sun glint on the ripples
     let rs = reflect(-v, n);
     let glint = pow(clamp(dot(rs, water.sun_dir.xyz), 0.0, 1.0), water.refl.w);
-    colour = colour + water.sun.rgb * glint * water.sun_dir.w * soft;
+    colour = colour + water.sun.rgb * glint * water.sun_dir.w * contribution_soft;
 
     // procedural foam: the engine's two drifting lookups of the foam texture, strongest where the water is shallow
     // (around legs and objects, at the shore) but not where it vanishes
@@ -283,9 +287,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let foam_reach = clamp(water.foam.x * (0.2 / max(foam_lum, 1e-3)) * thickness, 0.0, 1.0);
     var foam = 1.0 - foam_reach;
     foam = foam * smoothstep(0.2, 0.7, soft * foam);
-    colour = colour + water.foam_col.rgb * foam * foam_lum * soft;
+    colour = colour + water.foam_col.rgb * foam * foam_lum * contribution_soft;
 
     // Native surface SRC_ALPHA blending, folded into the combined fog/surface pass.
-    // Keep the existing shading/soft-intersection approximation within that surface.
-    return vec4<f32>(mix(fogged_background,colour,endpoints.y),1.0);
+    // Other full-shading and separate-pass boundaries remain explicit.
+    let surface_alpha=endpoints.y*select(1.0,soft,native_soft);
+    return vec4<f32>(mix(fogged_background,colour,surface_alpha),1.0);
 }

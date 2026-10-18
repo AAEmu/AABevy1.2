@@ -20,6 +20,8 @@ struct Fixture {
     legacy: bool,
     endpoint: bool,
     opaque: bool,
+    shore: bool,
+    soft_control: bool,
     unload: bool,
     moved: bool,
     done: bool,
@@ -62,10 +64,12 @@ fn main() {
                 } else {
                     0
                 },
-                pond: flag("--pond"),
+                pond: flag("--pond") || flag("--shore"),
                 legacy: flag("--legacy"),
                 endpoint: flag("--endpoint"),
                 opaque: flag("--opaque"),
+                shore: flag("--shore"),
+                soft_control: flag("--legacy-soft"),
                 unload: flag("--unload-check"),
                 ..default()
             })
@@ -234,7 +238,12 @@ fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
     }
 }
 
-fn world_camera(mut commands: Commands, fixture: Res<Fixture>) {
+fn world_camera(
+    mut commands: Commands,
+    fixture: Res<Fixture>,
+    terrain: Res<aa_world::TerrainQuery>,
+    water: Res<aa_world::WaterQuery>,
+) {
     let (p, t, fov) = if fixture.reference != 0 {
         // Original reference/ingame/combat_{triple_slash,return}/camera.json before_key_press.
         let (p, yaw) = if fixture.reference == 5 {
@@ -250,6 +259,38 @@ fn world_camera(mut commands: Commands, fixture: Res<Fixture>) {
         };
         let yaw = yaw.to_radians();
         (p, p + Vec3::new(-yaw.sin(), yaw.cos(), 0.0), 1.24354708)
+    } else if fixture.shore {
+        // Pick an actual shallow pond point from original terrain and volume data.
+        let anchor = Vec2::new(15564.0, 15346.0);
+        let mut best: Option<(f32, Vec3, f32)> = None;
+        for y in 0..132 {
+            for x in 0..140 {
+                let p = Vec2::new(15540.0 + x as f32 * 0.5, 15332.0 + y as f32 * 0.5);
+                let Some((surface, _)) = water.water_at(p.extend(128.0)) else {
+                    continue;
+                };
+                let Some(ground) = terrain.height_at(p.x, p.y) else {
+                    continue;
+                };
+                let depth = surface - ground;
+                if !(0.1..0.3).contains(&depth) {
+                    continue;
+                }
+                let score = (depth - 0.15).abs() + p.distance_squared(anchor) * 0.0001;
+                if best.is_none_or(|b| score < b.0) {
+                    best = Some((score, p.extend(surface), depth));
+                }
+            }
+        }
+        let (_, target, depth) = best.expect("original shallow pond fixture");
+        let mut camera = target + Vec3::new(-5.0, -7.0, 4.0);
+        camera.z = camera
+            .z
+            .max(terrain.height_at(camera.x, camera.y).unwrap() + 2.5);
+        info!(
+            "native shoreline fixture: target={target:?} true vertical depth={depth} camera={camera:?}"
+        );
+        (camera, target, 55.0_f32.to_radians())
     } else if fixture.pond {
         (
             Vec3::new(15570.0, 15335.0, 139.0),
@@ -297,7 +338,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if fixture.legacy
+        if (fixture.legacy || fixture.shore || fixture.soft_control)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -305,8 +346,16 @@ fn world_check(
                 material.0 = handle.clone();
             } else if let Some(source) = materials.get(material.id()) {
                 let mut control = source.clone();
-                control.params.motion.x = 0.0;
-                control.params.motion.y = 0.0;
+                if fixture.legacy {
+                    control.params.motion.x = 0.0;
+                    control.params.motion.y = 0.0;
+                }
+                if fixture.shore {
+                    control.params.motion.z = 0.0;
+                }
+                if fixture.soft_control {
+                    control.params.motion.w = -1.0;
+                }
                 let original = material.id();
                 let handle = materials.add(control);
                 fixture.controls.insert(original, handle.clone());
@@ -351,28 +400,74 @@ fn world_check(
 // --composite also exercises original fog + reflection compositing through depth/scene buffers.
 fn endpoint_numeric(
     mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WaterMaterial>>,
     mut standard: ResMut<Assets<StandardMaterial>>,
 ) {
     let composite = std::env::args().any(|a| a == "--composite");
     let near = std::env::args().any(|a| a == "--near");
+    let shallow = std::env::args().any(|a| a == "--shallow");
+    let sea_control = std::env::args().any(|a| a == "--sea-control");
+    assert!(!sea_control || shallow);
+    assert!(!shallow || composite);
     assert!(!composite || !near);
     let blue = Vec3::new(0.05, 0.1, 0.2);
     let fog = Vec3::new(0.6, 0.15, 0.05);
     let reflection = Vec3::new(0.1, 0.7, 0.3);
+    let normal = images.add(Image::new_fill(
+        bevy::render::render_resource::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        &[255, 128, 0, 255],
+        bevy::render::render_resource::TextureFormat::Rgba8Unorm,
+        bevy::asset::RenderAssetUsages::default(),
+    ));
     let mut expected = [[0; 3]; 4];
     for (i, a) in [0.0_f32, 0.25, 0.5, 1.0].into_iter().enumerate() {
-        let a = if near { 1.0 } else { a };
+        let a = if near || shallow { 1.0 } else { a };
         let clip_w = if near {
             [0.5_f32, 1.0, 2.0, 8.0][i]
         } else {
             8.0
         };
-        let surface = a * (a * (1.0 - (1.0 / clip_w).clamp(0.0, 1.0))).sqrt();
+        let depth = if shallow {
+            [0.05_f32, 0.1, 0.4, 1.2][i]
+        } else {
+            4.0
+        };
+        let point = Vec3::new(i as f32 * 2.0 - 3.0, 0.0, -1.0);
+        let view = (Vec3::new(0.0, 8.0, 0.0) - point).normalize();
+        let ray_depth = depth / view.y;
+        let soft = ray_depth.clamp(0.0, 1.0);
+        let surface = if sea_control {
+            1.0
+        } else {
+            a * (a * (1.0 - (1.0 / clip_w).clamp(0.0, 1.0))).sqrt()
+        };
         let color = if composite {
-            let transmission = 1.0 - a + a * 0.25;
-            fog.lerp(blue, transmission).lerp(reflection, surface)
+            let transmission = 1.0 - a + a * (-4.0_f32.ln() / 4.0 * ray_depth).exp();
+            let background = fog.lerp(blue, transmission);
+            if shallow {
+                // Nonzero authored-style bump crosses the real blue/red depth-matched edge.
+                // The old contribution-only soft mask leaves this refraction opaque.
+                let red = Vec3::new(0.7, 0.05, 0.02);
+                let normal = Vec3::new(0.5, 1.0, -0.5 / 255.0).normalize();
+                let reflected_normal = Vec3::Y.lerp(normal, 0.2).normalize();
+                let ndot = view.dot(reflected_normal).abs();
+                let fresnel = ((0.2 + 0.8 * (1.0 - ndot).powi(5)) * 0.7).clamp(0.0, 1.0);
+                let refracted = fog.lerp(red, transmission);
+                if sea_control {
+                    background.lerp(refracted.lerp(reflection, fresnel * soft), surface)
+                } else {
+                    background.lerp(refracted.lerp(reflection, fresnel), surface * soft)
+                }
+            } else {
+                background.lerp(reflection, surface)
+            }
         } else {
             Vec3::new(a, surface, 0.0)
         };
@@ -388,19 +483,29 @@ fn endpoint_numeric(
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0, 1.0, 1.0, a]; 4]);
         let params = WaterParams {
             body: fog.extend(4.0_f32.ln() / 4.0),
-            refl: Vec4::new(1.0, 1.0, 0.0, 1.0),
+            refl: if shallow {
+                Vec4::new(0.2, 0.7, 0.5, 1.0)
+            } else {
+                Vec4::new(1.0, 1.0, 0.0, 1.0)
+            },
+            waves: Vec4::new(1.0, 0.0, 0.0, 0.2),
             sun: Vec4::new(0.0, 0.0, 0.0, 1.0),
             sky_h: reflection.extend(1.0),
             sky_z: reflection.extend(0.0),
-            misc: Vec4::new(0.0, 0.0, 0.0, 1.0),
-            motion: Vec4::new(1.0, 0.0, 0.0, if composite { 0.0 } else { 2.0 }),
+            misc: Vec4::new(0.0, if shallow { 0.05 } else { 0.0 }, 0.0, 1.0),
+            motion: Vec4::new(
+                if sea_control { 0.0 } else { 1.0 },
+                0.0,
+                0.0,
+                if composite { 0.0 } else { 2.0 },
+            ),
             ..default()
         };
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(WaterMaterial {
                 params,
-                normal_map: None,
+                normal_map: if shallow { Some(normal.clone()) } else { None },
                 foam_map: None,
                 env_map: None,
             })),
@@ -422,21 +527,41 @@ fn endpoint_numeric(
             Transform::from_xyz(i as f32 * 2.0 - 3.0, 0.0, 1.0)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         ));
+        if shallow {
+            let ratio = (8.0 + depth) / 8.0;
+            // Split the background 0.005m right of the sampled surface pixel. Both
+            // halves have the same measured depth, so refraction cannot bypass it.
+            for (side, background) in [(-1.0, blue), (1.0, Vec3::new(0.7, 0.05, 0.02))] {
+                commands.spawn((
+                    Mesh3d(meshes.add(Rectangle::new(0.75, 1.5))),
+                    MeshMaterial3d(standard.add(StandardMaterial {
+                        base_color: Color::linear_rgb(background.x, background.y, background.z),
+                        unlit: true,
+                        ..default()
+                    })),
+                    Transform::from_xyz((point.x + 0.005 + side * 0.375) * ratio, -depth, -ratio)
+                        .with_scale(Vec3::splat(ratio))
+                        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                ));
+            }
+        }
         info!(
-            "native endpoint GPU case{i}: authored={a} clipW={clip_w} surface={surface} composite={composite} expected={:?}",
+            "native endpoint GPU case{i}: authored={a} clipW={clip_w} surface={surface} ray_depth={ray_depth} soft={soft} shallow={shallow} sea_control={sea_control} composite={composite} expected={:?}",
             expected[i]
         );
     }
     commands.insert_resource(Controls(expected));
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(100.0, 100.0))),
-        MeshMaterial3d(standard.add(StandardMaterial {
-            base_color: Color::linear_rgb(blue.x, blue.y, blue.z),
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, -4.0, 0.0),
-    ));
+    if !shallow {
+        commands.spawn((
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(100.0, 100.0))),
+            MeshMaterial3d(standard.add(StandardMaterial {
+                base_color: Color::linear_rgb(blue.x, blue.y, blue.z),
+                unlit: true,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, -4.0, 0.0),
+        ));
+    }
     commands.spawn((
         Camera3d::default(),
         bevy::pbr::ScreenSpaceTransmission::default(),
@@ -450,5 +575,5 @@ fn endpoint_numeric(
         Msaa::Off,
         Transform::from_xyz(0.0, 8.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z),
     ));
-    commands.spawn((Text::new(format!("Native river endpoint alpha: 0 / 0.25 / 0.5 / 1; clip W=8 (or --near: .5 / 1 / 2 / 8)\nTop production shader, bottom independent CPU reference; composite={composite}\nFog: 1-a+T*a; surface: a*sqrt(a*(1-1/W))")),TextFont {font_size:FontSize::Px(20.0),..default()},TextColor(Color::WHITE),Node {position_type:PositionType::Absolute,top:px(12.0),left:px(24.0),..default()}));
+    commands.spawn((Text::new(format!("Native river endpoint alpha: 0 / 0.25 / 0.5 / 1; clip W=8 (or --near: .5 / 1 / 2 / 8)\nTop production shader, bottom independent CPU reference; composite={composite}, shallow refraction={shallow}, sea control={sea_control}\nFog: 1-a+T*a; surface: a*sqrt(a*(1-1/W))")),TextFont {font_size:FontSize::Px(20.0),..default()},TextColor(Color::WHITE),Node {position_type:PositionType::Absolute,top:px(12.0),left:px(24.0),..default()}));
 }
