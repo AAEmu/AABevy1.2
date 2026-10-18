@@ -1,8 +1,8 @@
-//! Authored state rectangles, a bounded 64px icon-source path and separator anchors.
+//! Authored state rectangles, native 64px cached icon sources and separator anchors.
 use super::*;
 
-/// Native cache cells are 64x64 (3921e161 / 3922439e). Direct 64px sources are proven;
-/// renderer conversion of ordinary 48px item DDS remains unresolved and is unsupported here.
+/// Native cache cells are 64x64 (3921e161 / 3922439e). The DDS decoder preserves header
+/// dimensions (renderer381d6740), so ordinary 48px item DDS are rejected by this cache.
 pub(super) fn icon(lua: &Lua, path: Option<String>) -> Option<String> {
     let path = path?;
     let mut u = ui(lua);

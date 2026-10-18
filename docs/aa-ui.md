@@ -1591,10 +1591,9 @@ rows and paints apply the extra row-height text inset (or authored tree indent).
 
 Icon support is deliberately bounded to direct **64×64 DDS sources**. Native cache creation
 `3921e161`–`3921e179` / `39223820` establishes 64×64 cells, and `3922439e` validates the
-renderer-returned image dimensions before copying pixels to the cache. Ordinary item DDS
-samples are 48×48; the renderer loader's `0x2000` flag and image-info conversion have not been
-recovered, so their cache path remains unsupported. It would be incorrect to equate cache-cell
-dimensions with a proven native source-file restriction. The fixture's real 64×64 control
+renderer-returned image dimensions before copying pixels to the cache. At this checkpoint,
+ordinary 48×48 item DDS still needed a renderer audit; the following section resolves their
+native rejection. The fixture's real 64×64 control
 sheets (`ui/button/screenshot_mode.dds`, `ui/ranking/period.dds`) exercise the overloads and
 full-image UVs; they do not establish ordinary item-icon parity. Missing or unsupported icon
 sources leave the row text usable. Independent template animation/visibility, state-image
@@ -1616,3 +1615,34 @@ two bounded control-sheet icons. It logged 390–414 FPS, zero script errors and
 There is no supplied Achievement reference capture; shared window art/scale were compared
 with the existing Options reference, without claiming pixel parity. Font rendering is
 unchanged, and the fake Achievement data does not exercise server completion requests.
+
+## Listbox 48-pixel DDS cache audit
+
+The native listbox cache rejects ordinary **48×48 DDS icons**; no resize is missing from
+this toolkit path. The renderer audit used the existing CryRenderD3D10 binary extract
+(`data/extract/aa-cry/ida/render/cryrenderd3d10.dll`, SHA-256
+`EBF051BBA5D349A6B3BF6D4EB676908115B73BB22D35D5A0CC917C325426589D`). Its renderer constructor
+`38118689` installs vtable `382f2d88`, whose image-loader slot `+44c` is `381778d0` and
+image-info slot `+440` is `38176150`, matching the UI cache calls.
+
+The loader calls `381d52c0` → `381d5140` → `381d4ed0` → DDS constructor `381d6740`.
+The constructor copies header width/height directly to image offsets `+4`/`+8` and keeps
+them. Image-info `38176150` returns those fields unchanged. Flag `0x2000` selects the image
+data allocator (`381d4ce0` / DDS allocation branch); it does not resize. Path normalizer
+`38187610` changes `.tif` / `.srf` suffixes to `.dds` and leaves an existing DDS path intact.
+The shared UI cache has one initialization call (`3921e161`–`3921e179` → `39223820`), with
+64×64 cells in a 1024×1024 atlas. Cache `3922439e`–`392243b0` compares both decoded dimensions
+for equality and follows its release/failure path for a 48-pixel source.
+
+Consequently the existing 64-pixel source guard is preserved. This conclusion applies to
+the shared icon cache used by these native listbox overloads; it is not a generic drawable
+restriction. The original `CreateSliderList` regression appends the real 48×48 potion DDS
+through its unmodified icon-forwarding Lua method, then selects Healing potion by mouse and
+checks its text/value while confirming no rejected icon quad appears. Valid 64-pixel rows
+continue to render. All three `listbox_art` tests passed.
+
+`native_listbox_art --item-sources-48` produces the unique inspected capture
+`shots/aa-ui/native-listbox-item-sources-48.png`: both potion labels remain usable, Healing
+potion is selected and its rejected icon stays blank. It logged 411–456 FPS, zero script
+errors and closed itself. The two valid control-sheet icons remain visible. No resize,
+application hook, font substitution or broader image-loader change was introduced.
