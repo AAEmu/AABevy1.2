@@ -3353,3 +3353,27 @@ No LP/item affordability is checked by this getter or CanExpandExpert.
 Native3301b000 Unicorn oracle (no stubs) confirms ASCII30bytes->30, Korean30chars/
 90bytes->30, Korean31/93bytes->31, emoji30/120bytes->30, and a+ff+z->1. Ignored helper:
 data/extract/aa-net/search_length_oracle.py.
+
+### Housing proficiency modifier source and protected constant boundary (2026-10-18)
+
+Spatial3932a190 modifier class is conclusively Housing: OnHouseState391d784f invokes
+manager3932fa00, constructs the object queried by39328630 and calls3932d0f0, whose native
+literal is `X2::GameClient::Housing::InitFromNetHouse`. It derives bounds from static
+house metadata and received house state. Access393257e0 depends on received owner/
+permission/current-player relationship, then the matched proficiency bonus is read from
+the house's vector+1a8. This is neither a direct proficiency packet nor an equipment-only
+bonus. Complete house receive/decoration lifecycle is not yet an aa-net typed resource.
+
+3932fd00 populates/aggregates that vector using housing_decorations: loader39677f..
+queries SQL399fec78 with actability_group_id and actability_up stored at record0/+4.
+Matching existing group adds actability_up (3932fe1f); new group gets a20-byte entry.
+Decoration add/remove paths3903896d/39038ad1 call39330270/39330310 and emit native
+ACTABILITY_MODIFIER_UPDATE234 for the current house. Faithful hydration requires actual
+received house/doodad decoration association plus the static decoration catalog; absent
+full state must not be represented as a proven zero modifier.
+
+The bounded constant audit found only reads of ten language-ID globals39acb624..648,
+excluded Enum group39ac99b8 and special count-exclusion39acb620. Their image contents are
+protected/nonplaintext; no direct static initializer assignment was found. Runtime or
+protected-data initialization tracing is still needed. Numeric IDs must not be guessed
+from catalog language names or enum ordering.
