@@ -9,13 +9,14 @@ use aa_cry::material::{Material, TextureMap, texture_pak_path};
 use aa_cry::texture::{DdsOptions, load_dds};
 use aa_cry::{CryAssets, CryLoader};
 use bevy::asset::{RenderAssetUsages, embedded_asset};
-use bevy::mesh::{Indices, PrimitiveTopology};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
+use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, MaterialPlugin};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
 use bevy::shader::ShaderRef;
 
 use crate::coords::{CELL_SIZE, CELL_UNITS, UNIT_SIZE, cry_to_bevy};
+use crate::decal_projection::DeferredParams;
 use crate::placement::{CellObjects, Road};
 use crate::terrain_query::TerrainQuery;
 
@@ -32,9 +33,11 @@ pub struct OpacityParams {
     uv_y: Vec4,
     /// Static projected decals: world centre and inverse spherical fade radius. Roads use zero.
     attenuation: Vec4,
+    projection: DeferredParams,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+#[bind_group_data(RoadKey)]
 pub struct RoadExtension {
     #[uniform(100)]
     params: OpacityParams,
@@ -43,9 +46,34 @@ pub struct RoadExtension {
     opacity: Option<Handle<Image>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RoadKey(bool);
+
+impl From<&RoadExtension> for RoadKey {
+    fn from(extension: &RoadExtension) -> Self {
+        Self(extension.params.projection.center.w > 0.0)
+    }
+}
+
 impl MaterialExtension for RoadExtension {
     fn fragment_shader() -> ShaderRef {
         "embedded://aa_world/roads.wesl".into()
+    }
+
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        if key.bind_group_data.0
+            && let Some(depth) = descriptor.depth_stencil.as_mut()
+        {
+            // StandardMaterial couples CPU transparent order and raster depth bias. Native
+            // decals precede world transparency; their large sort offset must not move depth.
+            depth.bias.constant = 0;
+        }
+        Ok(())
     }
 }
 
@@ -75,11 +103,18 @@ pub(crate) struct RoadMesh {
     pub radius: f32,
     pub distance: f32,
     pub attenuation: Vec4,
+    pub deferred: Option<DeferredParams>,
 }
 
 impl RoadAssets {
     fn material(&self, loader: &CryLoader, path: &str, clamp: bool) -> MaterialSlot {
-        let slot = self.0.lock().unwrap().entry((path.to_string(), clamp)).or_default().clone();
+        let slot = self
+            .0
+            .lock()
+            .unwrap()
+            .entry((path.to_string(), clamp))
+            .or_default()
+            .clone();
         slot.get_or_init(|| prepare_material(loader, path, clamp));
         slot
     }
@@ -106,6 +141,7 @@ impl RoadAssets {
             radius,
             distance,
             attenuation,
+            deferred: None,
         })
     }
 }
@@ -116,6 +152,7 @@ impl RoadMesh {
         let data = self.material.get()?.as_ref()?;
         let mut handles = data.handles.lock().unwrap();
         if self.attenuation.w == 0.0
+            && self.deferred.is_none()
             && let Some(handle) = handles.get(&self.priority)
         {
             return Some(handle.clone());
@@ -124,8 +161,9 @@ impl RoadMesh {
         if let Some(images) = data.images.lock().unwrap().take() {
             textures.extend(images.into_iter().map(|(key, image)| (key, cry.images.add(image))));
         }
-        let mut material =
-            aa_cry::shade::to_standard_material(&data.source, |path, srgb| textures.get(&(texture_pak_path(path), srgb)).cloned())?;
+        let mut material = aa_cry::shade::to_standard_material(&data.source, |path, srgb| {
+            textures.get(&(texture_pak_path(path), srgb)).cloned()
+        })?;
         // Vertex alpha fades the true ends of a spline; the diffuse alpha and separate opacity
         // texture soften its banks. Masking this loses the original soft transition.
         if !matches!(material.alpha_mode, AlphaMode::Add) {
@@ -138,9 +176,38 @@ impl RoadMesh {
             .and_then(|t| textures.get(&(t.pak_path(), false)).cloned());
         let mut params = opacity_params(&data.source, opacity.is_some());
         params.attenuation = self.attenuation;
+        if let Some(mut projection) = self.deferred {
+            material.alpha_mode = AlphaMode::Blend;
+            // Native DeferredDecalPass precedes translucent surfaces. Keep the overlay between
+            // the sky (-1,000,000) and world transparency; preserve authored priority locally.
+            material.depth_bias = -500_000.0 + self.priority as f32;
+            let color = data.source.diffuse;
+            material.base_color = Color::linear_rgba(color.x, color.y, color.z, data.source.opacity);
+            projection.front.w = data.source.opacity;
+            projection.depth.w = data.source.alpha_test;
+            params.projection = projection;
+            params.mask = Vec4::W;
+            params.uv_x = Vec4::new(1.0, 0.0, 0.0, opacity.is_some() as u8 as f32);
+            params.uv_y = Vec4::new(0.0, 1.0, 0.0, 0.0);
+            // This supported slice changes diffuse/opacity on receiver geometry. Native MRT
+            // normal/specular accumulation is deliberately not approximated with new normals.
+            material.normal_map_texture = None;
+            material.reflectance = 0.0;
+            material.metallic = 0.0;
+            material.perceptual_roughness = 1.0;
+            material.emissive = LinearRgba::BLACK;
+            material.emissive_texture = None;
+            material.unlit = false;
+            material.uv_transform = bevy::math::Affine2::IDENTITY;
+            material.cull_mode = Some(bevy::render::render_resource::Face::Back);
+            material.double_sided = false;
+        }
         let extension = RoadExtension { params, opacity };
-        let handle = materials.add(ExtendedMaterial { base: material, extension });
-        if self.attenuation.w == 0.0 {
+        let handle = materials.add(ExtendedMaterial {
+            base: material,
+            extension,
+        });
+        if self.attenuation.w == 0.0 && self.deferred.is_none() {
             handles.insert(self.priority, handle.clone());
         }
         Some(handle)
@@ -215,8 +282,14 @@ fn opacity_params(source: &Material, enabled: bool) -> OpacityParams {
             transform.translation.x,
             enabled as u8 as f32,
         ),
-        uv_y: Vec4::new(transform.matrix2.x_axis.y, transform.matrix2.y_axis.y, transform.translation.y, 0.0),
+        uv_y: Vec4::new(
+            transform.matrix2.x_axis.y,
+            transform.matrix2.y_axis.y,
+            transform.translation.y,
+            0.0,
+        ),
         attenuation: Vec4::ZERO,
+        projection: DeferredParams::default(),
     }
 }
 
@@ -232,7 +305,9 @@ pub(crate) fn prepare_cell(
         let Some(path) = objects.materials.get(road.material as usize) else {
             continue;
         };
-        let Some(mesh) = road_mesh(road, cell, terrain) else { continue };
+        let Some(mesh) = road_mesh(road, cell, terrain) else {
+            continue;
+        };
         let material = assets.material(loader, path, false);
         if material.get().is_none_or(|m| m.is_none()) {
             continue;
@@ -246,6 +321,7 @@ pub(crate) fn prepare_cell(
             radius: (max - min).length() * 0.5,
             distance: road.max_view_dist,
             attenuation: Vec4::ZERO,
+            deferred: None,
         });
     }
     out
@@ -316,7 +392,10 @@ fn road_mesh(road: &Road, cell: (i32, i32), terrain: &TerrainQuery) -> Option<Me
             .entry((dx, dy))
             .or_insert_with(|| terrain.cell(cell.0 + dx, cell.1 + dy))
             .as_ref()?;
-        let (lx, ly) = (ix.rem_euclid(CELL_UNITS as i32) as usize, iy.rem_euclid(CELL_UNITS as i32) as usize);
+        let (lx, ly) = (
+            ix.rem_euclid(CELL_UNITS as i32) as usize,
+            iy.rem_euclid(CELL_UNITS as i32) as usize,
+        );
         Some(std::array::from_fn(|i| {
             let (ox, oy) = [(0, 0), (1, 0), (1, 1), (0, 1)][i];
             Vertex {
@@ -335,7 +414,11 @@ fn build_mesh(road: &Road, mut quad: impl FnMut(i32, i32) -> Option<[Vertex; 4]>
     if road.points.len() < 4
         || road.points.len() % 2 != 0
         || !road.points.iter().all(|p| p.is_finite())
-        || !road.tex_coords.iter().chain(&road.global_tex_coords).all(|v| v.is_finite())
+        || !road
+            .tex_coords
+            .iter()
+            .chain(&road.global_tex_coords)
+            .all(|v| v.is_finite())
     {
         return None;
     }
@@ -480,7 +563,10 @@ mod tests {
                 cross.y * 0.5
             })
             .sum();
-        assert!((area - 32.0).abs() < 1e-4, "clipping must neither overlap nor leave gaps: {area}");
+        assert!(
+            (area - 32.0).abs() < 1e-4,
+            "clipping must neither overlap nor leave gaps: {area}"
+        );
     }
 
     #[test]

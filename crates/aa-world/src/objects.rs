@@ -513,10 +513,11 @@ pub fn stream_objects(
         }
         let mut entities = Vec::new();
         for decal in decals {
+            let deferred = decal.deferred.is_some();
             let Some(material) = decal.material(&mut cry, &mut road_materials) else { continue };
             let end = decal.distance.min(cfg.brush_distance).max(0.0) + decal.radius;
             entities.push(commands.spawn((
-                Name::new("Terrain/object decal"),
+                Name::new(if deferred { "Deferred terrain/object decal" } else { "Terrain/object decal" }),
                 Mesh3d(cry.meshes.add(decal.mesh)),
                 MeshMaterial3d(material),
                 Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
