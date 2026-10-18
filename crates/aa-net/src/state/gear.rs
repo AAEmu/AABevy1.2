@@ -209,7 +209,7 @@ impl Inventory {
                 if item.id!=*item_id {return false}
                 item.flags=*bits;item.unsecure_time=*unsecure_time;item.unpack_time=*unpack_time;
             }
-            ItemTask::Update { container, slot, item_id, detail, detail_payload } => {
+            ItemTask::Update { container, slot, item_id, detail, detail_payload, .. } => {
                 let Some(Some(item)) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
                 item.detail = detail.clone();
                 item.detail_payload = detail_payload.clone();
@@ -499,13 +499,13 @@ mod tests {
         assert!(inv.item_slot_pending(2, 0));
         assert!(!inv.apply(&Event::ItemsChanged(ItemTasks {
             tasks: vec![ItemTask::Update { container: 2, slot: 0, item_id: 999,
-                detail: ItemDetail::Mate { exp: 0, dead: 0, level: 1 }, detail_payload: None }],
+                detail: ItemDetail::Mate { exp: 0, dead: 0, level: 1 }, detail_payload: None, raw_detail_block: None }],
             ..Default::default() })));
         assert!(inv.item_slot_pending(2, 0));
         assert_eq!(inv.bag[0], Some(pet));
         let update = Event::ItemsChanged(ItemTasks { reason: crate::mate::REPAIR_PETS_TASK,
             tasks: vec![ItemTask::Update { container: 2, slot: 0, item_id: 123,
-                detail: ItemDetail::Mate { exp: 17, dead: 0, level: 28 }, detail_payload: None }],
+                detail: ItemDetail::Mate { exp: 17, dead: 0, level: 28 }, detail_payload: None, raw_detail_block: None }],
             ..Default::default() });
         assert!(inv.apply(&update));
         assert!(!inv.item_slot_pending(2, 0));
@@ -678,6 +678,7 @@ mod tests {
                 item_id: 600,
                 detail: ItemDetail::Equip(Default::default()),
                 detail_payload: Some(vec![0; 55]),
+                raw_detail_block: None,
             },
         ])));
         assert_eq!(inv.worn(slot::HEAD).unwrap().grade, 3);

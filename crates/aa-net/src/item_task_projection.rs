@@ -1,4 +1,4 @@
-//! Native Count/Remove task outputs, given source-exact pre-row lookup context.
+//! Native item task outputs, given source-exact pre-row lookup context.
 //!
 //! Borrowed lookup uses explicit native PRE-row certainty; this never updates `Inventory`,
 //! dispatches observers, or retains history.
@@ -50,7 +50,7 @@ pub struct NativeItemTaskInventory<'a> {
     pub bank: NativeItemTaskStorage<'a>,
 }
 
-/// Source-exact physical Count lookup or equipment -> bag -> bank Remove lookup.
+/// Physical Count/Grade/Update lookup or equipment -> bag -> bank Remove lookup.
 /// The caller supplies certainty immediately BEFORE this task and owns all mutations.
 /// Unknown earlier records prevent a later ID match from becoming authoritative.
 /// Equipment indices above 27 are refused as unknown (native physical lookup is unsafe).
@@ -128,6 +128,12 @@ pub fn lookup_native_item_task<'a>(
         | ItemTask::Remove { item_id: 0, .. } => Some(Context::Missing), // no lookup occurs
         ItemTask::Count {
             container, slot, ..
+        }
+        | ItemTask::Grade {
+            container, slot, ..
+        }
+        | ItemTask::Update {
+            container, slot, ..
         } => Some(match container {
             1 | 0xfc | 0xf2 => physical(inventory.equipment, *container, *slot, true),
             2 | 0x64 | 0x65 | 0x66 => physical(inventory.bag, *container, *slot, false),
@@ -174,12 +180,14 @@ pub struct NativeItemTaskProjection {
     pub mutation: NativeItemTaskMutation,
 }
 
-/// Project original 397cd970/397cdad0. None means unsupported task, unknown context,
+/// Project original Count4/Remove7/Grade14 and qualified Update9. None means unsupported task, unknown context,
 /// or a supplied context inconsistent with the specified native lookup.
 ///
 /// Count ignores the task's ID/template and preserves zero/negative wrapping counts.
 /// Remove copies the found item before clearing it, then checks the declared location.
-/// Container 4 short-circuits both helpers before any lookup or mutation.
+/// Container 4 short-circuits Count/Remove only. Grade copies output before changing
+/// the grade; Update copies output after replacing supported normalized detail fields.
+/// Update requires a complete 128-byte received block consistent with its parsed fields.
 pub fn project_native_item_task(
     task: &ItemTask,
     context: NativeItemTaskContext<'_>,
@@ -190,6 +198,12 @@ pub fn project_native_item_task(
         }
         | ItemTask::Remove {
             container, slot, ..
+        }
+        | ItemTask::Grade {
+            container, slot, ..
+        }
+        | ItemTask::Update {
+            container, slot, ..
         } => (*container, *slot),
         _ => return None,
     };
@@ -198,8 +212,26 @@ pub fn project_native_item_task(
         output: None,
         mutation: NativeItemTaskMutation::None,
     };
-    if container == 4 {
+    if container == 4 && matches!(task, ItemTask::Count { .. } | ItemTask::Remove { .. }) {
         return Some(untouched(true));
+    }
+    if let ItemTask::Update {
+        detail,
+        detail_payload,
+        raw_detail_block,
+        ..
+    } = task
+    {
+        let block = raw_detail_block.as_deref()?;
+        if block.len() != 128 || !matches!(block[0], 0 | 1 | 3) {
+            return None;
+        }
+        let mut reader = crate::wire::Reader::new(block);
+        let kind = reader.u8().ok()?;
+        let decoded = crate::model::ItemDetail::read(&mut reader, kind).ok()?;
+        if &decoded != detail || detail_payload.as_deref() != Some(&block[1..reader.pos()]) {
+            return None;
+        }
     }
     if matches!(task, ItemTask::Remove { item_id: 0, .. }) {
         return Some(untouched(false));
@@ -234,6 +266,41 @@ pub fn project_native_item_task(
                 admitted: location == declared && item.template_id != 0,
                 output: Some(item.clone()),
                 mutation: NativeItemTaskMutation::Clear { location },
+            })
+        }
+        ItemTask::Grade { grade, .. } => {
+            if location != declared {
+                return None;
+            }
+            let mut changed = item.clone();
+            changed.grade = *grade;
+            Some(NativeItemTaskProjection {
+                admitted: true,
+                output: Some(item.clone()), // native copy precedes the grade write
+                mutation: NativeItemTaskMutation::Replace {
+                    location,
+                    item: changed,
+                },
+            })
+        }
+        ItemTask::Update {
+            detail,
+            detail_payload,
+            ..
+        } => {
+            if location != declared {
+                return None;
+            }
+            let mut changed = item.clone();
+            changed.detail = detail.clone();
+            changed.detail_payload = detail_payload.clone();
+            Some(NativeItemTaskProjection {
+                admitted: true,
+                output: Some(changed.clone()),
+                mutation: NativeItemTaskMutation::Replace {
+                    location,
+                    item: changed,
+                },
             })
         }
         _ => unreachable!(),
@@ -633,5 +700,211 @@ mod tests {
             lookup_native_item_task(&count, &view),
             Some(NativeItemTaskContext::Unknown)
         ));
+    }
+
+    fn update_task() -> ItemTask {
+        // Independent literal Update9 body, Equip detail with image42/durability13.
+        let mut wire = vec![40, 1, 9, 2, 3, 0xe7, 3, 0, 0, 0, 0, 0, 0, 128, 0];
+        let mut block = vec![0xa5; 128];
+        block[..56].fill(0);
+        block[0] = 1;
+        block[1] = 42;
+        block[5] = 13;
+        wire.extend_from_slice(&block);
+        wire.push(0); // no force removals
+        let tasks = crate::items::ItemTasks::read(&mut crate::wire::Reader::new(&wire)).unwrap();
+        assert!(!tasks.truncated);
+        tasks.tasks.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn grade_native_oracle_copies_old_output_before_new_grade_and_ignores_packet_id() {
+        // Executed397cde80: native-item-task-grade-update-oracle.json.
+        let mut original = item(5);
+        original.grade = 6;
+        let task = ItemTask::Grade {
+            container: 2,
+            slot: 3,
+            item_id: 999,
+            grade: 8,
+        };
+        let rows = [None, None, None, Some(&original)];
+        let view = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Unknown,
+            bag: storage(&rows, 4, 2),
+            bank: NativeItemTaskStorage::Unknown,
+        };
+        let context = lookup_native_item_task(&task, &view).unwrap();
+        let projected = project_native_item_task(&task, context).unwrap();
+        assert!(projected.admitted);
+        assert_eq!(projected.output, Some(original.clone()));
+        let NativeItemTaskMutation::Replace {
+            location: at,
+            item: changed,
+        } = projected.mutation
+        else {
+            panic!()
+        };
+        assert_eq!(at, location(3));
+        let mut expected = original;
+        expected.grade = 8;
+        assert_eq!(changed, expected);
+        assert!(
+            !project_native_item_task(&task, NativeItemTaskContext::Missing)
+                .unwrap()
+                .admitted
+        );
+    }
+
+    #[test]
+    fn update_native_oracle_changes_only_detail_and_copies_new_output() {
+        // Executed397cdc10: native-item-task-detail-update-oracle.json.
+        let original = item(5);
+        let task = update_task();
+        let projected = project_native_item_task(
+            &task,
+            NativeItemTaskContext::Found {
+                location: location(3),
+                item: &original,
+            },
+        )
+        .unwrap();
+        assert!(projected.admitted);
+        let NativeItemTaskMutation::Replace { item: changed, .. } = projected.mutation else {
+            panic!()
+        };
+        assert_eq!(projected.output, Some(changed.clone()));
+        let mut expected = original.clone();
+        if let ItemTask::Update {
+            detail,
+            detail_payload,
+            ..
+        } = task
+        {
+            expected.detail = detail;
+            expected.detail_payload = detail_payload;
+        }
+        assert_eq!(changed, expected);
+        assert_eq!(
+            (changed.id, changed.template_id, changed.count),
+            (123, 8001, 5)
+        );
+        assert_eq!(original.detail, crate::model::ItemDetail::None);
+    }
+
+    #[test]
+    fn update_refuses_missing_unknown_malformed_or_inconsistent_native_inputs() {
+        let original = item(5);
+        let task = update_task();
+        let context = NativeItemTaskContext::Found {
+            location: location(3),
+            item: &original,
+        };
+        let mut synthetic = task.clone();
+        if let ItemTask::Update {
+            raw_detail_block, ..
+        } = &mut synthetic
+        {
+            *raw_detail_block = None;
+        }
+        assert!(project_native_item_task(&synthetic, context).is_none());
+        for len in [0, 4, 127, 129] {
+            let mut malformed = task.clone();
+            if let ItemTask::Update {
+                raw_detail_block, ..
+            } = &mut malformed
+            {
+                *raw_detail_block = Some(vec![1; len]);
+            }
+            assert!(project_native_item_task(&malformed, context).is_none());
+        }
+        for which in 0..3 {
+            let mut mismatch = task.clone();
+            if let ItemTask::Update {
+                detail,
+                detail_payload,
+                raw_detail_block,
+                ..
+            } = &mut mismatch
+            {
+                match which {
+                    0 => raw_detail_block.as_mut().unwrap()[0] = 0xfe,
+                    1 => *detail = crate::model::ItemDetail::None,
+                    _ => *detail_payload = None,
+                }
+            }
+            assert!(project_native_item_task(&mismatch, context).is_none());
+        }
+        assert!(project_native_item_task(&task, NativeItemTaskContext::Unknown).is_none());
+        assert!(
+            project_native_item_task(
+                &task,
+                NativeItemTaskContext::Found {
+                    location: location(2),
+                    item: &original
+                }
+            )
+            .is_none()
+        );
+        let missing = project_native_item_task(&task, NativeItemTaskContext::Missing).unwrap();
+        assert!(!missing.admitted);
+        assert_eq!(missing.mutation, NativeItemTaskMutation::None);
+        assert_eq!(missing.output, None);
+    }
+    #[test]
+    fn normalized_none_and_mate_details_require_exact_received_prefixes() {
+        let original = item(5);
+        for (tag, detail, payload) in [
+            (0, crate::model::ItemDetail::None, vec![]),
+            (
+                3,
+                crate::model::ItemDetail::Mate {
+                    exp: -1,
+                    dead: 0xfe,
+                    level: 0xff,
+                },
+                vec![0xff, 0xff, 0xff, 0xff, 0xfe, 0xff],
+            ),
+        ] {
+            let mut block = vec![0xa5; 128];
+            block[0] = tag;
+            block[1..1 + payload.len()].copy_from_slice(&payload);
+            let task = ItemTask::Update {
+                container: 2,
+                slot: 3,
+                item_id: 999,
+                detail: detail.clone(),
+                detail_payload: Some(payload.clone()),
+                raw_detail_block: Some(block),
+            };
+            let result = project_native_item_task(
+                &task,
+                NativeItemTaskContext::Found {
+                    location: location(3),
+                    item: &original,
+                },
+            )
+            .unwrap();
+            assert!(result.admitted);
+            assert_eq!(result.output.as_ref().unwrap().detail, detail);
+            assert_eq!(
+                result.output.as_ref().unwrap().detail_payload,
+                Some(payload)
+            );
+        }
+        let task = ItemTask::Grade {
+            container: 4,
+            slot: 0,
+            item_id: 999,
+            grade: 8,
+        };
+        let unknown = NativeItemTaskStorage::Unknown;
+        let inventory = NativeItemTaskInventory {
+            equipment: unknown,
+            bag: unknown,
+            bank: unknown,
+        };
+        let context = lookup_native_item_task(&task, &inventory).unwrap();
+        assert!(!project_native_item_task(&task, context).unwrap().admitted); // no Count/Remove bypass
     }
 }
