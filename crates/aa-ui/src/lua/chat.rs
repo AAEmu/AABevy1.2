@@ -79,6 +79,9 @@ pub struct ChatData {
     pub selected: usize,
     pub tab_width: f32,
     pub min_tab_width: f32,
+    pub auto_resize_tabs: bool,
+    pub tab_offset: f32,
+    pub tab_gap: f32,
     pub tab_area_height: f32,
     /// `SetTabAreaInset(left, top, right, bottom)`.
     pub tab_inset: [f32; 4],
@@ -94,6 +97,8 @@ pub struct ChatData {
     pub right_line: Id,
     /// Cursor over the window at the last update.
     pub hovered: Option<bool>,
+    /// Last resolved local extent passed through the native geometry callback.
+    layout_extent: [f32; 2],
 }
 
 fn with_msg<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut MessageData) -> R) -> Option<R> {
@@ -622,7 +627,13 @@ fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Tabl
 /// Called when a chat window is created: its edit box, buttons and line drawables.
 pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
     let (edit, _) = native_child(lua, id, "chatEdit", "editbox", "chatEdit", false)?;
-    let (add, _) = native_child(lua, id, "addButton", "button", "addButton", true)?;
+    let (add, _) = native_child(lua, id, "addButton", "button", "addButton", false)?;
+    {
+        let mut u = ui(lua);
+        let o = u.tree.get_mut(add);
+        o.width = 20.0;
+        o.height = 20.0;
+    }
     native_child(lua, id, "imeToggle", "button", "imeToggleButton", false)?;
     let (selector_id, selector) = native_child(
         lua,
@@ -654,9 +665,12 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             window_id: 0,
             tabs: Vec::new(),
             selected: 0,
-            tab_width: 65.0,
-            min_tab_width: 42.0,
-            tab_area_height: 30.0,
+            tab_width: 50.0,
+            min_tab_width: 0.0,
+            auto_resize_tabs: false,
+            tab_offset: 0.0,
+            tab_gap: 0.0,
+            tab_area_height: 20.0,
             tab_inset: [0.0; 4],
             add_button: add,
             use_add_button: false,
@@ -667,12 +681,17 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             left_line,
             right_line,
             hovered: None,
+            layout_extent: [0.0; 2],
         });
     }
     super::chat_input::activate(lua, id);
     call_global(lua, "OnCreateChatWindow", t.clone());
     super::chat_input::show_method(lua, id);
     Ok(())
+}
+
+fn nonnegative(value: f32) -> f32 {
+    if value < 0.0 { 0.0 } else { value }
 }
 
 /// Tab buttons left to right in the tab area, the add button after them, the message frames
@@ -682,15 +701,39 @@ fn layout(lua: &Lua, id: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
     let wr = u.tree.rect(id);
-    let avail = (wr.w - c.tab_inset[0] - c.tab_inset[2]).max(0.0);
-    let n = c.tabs.len().max(1) as f32;
+    if let Some(c) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+        c.layout_extent = [wr.w, wr.h];
+    }
+    // 392c97e0 returns before inspecting or changing child controls when empty.
+    if c.tabs.is_empty() {
+        return;
+    }
+    let n = c.tabs.len() as f32;
     let add_w = if c.use_add_button {
         u.tree.get(c.add_button).width
     } else {
         0.0
     };
-    let tw = c.tab_width.min(((avail - add_w) / n).max(c.min_tab_width));
-    let mut x = c.tab_inset[0];
+    let tw = if c.auto_resize_tabs {
+        // Keep the SSE f32 addition order and minimum-first native clamp. In
+        // particular min > max is legal; Rust's clamp would panic here.
+        let mut used = c.tab_offset + add_w;
+        used += (n - 1.0) * c.tab_gap;
+        used += c.tab_inset[0];
+        used += c.tab_inset[2];
+        let proposed = ((wr.w - used) / n).floor();
+        let proposed = if proposed == 0.0 { 0.0 } else { proposed };
+        if c.min_tab_width > proposed {
+            c.min_tab_width
+        } else if proposed > c.tab_width {
+            c.tab_width
+        } else {
+            proposed
+        }
+    } else {
+        c.tab_width
+    };
+    let th = nonnegative(c.tab_area_height - c.tab_inset[1] - c.tab_inset[3]);
     let anchor = |point, x, y| Anchor {
         point,
         target: id,
@@ -700,9 +743,19 @@ fn layout(lua: &Lua, id: Id) {
     };
     for (i, tab) in c.tabs.iter().enumerate() {
         let o = u.tree.get_mut(tab.button);
-        o.anchors = vec![anchor(Point::TopLeft, x, c.tab_inset[1])];
+        o.anchors = vec![if i == 0 {
+            anchor(Point::TopLeft, c.tab_offset + c.tab_inset[0], c.tab_inset[1])
+        } else {
+            Anchor {
+                point: Point::TopLeft,
+                target: c.tabs[i - 1].button,
+                rel: Point::TopRight,
+                x: c.tab_gap,
+                y: 0.0,
+            }
+        }];
         o.width = tw;
-        o.height = c.tab_area_height;
+        o.height = th;
         o.shown = true;
         let m = u.tree.get_mut(tab.message);
         m.anchors = vec![
@@ -723,18 +776,21 @@ fn layout(lua: &Lua, id: Id) {
         {
             b.checked = i == c.selected;
         }
-        x += tw;
     }
+    u.tree.remove_anchors(c.add_button);
     let o = u.tree.get_mut(c.add_button);
-    let h = o.height;
-    o.anchors = vec![anchor(
-        Point::TopLeft,
-        x,
-        c.tab_inset[1] + ((c.tab_area_height - h) / 2.0).round(),
-    )];
+    if c.use_add_button {
+        o.anchors = vec![Anchor {
+            point: Point::BottomLeft,
+            target: c.tabs.last().unwrap().button,
+            rel: Point::BottomRight,
+            x: c.tab_gap,
+            y: 0.0,
+        }];
+    }
     o.shown = c.use_add_button;
     // The lines under the tab area, left and right of the selected tab.
-    let sel_x = c.tab_inset[0] + tw * c.selected as f32;
+    let sel_x = u.tree.rect(c.tabs[c.selected].button).x - wr.x;
     for (d, x0, x1) in [(c.left_line, 0.0, sel_x), (c.right_line, sel_x + tw, wr.w)] {
         let o = u.tree.get_mut(d);
         o.anchors = vec![anchor(Point::TopLeft, x0, c.tab_area_height - 1.0)];
@@ -742,6 +798,21 @@ fn layout(lua: &Lua, id: Id) {
         o.height = 1.0;
     }
     u.tree.touch();
+}
+
+/// Native extent/anchor callbacks 392ca020/30/40 run tab layout before the
+/// ordinary widget geometry callback. Anchor-derived sizes are settled per frame.
+pub(crate) fn geometry(lua: &Lua, id: Id) {
+    let changed = {
+        let u = ui(lua);
+        u.tree.widget(id).and_then(|w| w.chat.as_ref()).is_some_and(|c| {
+            let r = u.tree.rect(id);
+            c.layout_extent != [r.w, r.h]
+        })
+    };
+    if changed {
+        layout(lua, id);
+    }
 }
 
 fn select(lua: &Lua, id: Id, idx: usize) {
@@ -879,6 +950,10 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
 /// Per frame: tab button backgrounds show only while the cursor is over the chat window (the
 /// tab names stay), like the client's fading chat decorations.
 pub(crate) fn update(lua: &Lua) {
+    let windows = ui(lua).tree.of_class("chatwindow");
+    for id in windows {
+        geometry(lua, id);
+    }
     let mut g = ui(lua);
     let u = &mut *g;
     // Lines that time out (`SetTimeVisible`) leave the live view without a call.
@@ -1218,7 +1293,7 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SetTabWidth",
         method(lua, |lua, id, a| {
-            let v = a.f(1);
+            let v = nonnegative(a.f(1));
             set(lua, id, |c| c.tab_width = v);
             none()
         })?,
@@ -1226,7 +1301,7 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SetMinTabWidth",
         method(lua, |lua, id, a| {
-            let v = a.f(1);
+            let v = nonnegative(a.f(1));
             set(lua, id, |c| c.min_tab_width = v);
             none()
         })?,
@@ -1234,8 +1309,32 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SetTabAreaHeight",
         method(lua, |lua, id, a| {
-            let v = a.f(1);
+            let v = nonnegative(a.f(1));
             set(lua, id, |c| c.tab_area_height = v);
+            none()
+        })?,
+    )?;
+    def(
+        "UseAutoResizingTabButtonMode",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            set(lua, id, |c| c.auto_resize_tabs = on);
+            none()
+        })?,
+    )?;
+    def(
+        "SetOffset",
+        method(lua, |lua, id, a| {
+            let v = a.f(1);
+            set(lua, id, |c| c.tab_offset = v);
+            none()
+        })?,
+    )?;
+    def(
+        "SetGap",
+        method(lua, |lua, id, a| {
+            let v = a.f(1);
+            set(lua, id, |c| c.tab_gap = v);
             none()
         })?,
     )?;
@@ -1306,7 +1405,6 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         )?;
     }
     for name in [
-        "SetOffset",
         "SetCaretOffset",
         "SetMaxNotifyTime",
         "SetNotifyBlinkingFreq",
@@ -1314,9 +1412,7 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetRightLineOffset",
         "SetSlideTimeInDragging",
         "AllowTabSwitch",
-        "UseAutoResizingTabButtonMode",
         "UseSlidingButton",
-        "SetGap",
         "SetContentOffset",
         "SetTabButtonAlpha",
     ] {

@@ -3254,3 +3254,73 @@ Measured **259.7–294.1 FPS**, zero script errors and no WARN/ERROR;
 process 27004 self-closed. `reference/ingame/spawn/real.png` provides the
 original HUD/tab style context, without a matching long-name clipping
 sample, so no exact pixel-match claim is made.
+
+### Native fixed and auto chat-tab widths (2026-10-18)
+
+`UseAutoResizingTabButtonMode` now selects fixed or automatic tab widths;
+the original chat constructor's `true` call was previously ignored and
+every chat window used a fractional auto width. Native constructor
+`392cb6d0` initializes fixed mode, width 50, minimum 0, tab-area height 20,
+zero tab offset/gap/insets, and a hidden 20-by-20 add button. Original
+`chat/chat_window.lua` then applies its locale width, minimum 42, height
+30 and automatic mode. Empty tab containers return without changing child
+anchors or visibility, matching the early guard in `392c97e0`.
+
+Automatic layout uses the local extent getter `39275480`, independent of
+framebuffer/UI scale. The native f32 order is: tab offset + available add
+button width, then `(tab count - 1) * gap`, left inset and right inset;
+subtract that total from local window width, divide by tab count, and
+floor. Clamp helper `3922aed0` checks the minimum first, then maximum.
+Reversed limits are legal: minimum 90/maximum 20 yields 90 for a proposed
+width below 90, and 20 for a proposed width above 90. Fixed mode uses the
+configured width directly. Width/minimum/area-height setters clamp
+negative inputs to zero. Tab height subtracts top/bottom area insets.
+
+The actual chat binding is the TabController registration `3925a5c0`:
+`SetOffset` at `3925a7b1` calls `39258990` -> `392c9f00`, storing tab
+offset `+2e8`. `SetGap` uses `392589d0` -> `392c9f20` (`+2ec`). A different
+native class's same-named `39258790` wrapper is not the chat binding.
+`SetContentOffset` is a separate four-float method, `39258a50` ->
+`392cad90`, writing message-area offsets `+324..330`; it is not mapped to
+the single tab offset. Tabs now anchor to the preceding tab's right edge
+with the native gap; the add button anchors bottom-left to the final
+tab's bottom-right. Native callbacks `392ca020/30/40` relayout on geometry
+changes. aa-ui handles explicit size/anchor changes and settles inherited
+anchor-size changes on the next UI frame, preserving cached character
+clipping and full text/tooltip getters.
+
+Sources: `data/extract/aa-ui/native-chat-tab-layout-contracts-20261018.txt`,
+`native-chat-tab-binding-closure-20261018.txt`, and
+`native-chat-tab-width-next-20261018.txt`. Offline
+`chat_tab_width_oracle.py` executes the actual `392c97e0` width calculation,
+SSE floor, extent getter and clamp; only add-button availability is
+supplied. Its eleven cases in `native-chat-tab-width-oracle-20261018.json`
+cover fixed/auto, add reservation, zero tabs, reversed bounds, insets,
+offset/gap, negative space, signed zero and a one-f32-ULP width boundary.
+
+Remaining chat layout gaps are explicit: native add availability
+`39512b60` -> `39500190` reads eight global configuration occupancy bytes
+`+60..67`, keyed by native tab IDs 0..7. Allocation/load at
+`39506ce8/39506e1f` marks the ID, deletion `39506b6d` clears it, and
+`3951421e..2b` passes that same ID to `OnSetChatTabId`. These configuration
+slots outlive a constructed chat widget. The current per-window
+`AAUI.ChatTabs` bridge has no complete global configuration lifetime, so
+aa-ui retains its existing requested add visibility rather than inventing
+a visible-widget capacity rule. Native tab clipping/sliding and the
+four-float message `SetContentOffset` remain separate open work.
+
+Validation: `cargo check -p aa-ui` and the final selected library/native,
+chat-layout, character-clipping, chat-link/transport, screen-bounds and
+scale/clip suites passed **72 tests**, with one existing font-metric test
+ignored. Six layout regressions cover native defaults, fixed/auto toggles,
+reversed limits, negative setters, exact f32 floor boundaries, zero tabs,
+offset/gap/insets, bottom-aligned add controls, explicit/inherited resizing,
+and physical pick/press/release selection in both original chat windows.
+The original Unicode labels retain cached prefixes and complete tooltips.
+Built and copied the aa-dev `native_chat_tab_layout` example, then ran
+`--shot shots/aa-ui/native-chat-tab-layout-20261018.png --shot-after 8`.
+Inspected the unique capture: original auto tabs are 104 px in the 345 px
+window, and fixed tabs remain 140 px in the 430 px window. Logs report
+**476.6–604.2 FPS**, zero script errors and no WARN/ERROR; process 48680
+self-closed. `reference/ingame/spawn/real.png` supplies the original HUD/tab
+style comparison; no matching resized-tab reference or pixel-parity claim.
