@@ -406,15 +406,16 @@ The original pak sources define the mapping:
   each original Diffuse alpha mip. Base colour, normals, culling and opacity remain material data.
 
 The dock's `objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl`, submaterial 3 (`ucc`),
-uses `ucc_pattern04.dds`, red `(0.21568629,0.21568629,0.21568629)`, green/blue white, and
-SubSurface `ucc_logo32.dds` at scale `(3,3)`, offset `(1,1)`. This turns the raw rainbow into
-neutral patterned cloth with the authored crest in the middle third. All UCC triangles of
+uses Diffuse `ucc_pattern04.dds`, red `(0.21568629,0.21568629,0.21568629)`, green/blue white, and
+SubSurface `ucc_logo32.dds` at scale `(3,3)`, offset `(1,1)`. It has no Custom texture, so the native
+white default supplies the background mask: the palette sum saturates to plain white cloth, with
+the authored crest in the middle third. Diffuse still supplies opacity. All UCC triangles of
 `galleon_deco_sail01.cgf`, including its LODs, have UVs in 0..1 (verified from the pak).
 
-The native `$CustomMap` is a runtime binding whose default was **not recovered**. This static
-path uses an explicit material Custom texture when present, otherwise the authored Diffuse
-pattern; that fallback is supported here, not claimed as a recovered native default. Dynamic
-player crest download/binding is not implemented. The bake covers one UV square; repeated UVs
+The native `$CustomMap` uses an explicit material Custom texture when present, otherwise
+`textures/defaults/white.dds`, **not the Diffuse texture**. The original default asset is 4x4,
+with every RGBA channel 255, verified through aa-pak and in the real-galleon regression.
+Dynamic player crest download/binding is not implemented. The bake covers one UV square; repeated UVs
 outside it, animated TexMods, rotated SubSurface TexMods and nonidentity Diffuse TexMods need
 a shader path. Unhandled TexMod attributes are retained as `TexMod::unhandled` and reject the
 static bake, as do missing Diffuse/SubSurface inputs. Unsupported static transforms keep the existing material conversion. Cloth
@@ -425,9 +426,28 @@ Native probe: `D:/aa-re/client12/x2game_unpacked.dll`, `sub_390E3ED0`, changes t
 (`0x390E4074–0x390E41A0`), writes that texture to copied resource-array entry 10
 (`0x390E4085–0x390E40C6`; array starts at frame `-0x424`, stride `0x3c`, entry at `-0x1cc`),
 and supplies the crest to texture slot 9 (`0x390E4391–0x390E43B3`, non-HumanSkin case).
-These are disassembly observations of dynamic UCC replacement, not evidence of the renderer's
-absent-Custom default. The bounded `D:/aa-re` inventory contains only the dedicated-server
-`cry3dengine` binary and no client renderer, so that default remains unresolved.
+These are disassembly observations of dynamic UCC replacement; that supplied texture overrides
+the static absent-Custom binding.
+
+Renderer proof: the existing `data/extract/aa-cry/ida/render/cryrenderd3d10.dll` is PE x86,
+image base `0x38000000`, file/product version `0.5.1.101406`, timestamp
+`2014-10-14 05:46:04 UTC` (the related cry3dengine/client12 x2game builds are 05:45:00/05:44:21).
+SHA256 `ebf051bba5d349a6b3bf6d4eb676908115b73bb22d35d5a0cc917c325426589d` and MD5
+`f5f22e8b45bcbc7652fa424047a56a5c` match its existing IDA database input hashes. The renderer is
+also the 1.2 source used for the post defaults in `docs/aa-world.md`. Only disposable copies
+were opened for this bounded probe, with automatic analysis disabled.
+
+* `0x38257BE8–0x38257C03`: `$CustomMap` resolves to the dummy array plus `0x9b0`, index 10
+  at stride 248. `mfCreateShaderResources` (`0x38259E70`, case 10) loads the explicit Custom
+  filename; the resource constructor (`0x38259400`) leaves missing entries null.
+* `CHWShader_D3D::mfSetSamplers` (`0x38078EB0`), `0x38079025–0x3807902F`, checks
+  `resources[slot+16]`. When absent, `0x3807907B–0x380790B4` selects White global
+  `0x383DDB68` for slot 10 (only slots 0, 7, 1 and 5 have different fallbacks).
+* `0x381C68FE–0x381C6945` initializes that global from `Textures/Defaults/White.dds`.
+
+The disassembly and bounded decompilations are retained under the ignored
+`data/extract/aa-cry/ucc/renderer_probe/` directory. This proves the renderer's absent-slot
+default; it does not assert what a live gameplay customization override will supply.
 
 `cargo run -p aa-cry --example ucc_audit -- data/extract/aa-cry/ucc/audit` writes material and
 source-linked geometry TSVs. The installed pak has 38,294 MTL files / 67,885 material slots,
@@ -445,7 +465,9 @@ source-linked geometry TSVs. The installed pak has 38,294 MTL files / 67,885 mat
 
 Twenty-one enable background remapping; nine explicitly ignore it. Seventeen provide Custom
 (eleven with active background remapping); the authored Custom is used, with separate Diffuse
-opacity. Nine omit Diffuse and remain unsupported; all 218 authored TexMods are empty.
+opacity. The other ten active-background slots use the native white default: six galleon
+materials, three siege-weapon materials and the prologue ship. Nine omit Diffuse and remain
+unsupported; all 218 authored TexMods are empty.
 The audit checks 1,340 same-directory model candidates plus explicit cloak CDF bindings and the
 dock override: 479 source-linked bindings / 302 models, with no parse/load failures. It links
 198 UCC materials to 247 UV-square subsets and 16 out-of-range subsets. The latter have small
@@ -455,26 +477,25 @@ model binding in this bounded audit; this does not establish their absence from 
 
 `cargo run -p aa-cry --example ucc_cloth -- --shot shots/aa-cry/ucc_cloth.png --shot-after 8`
 shows the original sail mesh with raw Diffuse/control and the composition side by side, plus the
-source mask, composed texture and crest. It uses white, unlit factors to isolate this operation.
+raw Diffuse, native default mask, composed texture and crest. It uses white, unlit factors to isolate this operation.
 The installed `reference/ingame/spawn/real.png` contains no dock sail, so there is no matching
 real-client sail capture for a pixel comparison; `shots/aa-world/lights/on.png` is the previous
 Bevy dock control showing the raw rainbow. Focused tests cover the flags/defaults, linear
 palette, strict crest clipping/alpha, authored UV controls, alpha mips, cache/conversion and the
 real galleon recipe/UV domain.
 
-Add `--assembled --shot shots/aa-cry/ucc_assembled.png` for the original fourteen-part dock
+Add `--assembled --shot shots/aa-cry/ucc_assembled_native.png` for the original fourteen-part dock
 galleon, including hull, sails, masts, six cannons, helm/rudder and anchor hinge. The diagnostic
 reads the original cell `(18,7)` brush/model/material tables through aa-pak and preserves each
 part's relative matrix, centered and rotated together for comparison. The inspected image shows
-both authored sails corrected on the complete brush assembly; aa-dev reports 279.8–353.9 FPS
-(2.85–3.59 ms) at 1920x1080 while the independent CPU audit was also running.
+both sails with the native white background and authored sun on the complete brush assembly.
+The 1920x1080 capture records 147.8–305.0 FPS (3.29–6.89 ms), with the window exiting after capture.
 
-Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 61 tests, with one exhaustive
-material audit intentionally ignored; ten of the passing tests cover UCC/domain handling. The fixture build
-passes, and the inspected 1920x1080 capture shows neutral braided cloth and the centered sun
-crest alongside the raw RGB control. `aa-dev` reports 356.7–379.4 FPS (2.66–2.82 ms) in this
-unlit diagnostic scene. The window exits after capture. No aa-client integration is required:
-world material preparation already uses this conversion path.
+Validation (2026-10-17): `cargo test -p aa-cry --lib` passes 72 tests, with one exhaustive audit
+ignored; all nine focused UCC tests pass, including the actual default DDS,
+white output outside the crest, explicit Custom/default cache separation, every Diffuse alpha
+mip and the original galleon recipe. Domain/cache tests also preserve unsupported subset bypass.
+No aa-client integration is required: world material preparation already uses this conversion path.
 
 ### Static Eye iris (`shade/eye.rs`)
 

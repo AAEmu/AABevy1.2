@@ -28,6 +28,7 @@ fn main() {
 
 fn setup(mut commands: Commands, mut cry: CryAssets) {
     let raw = cry.texture(PATTERN, true).unwrap();
+    let default_mask = cry.texture("textures/defaults/white.dds", false).unwrap();
     let mark = cry.texture(LOGO, false).unwrap();
     let converted = cry.material(Some(MATERIAL), 3).unwrap();
     let composed = cry
@@ -140,15 +141,15 @@ fn setup(mut commands: Commands, mut cry: CryAssets) {
             align_items: AlignItems::Start, ..default()
         },
     )).with_children(|parent| {
-        for (label, image) in [("Authored RGB pattern (raw)", raw), ("Static composition (linear)", composed), ("Authored crest (linear)", mark)] {
+        for (label, image) in [("Authored Diffuse (raw)", raw), ("Native Custom default", default_mask), ("Static composition (linear)", composed), ("Authored crest (linear)", mark)] {
             parent.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(8), ..default() }).with_children(|panel| {
                 panel.spawn((Text::new(label), TextFont { font_size: FontSize::Px(18.0), ..default() }, TextColor(Color::WHITE)));
                 panel.spawn((ImageNode::new(image), Node { width: px(210), height: px(210), ..default() }, BackgroundColor(Color::srgb(0.3, 0.3, 0.3))));
             });
         }
         parent.spawn((
-            Node { width: px(620), margin: UiRect::left(px(12)), ..default() },
-            Text::new("galleon_mahadevi.mtl / submaterial 3\nRed mask = 0.21568629 grey; green / blue = white\nCrest UV = mesh UV * 3 - 1; strict 0 < UV < 1\nDiffuse alpha retained; unlit texture comparison\nStatic fallback: authored Diffuse pattern supplies $CustomMap"),
+            Node { width: px(650), margin: UiRect::left(px(12)), ..default() },
+            Text::new("galleon_mahadevi.mtl / submaterial 3\nCustom absent: native textures/defaults/white.dds\nRGB mask remap saturates white; authored sun crest\nCrest UV = mesh UV * 3 - 1; strict 0 < UV < 1\nDiffuse alpha retained; unlit texture comparison"),
             TextFont { font_size: FontSize::Px(19.0), ..default() },
             TextColor(Color::srgb(0.8, 0.84, 0.9)),
         ));

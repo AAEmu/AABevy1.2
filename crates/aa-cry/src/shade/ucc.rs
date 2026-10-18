@@ -1,7 +1,7 @@
 //! Static Cloth UCC composition from the client's `cloth.ext`, `cloth.cfx:384–467,532–539,735–753`
 //! and `FXSamplerDefs.cfi`. Both the RGB mask and the crest are sampled without sRGB decoding.
-//! The native `$CustomMap` is a runtime binding; for static materials without a Custom texture we
-//! explicitly use the authored Diffuse pattern. Dynamic player crests need a separate binding.
+//! The native `$CustomMap` uses resource slot 10, defaulting to `textures/defaults/white.dds`
+//! when no Custom texture is supplied. Dynamic player crests need a separate binding.
 //!
 //! This bake covers one UV square (the galleon sail's UCC subsets use 0..1). Animated TexMods,
 //! rotated TexMods and nonidentity Diffuse TexMods are left to a future shader implementation.
@@ -13,6 +13,9 @@ use crate::material::{Material, TexMod, TextureMap};
 const UCC: u64 = 0x10_0000;
 const BACKGROUND: u64 = 0x20_0000;
 const IGNORE_BACKGROUND: u64 = 0x40_0000;
+// Renderer 0.5.1.101406: $CustomMap -> slot10 (38257BE8), absent slot -> White
+// (38079025..380790B4), loaded from this asset (381C68FE..381C6945).
+const DEFAULT_CUSTOM: &str = "textures/defaults/white.dds";
 
 #[derive(Debug)]
 struct Recipe {
@@ -57,8 +60,13 @@ impl Recipe {
         }
         Some(Self {
             diffuse: diffuse.pak_path(),
-            mask: (m.gen_mask & BACKGROUND != 0 && m.gen_mask & IGNORE_BACKGROUND == 0)
-                .then(|| m.texture(&TextureMap::Custom).unwrap_or(diffuse).pak_path()),
+            mask: (m.gen_mask & BACKGROUND != 0 && m.gen_mask & IGNORE_BACKGROUND == 0).then(
+                || {
+                    m.texture(&TextureMap::Custom)
+                        .map(|t| t.pak_path())
+                        .unwrap_or_else(|| DEFAULT_CUSTOM.into())
+                },
+            ),
             logo: logo.pak_path(),
             colours: [
                 super::param_rgb(m, "uccRedMask").unwrap_or(Vec3::X),
@@ -256,6 +264,23 @@ mod tests {
     }
 
     #[test]
+    fn absent_custom_uses_native_white_and_explicit_custom_keeps_its_binding() {
+        let mut m = material(UCC | BACKGROUND);
+        let recipe = Recipe::from_material(&m).unwrap();
+        assert_eq!(recipe.mask.as_deref(), Some(DEFAULT_CUSTOM));
+        let mut custom = m.textures[0].clone();
+        custom.map = TextureMap::Custom;
+        custom.file = "authored-background.dds".into();
+        m.textures.push(custom);
+        assert_eq!(
+            Recipe::from_material(&m).unwrap().mask.as_deref(),
+            Some("authored-background.dds")
+        );
+        m.gen_mask |= IGNORE_BACKGROUND;
+        assert!(Recipe::from_material(&m).unwrap().mask.is_none());
+    }
+
+    #[test]
     fn logo_uses_authored_uv_strict_clip_and_alpha_blend() {
         let r = Recipe::from_material(&material(UCC)).unwrap();
         let blue = Vec3::Z;
@@ -371,7 +396,19 @@ mod tests {
         let m = Material::load("objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl").unwrap();
         let m = m.sub(3).unwrap();
         let mut prep = Prep::new(&loader);
+        let (dw, dh, native_white) = loader.decode_mips_rgba8(DEFAULT_CUSTOM).unwrap();
+        assert_eq!((dw, dh), (4, 4));
+        assert!(native_white.concat().iter().all(|v| *v == 255));
         let out = prep.convert(m).unwrap();
+        let mut explicit_pattern = m.clone();
+        let mut custom = m.texture(&TextureMap::Diffuse).unwrap().clone();
+        custom.map = TextureMap::Custom;
+        explicit_pattern.textures.push(custom);
+        assert_ne!(
+            out.base_color_texture,
+            prep.convert(&explicit_pattern).unwrap().base_color_texture,
+            "an authored Custom pattern must not alias the native white default in the bake cache"
+        );
         let mut control = m.clone();
         control.gen_mask = 0;
         let control = prep.convert(&control).unwrap();
@@ -414,12 +451,11 @@ mod tests {
             );
             offset += mip.len();
         }
-        // Outside the authored crest rectangle, every texel is neutral cloth, never raw RGB.
+        // Outside the authored crest rectangle, the absent Custom binding is plain white.
         for y in 0..h / 3 {
             for x in 0..w {
                 let i = ((y * w + x) * 4) as usize;
-                assert_eq!(data[i], data[i + 1]);
-                assert_eq!(data[i + 1], data[i + 2]);
+                assert_eq!(&data[i..i + 3], &[255; 3]);
             }
         }
     }
@@ -431,10 +467,7 @@ mod tests {
         }
         let m = Material::load("objects/env/06_unit/01_ship/galleon/galleon_mahadevi.mtl").unwrap();
         let r = Recipe::from_material(m.sub(3).unwrap()).unwrap();
-        assert_eq!(
-            r.mask.as_deref(),
-            Some("objects/env/07_ucc/ucc_pattern04.dds")
-        );
+        assert_eq!(r.mask.as_deref(), Some(DEFAULT_CUSTOM));
         assert_eq!(r.logo, "objects/env/07_ucc/ucc_logo32.dds");
         assert_eq!(r.scale, Vec2::splat(3.0));
         assert_eq!(r.offset, Vec2::ONE);
