@@ -30,7 +30,8 @@
 //! * per cell: an `R8Uint` image of the five-bit surface type of every 2 m sample (`heightmap.dat`) and a
 //!   uniform table (`TerrainParams`) with, for each of the 32 surface slots and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
-//!   continuous across cell borders, the detail strength and the detail normal map's tiling.
+//!   continuous across cell borders, independent base-normal tiling/phase, the detail strength and
+//!   the detail normal map's tiling.
 //!
 //! The shader takes the four surrounding samples (bilinear weights), the layers they select, the
 //! projection weights from the normal and blends sequentially like the engine does.
@@ -39,7 +40,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use aa_cry::material::{Material as CryMaterial, TextureMap};
+use aa_cry::material::{Material as CryMaterial, Texture, TextureMap};
 use aa_cry::texture::{Dds, DdsFormat};
 use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -91,6 +92,9 @@ pub struct TerrainParams {
     /// `(detail uv offset u, v, material colour g, b)`;
     /// a slot `< 0` means none.
     pub layers: [Vec4; SURFACE_TYPES * PROJECTIONS * ENTRY],
+    /// Per projection: normal UV relative scale xy and phase correction zw.
+    /// Identity preserves callers that author controlled `layers` directly.
+    pub normal_uv: [Vec4; SURFACE_TYPES * PROJECTIONS],
 }
 
 impl TerrainParams {
@@ -102,7 +106,10 @@ impl TerrainParams {
             entry[2] = Vec4::new(-1.0, 0.0, 0.0, 1.0);
             entry[3] = Vec4::new(0.0, 0.0, 1.0, 1.0);
         }
-        TerrainParams { tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, layers }
+        TerrainParams {
+            tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, layers,
+            normal_uv: [Vec4::new(1.0, 1.0, 0.0, 0.0); SURFACE_TYPES * PROJECTIONS],
+        }
     }
 }
 
@@ -221,6 +228,7 @@ struct Projection {
     normal: Option<Tex>,
     /// `TexMod` tiling of the diffuse map.
     tile: [f32; 2],
+    normal_tile: [f32; 2],
     /// `DetailTextureStrength`.
     strength: f32,
     /// The material's `Diffuse` colour (`MatDifColor`, linear), a factor of the lit layer.
@@ -407,6 +415,7 @@ impl LayerLibrary {
                                 diffuse,
                                 normal: slot(1, &pr.normal),
                                 tile: pr.tile,
+                                normal_tile: pr.normal_tile,
                                 strength: pr.strength,
                                 color: pr.color,
                                 detail: slot(1, &pr.detail),
@@ -458,7 +467,18 @@ impl LayerLibrary {
                 let (su, sv) = (scale[0] * proj.tile[0], scale[1] * proj.tile[1]);
                 let off = offset(p, su, sv);
                 let i = (s * PROJECTIONS + p) * ENTRY;
-                params.layers[i] = Vec4::new(proj.diffuse.map_or(-1.0, Tex::code), proj.normal.map_or(-1.0, Tex::code), su, sv);
+                let mut normal = proj.normal;
+                if normal.is_some() {
+                    let ratio = [proj.normal_tile[0] / proj.tile[0], proj.normal_tile[1] / proj.tile[1]];
+                    let normal_off = offset(p, scale[0] * proj.normal_tile[0], scale[1] * proj.normal_tile[1]);
+                    // Removing diffuse's integer world phase before a noninteger ratio would shift
+                    // the normal. Restore its independently reduced world phase in this affine map.
+                    let transform = Vec4::new(ratio[0], ratio[1],
+                        normal_off[0] - off[0] * ratio[0], normal_off[1] - off[1] * ratio[1]);
+                    if transform.is_finite() { params.normal_uv[s * PROJECTIONS + p] = transform; }
+                    else { normal = None; }
+                }
+                params.layers[i] = Vec4::new(proj.diffuse.map_or(-1.0, Tex::code), normal.map_or(-1.0, Tex::code), su, sv);
                 params.layers[i + 1] = Vec4::new(off[0], off[1], proj.strength, proj.detail_scale);
                 if let Some(detail) = proj.detail {
                     // the detail map is tiled over the layer uv: `uv * tiling`
@@ -550,6 +570,7 @@ struct RawProjection {
     diffuse: Option<String>,
     normal: Option<String>,
     tile: [f32; 2],
+    normal_tile: [f32; 2],
     strength: f32,
     color: [f32; 3],
     detail: Option<String>,
@@ -557,11 +578,24 @@ struct RawProjection {
     detail_scale: f32,
 }
 
+/// Ordinary static TC matrix only; unsupported modifiers retain diffuse without a guessed normal UV.
+fn static_tile(texture: &Texture) -> Option<[f32; 2]> {
+    let Some(t) = &texture.tex_mod else { return Some([1.0, 1.0]); };
+    (t.offset_u == 0.0 && t.offset_v == 0.0 && t.rotate_w == 0.0 && t.unhandled.is_empty()
+        && t.tile_u.is_finite() && t.tile_v.is_finite() && t.tile_u > 0.0 && t.tile_v > 0.0)
+        .then_some([t.tile_u, t.tile_v])
+}
+
 fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
     let mtl = CryMaterial::load(&format!("{path}.mtl")).ok()?;
     let pick = |m: &CryMaterial| -> Option<RawProjection> {
         let diffuse = m.texture(&TextureMap::Diffuse)?;
-        let normal = m.texture(&TextureMap::Normal).or_else(|| m.texture(&TextureMap::Bump));
+        let normal_source = m.texture(&TextureMap::Normal).or_else(|| m.texture(&TextureMap::Bump));
+        let normal = normal_source
+            .filter(|normal| static_tile(diffuse).is_some() && static_tile(normal).is_some());
+        if normal_source.is_some() && normal.is_none() {
+            debug!("aa-world: unsupported terrain normal TexMod in {path}; retaining diffuse");
+        }
         let tile = diffuse.tex_mod.as_ref().map_or([1.0, 1.0], |t| [t.tile_u, t.tile_v]);
         let param = |name: &str, default: f32| m.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         // %DETAIL_BUMP_MAPPING (0x8000 of the generation mask) enables the `Detail` normal map
@@ -570,6 +604,7 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
             diffuse: Some(diffuse.pak_path()),
             normal: normal.map(|t| t.pak_path()),
             tile,
+            normal_tile: normal.and_then(static_tile).unwrap_or([1.0, 1.0]),
             strength: param("DetailTextureStrength", 1.0),
             color: m.diffuse.to_array(),
             detail: detail.map(|t| t.pak_path()),
@@ -1010,6 +1045,51 @@ mod tests {
             assert!(table[21..].iter().all(|&(m,_)|m==u32::MAX));
         }
         assert!(built.library.layers.iter().all(|&n|n<=MAX_LAYERS));
+    }
+
+    #[test]
+    fn original_normal_tiles_have_independent_world_phase() {
+        if !crate::pak_available() { return; }
+        let built=LayerLibrary::build("main_world",[(15,15),(21,8),(13,10)].into_iter()).unwrap();
+        for (cell,sid,p,ratio) in [((15,15),6,2,5.0),((15,15),8,2,2.5),
+            ((15,15),9,2,0.5),((13,10),8,2,2.0),((21,8),7,0,0.7),((21,8),7,1,0.7)] {
+            let params=built.library.params(cell,Vec3::ONE).unwrap();
+            let uv=params.normal_uv[sid*3+p];
+            assert!((uv.x-ratio).abs()<1e-6 && (uv.y-ratio).abs()<1e-6,"{cell:?} slot{sid}/{p}: {uv:?}");
+            let local=Vec2::new(12.375,91.625);
+            let entry=(sid*3+p)*4;
+            let diffuse=local*params.layers[entry].zw()+params.layers[entry+1].xy();
+            let actual=diffuse*uv.xy()+uv.zw();
+            let table=built.library.cells[&cell];let scale=table[sid].1;
+            let proj=built.library.mats[table[sid].0 as usize].proj[p].unwrap();
+            // Independent global-coordinate projection, before reducing its phase modulo one.
+            let source=match p {
+                0=>[cell.1 as f64*1024.0,0.0],1=>[cell.0 as f64*1024.0,0.0],
+                _=>[cell.0 as f64*1024.0,cell.1 as f64*1024.0],
+            };
+            for axis in 0..2 {
+                let expected=((source[axis]+f64::from(local[axis]))
+                    *f64::from(scale[axis]*proj.normal_tile[axis])).rem_euclid(1.0) as f32;
+                let delta=(actual[axis]-expected).rem_euclid(1.0);
+                assert!(delta.min(1.0-delta)<0.0001,"normal phase {cell:?} slot{sid}/{p} axis{axis}: {actual:?} expected{expected}");
+            }
+        }
+        assert_eq!(TerrainParams::default().normal_uv,[Vec4::new(1.0,1.0,0.0,0.0);96]);
+    }
+
+    #[test]
+    fn unsupported_normal_texmods_are_declined() {
+        let mut texture=Texture {map:TextureMap::Bump,file:String::new(),amount:None,tex_mod:Some(aa_cry::material::TexMod::default())};
+        assert_eq!(static_tile(&texture),Some([1.0,1.0]));
+        for mutation in 0..7 {
+            let mut modifier=aa_cry::material::TexMod::default();
+            match mutation {
+                0=>modifier.offset_u=0.1,1=>modifier.offset_v=0.1,2=>modifier.rotate_w=90.0,
+                3=>modifier.tile_u=0.0,4=>modifier.tile_v=f32::NAN,5=>modifier.tile_u=-1.0,
+                _=>modifier.unhandled.push(("TexGenType".into(),"1".into())),
+            }
+            texture.tex_mod=Some(modifier);assert!(static_tile(&texture).is_none());
+        }
     }
 
     #[test]

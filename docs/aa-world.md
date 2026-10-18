@@ -2066,6 +2066,67 @@ control **168-180**; forest **160-185**, control **121-173**. Unloaded frames va
 roughly **164-276 FPS**. These shared-GPU runs are not a controlled cost
 comparison. No inherited fly/post/sky/water calibration file was changed.
 
+#### Independent native heightmap normal UVs
+
+`TerrainLayerVS` in the original `terrain.cfx`374/381-382 applies
+`_TCModify(...TS_DIFFUSE)` and `_TCModify(...TS_BUMP)` separately, storing bump UVs
+in `baseTC.zw`; line515 feeds those coordinates to `GetNormalMap`.
+`modificatortc.cfi`10-11/36-37/80/114-128 selects independent diffuse/bump TC
+matrices. The heightmap renderer previously sampled both textures with diffuse
+tiling. A bounded aa-pak survey of 61 original material files /83 projection
+records from five actual cells found six ordinary bump tiling differences:
+rock401b X/Y .7 versus diffuse 1, Palace dirt001b 2 versus 1, dry beach sand .2
+versus .4, coral 1 versus .4, and wet sand 5 versus 1. None of that survey's maps
+has authored nonzero offsets or rotation. Exact paths/modifiers are retained in
+ignored `roads/native-terrain-texmod-audit.json`.
+
+`terrain_layers.rs` now retains each accepted normal map's own static tiling.
+The cell uniform adds 96 affine normal-UV transforms, default identity, for a
+total 7,712 bytes. Each transform scales diffuse coordinates by
+`bumpTile/diffuseTile` and corrects the fractional cell-origin phase separately;
+the shader scales both texture gradients by the same ratio. This preserves
+world tiling across cell boundaries, including noninteger .7 ratios and the
+vertical projections' unshifted height coordinate. Base normal component
+decoding, BC1 handling, diffuse/detail coordinates, detail composition, geometry,
+lighting and fade remain unchanged. Native detail sampling uses its direct
+diffuse-coordinate/PublicParams path; its separate texture TexMod is not applied.
+
+Only finite positive static diffuse/bump tiling with zero offset/rotation and
+no unhandled modifier attributes is accepted for this normal path. Unsupported
+modifiers or nonfinite derived transforms omit that base normal while retaining
+the existing diffuse path; offsets, rotations, signed tiling and animation are
+explicitly unsupported. The five texture-array caps and world-library lifetime
+are unchanged; the observed full main-world library has 324 material entries,
+192/54/1 diffuse and 255/0 normal layers, about 163 MB, after unsupported normal
+modifiers are declined. No additional textures, per-frame work or draw calls
+are introduced by the UV transforms.
+
+Source/asset tests verify six original ratios and independent global-coordinate
+phase, identity defaults and unsupported-modifier refusal. The full suite passes
+**220 tests**, nine existing optional ignored. The aa-dev `terrain_normal_uv`
+fixture uses original wet-sand/coral/dry-sand/rock ATI2 texels; eight production
+GPU normal outputs (native and former diffuse-coordinate controls) match
+independent raw-block CPU calculations within one display byte. Inspected
+`shots/aa-world/terrain_normal_uv/numeric.png` logs **291-321 FPS** at 1280x720.
+
+`--world` selects an original owned SID8 patch in Palace cell (13,10), Cry target
+`(13822,10878,166.29433)`; `--world --rock` selects an X-dominant SID7 rock401b
+face in cell (21,8), target `(22162,8686,605.37744)`. Both use hour 10 and unchanged
+terrain/lighting, with objects/vegetation disabled. `--legacy` restores identity
+normal transforms only. Inspected native/legacy pairs show changed normal
+detail with unchanged diffuse patterns: image rows 180..720 have mean channel
+differences 1.13/1.57, and 15.7%/17.8% of pixels change by more than 3 in a channel.
+Palace logs **194-255 FPS** (control 202-226); rock **185-236** (control 176-211).
+These are shared-build runs, not a controlled performance comparison. No matching
+native camera capture exists; existing projection-frame, LOD weight, BC1 base-Z,
+roughness/specular and lighting approximations remain open.
+
+`--world --rock --unload-check` moves outside the world at 12 s and verifies zero
+cells, pending loads, patches, cell materials, surface maps and terrain mesh
+assets by 17 s; the shared arrays retain their world-library lifetime. All six
+capture runs self-close with exit 0 and no warnings/errors. The inherited
+fly/post/sky/water calibration files remain untouched.
+
 ### Objects (`objects.rs`, `placement.rs`)
 
 Placement files are parsed on the `aa_cry::workers` threads (max 2 cells in flight, ahead of the models in the queue) and binned per 64 m sector. Models are prepared (parsed, textures
