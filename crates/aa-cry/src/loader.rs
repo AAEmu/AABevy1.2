@@ -113,6 +113,7 @@ struct Inner {
     bc_supported: bool,
     mtls: Mutex<HashMap<String, Option<Arc<CryMaterial>>>>,
     textures: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
+    opaque_alpha: Mutex<HashMap<String, Option<bool>>>,
     cubes: Mutex<HashMap<String, Option<ImageEntry>>>,
     baked: Mutex<HashMap<String, Option<ImageEntry>>>,
     materials_cache: Mutex<HashMap<(String, usize, Shading, bool), Option<MaterialEntry>>>,
@@ -158,6 +159,7 @@ impl CryLoader {
                 bc_supported,
                 mtls: Default::default(),
                 textures: Default::default(),
+                opaque_alpha: Default::default(),
                 cubes: Default::default(),
                 baked: Default::default(),
                 materials_cache: Default::default(),
@@ -291,6 +293,20 @@ impl CryLoader {
         let (_, _, rgba) = self.decode_rgba8(path, u32::MAX)?;
         let n = rgba.len() / 4;
         (n > 0).then(|| rgba.chunks_exact(4).map(|p| p[3] as f32).sum::<f32>() / (255.0 * n as f32))
+    }
+
+    /// Cached proof of full opacity across every authored mip, independent of colour space.
+    /// Missing/unreadable textures return `None`; incomplete/non-flat textures cannot prove it.
+    pub fn alpha_is_opaque(&self, path: &str) -> Option<bool> {
+        let key = crate::material::texture_pak_path(path);
+        if let Some(opaque) = lock(&self.shared.opaque_alpha).get(&key) {
+            return *opaque;
+        }
+        let opaque = self.read_dds(&key).and_then(|(_, bytes)| {
+            Dds::parse(&bytes).ok().map(|dds| dds.alpha_is_opaque())
+        });
+        lock(&self.shared.opaque_alpha).insert(key, opaque);
+        opaque
     }
 
     /// Every mip of a flat texture as RGBA8 (CPU decode), for baking: `(width, height, mips)`.
@@ -699,6 +715,50 @@ impl CryLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_cat_cutouts_survive_opaque_smallest_mip_and_cached_opacity_checks() {
+        if !crate::pak_available() {
+            return;
+        }
+        let images = Assets::<Image>::default();
+        let meshes = Assets::<Mesh>::default();
+        let materials = Assets::<StandardMaterial>::default();
+        let binds = Assets::<SkinnedMeshInverseBindposes>::default();
+        let loader = CryLoader::new(
+            images.get_handle_provider(), meshes.get_handle_provider(),
+            materials.get_handle_provider(), binds.get_handle_provider(), false,
+        );
+        let path = "objects/characters/animals/cat_baby_pet/cat_baby_black_pet_df.dds";
+        assert_eq!(loader.mean_alpha(path), Some(1.0));
+        assert_eq!(loader.alpha_is_opaque(path), Some(false));
+        let alias = format!("GAME/{}", path.to_ascii_uppercase());
+        assert_eq!(loader.alpha_is_opaque(&alias), Some(false));
+        assert_eq!(lock(&loader.shared.opaque_alpha).len(), 1, "normalised cache ignores colour space");
+        assert_eq!(loader.alpha_is_opaque("missing-alpha-proof.dds"), None);
+        let mtl = loader.mtl("objects/characters/animals/cat_baby_pet/cat_baby_black_pet.mtl").unwrap();
+        let m = mtl.sub(0).unwrap();
+        for shading in [Shading::Basic, Shading::Full] {
+            let mut prep = Prep::new(&loader);
+            prep.shading = shading;
+            assert_eq!(prep.convert(m).unwrap().alpha_mode, AlphaMode::Mask(0.5));
+            let mut blend = m.clone();
+            blend.opacity = 0.5;
+            assert_eq!(prep.convert(&blend).unwrap().alpha_mode, AlphaMode::Blend);
+            let mut hidden = m.clone();
+            hidden.flags |= crate::material::flags::NO_DRAW;
+            assert!(prep.convert(&hidden).is_none());
+            // Genuine opaque BC1 still elides the redundant test. An out-of-range alpha ref
+            // must remain a mask even when all source texels have alpha one.
+            let mut opaque = m.clone();
+            opaque.textures.iter_mut()
+                .find(|t| t.map == crate::material::TextureMap::Diffuse).unwrap()
+                .file = "objects/env/07_ucc/ucc_pattern04.dds".into();
+            assert_eq!(prep.convert(&opaque).unwrap().alpha_mode, AlphaMode::Opaque);
+            opaque.alpha_test = 1.1;
+            assert_eq!(prep.convert(&opaque).unwrap().alpha_mode, AlphaMode::Mask(1.1));
+        }
+    }
 
     #[test]
     fn eye_hooks_follow_albedo_but_keep_explicit_emissive_overrides() {

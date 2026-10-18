@@ -86,6 +86,8 @@ pub struct Dds<'a> {
     pub depth: u32,
     /// Mip levels actually present in `data` (>= 1).
     pub mips: u32,
+    /// The header requested mip levels that were invalid or did not fit the file.
+    pub mips_truncated: bool,
     /// 6 for cubemaps, else 1.
     pub faces: u32,
     pub format: DdsFormat,
@@ -171,6 +173,7 @@ impl<'a> Dds<'a> {
         let depth = if caps2 & 0x20_0000 != 0 && flags & 0x80_0000 != 0 { depth_field.max(1) } else { 1 };
         let max_mips = 32 - width.max(height).max(depth).leading_zeros();
         let declared = if flags & 0x2_0000 != 0 { mip_field.max(1) } else { 1 };
+        let requested = declared;
         let declared = declared.min(max_mips);
 
         let rest = &bytes[128..];
@@ -213,11 +216,40 @@ impl<'a> Dds<'a> {
                 tail = &tail[(8 + len).min(tail.len())..];
             }
         }
-        Ok(Dds { width, height, depth, mips, faces, format, data, attached, average_color, swapped_rg })
+        Ok(Dds { width, height, depth, mips, mips_truncated: mips != requested, faces, format, data, attached, average_color, swapped_rg })
     }
 
     pub fn is_cubemap(&self) -> bool {
         self.faces == 6
+    }
+
+    /// Proves alpha is 255 throughout every authored mip of a complete, flat texture.
+    /// Scans alpha only, without decoding colour or allocating a full image. Padding texels of
+    /// partial BC blocks are included conservatively: transparent padding declines the proof.
+    pub fn alpha_is_opaque(&self) -> bool {
+        if self.faces != 1 || self.depth != 1 || self.mips_truncated || self.data.is_empty() {
+            return false;
+        }
+        match self.format {
+            DdsFormat::Bc1 => self.data.chunks_exact(8).all(|b| {
+                let c0 = u16::from_le_bytes([b[0], b[1]]);
+                let c1 = u16::from_le_bytes([b[2], b[3]]);
+                let indices = u32::from_le_bytes(b[4..8].try_into().unwrap());
+                // Selector 3 is transparent only in BC1's three-colour mode.
+                c0 > c1 || indices & (indices >> 1) & 0x5555_5555 == 0
+            }),
+            DdsFormat::Bc2 => self.data.chunks_exact(16).all(|b| b[..8].iter().all(|a| *a == 255)),
+            DdsFormat::Bc3 => self.data.chunks_exact(16).all(|b| {
+                let mut alpha = [0; 16];
+                bc4_block(b, &mut alpha);
+                alpha.iter().all(|a| *a == 255)
+            }),
+            DdsFormat::Bgra8 => self.data.chunks_exact(4).all(|p| p[3] == 255),
+            DdsFormat::A8 => self.data.iter().all(|a| *a == 255),
+            // These formats provide an implicit alpha of one, including their authored mips.
+            DdsFormat::Bc4 | DdsFormat::Bc5 | DdsFormat::Bgrx8 | DdsFormat::Bgr8
+            | DdsFormat::L8 | DdsFormat::Rg16Float | DdsFormat::R32Float => true,
+        }
     }
 
     /// Byte range of (face, mip) in `data` (all depth slices of that mip).
@@ -644,6 +676,7 @@ mod tests {
         f.extend_from_slice(&[0u8; 64]); // only mip 0
         let d = Dds::parse(&f).unwrap();
         assert_eq!(d.mips, 1);
+        assert!(d.mips_truncated);
     }
 
     #[test]
@@ -654,5 +687,76 @@ mod tests {
         let mut a = [0u8; 16];
         bc4_block(&b, &mut a);
         assert!(a.iter().all(|&v| v == 255));
+    }
+
+    #[test]
+    fn opacity_proof_checks_bc1_selectors_and_every_mip() {
+        let mut f = header(4, 4, 3, 4, b"DXT1", 0, [0; 4]);
+        // Three-colour mode, selector 0 throughout all three authored mips.
+        f.extend_from_slice(&[0; 24]);
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[132] = 3;
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque(), "base cutout, opaque smallest mip");
+        f[132] = 0;
+        f[148] = 3;
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque(), "lower mip cutout");
+        f[148] = 0;
+        f[128] = 1; // four-colour mode makes selector 3 opaque
+        f[132] = 255;
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+    }
+
+    #[test]
+    fn opacity_proof_reads_bc2_and_both_bc3_alpha_palettes() {
+        let mut f = header(4, 4, 1, 4, b"DXT3", 0, [0; 4]);
+        f.extend_from_slice(&[255; 16]);
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[135] = 0xfe;
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque());
+        let mut f = header(4, 4, 1, 4, b"DXT5", 0, [0; 4]);
+        f.extend_from_slice(&[0; 16]);
+        for (a0, a1, selector, opaque) in [
+            (255, 0, 0, true), (255, 0, 1, false), (255, 0, 2, false),
+            (0, 255, 1, true), (0, 255, 7, true), (0, 255, 6, false),
+            (255, 255, 5, true), (255, 255, 6, false),
+        ] {
+            f[128] = a0;
+            f[129] = a1;
+            let bits: u64 = (0..16).map(|i| (selector as u64) << (i * 3)).sum();
+            f[130..136].copy_from_slice(&bits.to_le_bytes()[..6]);
+            assert_eq!(Dds::parse(&f).unwrap().alpha_is_opaque(), opaque, "{a0}/{a1} selector {selector}");
+        }
+    }
+
+    #[test]
+    fn opacity_proof_declines_unproven_padding_and_missing_mips() {
+        let mut f = header(1, 1, 1, 4, b"DXT1", 0, [0; 4]);
+        f.extend_from_slice(&[0; 8]);
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[132] = 3 << 2; // only a padding texel is transparent: decline conservatively
+        assert_eq!(Dds::parse(&f).unwrap().decode_rgba8(0, 0)[3], 255);
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque());
+        let mut f = header(4, 4, 3, 4, b"DXT1", 0, [0; 4]);
+        f.extend_from_slice(&[0; 8]);
+        let d = Dds::parse(&f).unwrap();
+        assert_eq!(d.decode_rgba8(0, 0)[3], 255);
+        assert!(d.mips_truncated);
+        assert!(!d.alpha_is_opaque());
+    }
+
+    #[test]
+    fn opacity_proof_distinguishes_explicit_and_implicit_uncompressed_alpha() {
+        let mut f = header(2, 1, 1, 0x41, &[0; 4], 32, [0xFF_0000, 0xFF00, 0xFF, 0xFF00_0000]);
+        f.extend_from_slice(&[0, 0, 0, 255, 0, 0, 0, 255]);
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[135] = 254;
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[80] = 0x40; // X8R8G8B8: unused byte is not alpha
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        let mut f = header(2, 1, 1, 2, &[0; 4], 8, [0; 4]);
+        f.extend_from_slice(&[255, 255]);
+        assert!(Dds::parse(&f).unwrap().alpha_is_opaque());
+        f[129] = 0;
+        assert!(!Dds::parse(&f).unwrap().alpha_is_opaque());
     }
 }

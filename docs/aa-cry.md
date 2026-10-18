@@ -301,8 +301,8 @@ contrast 1.2: the client's colour grading).
 
 Effects on callers (aa-world, aa-client): `Emissive` is now tinted by the albedo and small (it
 used to be an additive grey glow); `HumanSkin` is no longer a flat 0.22 grey but the skin colour;
-hair is an alpha mask on the doubled alpha (not alpha-to-coverage, see below); `Illum` materials with
-`AlphaTest` on opaque (BC1) maps are no longer alpha tested; `Specular > 1` no longer makes
+hair is an alpha mask on the doubled alpha (not alpha-to-coverage, see below); materials with
+`AlphaTest` on proven fully opaque maps can skip the redundant test; `Specular > 1` no longer makes
 metal. Costume `Diffuse` stays 0.2: show characters with `StageLighting` (engine units) or about
 3x the nominal sun, not with a plain 10,000 lux light.
 
@@ -333,6 +333,56 @@ Not mapped (no `StandardMaterial` equivalent): the skin SSS map, `Environment` c
 material (scene-level: use `stage::environment_light`), detail maps and blend layers (surveyed:
 they occur on terrain and a few props only; no character material uses them), vertex bending,
 Kajiya-Kay's strand direction (the streaks come from the strand map, not from a tangent).
+
+### Authored alpha cutouts
+
+An opaque smallest mip does **not** prove a texture is opaque. The previous conversion removed
+`AlphaMode::Mask` when the smallest authored mip's mean alpha was at least 0.98. Real BC1
+textures can lose all their cutouts in those tiny mips: BC1 has one-bit transparency and is
+not intrinsically opaque. In the native sources, `humanskin.cfx:509–521` multiplies opacity by
+Diffuse alpha, `commonZPass.cfi:470–475` tests the sampled Diffuse alpha against the per-material
+reference, and `fragLib.cfi:292–295` clips against it when no Z pass supplies that coverage.
+`commonShadowGenPass.cfi:193–203` also clips the sampled alpha in shadows.
+
+`Dds::alpha_is_opaque` now scans alpha across **every authored mip**, directly in compressed
+blocks or explicit alpha bytes without decoding colour or allocating an image. It distinguishes
+BC1 three/four-colour selectors, BC2 nibbles and both BC3 alpha palettes; formats with implicit
+alpha one are opaque. Transparent padding in partial blocks conservatively declines the proof.
+`Dds::mips_truncated` records dropped/invalid requested mips, which cannot prove opacity; missing,
+unreadable, cube and volume inputs cannot prove it either. `CryLoader::alpha_is_opaque` caches
+the result by normalized texture path, independently of colour space.
+
+Only an existing Mask with a finite threshold that the base alpha can reach may be elided, and
+only after that full-opacity proof. Otherwise the original threshold is retained. Blend/no-draw
+decisions, vegetation exclusions, texture data and existing hair approximations are preserved.
+This restores native cutout coverage; it adds no guessed colour, lighting or alpha threshold.
+
+`cargo run -p aa-cry --example alpha_audit -- data/extract/aa-cry/mtl_all.tsv data/extract/aa-cry/alpha/audit.tsv`
+checks the inventory produced by `mtl_dump`, using the same conversion's Mask/no-draw/blend
+decisions and effective texture threshold. The installed audit successfully checks 27,853 masked
+material slots, considering 4,449 unique texture paths. The old mean shortcut elided 12,630 slots; only 10,945 prove
+full opacity. Of the old elisions, 1,605 have authored texels below their actual threshold
+(1,241 character slots): 1,276 Illum, 196 Cloth, 113 HumanSkin, 10 Metal, nine Frozenlayerwip and
+one Hair. Another 80 old elisions are conservatively retained by the stricter full-opacity proof.
+These are material/texture counts; the audit does not establish use of every cutout by every mesh.
+
+The original `cat_baby_black_pet.cdf` explicitly pairs `cat_baby_pet.chr` with
+`cat_baby_black_pet.mtl`: HumanSkin subset 0, AlphaTest 0.5, BC1 Diffuse 256x256 with seven mips.
+Its smallest mip is alpha 255 everywhere, while 2,192 base texels are below the threshold;
+authored mip minima are `[0,0,0,0,0,0,255]`.
+`cargo run -p aa-cry --example alpha_cutout -- --shot shots/aa-cry/alpha_cutout.png --shot-after 8`
+reads that CDF binding and compares the complete original mesh with the old opaque elision and
+the retained authored mask. An orthographic camera gives both meshes the same viewing angle;
+white, unlit factors isolate coverage. The inspected 1920x1080 capture removes
+the black rectangular whisker cards and restores the ear cutouts. There is no matching real-client
+cat capture under `reference/`, so this demonstrates the source-backed coverage correction rather
+than a real-client pixel comparison. `aa-dev` reports 336.0–398.4 FPS (2.59–3.01 ms); the fixture
+window exits after capture.
+
+Validation (2026-10-17): 71 library tests pass, one exhaustive audit is ignored. Five focused tests
+cover compressed alpha modes, every authored mip, padding/truncation, explicit/implicit alpha,
+real cat conversion, normalized caching, blend/no-draw exclusions and an unreachable alpha
+reference. Genuine opaque inputs still skip their redundant mask.
 
 ### Static UCC cloth (`shade/ucc.rs`)
 
