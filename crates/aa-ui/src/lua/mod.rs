@@ -357,34 +357,37 @@ pub fn flush(lua: &Lua) {
 }
 
 /// Raise a UI event (`ENTERED_WORLD_SELECT`, ...): every widget that registered it gets
-/// `OnEvent(self, name, args...)`.
+/// `OnEvent(self, name, args...)`, followed by UIParent's callbacks as `fn(args...)`.
 pub fn fire_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {
     let ids = ui(lua).events.get(name).cloned().unwrap_or_default();
     for id in ids {
-        if id == 0 {
-            // UIParent:SetEventHandler(name, fn): fn(...)
-            let r = reg(lua);
-            let f = r
-                .handlers
-                .raw_get::<Option<Table>>(0)
+        let mut a = vec![Value::String(lua.create_string(name).unwrap())];
+        a.extend(args.iter().cloned());
+        call_handler(lua, id, "OnEvent", a);
+    }
+    // Native 3920fcf0 iterates root callbacks after widget listeners, in equal-key
+    // insertion order. New callbacks can run this event; released future slots cannot.
+    let callbacks = reg(lua)
+        .handlers
+        .raw_get::<Option<Table>>(0)
+        .ok()
+        .flatten()
+        .and_then(|hs| {
+            hs.raw_get::<Option<Table>>(format!("__ev_{name}"))
                 .ok()
                 .flatten()
-                .and_then(|t| {
-                    t.raw_get::<Option<Function>>(format!("__ev_{name}"))
-                        .ok()
-                        .flatten()
-                });
-            if let Some(f) = f {
+        });
+    if let Some(callbacks) = callbacks {
+        let mut i = 1;
+        while i <= callbacks.raw_len() {
+            if let Ok(Value::Function(f)) = callbacks.raw_get::<Value>(i) {
                 if let Err(e) = f.call::<()>(MultiValue::from_iter(args.iter().cloned())) {
                     bevy::log::warn!("aa-ui: event handler {name}: {e}");
                 }
                 flush(lua);
             }
-            continue;
+            i += 1;
         }
-        let mut a = vec![Value::String(lua.create_string(name).unwrap())];
-        a.extend(args.iter().cloned());
-        call_handler(lua, id, "OnEvent", a);
     }
 }
 

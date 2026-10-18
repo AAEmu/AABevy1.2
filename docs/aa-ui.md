@@ -1985,3 +1985,77 @@ asserted exactly one cancellation, and reopened it before `--shot`.
 350x165 crop has mean absolute pixel error 3.59/255, and all 52 comparable named
 screen objects match geometry. The 2D example omits the reference's character and
 3D scene. It logged 356-463 FPS, zero script errors, exit 0 and automatic closure.
+
+## UIParent event callback ownership (2026-10-18)
+
+Original `unitframe/pet.alb` and `hud/pet_action_bar/pet.alb` both assign the global
+`SpawnPet` and register their distinct closures using
+`UIParent:SetEventHandler("SPAWN_PET", SpawnPet)`. The global name is intentionally
+reused; registration retains each closure independently. Keeping only the last
+function made one spawn invoke the action-bar callback twice and omit the frame.
+
+Native bindings `392610d3` / `3926111f` lead to registration `3925cde0` and release
+`3925ce30`. Registration manager `39212370` inserts every event/script/function
+triple through multimap insertion `39211810`, without replacement or deduplication.
+Release `39210f50` searches the event's equal range, compares script state and
+function identity, and erases only the first matching registration. Its callback
+argument is required; an event name alone does not release all callbacks.
+Dispatch `3920fcf0` calls ordinary widget listeners first, then iterates the root
+callback range in insertion order, passing only event arguments. The iterator is
+live: additions can run in the current event and released future callbacks are
+absent. The toolkit uses ordered Lua slots with released references replaced by
+`false`, preserving iteration positions during callbacks and reentrant dispatch.
+Widget subscriptions remain separate. Callback errors still allow later listeners.
+
+`tests/event_handlers.rs` exercises distinct and duplicate functions, exact release,
+widget-before-root order, unchanged event payloads, live addition/release, and error
+isolation. Its original-bytecode regression creates both actual pet widgets from one
+spawn, dismisses them, completes retirement, and creates both again from one spawn.
+
+The same regression exposed a second constructor failure: original pet-bar
+`UpdateBindingText` passes `slot:GetHotKey()` directly to
+`ConvertAbbreviatedBindingText` / `string.upper`, so nil aborts construction.
+Native `GetHotKey` (`39256500`) returns the slot string at `+0x340`; slot constructor
+`392c7950` initializes it to empty string `39ac3044` and clears it with the empty
+literal `3999c708`. Read-only loaded-client checks confirmed the shared string is
+empty and vtable `399c97c8 + 0xa4` resolves to slot identity method `392c7aa0`.
+The toolkit now returns an empty string for unbound/unestablished slots and absent
+or nil `AAUI.SlotHotKey` responses. Bound key strings remain unchanged. The original
+pet regression also checks the completed 250x105 bar, avoiding a partial-constructor
+false positive where a visible but unfinished 0x0 widget exists.
+All five event-handler/slot regressions and six popup-lifecycle regressions passed
+after these changes (`cargo test -p aa-ui --test event_handlers --test popup_lifecycle`).
+Integration visual check used the client's `owned_pet_hud` example with `aa-dev`
+default plugins, `DevPlugin` and `--shot`:
+`shots/hud/sol61-owned-pet/native-frame-and-bar-final.png` was inspected and shows
+the named pet frame and full original state/command/action bar. It logged 304-399
+FPS and closed automatically. The broader fixture logged one newly reached
+`ENTERED_WORLD` callback error (`battlefield/entrance.alb:46`, nil `maxCount`);
+the pet constructors completed. No supplied pet-specific native capture was available
+for a pixel comparison; this fixture omits the 3D scene and changes no UI calibration.
+
+## Original pet command gates: native evidence (2026-10-18)
+
+This read-only UI audit supports client-owned API work; it does not add command
+planning to the toolkit. Native `PassiveMode` (`39069ac0`) requires a current own
+pet, requests mode 1 and returns true even for a repeated passive request.
+`StandMode` (`39069bb0`) suppresses only an already-standing pet (`+0x34 == 0`)
+whose active raw mount-skill command (`+0x58`) equals zero. `ProtectiveMode`
+(`39069ca0`) and `AggressiveMode` (`39069d60`) also require attackability (`+0x24`),
+and suppress the matching mode 2/3 only while that command field is zero. All four
+report whether their branch requests a mode; deeper planner `3933c8f0` may still
+reject it. Constructor `3933ab60` and spawn initialization `3933ac10` initialize
+`+0x58` from zero global `3a16831c`; mode state is a separate field. Skill planner
+`3933e630` stores the original raw mount-skill ID at `3933eb11`; its completion
+paths clear the field at `3933ecf2`, `3933ed0d`, and `3933ed25`. It is not a target
+object ID. Read-only process memory confirmed the relevant mode/skill sentinels
+`39addc54`, `39addc5c`, and `3a16831c` are zero in the original loaded client.
+
+`CanDismiss` (`3906a560`) additionally calls `39357830`: its result depends on the
+local controller's virtual `+0x8c` result and casting/channel fields. The controller
+result's semantic name remains unresolved, so the simpler existence check is not
+claimed as parity. `CanMount` (`3906a440`) tries the current selected unit before
+the current own pet through `3935aa10`; it includes kind/alive, unattached player,
+controller/casting/channel, status, squared distance <=625 (25 units), two-second
+cooldown, buff and model-seat gates. It is broader than `IsMountablePet`, and these
+unresolved planner details must stay explicit when integrating native commands.
