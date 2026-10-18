@@ -891,8 +891,10 @@ no fallback to the purchase price. Buyback charges this same refund. Native
 original cart ten cells (`16 - 6`) and sell list sixteen.
 
 `Command::Bank(BankCommand)` provides `DepositMoney { amount, aa_point }`,
-`WithdrawMoney { amount, aa_point }`, and `Expand { container, auto_use_aa_point }` (2 bag,
-3 bank). Negative amounts and invalid containers are refused locally. Bank slots and contents
+`WithdrawMoney { amount, aa_point }`, `Expand { container, auto_use_aa_point }` (2 bag,
+3 bank; native context zero), and `ExpandWithContext { container, auto_use_aa_point,
+raw_context_obj_id }`. Expansion now writes the complete native eight-byte body; see the
+service re-audit below. Negative amounts, invalid containers and over-24-bit contexts are refused locally. Bank slots and contents
 already arrive at login in `Inventory.bank_slots` / `bank`; read them with `bank_items()` /
 `first_free_bank_slot()`. Moves and splits use the existing `plan_move` and `SwapItems` /
 `SplitItem` commands with container3. Balances are `PlayerStats.money` / `bank_money`, updated
@@ -999,7 +1001,9 @@ flag is parsed but ignored. Original Lua calls `X2Item:RepairAll()`, `RepairAllC
 `Repair` is a Bevy resource and `WorldState::repair`. `pending: Vec<RepairCommand>` tracks
 successful sends (`Event::Repair(RepairEvent::Requested(command))`); malformed requests use
 `RequestRejected { command, message }` and `last_error`. `last_report: Option<RepairReport>`
-is cleared when sending and filled only by the server's `ItemsChanged` reason3 (repair).
+is cleared when sending and filled only by a complete `ItemsChanged` reason3 (repair).
+Truncated item tasks do not complete a request; the packet decoder already rejects malformed
+frames, and the resource now enforces this independently for replay/manual events.
 Its `items: Vec<RepairedItem { container, slot, item_id, durability }>` lists confirmed
 detail updates. `Some(empty)` means a response with no repairs; `None` means no response yet.
 Ordinary reason4 durability loss does not complete a repair. Inventory folds full item details
@@ -1028,8 +1032,9 @@ unaffordable; `quote.check()` returns typed `NotEnoughMoney { required, availabl
 `NotEnoughCertificates { item_id, required, available }`. Invalid container/capacity,
 missing row and malformed negative requirements have separate `ExpansionFailure` variants.
 These are local preflight results: the lane silently ignores missing money/items, so they
-must not be presented as received server errors. Confirmation sends existing
-`BankCommand::Expand`; `InventoryExpanded` alone confirms capacity. Current rows expand by10,
+must not be presented as received server errors. Immediately before confirmation use
+`quote.recheck(&inventory,current_money)` to reject stale capacity and refresh requirements.
+Confirmation sends `BankCommand::Expand` or `ExpandWithContext`; `InventoryExpanded` alone confirms capacity. Current rows expand by10,
 require certificate8000025x1 at price0, and stop at bag150 / bank130. Native dialog info uses
 `kind="bag"|"bank"`, `dialog="money"|"item"|"item_money"`, `currency,cost,itemType,itemCount`;
 the original `DLG_TASK_EXPAND_INVENTORY` handler formats this supplied metadata.
@@ -2306,3 +2311,81 @@ and over-cap inline consumption, string byte limits, following DD04 entries for 
 duplicate/remove/recreate/reset behavior, no phantom units, and an ephemeral loopback session
 checking ordered events/resource updates, later HP/weather state and no automatic reply.
 Live elevator/raft visibility, riding and scene-transition QA remain pending while the lane is stalled.
+
+
+## Inventory services native/lane re-audit (2026-10-17)
+
+The NPC repair and bag/bank expansion request/receive APIs already existed. This follow-up fixes
+the native expansion tail, bank event routing, service send gating and confirmation preflight;
+it does not invent additional successful repairs, sorts or expansions.
+
+Native expansion `CSExpandSlots 0x041` is **eight bytes**: i32 container, bool auto-use-AA,
+then a BC context object ID. The earlier five-byte implementation matched the lane reader only.
+`BankCommand::Expand { container, auto_use_aa_point }` keeps its Rust shape and now appends an
+explicit unset context zero. `ExpandWithContext { container, auto_use_aa_point,
+raw_context_obj_id }` writes the caller's exact 24-bit context, with zero allowed and values above
+`0xffffff` rejected before send. Container remains 2 bag or 3 bank. The context is not inferred
+from a target, current NPC, owner or local character.
+
+Native sender `394e0980` sets CS `0x041` at `394e098f`, constructs via `397aba40`, and sends at
+`394e09b9`. Its vtable `399e5ea8` points to serializer `397b97b0`: signed i32 `slotType`, bool
+`autoUseAAPoint`, then BC data at packet+0x14. The sender obtains that last argument from
+`393b7b80(0xf)`, which reads a navigation-context value or a fallback global. The exact role and
+lifecycle of those globals remain unresolved; the public API therefore exposes raw context only.
+The lane `systems/economy/item_handlers.rs::CSExpandSlotsPacket` reads its original first five
+bytes and ignores the native tail. `net/registry.rs::dispatch` does not require stream exhaustion,
+so the complete native request remains source-compatible with this lane's individually framed
+requests. That compatibility is source-audited, not newly live-verified while the lane is stalled.
+
+Native NPC repair request shapes match the existing code: `CSRepairSingleEquipment 0x03c`
+is u8 container/u8 physical slot/bool AA (three bytes), and `CSRepairAllEquipments 0x03d` is one
+bool. Sender `394f10e0` chooses single at `394f1298` and all at `394f12d5`, then sends at
+`394f12c8` / `394f12fd`. Constructors `397abb10` / `397abb30`, vtables `399e5efc` / `399e5f08`
+and serializers `397b99d0` / `397b0930` confirm those fields. Native bag wrapper `3944ccc0`
+converts the Lua one-based physical slot to zero-based before reaching this sender; sorting still
+requires the UI's virtual-to-physical mapping first. Repair-all may skip individual unaffordable
+items in the lane. Complete reason3 item-task packets acknowledge only the detail updates they
+contain; an empty report is a response with no repaired items. Money changes remain separate
+reason83 tasks, and unrelated errors/wear/capacity packets do not finish a repair.
+
+`BankEvent::{Requested(BankCommand), RequestRejected { command, message }}` is exposed through
+`Event::Bank` and reexported from `aa_net`. Requested means only a successful local socket write.
+Invalid bank commands previously used `ShopEvent::RequestRejected`; they now stay in the bank
+family. Bank and repair session commands require `Phase::InWorld`; phase and field validation
+failures send no bytes and emit their own local rejection. A missing connection is not a successful
+send. No additional bank resource was added: real balances remain `PlayerStats`, capacity and
+items remain `Inventory`, and repair reports remain `Repair`.
+
+`ExpansionQuote::check()` now also checks a manually constructed quote's container, representable
+capacity, expected next capacity, rule step/bank flag and nonnegative requirements.
+`quote.recheck(&inventory,current_money)` returns a fresh checked quote with current money and
+certificates counted only in the bag, or `ExpansionFailure::CapacityChanged { expected, actual }`
+when the quoted container has changed. This matters because CS `0x041` contains neither expected
+capacity nor rule step: sending an old confirmation could expand a different tier. The helper is
+local preflight, not a reservation, packet send, ACK or capacity/currency/item mutation.
+
+Native expansion ACK `SCInvenExpanded 0x04d` remains exactly u8 container/u8 slots: constructor
+`391a9850` sets the opcode at `391a986b`, vtable `399b3204`, reader `397aeaf0`. It confirms only
+returned capacity. Certificate consumption must arrive in its actual item tasks. The lane parses
+but ignores auto-AA and native context; `inventory::expand_slot` also ignores rule `currency_id`
+and checks/debits character gold. It can silently refuse missing requirements or the final tier.
+For a positive configured money price it deducts gold without sending its MoneyChange task, so
+the client must retain the last received balance rather than synthesizing a debit from capacity.
+Current database tiers have price zero and require a bag certificate, with bag150/bank130 limits.
+Expansion success remains unavailable in fresh-account live QA without that naturally acquired
+certificate; no grant or fake ACK is used.
+
+Sorting remains local native tab ordering, with no inventory-sort request or server rearrangement
+ACK. The original default-tab comparator and physical-slot mapping are documented above; tab
+persistence/refresh and BAG_TAB_SORTED/BANK_TAB_SORTED belong to the app's original Lua bridge.
+The lane has generic per-character UI-data request/save packets, but their option IDs/blob mapping
+to these tabs has not been proved here and is not fabricated. `CSRepairSlaveItems 0x035` is a
+three-byte NPC-ID request whose lane handler only logs, so no functional vehicle-repair API or
+success is claimed. `CSRepairPetItems 0x0b5` is stablehand revival of dead mate summon items,
+not inventory equipment repair, and remains the separate owned-mate service scope.
+
+Focused tests cover independent native expansion bytes for zero/nonzero/maximal contexts,
+validation of public/stale quotes and fresh money/bag certificates, all ACK truncation points,
+partial repair report rejection, and an ephemeral loopback session checking service phases,
+request rejection families, exact frame bytes, ordered real ACKs and unchanged unacknowledged
+money/items/repair requests. No live lane connections or server changes were made.

@@ -514,6 +514,7 @@ pub enum Event {
     Mail(crate::mail::MailEvent),
     Friend(crate::friend::FriendEvent),
     Repair(crate::repair::RepairEvent),
+    Bank(crate::bank::BankEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -937,11 +938,13 @@ impl Session {
                     self.send_game(game::ClientMsg::Shop(m)).await;
                 }
             }
-            Command::Bank(m) => {
-                if let Err(message) = m.validate() {
-                    self.emit(Event::Shop(crate::shop::ShopEvent::RequestRejected(message.into())));
-                } else {
-                    self.send_game(game::ClientMsg::Bank(m)).await;
+            Command::Bank(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Bank(crate::bank::BankEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::Bank(crate::bank::BankEvent::RequestRejected { command, message: "bank service requires an active character".into() }));
+                } else if self.send_game(game::ClientMsg::Bank(command)).await {
+                    self.emit(Event::Bank(crate::bank::BankEvent::Requested(command)));
                 }
             }
             Command::Party(m) => {
@@ -1022,6 +1025,8 @@ impl Session {
             Command::Repair(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: "repair requires an active character".into() }));
                 } else if self.send_game(game::ClientMsg::Repair(command)).await {
                     self.emit(Event::Repair(crate::repair::RepairEvent::Requested(command)));
                 }
@@ -1628,6 +1633,212 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn repair_and_bank_services_validate_locally_and_wait_for_complete_authoritative_acks() {
+        use crate::bank::{BankCommand, BankEvent};
+        use crate::repair::{RepairCommand, RepairEvent};
+        use crate::wire::Writer;
+        use tokio::io::AsyncWriteExt;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        let expand = BankCommand::Expand {
+            container: 2,
+            auto_use_aa_point: true,
+        };
+        session.command(Command::Bank(expand)).await;
+        assert!(
+            events.try_recv().is_err(),
+            "no connection cannot produce a successful send event"
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::CharacterSelect;
+        session.command(Command::Bank(expand)).await;
+        assert!(
+            matches!(events.try_recv(), Ok(Event::Bank(BankEvent::RequestRejected { command, .. })) if command == expand)
+        );
+        let single = RepairCommand::Single {
+            container: 1,
+            slot: 15,
+            auto_use_aa_point: true,
+        };
+        session.command(Command::Repair(single)).await;
+        assert!(
+            matches!(events.try_recv(), Ok(Event::Repair(RepairEvent::RequestRejected { command, .. })) if command == single)
+        );
+        session.phase = Phase::InWorld;
+        for command in [
+            BankCommand::Expand {
+                container: 1,
+                auto_use_aa_point: false,
+            },
+            BankCommand::ExpandWithContext {
+                container: 3,
+                auto_use_aa_point: false,
+                raw_context_obj_id: 0x1000000,
+            },
+            BankCommand::DepositMoney {
+                amount: -1,
+                aa_point: 0,
+            },
+        ] {
+            session.command(Command::Bank(command)).await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::Bank(BankEvent::RequestRejected { command: actual, .. })) if actual == command)
+            );
+        }
+        let bad_repair = RepairCommand::Single {
+            container: 3,
+            slot: 0,
+            auto_use_aa_point: false,
+        };
+        session.command(Command::Repair(bad_repair)).await;
+        assert!(
+            matches!(events.try_recv(), Ok(Event::Repair(RepairEvent::RequestRejected { command, .. })) if command == bad_repair)
+        );
+        let mut state = crate::state::WorldState::default();
+        state.apply(&Event::InventoryInit {
+            bag_slots: 50,
+            bank_slots: 50,
+        });
+        state.stats.money = 777;
+        state.inventory.bag[0] = Some(crate::model::Item {
+            id: 7,
+            template_id: 8000025,
+            count: 2,
+            ..Default::default()
+        });
+        let before_bag = state.inventory.bag.clone();
+        let contextual = BankCommand::ExpandWithContext {
+            container: 3,
+            auto_use_aa_point: false,
+            raw_context_obj_id: 0x123456,
+        };
+        let all = RepairCommand::All {
+            auto_use_aa_point: false,
+        };
+        let requests = [
+            (
+                Command::Bank(expand),
+                vec![0xdd, 1, 0, 0, 0x41, 0, 2, 0, 0, 0, 1, 0, 0, 0],
+            ),
+            (
+                Command::Bank(contextual),
+                vec![0xdd, 1, 0, 1, 0x41, 0, 3, 0, 0, 0, 0, 0x56, 0x34, 0x12],
+            ),
+            (
+                Command::Repair(single),
+                vec![0xdd, 1, 0, 2, 0x3c, 0, 1, 15, 1],
+            ),
+            (Command::Repair(all), vec![0xdd, 1, 0, 3, 0x3d, 0, 0]),
+        ];
+        for (request, expected_frame) in requests {
+            session.command(request.clone()).await;
+            let event = events.try_recv().unwrap();
+            match request {
+                Command::Bank(expected) => assert!(
+                    matches!(&event, Event::Bank(BankEvent::Requested(actual)) if *actual == expected)
+                ),
+                Command::Repair(expected) => assert!(
+                    matches!(&event, Event::Repair(RepairEvent::Requested(actual)) if *actual == expected)
+                ),
+                _ => unreachable!(),
+            }
+            state.apply(&event);
+            let mut length = [0; 2];
+            peer.read_exact(&mut length).await.unwrap();
+            let mut received = vec![0; u16::from_le_bytes(length) as usize];
+            peer.read_exact(&mut received).await.unwrap();
+            assert_eq!(
+                received, expected_frame,
+                "rejected requests must not reach the socket"
+            );
+        }
+        assert_eq!(
+            (state.inventory.bag_slots, state.inventory.bank_slots),
+            (50, 50)
+        );
+        assert_eq!(state.inventory.bag, before_bag);
+        assert_eq!(state.stats.money, 777);
+        assert!(
+            state.shop.last_error.is_none(),
+            "bank validation must not report a shop rejection"
+        );
+        assert_eq!(state.repair.pending, vec![single, all]);
+        assert!(state.repair.last_report.is_none());
+        let mut body = Writer::new();
+        body.u16(0)
+            .u16(crate::opcodes::sc::SCInvenExpandedPacket)
+            .u8(2)
+            .u8(60);
+        body.u16(0)
+            .u16(crate::opcodes::sc::SCItemTaskSuccessPacket)
+            .raw(&[3, 0, 0, 0, 0, 0, 0]);
+        body.u16(0)
+            .u16(crate::opcodes::sc::SCOnOffSnowPacket)
+            .bool(true);
+        let body = body.finish();
+        let len = body.len() as u16;
+        let mut frame = Writer::new();
+        frame
+            .raw(&[0xdd, 4])
+            .u16(3)
+            .u8(1)
+            .u16(len)
+            .u16(!len)
+            .raw(&body);
+        let frame = frame.finish();
+        peer.write_all(&(frame.len() as u16).to_le_bytes())
+            .await
+            .unwrap();
+        peer.write_all(&frame).await.unwrap();
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+        let capacity = events.try_recv().unwrap();
+        assert!(matches!(
+            &capacity,
+            Event::InventoryExpanded {
+                container: 2,
+                slots: 60
+            }
+        ));
+        state.apply(&capacity);
+        assert_eq!(
+            state.repair.pending,
+            vec![single, all],
+            "capacity ACK is not a repair ACK"
+        );
+        let repair_ack = events.try_recv().unwrap();
+        assert!(
+            matches!(&repair_ack, Event::ItemsChanged(tasks) if tasks.reason == 3 && !tasks.truncated)
+        );
+        state.apply(&repair_ack);
+        assert_eq!(
+            state.repair.pending,
+            vec![all],
+            "one complete ACK completes only one request"
+        );
+        assert!(state.repair.last_report.as_ref().unwrap().items.is_empty());
+        let snow = events.try_recv().unwrap();
+        assert!(matches!(&snow, Event::Snow(true)));
+        state.apply(&snow);
+        assert!(state.world.snow);
+        assert_eq!(
+            (state.inventory.bag_slots, state.inventory.bank_slots),
+            (60, 50)
+        );
+        assert_eq!(state.inventory.bag[0], before_bag[0]);
+        assert_eq!(
+            state.stats.money, 777,
+            "capacity ACK alone cannot invent certificate or money settlement"
+        );
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn gimmick_batch_reaches_metadata_in_order_without_phantom_motion_or_reply() {
