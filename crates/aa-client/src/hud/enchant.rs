@@ -288,6 +288,9 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mu
     // Actual result producer admission formats the current record here,
     // emits original Lua first, then advances the controller receiver.
     super::item_effects::receive(rt, state, event);
+    // Specialty callbacks may query or change selected items synchronously.
+    // They see all preceding native rows and no later receipt in this frame.
+    super::specialty::receive(rt.map(|rt| &rt.lua), state, event);
 }
 
 fn track(
@@ -297,7 +300,8 @@ fn track(
     built: Res<super::HudBuilt>,
     mut inventory: Option<ResMut<aa_net::state::Inventory>>,
 ) {
-    let rt = rt.as_deref().filter(|_| built.up);
+    let stage_rt = rt.as_deref();
+    let rt = stage_rt.filter(|_| built.up);
     // Error callbacks can query locks before their first release in this same
     // frame; refresh the shared pending provider before any synchronous Lua.
     if let Some(inventory) = inventory.as_deref() {
@@ -307,7 +311,10 @@ fn track(
         super::item_effects::replay(rt, &state.0);
     }
     for NetEvent(event) in events.read() {
-        dispatch(rt, &state.0, event, inventory.as_deref_mut());
+        // SC099 has no Game/HUD gate; retain the actual stage runtime while
+        // other item callbacks keep their existing HUD admission policy.
+        let event_rt = if matches!(event, Event::SpecialtyRatio(_)) { stage_rt } else { rt };
+        dispatch(event_rt, &state.0, event, inventory.as_deref_mut());
     }
     if let Some(inventory) = inventory.as_deref() {
         state.0.borrow_mut().enchant.selection.sync_pending(&inventory);
