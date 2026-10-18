@@ -63,8 +63,12 @@ target/debug/aa-crime-20261018-v4.exe; its changes affect only the visual fixtur
 
 Screenshot review also exposes the toolkit's existing unimplemented inline
 `|d` dishonor token: the original infamy label shows that literal prefix.
-Its native rich-text audit is queued with aa-ui; scripts and labels are not
-rewritten to conceal it. Other character-stat fallbacks remain outside this slice.
+That gap is now fixed in aa-ui425f08e using the actual native numeric parser and
+captured dishonor glyph. Refreshed shots/hud/chat-locks/dishonor.png and waiting.png
+are inspected at398.1-505.0/258.4-281.0 FPS: the original label retains raw |d1234
+text but displays1234 and the red skull, with the original waiting tooltip intact.
+No scripts or labels were rewritten. The later checked lock build in aa-client-chat.md
+supersedes this milestone's playable alias. Other character-stat fallbacks remain outside this slice.
 No live in-world crime/jury settlement is claimed; the lane connection stall
 remains open. Reproduce the visual example with:
 

@@ -278,7 +278,7 @@ pub(crate) fn chat_read(lua: &Lua, owner: &str, suffix: &str) -> Option<Json> {
     store.data.get("chat")?.get(owner)?.get(suffix).cloned()
 }
 
-pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) {
+pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) -> bool {
     let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
     let mut store = store.lock().unwrap_or_else(|e| e.into_inner());
     let chat = store.data.entry("chat").or_insert_with(|| json!({}));
@@ -287,7 +287,10 @@ pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) {
     if !record.is_object() { *record = json!({}); }
     record[suffix] = value;
     store.dirty = true;
-    if let Err(e) = store.save() { bevy::log::warn!("settings: chat save: {e:#}"); }
+    match store.save() {
+        Ok(()) => true,
+        Err(e) => { bevy::log::warn!("settings: chat save: {e:#}"); false }
+    }
 }
 
 pub fn install_hud(lua: &Lua) -> mlua::Result<()> {

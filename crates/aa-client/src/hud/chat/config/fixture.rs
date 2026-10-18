@@ -44,7 +44,11 @@ pub(in crate::hud) fn show_options(rt: &UiRuntime) -> mlua::Result<()> {
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
-    if !std::env::args().any(|a| a == "--chat") {
+    let locked = std::env::args().any(|a| a == "--locked");
+    if locked {
+        context_action(&rt).unwrap();
+    }
+    if !locked && !std::env::args().any(|a| a == "--chat") {
         show_options(&rt).unwrap();
     }
     if std::env::args().any(|a| a == "--style") {
@@ -61,9 +65,48 @@ pub(in crate::hud) fn run() {
         .insert_non_send(rt)
         .insert_non_send(HudBridge(state))
         .add_systems(Startup, physical_pixels)
+        .add_systems(Update, lock_preview.before(aa_ui::UiFrame).run_if(move || locked))
         .run();
     if path.exists() {
         std::fs::remove_file(path).unwrap();
+    }
+}
+pub(super) fn context_action(rt: &UiRuntime) -> Result<(), Box<dyn std::error::Error>> {
+    let window = live_window(&rt.lua, 0).unwrap();
+    let (button, point) = {
+        let u = ui(&rt.lua);
+        let button = u.tree.widget(window).unwrap().chat.as_ref().unwrap().tabs[0].button;
+        let r = u.tree.rect(button);
+        (button, (r.x + r.w * 0.5, r.y + r.h * 0.5))
+    };
+    assert_eq!(aa_ui::input::pick(&rt.lua, point.0, point.1), Some(button));
+    rt.lua.globals().set("CHAT_LOCK_TAB", object_table(&rt.lua, button)?.unwrap())?;
+    let mut mouse = aa_ui::input::MouseState::default();
+    aa_ui::input::update(&rt.lua, &mut mouse, Some(point), false, false, true, 0.);
+    crate::hud::expansion::fixture::click(rt, "CHAT_LOCK_TAB:GetAttachedWidget().buttons[1]")
+}
+pub(super) fn drag_attempt(rt: &UiRuntime) {
+    let window = live_window(&rt.lua, 0).unwrap();
+    let p = {
+        let u = ui(&rt.lua);
+        let button = u.tree.widget(window).unwrap().chat.as_ref().unwrap().tabs[0].button;
+        let r = u.tree.rect(button);
+        (r.x + r.w * 0.5, r.y + r.h * 0.5)
+    };
+    let mut mouse = aa_ui::input::MouseState::default();
+    for (point, down, up) in [
+        (p, true, false),
+        ((p.0 + 5., p.1), false, false),
+        ((p.0 + 30., p.1 + 15.), false, false),
+        ((p.0 + 30., p.1 + 15.), false, true),
+    ] {
+        aa_ui::input::update(&rt.lua, &mut mouse, Some(point), down, up, false, 0.);
+    }
+}
+fn lock_preview(rt: NonSend<UiRuntime>, time: Res<Time>, mut last: Local<f32>) {
+    if time.elapsed_secs() - *last >= 2. {
+        *last = time.elapsed_secs();
+        drag_attempt(&rt);
     }
 }
 fn physical_pixels(mut windows: Query<&mut Window, With<PrimaryWindow>>) {

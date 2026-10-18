@@ -12,6 +12,7 @@ use serde_json::json;
 #[allow(dead_code)]
 pub(in crate::hud) mod fixture;
 mod model;
+mod locks;
 mod table;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,7 @@ pub(in crate::hud) struct View {
     font: i32,
     model: Model,
     options: [f32; 2],
+    locks: [bool; 8],
 }
 impl Default for View {
     fn default() -> Self {
@@ -34,6 +36,7 @@ impl Default for View {
             font: 15,
             model: Model::default(),
             options: [0.7, 0.5],
+            locks: [false; 8],
         }
     }
 }
@@ -109,22 +112,27 @@ fn ensure(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         .map(|v| v.map(f32::from_bits))
         .unwrap_or([0.7, 0.5]);
     view.loaded = true;
+    view.locks = key.as_deref()
+        .and_then(|key| crate::settings::chat_read(lua, key, "locks"))
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or([false; 8]);
     let [over, leave] = view.options;
     drop(data);
     aa_ui::lua::chat::set_alpha_options(lua, over, leave);
     Ok(())
 }
-fn save(lua: &Lua, state: &Shared, suffix: &str) {
+fn save(lua: &Lua, state: &Shared, suffix: &str) -> bool {
     let data = state.borrow();
     let view = &data.chat_config;
-    let Some(key) = view.key() else { return };
+    let Some(key) = view.key() else { return false };
     let value = match suffix {
         "tabs" => view.model.tabs_json(),
         "extra" => view.model.extra_json(),
         "options" => json!(view.options.map(f32::to_bits)),
-        _ => return,
+        "locks" => json!(view.locks),
+        _ => return false,
     };
-    crate::settings::chat_save(lua, &key, suffix, value);
+    crate::settings::chat_save(lua, &key, suffix, value)
 }
 fn live_window(lua: &Lua, window: i32) -> Option<Id> {
     let u = ui(lua);
@@ -137,6 +145,7 @@ fn live_window(lua: &Lua, window: i32) -> Option<Id> {
 }
 
 pub(in crate::hud) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
+    locks::install(lua, state)?;
     let api: Table = lua.globals().get("X2Chat")?;
     let hooks: Table = lua.globals().get("AAUI")?;
     let s = state.clone();
@@ -406,5 +415,5 @@ pub(in crate::hud) fn plugin(app: &mut App) {
             .before(super::super::sync_hud)
             .before(super::super::prebuild_hud)
             .before(super::super::build_hud),
-    );
+    ).add_systems(Update, locks::sync.after(super::super::sync_hud).after(super::super::build_hud).before(aa_ui::UiFrame));
 }

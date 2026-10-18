@@ -55,6 +55,25 @@ idle reset. Message content stays fully opaque; metadata background alpha is
 stored while the original message background DRAW alpha is1. Its background
 uses the global dynamic .5/.7 pair; tab/divider decorations retain metadata alpha.
 
+The eight window lock flags are saved independently as the locks key. Both
+native IsLockedChatWindowByChatTabId and LockChatWindowByTabId resolve the raw
+tab's owner rather than treating a tab ID as a window ID. Malformed numeric
+arguments return zero values; valid unknown raw IDs return one false. The
+setter accepts a boolean or a numeric nonzero flag, changes memory first,
+applies AllowTabSwitch(!locked) and UseResizing(!locked) to an actual live window,
+then returns the local save result. An absent live owner therefore returns false
+after changing its in-memory byte, without writing the file; a later valid save
+includes all eight bytes. Invalid/missing saved arrays reset all eight to false.
+Restored flags apply once to each live widget before the toolkit frame; explicit
+unchanged unlocks still cancel the native warning. The app JSON is its own storage
+representation, with no native eight-byte binary import claim.
+
+Locking preserves normal tab selection and right-click menus. An actual registered
+drag attempt arms the original3000ms notification with400ms blink intervals and
+prevents moving/resizing. It does not show the warning on an ordinary click.
+Unlocked first-tab dragging uses the toolkit's native generic window movement;
+other-tab splitting and reparenting remain open.
+
 Native source evidence includes record parser39458870, manager record lookup
 39503d20, validator39503df0, add39507e00, save-tabs39504680,
 save-extra395044d0, local key39286690, selection395139b4..bb,
@@ -64,8 +83,8 @@ lifecycle/selection and alpha execution artifacts are archived under
 palette/filter provenance and PE SHA256.
 
 Remaining boundaries: provider-specific extra name filtering at39507e18,
-InitChatWindow full reset, native window locks/tab dragging/tearing off,
-require their remaining toolkit/source integration.
+InitChatWindow full reset, window geometry persistence and other-tab splitting/
+tearing off require their remaining toolkit/source integration.
 Original physical right-click context dispatch is implemented in aa-ui, including
 the protected rawID0 clear action without changing selection. Legacy fallbacks for the remaining
 methods are not counted as implemented. Character-scoped writes preserve other
@@ -81,6 +100,12 @@ fresh stage, and proves unknown retained raw IDs leave saved bytes unchanged.
 These seven checks pass again after the method hook integration. aa-ui separately
 passes30 selected input/method checks,12 executed native method groups and an
 inspected restored-input capture at517.4-566.5 FPS.
+With lock integration, all nine configuration checks pass. They include the
+original context Lock/Unlock buttons, blocked real dragging and the source-correct
+first warning blink, persisted flags on a fresh stage, numeric/bool adapters and
+the missing-live-window save edge. Full client251 passed/38 optional probes
+ignored in70.48s. aa-ui separately passes37 selected lock/drag/resize/chat tests
+and15 focused bool-adapter checks.
 The strict native palette parser
 also exposed the toolkit's prior sequence-only Drawable.GetColor result;
 aa-ui now supplies its native named r/g/b/a table, allowing the original Save
@@ -106,4 +131,14 @@ The reproducible example is:
 ```powershell
 cargo run -p aa-client --example chat_config -- --size 1920x1080 --shot shots/hud/chat-config/options.png --shot-after 8
 # --style shows the original font/background/opacity page; --chat shows chat alone.
+# --locked uses the original context Lock action, then periodically attempts a real drag.
 ```
+
+The later lock milestone has five inspected captures in shots/hud/chat-locks:
+locked306.4-450.4 FPS, its visible warning phase252.7-492.6, the corrected dishonor
+panel398.1-505.0, jury tooltip258.4-281.0 and live world list360.2-412.1. Each
+self-closes without WARN/ERROR/panic. The blink is sampled at7.4s for the warning
+capture; its off phase at8s is also retained. Main
+target/debug/aa-client-20261018-locks.exe has SHA256
+6f8a31022ccdad799604d2282f0a75b887ab395b281d9fd64d74514991a3e400 and
+supersedes the playable alias after checking no client is running.

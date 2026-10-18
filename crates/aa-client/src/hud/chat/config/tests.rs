@@ -1,5 +1,101 @@
 use super::*;
 #[test]
+fn original_context_lock_unlock_persists_and_drag_feedback_does_not_move_the_window() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime(1280., 720.)?;
+    let window = live_window(&rt.lua, 0).unwrap();
+    let before = ui(&rt.lua).tree.rect(window);
+    let selected = state.borrow().chat_config.model.extra[&0].selected;
+    fixture::context_action(&rt)?;
+    rt.lua.load("assert(X2Chat:IsLockedChatWindowByChatTabId(0))").exec()?;
+    assert_eq!(state.borrow().chat_config.model.extra[&0].selected, selected);
+    fixture::drag_attempt(&rt);
+    let notify = {
+        let u = ui(&rt.lua);
+        let widget = u.tree.widget(window).unwrap();
+        let chat = widget.chat.as_ref().unwrap();
+        assert!(!chat.allow_tab_switch && !widget.resizing.enabled);
+        assert_eq!(chat.notify_remaining_ms, 3000.);
+        assert_eq!(u.tree.rect(window), before);
+        chat.lock_notify
+    };
+    aa_ui::lua::tick(&rt.lua, 400.);
+    assert!(ui(&rt.lua).tree.visible(notify));
+    fixture::context_action(&rt)?;
+    rt.lua.load("assert(not X2Chat:IsLockedChatWindowByChatTabId(0))").exec()?;
+    {
+        let u = ui(&rt.lua);
+        let widget = u.tree.widget(window).unwrap();
+        assert!(widget.chat.as_ref().unwrap().allow_tab_switch && widget.resizing.enabled);
+        assert_eq!(widget.chat.as_ref().unwrap().notify_remaining_ms, 0.);
+        assert!(!u.tree.visible(notify));
+    }
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    assert_eq!(saved["chat"]["17:12345"]["locks"][0], false);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+#[test]
+fn original_window_locks_preserve_native_arity_owner_and_missing_live_save_edge() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime(1280., 720.)?;
+    let window = live_window(&rt.lua, 0).unwrap();
+    rt.lua
+        .load(
+            r#"
+        assert(select('#',X2Chat:IsLockedChatWindowByChatTabId())==0)
+        assert(select('#',X2Chat:IsLockedChatWindowByChatTabId('3'))==0)
+        assert(not X2Chat:IsLockedChatWindowByChatTabId(99))
+        assert(select('#',X2Chat:LockChatWindowByTabId(3,'true'))==0)
+        assert(select('#',X2Chat:LockChatWindowByTabId('3',true))==0)
+        assert(X2Chat:LockChatWindowByTabId(3,1))
+        assert(X2Chat:IsLockedChatWindowByChatTabId(0) and X2Chat:IsLockedChatWindowByChatTabId(3))
+    "#,
+        )
+        .exec()?;
+    {
+        let u = ui(&rt.lua);
+        let widget = u.tree.widget(window).unwrap();
+        assert!(!widget.chat.as_ref().unwrap().allow_tab_switch && !widget.resizing.enabled);
+    }
+    let before = std::fs::read(&path)?;
+    let saved: serde_json::Value = serde_json::from_slice(&before)?;
+    assert_eq!(
+        saved["chat"]["17:12345"]["locks"],
+        json!([true, false, false, false, false, false, false, false])
+    );
+    let raw = state.borrow_mut().chat_config.model.allocate(7, "Outpost", 15).unwrap();
+    rt.lua.globals().set("ABSENT_LOCK_TAB", raw)?;
+    rt.lua
+        .load(
+            "assert(not X2Chat:LockChatWindowByTabId(ABSENT_LOCK_TAB,true));assert(X2Chat:IsLockedChatWindowByChatTabId(ABSENT_LOCK_TAB))",
+        )
+        .exec()?;
+    assert_eq!(
+        std::fs::read(&path)?,
+        before,
+        "missing live owner changes memory before returning false, but must not save"
+    );
+    rt.lua
+        .load("assert(X2Chat:LockChatWindowByTabId(0,0));assert(not X2Chat:IsLockedChatWindowByChatTabId(3))")
+        .exec()?;
+    {
+        let u = ui(&rt.lua);
+        let widget = u.tree.widget(window).unwrap();
+        assert!(widget.chat.as_ref().unwrap().allow_tab_switch && widget.resizing.enabled);
+    }
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    assert_eq!(
+        saved["chat"]["17:12345"]["locks"][7], true,
+        "next valid save includes all eight in-memory bytes"
+    );
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+#[test]
 fn native_partial_table_update_retains_hidden_filters_and_palette() -> mlua::Result<()> {
     let lua = Lua::new();
     let mut old = model::Tab::new(1, 0, "Party".into(), 15).defaults(15);
@@ -80,11 +176,13 @@ fn original_chat_controls_and_character_scoped_restart_keep_native_rows() -> Res
     edit.call_method::<()>("SetFocus", ())?;
     rt.type_text("/p ");
     assert_eq!(state.borrow().chat_config.model.extra[&0], model::Extra { selected: 3, method: 4 });
+    rt.lua.load("assert(X2Chat:LockChatWindowByTabId(1,true))").exec()?;
     let bytes = std::fs::read(&path)?;
     let saved: serde_json::Value = serde_json::from_slice(&bytes)?;
     assert!(saved["chat"]["17:-2147483647"]["tabs"].is_array());
     assert_eq!(saved["chat"]["17:-2147483647"]["extra"][0]["selected"], 3);
     assert_eq!(saved["chat"]["17:-2147483647"]["extra"][0]["method"], 4);
+    assert_eq!(saved["chat"]["17:-2147483647"]["locks"][0], true);
     // The input can retain a removed raw ID; an unknown owner must not save any extra row.
     rt.lua.load("AAUI.ChatMethod(-1,7);AAUI.ChatMethod(99,7)").exec()?;
     assert_eq!(std::fs::read(&path)?, bytes);
@@ -104,6 +202,7 @@ fn original_chat_controls_and_character_scoped_restart_keep_native_rows() -> Res
     super::super::super::api::install(&mut next, &other)?;
     crate::settings::reopen_fixture(&next, path.clone())?;
     next.run_stage(aa_ui::Stage::World);
+    locks::restore(&next.lua, &other);
     assert!(next.errors.is_empty(), "{:?}", next.errors);
     next.lua
         .load(
@@ -122,6 +221,8 @@ fn original_chat_controls_and_character_scoped_restart_keep_native_rows() -> Res
         assert_eq!(chat.tabs.iter().map(|t| t.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
         assert_eq!(chat.selected, 3);
         assert_eq!(chat.method, 4);
+        assert!(!chat.allow_tab_switch);
+        assert!(!u.tree.widget(window).unwrap().resizing.enabled);
     }
     other.borrow_mut().chat_config.identity(Some(18), 0x8000_0001);
     next.lua
