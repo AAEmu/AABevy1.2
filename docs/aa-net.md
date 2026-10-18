@@ -3186,3 +3186,52 @@ Its arguments are copied descriptor item-type at+8, grade byte+C and the encoded
 192-byte item descriptor. Before native six-bit encoding394df700 it clears the first
 8 bytes and forces descriptor count+10 to1. The outer syntax is proven; faithful
 payload construction still depends on the complete native item-descriptor layout.
+
+### Proficiency list and natural workbench entry followup (2026-10-18)
+
+GetAllMyActabilityInfos3943a720 enumerates static groups, filtering only record+C.
+Loader3982e080 proves this is skill_page_visible (SQL column3); visible (column5)
+is a separate record+14 field. Results form a compact1-based table, retaining the
+single-info name/point/modifyPoint/type/grade shapes. This getter does not exclude
+language groups. IsLanguageActability3943afd0 calls397a7c60, comparing exactly the ten
+globals39acb624..648; their runtime ID values remain unproven.
+
+GetActabilityCountByGrade3943b6f0 calls397a86b0 and counts EXACT received grade equality
+at397a8700, using the same visible/special-group exclusions as the different upgrade
+count397a8760 (which counts >= target grade). GetMinActabilityPoint3943ab70 returns0
+for received grade0, otherwise previous visible grade up_limit. GetMaxActabilityPoint
+3943ac40 returns current visible grade up_limit. Missing expert lookup397a8d40 returns
+10000. CanExpandExpert3943b940 checks only that the next expansion row exists through
+397a9540(received expanded count); it performs no LP/item affordability test. Received
+state availability remains an independent aa-net concern, not an invented zero value.
+
+Workbench entry394dc360 takes a real doodad objectID and resolves it through39035110.
+If absent it emits native error3 and does not create a context. Otherwise it installs
+interaction(kind3,objectID) via393b7b10, then394dc210 clears the prior CURRENT recipe/
+category maps and reads the actual object's static doodad template via3963b250.
+It enumerates template functions+24..28: kind0c contributes its CraftStart recipe list;
+kind3a resolves a CraftPack via397f2390 and contributes that pack's recipes. Valid
+resolved recipes are inserted uniquely and grouped by recipe ac_id and that category's
+group. Finally394dc360 emits CRAFTING_START event78(objectID,uniqueRecipeCount).
+
+This opening is local, source-proven interaction dispatch:393ba9c0 maps a special
+interaction skill/action to callback393b7ba0, which invokes394dc360 and returns true.
+Callers393b40e4/393b76ee skip their normal skill-cast fallback when handled. No new
+network ACK or command is implied. The map's craft action key global39ac7868 remains
+unresolved, so arbitrary recipe selection or guessed skill IDs must not impersonate
+a natural workbench interaction.
+
+GetActabilityCategoryTypesFromCurrentDoodad39461480 takes a group ID and consults the
+CURRENT map3a5ad874 through394d7f30; it sorts its category IDs by visible_order then ID.
+GetCraftTypesFromCurrentDoodad39461540 takes group/category IDs and consults that same
+CURRENT map through394d7da0, sorting available recipe IDs by visible_order then ID.
+Missing group/category, invalid sentinel arguments, or empty output returns nil. These
+getters therefore reflect the selected real workbench's contributed recipes, not every
+catalog recipe or a filter guessed solely from crafts.req_doodad_id. Lifetime closure
+and upstream action selection still require integration with the actual interaction.
+
+Existing aa_ui::item_link::format directly matches394e4ef0, including its alphabet,
+192-byte descriptor, zeroed instance ID and count1 normalization. CRAFT_FAILED394d2370
+constructs synthetic flags1/world_idff/zero detail and timing before formatting. Its
+grade3a5ad89c and maker3a5ad898 are zero-filled image values with direct read-only xrefs;
+indirect initialization was not excluded, so those defaults remain a stated boundary.
