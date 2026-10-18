@@ -163,6 +163,12 @@ impl ExpeditionEvent {
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Expeditions {
+    /// Actual selected/spawned local persistent identity, never inferred from roster order.
+    pub local_character_id: Option<u32>,
+    /// Native manager constructor/reset values are all zero (invalid expedition sentinel).
+    pub own_id: u32,
+    pub own_role: u8,
+    pub loaded_id: u32,
     pub factions: BTreeMap<u32, ExpeditionFaction>,
     pub policies: BTreeMap<(u32, u8), ExpeditionRolePolicy>,
     /// Native cache is keyed by persistent character ID, not by expedition ID.
@@ -174,35 +180,74 @@ pub struct Expeditions {
     pub last_receipt: Option<ExpeditionEvent>,
 }
 impl Expeditions {
+    /// Native392f8ad0 compares the loaded context with own ID, including equal reset sentinels.
+    pub fn info_loaded(&self) -> bool { self.loaded_id == self.own_id }
+    pub fn my_policy(&self) -> Option<&ExpeditionRolePolicy> {
+        self.policies.get(&(self.own_id, self.own_role))
+    }
+    pub fn own_policies(&self) -> impl Iterator<Item=&ExpeditionRolePolicy> {
+        self.policies.range((self.own_id,0)..=(self.own_id,u8::MAX)).map(|(_,row)|row)
+    }
+    fn hydrate_character(&mut self, character:&crate::model::Character) {
+        // Native392f8080 resets member/policy view but retains global faction metadata.
+        let factions=std::mem::take(&mut self.factions);
+        *self=Self { factions, local_character_id:(character.id!=0).then_some(character.id),
+            own_id:character.expedition_id, ..Self::default() };
+    }
+    fn cache_member(&mut self, member:&ExpeditionMember) {
+        let mut row=member.clone();row.name.truncate(128);row.memo.truncate(63);
+        self.members.insert(row.character_id,row);
+    }
     pub fn apply(&mut self, event: &Event) -> bool {
         match event {
             Event::Expedition(receipt) => {
                 match receipt {
                     ExpeditionEvent::Factions(rows) => {
-                        for row in rows {
-                            self.factions.insert(row.id, row.clone());
+                        for row in rows.iter().take(20) {
+                            let mut row=row.clone();row.name.truncate(128);row.owner_name.truncate(128);
+                            self.factions.insert(row.id, row);
                         }
                     }
                     ExpeditionEvent::Policies(rows) => {
-                        for row in rows {
-                            self.policies.insert((row.expedition_id, row.role), row.clone());
+                        for row in rows.iter().take(20) {
+                            let mut row=row.clone();row.name.truncate(128);
+                            self.policies.insert((row.expedition_id, row.role), row);
                         }
                     }
                     ExpeditionEvent::Members { total, expedition_id, members } => {
                         self.totals.insert(*expedition_id, *total);
-                        for row in members {
-                            self.members.insert(row.character_id, row.clone());
+                        for row in members.iter().take(20) {
+                            self.cache_member(row);
+                        }
+                        // Native392fb160: only this callback reconciles loaded membership.
+                        // Policies/status callbacks do not retroactively run this condition.
+                        if !self.policies.is_empty() && *total as usize == self.members.len() {
+                            if let Some(member)=self.local_character_id.and_then(|id|self.members.get(&id)) {
+                                self.own_id=member.expedition_id;
+                                self.own_role=member.role;
+                                self.loaded_id=*expedition_id;
+                            }
                         }
                     }
                     ExpeditionEvent::MemberStatus { member, .. } => {
-                        self.members.insert(member.character_id, member.clone());
+                        self.cache_member(member);
                     }
                 }
                 self.last_receipt = Some(receipt.clone());
                 true
             }
-            Event::CharacterSelected(_) | Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                let changed = self.last_receipt.is_some();
+            Event::CharacterSelected(state) => { self.hydrate_character(&state.character); true }
+            Event::PlayerSpawn(spawn) => {
+                // Session emits PlayerSpawn only for the actual selected Character-kind actor.
+                let crate::model::UnitKind::Character{char_id}=spawn.unit.kind else {return false};
+                if char_id==0 || char_id!=spawn.state.character.id {return false;}
+                if self.local_character_id==Some(char_id) {return false;}
+                self.hydrate_character(&spawn.state.character); true
+            }
+            Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+                let changed = self.local_character_id.is_some() || self.own_id != 0 || self.own_role != 0 || self.loaded_id != 0
+                    || !self.factions.is_empty() || !self.policies.is_empty() || !self.members.is_empty()
+                    || !self.totals.is_empty() || self.last_receipt.is_some();
                 *self = Self::default();
                 changed
             }
@@ -362,4 +407,67 @@ mod tests {
         assert!(matches!(&messages[0],crate::game::ServerMsg::Expedition(ExpeditionEvent::Members{members,..}) if members.len()==21));
         assert!(matches!(&messages[1],crate::game::ServerMsg::Expedition(ExpeditionEvent::Policies(rows)) if rows.is_empty()));
     }
+    fn selected(id:u32,expedition_id:u32)->Event {
+        let mut state=crate::model::CharacterState::default();state.character.id=id;state.character.expedition_id=expedition_id;
+        Event::CharacterSelected(Box::new(state))
+    }
+    fn spawn(id:u32,expedition_id:u32)->Event {
+        let Event::CharacterSelected(state)=selected(id,expedition_id) else{panic!()};
+        let mut unit=crate::state::tests::unit(77);unit.kind=crate::model::UnitKind::Character{char_id:id};
+        Event::PlayerSpawn(Box::new(crate::session::PlayerSpawn{obj_id:77,state:*state,unit}))
+    }
+    #[test]
+    fn native_identity_hydration_and_members_only_reconciliation_preserve_callback_order() {
+        let mut state=Expeditions::default();assert!(state.info_loaded());
+        state.apply(&Event::Expedition(ExpeditionEvent::Factions(vec![ExpeditionFaction{id:9,..Default::default()}])));
+        state.apply(&selected(7,9));assert_eq!((state.local_character_id,state.own_id,state.own_role,state.loaded_id),(Some(7),9,0,0));
+        assert!(!state.info_loaded());assert!(state.factions.contains_key(&9));
+        let mut own=ExpeditionMember{character_id:7,expedition_id:9,role:255,..Default::default()};
+        let members=|total,rows|Event::Expedition(ExpeditionEvent::Members{total,expedition_id:9,members:rows});
+        state.apply(&members(1,vec![own.clone()]));assert!(!state.info_loaded(),"no policy cache yet");
+        state.apply(&Event::Expedition(ExpeditionEvent::Policies(vec![ExpeditionRolePolicy{expedition_id:9,role:255,..Default::default()}])));
+        assert!(!state.info_loaded(),"policy receipt never retroactively reconciles");
+        state.apply(&members(2,vec![own.clone()]));assert!(!state.info_loaded(),"declared count does not match keyed cache");
+        state.apply(&members(1,vec![own.clone()]));assert!(state.info_loaded());assert_eq!(state.own_role,255);
+        assert!(state.my_policy().is_some());assert_eq!(state.own_policies().count(),1);
+        state.apply(&spawn(7,0));assert_eq!((state.own_id,state.loaded_id,state.own_role),(9,9,255),"matching spawn must not overwrite already received view with older selection fields");
+        own.expedition_id=10;own.role=2;
+        state.apply(&Event::Expedition(ExpeditionEvent::MemberStatus{member:own.clone(),flag:0}));
+        assert_eq!((state.own_id,state.own_role),(9,255),"status callback does not reconcile own manager");
+        state.apply(&members(1,vec![own]));assert_eq!((state.own_id,state.loaded_id,state.own_role),(10,9,2));
+        assert!(!state.info_loaded(),"packet context need not equal own row expedition; native preserves both");
+    }
+    #[test]
+    fn native_view_uses_actual_local_row_and_resets_on_real_identity_change() {
+        let mut state=Expeditions::default();state.apply(&selected(7,9));
+        state.apply(&Event::Expedition(ExpeditionEvent::Policies(vec![ExpeditionRolePolicy{expedition_id:8,role:0,..Default::default()}])));
+        let list=Event::Expedition(ExpeditionEvent::Members{total:1,expedition_id:8,members:vec![ExpeditionMember{character_id:99,expedition_id:8,role:255,..Default::default()}]});
+        state.apply(&list);assert_eq!((state.own_id,state.loaded_id),(9,0),"first roster row is not local identity");
+        state.apply(&Event::Expedition(ExpeditionEvent::Factions(vec![ExpeditionFaction{id:8,..Default::default()}])));
+        state.apply(&spawn(10,12));assert_eq!((state.local_character_id,state.own_id,state.loaded_id,state.own_role),(Some(10),12,0,0));
+        assert!(state.members.is_empty()&&state.policies.is_empty()&&state.last_receipt.is_none());assert!(state.factions.contains_key(&8));
+        state.apply(&Event::Disconnected{message:String::new()});assert_eq!(state,Expeditions::default());
+    }
+
+    #[test]
+    fn safe_inline_cache_limits_never_truncate_complete_received_events() {
+        let mut state=Expeditions::default();state.apply(&selected(21,9));
+        let factions=(1..=21).map(|id|ExpeditionFaction{id,name:vec![b'A';129],owner_name:vec![b'B';130],..Default::default()}).collect::<Vec<_>>();
+        state.apply(&Event::Expedition(ExpeditionEvent::Factions(factions.clone())));
+        assert_eq!(state.factions.len(),20);assert_eq!(state.factions[&1].name.len(),128);assert_eq!(state.factions[&1].owner_name.len(),128);
+        assert!(matches!(&state.last_receipt,Some(ExpeditionEvent::Factions(rows)) if rows==&factions));
+        let policies=(0..21).map(|role|ExpeditionRolePolicy{expedition_id:9,role,name:vec![b'C';129],..Default::default()}).collect::<Vec<_>>();
+        state.apply(&Event::Expedition(ExpeditionEvent::Policies(policies.clone())));
+        assert_eq!(state.policies.len(),20);assert_eq!(state.policies[&(9,0)].name.len(),128);
+        assert!(matches!(&state.last_receipt,Some(ExpeditionEvent::Policies(rows)) if rows==&policies));
+        let members=(1..=21).map(|character_id|ExpeditionMember{character_id,expedition_id:9,name:vec![b'D';129],memo:vec![b'E';64],..Default::default()}).collect::<Vec<_>>();
+        let receipt=ExpeditionEvent::Members{total:21,expedition_id:9,members:members.clone()};
+        state.apply(&Event::Expedition(receipt.clone()));assert_eq!(state.members.len(),20);assert!(!state.info_loaded());
+        assert_eq!(state.last_receipt,Some(receipt));assert_eq!(state.members[&1].name.len(),128);assert_eq!(state.members[&1].memo.len(),63);
+        state.apply(&Event::Expedition(ExpeditionEvent::MemberStatus{member:members[20].clone(),flag:0}));
+        assert_eq!(state.members[&21].memo.len(),63);assert!(!state.info_loaded(),"status does not reconcile");
+        state.apply(&Event::Expedition(ExpeditionEvent::Members{total:21,expedition_id:9,members:vec![]}));
+        assert!(state.info_loaded(),"native callback count/cache conditions now hold with actual local row");
+    }
+
 }
