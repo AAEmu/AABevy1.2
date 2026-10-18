@@ -169,6 +169,20 @@ pub(in crate::hud) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         })?,
     )?;
     let s = state.clone();
+    hooks.raw_set(
+        "ChatMethod",
+        lua.create_function(move |lua, (raw_id, method): (i32, i32)| {
+            ensure(lua, &s)?;
+            let mut data = s.borrow_mut();
+            let model = &mut data.chat_config.model;
+            let Some(window) = model.tabs.get(&raw_id).map(|tab| tab.window) else { return Ok(()) };
+            model.extra.entry(window).or_default().method = method;
+            drop(data);
+            save(lua, &s, "extra");
+            Ok(())
+        })?,
+    )?;
+    let s = state.clone();
     api.raw_set(
         "AllChatWindowIds",
         lua.create_function(move |lua, _: MultiValue| {
