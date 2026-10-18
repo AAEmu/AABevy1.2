@@ -1,0 +1,214 @@
+//! Stablehand service over received summon-item details; no optimistic revival.
+#[allow(dead_code)]
+pub(super) mod fixture;
+#[cfg(test)]
+mod tests;
+use super::api::{HudBridge, HudData, Shared};
+use super::data::{any_flag, any_int};
+use aa_net::interaction::InteractEvent;
+use aa_net::mate::MateCommand;
+use aa_net::model::ItemDetail;
+use aa_net::state::{Inventory, Player, Units};
+use aa_net::{Command, Event, NetCommand, NetEvent};
+use aa_ui::UiRuntime;
+use bevy::prelude::*;
+use mlua::{Lua, Table, Value};
+use rusqlite::Connection;
+use std::collections::HashSet;
+
+#[derive(Default)]
+pub(super) struct Tables {
+    summons: HashSet<u32>,
+    pub(super) stables: HashSet<u32>,
+}
+
+impl Tables {
+    pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
+        let mut out = Self::default();
+        let mut query = conn.prepare("SELECT item_id,npc_id FROM item_summon_mates ORDER BY id")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            if any_int(row, 1)? != 0 {
+                out.summons.insert(any_int(row, 0)? as u32);
+            }
+        }
+        let mut query = conn.prepare("SELECT id,stabler FROM npcs")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            if any_flag(row, 1)? {
+                out.stables.insert(any_int(row, 0)? as u32);
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Default)]
+pub(super) struct View {
+    owner: u32,
+    inventory: Option<Inventory>,
+    service: Option<(u32, u32)>,
+    requests: Vec<(u32, (u32, u32))>,
+}
+
+pub(super) fn refresh(world: &World, data: &mut HudData) {
+    if data.pets.owner != data.character_id {
+        data.pets = View {
+            owner: data.character_id,
+            ..default()
+        };
+    }
+    if let Some(inventory) = world.get_resource_ref::<Inventory>() {
+        if data.pets.inventory.is_none() || inventory.is_changed() {
+            data.pets.inventory = Some((*inventory).clone());
+        }
+    }
+}
+
+/// Native x87 pow constant, followed by separately rounded single-precision additions.
+fn revival_cost(level: u8) -> i32 {
+    let power = f64::from(level).powf(2.299999952316284) as f32;
+    let half = f32::from(level) * 0.5f32;
+    ((power + half) + 0.5f32).floor() as i32
+}
+
+fn quote(data: &HudData) -> f64 {
+    let (Some(game), Some(inventory)) = (data.game.get(), &data.pets.inventory) else {
+        return 0.0;
+    };
+    let mut sum = 0i32;
+    for (container, items, capacity) in [(2, &inventory.bag, inventory.bag_slots), (3, &inventory.bank, inventory.bank_slots)] {
+        for (slot, item) in items.iter().take(capacity as usize).enumerate() {
+            let Some(item) = item else { continue };
+            let Ok(slot) = u8::try_from(slot) else { continue };
+            if inventory.item_slot_pending(container, slot)
+                || !game.pets.summons.contains(&item.template_id)
+                || !game.items.get(&item.template_id).is_some_and(|item| item.impl_id == 11)
+            {
+                continue;
+            }
+            if let ItemDetail::Mate { dead, level, .. } = item.detail {
+                if dead != 0 {
+                    sum = sum.wrapping_add(revival_cost(level));
+                }
+            }
+        }
+    }
+    f64::from(sum as f32)
+}
+
+pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    let x2: Table = lua.globals().get("X2")?;
+    let state = bridge.clone();
+    x2.set(
+        "GetTotalRepairsForPetItems",
+        lua.create_function(move |_, _: Value| Ok(quote(&state.borrow())))?,
+    )?;
+    let state = bridge.clone();
+    x2.set(
+        "RepairPetItems",
+        lua.create_function(move |_, _: Value| {
+            let mut data = state.borrow_mut();
+            if let Some(npc) = data.pets.service.filter(|npc| data.dialog.npc == Some(*npc)) {
+                let owner = data.character_id;
+                data.pets.requests.push((owner, npc));
+            }
+            Ok(())
+        })?,
+    )?;
+    Ok(())
+}
+
+fn valid_stable(data: &HudData, units: &Units, npc: (u32, u32)) -> bool {
+    units
+        .get(npc.0)
+        .is_some_and(|unit| matches!(unit.kind, aa_net::model::UnitKind::Npc { template_id, .. } if template_id == npc.1))
+        && data.game.get().is_some_and(|game| game.pets.stables.contains(&npc.1))
+}
+
+pub(super) fn update(
+    mut events: MessageReader<NetEvent>,
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    player: Res<Player>,
+    units: Res<Units>,
+    mut net: MessageWriter<NetCommand>,
+) {
+    let Some(rt) = rt else {
+        events.clear();
+        return;
+    };
+    let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
+    let owner = player.spawn.as_ref().map_or(0, |s| s.character().id);
+    let mut starts = Vec::new();
+    let mut errors = Vec::new();
+    {
+        let mut data = bridge.0.borrow_mut();
+        if owner == 0 {
+            data.pets = default();
+            events.clear();
+            return;
+        }
+        for NetEvent(event) in events.read() {
+            if let Event::Mate(aa_net::mate::MateEvent::RequestRejected {
+                command: MateCommand::ReviveItems { .. },
+                message,
+            }) = event
+            {
+                errors.push(message.clone());
+            }
+            if let Event::Interaction(InteractEvent::SkillList {
+                npc_obj_id,
+                obj_id,
+                skills,
+                interactable,
+                ..
+            }) = event
+            {
+                if *obj_id == own && *interactable && skills.contains(&12195) {
+                    if let Some(npc) = data.dialog.npc.filter(|n| n.0 == *npc_obj_id && valid_stable(&data, &units, *n)) {
+                        data.pets.service = Some(npc);
+                        starts.push(npc.0);
+                    }
+                }
+            }
+        }
+        if data
+            .pets
+            .service
+            .is_some_and(|npc| data.dialog.npc != Some(npc) || !valid_stable(&data, &units, npc))
+        {
+            data.pets.service = None;
+        }
+        for (quoted_owner, npc) in std::mem::take(&mut data.pets.requests) {
+            if owner == quoted_owner
+                && data.character_id == owner
+                && data.pets.service == Some(npc)
+                && data.dialog.npc == Some(npc)
+                && valid_stable(&data, &units, npc)
+            {
+                net.write(NetCommand(Command::Mate(MateCommand::ReviveItems { npc_obj_id: npc.0 })));
+            }
+        }
+    }
+    for object in starts {
+        rt.fire_event("NPC_INTERACTION_START", ("stabler", "", object.to_string()));
+    }
+    for message in errors {
+        rt.fire_event("SYSMSG", message);
+    }
+}
+
+pub(super) fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        update
+            .after(super::sync_hud)
+            .after(super::dialog::handle_dialog)
+            .before(aa_ui::UiFrame)
+            .run_if(super::hud_up),
+    )
+    .add_systems(OnExit(crate::Screen::InGame), |bridge: NonSend<HudBridge>| {
+        bridge.0.borrow_mut().pets = default()
+    });
+}

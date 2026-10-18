@@ -1353,3 +1353,36 @@ SCWorldInteractionSkillList/Cancel now decode in aa-net, but the lane has no emi
 CraftStart/Pack func_skill_id cannot supply a guessed action. No server ACK or successful craft
 is manufactured to hide these gaps. Broader native execution validation, special-currency and
 secure-playerflag policies, full proficiency controls/housing modifiers and pack flows remain open.
+
+## Stablehand revival service (2026-10-18)
+
+A received NPC interaction list containing HealPetSWounds12195 now opens the original stablehand
+window for the actual current stablehand NPC. The static npcs.stabler flag keeps normal talk/input
+routing alive for these services. Confirmation rechecks character identity, NPC context, actual
+received NPC kind/template and static service flag before issuing existing Mate::ReviveItems. Cancel
+sends nothing. The native quote itself has no stablehand/affordability requirement.
+
+X2:GetTotalRepairsForPetItems scans received physical Bag2 and Bank3 slots, excluding pending keys,
+live items, missing mappings and non-summon implementations. The mapping is item_summon_mates,
+not npcs.pet_item_id. A nonzero dead detail byte charges once per item regardless of stack count;
+level is the received byte, with no invented cap. Costs follow original double exponent
+2.299999952316284 followed by individually rounded f32 power/additions/floor, signed sum and f32
+Lua return. This reproduces the documented formula and one-copper differences from the lane's
+entirely-double exponent2.3 at levels144/164/219/226/244; it is not a native MSVCR pow oracle.
+
+Validation:154 client tests pass /26 ignored. The exact isolated original stablehand test passes
+in1.91s: actual received NPC skill list, physical Cancel/Confirm, stale-interaction rejection,
+unchanged dead details on send, authoritative reason58 detail updates, then the original zero-quote
+notice. Numeric/eligibility tests include Bag+Bank, pending/unmapped/live/out-of-capacity cases,
+nonzero dead bytes and stack independence. The inspected native-confirmation.png in
+shots/hud/sol61-stablehand/ shows the original9g46s78c quote for explicit level30 bag and level144
+bank fixtures. The inventory has10silver: native quote/confirmation does not promise affordability
+or a successful transaction.291-343FPS, no reported script/GPU errors, screenshot exit completed.
+No pet was killed/revived or granted against the stalled lane. Full owned pet/slave UI, skills,
+equipment, mounting and natural live service verification remain active work.
+
+The refreshed playable copy target/debug/aa-client-play.exe has SHA256
+366EC42C2E53D7F6F30FCA20C551516AF34DD83BA3A113C1B4C6DAD08BEF41D7.
+Its inspected world-select.png in the same folder reaches the live Lane-bevy list at268-317FPS
+while the stablehand fixture was also rendering. Both processes exited normally. This checks
+login/world listing and does not establish that the lane game-connection stall is resolved.

@@ -57,6 +57,7 @@ mod marks;
 mod markers;
 mod panels;
 mod party;
+mod pets;
 mod plates;
 mod pvp;
 mod repair;
@@ -132,6 +133,11 @@ pub(crate) fn repair_fixture() {
 #[allow(dead_code)]
 pub(crate) fn crafting_fixture() {
     crafting::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn stablehand_fixture() {
+    pets::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -344,6 +350,7 @@ impl Plugin for HudPlugin {
         expansion::plugin(app);
         repair::plugin(app);
         crafting::plugin(app);
+        pets::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);

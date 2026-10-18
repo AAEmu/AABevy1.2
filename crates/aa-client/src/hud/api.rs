@@ -83,6 +83,7 @@ pub struct HudData {
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
     pub(super) crafting: super::crafting::View,
+    pub(super) pets: super::pets::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
@@ -134,6 +135,7 @@ impl Default for HudData {
             expansion: Default::default(),
             repair: Default::default(),
             crafting: Default::default(),
+            pets: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
@@ -244,6 +246,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
     super::crafting::install(lua, bridge)?;
+    super::pets::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::sorting::install(lua, bridge)
 }
@@ -494,6 +497,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         bridge.borrow_mut().expansion.clear();
         bridge.borrow_mut().repair = Default::default();
         bridge.borrow_mut().crafting = Default::default();
+        bridge.borrow_mut().pets = Default::default();
         return;
     };
     // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
@@ -523,6 +527,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
     super::crafting::refresh(world, &mut data);
+    super::pets::refresh(world, &mut data);
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
