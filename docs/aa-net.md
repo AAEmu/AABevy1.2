@@ -3252,3 +3252,51 @@ from object vector+1a8..1ac (20-byte entries, value+4). The prior equipped-state
 was too strong; no equipment-only assumption is justified. Exact spatial object type and
 its authoritative bonus population remain untraced. Missing player/object/permission/
 group/bonus yields native0, independently of received proficiency-point availability.
+
+### Native crafting catalog getter shapes (2026-10-18)
+
+EnumActabilityGroupTypes39460cf0 walks all static groups in native catalog order and
+skips only global39ac99b8 (runtime ID unresolved); it does not test skill_page_visible
+or visible. No output returns nil. GetCategoryType39463a30 returns category IDs with
+visible_ui true, sorting visible_order then unsigned ID, and permits an empty table.
+GetActabilityCategoryTypesGroupType394610d0->394d8200 reads the ALL-catalog category
+map3a5ad8a0, filters visible_ui, sorts the same way and returns nil on unknown/empty.
+Its special all-groups path compares global3a5ad8b0. In contrast the CurrentDoodad
+getters read the selected bench map3a5ad874. GetActabilityCategoryCraftTypesByTypes
+394612c0->394d84b0 reads the ALL catalog group/category map and sorts recipe IDs by
+visible_order then unsigned ID; it imposes no labor/proficiency/workbench/range gate.
+
+GetCraftProductInfo39462a70 returns array rows with exactly itemType,item_name,amount,
+success_rate,useGrade,productGrade. success_rate is the raw product rate converted to
+f32, without division by100. useGrade is product byte+15; productGrade is grade byte+8.
+It supplies no item_info table. Known recipe with zero products returns an empty table;
+unknown recipe or any product with missing item descriptor logs/returns nil. Material
+rows remain amount,count,mainGrade,item_info, using exact required grade or the native
+static default for required grade-1 when no eligible physical material is available.
+
+GetExecutableCraftCount39461ee0 calls394d3cc0. Unknown recipe or zero material amount
+returns-1 internally and nil to Lua. The count starts INT_MAX. Labor is considered ONLY
+when the material vector is empty, the recipe skill resolves and its base labor is
+positive: native discounted neededLP divides current labor, if neededLP is nonzero.
+Otherwise material recipes skip this labor branch and take the minimum eligible item
+count divided by each required amount. A special material item ID uses64-bit current
+copper division, invalid item gives0, normal inventory count3961fbc0 receives the required
+grade and playerflags2000 policy. This getter itself does not test proficiency, range,
+workbench compatibility, inventory space or material-row widget limits. Its no-limit
+path may retain INT_MAX; an integration must not invent a smaller native result.
+
+GetUpperCraftsInfo39462df0(craftID,categoryFilter) selects the LAST source product item
+ID, then walks global craft_materials catalog397de0d0 in native order. For each matching
+material item ID it resolves the consuming recipe, requires show_upper_crafts and at
+least one product, then resolves firstproduct.craft_id; positive categoryFilter must
+match that recipe.ac_id. Output rows have craft_Type,ac_type,itemType,useGrade,itemGrade,
+mainGrade and optional item_impl. Product fields come from the consuming recipe's FIRST
+product; mainGrade comes from the matching material. There is no deduplication/sort in
+this getter; it appends per matching material. Unknown source returns nil, known source
+with no matches returns an empty table. These shapes were read from original wrappers;
+no new protocol state or fabricated crafting results were introduced.
+
+Executable-count secure policy is source-specific:394d3e39 passes playerflags2000
+as3961fbc0's last bool argument, which skips item flag04 only when true. MaterialInfo
+instead checks feature byte5 bit20 plus item flag04. Their counts must not be assumed
+identical when these independent received/config flags differ.
