@@ -709,7 +709,7 @@ One bounded worker request reads each world's XML and up to four textures once; 
 entities/materials serve the world. Per-frame work only updates those uniforms. World changes remove the old entities and
 materials; disabling the environment or `MoonSettings.enabled` hides the draws. `AA_NO_MOONS=1` disables by default.
 `MoonStats` reports loaded/authored and rendered counts, and `MoonDisc.slot` identifies the authored slot.
-`EnvSample.moon_dir` and `moons` participate in the existing zone blend. Remaining limits: optional non-default
+Moon color/shape curves participate in the raw zone blend before HDR multiplication; `moon_dir` follows the world's raw-hour orbit. Remaining limits: optional non-default
 `r_stars_rotate>=2`, reflection-pass moon boost / planar moon reflections, and the native non-HDR shader branch.
 
 `cargo run -p aa-world --example moons -- --shot shots/aa-world/night/moons.png --shot-after 14` frames both original
@@ -764,6 +764,67 @@ in the south-east); at the real hour 19.166 (spline 12.17, sun at azimuth 288 / 
 of the spawn picture (rock, grass slope, far bank, left trees) are 6 to 20 display values bright in green and blue, the sky (hills) within 10, the pond water within 5
 at the left and 20 dark at the right, where the real pond has a pale sheet that looks like the sky's mirror image (the cube map reflection is dim at
 that angle). Not re-fitted: it is one picture, and the real client's own shade (AO, the engine's film curve) is not reproduced.
+
+**Spatial zone transitions** (`World::environment_weights`, `TimeOfDay::sample_blended`,
+`sky::TodCache`): the original 1.2 producer is recovered in `crysystem.dll`,
+`SeamlessSystem::UpdateTimeOfDay` at **365EEC20**. The read-only decompile is
+`D:/aa-re/client12/ida/crysystem.c`; its DLL matches a targeted original-pak extraction,
+SHA256 `04b994394c24d2c31033ff196003d71913a20ecf7c7c2443520ac158c7798f23`.
+With no area-ToD override, it scans offsets -2 through +2 in both axes of the 64 m sector
+grid. Each sector contributes `clamp(1 - nearestDistanceToSectorAabb / 90, 0, 1)` to its
+zone, keeping the greatest weight for repeated sectors of one zone. The containing sector
+has weight 1; diagonals use Euclidean distance to the sector rectangle, not its center.
+Only ten zone inputs enter the producer map. The native lookup operates in a moving
+8-cell / 128-sector local grid (`365ED070` subtracts the current origin); aa-world applies the translation-invariant distance formula
+to its global sector ownership table. Until that table arrives, the existing cell-zone
+fallback remains. A `WorldClock.zone` override selects exactly that single-zone input.
+
+Zone virtual slot 172 (**365F2520**) multiplies the spatial weight by each active relic
+layer's weight before registering it with engine **300A4270**. Engine **300A5010** then
+evaluates the layers and adds every raw scalar/RGB value times `weight / sum(weights)`.
+Only afterward does **300A5DD0** apply the existing renderer color/HDR operations. Thus
+interpolating already-lit `EnvSample`s is incorrect: RGB conversion, color multipliers and
+moon `exp2(HDR dynamic power factor)` must operate on blended raw values. The new sampler
+does this without building per-frame spline maps. Sun and moon orbital directions still
+use the raw clock hour and world lighting configuration; curve lookup keeps the existing
+warped hour. Native **300A4C10** invokes each layer's spline evaluator at warped hour / 24.
+The existing linear spline evaluator is preserved here; exact native tangent/default-table
+parity is a separate boundary, not proved by this blend audit.
+
+There is no native previous-frame interpolation in this path. The old frame-rate-dependent
+exponential filter / 0.02 minimum step has been removed; continuous movement now blends
+by distance, and explicit clock/zone overrides apply immediately. The ToD cache retains
+only the active (at most ten) zone/layer inputs. A world change invalidates curves, lighting,
+HDR and skybox cache keys; a late sector-map result from another world is discarded.
+Disabling the environment clears its sample and active curve references, which also lets
+dependent cloud/moon systems retire or hide their draws. Existing sky/ocean entity
+ownership remains with the world plugin; this is not an independent full-world teardown.
+
+Supported slice: the spatial blend of the selected `WorldClock.layer` (normal by default).
+Area-ToD priorities/weights, per-zone relic layer transitions, native spline tangent/default
+semantics and `env.xml` parameter blending are not implemented by this change. Skybox and
+cloud asset selection still follows the discrete owning zone; native skybox opacity and
+layer-transition fades from **365F0210** remain explicit gaps. No sky/cloud color calibration
+was changed. `environment_border` exercises the actual Solzreed 179 / Silent Sea 210 border
+at Cry `(15712,15808)`, with `--offset`, `--zone179`, `--zone210`, `--motion-check` and
+`--unload-check` controls.
+
+Validation (2026-10-17): 15 native regression tests passed, along with all 13 environment
+tests and the real Solzreed/sea 2 cm border continuity test. The GPU motion fixture crossed
+the same boundary in a **0.117188 m** frame step with sun RGB delta **0.000105** and fog
+RGB delta **0.000085**, rather than a full-zone step. Inspected captures under
+`shots/aa-world/environment/` are `border_blend.png`, `border_zone179.png`,
+`border_zone210.png` and `border_motion.png`. The exact-border inputs are `(179,1)` and
+`(210,1)`; blended sun is `(6.048904,5.651661,5.054752)` and fog
+`(.156384,.277799,.467424)`, after the existing conversions. Single-zone controls verify
+the changed fog coloration and expose the still-discrete skybox selection. Captures ran at
+176-298 FPS (blend), 182-249 (forced 179), 182-212 (forced 210) and 182-232 (moving).
+The GPU unload assertion passed (no active sample or cloud entities), and
+`cargo check -p aa-world --examples` passed. All fixture windows exited normally.
+No original-client still or sequence of this border is available in `reference/`; visual
+comparison here is against the two original-data zone controls, with the blend contract
+proved independently from native code. The old spawn reference's sky calibration gap
+remains unchanged; there was no new brightness fit.
 
 **Sun direction at the spawn hour**: the raw formula (`sun_direction`) puts the sun at azimuth 288 / elevation 13 (west-north-west, low) at 19.166 h.
 An earlier reading of the diffuse picture ("lit from the north-north-east") was wrong: `fly --camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0
@@ -1459,8 +1520,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   characters are lit differently in the engine: the time of day has two extra "Char BackLight" lights (`1 Color` 0.49 x 5.0,
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
-* The real client's time of day is solved (see Environment, Time of day warp): the splines are read at the engine's warped hour. Not modelled: the
-  engine blends two zone layers by `layer weight` across zone borders (aa-world reads layer 0 of the zone under the camera), and the plateau of
+* The real client's time-of-day hour warp and spatial raw-curve zone blending are implemented (see Environment). Remaining transition gaps:
+  area-ToD overrides, per-zone relic layer weights, native spline tangent/default semantics and discrete skybox/cloud fades. The plateau of
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.

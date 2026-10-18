@@ -338,7 +338,8 @@ impl Mix for MoonSample {
 }
 
 impl EnvSample {
-    /// Component-wise interpolation between two samples (zone changes, time steps).
+    /// Component-wise interpolation utility for evaluated samples. Native zone blending uses
+    /// [`TimeOfDay::sample_blended`] before color conversion and HDR multiplication instead.
     pub fn lerp(&self, other: &EnvSample, t: f32) -> EnvSample {
         macro_rules! mix {
             ($($f:ident),*) => {
@@ -365,9 +366,34 @@ impl TimeOfDay {
     /// and everything else take the raw hour.
     pub fn sample(&self, hour: f32, lighting: Lighting) -> EnvSample {
         let t = spline_hour(hour, lighting.dawn_hour) / 24.0;
+        Self::sample_values(hour, lighting, |name| self.scalar(name, t), |name| self.color(name, t))
+    }
+
+    /// Native 300A5010: evaluate each layer, normalize its weight, blend raw scalar/RGB
+    /// values, then apply color-space conversion and HDR multipliers in UpdateEngine.
+    /// Blending already-lit EnvSamples would change both color and multiplier behavior.
+    pub fn sample_blended(layers: &[(&TimeOfDay, f32)], hour: f32, lighting: Lighting) -> EnvSample {
+        let total: f32 = layers.iter().filter(|(_, w)| w.is_finite() && *w > 0.0).map(|(_, w)| w).sum();
+        if total <= 0.0 {
+            return Self::default().sample(hour, lighting);
+        }
+        let t = spline_hour(hour, lighting.dawn_hour) / 24.0;
+        let scalar = |name: &str| layers.iter().filter(|(_, w)| w.is_finite() && *w > 0.0)
+            .map(|(tod, weight)| tod.scalar(name, t) * (*weight / total)).sum();
+        let color = |name: &str| layers.iter().filter(|(_, w)| w.is_finite() && *w > 0.0)
+            .fold(Vec3::ZERO, |sum, (tod, weight)| sum + tod.color(name, t) * (*weight / total));
+        Self::sample_values(hour, lighting, scalar, color)
+    }
+
+    fn sample_values(
+        hour: f32,
+        lighting: Lighting,
+        scalar: impl Fn(&str) -> f32,
+        color: impl Fn(&str) -> Vec3,
+    ) -> EnvSample {
         let col = |name: &str, mul: &str| {
-            let c = self.color(name, t);
-            let m = if mul.is_empty() { 1.0 } else { self.scalar(mul, t) };
+            let c = color(name);
+            let m = if mul.is_empty() { 1.0 } else { scalar(mul) };
             (c, srgb_to_linear(c) * m)
         };
         let (_, sun) = col("Sun color", "Sun color multiplier");
@@ -378,21 +404,21 @@ impl TimeOfDay {
         let (nh, horizon) = col("Night sky: Horizon color", "Night sky: Horizon color multiplier");
         let (nz, zenith) = col("Night sky: Zenith color", "Night sky: Zenith color multiplier");
         let (_, fog_top) = col("Fog color (top)", "Fog color (top) multiplier");
-        let cloud_sun = srgb_to_linear(self.color("Sun color", t)) * self.scalar("Cloud shading: Sun light multiplier", t);
-        let cloud_sky = srgb_to_linear(self.color("Sky color", t)) * self.scalar("Cloud shading: Sky light multiplier", t);
+        let cloud_sun = srgb_to_linear(color("Sun color")) * scalar("Cloud shading: Sun light multiplier");
+        let cloud_sky = srgb_to_linear(color("Sky color")) * scalar("Cloud shading: Sky light multiplier");
         // The sun is up between the dawn and dusk colour keys: brightness of the sun colour decides.
         let lum = |c: Vec3| c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
-        let sun_srgb = self.color("Sun color", t);
+        let sun_srgb = color("Sun color");
         let day = ((lum(sun_srgb) - 0.25) / 0.5).clamp(0.0, 1.0);
-        let balance = self.color("Color balance", t);
-        let photo = self.color("Filters: photofilter color", t);
-        let wavelength = |n: &str| self.scalar(n, t).max(1.0);
+        let balance = color("Color balance");
+        let photo = color("Filters: photofilter color");
+        let wavelength = |n: &str| scalar(n).max(1.0);
         let (red, green, blue) = (wavelength("Sky light: Wavelength (R)"), wavelength("Sky light: Wavelength (G)"), wavelength("Sky light: Wavelength (B)"));
         let scatter = Vec3::new(1.0, (red / green).powi(4), (red / blue).powi(4));
-        let sky_sun = srgb_to_linear(self.color("Sky light: Sun intensity", t));
+        let sky_sun = srgb_to_linear(color("Sky light: Sun intensity"));
         let back = |i: u32| {
             let (_, c) = col(&format!("{i} Color"), &format!("{i} Diffuse Multiplier"));
-            c.extend(self.scalar(&format!("{i} Specular Multiplier"), t))
+            c.extend(scalar(&format!("{i} Specular Multiplier")))
         };
         EnvSample {
             sun_dir: sun_direction(hour, lighting),
@@ -401,64 +427,64 @@ impl TimeOfDay {
             sky,
             ambient_ground,
             fog,
-            fog_density: self.scalar("Volumetric fog: Global density", t),
+            fog_density: scalar("Volumetric fog: Global density"),
             ocean_fog,
             sky_srgb,
             fog_srgb,
             night_horizon: nh,
             night_zenith: nz,
-            star_intensity: self.scalar("Night sky: Star intensity", t),
+            star_intensity: scalar("Night sky: Star intensity"),
             moons: std::array::from_fn(|i| {
                 let prefix = if i == 0 { "Night sky: Moon".to_string() } else { format!("Night sky: Moon{i}") };
                 // Native UpdateEngineMoonParameters multiplies the sampled float RGB directly;
                 // SetGlobalParameter copies it unchanged. The engine HDR base defaults to 2.
-                let hdr = self.scalar("HDR dynamic power factor", t).exp2();
-                let color = |suffix: &str| self.color(&format!("{prefix}{suffix} color"), t)
-                    * self.scalar(&format!("{prefix}{suffix} color multiplier"), t) * hdr;
+                let hdr = scalar("HDR dynamic power factor").exp2();
+                let color = |suffix: &str| color(&format!("{prefix}{suffix} color"))
+                    * scalar(&format!("{prefix}{suffix} color multiplier")) * hdr;
                 MoonSample { color: color(""), inner: color(" inner corona"), outer: color(" outer corona"),
-                    inner_scale: self.scalar(&format!("{prefix} inner corona scale"), t),
-                    outer_scale: self.scalar(&format!("{prefix} outer corona scale"), t),
-                    outer_size: self.scalar(&format!("{prefix} outer corona size"), t) }
+                    inner_scale: scalar(&format!("{prefix} inner corona scale")),
+                    outer_scale: scalar(&format!("{prefix} outer corona scale")),
+                    outer_size: scalar(&format!("{prefix} outer corona size")) }
             }),
             day,
             fog_top,
             fog_layer: Vec4::new(
-                self.scalar("Fog height (bottom)", t),
-                self.scalar("Fog height (top)", t),
-                self.scalar("Fog layer density (bottom)", t),
-                self.scalar("Fog layer density (top)", t),
+                scalar("Fog height (bottom)"),
+                scalar("Fog height (top)"),
+                scalar("Fog layer density (bottom)"),
+                scalar("Fog layer density (top)"),
             ),
             fog_ramp: Vec3::new(
-                self.scalar("Volumetric fog: Ramp start", t),
-                self.scalar("Volumetric fog: Ramp end", t),
-                self.scalar("Volumetric fog: Ramp influence", t),
+                scalar("Volumetric fog: Ramp start"),
+                scalar("Volumetric fog: Ramp end"),
+                scalar("Volumetric fog: Ramp influence"),
             ),
             horizon,
             zenith,
-            zenith_shift: self.scalar("Night sky: Zenith shift", t),
+            zenith_shift: scalar("Night sky: Zenith shift"),
             cloud_sun,
             cloud_sky,
-            skybox_mul: self.scalar("Skybox multiplier", t),
+            skybox_mul: scalar("Skybox multiplier"),
             film: Vec4::new(
-                self.scalar("Film curve shoulder scale", t),
-                self.scalar("Film curve midtones scale", t),
-                self.scalar("Film curve toe scale", t),
-                self.scalar("Film curve whitepoint", t),
+                scalar("Film curve shoulder scale"),
+                scalar("Film curve midtones scale"),
+                scalar("Film curve toe scale"),
+                scalar("Film curve whitepoint"),
             ),
-            saturation: self.scalar("Saturation", t),
-            contrast: self.scalar("Contrast", t),
+            saturation: scalar("Saturation"),
+            contrast: scalar("Contrast"),
             color_balance: if balance == Vec3::ZERO { Vec3::ONE } else { balance },
-            levels_min: self.scalar("Levels: min input", t),
-            photofilter: Vec4::new(photo.x, photo.y, photo.z, self.scalar("Filters: photofilter density", t)),
-            hdr_dynamic: self.scalar("HDR dynamic power factor", t),
-            sun_shafts: self.scalar("Sun shafts visibility", t),
-            sun_specular: self.scalar("Sun specular multiplier", t),
-            sky_rayleigh: scatter * self.scalar("Sky light: Rayleigh scattering", t) * sky_sun,
-            sky_mie: Vec3::splat(self.scalar("Sky light: Mie scattering", t)) * sky_sun,
-            ambient_heights: Vec2::new(self.scalar("Ambient min height", t), self.scalar("Ambient max height", t)),
+            levels_min: scalar("Levels: min input"),
+            photofilter: Vec4::new(photo.x, photo.y, photo.z, scalar("Filters: photofilter density")),
+            hdr_dynamic: scalar("HDR dynamic power factor"),
+            sun_shafts: scalar("Sun shafts visibility"),
+            sun_specular: scalar("Sun specular multiplier"),
+            sky_rayleigh: scatter * scalar("Sky light: Rayleigh scattering") * sky_sun,
+            sky_mie: Vec3::splat(scalar("Sky light: Mie scattering")) * sky_sun,
+            ambient_heights: Vec2::new(scalar("Ambient min height"), scalar("Ambient max height")),
             char_back: [back(1), back(2)],
-            char_back_shadow: self.scalar("InShadowIntensity", t),
-            ocean_under: self.scalar("Ocean fog density under water", t),
+            char_back_shadow: scalar("InShadowIntensity"),
+            ocean_under: scalar("Ocean fog density under water"),
         }
     }
 }
@@ -582,6 +608,37 @@ mod tests {
         let mut b = a.clone();
         b.fog_density = 0.6;
         assert!((a.lerp(&b, 0.5).fog_density - 0.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn native_zone_blending_precedes_color_conversion_and_hdr_products() {
+        let tod = |color: f32, multiplier: f32, hdr: f32| {
+            TimeOfDay::parse(&format!(
+                r#"<TimeOfDay>
+            <Variable Name="Sun color" Color="{color},{color},{color}"/>
+            <Variable Name="Sun color multiplier" Value="{multiplier}"/>
+            <Variable Name="Night sky: Moon color" Color="{color},{color},{color}"/>
+            <Variable Name="Night sky: Moon color multiplier" Value="{multiplier}"/>
+            <Variable Name="HDR dynamic power factor" Value="{hdr}"/>
+            </TimeOfDay>"#
+            ))
+            .unwrap()
+        };
+        let a = tod(0.2, 2.0, 1.0);
+        let b = tod(0.8, 6.0, 3.0);
+        let lighting = Lighting::default();
+        let mixed = TimeOfDay::sample_blended(&[(&a, 1.0), (&b, 3.0)], 3.8, lighting);
+        let raw = Vec3::splat(0.65);
+        assert!((mixed.sun - srgb_to_linear(raw) * 5.0).length() < 1e-5);
+        assert!((mixed.moons[0].color - raw * 5.0 * 2.5_f32.exp2()).length() < 1e-5);
+        assert_eq!(mixed.hdr_dynamic, 2.5);
+        assert_eq!(mixed.sun_dir, sun_direction(3.8, lighting));
+        let after_conversion = a.sample(3.8, lighting).lerp(&b.sample(3.8, lighting), 0.75);
+        assert!((after_conversion.sun - mixed.sun).length() > 0.5);
+        assert!((after_conversion.moons[0].color - mixed.moons[0].color).length() > 10.0);
+        let single = TimeOfDay::sample_blended(&[(&a, 0.2)], 3.8, lighting);
+        assert_eq!(single.sun, a.sample(3.8, lighting).sun);
+        assert_eq!(single.moons[0].color, a.sample(3.8, lighting).moons[0].color);
     }
 
     #[test]

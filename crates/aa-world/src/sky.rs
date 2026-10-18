@@ -1,8 +1,8 @@
 //! Sky, sun, ambient light, fog parameters and ocean from the time of day data.
 //!
 //! * [`WorldClock`] holds the hour (0..24); `speed` advances it (game hours per real second).
-//! * The zone under the camera selects `zone/<id>/time_of_day.xml` (cached); the environment is sampled at the
-//!   clock and smoothed, then drives:
+//! * Nearby sectors select weighted `zone/<id>/time_of_day.xml` inputs (cached). Their raw curve
+//!   values blend at the clock's warped hour, then drive:
 //!   * a directional sun / moon light (colour and strength from `Sun color * multiplier`, direction from
 //!     the sun path of `lighting.xml`; at night the light comes from the moon side),
 //!   * ambient light (`Sky color` / `Ambient ground color`),
@@ -276,7 +276,7 @@ impl AtmosphereTuning {
     }
 }
 
-/// The environment currently applied (smoothed).
+/// The environment currently applied from native spatially weighted time-of-day inputs.
 #[derive(Resource, Clone, Debug)]
 pub struct Environment {
     pub sample: Option<EnvSample>,
@@ -302,6 +302,7 @@ pub struct SkyAssets {
 /// Cached zone data: time of day files, the sky of each zone and its sky box textures.
 #[derive(Resource, Default)]
 pub struct TodCache {
+    world: Option<String>,
     zones: HashMap<(u16, u32), Option<Arc<TimeOfDay>>>,
     world_default: HashMap<u32, Option<Arc<TimeOfDay>>>,
     lighting: Option<Lighting>,
@@ -309,6 +310,38 @@ pub struct TodCache {
     sector_rx: Option<Mutex<Receiver<World>>>,
     zone_sky: HashMap<Option<u16>, ZoneSky>,
     sky_boxes: HashMap<String, Option<SkyBox>>,
+}
+
+impl TodCache {
+    fn sync_world(&mut self, world: &str) {
+        if self.world.as_deref() == Some(world) {
+            return;
+        }
+        *self = Self { world: Some(world.to_string()), ..default() };
+        self.lighting = aa_pak::Pak::global()
+            .read_string(&format!("worlds/{world}/lighting.xml"))
+            .ok().and_then(|x| Lighting::parse(&x));
+        self.hdr = aa_pak::Pak::global()
+            .read_string(&format!("worlds/{world}/env.xml"))
+            .ok().and_then(|x| HdrSetup::parse(&x)).unwrap_or_default();
+    }
+
+    fn sample_zones(&mut self, world: &str, weights: &[(u16, f32)], layer: u32, hour: f32) -> Option<EnvSample> {
+        self.sync_world(world);
+        // Only nearby inputs stay resident; revisiting another world/zone cannot reuse stale curves.
+        self.zones.retain(|(zone, l), _| *l == layer && weights.iter().take(10).any(|(z, _)| z == zone));
+        let layers: Vec<_> = weights.iter().take(10).filter_map(|(zone, weight)| {
+            self.zones.entry((*zone, layer)).or_insert_with(|| load_tod(world, Some(*zone), layer))
+                .clone().map(|tod| (tod, *weight))
+        }).collect();
+        let lighting = self.lighting.unwrap_or_default();
+        if layers.is_empty() {
+            return self.world_default.entry(layer).or_insert_with(|| load_tod(world, None, layer))
+                .as_ref().map(|tod| tod.sample(hour, lighting));
+        }
+        let inputs: Vec<_> = layers.iter().map(|(tod, weight)| (tod.as_ref(), *weight)).collect();
+        Some(TimeOfDay::sample_blended(&inputs, hour, lighting))
+    }
 }
 
 /// Registers the sky systems.
@@ -343,6 +376,7 @@ fn setup_sky(
     if !cfg.environment {
         return;
     }
+    cache.sync_world(&cfg.world);
     // sector -> zone ownership comes from the big world.xml: parse it off the main thread
     let (tx, rx) = channel();
     let mut world = (*info.0).clone();
@@ -352,15 +386,6 @@ fn setup_sky(
         }
     });
     cache.sector_rx = Some(Mutex::new(rx));
-    cache.lighting = aa_pak::Pak::global()
-        .read_string(&format!("worlds/{}/lighting.xml", cfg.world))
-        .ok()
-        .and_then(|x| Lighting::parse(&x));
-    cache.hdr = aa_pak::Pak::global()
-        .read_string(&format!("worlds/{}/env.xml", cfg.world))
-        .ok()
-        .and_then(|x| HdrSetup::parse(&x))
-        .unwrap_or_default();
 
     ambient.brightness = 300.0;
 
@@ -405,13 +430,15 @@ fn setup_sky(
     commands.insert_resource(SkyAssets { dome_material, ocean_material });
 }
 
-fn receive_zones(mut cache: ResMut<TodCache>, mut info: ResMut<WorldInfo>) {
+fn receive_zones(cfg: Res<WorldConfig>, mut cache: ResMut<TodCache>, mut info: ResMut<WorldInfo>) {
     let received = match &cache.sector_rx {
         Some(rx) => rx.lock().unwrap().try_recv().ok(),
         None => None,
     };
     if let Some(world) = received {
-        info.0 = Arc::new(world);
+        if world.name == cfg.world {
+            info.0 = Arc::new(world);
+        }
         cache.sector_rx = None;
     }
 }
@@ -459,7 +486,6 @@ pub(crate) fn view_exposure(cameras: &Query<Option<&Exposure>, With<PostUniform>
 #[allow(clippy::too_many_arguments)]
 pub fn update_environment(
     mut commands: Commands,
-    time: Res<Time>,
     cfg: Res<WorldConfig>,
     info: Res<WorldInfo>,
     clock: Res<WorldClock>,
@@ -474,6 +500,10 @@ pub fn update_environment(
     focus: Query<Entity, With<WorldFocus>>,
 ) {
     if !cfg.environment {
+        env.sample = None;
+        env.zone = None;
+        cache.zones.clear();
+        cache.world_default.clear();
         return;
     }
     let focus_entity = focus.iter().next();
@@ -485,27 +515,24 @@ pub fn update_environment(
         return;
     };
     let cry_pos = bevy_to_cry(cam_tf.translation());
-    let zone = clock.zone.or_else(|| info.0.zone_at(cry_pos));
+    let same_world = info.0.name == cfg.world;
+    let zone = clock.zone.or_else(|| same_world.then(|| info.0.zone_at(cry_pos)).flatten());
 
-    let layer = clock.layer;
-    let tod = zone
-        .and_then(|z| cache.zones.entry((z, layer)).or_insert_with(|| load_tod(&cfg.world, Some(z), layer)).clone())
-        .or_else(|| cache.world_default.entry(layer).or_insert_with(|| load_tod(&cfg.world, None, layer)).clone());
-    let Some(tod) = tod else { return };
-    let lighting = cache.lighting.unwrap_or_default();
-    let mut target = tod.sample(clock.hour, lighting);
+    let weights = clock.zone.map(|z| vec![(z, 1.0)]).unwrap_or_else(|| {
+        if same_world { info.0.environment_weights(cry_pos) } else { Vec::new() }
+    });
+    let Some(mut cur) = cache.sample_zones(&cfg.world, &weights, clock.layer, clock.hour) else {
+        env.sample = None;
+        env.zone = zone;
+        return;
+    };
     // the clouds are shaded by the sky colour, which some zones keep green (see `update_ambient`): same hue as the ambient light
-    target.cloud_sky = ambient_hue(&target, &tuning, target.cloud_sky);
+    cur.cloud_sky = ambient_hue(&cur, &tuning, cur.cloud_sky);
     if tuning.sun_az.is_finite() && tuning.sun_el.is_finite() {
         let (az, el) = (tuning.sun_az.to_radians(), tuning.sun_el.to_radians());
-        target.sun_dir = Vec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin());
+        cur.sun_dir = Vec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin());
     }
-    // glide between zones / times
-    let k = 1.0 - (-time.delta_secs() * 3.0).exp();
-    let cur = match (&env.sample, env.zone == zone) {
-        (Some(prev), true) => prev.lerp(&target, k.max(0.02)),
-        _ => target.clone(),
-    };
+    // Native 300A5010 evaluates weighted curves each frame; there is no temporal filter.
     env.zone = zone;
     env.hour = clock.hour;
     if let Some((c, _)) = zone_sky_of(&mut cache, &cfg.world, zone).ocean_fog {
@@ -866,5 +893,65 @@ mod tests {
         }
         let noon = TimeOfDay::default().sample(12.0, Lighting::default());
         assert_eq!(directional_light_dir(&noon), noon.sun_dir);
+    }
+
+    #[test]
+    fn native_border_clock_override_world_change_and_unload() {
+        if !crate::pak_available() {
+            return;
+        }
+        let mut world = World::load("main_world").unwrap();
+        world.load_sector_zones().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldConfig::new("main_world"))
+            .insert_resource(WorldInfo(Arc::new(world)))
+            .insert_resource(WorldClock { hour: 10.0, zone: None, ..default() })
+            .insert_resource(AtmosphereTuning::default())
+            .insert_resource(Environment { sample: None, zone: None, hour: 0.0, ocean_fog: Vec3::ZERO })
+            .init_resource::<TodCache>()
+            .init_resource::<GlobalAmbientLight>()
+            .init_resource::<ClearColor>()
+            .add_systems(Update, update_environment);
+        let at = cry_to_bevy(Vec3::new(15712.0, 15808.0 - 0.01, 150.0));
+        let camera = app.world_mut().spawn((Camera3d::default(), GlobalTransform::from_translation(at))).id();
+        app.update();
+        let a = app.world().resource::<Environment>().sample.as_ref().unwrap().clone();
+        assert_eq!(app.world().resource::<Environment>().zone, Some(179));
+        assert_eq!(app.world().resource::<TodCache>().zones.len(), 2);
+        *app.world_mut().get_mut::<GlobalTransform>(camera).unwrap() = GlobalTransform::from_translation(at - Vec3::Z * 0.02);
+        app.update();
+        let b = app.world().resource::<Environment>().sample.as_ref().unwrap().clone();
+        assert_eq!(app.world().resource::<Environment>().zone, Some(210));
+        assert!((a.sun - b.sun).length() < 0.01);
+        assert!((a.fog - b.fog).length() < 0.01);
+        app.world_mut().resource_mut::<WorldClock>().hour = 3.8;
+        app.update();
+        let info = app.world().resource::<WorldInfo>();
+        let pos = bevy_to_cry(app.world().get::<GlobalTransform>(camera).unwrap().translation());
+        let weights = info.0.environment_weights(pos);
+        let inputs: Vec<_> = weights.iter().map(|(zone, weight)| (load_tod("main_world", Some(*zone), 0).unwrap(), *weight)).collect();
+        let refs: Vec<_> = inputs.iter().map(|(tod, weight)| (tod.as_ref(), *weight)).collect();
+        let expected = TimeOfDay::sample_blended(&refs, 3.8, Lighting::default());
+        let env = app.world().resource::<Environment>();
+        assert_eq!(env.sample.as_ref().unwrap().sun, expected.sun, "clock change has no frame-rate dependent lag");
+        assert_eq!(env.sample.as_ref().unwrap().sun_dir, expected.sun_dir);
+        app.world_mut().resource_mut::<WorldClock>().zone = Some(186);
+        app.update();
+        assert_eq!(app.world().resource::<TodCache>().zones.len(), 1);
+        assert!(app.world().resource::<TodCache>().zones.contains_key(&(186, 0)));
+        app.world_mut().resource_mut::<WorldConfig>().world = "login2".into();
+        app.update();
+        let cache = app.world().resource::<TodCache>();
+        assert_eq!(cache.world.as_deref(), Some("login2"));
+        assert_eq!(cache.lighting.unwrap().dawn_hour, 6.0);
+        app.world_mut().resource_mut::<WorldConfig>().environment = false;
+        app.update();
+        assert!(app.world().resource::<Environment>().sample.is_none());
+        assert!(app.world().resource::<TodCache>().zones.is_empty());
+        assert!(app.world().resource::<TodCache>().world_default.is_empty());
+        app.world_mut().resource_mut::<WorldConfig>().environment = true;
+        app.update();
+        assert!(app.world().resource::<Environment>().sample.is_some());
     }
 }
