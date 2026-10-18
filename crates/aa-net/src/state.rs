@@ -219,7 +219,7 @@ impl Units {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.faction_id = *faction_id;
             }
-            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
                     return false;
                 }
@@ -282,7 +282,7 @@ impl Doodads {
                 let Some(d) = self.by_id.get_mut(obj_id) else { return false };
                 d.owner_id = *new_owner_id;
             }
-            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
                     return false;
                 }

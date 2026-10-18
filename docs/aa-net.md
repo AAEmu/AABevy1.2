@@ -3556,3 +3556,35 @@ and passes doodad+7c (runtime object ID) and+2a8 (item template) to39330270. Rem
 39038a97 resolves the doodad's attached unit+88 and passes the same pair to39330310.
 This supports later use of received attachment and item identity; it does not prove that
 all world doodads merely owned by the same player are decorations of that house.
+
+### Explicit housing attachment identities (2026-10-18)
+
+`housing_attachments(&Doodads, &Units)` yields raw `HousingAttachment` identities only
+when a doodad's received `parent_obj_id` resolves to an existing received
+`UnitKind::Housing`. The four fields are house runtime object ID, its received timeline,
+doodad runtime object ID and raw item template ID. The join is computed from the two
+existing tables, so either packet order works and ordinary unit/doodad removal immediately
+invalidates membership without another cache. There is no ordering promise, ownership or
+proximity fallback, static item classification, permission decision or modifier total.
+A zero/unknown item template remains a received identity for the caller to resolve.
+
+This adds no wire fields: Doodad::read already retained parent and item IDs, and Unit::read
+already retained housing kind3 plus TL/template/build-step. The lane
+`models/doodad.rs::write` writes owner-object and parent-object BCs separately;
+`housing/manager.rs::attach_loaded_doodad` explicitly sets parent_obj_id=house.obj_id.
+That is consistent with the native parent-kind3/TL check above. Unit and doodad view tables
+now also clear on `CharacterSelected`, matching the per-character housing cache and
+preventing old attachment joins when a new character state arrives without a prior leave.
+
+The regression uses an independent full doodad wire fixture with different owner-object,
+parent-object, character-owner and owner-database IDs. It checks every truncation, parent
+kind, both packet orders, same-owner unattached rejection, raw zero item IDs, removals and
+character/world/disconnect resets. No placement, furnishing or server command is added.
+
+Lane `world/visibility.rs` announces a house as SCUnitState, then SCHouseState, then
+SCDoodadsCreated batches from its attached_doodads IDs. The joined view intentionally
+needs no guessed completion marker for those batches and yields only attachments already
+received at each point in that stream.
+
+Validation after the attachment/lifecycle follow-up: full aa-net library suite283 passed;
+`git diff --check` passes. No live placement or furnishing transaction was performed.

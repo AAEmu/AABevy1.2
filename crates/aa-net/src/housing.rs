@@ -152,6 +152,32 @@ impl HousingEvent {
     }
 }
 
+/// Received attachment identity, before static decoration lookup or housing access policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HousingAttachment {
+    pub house_obj_id: u32,
+    pub house_tl_id: u16,
+    pub doodad_obj_id: u32,
+    pub item_template_id: u32,
+}
+
+/// Join only an explicit doodad parent with an existing received housing unit.
+/// No ownership/proximity inference, static decoration classification, or cached ordering.
+pub fn housing_attachments<'a>(doodads: &'a crate::state::Doodads, units: &'a crate::state::Units) -> impl Iterator<Item = HousingAttachment> + 'a {
+    doodads.by_id.values().filter_map(move |doodad| {
+        let parent = units.by_id.get(&doodad.parent_obj_id)?;
+        let crate::model::UnitKind::Housing { tl_id, .. } = parent.kind else {
+            return None;
+        };
+        Some(HousingAttachment {
+            house_obj_id: parent.obj_id,
+            house_tl_id: tl_id,
+            doodad_obj_id: doodad.obj_id,
+            item_template_id: doodad.item_template_id,
+        })
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct House {
     pub snapshot: HouseSnapshot,
@@ -385,6 +411,91 @@ pub(crate) mod tests {
             world.apply(&state);
             assert!(world.houses.apply(&reset));
             assert!(!world.houses.apply(&reset));
+        }
+    }
+    #[test]
+    fn housing_attachment_identity_is_received_parent_kind_and_timeline_not_owner() {
+        use crate::model::{Doodad, UnitKind};
+        // models/doodad.rs::write field sequence: owner obj != parent obj and
+        // persistent owner DB id != housing timeline. Neither is a membership key.
+        let raw = hex(
+            "030201 2a000000 999999 563412 ff 000000000000000000 0000 0000 0000 0000803f 00 00000000 44332211 0000000000000000 88776655 00000000 00000000 0000000000000000 00000000 00000000 ffffffff 03 efcdab89 00000000",
+        );
+        let mut reader = Reader::new(&raw);
+        let doodad = Doodad::read(&mut reader).unwrap();
+        assert!(reader.is_empty());
+        assert_eq!(
+            (
+                doodad.obj_id,
+                doodad.owner_obj_id,
+                doodad.parent_obj_id,
+                doodad.item_template_id,
+                doodad.owner_db_id
+            ),
+            (0x010203, 0x999999, 0x123456, 0x55667788, 0x89abcdef)
+        );
+        for cut in 0..raw.len() {
+            assert!(Doodad::read(&mut Reader::new(&raw[..cut])).is_err());
+        }
+        let mut world = crate::state::WorldState::default();
+        world.apply(&Event::DoodadsSpawned(vec![doodad.clone()]));
+        assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 0);
+        let mut parent = crate::state::tests::unit(doodad.parent_obj_id);
+        world.apply(&Event::UnitSpawned(Box::new(parent.clone())));
+        assert_eq!(
+            housing_attachments(&world.doodads, &world.units).count(),
+            0,
+            "ordinary character parent is not housing"
+        );
+        parent.kind = UnitKind::Housing {
+            tl_id: 321,
+            template_id: 99,
+            build_step: -1,
+        };
+        world.apply(&Event::UnitSpawned(Box::new(parent.clone())));
+        let expected = HousingAttachment {
+            house_obj_id: 0x123456,
+            house_tl_id: 321,
+            doodad_obj_id: 0x010203,
+            item_template_id: 0x55667788,
+        };
+        assert_eq!(housing_attachments(&world.doodads, &world.units).collect::<Vec<_>>(), [expected]);
+        // Same owner without the explicit attachment never qualifies.
+        let mut unattached = doodad.clone();
+        unattached.obj_id = 4;
+        unattached.parent_obj_id = 0;
+        world.apply(&Event::DoodadsSpawned(vec![unattached]));
+        assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 1);
+        world.apply(&Event::DoodadsRemoved(vec![doodad.obj_id]));
+        assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 0);
+        world.apply(&Event::DoodadsSpawned(vec![doodad.clone()]));
+        world.apply(&Event::UnitsRemoved(vec![parent.obj_id]));
+        assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 0);
+        // Reverse packet order and unknown/zero item IDs remain raw identities.
+        world.apply(&Event::UnitSpawned(Box::new(parent)));
+        let mut zero = doodad;
+        zero.item_template_id = 0;
+        world.apply(&Event::DoodadsSpawned(vec![zero]));
+        assert_eq!(housing_attachments(&world.doodads, &world.units).next().unwrap().item_template_id, 0);
+        for reset in [
+            Event::CharacterSelected(Box::default()),
+            Event::LeftWorld { target: 0 },
+            Event::Disconnected { message: String::new() },
+        ] {
+            let mut parent = crate::state::tests::unit(0x123456);
+            parent.kind = UnitKind::Housing {
+                tl_id: 321,
+                template_id: 99,
+                build_step: -1,
+            };
+            world.apply(&Event::UnitSpawned(Box::new(parent)));
+            let mut reader = Reader::new(&raw);
+            world.apply(&Event::DoodadsSpawned(vec![Doodad::read(&mut reader).unwrap()]));
+            assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 1);
+            world.apply(&reset);
+            assert!(world.units.by_id.is_empty());
+            assert!(world.doodads.by_id.is_empty());
+            assert_eq!(housing_attachments(&world.doodads, &world.units).count(), 0);
         }
     }
 }
