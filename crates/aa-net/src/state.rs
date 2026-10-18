@@ -136,6 +136,12 @@ impl Units {
             Event::UnitSpawned(u) => {
                 self.by_id.insert(u.obj_id, (**u).clone());
             }
+            Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
+                let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
+                if !matches!(unit.kind, crate::model::UnitKind::Slave { .. }) { return false; }
+                unit.pos = escape.position();
+                unit.rotation[2] = escape.yaw;
+            }
             Event::UnitMoved { obj_id, movement } => {
                 // Ship requests carry only throttle and steering. Keep the last transform and
                 // movement report; replacing either with this request would put a ship at (0, 0, 0).
@@ -198,6 +204,10 @@ impl Units {
                         *s = item.clone();
                     }
                 }
+            }
+            Event::UnitNameChanged { obj_id, name } => {
+                let Some(unit) = self.by_id.get_mut(obj_id) else { return false };
+                unit.name = name.clone();
             }
             Event::UnitFactionChanged { obj_id, faction_id, .. } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };

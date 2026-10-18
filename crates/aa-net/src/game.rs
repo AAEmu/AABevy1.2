@@ -125,6 +125,7 @@ pub enum ClientMsg {
     LootRoll(crate::loot_roll::LootRollCommand),
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
+    Slave(crate::slave_control::SlaveCommand),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -183,6 +184,7 @@ impl ClientMsg {
             Self::LootRoll(m) => m.opcode(),
             Self::Actability(m) => m.opcode(),
             Self::Mate(m) => m.opcode(),
+            Self::Slave(m) => m.opcode(),
             Self::Auction(m) => m.opcode(),
             Self::Trade(m) => m.opcode(),
             Self::Mail(m) => m.opcode(),
@@ -283,6 +285,7 @@ impl ClientMsg {
             Self::LootRoll(m) => m.write(&mut w),
             Self::Actability(m) => m.write(&mut w),
             Self::Mate(m) => m.write(&mut w),
+            Self::Slave(m) => m.write(&mut w),
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),
             Self::Mail(m) => m.write(&mut w),
@@ -426,6 +429,7 @@ pub enum ServerMsg {
     UnitDetached { obj_id: u32, reason: u8 },
     /// `SCUnitModelPostureChanged`: an NPC changed its idle pose.
     UnitPosture { obj_id: u32, posture: Posture },
+    UnitNameChanged { obj_id: u32, name: String },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
     // -- world: clock, weather, chat channels, targets
     /// The game clock in hours (0..24); `speed` (game hours per real second) comes with the
@@ -562,6 +566,7 @@ impl ServerMsg {
             Self::UnitAttached { .. } => "SCUnitAttached",
             Self::UnitDetached { .. } => "SCUnitDetached",
             Self::UnitPosture { .. } => "SCUnitModelPostureChanged",
+            Self::UnitNameChanged { .. } => "SCUnitNameChanged",
             Self::UnitFactionChanged { .. } => "SCUnitFactionChanged",
             Self::TimeOfDay { speed: None, .. } => "SCTimeOfDay",
             Self::TimeOfDay { .. } => "SCDetailedTimeOfDay",
@@ -882,6 +887,7 @@ impl ServerMsg {
             sc::SCBmPointPacket => Self::BmPoint(r.i64()?),
             sc::SCCombatEngagedPacket => Self::CombatEngaged { obj_id: r.bc()? },
             sc::SCCombatClearedPacket => Self::CombatCleared { obj_id: r.bc()? },
+            sc::SCUnitNameChangedPacket => Self::UnitNameChanged { obj_id: r.bc()?, name: r.string()? },
             sc::SCUnitFactionChangedPacket => Self::UnitFactionChanged {
                 obj_id: r.bc()?,
                 name: r.string()?,
