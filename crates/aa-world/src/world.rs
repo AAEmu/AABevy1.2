@@ -131,6 +131,31 @@ impl World {
         Ok(())
     }
 
+    /// Native world-layer point query: sector owner under global Cry-space XY, with no cell fallback.
+    ///
+    /// Needs [`World::load_sector_zones`]. Native `365F3250` truncates both cell and sector indices
+    /// toward zero, checks their bounds, then returns the exact owner (`365F2680`). Z is ignored.
+    /// This is the spatial zone lookup used by trial locations, independently of loaded subzone
+    /// Area entities. An absent cell, unowned sector or invalid XY returns `None`.
+    pub fn sector_zone_at(&self, pos: Vec3) -> Option<u16> {
+        if !pos.x.is_finite() || !pos.y.is_finite() {
+            return None;
+        }
+        let cx = (pos.x * (1.0 / CELL_SIZE)) as i32;
+        let cy = (pos.y * (1.0 / CELL_SIZE)) as i32;
+        if cx < 0 || cy < 0 || cx >= self.cells_x || cy >= self.cells_y {
+            return None;
+        }
+        let sx = ((pos.x - cx as f32 * CELL_SIZE) * (1.0 / SECTOR_SIZE)) as i32;
+        let sy = ((pos.y - cy as f32 * CELL_SIZE) * (1.0 / SECTOR_SIZE)) as i32;
+        if !(0..16).contains(&sx) || !(0..16).contains(&sy) {
+            return None;
+        }
+        let owners = self.sector_zones.get(&(cx, cy))?;
+        let id = owners[(sx * 16 + sy) as usize];
+        (id != 0).then_some(id)
+    }
+
     /// Zone owning the sector under a cry-space position (needs [`World::load_sector_zones`]); falls
     /// back to the first zone of the cell.
     pub fn zone_at(&self, pos: Vec3) -> Option<u16> {
@@ -229,6 +254,86 @@ mod tests {
         let z = w.zone_at(Vec3::new(9.5 * 1024.0, 14.5 * 1024.0, 0.0)).unwrap();
         assert!(w.zone_name(z).is_some(), "zone {z}");
     }
+
+    #[test]
+    fn native_sector_query_bounds_truncation_and_no_cell_fallback() {
+        let mut w = World { cells_x: 2, cells_y: 3, ..Default::default() };
+        let mut owners = Box::new([0; 256]);
+        owners[0] = 129;
+        owners[1] = 130;
+        owners[15 * 16] = 131;
+        w.sector_zones.insert((0, 0), owners);
+        let mut owners = Box::new([0; 256]);
+        owners[0] = 7;
+        w.sector_zones.insert((1, 0), owners);
+        // The original 365F3250/365F32E0/365F2680 was executed with this sparse layout.
+        for (x, y, zone) in [
+            (0.0, 0.0, Some(129)),
+            (-0.1, 0.0, Some(129)),
+            (-63.999, 0.0, Some(129)),
+            (-64.0, 0.0, None),
+            (-1023.9, 0.0, None),
+            (-1024.0, 0.0, None),
+            (0.0, -63.999, Some(129)),
+            (0.0, -64.0, None),
+            (63.999, 0.0, Some(129)),
+            (64.0, 0.0, None),
+            (0.0, 63.999, Some(129)),
+            (0.0, 64.0, Some(130)),
+            (1023.999, 0.0, Some(131)),
+            (1024.0, 0.0, Some(7)),
+            (2047.9, 0.0, None),
+            (2048.0, 0.0, None),
+            (0.0, 3072.0, None),
+            (64.0, 64.0, None),
+            (f32::NAN, 0.0, None),
+            (f32::INFINITY, 0.0, None),
+            (f32::NEG_INFINITY, 0.0, None),
+            (2_199_023_255_552.0, 0.0, None),
+        ] {
+            assert_eq!(w.sector_zone_at(Vec3::new(x, y, f32::NAN)), zone, "{x},{y}");
+        }
+        w.cells.insert((0, 0), vec![999]);
+        let unowned = Vec3::new(64.0, 64.0, 0.0);
+        assert_eq!(w.zone_at(unowned), Some(999));
+        assert_eq!(w.sector_zone_at(unowned), None);
+        w.sector_zones.clear();
+        assert_eq!(w.sector_zone_at(Vec3::ZERO), None);
+    }
+
+    #[test]
+    fn real_native_sector_query_original_x86_goldens() {
+        if !crate::pak_available() {
+            return;
+        }
+        let mut w = World::load("main_world").unwrap();
+        w.load_sector_zones().unwrap();
+        // Native point-query execution over all 35*38 original cell centres, including unowned
+        // sectors. FNV preserves the complete X-major sequence without embedding another owner map.
+        let mut hash = 0xcbf29ce484222325_u64;
+        for x in 0..w.cells_x {
+            for y in 0..w.cells_y {
+                let zone = w.sector_zone_at(Vec3::new(
+                    x as f32 * CELL_SIZE + 512.0,
+                    y as f32 * CELL_SIZE + 512.0,
+                    0.0,
+                ));
+                hash = (hash ^ u64::from(zone.unwrap_or(0))).wrapping_mul(0x100000001b3);
+            }
+        }
+        assert_eq!(hash, 0x7284f3a5117503e5);
+        for (x, y, zone) in [
+            (15712.0, 15807.99, 179),
+            (15712.0, 15808.0, 210),
+            (15712.0, 15808.01, 210),
+            (12428.0, 10430.0, 149),
+            (21380.0, 8390.0, 158),
+            (9728.0, 14848.0, 129),
+        ] {
+            assert_eq!(w.sector_zone_at(Vec3::new(x, y, 0.0)), Some(zone));
+        }
+    }
+
     #[test]
     fn native_environment_distance_max_weights_and_limit() {
         let mut world = World::default();
