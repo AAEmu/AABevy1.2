@@ -85,6 +85,8 @@ pub struct ChatData {
     pub tab_area_height: f32,
     /// `SetTabAreaInset(left, top, right, bottom)`.
     pub tab_inset: [f32; 4],
+    /// Signed top-left/bottom-right offsets for message frames, independent of tabs.
+    pub content_offset: [f32; 4],
     pub add_button: Id,
     pub use_add_button: bool,
     pub edit: Id,
@@ -672,6 +674,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             tab_gap: 0.0,
             tab_area_height: 20.0,
             tab_inset: [0.0; 4],
+            content_offset: [0.0; 4],
             add_button: add,
             use_add_button: false,
             edit,
@@ -694,8 +697,8 @@ fn nonnegative(value: f32) -> f32 {
     if value < 0.0 { 0.0 } else { value }
 }
 
-/// Tab buttons left to right in the tab area, the add button after them, the message frames
-/// below; only the selected tab's frame is shown.
+/// Tab buttons left to right in the tab area, the add button after them;
+/// only the selected message frame is shown. Content anchors have their own callback.
 fn layout(lua: &Lua, id: Id) {
     let Some(c) = chat(lua, id) else { return };
     let mut g = ui(lua);
@@ -758,16 +761,6 @@ fn layout(lua: &Lua, id: Id) {
         o.height = th;
         o.shown = true;
         let m = u.tree.get_mut(tab.message);
-        m.anchors = vec![
-            anchor(Point::TopLeft, 0.0, c.tab_area_height),
-            Anchor {
-                point: Point::BottomRight,
-                target: id,
-                rel: Point::BottomRight,
-                x: -c.tab_inset[2],
-                y: 0.0,
-            },
-        ];
         m.shown = i == c.selected;
         if let Some(b) = u
             .tree
@@ -798,6 +791,22 @@ fn layout(lua: &Lua, id: Id) {
         o.height = 1.0;
     }
     u.tree.touch();
+}
+
+/// Native 392ca610 runs on SetContentOffset and tab insertion, separately from
+/// tab layout. In particular, later tab-area-height changes retain these anchors.
+fn layout_content(lua: &Lua, id: Id) {
+    let Some(c) = chat(lua, id) else { return };
+    let [left, top, right, bottom] = c.content_offset;
+    let top = c.tab_area_height + top;
+    let mut u = ui(lua);
+    for tab in c.tabs {
+        if tab.message == crate::tree::ROOT || !u.tree.get(tab.message).alive { continue; }
+        u.tree.get_mut(tab.message).anchors = vec![
+            Anchor { point: Point::TopLeft, target: id, rel: Point::TopLeft, x: left, y: top },
+            Anchor { point: Point::BottomRight, target: id, rel: Point::BottomRight, x: right, y: bottom },
+        ];
+    }
 }
 
 /// Native extent/anchor callbacks 392ca020/30/40 run tab layout before the
@@ -920,6 +929,7 @@ fn set_window_id(lua: &Lua, id: Id, window_id: i64) -> mlua::Result<()> {
     if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
         c.hovered = None;
     }
+    layout_content(lua, id);
     select(lua, id, 0);
     Ok(())
 }
@@ -1404,6 +1414,16 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             })?,
         )?;
     }
+    def(
+        "SetContentOffset",
+        method(lua, |lua, id, a| {
+            if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+                c.content_offset = [a.f(1), a.f(2), a.f(3), a.f(4)];
+            }
+            layout_content(lua, id);
+            none()
+        })?,
+    )?;
     for name in [
         "SetCaretOffset",
         "SetMaxNotifyTime",
@@ -1413,7 +1433,6 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetSlideTimeInDragging",
         "AllowTabSwitch",
         "UseSlidingButton",
-        "SetContentOffset",
         "SetTabButtonAlpha",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
