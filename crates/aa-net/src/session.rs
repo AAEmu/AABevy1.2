@@ -291,7 +291,9 @@ pub enum Command {
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
+    /// Legacy unscoped transport API; new app actions should capture persistent identity below.
     Auction(crate::auction::AuctionCommand),
+    AuctionForCharacter { character_id:u32,command:crate::auction::AuctionCommand },
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
     Friend(crate::friend::FriendCommand),
@@ -1243,12 +1245,11 @@ impl Session {
                     self.emit(Event::LootRoll(crate::loot_roll::LootRollEvent::Requested(command)));
                 }
             }
-            Command::Auction(command) => {
-                if let Err(message) = command.validate() {
-                    self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected { command, message: message.into() }));
-                } else if self.send_game(game::ClientMsg::Auction(command.clone())).await {
-                    self.emit(Event::Auction(crate::auction::AuctionEvent::Requested(command)));
-                }
+            Command::Auction(command) => {self.send_auction(command).await;}
+            Command::AuctionForCharacter{character_id,command}=>{
+                if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id){
+                    self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:"auction request belongs to an inactive character".into()}));
+                }else{self.send_auction(command).await;}
             }
             Command::Trade(command) => {
                 if let Err(message) = command.validate() {
@@ -1793,6 +1794,12 @@ impl Session {
                 self.emit(Event::UnhandledGamePacket {level,opcode,len});
             }
         }
+    }
+
+    async fn send_auction(&mut self,command:crate::auction::AuctionCommand){
+        if let Err(message)=command.validate(){self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:message.into()}));}
+        else if self.send_game(game::ClientMsg::Auction(command.clone())).await{self.emit(Event::Auction(crate::auction::AuctionEvent::Requested(command)));}
+        else{self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:"auction request was not sent".into()}));}
     }
 
     async fn start_skill(&mut self, skill_id: u32, caster: StartCaster, target: SkillTarget) {
@@ -4720,6 +4727,21 @@ mod tests {
       s.phase=Phase::CharacterSelect;s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));s.phase=Phase::InWorld;
       s.received_rankings.borrow_mut().character_id=Some(41);s.command(Command::Ranking{character_id:42,command:C::RequestSnapshots{rank_id:7}}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));
       assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());s.game.as_mut().unwrap().shutdown().await;s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::RankingRequested{..}|Event::Ranking(_)));rejected|=matches!(e,Event::RankingRequestRejected{..});}assert!(rejected);
+    }
+
+    #[tokio::test]
+    async fn auction_captured_character_loopback_and_complete_send_rejection(){
+        use crate::auction::{AuctionCommand as C,AuctionSearch,AuctioneerIds,AuctionEvent};
+        let(tx,mut events)=unbounded_channel();let mut s=Session::new(tx,ClientOptions::default());s.phase=Phase::InWorld;s.selected=42;let mut header=CharacterState::default();header.character.id=42;s.selected_state=Some(header);
+        let command=C::Search{auctioneer:AuctioneerIds::default(),query:AuctionSearch::default()};
+        s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::Auction(AuctionEvent::Requested(_))));rejected|=matches!(e,Event::Auction(AuctionEvent::RequestRejected{..}));}assert!(rejected);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();s.game=Some(connection.unwrap());
+        s.command(Command::AuctionForCharacter{character_id:41,command:command.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::RequestRejected{..}))));
+        s.selected_state.as_mut().unwrap().character.id=41;s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::RequestRejected{..}))));s.selected_state.as_mut().unwrap().character.id=42;
+        s.phase=Phase::CharacterSelect;s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::RequestRejected{..}))));s.phase=Phase::InWorld;
+        s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;let n=peer.read_u16_le().await.unwrap();let mut raw=vec![0;n as usize];peer.read_exact(&mut raw).await.unwrap();let mut expected=command.opcode().to_le_bytes().to_vec();expected.extend(game::ClientMsg::Auction(command.clone()).encode_body());assert_eq!(&raw[4..],expected);assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::Requested(actual)))if actual==command));assert!(events.try_recv().is_err());
+        s.game.as_mut().unwrap().shutdown().await;s.command(Command::AuctionForCharacter{character_id:42,command:command.clone()}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::Auction(AuctionEvent::Requested(_))));rejected|=matches!(e,Event::Auction(AuctionEvent::RequestRejected{..}));}assert!(rejected);
+        s.command(Command::Auction(command)).await;assert!(matches!(events.try_recv(),Ok(Event::Auction(AuctionEvent::RequestRejected{..}))));
     }
 
 }
