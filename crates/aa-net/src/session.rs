@@ -265,6 +265,8 @@ pub enum Command {
     Interact(crate::interaction::Interact),
     Shop(crate::shop::ShopCommand),
     Bank(crate::bank::BankCommand),
+    /// Opaque per-character UI data; save does not have a server acknowledgement.
+    UiData(crate::ui_data::UiDataCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
@@ -515,6 +517,7 @@ pub enum Event {
     Friend(crate::friend::FriendEvent),
     Repair(crate::repair::RepairEvent),
     Bank(crate::bank::BankEvent),
+    UiData(crate::ui_data::UiDataEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
     /// The skills of `ability` were forgotten.
@@ -936,6 +939,23 @@ impl Session {
                     self.emit(Event::Shop(crate::shop::ShopEvent::RequestRejected(message.into())));
                 } else {
                     self.send_game(game::ClientMsg::Shop(m)).await;
+                }
+            }
+            Command::UiData(command) => {
+                use crate::ui_data::{UiDataCommand, UiDataEvent};
+                let invalid = command.validate().err().or_else(|| match &command {
+                    UiDataCommand::Request { .. } if !matches!(self.phase,
+                        Phase::CharacterSelect | Phase::EnteringWorld | Phase::InWorld) =>
+                        Some("UI data request requires a connected character lobby or world"),
+                    UiDataCommand::Save { character_id, .. } if self.phase != Phase::InWorld
+                        || *character_id != self.selected || self.selected == 0 =>
+                        Some("UI data save must match the active selected character"),
+                    _ => None,
+                });
+                if let Some(message) = invalid {
+                    self.emit(Event::UiData(UiDataEvent::RequestRejected { command, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
+                    self.emit(Event::UiData(UiDataEvent::Requested(command)));
                 }
             }
             Command::Bank(command) => {
@@ -1431,6 +1451,7 @@ impl Session {
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
+            M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::Mate(e) => self.emit(Event::Mate(e)),
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
@@ -1633,6 +1654,172 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn ui_data_session_validates_save_identity_and_only_caches_received_responses() {
+        use crate::ui_data::{UiDataCommand, UiDataEvent, UiDataResponse};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.selected = 7;
+        let save = UiDataCommand::Save {
+            character_id: 7,
+            data_type: 5,
+            payload: "x\u{00e9}\u{1f600}".into(),
+        };
+        session.command(Command::UiData(save.clone())).await;
+        assert!(
+            events.try_recv().is_err(),
+            "no connection cannot produce Requested"
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        for (phase, command) in [
+            (
+                Phase::Idle,
+                UiDataCommand::Request {
+                    character_id: 7,
+                    data_type: 5,
+                },
+            ),
+            (
+                Phase::InWorld,
+                UiDataCommand::Request {
+                    character_id: 0,
+                    data_type: 5,
+                },
+            ),
+            (Phase::CharacterSelect, save.clone()),
+            (
+                Phase::InWorld,
+                UiDataCommand::Save {
+                    character_id: 8,
+                    data_type: 5,
+                    payload: "other".into(),
+                },
+            ),
+            (
+                Phase::InWorld,
+                UiDataCommand::Save {
+                    character_id: 7,
+                    data_type: 5,
+                    payload: "a\0b".into(),
+                },
+            ),
+            (
+                Phase::InWorld,
+                UiDataCommand::Save {
+                    character_id: 7,
+                    data_type: 5,
+                    payload: "a".repeat(8192),
+                },
+            ),
+        ] {
+            session.phase = phase;
+            session.command(Command::UiData(command.clone())).await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::UiData(UiDataEvent::RequestRejected { command: actual, message })) if actual == command && !message.is_empty())
+            );
+        }
+        let mut state = crate::state::WorldState::default();
+        // Requests may name a lobby character. The lane alone checks connection ownership and
+        // silently ignores an unowned ID; a local socket write must never fabricate its response.
+        for (index, command) in [
+            UiDataCommand::Request {
+                character_id: 7,
+                data_type: 0xffff,
+            },
+            UiDataCommand::Request {
+                character_id: 8,
+                data_type: 2,
+            },
+            save.clone(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            session.phase = if index == 2 {
+                Phase::InWorld
+            } else {
+                Phase::CharacterSelect
+            };
+            session.command(Command::UiData(command.clone())).await;
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(&event, Event::UiData(UiDataEvent::Requested(actual)) if *actual == command)
+            );
+            state.apply(&event);
+            let mut length = [0; 2];
+            peer.read_exact(&mut length).await.unwrap();
+            let mut frame = vec![0; u16::from_le_bytes(length) as usize];
+            peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(
+                frame,
+                game::ClientMsg::UiData(command).encode(index as u8),
+                "rejected commands must not reach the socket"
+            );
+            assert!(
+                state.ui_data.entries().is_empty(),
+                "a save has no ACK or optimistic cache write"
+            );
+            assert!(events.try_recv().is_err());
+        }
+        let values = [
+            UiDataResponse {
+                character_id: 7,
+                data_type: 5,
+                payload: "old".into(),
+                raw_length: 4,
+            },
+            UiDataResponse {
+                character_id: 8,
+                data_type: 2,
+                payload: "other".into(),
+                raw_length: 6,
+            },
+            UiDataResponse {
+                character_id: 7,
+                data_type: 5,
+                payload: "received".into(),
+                raw_length: -1,
+            },
+        ];
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(
+                values
+                    .iter()
+                    .cloned()
+                    .map(game::ServerMsg::UiData)
+                    .chain([game::ServerMsg::UnitPoints {
+                        obj_id: 99,
+                        hp: 5,
+                        mp: 6,
+                    }])
+                    .collect(),
+            )))
+            .await;
+        for value in &values {
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(&event, Event::UiData(UiDataEvent::Response(actual)) if actual == value)
+            );
+            state.apply(&event);
+        }
+        assert_eq!(state.ui_data.get(7, 5), Some(&values[2]));
+        assert_eq!(state.ui_data.get(8, 2), Some(&values[1]));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::UnitPoints {
+                obj_id: 99,
+                hp: 5,
+                mp: 6
+            })
+        ));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn repair_and_bank_services_validate_locally_and_wait_for_complete_authoritative_acks() {

@@ -103,6 +103,8 @@ opcodes! {
         CSRepairSingleEquipmentPacket = 0x03c,
         CSRepairAllEquipmentsPacket = 0x03d,
         CSExpandSlotsPacket = 0x041,
+        CSRequestUIDataPacket = 0x117,
+        CSSaveUIDataPacket = 0x118,
         CSDepositMoneyPacket = 0x047,
         CSWithdrawMoneyPacket = 0x048,
         CSResurrectCharacterPacket = 0x04e,
@@ -160,6 +162,7 @@ opcodes! {
 opcodes! {
     /// Game server to client, level 1 (`SC*`).
     pub mod sc {
+        SCResponseUIDataPacket = 0x1ca,
         X2EnterWorldResponsePacket = 0x000,
         SCReconnectAuthPacket = 0x001,
         SCPrepareLeaveWorldPacket = 0x002,

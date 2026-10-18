@@ -44,6 +44,7 @@ pub mod state;
 pub mod stream;
 pub mod trade;
 pub mod unit_msg;
+pub mod ui_data;
 pub mod wire;
 pub mod world_msg;
 
@@ -73,6 +74,7 @@ pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
 pub use slave::{SlaveCreated, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
 pub use slave_control::{SlaveCommand, SlaveItemLocation, SlaveSpawnRequest};
 pub use wire::Pos;
+pub use ui_data::{UiData, UiDataCommand, UiDataEvent, UiDataResponse};
 
 #[cfg(feature = "bevy")]
 pub use plugin::{NetCommand, NetEvent, NetPlugin};

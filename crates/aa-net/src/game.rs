@@ -131,6 +131,7 @@ pub enum ClientMsg {
     Mail(crate::mail::MailCommand),
     Friend(crate::friend::FriendCommand),
     Repair(crate::repair::RepairCommand),
+    UiData(crate::ui_data::UiDataCommand),
     /// Party command plus the local character name used by `CSReplyToJoinTeam`.
     Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
@@ -190,6 +191,7 @@ impl ClientMsg {
             Self::Mail(m) => m.opcode(),
             Self::Friend(m) => m.opcode(),
             Self::Repair(m) => m.opcode(),
+            Self::UiData(m) => m.opcode(),
             Self::Party { command, .. } => command.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
@@ -291,6 +293,7 @@ impl ClientMsg {
             Self::Mail(m) => m.write(&mut w),
             Self::Friend(m) => m.write(&mut w),
             Self::Repair(m) => m.write(&mut w),
+            Self::UiData(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);
@@ -362,6 +365,7 @@ pub enum ServerMsg {
     /// Congestion per race (index = race id) for character creation.
     RaceCongestion([u8; 9]),
     CharacterList { last: bool, characters: Vec<Character> },
+    UiData(crate::ui_data::UiDataResponse),
     CharacterCreated(Box<Character>),
     CharacterCreationFailed { reason: u8 },
     CharacterDeleteResponse { id: u32, status: u8, delete_request_time: i64, delete_time: i64 },
@@ -615,6 +619,7 @@ impl ServerMsg {
             Self::LoadInstance(_) => "SCLoadInstance",
             Self::BlinkUnit(_) => "SCBlinkUnit",
             Self::Gimmick(e) => e.name(),
+            Self::UiData(_) => "SCResponseUIData",
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
@@ -917,6 +922,7 @@ impl ServerMsg {
             sc::SCLoadInstancePacket => Self::LoadInstance(crate::world_msg::InstanceLoad::read(r)?),
             sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
             sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
+            sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,
