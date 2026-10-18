@@ -3377,3 +3377,28 @@ excluded Enum group39ac99b8 and special count-exclusion39acb620. Their image con
 protected/nonplaintext; no direct static initializer assignment was found. Runtime or
 protected-data initialization tracing is still needed. Numeric IDs must not be guessed
 from catalog language names or enum ordering.
+
+### Stablehand quote getter source audit (2026-10-18)
+
+GetTotalRepairsForPetItems39447a40 invokes397d3130 with argument0b, which is item
+implementation11, NOT a container mask. That helper enumerates physical BAG(kind2) and
+BANK(kind3) slots and selects items whose static implementation is11. The quote skips
+invalid templates, pending packed slot keys in inventory+c348, absent/invalid pet-item
+mapping396a6f00 and nondead items. Native detail deadbyte+1d must be nonzero; level is
+byte+1e. Each eligible item contributes once, independently of stack count. Getter sums
+signed i32 costs and returns the total converted to f32 Lua number. It does not require
+a stablehand, inspect affordability/currency policy or change any received dead flag.
+
+Per-item arithmetic39447b08..b96: level converts to f32, then double; imported MSVCR100
+__libm_sse2_pow uses double exponent399da2e8=2.299999952316284. Result converts to f32;
+separate f32 operations add level*0.5 and0.5; the native SSE floor sequence converts to
+i32. This differs from the lane's entirely-double `revive_cost` using exponent2.3.
+A formula comparison across byte levels finds one-copper differences at144,164,219,226,
+244; this comparison is not a live/native pow oracle and assumes no arbitrary level cap.
+
+RepairPetItems39440d80 independently reads current interaction, requires NPC kind1,
+resolved NPC data and stabler flag+e4, and sends existing CS0b5 actual NPC objectID.
+It adds no optimistic mutation/acceptance. The existing authoritative reason58 item
+updates remain the source of revival. A faithful UI quote still needs current per-slot
+pending eligibility plus pet static mapping; no new quote API was fabricated from only
+dead flags or from the lane's different floating-point implementation.
