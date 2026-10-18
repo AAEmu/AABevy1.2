@@ -1,9 +1,10 @@
 use super::*;
 use crate::hud::api::HudData;
+use aa_ui::UiRuntime;
 use mlua::FromLua;
 use std::{cell::RefCell, rc::Rc};
 
-fn runtime() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
+pub(super) fn runtime() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
     let rt = UiRuntime::new("en_us", 1280., 720.)?;
     let state = Rc::new(RefCell::new(HudData::default()));
     rt.lua

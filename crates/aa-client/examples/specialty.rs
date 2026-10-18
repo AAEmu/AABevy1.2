@@ -1,4 +1,4 @@
-//! Original specialty ratio error receipt. No connection, request or sale.
+//! Original specialty receipts. --specialty-quote money|coin|full adds explicit fixture goods/NPC.
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;
