@@ -550,15 +550,15 @@ render proxy's top-level `CastShadow`. Positions use the native parent transform
 origin; entity scale changes a child slot's position but does not multiply the authored light radius.
 
 Every cell owns its `LocalLight` data entities, and unload removes them together with any render
-components. `LocalLightSettings` defaults to 64 nearest lights, two nearest authored shadow
+components. `LocalLightSettings` defaults to 64 nearest light components, two nearest authored shadow
 requests, and a 400 m distance to the influence sphere. Selection runs at 5 Hz; point-light
 components only change when the selected set or parameters change. Inactive/hidden records do
-not render. Projector textures, fake/negative lights and deferred clip bounds are retained as data
+not render. Unsupported projector variants, fake/negative lights and deferred clip bounds are retained as data
 and counted as unsupported, without substituting omnidirectional lights. Runtime `enabled=false`
 or `AA_NO_LOCAL_LIGHTS=1` disables rendering while retaining the cell data. `LocalLightStats`
 reports authored/rendered/shadowed/unsupported counts. No additional aa-client wiring is needed.
 
-The current renderer uses Bevy's clustered `PointLight` path, so photometry is an approximation:
+Point sources use Bevy's clustered `PointLight` path, so photometry is an approximation:
 the original `ShadeLib.cfi::GetAttenuation` and `DeferredShading.cfx::GetDeferredLightAttenuation`
 give `(1-d²/r²)²`; Bevy uses `(1-(d²/r²)²)²/d²`. Luminous intensity is therefore
 `0.16 * radius² * WorldConfig.sun_lux_scale` (lumens multiply by `4*pi`), matching diffuse
@@ -566,11 +566,12 @@ illuminance at half-radius. RGB is the authored diffuse product, without arbitra
 The exact Cry falloff, legacy `fHDRDynamic`, per-light specular multiplier, ambient-light shader
 mode, style animation, vis-area restrictions and legacy shadow-bias units are not reproduced.
 Those fields remain typed data; shadows use Bevy's bias defaults and the bounded shadow budget.
-IndirectLight and projected/cubemap lighting remain separate renderer work.
+IndirectLight and cubemap lighting remain separate renderer work. Ordinary RGB 2D projectors
+have a bounded supported path described below.
 
 Validation: `cargo test -p aa-world --lib light` passes five tests, including the real dock
 Light_116 (radius 18, warm diffuse times two, HDR 1) and parented airport Light129; the runtime
-budget test excludes inactive/hidden/projector/fake slots and releases all render components
+headless point-budget test excludes inactive/hidden/projector/fake slots and releases all render components
 when disabled. `cargo check -p aa-world --examples` passes. The aa-dev `local_lights` example
 captures at 1920x1080, hour 0: `shots/aa-world/lights/on.png` and `off.png` show the same dock
 with and without its 32 original light slots. With lights, 127–149 FPS late; disabled, 184–190 FPS.
@@ -588,6 +589,115 @@ logo compositing with the authored UV controls. `aa-cry::loader::Prep::material`
 `shade::convert_material` / `to_standard_material`, which currently binds Diffuse as ordinary
 sRGB and has no UCC remap/composite. This is a material-conversion gap, not bad placement;
 no aa-cry files were changed.
+
+**Ordinary RGB projectors** (`objects/lights/projectors.rs`): original `Light.lua` feeds
+`projector_texture`, `proj_fov` and `proj_nearplane` to native entity parser **32043600**.
+It halves the full authored FOV into `SLight+316`, preserves near plane at `+320`, and
+loads ordinary 2D cookies with renderer flags zero. Renderer **381A9CB0** calls
+**381A8AD0** in its projective-texgen basis mode, then multiplies view, projection and
+the `(0.5,-0.5)` texture bias. For normalized authored columns X/Y/Z and local point
+`(x,y,z)` relative to the light, depth is **+x**, and
+`u=.5-z/(2*x*tan(FOV/2))`, `v=.5-y/(2*x*tan(FOV/2))`.
+Entity scale is removed independently from each basis column. Native near is
+`max(authoredNear,.01)`, far `max(radius,near+.01)`; the matrix oracle also checks
+behind-light, near and far samples. The imported SSE `tanf` alone is replaced with
+host libm in the x86 Unicorn oracle; all matrix instructions run from original bytes.
+
+Native **38045CA0** samples the cookie at texture slot 2 with sampler byte 18 zero;
+**380FB9C0** normally selects `CTexture+132` and only selects `+136` when that byte is
+nonzero and dual-view flag `0x10` is present. The ordinary flags-zero load chain
+**38176D00 → 381C5E00 → 381C49C0/381C5980 → 381C4EA0/381C39D0** does not request that
+dual view. DDS loader **381D6740** checks the `CRYF` marker at file+124 and maps
+header flag `0x800` at file+36 into ImageFile+24 bit `0x1000`; normal-map inputs do
+not set it. **381C39D0** copies that image bit into CTexture+60 bit `0x8000`.
+Format setup **380F4380/380F41A0** marks DXT1/3/5 as sRGB-capable; **38100230**
+preserves the existing image bit only for supported ordinary formats and selects
+the corresponding default view, using **380F8B20**'s DXGI mappings 71→72, 74→75
+and 77→78. Thus channel images preserve both encoded bytes and the native CRYF
+color-space flag; untagged cookies remain linear. Hardware decodes tagged channels
+before bilinear filtering. The original shader
+`DeferredShading.cfx::LightPassPS` multiplies `cookie.rgb * g_LightDiffuse * NdotL *
+attenuation`. Its pass state `0x22`, decoded by **38056EC0**, is ONE/ONE ADD. Three
+axis-colored Bevy lights with the same full intensity therefore reproduce the RGB
+filter without a 3x gain or a division by three. Bevy's spot and point extractors
+both divide lumens by `4*pi` (`bevy_pbr 0.20 render/light.rs`).
+
+Bevy `SpotLightTexture` reads red only. The adapter splits an original cookie into
+three red-channel images with the original color space and mirrors U to reconcile the native texgen basis
+with a proper Bevy rotation. It circumscribes the native square with the spot's
+constant inner cone, sets the outer cosine to `cos(inner)-1e-4` (Bevy's denominator
+guard), and scales local XY by `tan(nativeHalfFov)/tan(outer)`. The texture footprint
+and all square corners retain native UVs and full angular intensity. A fully black
+outer pixel border is required so clamp addressing contributes zero outside the
+square. Nonblack borders are rejected rather than repeated or clipped to a circle.
+
+Supported: active visible ordinary non-shadowed BC1/2/3 2D cookies, positive RGB,
+orthogonal non-reflected transforms, HDR/style zero, authored near plane zero.
+Shadowed RGB, ambient/fake/negative/cubemap/clip-bound variants, positive/negative
+authored near planes, HDR/style animation, normal-map cookies, shear/reflection and nonblack borders stay
+unsupported. The native effective .01 m near clip is not implemented in the Bevy
+receiver. Vis-area restrictions and the separate native specular multiplier retain
+the existing local-light limitations. Projector attenuation in the original shader
+is **`1-d²/r²`**, unlike the squared point-light falloff. The Bevy inverse-square
+receiver remains an approximation: each component uses luminous intensity
+`(16/75)*radius²*sun_lux_scale`, matching native diffuse only at half-radius.
+
+Selection remains 5 Hz. Each RGB source consumes **three** of the 64 GPU-light slots
+atomically; no partial color and no RGB shadows are allowed. Child lights belong to
+the authored cell root. Two nearby cookie assets (six texture views), each at most
+262,144 pixels and dimension 1024, bound resident cached channel images to 6 MiB;
+at most two transient worker results can coexist with that cache. Only mip zero is
+needed by the original explicit-LOD-zero shader. Two shared-worker jobs maximum
+remain counted across world changes until drained; obsolete results never upload.
+Cookies release when no nearby eligible source references them. The feature requires
+both Bevy `pbr_light_textures` and `pbr_clustered_decals`; the plugin checks Bevy's
+actual GPU capability predicate and leaves projectors unsupported on other devices.
+Bevy shares one sampler across clustered decal/light textures; this path consistently
+uses linear clamp. Other consumers must observe that Bevy restriction.
+`LocalLightStats.rendered` counts actual GPU components, with new `projected_sources`,
+`cookie_assets` and `pending_cookies` fields. No aa-client hook is needed.
+
+A bounded survey of the 22 largest cell-entity XML files (10,648,396 bytes) found 467
+projector records; 128 active ordinary non-shadowed candidates all use original
+`objects/env/08_dungeon/05_libray/light_a_df.dds`. That 256×512 DXT1 stained-glass cookie
+is strongly RGB (maximum channel difference 177) with an exactly black border.
+Its original `CRYF` flag is `0x800`, so it uses sRGB sampling.
+Fixture `projected_lights` uses original instance-library cell (0,4) **Light_587**,
+GUID `491a724ff2eb4d01`, FOV 62.2°, radius 15 m, diffuse
+`(.0196078,.705882,.54902)*31.3`, near zero and its authored rotation. Its neutral
+receiver is an explicit rendering control, not original library geometry. `--world`
+uses normal cell streaming; `--off`, individual RGB controls, `--budget-two` and
+`--unload-check` isolate filtering, additive power, atomic budgeting and lifetime.
+Read-only source exports and numeric oracles live under ignored
+`data/extract/aa-world/lights/projector-*.txt` / `projector-native-goldens.json`.
+
+Validation: `cargo test -p aa-world --lib` passes **139 tests**, with nine pre-existing
+ignored tests; current `cargo check -p aa-world --examples` and the fixture build pass.
+The source-backed tests include native identity/scaled/authored-rotation UV goldens,
+black-border and linear/sRGB image rules, the half-radius photometry equation, atomic
+mixed point/RGB budgeting, root/child unload and stale-world worker completion.
+Inspected 1920×1080 captures under `shots/aa-world/lights/` are `projector_rgb.png`,
+`projector_{red,green,blue,off,budget_two,unload}.png` and
+`projector_library_{world,off,unload}.png`. Across 457,942 lit receiver pixels, the full
+RGB capture equals the sum of the separate-channel captures exactly: zero byte error
+and zero linear-RGB error. Original texel (232,436), outside a circular cone footprint,
+remains visible near screen (645,812), with a 5×5 peak RGB (1,10,119). Off, two-slot
+budget and root-unload captures contain no nonzero RGB pixels. The final RGB fixture
+logs 294–414 FPS, the individual controls 278–451 FPS; separate runs on a shared GPU
+are not a controlled benchmark. Its harmless no-effect dithering warning was removed
+by disabling dithering with Tonemapping::None, then rebuilding and recapturing.
+
+Actual library streaming retains 2,013 authored slots and selects 64 GPU components:
+11 RGB sources/33 spots plus 31 points, one cookie, zero shadows (208–252 FPS). Moving
+away in `--world --unload-check` verifies zero authored slots, components, RGB children,
+cookie assets and pending cookie jobs. Every run exits with process status zero and
+no renderer errors. The in-scene camera is obstructed by dark geometry, so its on/off
+captures do **not** establish a useful authored-receiver visual match. No same-camera
+library reference is available under `reference/`; the useful comparison is the
+original cookie plus native numeric and neutral-receiver controls. World runs also
+report an existing aa-fx material-load warning for
+`materials/effects/velo_particle_volumelights2.mtl`; no lighting values were tuned to
+hide either scene limitation. All own windows close; the user's client is untouched.
 
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data
@@ -1770,7 +1880,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
+* Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).

@@ -10,7 +10,7 @@ aa-pak.workspace = true
 aa-cry.workspace = true
 aa-fx.workspace = true
 aa-audio.workspace = true
-bevy.workspace = true
+bevy = { workspace = true, features = ["pbr_light_textures", "pbr_clustered_decals"] }
 half = "2"
 roxmltree.workspace = true
 thiserror.workspace = true
