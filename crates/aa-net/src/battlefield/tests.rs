@@ -498,3 +498,17 @@ fn clocked_receive_keeps_native_timestamps_and_distinct_start_vs_frame_branches(
     let mut unknown=active_state();unknown.apply_with_time(&Event::Battlefield(BattlefieldEvent::Started(start())),None);
     assert_eq!(unknown.phase,Some(BattlefieldPhase::Opening));assert_eq!(unknown.opening_at_ms,None);
 }
+
+#[test]
+fn remaining_time_notice_is_raw_unconditional_and_never_creates_a_timer_or_phase() {
+    for ms in [0u32,499,500,999,1000,1499,1500,u32::MAX] {
+        check(0x196,&ms.to_le_bytes(),BattlefieldEvent::UnearnedWinRemaining{milliseconds:ms});
+    }
+    for (ms,seconds) in [(0,0),(499,0),(500,1),(999,1),(1000,1),(1499,1),(1500,2),(u32::MAX,4294967)] {
+        assert_eq!(unearned_win_remaining_seconds(ms),seconds);
+    }
+    let mut s=Battlefield::default();fold(&mut s,BattlefieldEvent::UnearnedWinRemaining{milliseconds:1500});
+    assert_eq!(s.last_remaining_time_ms,Some(1500));assert!(!s.in_instant_game());
+    assert!(!s.advance_server_time(u32::MAX));assert_eq!(s.last_remaining_time_ms,Some(1500));
+    s.apply(&Event::Disconnected{message:String::new()});assert_eq!(s.last_remaining_time_ms,None);
+}

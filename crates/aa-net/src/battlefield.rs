@@ -13,6 +13,11 @@ pub use progress::{BattlefieldPoint, BattlefieldSkillEnable, BattlefieldKill};
 pub use phases::{BattlefieldPhase, BattlefieldStart, BattlefieldEnd, BattlefieldTeamResult, BattlefieldMemberResult};
 pub use joined::BattlefieldJoined;
 
+/// Native SC196 notification rounds milliseconds to nearest seconds, with half-up ties.
+pub fn unearned_win_remaining_seconds(milliseconds:u32)->u32 {
+    milliseconds/1000+u32::from(milliseconds%1000>=500)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BattlefieldCommand {
     Apply { battlefield_id: u32, corps: u8 },
@@ -83,6 +88,7 @@ pub enum BattlefieldEvent {
     Ended(BattlefieldEnd),
     Point(BattlefieldPoint),
     Kill(BattlefieldKill),
+    UnearnedWinRemaining { milliseconds:u32 },
     SkillEnable(BattlefieldSkillEnable),
     InviteTimedOut {
         zone_id: u32,
@@ -103,7 +109,7 @@ impl BattlefieldEvent {
         r.i16()
     }
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x18b..=0x195)
+        matches!(op, 0x18b..=0x196)
     }
     pub fn name(&self) -> &'static str {
         match self {
@@ -116,6 +122,7 @@ impl BattlefieldEvent {
             Self::Ended(_) => "SCInstantGameEnd",
             Self::Point(_) => "SCInstantGameAddPoint",
             Self::Kill(_) => "SCInstantGameKill",
+            Self::UnearnedWinRemaining { .. } => "SCInstantGameRemainTime",
             Self::SkillEnable(_) => "SCInstantGameKillstreak",
             Self::InviteTimedOut { .. } => "SCInstantGameInviteTimeout",
             Self::Requested(_) => "BattlefieldRequested",
@@ -147,6 +154,7 @@ impl BattlefieldEvent {
             sc::SCInstantGameEndPacket => Self::Ended(BattlefieldEnd::read_lane(r)?),
             sc::SCInstantGameAddPointPacket => Self::Point(BattlefieldPoint::read(r)?),
             sc::SCInstantGameKillPacket => Self::Kill(BattlefieldKill::read(r)?),
+            sc::SCInstantGameUnkPacket => Self::UnearnedWinRemaining { milliseconds:r.u32()? },
             sc::SCInstantGameKillstreakPacket => Self::SkillEnable(BattlefieldSkillEnable::read(r)?),
             sc::SCInstantGameInviteTimeoutPacket => Self::InviteTimedOut {
                 zone_id: r.u32()?,
@@ -189,6 +197,8 @@ pub struct Battlefield {
     pub last_point: Option<BattlefieldPoint>,
     pub last_skill_enable: Option<BattlefieldSkillEnable>,
     pub last_kill: Option<BattlefieldKill>,
+    /// Received notice only; never decremented or treated as a phase transition.
+    pub last_remaining_time_ms: Option<u32>,
     pub kill_scores: [i32;2],
     /// Native stored getter value; victim notification independently passes zero.
     pub my_killstreak_point: i32,
@@ -299,6 +309,7 @@ impl Battlefield {
         match e {
             Event::Battlefield(BattlefieldEvent::Ended(end)) => self.last_end=Some(end.clone()),
             Event::Battlefield(BattlefieldEvent::Point(point)) => self.last_point=Some(point.clone()),
+            Event::Battlefield(BattlefieldEvent::UnearnedWinRemaining { milliseconds }) => self.last_remaining_time_ms=Some(*milliseconds),
             Event::Battlefield(BattlefieldEvent::Kill(kill)) => {
                 self.last_kill=Some(kill.clone());
                 if self.local_killstreak_notification(kill).is_some() { self.my_killstreak_point=i32::from(kill.killer_killstreak); }
