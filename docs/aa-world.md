@@ -156,10 +156,10 @@ for each record:
 All table/count/block/tree reads are bounded by their container; malformed records
 fail atomically. A 64-level defensive stack limit rejects pathological mask chains.
 The supported slice imports brushes, vegetation, decals, roads and water through the
-existing renderers, plus supported compiled voxel proxies through cell collision.
+existing renderers, plus supported compiled voxel base meshes and cell collision.
 Voxel/distant-cloud records have exact boundaries; unknown-sized
 kinds still end their object block while retaining child trees. It does **not** render
-voxel surfaces or distant clouds, traverse portals for occlusion, apply area sky/light/fog
+voxel projected detail/atlases or distant clouds, traverse portals for occlusion, apply area sky/light/fog
 flags or implement visarea light confinement.
 Repeated instances inside an authored area are preserved. Exterior `brush.dat` versus
 `object.dat` selection is unchanged, so their duplicate export is still selected once.
@@ -244,16 +244,16 @@ CPU fixtures prepare 18/45/4 supported decal meshes in (8,13)/(12,15)/(20,8), al
 finite and within the existing per-mesh triangle bound. Missing voxel receivers
 explain why not every authored interior decal can currently render.
 
-Voxel rendering is a concrete remaining gap, not a missing marching-cubes algorithm:
+Voxel projected detail/atlas rendering is a concrete remaining gap:
 the first surveyed compiled blob is a length-prefixed zlib stream containing a valid
 `CryTek` 0x745 CGF (2,901 vertices / 5,642 triangles). Native `301A0790` calls
 `301A0D30` for compressed memory blocks, then `30192D40`/`3019FFE0` load that CGF.
 The original `voxterrain.cfx` samples generated diffuse/normal atlases with per-atlas
 range restoration. The CGF also contains `COLORS2` and `VERT_MATS` streams, which
 `aa-cry::Model` currently does not retain. Native palette-to-atlas generation,
-surface blending and render flags need their own supported path; drawing
-the mesh with guessed vertex colours, terrain UVs or a generic rock material is not
-implemented. Read-only audit outputs are under ignored `lights/visarea-*` and
+surface blending and render flags need their own supported path. The supported base
+pass below instead uses the exact original packed vertex colours and visible CGF,
+without guessed UVs or a generic rock material. Read-only audit outputs are under ignored `lights/visarea-*` and
 `lights/voxel-*`; the original shader is extracted under ignored `voxel/`.
 
 **Native compiled voxel collision.** `placement/voxels.rs` retains the cell-local
@@ -301,9 +301,10 @@ allocations. `CellStats::{voxels,voxels_colliding,voxel_triangles,voxels_unsuppo
 make skipped variants visible.
 
 Runtime volume meshing, missing/foreign-index proxies without explicit material IDs,
-multiple/deformed nodes, other compression formats and voxel surface/atlas rendering
-remain unsupported. This restores physical cave floors/walls; it does not make
-their surfaces visible or create decal receivers. Native point/area evidence also
+multiple/deformed nodes, other compression formats and voxel projected detail/atlas rendering
+remain unsupported. Collision alone restores physical cave floors/walls;
+the later base-pass slice makes supported surfaces visible, while decal receivers
+remain separate work. Native point/area evidence also
 remains separate: `3017B3E0` uses min-inclusive/max-exclusive AABB tests followed by
 `3017B2F0`'s XY crossing test, while `3017BEF0` conditionally multiplies area ambient
 by native sky colour or the renderer HDR multiplier. Bevy light `RenderLayers`
@@ -335,6 +336,93 @@ and diagnostic entities; the prior floor structure ray becomes absent. Inspected
 exit zero and close their own windows. No matching native cave reference capture is
 available under `reference/`; serialized geometry/numeric ray oracles are the native
 comparison for this collision-only slice.
+
+**Visible native voxel base pass.** A bounded follow-up trace identifies the active
+default material contract, rather than assuming `voxterrain.cfx` is sufficient.
+`3019A740` (`CVoxelObject::Render`) draws the base through `3019EB80`, then projected
+surface layers through `3019EEC0`. Base getter `30127D50` returns `CTerrain +3560`;
+constructor `300CEAE0` loads **`Terrain`** into that field. `3019FFE0` prepares the
+separate projected meshes through `300DF410` / `300DFA60`, using the authored cell
+surface indices and projection names. The compiled original sample has no UV stream;
+the base pass does not need invented atlas UVs.
+
+The original `terrain.cfx` `TerrainVS` writes `Color1 = (Color.r, Color.b, Normal.w,
+Normal.w)` and selects vertex-colour RGB when `Color.g >= 0.5`. Exact renderer
+`38206540` / `382065A0` preserve the first colour stream with D3D channel swizzling;
+`382051A0` writes **`COLORS2` byte 2 to packed `Normal.w`**. `TerrainPS` then selects
+that RGB directly, and the layer shader explicitly documents that voxel vertex
+colour is **linear**, converting to gamma only for its detail blend. Therefore the
+supported base colour is exactly `(COLORS.r, COLORS.b, COLORS2.b) /255`; byte 128
+is included in the flag threshold. `COLORS.g &0x7f` is a global cell surface index,
+not a green tint or the local `VERT_MATS` physics ID. The first original vertex's
+streams `(21,140,14,255)` / `(0,0,11,0)` decode to linear `(21,14,11)/255`.
+
+`PlacedVoxel::compiled_base_mesh` reads the already retained first LOD with the same
+CGF size/count preflight as collision, one identity `Merged` static node, complete
+finite normals and exact four-byte `COLORS2` records. Any referenced vertex with
+`g <128` rejects the slot: it requires the native terrain-cover projection, which
+this slice does not approximate. Unreferenced vertices do not affect support.
+The native CGF's visible indices/normals are used, not its reordered physics proxy.
+`objects/voxels.rs` applies the authored matrix to positions and inverse-transpose
+to normals, converts axes once, flips reflected winding and leaves cell origin on
+the entity. Vertex colours remain linear in the GPU buffer. Meshes use the existing
+Bevy PBR/fog/light/shadow path, without terrain-tint or brightness adjustments;
+native Terrain BRDF, baked/dynamic terrain AO and projected normal/gloss detail
+remain explicit differences.
+
+The same two existing placement jobs prepare at most 32 voxel meshes /64 MiB decoded
+attempt bytes /32 MiB vertex+index bytes per cell. Each slot is complete or skipped;
+overflow and unsupported variants increment `ObjectStats::voxels_unsupported`.
+`voxels` / `voxel_triangles` report visible meshes/triangles, and `VoxelSurface`
+identifies their cell/source slot. GPU uploads happen when that placement result
+arrives; visibility uses the existing brush-distance cap and authored maximum view
+distance. There are no added threads, independent cell requests or per-frame rebuilds.
+Cell unload explicitly despawns the entities and removes their owned mesh/material
+assets. The cell's shared base material has no textures and no persistent cache.
+
+Original (20,8) has seven supported base meshes / **45,963 visible CGF triangles**;
+the independent raw CGF header probe reads index counts
+`16926,15288,7674,23034,23079,21459,30429`. Its 45,413 colliding triangles are a
+different native stream and remain unchanged. Unit tests verify the original packed
+colour, `g=127` rejection / `g=128` acceptance, linear GPU attribute values, transform
+units, all seven visible meshes and the 32-slot bound. `aa-cry` is unchanged: raw
+chunk access supplies `COLORS2`; a future general loader could add
+`MeshData.colors2: Vec<[u8;4]>` from data-stream type 4 without changing the original
+`colors` field or conflating it with `VERT_MATS`.
+
+Base-pass QA: **157 library tests pass**, nine existing ignored, and all examples
+check. `voxel_surfaces --colour-check` renders the first original decoded vertex
+beside an independent numeric linear-colour material; both GPU samples are exactly
+**`[81,66,59]` sRGB** (the expected display conversion of linear `(21,14,11)/255`).
+Inspected 1920x1080 `shots/aa-world/voxel/native_base_colour.png` logs 371-434 FPS.
+The threshold fixtures also include two real exterior slots from cell (21,8):
+their `COLORS.g` ranges are **1-148 /1-20**, so both require the cover-projection
+branch and are rejected. The seven interior (20,8) slots have ranges 139-145 and
+remain supported. The streamed world consequently reports seven visible meshes,
+45,963 triangles and two unsupported nearby exterior slots, with zero model failures
+or pending models once settled.
+
+Inspected `native_base_cave_on.png` / `native_base_cave_off.png` use the same original
+floor camera at Cry `(21354,9055,456.7)` looking at `(21335,9044,458.5)`, hour 10.
+On restores the cave floor/walls around the authored bridge, cart and torches; off
+hides only the voxel base meshes, exposing floating props and outside sky. The
+original floor collision remains `454.91745` in both. Final settled on logs 79-94 FPS
+(first interval 104), off 73-97 FPS; animated particles and shared GPU work make
+these separate runs unsuitable for a precise performance delta. No authored light,
+environment/exposure, material palette or inherited calibration value is tuned.
+`--unload-check` moves the actual camera away and verifies zero voxel entities,
+cell collision/loading jobs, plus absence of **all seven owned mesh asset IDs and
+the cell's material asset ID** from their asset collections. Inspected
+`native_base_unload.png` confirms the empty world view, 178-234 FPS after release.
+All four runs exit zero without GPU errors and close their own windows. There is
+no matching native cave image under `reference/`; exact original geometry, packed
+colour math and on/off receiver alignment are the verified comparison boundaries.
+
+Projected `Terrain.Layer` diffuse/normal/gloss, native distance fading and projection
+ordering, alternate cover-colour vertices, volumetric mesh generation, lower LOD
+selection and custom/animated voxel materials remain unsupported. Portal/area
+receiver lighting and native atlas generation remain open; the base-pass rendering
+does not claim those features or complete original cave appearance.
 
 Area flags are a separate unresolved rendering contract. Exact `30170860` maps
 header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`
@@ -384,7 +472,7 @@ child node per mask bit. Item types (all 1208 cells walk exactly to EOF):
 | 9 | decal, 111 B; planar / forward projections plus deferred diffuse/opacity on terrain and opaque brushes |
 | 13 | road, `63 + 12 n` bytes (`n` u32 at payload offset 39); parsed and projected onto terrain |
 | 11 | water volume, 119 B + 12 times the two counts at +103/+115 |
-| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD serialized collision supported, surface rendering open |
+| 6 | voxel v5, 198775 B plus optional length-prefixed compiled CGF blocks; first-LOD native baked-colour base and serialized collision supported; projected detail/atlases open |
 | 14 | distant cloud, 79 B; skipped |
 
 Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChunk_NEW` is a
@@ -2123,8 +2211,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
-* Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
-  Interior supported placements render/collide through the existing paths, but voxel surfaces/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
+* Not rendered: native MRT normal/specular decal effects, voxel projected detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
+  Interior supported placements render/collide through the existing paths, including the supported baked-colour voxel base; voxel projected detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).

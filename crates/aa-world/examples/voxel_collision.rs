@@ -1,5 +1,5 @@
 //! Diagnostic view of an original cave's serialized first-LOD collision proxy.
-//! Colours/wireframe are diagnostic; native voxel surface/atlas rendering is not implemented.
+//! Colours/wireframe are diagnostic; native projected detail/atlas rendering remains unsupported.
 //! --unload-check moves the camera away and checks the normal collision-cell release path.
 
 use aa_world::collide::{CollisionConfig, Mask};
