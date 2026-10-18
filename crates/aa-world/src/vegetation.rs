@@ -20,6 +20,9 @@ pub struct VegGroup {
     pub use_terrain_color: bool,
     /// Nonzero authored material-layer variants are not handled by the colour-only extension.
     pub material_layers: u32,
+    /// Native group bending. Missing/malformed values are kept unsupported.
+    pub bending: f32,
+    pub complex_bending: bool,
 }
 
 impl VegGroup {
@@ -29,12 +32,25 @@ impl VegGroup {
         (!self.use_terrain_color && self.brightness.is_finite() && self.brightness >= 0.0)
             .then(|| self.brightness.min(1.0))
     }
+
+    pub(crate) fn style(&self) -> Style {
+        Style {
+            brightness: self.supported_brightness().unwrap_or(1.0),
+            bending: if self.bending.is_finite() && (0.0..=10.0).contains(&self.bending) && !self.complex_bending {
+                self.bending.clamp(0.01, 10.0)
+            } else { 0.0 },
+        }
+    }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Style { pub brightness: f32, pub bending: f32 }
 
 #[derive(Clone, Debug, Default)]
 pub struct VegGroups {
     pub groups: HashMap<u16, VegGroup>,
-    brightnesses: HashMap<(String, String), Vec<f32>>,
+    styles: HashMap<(String, String), Vec<Style>>,
+    pub(crate) wind: bevy::math::Vec3,
 }
 
 fn normalized_asset(p: &str) -> String {
@@ -42,14 +58,25 @@ fn normalized_asset(p: &str) -> String {
 }
 
 impl VegGroups {
+    pub(crate) fn styles(&self, model: &str, material: Option<&str>) -> Vec<Style> {
+        self.styles.get(&(normalized_asset(model),normalized_asset(material.unwrap_or(""))))
+            .cloned().unwrap_or_else(|| vec![Style { brightness: 1.0, bending: 0.0 }])
+    }
     /// Small pre-indexed variant list, queried once per model arrival, not every frame/instance.
-    pub(crate) fn brightnesses(&self, model: &str, material: Option<&str>) -> Vec<f32> {
-        let key = (normalized_asset(model), normalized_asset(material.unwrap_or("")));
-        self.brightnesses.get(&key).cloned().unwrap_or_else(|| vec![1.0])
+    #[cfg(test)]
+    fn brightnesses(&self, model: &str, material: Option<&str>) -> Vec<f32> {
+        let mut values=Vec::new();
+        for style in self.styles(model,material) {
+            if !values.contains(&style.brightness) { values.push(style.brightness); }
+        }
+        values
     }
     pub fn load(world: &str) -> Option<VegGroups> {
         let text = aa_pak::Pak::global().read_string(&format!("worlds/{world}/vegetation.xml")).ok()?;
-        VegGroups::parse(&text)
+        let mut groups=VegGroups::parse(&text)?;
+        groups.wind=aa_pak::Pak::global().read_string(&format!("worlds/{world}/env.xml"))
+            .map(|xml| crate::vegetation_wind::environment(&xml)).unwrap_or(bevy::math::Vec3::X);
+        Some(groups)
     }
 
     pub fn parse(xml: &str) -> Option<VegGroups> {
@@ -75,17 +102,19 @@ impl VegGroups {
                     brightness: g.attribute("fBrightness").map(|v| v.parse().unwrap_or(f32::NAN)).unwrap_or(1.0),
                     use_terrain_color: flag("bUseTerrainColor"),
                     material_layers: g.attribute("nMaterialLayers").and_then(|v| v.parse().ok()).unwrap_or(0),
+                    bending: g.attribute("fBending").and_then(|v| v.parse().ok()).unwrap_or(f32::NAN),
+                    complex_bending: flag("bComplexBending"),
                 },
             );
         }
-        let mut brightnesses: HashMap<_, Vec<f32>> = HashMap::new();
+        let mut styles: HashMap<_, Vec<Style>> = HashMap::new();
         for g in groups.values().filter(|g| g.material_layers == 0) {
-            if let Some(value) = g.supported_brightness() && value != 1.0 {
-                let values = brightnesses.entry((normalized_asset(&g.model), normalized_asset(&g.material))).or_insert_with(|| vec![1.0]);
-                if !values.contains(&value) { values.push(value); }
-            }
+            let values=styles.entry((normalized_asset(&g.model), normalized_asset(&g.material)))
+                .or_insert_with(|| vec![Style { brightness: 1.0, bending: 0.0 }]);
+            let style=g.style();
+            if !values.contains(&style) { values.push(style); }
         }
-        Some(VegGroups { groups, brightnesses })
+        Some(VegGroups { groups, styles, wind: bevy::math::Vec3::X })
     }
 }
 
@@ -129,6 +158,22 @@ mod tests {
         assert_eq!(values, [0.0,0.4,1.0]); // no lower clamp, layer or terrain approximation.
         assert_eq!(groups.brightnesses("GAME/objects/a.cgf", Some("materials/b.mtl")), [1.0,0.7]);
         assert_eq!(groups.brightnesses("objects/other.cgf", None), [1.0]);
+    }
+    #[test]
+    fn main_wind_uses_native_group_limits_and_declines_missing_or_complex_inputs() {
+        let groups=VegGroups::parse(r#"<vegetationMgr><groupList>
+            <group id="1" modelFileName="a.cgf" fBending="0"/>
+            <group id="2" modelFileName="a.cgf" fBending="12"/>
+            <group id="3" modelFileName="a.cgf" fBending="2" bComplexBending="1"/>
+            <group id="4" modelFileName="a.cgf"/>
+            <group id="5" modelFileName="a.cgf" fBending="NaN"/>
+            <group id="6" modelFileName="a.cgf" fBending="0.4" nMaterialLayers="1"/>
+            <group id="7" modelFileName="a.cgf" fBending="10"/>
+        </groupList></vegetationMgr>"#).unwrap();
+        assert_eq!(groups.groups[&1].style().bending,0.01);
+        assert_eq!(groups.groups[&7].style().bending,10.0);
+        for id in [2,3,4,5] {assert_eq!(groups.groups[&id].style().bending,0.0);}
+        assert_eq!(groups.styles("a.cgf",None).len(),3);
     }
 
     #[test]

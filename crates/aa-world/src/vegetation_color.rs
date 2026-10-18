@@ -26,13 +26,14 @@ pub const NO_COLOR_VARIATION: u32 = 1 << 18;
 pub const IGNORE_VERTEX_AO: u32 = 1 << 19;
 
 pub type VegetationMaterial = ExtendedMaterial<StandardMaterial, VegetationColor>;
-pub(crate) type Mirrors = HashMap<(AssetId<StandardMaterial>, u32), AssetId<VegetationMaterial>>;
+pub(crate) type Mirrors = HashMap<(AssetId<StandardMaterial>, u32, [u32;4]), AssetId<VegetationMaterial>>;
 pub(crate) struct Mirror {
     pub material: Handle<VegetationMaterial>,
     pub variation: bool,
     pub brightness: f32,
+    pub wind: Vec4,
 }
-pub(crate) type Materials = HashMap<(AssetId<StandardMaterial>, u32), Mirror>;
+pub(crate) type Materials = HashMap<(AssetId<StandardMaterial>, u32, u32), Mirror>;
 
 /// A nonunity authored scalar part, for scene diagnostics and cell-lifetime checks.
 #[derive(Component, Clone, Copy, Debug)]
@@ -67,7 +68,9 @@ pub(crate) fn prepare(
     cry: &mut CryAssets,
     loaded: &LoadedModel,
     ao: &ao::Meshes,
-    brightnesses: &[f32],
+    styles: &[crate::vegetation::Style],
+    global_wind: Option<Vec3>,
+    epoch: f32,
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
 ) -> Materials {
@@ -78,6 +81,7 @@ pub(crate) fn prepare(
     let Some(mtl) = cry.mtl(path) else {
         return result;
     };
+    let half_height=crate::vegetation_wind::model_half_height(loaded);
     // Follow the exact subset ids of drawn nodes, including the loader's root fallback
     // for non-multi materials; source sub-material order need not equal Part order.
     let mut subsets = Vec::new();
@@ -116,8 +120,16 @@ pub(crate) fn prepare(
         // Alpha-glow is added after AO in the native shader; that distinct pass is unsupported.
         let brightness_supported =
             source.shader.eq_ignore_ascii_case("Vegetation") && source.gen_mask & 0x4000_0000 == 0;
-        for &brightness in brightnesses {
-            if !variation && !has_ao && !(brightness_supported && brightness != 1.0) {
+        for &style in styles {
+            let brightness=style.brightness;
+            // The original DETAIL_BENDING script explicitly enters VTM_BENDING for grass/leaves.
+            // Only the main branch is supported here; packed vertex RGB detail remains separate.
+            let wind=if style.bending > 0.0 && source.shader.eq_ignore_ascii_case("Vegetation")
+                && source.gen_mask & 0x10000 != 0 && source.gen_mask & (0x100|0x2000) != 0
+            {
+                half_height.zip(global_wind).map(|(h,w)| crate::vegetation_wind::parameters(w,style.bending,h)).unwrap_or(Vec4::ZERO)
+            } else { Vec4::ZERO };
+            if !variation && !has_ao && !(brightness_supported && brightness != 1.0) && wind.z == 0.0 {
                 continue;
             }
             let value = if brightness_supported {
@@ -128,14 +140,15 @@ pub(crate) fn prepare(
             let handle = cry
                 .materials
                 .get(&base)
-                .map(|m| variant(base.id(), m, value, mirrors, materials));
+                .map(|m| wind_variant(base.id(), m, value, wind, source.gen_mask & 0x2000 != 0, epoch, mirrors, materials));
             if let Some(handle) = handle {
                 result.insert(
-                    (base.id(), brightness.to_bits()),
+                    (base.id(), brightness.to_bits(), style.bending.to_bits()),
                     Mirror {
                         material: handle,
                         variation,
                         brightness: value,
+                        wind,
                     },
                 );
             }
@@ -144,6 +157,7 @@ pub(crate) fn prepare(
     result
 }
 
+#[cfg(test)]
 fn variant(
     base_id: AssetId<StandardMaterial>,
     base: &StandardMaterial,
@@ -151,7 +165,15 @@ fn variant(
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
 ) -> Handle<VegetationMaterial> {
-    let key = (base_id, value.to_bits());
+    wind_variant(base_id,base,value,Vec4::ZERO,false,0.0,mirrors,materials)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wind_variant(
+    base_id: AssetId<StandardMaterial>, base: &StandardMaterial, value: f32, wind: Vec4,
+    grass: bool, epoch: f32, mirrors: &mut Mirrors, materials: &mut Assets<VegetationMaterial>,
+) -> Handle<VegetationMaterial> {
+    let key = (base_id, value.to_bits(), wind.to_array().map(f32::to_bits));
     if let Some(handle) = mirrors
         .get(&key)
         .and_then(|id| materials.get_strong_handle(*id))
@@ -160,7 +182,7 @@ fn variant(
     }
     let handle = materials.add(VegetationMaterial {
         base: base.clone(),
-        extension: VegetationColor { brightness: value },
+        extension: VegetationColor { brightness: value, wind, grass, clock_epoch: epoch, seconds: None, high_quality: false },
     });
     mirrors.insert(key, handle.id());
     handle
@@ -172,24 +194,40 @@ fn variant(
 #[bindless(index_table(range(50..51), binding(100)))]
 pub struct VegetationColor {
     pub brightness: f32,
+    /// Steady native base XY, group bending*0.1, native model vertical half-height.
+    pub wind: Vec4,
+    pub grass: bool,
+    /// Unwrapped game-time epoch; shader globals supply the within-period seconds.
+    pub clock_epoch: f32,
+    /// Diagnostic frozen-time control; ordinary streamed materials use the app's game clock.
+    pub seconds: Option<f32>,
+    /// Diagnostic known-frame HQ variation. Streamed scenes await the native sliding-origin bridge.
+    pub high_quality: bool,
 }
 impl Default for VegetationColor {
     fn default() -> Self {
-        Self { brightness: 1.0 }
+        Self { brightness: 1.0, wind: Vec4::ZERO, grass: false, clock_epoch: 0.0, seconds: None, high_quality: false }
     }
 }
 #[derive(Clone, ShaderType)]
 pub struct VegetationUniform {
     pub brightness: Vec4,
+    pub wind: Vec4,
+    pub clock: Vec4,
 }
 impl From<&VegetationColor> for VegetationUniform {
     fn from(v: &VegetationColor) -> Self {
         Self {
             brightness: Vec4::splat(v.brightness),
+            wind: v.wind,
+            clock: Vec4::new(v.clock_epoch,u8::from(v.grass) as f32 + 2.0*u8::from(v.high_quality) as f32,v.seconds.unwrap_or(0.0),if v.seconds.is_some() { 1.0 } else { 0.0 }),
         }
     }
 }
 impl MaterialExtension for VegetationColor {
+    fn vertex_shader() -> ShaderRef { "embedded://aa_world/vegetation_vertex.wesl".into() }
+    fn prepass_vertex_shader() -> ShaderRef { Self::vertex_shader() }
+    fn deferred_vertex_shader() -> ShaderRef { Self::vertex_shader() }
     fn fragment_shader() -> ShaderRef {
         "embedded://aa_world/vegetation_color.wesl".into()
     }
@@ -216,8 +254,25 @@ pub struct VegetationColorPlugin;
 impl Plugin for VegetationColorPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "vegetation_color.wesl");
-        app.add_plugins(MaterialPlugin::<VegetationMaterial>::default());
+        bevy::shader::load_shader_library!(app, "vegetation_bindings.wesl");
+        bevy::shader::load_shader_library!(app, "vegetation_wind.wesl");
+        embedded_asset!(app, "vegetation_vertex.wesl");
+        app.add_plugins(MaterialPlugin::<VegetationMaterial>::default())
+            .add_systems(Update, clock_epoch);
     }
+}
+
+/// Ordinary frames use the shared shader clock and require no material uploads or instance walks.
+/// On wrap/reset only, refresh the small shared model/group variants. Pausing follows Bevy's game clock.
+pub(crate) fn epoch(time:&Time)->f32 {
+    let periods=time.elapsed().as_nanos()/time.wrap_period().as_nanos();
+    (periods as f64*time.wrap_period().as_secs_f64()) as f32
+}
+fn clock_epoch(time: Res<Time>, mut previous: Local<Option<f32>>, mut materials: ResMut<Assets<VegetationMaterial>>) {
+    let epoch=epoch(&time);
+    if *previous == Some(epoch) { return; }
+    *previous=Some(epoch);
+    for (_,material) in materials.iter_mut() { material.extension.clock_epoch=epoch; }
 }
 
 #[cfg(test)]
@@ -250,6 +305,45 @@ mod tests {
         assert_eq!(d.index_tables.len(), 1);
         assert_eq!(VegetationColor::default().brightness, 1.0);
         assert!(VegetationMaterial::bindless_slot_count().is_some());
+    }
+    #[test]
+    fn game_clock_wrap_pause_and_reset_keep_native_seconds() {
+        use std::time::Duration;
+        let mut app=App::new();
+        let mut time=Time::<()>::default();
+        time.set_wrap_period(Duration::from_secs(1));
+        time.advance_by(Duration::from_secs_f32(3600.125));
+        app.insert_resource(time).init_resource::<Assets<VegetationMaterial>>().add_systems(Update,clock_epoch);
+        let h=app.world_mut().resource_mut::<Assets<VegetationMaterial>>().add(VegetationMaterial {base:StandardMaterial::default(),extension:VegetationColor::default()});
+        app.update();
+        let epoch=app.world().resource::<Assets<VegetationMaterial>>().get(&h).unwrap().extension.clock_epoch;
+        assert_eq!(epoch,3600.0);
+        assert_eq!(epoch+app.world().resource::<Time>().elapsed_secs_wrapped(),3600.125);
+        app.update(); // paused/no advancement does not move the native clock.
+        assert_eq!(app.world().resource::<Assets<VegetationMaterial>>().get(&h).unwrap().extension.clock_epoch,epoch);
+        let mut reset=Time::<()>::default();reset.set_wrap_period(Duration::from_secs(1));
+        reset.advance_by(Duration::from_secs_f32(0.25));app.insert_resource(reset);app.update();
+        assert_eq!(app.world().resource::<Assets<VegetationMaterial>>().get(&h).unwrap().extension.clock_epoch,0.0);
+    }
+    #[test]
+    fn wind_clock_follows_real_app_virtual_pause_and_reset() {
+        use std::time::Duration;
+        let mut app=App::new();
+        app.add_plugins(bevy::time::TimePlugin).init_resource::<Assets<VegetationMaterial>>().add_systems(Update,clock_epoch);
+        let h=app.world_mut().resource_mut::<Assets<VegetationMaterial>>().add(VegetationMaterial {base:StandardMaterial::default(),extension:VegetationColor::default()});
+        {
+            let mut game=app.world_mut().resource_mut::<Time<Virtual>>();
+            game.set_wrap_period(Duration::from_secs(1));game.advance_by(Duration::from_secs_f32(3.125));game.pause();
+        }
+        for _ in 0..2 {
+            app.update();
+            assert_eq!(app.world().resource::<Time>().elapsed_secs(),3.125);
+            assert_eq!(app.world().resource::<Assets<VegetationMaterial>>().get(&h).unwrap().extension.clock_epoch,3.0);
+        }
+        let mut reset=Time::<Virtual>::default();reset.set_wrap_period(Duration::from_secs(1));reset.pause();app.insert_resource(reset);
+        app.update();
+        assert_eq!(app.world().resource::<Time>().elapsed_secs(),0.0);
+        assert_eq!(app.world().resource::<Assets<VegetationMaterial>>().get(&h).unwrap().extension.clock_epoch,0.0);
     }
     #[test]
     fn scalar_variants_share_exact_values_without_mutating_base_or_unity() {

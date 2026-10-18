@@ -33,7 +33,7 @@ use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use crate::vegetation_color::{self, VegetationMaterial, VegetationColorPart};
-use bevy::math::Affine3A;
+use bevy::math::{Affine3A, Vec3A};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureViewDimension;
 
@@ -384,6 +384,7 @@ pub fn stream_objects(
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
     timers: Option<Res<crate::profile::Timers>>,
+    time: Res<Time>,
 ) {
     if !cfg.objects {
         return;
@@ -601,8 +602,12 @@ pub fn stream_objects(
                 let ao_meshes = vegetation_color::ao::finish(ao, &mut cry.meshes, &mut state.ao_mirrors);
                 // Once per prepared model, include only authored matching group variants.
                 let key = &state.models.keys[id as usize];
-                let brightnesses = groups.brightnesses(&key.path, key.material.as_deref());
-                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &brightnesses, &mut state.color_mirrors, &mut vegetation_materials);
+                let styles = groups.styles(&key.path, key.material.as_deref());
+                let epoch=vegetation_color::epoch(&time);
+                // Native SetupBending uses the group's LOD0 stat object's height, even when rendering another LOD.
+                // Separate LOD assets have no retained original root bounds here, so leave that path unsupported.
+                let wind=(key.lod == 0).then_some(groups.wind);
+                let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &styles, wind, epoch, &mut state.color_mirrors, &mut vegetation_materials);
                 ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials, ao_meshes }))
             }
             Err(e) => {
@@ -916,7 +921,7 @@ fn spawn_instance(
             if matches!(kind, Kind::Vegetation | Kind::Trees)
                 && let Some(group) = groups.groups.get(&data.objects.vegetation[idx].group)
                 && group.material_layers == 0
-                && let Some(material) = inst.color_materials.get(&(part.material.id(), group.supported_brightness().unwrap_or(1.0).to_bits()))
+                && let Some(material) = inst.color_materials.get(&(part.material.id(), group.style().brightness.to_bits(), group.style().bending.to_bits()))
             {
                 let bgr = data.objects.vegetation[idx].color_variation;
                 let tag = if material.variation { vegetation_color::pack(bgr) } else { vegetation_color::NO_COLOR_VARIATION };
@@ -924,6 +929,14 @@ fn spawn_instance(
                 if material.variation { entity.insert(VegetationColorPart { cell, bgr }); }
                 if material.brightness != 1.0 {
                     entity.insert(vegetation_color::VegetationBrightnessPart { cell, group: group.id, brightness: material.brightness });
+                }
+                if material.wind.z > 0.0 {
+                    entity.insert(crate::vegetation_wind::VegetationWindPart { cell, group: group.id,
+                        bending: group.style().bending, half_height: material.wind.w });
+                    // Native main bending preserves every local vertex's distance from the origin.
+                    // Its enclosing sphere stays valid when a narrow static box would clip moving tips.
+                    let radius=(part.aabb.center.abs()+part.aabb.half_extents).length();
+                    entity.insert(bevy::camera::primitives::Aabb { center:Vec3A::ZERO, half_extents:Vec3A::splat(radius) });
                 }
                 if let Some(ao) = inst.ao_meshes.get(&part.mesh.id()) {
                     entity.insert((Mesh3d(ao.mesh.clone()), vegetation_color::VegetationAoPart { cell, min_alpha: ao.min_alpha }));

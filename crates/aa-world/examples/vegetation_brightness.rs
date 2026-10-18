@@ -94,7 +94,7 @@ fn numeric(
                     },
                     ..default()
                 },
-                extension: VegetationColor { brightness },
+                extension: VegetationColor { brightness, ..default() },
             });
             let p = Vec2::new(i as f32 * 2.0 - 3.0, 3.0 - row as f32 * 2.0);
             let mut mesh = Mesh::from(Rectangle::new(1.5, 0.9));
