@@ -17,6 +17,7 @@ use crate::tree::{Id, WidgetType};
 /// Caret blink half period.
 const BLINK_MS: f64 = 530.0;
 
+mod clipboard;
 mod geometry;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -35,6 +36,8 @@ pub struct EditData {
     pub max_len: usize,
     pub password: bool,
     pub digit: bool,
+    /// Native defaults to enabled; SetDigit(true) disables until UseClipboard(true).
+    pub clipboard_disabled: bool,
     pub digit_max: Option<f64>,
     /// `SetInitVal`: empty, non-password digit edits materialize this value on GetText.
     pub init_val: i32,
@@ -71,6 +74,11 @@ pub enum UiKey {
     Escape,
     Tab,
     SelectAll,
+    Copy,
+    Cut,
+    Paste,
+    /// Native Ctrl+Shift+Insert runs both shortcut branches, paste then copy-all.
+    PasteAndCopy,
 }
 
 impl UiKey {
@@ -90,6 +98,10 @@ impl UiKey {
             UiKey::Escape => "escape".into(),
             UiKey::Tab => "tab".into(),
             UiKey::SelectAll => "a".into(),
+            UiKey::Copy => "c".into(),
+            UiKey::Cut => "x".into(),
+            UiKey::Paste => "v".into(),
+            UiKey::PasteAndCopy => "insert".into(),
         }
     }
 }
@@ -365,6 +377,18 @@ pub(crate) fn press(lua: &Lua, id: Id, k: &UiKey) {
         UiKey::Enter if multiline => insert(lua, id, "\n"),
         UiKey::Backspace => erase(lua, id, true),
         UiKey::Delete => erase(lua, id, false),
+        UiKey::Copy | UiKey::Cut | UiKey::Paste => clipboard_key(lua, id, k),
+        UiKey::PasteAndCopy => {
+            let changed = clipboard_key(lua, id, &UiKey::Paste);
+            let owner = {
+                let u = ui(lua);
+                u.keyboard.owner(&u.tree, u.focus)
+            };
+            if owner == Some(id) {
+                clipboard_key(lua, id, &UiKey::Copy);
+            }
+            changed
+        }
         UiKey::Left
         | UiKey::Right
         | UiKey::Up
@@ -382,7 +406,7 @@ pub(crate) fn press(lua: &Lua, id: Id, k: &UiKey) {
         super::sound::widget_sound(
             lua,
             id,
-            if matches!(k, UiKey::Backspace | UiKey::Delete) {
+            if matches!(k, UiKey::Backspace | UiKey::Delete | UiKey::Cut) {
                 "text_deleted"
             } else {
                 "text_added"
@@ -543,6 +567,83 @@ fn store(lua: &Lua, id: Id, text: String, caret: usize) {
     u.caret_visible = true;
     u.tree.touch();
     geometry::ensure_caret(&mut u, id);
+}
+
+fn clipboard_key(lua: &Lua, id: Id, key: &UiKey) -> bool {
+    let (text, e) = {
+        let u = ui(lua);
+        let Some(w) = u.tree.widget(id).filter(|w| w.enabled) else {
+            return false;
+        };
+        let e = w.edit.clone().unwrap_or_default();
+        // Native39292840 sets model+9b;3922a0d1 rejects input before clipboard handling.
+        if e.clipboard_disabled || e.read_only {
+            return false;
+        }
+        (
+            w.text.as_ref().map(|t| t.text.clone()).unwrap_or_default(),
+            e,
+        )
+    };
+    let selected = selection(&e, text.chars().count());
+    match key {
+        UiKey::Copy => {
+            let range = if selected.is_empty() {
+                0..text.chars().count()
+            } else {
+                selected
+            };
+            clipboard::set(
+                lua,
+                &text[byte_at(&text, range.start)..byte_at(&text, range.end)],
+            );
+            false
+        }
+        UiKey::Cut if !selected.is_empty() => {
+            let copied =
+                text[byte_at(&text, selected.start)..byte_at(&text, selected.end)].to_string();
+            let mut new = text.clone();
+            new.replace_range(
+                byte_at(&text, selected.start)..byte_at(&text, selected.end),
+                "",
+            );
+            // Native cut erases before trying the OS clipboard, including a failed write.
+            store(lua, id, new, selected.start);
+            clipboard::set(lua, &copied);
+            true
+        }
+        UiKey::Paste => {
+            let pasted = clipboard::paste(lua);
+            // Hooks run outside all Ui borrows and may move focus or disable editing.
+            let u = ui(lua);
+            if u.keyboard.owner(&u.tree, u.focus) != Some(id)
+                || !u.tree.widget(id).is_some_and(|w| {
+                    w.enabled
+                        && w.text.as_ref().is_some_and(|t| t.text == text)
+                        && w.edit.clone().unwrap_or_default() == e
+                })
+            {
+                return false;
+            }
+            drop(u);
+            let mut add = pasted;
+            if e.max_len > 0 {
+                let room = e
+                    .max_len
+                    .saturating_sub(text.chars().count() - selected.len());
+                add = add.chars().take(room).collect();
+            }
+            let mut new = text.clone();
+            new.replace_range(
+                byte_at(&text, selected.start)..byte_at(&text, selected.end),
+                &add,
+            );
+            // Paste is a direct buffer operation in native39228270: digit filtering is bypassed.
+            store(lua, id, new, selected.start + add.chars().count());
+            true
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn selection(edit: &EditData, len: usize) -> std::ops::Range<usize> {
@@ -802,7 +903,12 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetDigit",
         method(lua, |lua, id, a| {
             let on = a.b(1, true);
-            with(lua, id, |e| e.digit = on);
+            with(lua, id, |e| {
+                e.digit = on;
+                if on {
+                    e.clipboard_disabled = true;
+                }
+            });
             none()
         })?,
     )?;
@@ -894,9 +1000,14 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    for name in ["SetEnglish", "UseClipboard"] {
-        def(name, method(lua, |_, _, _| none())?)?;
-    }
+    def(
+        "UseClipboard",
+        method(lua, |lua, id, a| {
+            with(lua, id, |e| e.clipboard_disabled = !a.b(1, true));
+            none()
+        })?,
+    )?;
+    def("SetEnglish", method(lua, |_, _, _| none())?)?;
     Ok(())
 }
 

@@ -186,8 +186,18 @@ pub fn event(lua: &Lua, code: KeyCode, down: bool, text: Option<&str>) -> bool {
         }
     };
     if let Some(id) = target {
-        let control = ui(lua).keyboard.modifiers().control;
-        let key = if control && code == KeyCode::KeyA {
+        let modifiers = ui(lua).keyboard.modifiers();
+        let control = modifiers.control;
+        let key = if control && modifiers.shift && code == KeyCode::Insert {
+            Some(edit::UiKey::PasteAndCopy)
+        } else if (control && code == KeyCode::KeyV) || (modifiers.shift && code == KeyCode::Insert)
+        {
+            Some(edit::UiKey::Paste)
+        } else if control && matches!(code, KeyCode::KeyC | KeyCode::Insert) {
+            Some(edit::UiKey::Copy)
+        } else if control && code == KeyCode::KeyX {
+            Some(edit::UiKey::Cut)
+        } else if control && code == KeyCode::KeyA {
             Some(edit::UiKey::SelectAll)
         } else {
             edit_key(code, text).filter(|k| !control || !matches!(k, edit::UiKey::Text(_)))

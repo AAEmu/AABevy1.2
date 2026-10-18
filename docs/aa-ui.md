@@ -344,8 +344,8 @@ text at the caret (with `SetMaxTextLength`, `SetDigit`, `SetDigitMax`, `SetReadO
 `SetPassword` shows `*`) and fire `OnTextChanged(self)`; Backspace, Delete, Left, Right, Home,
 End edit and move the caret; Enter fires `OnEnterPressed` (multi-line boxes insert a line
 break, `ClearTextOnEnter` empties the box), Escape `OnEscapePressed`, Tab `OnTabPressed`; every
-key also fires `OnKeyDown` / `OnKeyUp(self, name)` with lower-case names (`"enter"`). `SetText`
-does not fire `OnTextChanged` (the money edits call `SetText` from that handler). The caret
+key also fires `OnKeyDown` / `OnKeyUp(self, name)` with lower-case names (`"enter"`). Changed
+`SetText` fires `OnTextChanged` synchronously; identical text is a no-op. The caret
 blinks every 530 ms. `SetPrefixText` draws a prefix in `prefixStyle` before the text
 (`SetPrefixInset` around it).
 
@@ -360,7 +360,8 @@ The same cached literal layout drives text, selection, picking, and navigation, 
 markup characters and final empty lines. Text, backing and caret clip to the authored inset;
 typing/navigation scroll the caret into view, and wheel input scrolls multiline text.
 The native multiline Lua class has no `SetFocus`; pointer input and the application focus API
-can focus it. OS clipboard, IME composition and Ctrl-word navigation remain unimplemented.
+can focus it. Native clipboard shortcuts are implemented below; IME composition and Ctrl-word
+navigation remain unimplemented.
 
 Native evidence: select-all flag `39239c40` / focus path `39292230`; single/multiline rendering
 `392935b0` / `39295060`; selected backing in `39220fd0` uses the game's
@@ -451,6 +452,13 @@ game API responsibilities. Native evidence: item parser `3926f690`, quest parser
 `3926fdd0`, item/quest display `39271cc0` / `39271e10`, doubled-bar dispatch `392740ab`,
 and link table binding `3924b360`. Native item grade colors come from `39695c30`; quest
 color depends on quest type/level versus the player, which the application lookup supplies.
+
+Native quest formatter `3949d820` returns `|q%d;`. Quest color `39271e10` uses RGBA
+`(.72,.97,.99,1)` for `quest_contexts.detail_id == 6`. Otherwise quest level minus player
+level >=6 is `(.73,.22,.22,1)`, >=3 is `(.82,.55,.04,1)`, and quest level below
+`player - max(5,floor((player+1)/5))` is `(.56,.56,.56,1)`; other levels are white.
+The detail mapping is explicit: SQL at `39a19db0` selects `detail_id` as column4; loader
+`398940ee` stores it at record+0x10, exactly the field tested by the color function.
 
 `aa_ui::item_link` exposes transport for an exact caller-supplied native item record:
 `encode_payload(&[u8;192])`, `decode_payload(&str) -> Option<[u8;192]>`, and
@@ -556,6 +564,18 @@ i64 ID (`3948e501` / `3948e553`). `extra` is a decimal string from the header's 
 `extra` at `0x2b8` (`3948ec27` / `3948ec4d`), not the body receiver. `receiver` is a
 separate string from body offset `0xc`; send/receive dates are structured date tables.
 
+The two item-count methods have different sources. `GetCurrentMailAttachedItemCount`
+(`3948d550` -> `393cce70`, load `393ccedd`) returns the cached header's signed attachment
+byte at +0x2a3. It does not recompute body items/money. `GetCurrentMailItemCount`
+(`3948d010`) checks ten body records at +0x888, stride192, and counts only records with
+nonzero ID, valid template ID and successful item-definition lookup (`3948d0bc`..`3948d0ec`,
+lookup `39695dc0`). Money/charge/AA points are not item slots in that count.
+
+Native `InfoFromLink` (`394dfae0`) decodes the inner 192-byte item record. When a wrapper
+is present it skips to the second comma; outer type/grade never overwrite payload fields.
+The application's strict full-markup parser can therefore accept both raw encoded payload
+and structurally valid `|iTYPE,GRADE,PAYLOAD;`, trusting the decoded record for tooltip data.
+
 Empty digit edits now follow native `GetText` (`392930c0`, vtable `399c7788` + `0x1ac`):
 when `SetDigit(true)` is active, password mode is off and the buffer is empty, the getter
 formats `SetInitVal` (signed i32, default zero) and writes it back into the edit buffer.
@@ -579,6 +599,44 @@ remains event-free because it calls the internal buffer writer directly. Reentra
 can clamp through `SetText` without recursing on identical values. Tests exercise changed /
 unchanged calls, synchronous reentrant clamping, clean repeated setters and original
 `CreateMoneyEdit` max-value and empty-zero normalization.
+
+Native clipboard handling supports Ctrl+C / Ctrl+Insert, Ctrl+X, and Ctrl+V / Shift+Insert.
+Ctrl+Shift+Insert runs paste followed by copy, matching both native dispatch branches.
+Copy uses the selection, or the complete text when selection is empty. Cut requires a
+nonempty selection and removes it before attempting clipboard output. Paste replaces the
+selection, normalizes CRLF to LF and applies the editor's character limit. Empty clipboard
+text deletes a selection. If Unicode text is unavailable, native reuses its transfer buffer
+from the previous copy/cut/successful paste; that buffer is initially empty. This source-backed
+fallback is kept per UI runtime. Native conversion buffers cap
+copy at 1024 UTF-16 units and paste at 4096 UTF-8 bytes then 1024 Unicode characters.
+Unlike typed input, paste writes the buffer directly, so explicitly enabling clipboard in
+a digit edit also permits non-digit pasted text. Password mode does not change the clipboard
+flag. `UseClipboard(false)`, read-only state and a disabled widget reject clipboard shortcuts;
+`SetDigit(true)` disables clipboard, while `SetDigit(false)` does not reenable it.
+
+Windows uses the Unicode OS clipboard only after an explicit shortcut. Optional
+`AAUI.GetClipboard() -> string | nil` and `AAUI.SetClipboard(text)` replace OS access for
+embedded runtimes and fixtures; they run outside Ui borrows. Other platforms require those
+hooks. A paste hook that changes focus/text/selection cannot insert into an outdated owner.
+The app needs no hook on Windows. `UiKey::{Copy,Cut,Paste}` also supports direct harness input.
+
+Native references: shortcut dispatch `392297c1`; copy `39227b60`; cut `39227c30`;
+Unicode write `39224a60`; paste `39228270`; clipboard setter `39292ab0` (wrapper+c29,
+model+a4); digit-disable path `39228c90`; password setter `39292a90`; read-only setter
+`39292840` and input gate `3922a0d1`. Paste marks model dirty at `392284a9`, including
+replacement by identical text. Toolkit clipboard actions do no per-frame work.
+`tests/clipboard.rs` exercises Unicode selection/copy-all/cut, key edges and both Insert
+shortcuts, CRLF/empty/limits, independent flags, capture/reentrant hooks and original friend /
+recipient / mail-body `.alb` widgets. All automated clipboard tests and the `native_edits`
+capture use private hooks and leave the OS clipboard alone.
+
+The full suite passed 141 runtime tests plus both doc tests (one font metrics test ignored).
+The native transfer-buffer follow-up also passed all 22 clipboard/edit/keyboard tests.
+`shots/aa-ui/native-clipboard.png` shows the original social edit's copied `Newfriend` in
+the original mail recipient, plus selected/scrolled literal mail text. Shared panel fonts,
+textures and HUD art were checked against `reference/ingame/bag/real.png`; the supplied
+references contain no dedicated social/mail capture. The `aa_dev` run logged 372-445 FPS,
+zero script errors, and exited after its screenshot.
 
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's

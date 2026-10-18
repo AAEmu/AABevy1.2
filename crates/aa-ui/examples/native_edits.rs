@@ -1,4 +1,5 @@
-//! Original friend/mail views with native edit selection, wrapping and scrolling.
+//! Original friend/mail views with native selection, clipboard, wrapping and scrolling.
+//! The fixture supplies clipboard hooks, so automatic captures never modify the OS clipboard.
 //! `cargo run -p aa-ui --example native_edits -- --shot shots/aa-ui/native-edits.png --shot-after 5`
 
 #[path = "fake/mod.rs"]
@@ -19,19 +20,26 @@ fn main() {
             ui.run_stage(aa_ui::Stage::World);
             fake::enter_world(ui);
             ui.exec("@original_edit_views", r#"
+                local clipboard=''
+                AAUI.GetClipboard=function() return clipboard end
+                AAUI.SetClipboard=function(text) clipboard=text end
                 friends = SetViewOfRelationshipFrame('selectionFriends', UIParent)
                 friends:RemoveAllAnchors(); friends:AddAnchor('TOPLEFT', UIParent, 65, 130)
                 friends:Show(true)
                 local input = friends.tab.window[1].inputName
-                input:SetText('Oldfriend'); input.guideText:Show(false); input:SetFocus()
+                input:SetText('Newfriend'); input.guideText:Show(false); input:SetFocus()
                 mail = SetViewOfWriteMailWindow('selectionMail', UIParent)
                 mail:RemoveAllAnchors(); mail:AddAnchor('TOPRIGHT', UIParent, -65, 130)
                 mail:Show(true)
-                mail.roleEdit:SetText('Newfriend')
                 mail.titleEdit:SetText('A letter from Solzreed Peninsula')
                 mail.content:Show(true)
-                mail.content:SetText('Dear Newfriend,\n\nThis original mail edit wraps its text at the authored inset. Dragging selects characters, Shift extends the range, and Home or End moves within a visual line.\n\nLong letters scroll to keep the caret visible while the paper, inset and attachment frame stay in place.\n\nLiteral markup stays editable: |cffffffffhello|r.\n\nSee you in Crescent Throne!\nRefone\n')
+                mail.content:SetText('Dear Newfriend,\n\nThe recipient was copied from the original friends edit and pasted here through native clipboard shortcuts.\n\nDragging selects characters, Shift extends the range, and Home or End moves within a visual line.\n\nLong letters scroll to keep the caret visible while the paper, inset and attachment frame stay in place.\n\nLiteral markup stays editable: |cffffffffhello|r.\n\nSee you in Crescent Throne!\nRefone\n')
+                input:SetFocus()
             "#).unwrap();
+            ui.key(&UiKey::Copy);
+            ui.exec("@mail_recipient_focus", "mail.roleEdit:SetFocus()").unwrap();
+            ui.key(&UiKey::Paste);
+            assert_eq!(ui.lua.load("return mail.roleEdit:GetText()").eval::<String>().unwrap(), "Newfriend");
             let content: mlua::Value = ui.lua.load("return mail.content").eval().unwrap();
             ui.set_focus(aa_ui::lua::value_id(&ui.lua, &content));
             ui.key(&UiKey::Up);

@@ -83,6 +83,7 @@ impl UiRuntime {
             entered: Vec::new(),
             focus: None,
             keyboard: Default::default(),
+            clipboard: String::new(),
             caret_visible: false,
             caret_t0: 0.0,
             cursor: (0.0, 0.0),
