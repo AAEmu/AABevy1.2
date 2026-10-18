@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use rusqlite::Connection;
 use std::collections::HashMap;
 pub(super) mod cancel;
+pub(super) mod query;
 
 /// Native39421dcf: positive selected count only, converted through signed CVTSI2SS.
 pub(super) fn stack_count(rule: u32, stacks: i32, charged: i32) -> Option<f64> {

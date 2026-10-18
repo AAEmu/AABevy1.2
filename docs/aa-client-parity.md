@@ -13,7 +13,15 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite: 283 passed / 38 optional probes ignored in 62.57s.
+Latest full-client suite: 286 passed / 38 optional probes ignored in 27.36s.
+All11 focused buff checks pass, including native optional flags, strict numeric
+ordinals/zero-result failures, missing-descriptor physical positions, static
+category, caster identity and unsigned/f32 duration fields. The original buff
+tooltip passes physical hover/time-only refresh/leave. Three tooltip/charge/live
+world-list captures are inspected without runtime errors; the playable alias is
+refreshed with this getter, native completion artwork, BC1 normal XYZ and socket
+result readers. Native actor-frame time, full description providers and live
+entry remain explicit gaps (aa-client-buffs.md).
 Native buff-count checks add twelve executed branch goldens and original
 charge/stack badges responding to signed SCBuffUpdated values without icon
 removal. All eight focused buff/catalog/control checks pass. Charge and live
@@ -70,10 +78,11 @@ GCD selection/state has a tested opt-in toolkit adapter; the actual application
 producer/accessor mapping remains open. Generic and ordinary slot mask rendering
 now use the source dual-texture path; ordinary slot captures and 42 selected
 UI regressions pass. The toolkit selector remains opt-in pending real producers.
-Network 541 tests pass, including native buff metadata/capacity/order/descriptor
+Network 543 tests pass at the integrated build, including received SC09d/e socket
+results and native buff metadata/capacity/order/descriptor
 guards, SCBuffUpdated and factual decoder-loss uncertainty, bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
-World 221 tests / 9
+World 222 tests / 9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
 now reach the transmission copy in their source order. Fog/deferred decal water
@@ -85,7 +94,8 @@ retain exact evidence and limits. Native terrain holes/height packing/diagonal
 and 32-slot surface materials pass numeric regressions, all 64 GPU material
 controls, two original on/legacy pairs and unload checks. Independent diffuse/bump
 tiling and cell phase pass eight original ATI2 texel controls, original scene pairs
-and unload. Signed heightmap projection/frame adds 27 executed original controls,
+and unload. BC1 normal XYZ preservation adds38 GPU controls and six original
+scene/unload runs; ATI2/detail controls remain pixel-identical. Signed heightmap projection/frame adds 27 executed original controls,
 22 GPU controls and seven inspected original-scene/control/unload runs. Trial spatial strings/live validation, bounty asset
 compatibility and ranking live integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
@@ -119,7 +129,7 @@ parity is unfinished.
 
 ## Active ownership
 
-* Root: `aa-client`, original trial/bounty/ranking received adapters, physical terrain support and native Good-list self-buff cancellation have documented checks. Native buff getter flag/count/charge projection is next over executed source contracts. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
+* Root: `aa-client`, original trial/bounty/ranking received adapters, physical terrain support, native Good-list self-buff cancellation and getter flag/count/charge projection have documented checks. Receipt-ordered item-effect callbacks, remaining native buff time/description providers and genuine cooldown producers continue next over executed source contracts. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
 * Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
 * UI agent: `aa-ui`, native listbox hierarchy/art/tooltips for original crafting/achievement, including visible/animated templates and white/grey state fallbacks; native48px icon rejection audited. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed. Read-only native repair API audit supports root's next integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.

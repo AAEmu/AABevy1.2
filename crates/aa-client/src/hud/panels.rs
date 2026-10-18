@@ -61,6 +61,10 @@ pub struct SlotSnap {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BuffSnap {
     pub id: u32,
+    pub descriptor: bool,
+    pub kind: i64,
+    pub caster_character_id: u32,
+    pub duration_ms: u32,
     /// Received instance identity; the original click callback still passes its one-based ordinal.
     pub instance_index: u32,
     pub name: String,
@@ -214,12 +218,17 @@ pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::Buff
                 _ => true,
             },
         };
-        let ends_ms = (b.duration_ms > 0).then(|| {
+        let duration_ms = b.duration_ms as u32;
+        let ends_ms = (duration_ms != 0).then(|| {
             let received = e.received.saturating_duration_since(start).as_millis() as u64;
-            received + (i64::from(b.duration_ms) - i64::from(b.elapsed_ms)).max(0) as u64
+            received + u64::from(duration_ms.saturating_sub(b.elapsed_ms))
         });
         let snap = BuffSnap {
             id: b.buff_id,
+            descriptor: info.is_some(),
+            kind: info.map_or(0, |info| info.kind),
+            caster_character_id: b.caster_char_id,
+            duration_ms,
             instance_index: b.index,
             name: info.map(|i| i.named.name.clone()).unwrap_or_default(),
             icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
@@ -383,6 +392,10 @@ pub(in crate::hud) fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table>
 fn buff_table(lua: &Lua, b: &BuffSnap) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.raw_set("buff_id", i64::from(b.id))?;
+    t.raw_set("descriptor", b.descriptor)?;
+    t.raw_set("buff_kind", b.kind)?;
+    t.raw_set("caster_character_id", i64::from(b.caster_character_id))?;
+    t.raw_set("duration", f64::from(b.duration_ms as f32))?;
     t.raw_set("name", b.name.as_str())?;
     t.raw_set("path", b.icon.as_str())?;
     t.raw_set("description", b.desc.as_str())?;

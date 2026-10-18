@@ -1,4 +1,4 @@
-# Original self-buff cancellation
+# Original buff getters and self-buff cancellation
 
 The client binds the unchanged original player-frame right-button callback to
 `X2Ability:CancelPlayerBuff`. Its argument is the one-based native Good-list
@@ -94,8 +94,59 @@ or other worker changes require another build.
 Current main-copy/playable SHA256:
 `9DE983213ED1BE99446FB33AFF8285196F04E32E8265083C37192709FD4A3297`.
 
-The unchanged Lua getter's broader flag representation remains a separate
-follow-up: omitted flags default to all, explicit wrong types become0, and the
-native stack field also requires bit0x10. Full tick/stat, time advancement,
-metadata flags and caster-dependent description formatting are not claimed by
-this numeric-count slice.
+At the numeric-count milestone, the getter's broader flag representation was
+still separate. The subsequent adapter below closes argument and field shapes;
+full tick/stat, native actor-frame time advancement and caster-dependent
+description formatting remain separate.
+
+The getter now follows the executed original UnitBuff/UnitDeBuff argument and
+optional-field contracts. Unit aliases require a Lua string, and ordinals use
+strict numbers converted through native f32/CVTTSS2SI and wrapping subtraction.
+Omitted flags select all (-1); explicit nil or wrong types select0. Missing
+actors, ordinals and descriptors return zero Lua values. A missing descriptor
+still occupies its physical Good/Bad position and count, preserving cancellation
+mapping. Metadata category follows the static descriptor's kind, independently
+of its received wire group, and uses original localization group33.
+
+Flags1/2/4/8/16 select description/mine/duration/timeLeft/stack. Only exactly-1
+adds name, path, buff_id, category and tipType in this app's script environment.
+The mine field compares the received caster persistent ID with the actual local
+character ID. Duration retains unsigned wire bits, including0, then rounds
+through f32; timeLeft is absent for zero duration. Stack selection retains the
+prior signed charge/rule behavior. The existing description provider still runs
+even when its result is not exposed, as the native formatter does.
+
+All11 focused buff checks pass in4.14s. Three added original-stage checks cover
+default/explicit flags, malformed arguments and zero-result arity, physical
+missing-descriptor ordinals, static versus wire kind, unsigned duration extremes,
+f32 projection and omitted time/count fields. A physical pointer hover opens the
+unchanged original buff tooltip (tooltip window7); its time-only refresh retains
+the full name/description metadata, and pointer leave closes it. The aa-dev
+buffs fixture adds --tooltip using the toolkit's normal virtual pointer path.
+
+The existing HUD Instant countdown is explicitly retained as a compatibility
+clock; this slice does not claim the original actor-frame elapsed producer.
+Existing token expansion, local-stat/caster providers and unit alias resolution
+also retain their documented limits. The archived native formatter/parser/number
+oracles establish further source contracts but do not make this app's entire
+description provider equivalent or port original unsafe buffer behavior.
+
+The full copied client test executable passes286 checks /38 existing optional
+probes ignored in27.36s (data/extract/aa-client/trial/getters-full-tests.log).
+Main and buffs example build. Three1920x1080 captures under
+shots/hud/buff-getters/ are inspected: original Inspire tooltip with category,
+formatted description and live time-only refresh (296.3-324.7 FPS), signed charge
+badge (279.2-363.2), and actual lane world select (244.0-310.6). All processes
+self-close without script errors/WARN/ERROR/panics. The tooltip's authored brown
+frame, category/title/icon and highlighted text are compared with
+reference/ingame/tooltip_buff/real.png; the reference contains Patron and a real
+world scene, while this explicit fixture contains Inspire over the HUD-only
+background. No same-buff pixel equivalence or live world-entry claim is made.
+
+Latest inspected main is target/debug/aa-client-20261018-buff-getters.exe;
+target/debug/aa-client-play.exe is refreshed only after checking the alias is
+idle. Both SHA256:
+8FC2D3187828B755DCFECDBE969B1A61CF6F0AEFA6865145576E0D0BA33551EE.
+This build includes native ordinary-slot completion artwork, BC1 terrain normal
+XYZ preservation and SC09d/e socketing result readers. Subsequent SC09c/f, raw
+cooldown setter and triangle layer-weight work requires another build.
