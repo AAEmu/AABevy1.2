@@ -55,6 +55,20 @@ pub fn read_ai_aggro(r: &mut Reader) -> Result<(u32, Vec<AggroEntry>)> {
     Ok((npc, entries))
 }
 
+/// Raw native house posture bytes; bool consumers compare each value to1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HousePosture {
+    pub has_loot_left: bool,
+    pub doors: [u8; 2],
+    pub windows: [u8; 6],
+}
+
+impl HousePosture {
+    pub fn read(r: &mut Reader, has_loot_left: bool) -> Result<Self> {
+        Ok(Self { has_loot_left, doors: [r.u8()?, r.u8()?], windows: [r.u8()?, r.u8()?, r.u8()?, r.u8()?, r.u8()?, r.u8()?] })
+    }
+}
+
 /// What `SCUnitModelPostureChanged` reports: the unit's posture (`ModelPostureType`: 0 none, 1 house, 4 actor model state,
 /// 7 farm field, 8 turret) and, for an actor model state, the animation action (`anim_actions.id`) it stands in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,6 +80,7 @@ pub struct Posture {
     pub anim_action: u32,
     /// Play it now (false: the unit leaves the pose).
     pub activate: bool,
+    pub house: Option<HousePosture>,
 }
 
 impl Posture {
@@ -73,10 +88,10 @@ impl Posture {
     pub fn read(r: &mut Reader) -> Result<Self> {
         let kind = r.u8()?;
         let has_loot_left = r.bool()?;
-        let mut posture = Self { kind, has_loot_left, anim_action: 0, activate: false };
+        let mut posture = Self { kind, has_loot_left, anim_action: 0, activate: false, house: None };
         match kind {
             0 => {}
-            1 => r.skip(8)?, // two doors, six windows
+            1 => posture.house = Some(HousePosture::read(r, has_loot_left)?), // two doors, six windows
             4 => {
                 posture.anim_action = r.u32()?;
                 posture.activate = r.bool()?;
@@ -293,7 +308,7 @@ mod tests {
         let mut r = Reader::new(&bytes);
         let p = Posture::read(&mut r).unwrap();
         assert!(r.is_empty());
-        assert_eq!(p, Posture { kind: 4, has_loot_left: true, anim_action: 100, activate: true });
+        assert_eq!(p, Posture { kind: 4, has_loot_left: true, anim_action: 100, activate: true, house: None });
         for (kind, len) in [(1u8, 8usize), (7, 14), (8, 8)] {
             let mut bytes = vec![kind, 0];
             bytes.extend(std::iter::repeat_n(1u8, len));
@@ -339,7 +354,7 @@ mod tests {
         w.bc(7).u8(4).bool(false).u32(104).bool(true);
         assert_eq!(
             frame(sc::SCUnitModelPostureChangedPacket, &w.finish()),
-            M::UnitPosture { obj_id: 7, posture: Posture { kind: 4, has_loot_left: false, anim_action: 104, activate: true } }
+            M::UnitPosture { obj_id: 7, posture: Posture { kind: 4, has_loot_left: false, anim_action: 104, activate: true, house: None } }
         );
         let mut w = Writer::new();
         w.bc(0x99).i32(1).bc(5).i32(77).i32(0).i32(0).u8(135);
