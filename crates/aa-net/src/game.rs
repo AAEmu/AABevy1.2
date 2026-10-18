@@ -475,6 +475,9 @@ pub enum ServerMsg {
     BuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsCreated(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
+    DoodadChanged { obj_id: u32, data: i32 },
+    DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
+    DoodadSound { obj_id: u32, sound_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     Chat(ChatMessage),
     ErrorMsg { code: i16, kind: u32, notify: bool },
@@ -588,6 +591,9 @@ impl ServerMsg {
             Self::Teleport { .. } => "SCTeleportUnit",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
+            Self::DoodadChanged { .. } => "SCDoodadChanged",
+            Self::DoodadOriginator { .. } => "SCDoodadOriginator",
+            Self::DoodadSound { .. } => "SCDoodadSound",
             Self::DoodadPhaseChanged { .. } => "SCDoodadPhaseChanged",
             Self::Chat(_) => "SCChatMessage",
             Self::ErrorMsg { .. } => "SCErrorMsg",
@@ -972,6 +978,9 @@ impl ServerMsg {
                 Self::DoodadsCreated(doodads)
             }
             sc::SCDoodadRemovedPacket => Self::DoodadsRemoved(vec![r.bc()?]),
+            sc::SCDoodadChangedPacket => Self::DoodadChanged { obj_id: r.bc()?, data: r.i32()? },
+            sc::SCDoodadOriginatorPacket => Self::DoodadOriginator { obj_id: r.bc()?, new_owner_id: r.u32()?, new_faction: r.u32()? },
+            sc::SCDoodadSoundPacket => Self::DoodadSound { obj_id: r.bc()?, sound_id: r.u32()? },
             sc::SCDoodadsRemovedPacket => {
                 let n = r.u16()?;
                 r.skip(1)?; // last
@@ -1647,6 +1656,82 @@ mod tests {
         assert_eq!(
             ServerMsg::decode(&frame).unwrap(),
             ServerMsg::Batch(vec![expected, ServerMsg::Snow(true)])
+        );
+    }
+
+    #[test]
+    fn doodad_mutation_packets_match_lane_goldens_and_keep_following_dd04_boundaries() {
+        let packets = vec![
+            (
+                sc::SCDoodadChangedPacket,
+                vec![8, 0, 0, 253, 255, 255, 255],
+                ServerMsg::DoodadChanged {
+                    obj_id: 8,
+                    data: -3,
+                },
+            ),
+            (
+                sc::SCDoodadOriginatorPacket,
+                vec![9, 0, 0, 10, 0, 0, 0, 148, 0, 0, 0],
+                ServerMsg::DoodadOriginator {
+                    obj_id: 9,
+                    new_owner_id: 10,
+                    new_faction: 148,
+                },
+            ),
+            (
+                sc::SCDoodadSoundPacket,
+                vec![7, 0, 0, 55, 0, 0, 0],
+                ServerMsg::DoodadSound {
+                    obj_id: 7,
+                    sound_id: 55,
+                },
+            ),
+        ];
+        let mut raw = Writer::new();
+        let mut expected = Vec::new();
+        for (op, body, message) in packets {
+            assert_eq!(ServerMsg::decode(&game_frame(op, &body)).unwrap(), message);
+            for cut in 0..body.len() {
+                assert!(
+                    ServerMsg::decode(&game_frame(op, &body[..cut])).is_err(),
+                    "op{op:03x}cut{cut}"
+                );
+            }
+            raw.u16(0).u16(op).raw(&body);
+            expected.push(message);
+        }
+        raw.u16(0)
+            .u16(sc::SCDoodadPhaseChangedPacket)
+            .bc(9)
+            .u32(4652)
+            .u32(30000)
+            .i32(-1)
+            .u32(27606);
+        expected.push(ServerMsg::DoodadPhaseChanged {
+            obj_id: 9,
+            func_group_id: 4652,
+            time_left: 30000,
+            puzzle_group: -1,
+            item_template_id: 27606,
+        });
+        raw.u16(0).u16(sc::SCOnOffSnowPacket).bool(true);
+        expected.push(ServerMsg::Snow(true));
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 5, 0];
+        frame.extend(stored(&raw.finish(), true));
+        assert_eq!(
+            ServerMsg::decode(&frame).unwrap(),
+            ServerMsg::Batch(expected)
+        );
+        let mut owner = Writer::new();
+        owner.bc(9).u32(0xf1234567).u32(0x80000000);
+        assert_eq!(
+            decode(sc::SCDoodadOriginatorPacket, &owner.finish()),
+            ServerMsg::DoodadOriginator {
+                obj_id: 9,
+                new_owner_id: 0xf1234567,
+                new_faction: 0x80000000
+            }
         );
     }
 

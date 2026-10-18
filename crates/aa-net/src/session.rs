@@ -510,6 +510,10 @@ pub enum Event {
     PassiveBuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsSpawned(Vec<Doodad>),
     DoodadsRemoved(Vec<u32>),
+    DoodadChanged { obj_id: u32, data: i32 },
+    /// Owner is a stored character ID, not an object ID. Faction is preserved as raw wire data.
+    DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
+    DoodadSound { obj_id: u32, sound_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     /// Local command rejection, distinct from an authoritative SkillStarted failure.
     DoodadSkillRejected { skill_id: u32, doodad_obj_id: u32, message: String },
@@ -1375,6 +1379,9 @@ impl Session {
             }
             M::DoodadsCreated(v) => self.emit(Event::DoodadsSpawned(v)),
             M::DoodadsRemoved(v) => self.emit(Event::DoodadsRemoved(v)),
+            M::DoodadChanged { obj_id, data } => self.emit(Event::DoodadChanged { obj_id, data }),
+            M::DoodadOriginator { obj_id, new_owner_id, new_faction } => self.emit(Event::DoodadOriginator { obj_id, new_owner_id, new_faction }),
+            M::DoodadSound { obj_id, sound_id } => self.emit(Event::DoodadSound { obj_id, sound_id }),
             M::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id } => {
                 self.emit(Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id });
             }
@@ -1540,6 +1547,52 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn doodad_mutation_events_preserve_signed_data_stored_owner_faction_and_sound() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::DoodadChanged {
+                    obj_id: 8,
+                    data: i32::MIN,
+                },
+                game::ServerMsg::DoodadOriginator {
+                    obj_id: 9,
+                    new_owner_id: 0xf1234567,
+                    new_faction: 0x80000000,
+                },
+                game::ServerMsg::DoodadSound {
+                    obj_id: 7,
+                    sound_id: u32::MAX,
+                },
+            ])))
+            .await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::DoodadChanged {
+                obj_id: 8,
+                data: i32::MIN
+            })
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::DoodadOriginator {
+                obj_id: 9,
+                new_owner_id: 0xf1234567,
+                new_faction: 0x80000000
+            })
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::DoodadSound {
+                obj_id: 7,
+                sound_id: u32::MAX
+            })
+        ));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn doodad_skill_command_rejects_truncation_and_waits_for_real_skill_started() {

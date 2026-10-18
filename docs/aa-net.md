@@ -1628,6 +1628,29 @@ Full `cargo test -p aa-net` passed 187 library and 2 scripted-session tests, wit
 tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 Natural gathering/interaction live QA remains pending while the lane is stalled.
 
+Adjacent doodad packets now preserve their complete lane layouts in both `ServerMsg`
+and `Event`:
+
+* `DoodadChanged { obj_id, data }` (SC10e): bc objectId, i32 data (7 bytes).
+* `DoodadOriginator { obj_id, new_owner_id, new_faction }` (SC114): bc objectId,
+  u32 stored ownerId, u32 faction (11 bytes).
+* `DoodadSound { obj_id, sound_id }` (SC156): bc objectId, u32 soundId (7 bytes).
+
+`Doodads` applies changed data and the stored `owner_id` only to known objects.
+The owner is a full u32 stored character ID, not the separate three-byte owner object ID;
+the reducer does not infer parent, owner type, permissions, phase or faction state.
+Zero owner/data values clear those fields. Unknown and removed objects stay absent.
+Faction and sound IDs remain raw events for consumers to interpret; a sound does not
+mutate the doodad or invent its position. Audio consumers can resolve a currently known
+object through `Doodads`.
+
+Three additional offline tests check the exact source goldens, every truncation, all
+three updates followed by phase and another DD04 opcode, signed/full-width event
+forwarding, known-only updates, clearing and preservation of unrelated fields.
+Full `cargo test -p aa-net` passed 190 library and 2 scripted-session tests, with 9 live
+tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
+No live lane traffic was used for these updates.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
