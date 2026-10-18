@@ -548,6 +548,9 @@ pub enum ServerMsg {
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
+    /// Raw skill-effect feedback. Authoritative item updates are separate item-task receipts.
+    LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
+    LunastoneSocketingResult { raw_result:u8, item_id:u64, template_id:u32 },
     /// A passive buff was learned (characters).
     BuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsCreated(Vec<Doodad>),
@@ -684,6 +687,8 @@ impl ServerMsg {
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffUpdated { .. } => "SCBuffUpdated",
+            Self::LunagemSocketingResult { .. } => "SCItemSocketingLunagemResult",
+            Self::LunastoneSocketingResult { .. } => "SCItemSocketingLunastoneResult",
             Self::BuffLearned { .. } => "SCBuffLearned",
             Self::Teleport { .. } => "SCTeleportUnit",
             Self::LoadInstance(_) => "SCLoadInstance",
@@ -1101,6 +1106,8 @@ impl ServerMsg {
             }
             sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
             sc::SCBuffUpdatedPacket => Self::BuffUpdated { obj_id:r.bc()?, index:r.u32()?, stacks:r.i32()?, charged:r.i32()? },
+            sc::SCItemSocketingLunagemResultPacket => Self::LunagemSocketingResult { raw_result:r.u8()?, item_id:r.u64()?, template_id:r.u32()?, raw_install:r.u8()? },
+            sc::SCItemSocketingLunastoneResultPacket => Self::LunastoneSocketingResult { raw_result:r.u8()?, item_id:r.u64()?, template_id:r.u32()? },
             sc::SCBuffLearnedPacket => Self::BuffLearned { obj_id: r.bc()?, buff_id: r.u32()? },
             sc::SCTeleportUnitPacket => Self::Teleport {
                 reason: r.u8()?,
@@ -2094,6 +2101,27 @@ mod tests {
             batch.u16(0).u16(sc::SCBuffRemovedPacket).bc(0x010203).u32(7);
             assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::BuffRemoved{obj_id:0x010203,index:7}]);
         }
+    }
+
+    #[test]
+    fn socket_result_native_goldens_raw_bytes_truncation_and_dd04_alignment() {
+        // Actual397b39b0/397b3a40 field walk with canonical archive bool primitive, independent Writer.
+        let gem=[1,8,7,6,5,4,3,2,1,0xdd,0xcc,0xbb,0xaa,1];
+        let stone=&gem[..13];
+        let expected_gem=ServerMsg::LunagemSocketingResult{raw_result:1,item_id:0x0102030405060708,template_id:0xaabbccdd,raw_install:1};
+        let expected_stone=ServerMsg::LunastoneSocketingResult{raw_result:1,item_id:0x0102030405060708,template_id:0xaabbccdd};
+        for (opcode,body,expected) in [(sc::SCItemSocketingLunagemResultPacket,&gem[..],expected_gem.clone()),(sc::SCItemSocketingLunastoneResultPacket,stone,expected_stone.clone())] {
+            assert_eq!(decode(opcode,body),expected);
+            for n in 0..body.len(){assert!(ServerMsg::decode(&game_frame(opcode,&body[..n])).is_err());}
+        }
+        let mut noncanonical=gem;noncanonical[0]=255;noncanonical[13]=254;
+        assert_eq!(decode(sc::SCItemSocketingLunagemResultPacket,&noncanonical),ServerMsg::LunagemSocketingResult{raw_result:255,item_id:0x0102030405060708,template_id:0xaabbccdd,raw_install:254});
+        assert_eq!(decode(sc::SCItemSocketingLunastoneResultPacket,&noncanonical[..13]),ServerMsg::LunastoneSocketingResult{raw_result:255,item_id:0x0102030405060708,template_id:0xaabbccdd});
+        let mut batch=Writer::new();batch.u16(0).u16(sc::SCItemSocketingLunagemResultPacket).raw(&gem);
+        batch.u16(0).u16(sc::SCItemSocketingLunastoneResultPacket).raw(stone);
+        batch.u16(0).u16(sc::SCItemSocketingLunagemResultPacket).raw(&gem);
+        batch.u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
+        assert_eq!(ServerMsg::decode_batch(&batch.finish(),4),vec![expected_gem.clone(),expected_stone,expected_gem,ServerMsg::BuffRemoved{obj_id:9,index:7}]);
     }
 
 }

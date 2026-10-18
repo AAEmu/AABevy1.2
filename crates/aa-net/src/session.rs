@@ -616,6 +616,9 @@ pub enum Event {
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
+    /// Received result only; does not grant, consume or modify any item.
+    LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
+    LunastoneSocketingResult { raw_result:u8, item_id:u64, template_id:u32 },
     /// A passive buff was learned.
     PassiveBuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsSpawned(Vec<Doodad>),
@@ -1776,6 +1779,8 @@ impl Session {
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
             M::BuffUpdated { obj_id, index, stacks, charged } => self.emit(Event::BuffUpdated { obj_id, index, stacks, charged }),
+            M::LunagemSocketingResult { raw_result, item_id, template_id, raw_install } => self.emit(Event::LunagemSocketingResult { raw_result, item_id, template_id, raw_install }),
+            M::LunastoneSocketingResult { raw_result, item_id, template_id } => self.emit(Event::LunastoneSocketingResult { raw_result, item_id, template_id }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
             M::Teleport { pos, .. } => {
                 self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
@@ -4803,6 +4808,21 @@ mod tests {
             assert!(events.try_recv().is_err());
         }
         assert_eq!(session.self_obj,0);assert!(session.selected_state.is_none());assert!(session.game.is_none());
+    }
+
+    #[tokio::test]
+    async fn socket_results_forward_raw_repeats_without_inventory_or_ack_fabrication() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let mut world=crate::state::WorldState::default();
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::LunagemSocketingResult{raw_result:255,item_id:u64::MAX,template_id:u32::MAX,raw_install:254})).await;
+            let event=events.try_recv().unwrap();assert!(matches!(event,Event::LunagemSocketingResult{raw_result:255,item_id:u64::MAX,template_id:u32::MAX,raw_install:254}));world.apply(&event);
+            session.game_msg(Ok(game::ServerMsg::LunastoneSocketingResult{raw_result:0,item_id:0,template_id:0})).await;
+            let event=events.try_recv().unwrap();assert!(matches!(event,Event::LunastoneSocketingResult{raw_result:0,item_id:0,template_id:0}));world.apply(&event);
+            assert!(events.try_recv().is_err());
+        }
+        assert_eq!(session.self_obj,0);assert!(session.selected_state.is_none());assert!(session.game.is_none());
+        assert!(world.player.spawn.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());
     }
 
 }

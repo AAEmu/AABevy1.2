@@ -274,6 +274,8 @@ opcodes! {
         SCItemTaskSuccessPacket = 0x090,
         SCUnitEquipmentsChangedPacket = 0x094,
         SCSyncItemLifespanPacket = 0x098,
+        SCItemSocketingLunagemResultPacket = 0x09d,
+        SCItemSocketingLunastoneResultPacket = 0x09e,
         SCLoadInstancePacket = 0x197,
         SCSkillStartedPacket = 0x0a1,
         SCSkillFiredPacket = 0x0a2,
