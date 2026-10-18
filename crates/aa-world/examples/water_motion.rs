@@ -31,6 +31,8 @@ struct Fixture {
     old_refraction: bool,
     features: bool,
     old_features: bool,
+    foam_uv: bool,
+    old_foam_uv: bool,
     environment_2d: bool,
     old_environment_2d: bool,
     farm: bool,
@@ -92,6 +94,8 @@ fn main() {
                 old_refraction: flag("--legacy-refraction"),
                 features: flag("--features") || flag("--legacy-features"),
                 old_features: flag("--legacy-features"),
+                foam_uv: flag("--foam-uv") || flag("--legacy-foam-uv"),
+                old_foam_uv: flag("--legacy-foam-uv"),
                 environment_2d: flag("--environment-2d") || flag("--legacy-environment-2d"),
                 old_environment_2d: flag("--legacy-environment-2d"),
                 farm: flag("--farm"),
@@ -393,7 +397,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features || fixture.environment_2d)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features || fixture.environment_2d || fixture.foam_uv)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -439,6 +443,11 @@ fn world_check(
                         control.params.sun=(cur.sun*rs*value("SunMultiplier",0.1)*tuning.water_sun).extend(control.params.sun.w);
                         control.params.foam_col=((cur.sun+cur.sky)*rs*value("FoamMultiplier",0.75)*tuning.water_foam).extend(0.0);
                     }
+                }
+                if fixture.foam_uv {
+                    control.params.motion.z=0.0;
+                    if fixture.old_foam_uv {control.params.motion.w=-5.0;}
+                    info!("water foam UV control: native={} legacy={}",control.params.motion.x>0.5,fixture.old_foam_uv);
                 }
                 if fixture.environment_2d {
                     control.params.motion.z=0.0;

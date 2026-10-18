@@ -4218,6 +4218,66 @@ filter CVars, TexMod/type/view overrides, dynamic/realtime sources and full nati
 water lighting remain explicit boundaries. In particular SUN_SHADING's unity versus
 sun+sky radiometry is unchanged by this sampler slice; no colour tuning is bundled.
 
+### Native foam projection precision
+
+Original `WaterSurfaceVS` lines 329-333 use world Cry XY for two affine foam
+projections, with opposite animation signs and the second sample reading `Foam0.wz`.
+The folded source expressions are `.02*.333*16*3` and `.02*.333*20*2.1`.
+The original cached D3D11 shaders resolve their exact float32 coefficients to
+**0x3ea3ad19 = 0.31968000531196594** and
+**0x3e8f3776 = 0.2797200083732605**. The former rounded 0.3197 / 0.2797
+values move the pattern by about 0.31 texture cycles at the real pond coordinates.
+
+This is confirmed by execution as well as source. The original 146,327-byte
+`watersurface@watersurfacevs.fxcb` contains 13 unique VS DXBC variants. A bounded
+CPU-only D3D11 WARP fixture runs all 13 **unmodified** vertex shaders, with a
+formula-free geometry shader copying `TEXCOORD2` to stream output before clipping.
+Six signed world positions, three times and three signed/zero speeds give
+**702 original-shader controls**, all matching independent strict float32 arithmetic
+with **zero error**. This validates the coefficient bits, operation order, `frac`
+for negative animation and the `xy` / `wz` channel interpretation. It is execution
+of the original compiled shaders on WARP, without an original-client camera claim.
+
+`water_motion.wesl::foam_coordinates` applies those constants only to the existing
+source-qualified authored WaterSurface+BUMP_MAP path. The sea and unknown/fallback
+paths retain their old rounded coefficients, phase and sampling order. Foam
+feature eligibility, both texture samples, normal perturbation, shoreline weight,
+opacity and all lighting gains are unchanged. A diagnostic fixed clock affects
+only the native authored comparison controls; production still uses the same
+application time. `--foam-uv` / `--legacy-foam-uv` change only projection precision
+in the original-world fixture with the same frozen wave/foam time.
+
+`water_foam` supplies 216 independent GPU pixel controls for both projections at
+all 54 source input cases, including the retained sea/fallback profile. The upper
+six rows use the native constants; lower rows retain the rounded values. Thin CPU
+swatches show the expected fractional coordinates. The bounds are fixed; this
+slice introduces no textures, worker tasks or per-frame CPU work.
+
+All **216 GPU controls pass within one byte** at 1280x720, logging 125-241 FPS.
+The original shallow pond camera targets **15570.5,15360.5,127**, with actual
+vertical depth **0.1627655**. The inspected native/rounded pair shows the changed
+foam phase on the water.
+There are **140,234 pixels** above a three-byte channel difference, maximum 207;
+this is a source-formula comparison, with no original-client camera reference.
+Native settled samples log **144-173 FPS**, with a first-loading sample of 6.9;
+the rounded comparison logs 114-189 FPS. These shared-load readings are not a
+performance comparison. No brightness or authored geometry was tuned.
+
+The original cell's one eight-vertex water mesh and entity are released after
+camera movement; unload logs 134-189 FPS. The existing four sea compositing controls
+also pass at 262-287 FPS, and their full 1920x1080 PNG is **pixel-identical** to the
+previous milestone, maximum difference 0. All five capture runs self-close without
+warnings/errors; copied executables are removed after exit. **227 library tests
+pass / 9 existing optional tests ignored**, all examples check, and the numeric,
+world and refraction fixtures build. The inherited shader +/- payload remains
+exact and the other four calibration files retain their archived hashes.
+
+Ignored `roads/water-foam-audit/` retains the original cache, decoded DXBC,
+disassembly, WARP harness/CSV, independent controls and separate calibration
+baselines. Only the owned shader patch is staged. Native vertex-versus-fragment
+float interpolation details, high-quality foam selection, SUN_SHADING radiometry
+and the other previously stated water limitations remain open.
+
 ### Native river endpoint opacity and counted outlines
 
 Exact `_LoadWaterVolume` **301F6AB0** reads byte40 bits2/4, equivalently

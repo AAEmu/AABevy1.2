@@ -1,4 +1,4 @@
-import aa_world::water_motion::{coordinates,endpoint_weights,sun_normal,bump_normal,refraction_uv,refraction_behind};
+import aa_world::water_motion::{coordinates,foam_coordinates,endpoint_weights,sun_normal,bump_normal,refraction_uv,refraction_behind};
 // Water volumes and the sea, see `water_material.rs`.
 //
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
@@ -208,6 +208,13 @@ fn trace(p: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.world_position.xyz;
     let inspect_mode = select(water.motion.w,water.motion.w-10.0,water.motion.w>=10.0);
+    // Isolated native/legacy foam-projection controls. Injected Cry XY avoids
+    // moving the real authored meshes or rounding large world coordinates in a camera.
+    if water.motion.w == 30.0 || water.motion.w == 31.0 {
+        let taps=foam_coordinates(water.sky_h.xy,water.motion.z,water.foam.y,water.motion.x>0.5);
+        let uv=select(taps[0],taps[1],water.motion.w==31.0);
+        return vec4<f32>(fract(uv),0.2,1.0);
+    }
     var endpoints=vec2<f32>(1.0);
     @if(VERTEX_COLORS) {
         if water.motion.x > 0.5 {endpoints=endpoint_weights(in.color);}
@@ -241,10 +248,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // From below, the surface remains the post pass's responsibility.
     if view.world_position.y < p.y { discard; }
     // the foam is looked up unconditionally (uniform control flow), see below
-    let foam_anim = fract(globals.time * 0.025 * water.foam.y);
+    let native_foam=water.motion.x>0.5;
+    let foam_time=select(globals.time,water.motion.z,native_foam && water.motion.z>=0.0);
+    let foam_taps=foam_coordinates(vec2<f32>(p.x,-p.z),foam_time,water.foam.y,native_foam && water.motion.w != -5.0);
     let foam_bump = vec2<f32>(n.x, -n.z) * (0.15 * 0.075);
-    let foam_uv_a = vec2<f32>(p.x, -p.z) * 0.3197 - vec2<f32>(foam_anim) + foam_bump;
-    let foam_uv_b = vec2<f32>(-p.z, p.x) * 0.2797 + vec2<f32>(foam_anim) + foam_bump;
+    let foam_uv_a = foam_taps[0] + foam_bump;
+    let foam_uv_b = foam_taps[1] + foam_bump;
     let foam_sum = textureSample(foam_map, foam_map_sampler, foam_uv_a).rgb + textureSample(foam_map, foam_map_sampler, foam_uv_b).rgb;
 
     // ---- under the surface: thickness of the water along the view ray, refracted scene ----
