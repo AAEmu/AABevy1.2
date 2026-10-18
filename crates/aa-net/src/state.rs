@@ -370,6 +370,7 @@ pub struct WorldState {
     pub auction: Auction,
     pub loot_rolls: LootRolls,
     pub scheduled_events: crate::scheduled::ScheduledEvents,
+    pub expeditions: crate::expedition::Expeditions,
     pub families: crate::family::Families,
     pub server_clock: crate::clock::ServerClock,
     pub battlefield: crate::battlefield::Battlefield,
@@ -414,6 +415,7 @@ impl WorldState {
         self.auction.apply(e);
         self.loot_rolls.apply(e);
         self.scheduled_events.apply(e);
+        self.expeditions.apply(e);
         self.families.apply(e);
         self.server_clock.apply(e);
         if let Some(now)=self.server_clock.mapped_now() {self.battlefield.advance_server_time(now);}

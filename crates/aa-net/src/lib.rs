@@ -105,6 +105,8 @@ mod equipment_notice_tests;
 
 pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, BattlefieldInvitation, BattlefieldQueue};
 
+pub mod expedition;
+pub use expedition::{Expeditions, ExpeditionEvent, ExpeditionFaction, ExpeditionMember, ExpeditionRolePolicy};
 pub mod family;
 pub mod family_command;
 pub use family_command::FamilyCommand;
