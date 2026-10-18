@@ -2,6 +2,7 @@
 //! `--live` runs the idle FSQ, `--bones` isolates the original Ferre male cry eye controllers.
 //! `--head` previews the PC library's authored head_x effector at -1, 0 and +1 weight.
 //! `--chef` previews the NPC chef's original native face01 speech targets.
+//! `--chef-items` fills the actor CDF's declared slots with explicit original body items.
 use aa_anim::facial::{ExpressionLibrary, FacialAnimator, FacialPlugin, FacialSequence};
 use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, GameDb, Gender, Race, spawn_character_with_facial};
 use aa_cry::scene::{CryAssets, CryPlugin, ModelOptions, SkeletonBinding, spawn_loaded};
@@ -43,9 +44,15 @@ struct Preview {
 // Mirrors the client's CDF skin path: load against shared body joints, prepare before
 // spawn_loaded, then put the returned face and weights beside the body Animator.
 fn spawn_chef(commands: &mut Commands, cry: &mut CryAssets, transform: Transform) -> Entity {
-    let head_path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
+    let with_items = std::env::args().any(|a| a == "--chef-items");
+    let mut cdf = aa_anim::Cdf::load(if with_items { "objects/characters/people/npc_chef01/nude/npc_chef01.cdf" } else { "objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf" }).unwrap();
+    if with_items {
+        let db = GameDb::open().unwrap();
+        for item in [14478, 14475, 14479] { assert!(cdf.bind_body_part(&db.body_part(item).unwrap())); }
+    }
+    let head_path = cdf.attachment("face").unwrap().binding.as_str();
     let body_cal = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal";
-    let rig = aa_anim::pose::shared_rig("objects/characters/people/npc_chef01/nude/npc_chef01_base.chr").unwrap();
+    let rig = aa_anim::pose::shared_rig(&cdf.model).unwrap();
     let root = commands.spawn((transform, Visibility::default())).id();
     let model_root = commands.spawn((Transform::from_rotation(aa_cry::CRY_TO_BEVY), Visibility::default(), ChildOf(root))).id();
     let bones = aa_anim::spawn_bones(commands, model_root, &rig);
@@ -59,7 +66,15 @@ fn spawn_chef(commands: &mut Commands, cry: &mut CryAssets, transform: Transform
     assert_eq!(face.targets.len(), 23);
     let head = spawn_loaded(commands, head_path, &loaded, &options);
     commands.entity(head).insert(ChildOf(model_root));
-    let cdf = aa_anim::Cdf::load("objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf").unwrap();
+    if with_items {
+        for attachment in &cdf.attachments {
+            if attachment.kind != aa_anim::cdf::AttachmentKind::Skin || attachment.name == "face" || attachment.binding.is_empty() || attachment.flags & 1 != 0 { continue; }
+            let options = ModelOptions { material: attachment.material.clone(), ..options.clone() };
+            let loaded = cry.load_model(&attachment.binding, &options).unwrap();
+            let part = spawn_loaded(commands, &attachment.binding, &loaded, &options);
+            commands.entity(part).insert(ChildOf(model_root));
+        }
+    }
     for attachment in &cdf.attachments {
         if attachment.kind != aa_anim::cdf::AttachmentKind::Bone || attachment.binding.is_empty() || attachment.flags & 1 != 0 { continue; }
         let (bone, local) = attachment.bone_binding(&rig.skeleton).unwrap();
@@ -73,7 +88,7 @@ fn spawn_chef(commands: &mut Commands, cry: &mut CryAssets, transform: Transform
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
-    let chef = std::env::args().any(|a| a == "--chef");
+    let chef = std::env::args().any(|a| a == "--chef" || a == "--chef-items");
     let bones = std::env::args().any(|a| a == "--bones");
     let head_preview = std::env::args().any(|a| a == "--head");
     let race = match arg("--race").as_deref() {

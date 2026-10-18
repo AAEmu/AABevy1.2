@@ -140,6 +140,20 @@ impl Cdf {
     pub fn attachment(&self, name: &str) -> Option<&Attachment> {
         self.attachments.iter().find(|a| a.name.eq_ignore_ascii_case(name))
     }
+
+    /// Bind an explicitly supplied body-part item to its already-declared skin slot.
+    /// Use server-supplied item IDs, not inferred CDF filename/default-body substitutions.
+    /// Returns false for missing/non-skin slots; never invents attachments. The caller
+    /// selects a compatible model and handles custom textures/colours separately.
+    pub fn bind_body_part(&mut self, part: &crate::db::BodyPart) -> bool {
+        let Some(slot) = part.attachment_slot() else { return false };
+        let Some(attachment) = self.attachments.iter_mut().find(|a| a.kind == AttachmentKind::Skin && a.name.eq_ignore_ascii_case(slot)) else { return false };
+        attachment.binding = part.path.clone();
+        attachment.material = None;
+        // This is the effective visible binding, replacing an empty/hidden slot.
+        attachment.flags &= !1;
+        true
+    }
 }
 
 impl Attachment {
@@ -256,6 +270,43 @@ mod tests {
             assert!(changed.bone_binding(&skeleton).is_err());
             changed.bone_name = "not_a_joint".into();
             assert!(changed.bone_binding(&skeleton).is_err());
+        }
+    }
+
+    #[test]
+    fn original_blank_actor_cdf_accepts_explicit_packet_body_items_only() {
+        if !aa_cry::pak_available() { return; }
+        let db = crate::GameDb::open().unwrap();
+        let original = Cdf::load("objects/characters/people/npc_chef01/nude/npc_chef01.cdf").unwrap();
+        let mut bound = original.clone();
+        for (item, slot) in [(14478, "face"), (14475, "hair"), (14479, "body")] {
+            let body = db.body_part(item).unwrap();
+            assert_eq!(body.model_id, 631);
+            assert_eq!(body.attachment_slot(), Some(slot));
+            assert!(original.attachment(slot).unwrap().binding.is_empty());
+            assert!(bound.bind_body_part(&body));
+            let attachment = bound.attachment(slot).unwrap();
+            assert_eq!(attachment.binding, body.path);
+            assert_eq!(attachment.flags & 1, 0);
+            assert!(aa_pak::Pak::global().exists(&attachment.binding));
+        }
+        assert_eq!(bound.model, original.model);
+        assert_eq!(bound.customize, original.customize);
+        for name in ["eye_left", "eye_right", "head", "mainhand"] {
+            assert_eq!(bound.attachment(name), original.attachment(name));
+        }
+        let mut invalid = db.body_part(14478).unwrap();
+        invalid.slot_type = 0;
+        let before = bound.clone();
+        assert!(!bound.bind_body_part(&invalid));
+        invalid.slot_type = 29; // this actor CDF does not declare a beard slot
+        assert!(!bound.bind_body_part(&invalid));
+        assert_eq!(bound, before);
+        let mut slots = db.body_part(14478).unwrap();
+        let names = ["face", "hair", "glasses", "reserved", "tail", "body", "beard"];
+        for (i, name) in names.into_iter().enumerate() {
+            slots.slot_type = 23 + i as u32;
+            assert_eq!(slots.attachment_slot(), Some(name));
         }
     }
 }
