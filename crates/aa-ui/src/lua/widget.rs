@@ -1927,6 +1927,10 @@ pub(crate) fn apply_button_state(u: &mut super::Ui, id: Id, desired: ButtonState
     let Some(w) = u.tree.widget(id) else { return };
     let Some(b) = w.button.as_ref() else { return };
     let state = if w.enabled { desired } else { ButtonState::Disabled };
+    let old_highlight = (b.state == ButtonState::Highlight).then_some(b.bg[1]).flatten();
+    let mask_targets: Vec<_> = b.bg[1].into_iter().chain(w.drawables.iter().copied().filter(|&d| {
+        u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(ButtonState::Highlight))
+    })).collect();
     let mut writes = Vec::new();
     for (st, i) in [(ButtonState::Disabled, 3), (ButtonState::Normal, 0),
                     (ButtonState::Highlight, 1), (ButtonState::Pushed, 2)] {
@@ -1941,9 +1945,22 @@ pub(crate) fn apply_button_state(u: &mut super::Ui, id: Id, desired: ButtonState
     writes.extend(w.drawables.iter().copied().filter(|&d| {
         u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(state))
     }).map(|d| (d, true)));
-    if b.state != state { u.tree.widget_mut(id).unwrap().button.as_mut().unwrap().state = state; }
+    let changed = b.state != state;
+    //39282f98 first disables the former highlight's mask, then the hide pass
+    // enables masks of current highlight art even while that art remains hidden.
+    if let Some(d) = old_highlight { highlight_mask(u, d, false); }
+    if changed { u.tree.widget_mut(id).unwrap().button.as_mut().unwrap().state = state; }
     for (d, shown) in writes {
         if u.tree.get(d).alive && u.tree.get(d).shown != shown { u.tree.get_mut(d).shown = shown; }
+    }
+    for d in mask_targets { highlight_mask(u, d, true); }
+}
+
+fn highlight_mask(u: &mut super::Ui, id: Id, visible: bool) {
+    if u.tree.get(id).alive && u.tree.get(id).drawable().is_some_and(|d| {
+        matches!(d.class, "drawable:image" | "drawable:iconimage") && d.mask.is_some() && d.mask_visible != visible
+    }) {
+        u.tree.drawable_mut(id).unwrap().mask_visible = visible;
     }
 }
 

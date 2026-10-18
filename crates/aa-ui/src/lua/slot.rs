@@ -995,9 +995,7 @@ fn masked_image_quads(image: Quad, mask: &CooldownMask, progress: f32, out: &mut
             },
             pos: [0.; 4],
             uv: [0., 0., 1., 1.],
-            color: image
-                .color
-                .map(|v| ((f64::from(v.clamp(0., 1.)) * 255.).trunc() / 255.) as f32),
+            color: crate::render::rgba8(image.color),
             corners: Some([point(a), point(b), point(c), point(c)]),
             uvs: Some([a, b, c, c]),
             vcolors: None,
@@ -1113,7 +1111,7 @@ pub(crate) fn cooldown_quads(
         }
         let icon = drawable.class == "drawable:iconimage";
         let mut art = Vec::new();
-        crate::render::drawable_quads(u, background, alpha, state, scale, None, &mut art);
+        crate::render::cooldown_background_quads(u, background, alpha, state, scale, &mut art);
         // Icon3928ed10 reuses object+d0 for every retained texture layer.
         let icon_uv = if icon {
             art.first().map(|q| q.uv)

@@ -200,6 +200,55 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
             })?,
         )?;
     }
+    if matches!(class, "drawable:image" | "drawable:iconimage") {
+        def("SetMask", method(lua, |lua, id, a| {
+            let Value::String(raw) = a.v(1) else { return none() };
+            let raw = raw.as_bytes();
+            let path = String::from_utf8_lossy(raw.split(|&b| b == 0).next().unwrap_or_default());
+            let mut u = ui(lua);
+            if !mask_class(&u, id) { return none(); }
+            if let Some(texture) = u.textures.resolve(&path)
+                && u.textures.size(&texture).is_some()
+            {
+                u.tree.drawable_mut(id).unwrap().mask = Some(crate::tree::DrawableMask {
+                    texture, uv: [0., 0., 1., 1.],
+                });
+            }
+            none()
+        })?)?;
+        def("SetMaskCoords", method(lua, |lua, id, a| {
+            if !(1..=4).all(|i| a.is_num(i)) { return none(); }
+            let mut u = ui(lua);
+            if !mask_class(&u, id) { return none(); }
+            let Some(mask) = u.tree.get(id).drawable().and_then(|d| d.mask.clone()) else {
+                // Native icon39289680 dereferences the absent texture. Refuse safely.
+                return none();
+            };
+            if let Some((w, h)) = u.textures.size(&mask.texture) {
+                let (rw, rh) = (1.0_f32 / w as f32, 1.0_f32 / h as f32);
+                let (x, y, w, h) = (a.f(1), a.f(2), a.f(3), a.f(4));
+                u.tree.drawable_mut(id).unwrap().mask.as_mut().unwrap().uv = [
+                    x * rw, y * rh,
+                    if w == 0. { 1. } else { (x + w) * rw },
+                    if h == 0. { 1. } else { (y + h) * rh },
+                ];
+            }
+            none()
+        })?)?;
+        def("SetMaskVisible", method(lua, |lua, id, a| {
+            let visible = match a.v(1) {
+                Value::Boolean(v) => v,
+                Value::Integer(v) => v != 0,
+                Value::Number(v) => v != 0.,
+                _ => return none(),
+            };
+            let mut u = ui(lua);
+            if mask_class(&u, id) && u.tree.get(id).drawable().unwrap().mask_visible != visible {
+                u.tree.drawable_mut(id).unwrap().mask_visible = visible;
+            }
+            none()
+        })?)?;
+    }
     def(
         "SetTextureInfo",
         method(lua, |lua, id, a| {
@@ -278,9 +327,6 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     for name in [
         "SetSnap",
         "SetBlendMode",
-        "SetMask",
-        "SetMaskCoords",
-        "SetMaskVisible",
         "SetTextureColor",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
@@ -330,4 +376,10 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     let _ = Value::Nil;
     super::stubs::finalize(lua, &m, class)?;
     Ok(m)
+}
+
+fn mask_class(u: &super::Ui, id: Id) -> bool {
+    u.tree.get(id).drawable().is_some_and(|d| {
+        matches!(d.class, "drawable:image" | "drawable:iconimage")
+    })
 }

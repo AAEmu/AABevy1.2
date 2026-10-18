@@ -561,6 +561,13 @@ pub struct Widget {
     pub raise: u32,
 }
 
+/// Native image/icon mask texture and its independent normalized rectangle.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawableMask {
+    pub texture: String,
+    pub uv: [f32; 4],
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drawable {
     pub kind: DrawKind,
@@ -572,6 +579,9 @@ pub struct Drawable {
     pub texture: Option<String>,
     /// Icon images: textures stacked over `texture` (`AddTexture`: icon, then frame / overlay).
     pub extra_textures: Vec<String>,
+    pub mask: Option<DrawableMask>,
+    /// Independent native byte: it can be set before a mask is loaded.
+    pub mask_visible: bool,
     /// Texture rectangle `x, y, w, h` in texels; negative `w`/`h` mirror.
     pub coords: Option<[f32; 4]>,
     /// Nine/three part borders in texels (left, top, right, bottom).
