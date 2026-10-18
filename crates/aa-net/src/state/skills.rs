@@ -510,6 +510,7 @@ mod tests {
             synergy: 0,
             result: res,
             result_value: 0,
+            raw_result:crate::SkillResult::default(),
         })
     }
 
@@ -523,6 +524,7 @@ mod tests {
             channeling_ms: 0,
             fire_anim_id: 0,
             raw_final_flag: 0,
+            result:crate::SkillResult::default(),
         })
     }
 

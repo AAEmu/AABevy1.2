@@ -5288,7 +5288,7 @@ feature check passed. Exact native excerpts are retained in
 
 ### SkillFired final wire byte (2026-10-18)
 
-`SkillFired.raw_final_flag` preserves the final u8 after `fire_anim_id`, including noncanonical nonzero values. The active lane `systems/skills/packets.rs::SCSkillFiredPacket::write` writes zero; the preceding u8 remains a separate field. Native handler391d58dd reads packet+160 and passes it as the final argument to3939b010; nonzero at3939b35b bypasses one ordinary own/tag cooldown insertion path39368f90. Zero alone does not imply insertion: native also checks toggle_buff_id and timing_id. This field therefore has a neutral raw name and does not generate estimated cooldowns. Source: `data/extract/aa-ui/native-cooldown-fired-body-20261018.txt` and `native-cooldown-started-fired-20261018.txt`. Tests preserve 1/2/255, reject every truncated prefix, and retain nonzero0x82 followed by three other packets in a DD04 batch.
+`SkillFired.raw_final_flag` preserves the final u8 after `fire_anim_id`, including noncanonical nonzero values. The active lane `systems/skills/packets.rs::SCSkillFiredPacket::write` writes zero; the preceding byte is the variable SkillResult header described below. Native serializer397ca4aa..bd decodes final-wire bit1 into packet+160 (bit0 goes to+14c); handler391d58dd passes the decoded bit1 as the final argument to3939b010. Nonzero decoded bit1 at3939b35b bypasses one ordinary own/tag cooldown insertion path39368f90. Raw byte1 does not suppress; raw byte2 does. Zero alone does not imply insertion: native also checks toggle_buff_id and timing_id. This field therefore has a neutral raw name and does not generate estimated cooldowns. Source: `data/extract/aa-ui/native-cooldown-fired-body-20261018.txt` and `native-cooldown-started-fired-20261018.txt`. Tests preserve 1/2/255, reject every truncated prefix, and retain nonzero0x82 followed by three other packets in a DD04 batch.
 
 ### Family member removal cache correction (2026-10-18)
 
@@ -5714,3 +5714,73 @@ The same political-system boundary prevents native Task35 admission for that
 lane-created row. No client workaround changes the received political system.
 
 Validation: cargo test -p aa-net --features bevy --lib: 433 passed, 0 failed, 0 ignored (2026-10-18).
+
+
+### Native skill-result framing prerequisite and duration oracle (2026-10-18)
+
+Plain `SkillResult { raw_flags:u8, code:u8, extra:u16, value:u32 }` follows actual
+reader397b1ef0. It first clears all three decoded fields, then reads the header:
+bit0 selects codeu8, bit1 selects extrau16, bit2 selects valueu32. Fields are
+independent, including simultaneous extra/value. Unknown header bits are retained
+and consume no additional bytes. `SkillFired.result` now decodes this full record
+before fire_anim_id; the previous one-byte skip was sufficient only for the
+active lane's zero-header success writer and desynchronized native nonzero results.
+`SkillStarted.raw_result` retains the same complete record; legacy result/code and
+result_value stay compatible (valueu32 takes precedence over extrau16).
+
+`SkillFired.raw_final_flag` remains the complete wire byte.
+`native_cooldown_suppressed()` tests **bit1**, not nonzero raw byte. Native
+397ca390?397ca4aa..bd splits bit0 to packet+14c and bit1 to packet+160, the latter
+being the gate passed by391d58dd to3939b010. This is only one producer predicate;
+no Started/Fired duration or GCD timer is introduced by this parser milestone.
+
+Actual x86 reader397b1ef0 and the packed flag decoder were executed locally in
+Unicorn, mocking only the abstract reader's primitive accessors. Nine result
+header fixtures and all256 packed flag values are archived in ignored
+`data/extract/aa-net/native-cooldown-fired-result-oracle-20261018.json`, with helper
+`fired_result_oracle.py`. Inlined Rust goldens preserve the executed outputs;
+all256 result-header combinations also run truncation and three-packet DD04
+alignment regressions (Started?Fired?Ended). Native clearing from an initially
+0xcc-filled destination verifies zero defaults, not an invented success receipt.
+The lane's zero result/zero packed flag encoding remains unchanged.
+
+The separate read-only duration oracle executes original3989f900, runtime
+three-list enumeration39387a50, callbacks398a05b0/398a05f0, matching398a0480,
+learned-passive filtering3989e5c0, and racial registry3989e6a0/39682160. Only native
+BuffDesc/PassiveDesc lookup functions are mocked with explicit fixture tables;
+provider loops and arithmetic are original instructions. Runtime records use
+native stack+40, inactive learned passives use stack1, and the first matching
+racial/gender record supplies its static Buffs with stack1. Unlike unit-attribute
+callbacks, this skill-modifier path does **not** skip one_time Buffs and does not
+apply ability-level/conditional/dynamic unit-modifier logic.
+
+Catalog SQL3973d460 selects owner_type,owner_id,skill_attribute_id,skill_id,
+synergy,tag_id,unit_modifier_type_id,value from skill_modifiers. Owner Buff rows
+become BuffDesc+274. Runtime-verified invalid skill/tag sentinels3a5e131c/1320 are0;
+native SQLite integer getter3953a390?3952a830 returns0 for NULL, independently
+executed in the oracle. Category1 matching is universal(skill0/tag0), exact skill,
+or any matching descriptor tag, once per row; synergy is an output flag rather
+than an eligibility gate. Type0 adds wrapping value*stack to flat; type1 to
+percent, initially100. Base+flat wraps before the optional f32 percent multiply
+and0.01f32 multiply/CVTTSS2SI; signed nonpositive results clamp0. Percent100 skips
+the float path completely.
+
+Executed examples: base16777217/percent100 retains16777217; percent101 gives
+16944988. A mixed runtime/passive/racial fixture gives6825 and synergytrue,
+including a one_time Buff; actual compact Buff1853 stack2/base10000 gives4000,
+2323 gives0,402 gives6000,403 gives5000,404 gives4000. Signed overflow and out-of-
+range CVTT produce the native zero-clamped outcomes. Full descriptors, mocks,
+callback order and results are in `native-cooldown-duration-oracle-20261018.json`
+and `cooldown_duration_oracle.py` under the same ignored directory.
+
+Ordinary timeline lifetime remains a separate admission boundary:39394e70 and
+39399e90 prove a unique u32TL tree, but39397ff0 ends/decrements a record without
+immediately erasing its node. Fired3939b010 validates retained raw skill/caster/
+target using39391da0/39391e30; on mismatch it ends the record then invokes
+3939a810, and an equal-key insert may still return the old record. Physical erase
+occurs later through3939c540/3939c780?3939a0e0 and reference counts+304/+308/+30c.
+Consequently incoming Fired skill/caster alone cannot prove the native producer's
+retained identity. Existing bounded stop timers and estimates are unchanged;
+no immediate replacement model or GCD/A74 approximation is claimed.
+
+Validation: cargo test -p aa-net --features bevy --lib: 435 passed, 0 failed, 0 ignored (2026-10-18).

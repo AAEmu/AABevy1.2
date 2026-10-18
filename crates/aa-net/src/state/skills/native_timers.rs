@@ -176,6 +176,7 @@ mod tests {
             synergy: 0,
             result: 0,
             result_value: 0,
+            raw_result:crate::SkillResult::default(),
         })
     }
     fn ready() -> Skills {
