@@ -199,6 +199,7 @@ impl Plugin for AaWorldPlugin {
         crate::objects::lights::build(app);
         crate::objects::rigid::build(app);
         crate::roads::build(app);
+        app.add_plugins(crate::objects::voxels::VoxelMaterialPlugin);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
         crate::water_query::build(app, &self.config.world);

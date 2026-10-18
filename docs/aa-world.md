@@ -359,9 +359,9 @@ streams `(21,140,14,255)` / `(0,0,11,0)` decode to linear `(21,14,11)/255`.
 
 `PlacedVoxel::compiled_base_mesh` reads the already retained first LOD with the same
 CGF size/count preflight as collision, one identity `Merged` static node, complete
-finite normals and exact four-byte `COLORS2` records. Any referenced vertex with
-`g <128` rejects the slot: it requires the native terrain-cover projection, which
-this slice does not approximate. Unreferenced vertices do not affect support.
+finite normals and exact four-byte `COLORS2` records. The initial baked-only slice
+rejected `g <128`; the source-backed cover follow-up below now retains its native
+selector and draws the original cover texture.
 The native CGF's visible indices/normals are used, not its reordered physics proxy.
 `objects/voxels.rs` applies the authored matrix to positions and inverse-transpose
 to normals, converts axes once, flips reflected winding and leaves cell origin on
@@ -378,13 +378,14 @@ identifies their cell/source slot. GPU uploads happen when that placement result
 arrives; visibility uses the existing brush-distance cap and authored maximum view
 distance. There are no added threads, independent cell requests or per-frame rebuilds.
 Cell unload explicitly despawns the entities and removes their owned mesh/material
-assets. The cell's shared base material has no textures and no persistent cache.
+assets. Materials and original cover tiles are shared within a cell, with no
+persistent voxel material/texture cache.
 
 Original (20,8) has seven supported base meshes / **45,963 visible CGF triangles**;
 the independent raw CGF header probe reads index counts
 `16926,15288,7674,23034,23079,21459,30429`. Its 45,413 colliding triangles are a
 different native stream and remain unchanged. Unit tests verify the original packed
-colour, `g=127` rejection / `g=128` acceptance, linear GPU attribute values, transform
+colour, `g=127` cover / `g=128` baked selection, linear GPU attribute values, transform
 units, all seven visible meshes and the 32-slot bound. `aa-cry` is unchanged: raw
 chunk access supplies `COLORS2`; a future general loader could add
 `MeshData.colors2: Vec<[u8;4]>` from data-stream type 4 without changing the original
@@ -397,10 +398,9 @@ beside an independent numeric linear-colour material; both GPU samples are exact
 Inspected 1920x1080 `shots/aa-world/voxel/native_base_colour.png` logs 371-434 FPS.
 The threshold fixtures also include two real exterior slots from cell (21,8):
 their `COLORS.g` ranges are **1-148 /1-20**, so both require the cover-projection
-branch and are rejected. The seven interior (20,8) slots have ranges 139-145 and
-remain supported. The streamed world consequently reports seven visible meshes,
-45,963 triangles and two unsupported nearby exterior slots, with zero model failures
-or pending models once settled.
+branch; these were rejected at the baked-only milestone and are supported by the
+follow-up below. The seven interior (20,8) slots have ranges 139-145 and remain
+supported, with unchanged geometry/physics.
 
 Inspected `native_base_cave_on.png` / `native_base_cave_off.png` use the same original
 floor camera at Cry `(21354,9055,456.7)` looking at `(21335,9044,458.5)`, hour 10.
@@ -419,10 +419,60 @@ no matching native cave image under `reference/`; exact original geometry, packe
 colour math and on/off receiver alignment are the verified comparison boundaries.
 
 Projected `Terrain.Layer` diffuse/normal/gloss, native distance fading and projection
-ordering, alternate cover-colour vertices, volumetric mesh generation, lower LOD
+ordering, volumetric mesh generation, lower LOD
 selection and custom/animated voxel materials remain unsupported. Portal/area
 receiver lighting and native atlas generation remain open; the base-pass rendering
 does not claim those features or complete original cave appearance.
+
+**Native cover-projection follow-up.** `300C2870` / `300D70B0` find the smallest
+terrain node containing the serialized voxel box in XY, using the original 0.01 m
+containment tolerance and child order. Texture setup `300D9340` chooses an available
+ancestor and supplies scale `(1 - 1/resolution) / nodeSize` plus half-texel offsets.
+`300CDD50` reads that resolution from the original `cover.ctc` layer header, not from
+a guessed atlas size. The supported near/full-quality path selects the original
+128x128 BC1/BC3 tile, preserving its raw non-sRGB encoded values, clamped linear
+filtering and native Y/X texture orientation. The selected world node is at least
+64 m in this static compiled-terrain path; missing finer tiles use their available
+ancestor. Dynamic texture-streaming/quality LOD selection remains open.
+
+`compiled_base_mesh` now preserves linear RGB for all vertices and puts the exact
+per-vertex `g >=128` baked flag in colour alpha. The opaque `VoxelMaterial` shader
+uses it only as an interpolated selector, never as surface transparency. Original
+`common.cfi::tex2DTerrain` decodes the filtered cover texel as
+`r=(raw.r+.001012)*31/30`, `gamma=saturate((r,raw.g,1-r-raw.g)*3*raw.b)`;
+`TerrainPS` raises it to 2.2 and blends with interpolated packed linear RGB. A CPU
+choice of cover/baked per vertex would give a different result at mixed triangles
+and is deliberately avoided. Source evidence is retained in ignored
+`lights/voxel-cover-{mapping,bindings,file}.txt`.
+
+Both original (21,8) boxes, XY `(832,0)..(896,64)`, select level 4 node `(13,0)` and
+share one 8192-byte BC1 tile/material. UVs run from `.5/128` to `127.5/128`; midpoint,
+axis/sign, crossing-box common-ancestor and invalid-box checks use actual original
+data. Missing cover declines the entire mixed slot, without a flat fallback.
+The existing two placement jobs retain the same decoded/mesh/count limits; UVs add
+eight bytes per vertex. Cover images are bounded by those mesh attempts and deduplicated
+by node within each cell. Unload explicitly removes their images as well as meshes
+and materials. No additional per-frame parsing, geometry work or threads are added.
+
+`voxel_cover` checks an original (21,8) tile's encoded first texel `(93,102,21)/255`
+with selector 0, 0.5 and 1 against independent CPU decode/linear blend controls.
+The GPU returns exactly **`[17,18,6]`, `[59,49,41]`, `[81,66,59]` sRGB**, identical
+to the controls. Inspected `shots/aa-world/voxel/native_cover_numeric.png` logs
+407-408 FPS. **159 library tests pass**, nine existing ignored.
+All examples check. Inspected `native_cover_exterior_on.png` / `_off.png` use Cry
+`(22310,8180,560)` looking at `(22368,8224,510)`, hour 10, with unchanged authored
+lighting/material/environment. The on image restores the native low-detail voxel
+faces over the terrain opening; the off image hides only voxel surfaces. The view
+also streams the adjacent cell: four supported meshes /3590 triangles, two shared
+materials/cover images, zero unsupported slots and zero pending/failed models when
+settled. On logs 130-177 FPS, off 153-174 FPS; separate runs and shared GPU work
+preclude a precise cost comparison. `native_cover_exterior_unload.png` verifies
+zero voxel entities, collision cells/loading jobs and absence of all captured four
+mesh IDs, two material IDs and two image IDs after moving the actual camera away;
+194-206 FPS after release. All runs close their own windows. No matching native
+reference image exists here: exact original geometry/cover mapping and numeric
+shader controls are the checked boundary, not complete terrain appearance. Native
+projected `Terrain.Layer` detail and its per-vertex fade remain the next slice.
 
 Area flags are a separate unresolved rendering contract. Exact `30170860` maps
 header +208 bit `0x8` to area +72 (`bAffectedByOutLights`, getter `30181120`), `0x10`

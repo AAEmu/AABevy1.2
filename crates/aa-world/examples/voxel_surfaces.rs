@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use aa_world::objects::voxels::VoxelSurface;
+use aa_world::objects::voxels::{VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelSurface};
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::asset::AssetId;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -18,8 +18,10 @@ struct Fixture {
     moved: bool,
     verified: bool,
     ray_checked: bool,
+    exterior: bool,
     meshes: HashSet<AssetId<Mesh>>,
-    materials: HashSet<AssetId<StandardMaterial>>,
+    materials: HashSet<AssetId<VoxelMaterial>>,
+    images: HashSet<AssetId<Image>>,
     last: f32,
 }
 
@@ -32,6 +34,7 @@ fn main() {
     .add_plugins(aa_dev::DevPlugin);
     if flag("--colour-check") {
         app.insert_resource(ClearColor(Color::BLACK))
+            .add_plugins(VoxelMaterialPlugin)
             .add_systems(Startup, colour_control)
             .add_observer(colour_pixels);
     } else {
@@ -49,6 +52,7 @@ fn main() {
             .insert_resource(Fixture {
                 off: flag("--off"),
                 unload: flag("--unload-check"),
+                exterior: flag("--exterior"),
                 ..default()
             })
             .add_systems(Startup, world_camera)
@@ -68,10 +72,18 @@ fn vector_arg(name: &str) -> Option<Vec3> {
     (values.len() == 3 && values.iter().all(|v| v.is_finite())).then(|| Vec3::from_slice(&values))
 }
 
-fn world_camera(mut commands: Commands) {
+fn world_camera(mut commands: Commands, fixture: Res<Fixture>) {
     // Original compiled-proxy floor: (21354.6667,9055.3333,454.91738).
-    let position = vector_arg("--pos").unwrap_or(Vec3::new(21354.0, 9055.0, 456.7));
-    let target = vector_arg("--look").unwrap_or(Vec3::new(21335.0, 9044.0, 458.5));
+    let position = vector_arg("--pos").unwrap_or(if fixture.exterior {
+        Vec3::new(22310.0, 8180.0, 560.0)
+    } else {
+        Vec3::new(21354.0, 9055.0, 456.7)
+    });
+    let target = vector_arg("--look").unwrap_or(if fixture.exterior {
+        Vec3::new(22368.0, 8224.0, 510.0)
+    } else {
+        Vec3::new(21335.0, 9044.0, 458.5)
+    });
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(cry_to_bevy(position)).looking_at(cry_to_bevy(target), Vec3::Y),
@@ -92,21 +104,42 @@ fn verify(
     mut surfaces: Query<(
         &VoxelSurface,
         &Mesh3d,
-        &MeshMaterial3d<StandardMaterial>,
+        &MeshMaterial3d<VoxelMaterial>,
         &mut Visibility,
     )>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     meshes: Res<Assets<Mesh>>,
-    materials: Res<Assets<StandardMaterial>>,
+    materials: Res<Assets<VoxelMaterial>>,
+    images: Res<Assets<Image>>,
 ) {
     for (_, mesh, material, mut visibility) in &mut surfaces {
         fixture.meshes.insert(mesh.id());
         fixture.materials.insert(material.id());
+        if let Some(image) = materials
+            .get(material.id())
+            .and_then(|m| m.extension.cover.as_ref())
+        {
+            fixture.images.insert(image.id());
+        }
         if fixture.off {
             *visibility = Visibility::Hidden;
         }
     }
-    if !fixture.ray_checked && objects.stats.voxels >= 7 && collision.cell(20, 8).is_some() {
+    if fixture.exterior
+        && !fixture.ray_checked
+        && surfaces.iter().filter(|(v, ..)| v.cell == (21, 8)).count() == 2
+    {
+        let target_materials: HashSet<_> = surfaces.iter().filter(|(v, ..)| v.cell == (21,8)).map(|(_,_,m,_)| m.id()).collect();
+        assert_eq!(target_materials.len(), 1, "shared native cover material");
+        assert!(materials.get(*target_materials.iter().next().unwrap()).unwrap().extension.cover.is_some(), "original cover tile");
+        fixture.ray_checked = true;
+        info!("original neighbour meshes share one original cover tile/material");
+    }
+    if !fixture.exterior
+        && !fixture.ray_checked
+        && objects.stats.voxels >= 7
+        && collision.cell(20, 8).is_some()
+    {
         let point = Vec3::new(21354.6667, 9055.3333, 454.91738);
         let ground = collision
             .ground_below(point.x, point.y, point.z + 0.3, 0.0)
@@ -153,9 +186,10 @@ fn verify(
                 .iter()
                 .all(|id| materials.get(*id).is_none())
         );
+        assert!(fixture.images.iter().all(|id| images.get(*id).is_none()));
         assert_eq!((collision.stats().cells, collision.stats().loading), (0, 0));
         info!(
-            "voxel base unload PASSED: entities/cell collision/jobs/owned mesh+material assets = 0"
+            "voxel base unload PASSED: entities/cell collision/jobs/owned mesh+material+cover assets = 0"
         );
         fixture.verified = true;
     }
@@ -164,26 +198,30 @@ fn verify(
 fn colour_control(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<VoxelMaterial>>,
 ) {
     let source = aa_world::placement::load_cell_objects("main_world", 20, 8);
     let native = source.voxels[0].compiled_base_mesh().unwrap().colors[0].map(|v| v as f32 / 255.0);
     assert_eq!(native, [21.0 / 255.0, 14.0 / 255.0, 11.0 / 255.0, 1.0]);
     for (x, vertex) in [(-1.3, true), (1.3, false)] {
         let mut mesh = Mesh::from(Rectangle::new(2.0, 2.0));
-        if vertex {
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![native; 4]);
-        }
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_COLOR,
+            vec![if vertex { native } else { [1.0; 4] }; 4],
+        );
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: if vertex {
-                    Color::WHITE
-                } else {
-                    Color::linear_rgba(21.0 / 255.0, 14.0 / 255.0, 11.0 / 255.0, 1.0)
+            MeshMaterial3d(materials.add(VoxelMaterial {
+                base: StandardMaterial {
+                    base_color: if vertex {
+                        Color::WHITE
+                    } else {
+                        Color::linear_rgba(21.0 / 255.0, 14.0 / 255.0, 11.0 / 255.0, 1.0)
+                    },
+                    unlit: true,
+                    ..default()
                 },
-                unlit: true,
-                ..default()
+                extension: VoxelExtension::new(None),
             })),
             Transform::from_xyz(x, 0.0, 0.0),
         ));
