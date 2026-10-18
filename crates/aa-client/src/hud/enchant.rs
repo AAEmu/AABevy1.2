@@ -6,9 +6,11 @@ use mlua::{Lua, MultiValue, Table, Value};
 
 use super::api::{HudBridge, Shared};
 mod catalog;
+mod controller;
 mod records;
 mod selection;
 pub(super) use catalog::Tables;
+pub(super) use controller::ResultKind;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Mode {
@@ -34,6 +36,57 @@ impl Mode {
 pub(super) struct View {
     mode: Mode,
     selection: selection::State,
+    operation: Option<controller::Operation>,
+}
+
+pub(super) fn current(data: &super::api::HudData, id: u64) -> Option<&aa_net::model::Item> {
+    data.enchant.selection.records.current(id)
+}
+pub(super) fn request_current(state: &Shared, character_id: u32, request: &aa_net::item_effect::ItemEffectRequest) -> bool {
+    state
+        .borrow()
+        .enchant
+        .operation
+        .as_ref()
+        .is_some_and(|operation| operation.matches(character_id, request))
+}
+
+fn complete(lua: Option<&Lua>, state: &Shared) {
+    let presence = {
+        let mut data = state.borrow_mut();
+        //39046020 resets the captured operation before any selection setter or
+        // synchronous UPDATE callback can reenter the controller.
+        let Some(operation) = data.enchant.operation.take() else { return };
+        let super::api::HudData {
+            enchant, game, cooldowns, ..
+        } = &mut *data;
+        match game.get() {
+            Some(game) => enchant
+                .selection
+                .restore(&game.enchant, cooldowns, enchant.mode, &operation.request, operation.result_seen()),
+            None => {
+                enchant.selection.clear();
+                false
+            }
+        }
+    };
+    if let Some(lua) = lua {
+        selection::update(lua, presence);
+    }
+}
+
+pub(super) fn result(lua: Option<&Lua>, state: &Shared, kind: ResultKind) {
+    let finished = {
+        let mut data = state.borrow_mut();
+        let mode = data.enchant.mode;
+        data.enchant
+            .operation
+            .as_mut()
+            .is_some_and(|operation| operation.result(mode, kind))
+    };
+    if finished {
+        complete(lua, state);
+    }
 }
 
 fn switch(lua: &Lua, state: &Shared, mode: Mode) -> mlua::Result<()> {
@@ -115,38 +168,148 @@ fn retires(event: &Event) -> bool {
             | Event::PhaseChanged(aa_net::Phase::Authenticating | aa_net::Phase::Connecting)
     )
 }
+fn release_pending(rt: Option<&UiRuntime>, state: &Shared, inventory: Option<&mut aa_net::state::Inventory>, container: u8, slot: u8) {
+    if let Some(inventory) = inventory {
+        inventory.clear_item_slot_pending(container, slot);
+        state.borrow_mut().enchant.selection.sync_pending(inventory);
+    }
+    state.borrow_mut().enchant.selection.release_pending(container, slot);
+    if let Some(rt) = rt {
+        let event = match container {
+            2 => "BAG_LOCK_UPDATE",
+            3 => "BANK_LOCK_UPDATE",
+            _ => return,
+        };
+        // Installed C358=394e1370 ignores pending's bool; notification is
+        // unconditional even for an absent key, with one numeric slot+1.
+        aa_ui::lua::fire_ui_event(&rt.lua, event, vec![Value::Number(f64::from(u16::from(slot) + 1))]);
+    }
+}
+pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mut inventory: Option<&mut aa_net::state::Inventory>) {
+    let replaces_owner = matches!(event, Event::PlayerSpawn(spawn)
+        if state.borrow().enchant.selection.records.owner() != Some(spawn.character().id));
+    if retires(event) || replaces_owner {
+        state.borrow_mut().enchant.operation = None;
+        super::item_effects::clear(state);
+        if let Some(rt) = rt {
+            if let Err(error) = switch(&rt.lua, state, Mode::Off) {
+                warn!("enchant: retiring mode: {error}");
+            }
+        } else {
+            let mut data = state.borrow_mut();
+            data.enchant.mode = Mode::Off;
+            data.enchant.selection.clear();
+        }
+    }
+    let (cleared, released_detail) = {
+        let mut data = state.borrow_mut();
+        let before = data.enchant.selection.slots;
+        let released_detail = data.enchant.selection.observe(event);
+        (
+            before != data.enchant.selection.slots && data.enchant.mode != Mode::Off,
+            released_detail,
+        )
+    };
+    if released_detail {
+        if let Event::ItemDetailUpdated(update) = event {
+            //394e47b0 releases this key after the actual128-byte copy.
+            // It does not dispatch an item-consumption notification.
+            release_pending(rt, state, inventory.as_deref_mut(), 2, update.slot);
+        }
+    }
+    if let Event::ItemOperationError(error) = event {
+        if error.error_code != 0 {
+            if let Some(rt) = rt {
+                if let Err(error) = selection::error(&rt.lua, error.error_code) {
+                    warn!("item operation error: {error}");
+                }
+            }
+            //391d56c0 reports the error before either397d2200(false) call.
+            // Preserve repeated keys; these are lock releases, not settlement.
+            for (container, slot) in error.pending_releases() {
+                release_pending(rt, state, inventory.as_deref_mut(), container, slot);
+            }
+        }
+    }
+    if cleared {
+        if let Some(rt) = rt {
+            selection::update(&rt.lua, false);
+        }
+    }
+    if let Event::ItemsChanged(changes) = event {
+        if !changes.truncated {
+            for task in &changes.tasks {
+                let finished = {
+                    let mut data = state.borrow_mut();
+                    let output = data.enchant.selection.apply_row(task);
+                    let mode = data.enchant.mode;
+                    output.as_ref().is_some_and(|output| {
+                        data.enchant
+                            .operation
+                            .as_mut()
+                            .is_some_and(|operation| operation.row(mode, changes.reason, output))
+                    })
+                };
+                if finished {
+                    complete(rt.map(|rt| &rt.lua), state);
+                }
+            }
+            state.borrow_mut().enchant.selection.records.finish(changes);
+        }
+    }
+    match event {
+        Event::ItemEffectRequested { character_id, request } => {
+            if let Some(operation) = state.borrow_mut().enchant.operation.as_mut() {
+                operation.requested(*character_id, request);
+            }
+        }
+        Event::ItemEffectRejected {
+            character_id,
+            request,
+            message,
+        } => {
+            let matches = state
+                .borrow()
+                .enchant
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.matches(*character_id, request));
+            if matches {
+                state.borrow_mut().enchant.operation = None;
+                if let Some(rt) = rt {
+                    let presence = state.borrow().enchant.selection.presence();
+                    selection::update(&rt.lua, presence);
+                    rt.fire_event("SYSMSG", message.as_str());
+                }
+            }
+        }
+        _ => {}
+    }
+    // Actual result producer admission formats the current record here,
+    // emits original Lua first, then advances the controller receiver.
+    super::item_effects::receive(rt, state, event);
+}
+
 fn track(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
     state: NonSend<HudBridge>,
     built: Res<super::HudBuilt>,
-    inventory: Option<Res<aa_net::state::Inventory>>,
+    mut inventory: Option<ResMut<aa_net::state::Inventory>>,
 ) {
-    for NetEvent(event) in events.read() {
-        if retires(event) {
-            if let Some(rt) = rt.as_deref().filter(|_| built.up) {
-                if let Err(error) = switch(&rt.lua, &state.0, Mode::Off) {
-                    warn!("enchant: retiring mode: {error}");
-                }
-            } else {
-                let mut data = state.0.borrow_mut();
-                data.enchant.mode = Mode::Off;
-                data.enchant.selection.clear();
-            }
-        }
-        let cleared = {
-            let mut data = state.0.borrow_mut();
-            let before = data.enchant.selection.slots;
-            data.enchant.selection.receive(event);
-            before != data.enchant.selection.slots && data.enchant.mode != Mode::Off
-        };
-        if cleared {
-            if let Some(rt) = rt.as_deref().filter(|_| built.up) {
-                selection::update(&rt.lua, false);
-            }
-        }
+    let rt = rt.as_deref().filter(|_| built.up);
+    // Error callbacks can query locks before their first release in this same
+    // frame; refresh the shared pending provider before any synchronous Lua.
+    if let Some(inventory) = inventory.as_deref() {
+        state.0.borrow_mut().enchant.selection.sync_pending(inventory);
     }
-    if let Some(inventory) = inventory {
+    if let Some(rt) = rt {
+        super::item_effects::replay(rt, &state.0);
+    }
+    for NetEvent(event) in events.read() {
+        dispatch(rt, &state.0, event, inventory.as_deref_mut());
+    }
+    if let Some(inventory) = inventory.as_deref() {
         state.0.borrow_mut().enchant.selection.sync_pending(&inventory);
     }
 }

@@ -2,14 +2,15 @@
 use aa_net::{
     Event,
     item_task_projection::{
-        NativeItemTaskInventory, NativeItemTaskLocation, NativeItemTaskMutation, NativeItemTaskStorage, lookup_native_item_task,
-        lookup_native_item_task_move, project_native_item_task, project_native_item_task_move,
+        NativeItemTaskInventory, NativeItemTaskLocation, NativeItemTaskMutation, NativeItemTaskStorage, lookup_native_item_detail_update,
+        lookup_native_item_task, lookup_native_item_task_move, project_native_item_detail_update, project_native_item_task,
+        project_native_item_task_move,
     },
-    items::{ItemTask, ItemTasks},
+    items::{ItemDetailUpdate, ItemTask, ItemTasks},
     model::{Equipment, Item},
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Records {
     owner: Option<u32>,
     actor: u32,
@@ -74,8 +75,8 @@ impl Records {
         self.bag.fill(None);
         self.bank.fill(None);
     }
-    /// Snapshot/lifecycle observations only. ItemsChanged rows must be applied by
-    /// the caller one at a time, with its controller callback between rows.
+    /// Snapshot/lifecycle observations only. ItemsChanged rows and typed detail
+    /// updates are applied separately; row callbacks must precede later rows.
     pub fn observe(&mut self, event: &Event) {
         match event {
             Event::CharacterSelected(selected) => self.selected(selected.character.id, &selected.character.equipment),
@@ -137,7 +138,11 @@ impl Records {
                 self.lose();
                 self.actor = 0;
             }
-            Event::GameDecodeFailed { .. } | Event::UnhandledGamePacket { level: 4, len: 1.., .. } => self.lose(),
+            Event::GameDecodeFailed { .. }
+            | Event::UnhandledGamePacket { level: 4, len: 1.., .. }
+            // SC093 updates a BAG detail union. Until its typed decoder is
+            // available, an unhandled receipt cannot preserve exact records.
+            | Event::UnhandledGamePacket { opcode: 0x93, len: 1.., .. } => self.lose(),
             event if super::retires(event) => *self = Self::default(),
             _ => {}
         }
@@ -260,6 +265,46 @@ impl Records {
         }
         Some(output)
     }
+    /// True only for a qualified SC093 detail replacement, which releases its
+    /// BAG pending key. This is not an ItemTask output or consumption observer.
+    pub fn apply_detail(&mut self, update: &ItemDetailUpdate) -> bool {
+        let projected = if self.actor != 0 && self.owner.is_some() && !self.lost {
+            let bag: Vec<_> = self.bag.iter().map(Option::as_ref).collect();
+            let inventory = NativeItemTaskInventory {
+                equipment: NativeItemTaskStorage::Unknown,
+                bag: match self.bag_extent {
+                    Some(extent) => NativeItemTaskStorage::Present {
+                        records: &bag,
+                        extent,
+                        container: 2,
+                    },
+                    None => NativeItemTaskStorage::Unknown,
+                },
+                bank: NativeItemTaskStorage::Unknown,
+            };
+            let context = lookup_native_item_detail_update(update, &inventory);
+            project_native_item_detail_update(update, context)
+        } else {
+            None
+        };
+        match projected {
+            Some(replace @ NativeItemTaskMutation::Replace { .. }) => {
+                self.mutation(replace);
+                !self.lost
+            }
+            Some(NativeItemTaskMutation::None) => false,
+            _ => {
+                // Keep unrelated rows known. A partial detail receipt cannot
+                // reconstruct an unknown complete record or repair lost history.
+                if update.container == 2 {
+                    if let Some(row) = self.bag.get_mut(usize::from(update.slot)) {
+                        *row = None;
+                    }
+                }
+                false
+            }
+        }
+    }
     pub fn finish(&mut self, changes: &ItemTasks) {
         // Stronger app certainty retirement for lane mutations: original SC090's
         // serializer reads these IDs, but its handler never dispatches them.
@@ -280,6 +325,30 @@ impl Records {
         };
         rows.get(usize::from(slot))?.as_ref()
     }
+    pub fn owner(&self) -> Option<u32> {
+        self.owner
+    }
+    pub fn current(&self, id: u64) -> Option<&Item> {
+        if self.actor == 0 || self.lost {
+            return None;
+        }
+        //397ccfb0: all28 equipment records first, then enabled BAG records.
+        // Unknown earlier records cannot prove a later first hit. Equipment
+        // matches ID even for template0; BAG skips invalid-template records.
+        for index in 0..28 {
+            let item = self.equipment.get(index)?.as_ref()?;
+            if item.id == id {
+                return Some(item);
+            }
+        }
+        for index in 0..usize::from(self.bag_extent?) {
+            let item = self.bag.get(index)?.as_ref()?;
+            if item.template_id != 0 && item.id == id {
+                return Some(item);
+            }
+        }
+        None
+    }
     pub fn bag_extent(&self) -> Option<u8> {
         self.bag_extent
     }
@@ -291,7 +360,7 @@ impl Records {
                 .is_some_and(|n| n > 0 && n <= 130 && self.bag.iter().take(usize::from(n)).all(Option::is_some))
     }
     pub fn bag_items(&self) -> impl Iterator<Item = (u8, &Item)> {
-        let n = if self.complete_bag() { self.bag_extent.unwrap_or(0) } else { 0 };
+        let n = if self.complete_bag() { self.bag_extent().unwrap_or(0) } else { 0 };
         self.bag
             .iter()
             .take(usize::from(n))

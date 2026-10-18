@@ -62,9 +62,17 @@ the same headgear checks. Eight inspected original HUD/world-list captures
 validate that combined build (aa-client-enchant.md); they add no new headgear
 scene/reference claim.
 
-The current inspected alias comes from
+The previous inspected alias came from
 target/debug/aa-client-20261018-enchant-records.exe, SHA256
 8C3D1CDC2FDDF96F44F050814A93D32822F755D18FF61C1BB1F175D1CC8A3726.
 Its frozen suite passes315 tests /38 optional probes ignored in91.99s and eight
 original HUD/world-list captures are inspected. These are combined regression
 checks, with no additional headgear-scene or paired-reference claim.
+
+The current inspected alias comes from
+target/debug/aa-client-20261018-enchant-controller.exe, SHA256
+B4D86DF88E2976114124E62A50BBA4EBD91443C1AF68DAFCE1DC328FF909B8D7.
+Its frozen suite passes328 /38 optional ignores in90.50s and12 original
+HUD/world-list captures are inspected without runtime errors. The idle alias
+was refreshed and hash verified at16:52 local. These combined regression checks
+add no new headgear-scene or paired-reference claim.

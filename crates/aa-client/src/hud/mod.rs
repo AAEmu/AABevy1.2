@@ -433,7 +433,6 @@ impl Plugin for HudPlugin {
         trial::plugin(app);
         ranking::plugin(app);
         buffs::cancel::plugin(app);
-        item_effects::plugin(app);
         enchant::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);

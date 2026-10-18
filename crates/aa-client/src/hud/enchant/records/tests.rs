@@ -42,6 +42,33 @@ fn count(slot: u8, delta: i32) -> ItemTask {
         delta,
     }
 }
+
+#[test]
+fn current_result_lookup_keeps_first_equipment_hit_and_requires_known_earlier_bag_rows() {
+    let mut records = seed();
+    records.bag[8] = Some(item(42, 31432, 0));
+    assert_eq!(records.current(42).unwrap().count, 0);
+    records.equipment[0] = Some(item(42, 28299, -1));
+    assert_eq!(records.current(42).unwrap().template_id, 28299);
+    records.equipment[0] = Some(empty_equipment());
+    records.bag[0] = None;
+    assert!(
+        records.current(42).is_none(),
+        "unknown earlier row can contain the first duplicate ID"
+    );
+    assert_eq!(
+        records.current(0).unwrap().template_id,
+        0,
+        "known equipment empty stops ID0 before unknown BAG"
+    );
+    records.bag[0] = Some(Item::default());
+    records.bag_extent = Some(200);
+    assert!(
+        records.current(42).is_some(),
+        "an actual early hit can precede an unsafe extent tail"
+    );
+    assert!(records.current(99).is_none(), "an overlong missing scan is not a known miss");
+}
 fn remove(slot: u8, id: u64) -> ItemTask {
     ItemTask::Remove {
         container: 2,
@@ -223,6 +250,16 @@ fn raw_detail_admission_hydrates_real_add_update_and_retires_unqualified_rows_on
 #[test]
 fn unsafe_receipts_and_actor_retirement_do_not_heal_with_same_owner_spawn() {
     let mut records = seed();
+    records.observe(&Event::UnhandledGamePacket {
+        opcode: 0x93,
+        level: 3,
+        len: 140,
+    });
+    assert!(
+        !records.complete_bag(),
+        "unhandled native detail mutation cannot preserve exact pre-row input"
+    );
+    let mut records = seed();
     records.observe(&Event::InventoryChunk(InvenChunk {
         container: 2,
         chunks: 1,
@@ -283,4 +320,68 @@ fn header_boundaries_force_remove_and_local_equipment_order_preserve_unrelated_c
         items: vec![(0, Some(item(7, 10, 2))), (0, Some(item(8, 11, 3)))],
     });
     assert_eq!(records.item(1, 0), Some(&item(8, 11, 3)));
+}
+
+pub(super) fn detail_update(item_id: u64, slot: u8) -> ItemDetailUpdate {
+    let mut raw_detail = vec![0; 56];
+    raw_detail[0] = 1;
+    raw_detail[5] = 77;
+    raw_detail[24..28].copy_from_slice(&31003u32.to_le_bytes());
+    ItemDetailUpdate {
+        item_id,
+        container: 2,
+        slot,
+        raw_detail,
+    }
+}
+
+#[test]
+fn typed_detail_updates_require_known_matching_bag_record_and_preserve_other_metadata() {
+    use aa_net::model::EquipDetail;
+    let mut records = seed();
+    let original = item(42, 31432, 3);
+    records.bag[0] = Some(original.clone());
+    let update = detail_update(42, 0);
+    assert!(records.apply_detail(&update));
+    let mut expected = original;
+    expected.detail = ItemDetail::Equip(EquipDetail {
+        durability: 77,
+        gem_ids: [31003, 0, 0, 0, 0, 0, 0],
+        ..Default::default()
+    });
+    expected.detail_payload = Some(update.raw_detail[1..].to_vec());
+    assert_eq!(records.item(2, 0), Some(&expected));
+    let mut wrong = update.clone();
+    wrong.item_id = 43;
+    assert!(!records.apply_detail(&wrong));
+    assert_eq!(records.item(2, 0), Some(&expected));
+    for container in [1, 3, 4, 0x64] {
+        wrong = update.clone();
+        wrong.container = container;
+        assert!(!records.apply_detail(&wrong));
+        assert_eq!(records.item(2, 0), Some(&expected));
+    }
+    assert!(
+        !records.apply_detail(&detail_update(0, 1)),
+        "known empty native record is not a valid template"
+    );
+    assert_eq!(records.item(2, 1), Some(&Item::default()));
+    records.bag[2] = Some(item(0, 31432, 1));
+    assert!(
+        records.apply_detail(&detail_update(0, 2)),
+        "ID0 is allowed when the physical valid-template record matches"
+    );
+    records.bag[3] = None;
+    assert!(!records.apply_detail(&detail_update(42, 3)));
+    assert!(records.item(2, 3).is_none());
+    let mut malformed = update;
+    malformed.raw_detail.pop();
+    assert!(!records.apply_detail(&malformed));
+    assert!(records.item(2, 0).is_none());
+    assert!(
+        records.item(2, 1).is_some(),
+        "uncertain detail update retires only the affected physical row"
+    );
+    chunk(&mut records, 2, 0, vec![None; 10]);
+    assert!(records.complete_bag());
 }

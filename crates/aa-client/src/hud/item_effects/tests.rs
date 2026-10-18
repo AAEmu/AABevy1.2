@@ -1,5 +1,6 @@
 use super::*;
 use aa_net::{
+    NetEvent,
     item_effect::{GradeEnchantBroadcast, GradeEnchantResult},
     items::{ItemTask, ItemTasks, container},
 };
@@ -7,6 +8,35 @@ use std::{cell::RefCell, rc::Rc};
 
 fn state() -> Shared {
     Rc::new(RefCell::new(super::super::api::HudData::default()))
+}
+fn received(state: &Shared, event: &Event) -> Option<Notice> {
+    dispatch(None, state, event);
+    state.borrow_mut().item_effects.pending.pop()
+}
+fn bag(state: &Shared, container: u8, item: Option<Item>) {
+    let mut items = vec![None; 10];
+    items[0] = item;
+    dispatch(
+        None,
+        state,
+        &Event::InventoryChunk(aa_net::items::InvenChunk {
+            container,
+            chunks: 1,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }),
+    );
+}
+fn equip(state: &Shared, item: Option<Item>) {
+    dispatch(
+        None,
+        state,
+        &Event::EquipmentChanged {
+            obj_id: 100,
+            items: vec![(0, item)],
+        },
+    );
 }
 fn change(grade: u8) -> Event {
     Event::ItemsChanged(ItemTasks {
@@ -68,120 +98,178 @@ fn native_grade_helpers_keep_raw_low_byte_strict_types_and_zero_result_misses() 
 fn native_current_lookup_requires_actual_spawn_equipment_first_and_bag_only() {
     let state = state();
     fixture::seed(&state);
-    let mut data = state.borrow_mut();
-    let view = &mut data.item_effects;
-    assert!(view.receive(&socket()).is_some());
+    assert!(received(&state, &socket()).is_some());
     let mut equipped = fixture::item();
     equipped.grade = 4;
-    view.inventory.equipment.slots[0] = Some(equipped.clone());
+    equip(&state, Some(equipped.clone()));
     assert!(
-        matches!(view.receive(&socket()), Some(Notice::Socket {link, ..}) if link == super::super::itemlinks::link(&equipped).unwrap())
+        matches!(received(&state, &socket()), Some(Notice::Socket {link, ..}) if link == super::super::itemlinks::link(&equipped).unwrap())
     );
-    view.inventory.equipment.slots[0] = None;
-    view.inventory.bank[0] = view.inventory.bag[0].take();
-    assert!(view.receive(&socket()).is_none(), "bank is outside native397ccfb0 lookup");
-    view.inventory.bag[0] = view.inventory.bank[0].take();
-    view.inventory.bag[0].as_mut().unwrap().id = 0;
+    equip(&state, None);
+    bag(&state, 2, None);
+    bag(&state, 3, Some(fixture::item()));
+    assert!(received(&state, &socket()).is_none(), "bank is outside native397ccfb0 lookup");
+    let mut zero_id = fixture::item();
+    zero_id.id = 0;
+    bag(&state, 2, Some(zero_id.clone()));
     assert!(
-        view.current(0).is_none(),
+        super::super::enchant::current(&state.borrow(), 0).is_some_and(|item| item.template_id == 0),
         "first empty equipment ID0 cannot fall through to a bag item"
     );
-    view.inventory.equipment.slots[0] = view.inventory.bag[0].clone();
-    assert!(view.current(0).is_some(), "a genuine first equipment ID0 is not rejected by value");
-    view.inventory.equipment.slots[0] = None;
-    view.inventory.bag[0].as_mut().unwrap().id = fixture::item().id;
+    equip(&state, Some(zero_id));
     assert!(
-        view.receive(&Event::UnhandledGamePacket {
-            level: 2,
-            opcode: 0x3ff,
-            len: 1
-        })
+        super::super::enchant::current(&state.borrow(), 0).is_some_and(|item| item.template_id != 0),
+        "a genuine first equipment ID0 is not rejected by value"
+    );
+    equip(&state, None);
+    bag(&state, 2, Some(fixture::item()));
+    assert!(
+        received(
+            &state,
+            &Event::UnhandledGamePacket {
+                level: 2,
+                opcode: 0x3ff,
+                len: 1
+            }
+        )
         .is_none()
     );
-    assert!(view.receive(&socket()).is_some());
-    view.receive(&Event::UnhandledGamePacket {
-        level: 4,
-        opcode: 0x3ff,
-        len: 1,
-    });
-    assert!(view.receive(&socket()).is_none());
-    drop(data);
+    assert!(received(&state, &socket()).is_some());
+    received(
+        &state,
+        &Event::UnhandledGamePacket {
+            level: 4,
+            opcode: 0x3ff,
+            len: 1,
+        },
+    );
+    assert!(received(&state, &socket()).is_none());
     fixture::seed(&state);
-    let mut data = state.borrow_mut();
-    let view = &mut data.item_effects;
-    assert!(view.receive(&socket()).is_some());
-    view.receive(&Event::CharacterSelected(Box::new(super::super::expansion::fixture::spawn().state)));
-    assert!(view.receive(&socket()).is_none(), "selection cannot retain an old active Game");
-    assert!(view.pending.is_empty());
+    assert!(received(&state, &socket()).is_some());
+    received(
+        &state,
+        &Event::CharacterSelected(Box::new(super::super::expansion::fixture::spawn().state)),
+    );
+    assert!(received(&state, &socket()).is_none(), "selection cannot retain an old active Game");
+    assert!(state.borrow().item_effects.pending.is_empty());
 }
 
 #[test]
 fn actual_receipt_order_formats_pre_or_post_change_item_without_mutating_received_inventory() {
     let state = state();
     fixture::seed(&state);
-    let mut data = state.borrow_mut();
-    let view = &mut data.item_effects;
     let old = super::super::itemlinks::link(&fixture::item()).unwrap();
     let magical = Event::LunastoneSocketingResult {
         raw_result: 1,
         item_id: fixture::item().id,
         template_id: 7,
     };
-    assert!(matches!(view.receive(&magical), Some(Notice::Magical { link, .. }) if link == old));
-    assert_eq!(view.inventory.bag[0].as_ref().unwrap().grade, 1);
-    view.receive(&change(3));
+    assert!(matches!(received(&state, &magical), Some(Notice::Magical { link, .. }) if link == old));
+    assert_eq!(
+        super::super::enchant::current(&state.borrow(), fixture::item().id).unwrap().grade,
+        1
+    );
+    received(&state, &change(3));
     let mut new = fixture::item();
     new.grade = 3;
     let updated = super::super::itemlinks::link(&new).unwrap();
     assert_ne!(updated, old);
-    assert!(matches!(view.receive(&socket()), Some(Notice::Socket { link, .. }) if link == updated));
-    assert_eq!(view.inventory.bag[0].as_ref().unwrap().grade, 3);
+    assert!(matches!(received(&state, &socket()), Some(Notice::Socket { link, .. }) if link == updated));
+    assert_eq!(
+        super::super::enchant::current(&state.borrow(), fixture::item().id).unwrap().grade,
+        3
+    );
     let inline = Event::GradeEnchantResult(grade(0));
     assert!(
-        matches!(view.receive(&inline), Some(Notice::Grade { link, .. }) if link == old),
+        matches!(received(&state, &inline), Some(Notice::Grade { link, .. }) if link == old),
         "inline item wins over the different current item"
     );
-    assert_eq!(view.inventory.bag[0].as_ref().unwrap().grade, 3);
+    assert_eq!(
+        super::super::enchant::current(&state.borrow(), fixture::item().id).unwrap().grade,
+        3
+    );
+}
+
+#[test]
+fn same_frame_results_use_their_own_native_receipt_position() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = UiRuntime::new("en_us", 800., 600.)?;
+    rt.exec(
+        "@receipt_order",
+        r#"
+      links={};local w=UIParent:CreateWidget('emptywidget','receiptOrder','UIParent')
+      w:RegisterEvent('ITEM_SOCKETING_RESULT')
+      w:SetHandler('OnEvent',function(_,_,_,link)links[#links+1]=link end)
+    "#,
+    )?;
+    let state = state();
+    fixture::seed(&state);
+    let old = super::super::itemlinks::link(&fixture::item()).unwrap();
+    let mut updated = fixture::item();
+    updated.grade = 3;
+    let new = super::super::itemlinks::link(&updated).unwrap();
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_message::<NetEvent>()
+        .insert_non_send(HudBridge(state))
+        .insert_non_send(rt)
+        .insert_resource(super::super::HudBuilt { up: true, fresh: false });
+    super::super::enchant::plugin(&mut app);
+    for event in [socket(), change(3), socket(), change(4)] {
+        app.world_mut().write_message(NetEvent(event));
+    }
+    app.update();
+    let rt = app.world().non_send::<UiRuntime>();
+    let links: Vec<String> = rt
+        .lua
+        .globals()
+        .get::<mlua::Table>("links")?
+        .sequence_values()
+        .collect::<mlua::Result<_>>()?;
+    assert_eq!(links, [old, new], "later rows in one frame cannot rewrite earlier callbacks");
+    Ok(())
 }
 
 #[test]
 fn raw_result_domains_invalid_items_numeric_width_and_cstring_boundaries_remain_distinct() {
-    let mut view = View::default();
+    let state = state();
     for code in 0..=4 {
-        assert!(view.receive(&Event::GradeEnchantResult(grade(code))).is_some());
+        assert!(received(&state, &Event::GradeEnchantResult(grade(code))).is_some());
     }
-    assert!(view.receive(&Event::GradeEnchantResult(grade(5))).is_none());
+    assert!(received(&state, &Event::GradeEnchantResult(grade(5))).is_none());
     let mut invalid = grade(0);
     invalid.item.as_mut().unwrap().template_id = 0;
-    assert!(view.receive(&Event::GradeEnchantResult(invalid)).is_none());
+    assert!(received(&state, &Event::GradeEnchantResult(invalid)).is_none());
     let mut invalid = grade(0);
     invalid.item.as_mut().unwrap().detail = aa_net::model::ItemDetail::Other(2);
-    assert!(view.receive(&Event::GradeEnchantResult(invalid)).is_none());
+    assert!(received(&state, &Event::GradeEnchantResult(invalid)).is_none());
     let binary = GradeEnchantBroadcast {
         raw_name: vec![255, b'A', 0, b'B'],
         result: grade(255),
     };
     assert!(
-        matches!(view.receive(&Event::GradeEnchantBroadcast(binary)), Some(Notice::Broadcast {name, result:255, ..}) if name == [255,b'A'])
+        matches!(received(&state, &Event::GradeEnchantBroadcast(binary)), Some(Notice::Broadcast {name, result:255, ..}) if name == [255,b'A'])
     );
     assert!(
-        view.receive(&Event::GradeEnchantBroadcast(GradeEnchantBroadcast {
-            raw_name: vec![b'A'; 129],
-            result: grade(255)
-        }))
+        received(
+            &state,
+            &Event::GradeEnchantBroadcast(GradeEnchantBroadcast {
+                raw_name: vec![b'A'; 129],
+                result: grade(255)
+            })
+        )
         .is_none()
     );
-    let state = state();
     fixture::seed(&state);
-    let mut data = state.borrow_mut();
-    let view = &mut data.item_effects;
     assert!(matches!(
-        view.receive(&Event::LunagemSocketingResult {
-            raw_result: 255,
-            item_id: fixture::item().id,
-            template_id: u32::MAX,
-            raw_install: 0
-        }),
+        received(
+            &state,
+            &Event::LunagemSocketingResult {
+                raw_result: 255,
+                item_id: fixture::item().id,
+                template_id: u32::MAX,
+                raw_install: 0
+            }
+        ),
         Some(Notice::Socket {
             success: false,
             template: 4294967296.,
@@ -190,26 +278,32 @@ fn raw_result_domains_invalid_items_numeric_width_and_cstring_boundaries_remain_
         })
     ));
     assert!(
-        view.receive(&Event::LunagemSocketingResult {
-            raw_result: 1,
-            item_id: fixture::item().id,
-            template_id: 1,
-            raw_install: 2
-        })
+        received(
+            &state,
+            &Event::LunagemSocketingResult {
+                raw_result: 1,
+                item_id: fixture::item().id,
+                template_id: 1,
+                raw_install: 2
+            }
+        )
         .is_none()
     );
     assert!(
-        view.receive(&Event::LunastoneSocketingResult {
-            raw_result: 2,
-            item_id: fixture::item().id,
-            template_id: 1
-        })
+        received(
+            &state,
+            &Event::LunastoneSocketingResult {
+                raw_result: 2,
+                item_id: fixture::item().id,
+                template_id: 1
+            }
+        )
         .is_none()
     );
-    view.receive(&Event::Disconnected { message: "fixture".into() });
-    assert!(view.receive(&socket()).is_none());
+    received(&state, &Event::Disconnected { message: "fixture".into() });
+    assert!(received(&state, &socket()).is_none());
     assert!(
-        view.receive(&Event::GradeEnchantResult(grade(0))).is_some(),
+        received(&state, &Event::GradeEnchantResult(grade(0))).is_some(),
         "native inline handler has no Game lookup"
     );
 }
@@ -229,7 +323,7 @@ fn lua_callback_types_arity_binary_names_and_deferred_lifecycle_follow_actual_hu
         .insert_non_send(HudBridge(state.clone()))
         .insert_non_send(rt)
         .insert_resource(super::super::HudBuilt::default());
-    plugin(&mut app);
+    super::super::enchant::plugin(&mut app);
     app.world_mut().write_message(NetEvent(Event::GradeEnchantResult(grade(4))));
     app.update();
     assert_eq!(state.borrow().item_effects.pending.len(), 1);

@@ -48,6 +48,7 @@ pub enum Request {
     Party(aa_net::party::PartyCommand),
     Friend(aa_net::friend::FriendCommand),
     Target { obj_id: u32 },
+    ItemEffect { character_id: u32, request: aa_net::item_effect::ItemEffectRequest },
 }
 
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
@@ -799,6 +800,14 @@ pub fn handle_requests(
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
+            Request::ItemEffect { character_id, request } => {
+                // The typed request was captured by the original enchant API.
+                // A replacement operation may retire a queued command before
+                // this frame drains; Session rechecks genuine received records.
+                if super::enchant::request_current(&bridge.0, character_id, &request) {
+                    net.write(NetCommand(Command::ItemEffect { character_id, request }));
+                }
+            }
             Request::Chat { chat_type, message, target } => {
                 let message = aa_ui::lua::chat::encode_for_transport(&message);
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));

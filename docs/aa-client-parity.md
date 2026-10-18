@@ -13,12 +13,29 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Accepted records-build validation:315 passed /38 existing optional probes ignored
+Current source integration queues typed enchant requests from the original
+Execute API in all four modes, then uses one native receipt-ordered item provider
+for result links, per-row consumption and controller restoration. Matching actual
+writes arm completion; raw skill errors/stops do not invent native Timeline
+ownership. SC093 and SC0A0 use their source-qualified ordered lock callbacks.
+The combined build and visual verification pass; the accepted playable alias
+is target/debug/aa-client-20261018-enchant-controller.exe, refreshed idle at16:52
+local and hash verified B4D86DF88E2976114124E62A50BBA4EBD91443C1AF68DAFCE1DC328FF909B8D7.
+The frozen client suite passes328 /38 optional ignores in90.50s, with32 focused
+enchant checks in5.82s. Main and three fixtures build (3m29s, final refresh53.22s),
+and12 original-script/world-list captures are inspected without runtime errors,
+including all four visibly dimmed working states. Later shared native-record
+Session migration and UI health-warning visibility work remain outside this cut.
+Protected native planning,
+global selection pending/effect registration and retained-Timeline stop handling
+remain explicit gaps (aa-client-enchant.md).
+
+Previous accepted records-build validation:315 passed /38 existing optional probes ignored
 in91.99s with three test threads. Twenty focused enchant checks pass in6.60s.
 Selection and BAG totals now use explicitly known native pre-row records,
 preserving zero/negative stacks, ID lookup/removal ordering and native empty
-records; unsafe/unprovided rows retire certainty. Typed request/controller
-integration remains open. Main and three fixtures build in3m37s; eight
+records; unsafe/unprovided rows retire certainty. At this frozen cut, typed
+request/controller integration was still open. Main and three fixtures build in3m37s; eight
 shots/hud/enchant-records/ captures are inspected without runtime errors.
 Seven are pixel equal to the prior frames cut; the buff differs only at its
 advancing countdown digit. The idle playable alias is refreshed from

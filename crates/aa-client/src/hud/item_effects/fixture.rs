@@ -1,7 +1,7 @@
 //! Explicit received item results over the unchanged original chat/alarm scripts; no session.
 use super::*;
 use aa_net::{
-    items::{ItemTask, ItemTasks, container},
+    items::container,
     model::{EquipDetail, ItemDetail},
 };
 use bevy::window::PrimaryWindow;
@@ -22,21 +22,24 @@ pub(super) fn item() -> Item {
 }
 pub(super) fn seed(state: &Shared) {
     let mut spawn = super::super::expansion::fixture::spawn();
-    spawn.state.num_inventory_slots = 3;
-    spawn.state.num_bank_slots = 3;
+    spawn.state.num_inventory_slots = 10;
+    spawn.state.num_bank_slots = 10;
+    let mut items = vec![None; 10];
+    items[0] = Some(item());
     for event in [
         Event::CharacterSelected(Box::new(spawn.state.clone())),
-        Event::ItemsChanged(ItemTasks {
-            tasks: vec![ItemTask::Add {
-                action: 1,
-                container: container::INVENTORY,
-                slot: 0,
-                item: item(),
-                raw_detail_block: None,
-            }],
-            ..default()
-        }),
         Event::PlayerSpawn(Box::new(spawn)),
+        Event::InventoryInit {
+            bag_slots: 10,
+            bank_slots: 10,
+        },
+        Event::InventoryChunk(aa_net::items::InvenChunk {
+            container: container::INVENTORY,
+            chunks: 1,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }),
     ] {
         dispatch(None, state, &event);
     }
