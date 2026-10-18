@@ -85,7 +85,7 @@ impl ListBoxData {
 }
 
 /// Invalid entries stop that sibling array, leaving its already appended prefix, as native.
-fn parse(table: Table, ancestors: &mut Vec<usize>) -> mlua::Result<Vec<Row>> {
+fn parse(lua: &Lua, table: Table, ancestors: &mut Vec<usize>) -> mlua::Result<Vec<Row>> {
     let ptr = table.to_pointer() as usize;
     if ancestors.contains(&ptr) || ancestors.len() >= 64 {
         return Err(mlua::Error::RuntimeError(
@@ -116,7 +116,7 @@ fn parse(table: Table, ancestors: &mut Vec<usize>) -> mlua::Result<Vec<Row>> {
         ];
         let opened = matches!(node.raw_get("opened")?, Value::Boolean(true));
         let child = match node.raw_get("child")? {
-            Value::Table(t) => parse(t, ancestors)?,
+            Value::Table(t) => parse(lua, t, ancestors)?,
             _ => Vec::new(),
         };
         rows.push(Row {
@@ -131,6 +131,13 @@ fn parse(table: Table, ancestors: &mut Vec<usize>) -> mlua::Result<Vec<Row>> {
             selected: false,
             opened,
             child,
+            icon: paint::icon(
+                lua,
+                match node.raw_get("iconPath")? {
+                    Value::String(path) => Some(path.to_string_lossy()),
+                    _ => None,
+                },
+            ),
         });
     }
     ancestors.pop();
@@ -201,7 +208,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let Value::Table(table) = a.v(1) else {
                 return none();
             };
-            let rows = parse(table, &mut Vec::new())?;
+            let rows = parse(lua, table, &mut Vec::new())?;
             change(lua, id, |d| {
                 let dirty = d.rows != rows || d.selected != -1 || d.top != 0;
                 d.tree_mode = !rows.is_empty();
@@ -213,6 +220,18 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 ((), dirty)
             });
             none()
+        })?,
+    )?;
+    m.raw_set(
+        "IsItemOpened",
+        method(lua, |lua, id, a| {
+            let index = a.f(1) as i32;
+            ret(
+                lua,
+                data(&ui(lua), id)
+                    .and_then(|d| usize::try_from(index).ok().and_then(|i| d.rows.get(i)))
+                    .is_some_and(|r| r.opened),
+            )
         })?,
     )?;
     m.raw_set(
@@ -281,9 +300,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    for (name, opened) in [
-        ("CreateOpenedImageDrawable", true),
-        ("CreateClosedImageDrawable", false),
+    for (name, kind) in [
+        ("CreateOpenedImageDrawable", 0),
+        ("CreateClosedImageDrawable", 1),
+        ("CreateSeparatorImageDrawable", 2),
     ] {
         m.raw_set(
             name,
@@ -302,10 +322,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     image
                 };
                 change(lua, id, |d| {
-                    if opened {
-                        d.opened_image = Some(image);
-                    } else {
-                        d.closed_image = Some(image);
+                    match kind {
+                        0 => d.opened_image = Some(image),
+                        1 => d.closed_image = Some(image),
+                        _ => d.separator_image = Some(image),
                     }
                     ((), true)
                 });
