@@ -31,6 +31,8 @@ struct Fixture {
     old_refraction: bool,
     features: bool,
     old_features: bool,
+    environment_2d: bool,
+    old_environment_2d: bool,
     farm: bool,
     solzreed: bool,
     grazing: bool,
@@ -90,6 +92,8 @@ fn main() {
                 old_refraction: flag("--legacy-refraction"),
                 features: flag("--features") || flag("--legacy-features"),
                 old_features: flag("--legacy-features"),
+                environment_2d: flag("--environment-2d") || flag("--legacy-environment-2d"),
+                old_environment_2d: flag("--legacy-environment-2d"),
                 farm: flag("--farm"),
                 solzreed: flag("--solzreed"),
                 grazing: flag("--grazing"),
@@ -206,6 +210,7 @@ fn numeric(
                 normal_map: Some(image),
                 foam_map: None,
                 env_map: None,
+                environment_2d: None,
             })),
             Transform::from_xyz(i as f32 * 2.0 - 3.0, 0.0, -1.0)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
@@ -388,7 +393,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features || fixture.environment_2d)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -434,6 +439,11 @@ fn world_check(
                         control.params.sun=(cur.sun*rs*value("SunMultiplier",0.1)*tuning.water_sun).extend(control.params.sun.w);
                         control.params.foam_col=((cur.sun+cur.sky)*rs*value("FoamMultiplier",0.75)*tuning.water_foam).extend(0.0);
                     }
+                }
+                if fixture.environment_2d {
+                    control.params.motion.z=0.0;
+                    if fixture.old_environment_2d {control.params.motion.w=-4.0;}
+                    info!("water environment2d control: source_mode={} bound2d={} legacy={}",control.params.motion.x,control.environment_2d.is_some(),fixture.old_environment_2d);
                 }
                 let original = material.id();
                 let handle = materials.add(control);
@@ -591,6 +601,7 @@ fn endpoint_numeric(
                 normal_map: if shallow { Some(normal.clone()) } else { None },
                 foam_map: None,
                 env_map: None,
+                environment_2d: None,
             })),
             Transform::from_xyz(
                 (i as f32 * 2.0 - 3.0) * clip_w / 8.0,

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use bevy::asset::embedded_asset;
 use bevy::camera::Exposure;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
 use bevy::prelude::*;
@@ -32,6 +33,8 @@ use crate::water::WaterStyle;
 pub const AUTHORED_WATER_UV: f32 = 1.0;
 /// Authored UV plus source-qualified, successfully loaded static environment cube.
 pub const AUTHORED_WATER_CUBE: f32 = 2.0;
+/// Authored UV plus a source-qualified ordinary 2D environment texture (TT3_TCUBE absent).
+pub const AUTHORED_WATER_ENVIRONMENT_2D: f32 = 3.0;
 
 /// Uniform of `water.wesl` (see the shader for the meaning of the fields).
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
@@ -83,6 +86,9 @@ pub struct WaterMaterial {
     #[texture(5, dimension = "cube")]
     #[sampler(6)]
     pub env_map: Option<Handle<Image>>,
+    #[texture(7)]
+    #[sampler(8)]
+    pub environment_2d: Option<Handle<Image>>,
 }
 
 impl Material for WaterMaterial {
@@ -142,6 +148,7 @@ struct StyleBase {
     native_uv: bool,
     no_flow: bool,
     native_cube: bool,
+    native_environment_2d: bool,
 }
 
 fn static_cube_candidate(material: &aa_cry::material::Material) -> bool {
@@ -174,6 +181,7 @@ impl StyleBase {
             native_uv: false,
             no_flow: false,
             native_cube: false,
+            native_environment_2d: false,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -192,12 +200,15 @@ impl StyleBase {
         if style.material.is_empty() {
             return (base, normal_map);
         }
-        let Ok(mtl) = aa_cry::material::Material::load(&format!("{}.mtl", style.material.trim_end_matches(".mtl"))) else {
+        let Ok(bytes) = aa_cry::read(&format!("{}.mtl", style.material.trim_end_matches(".mtl"))) else {
             return (base, normal_map);
         };
+        let text = String::from_utf8_lossy(&bytes);
+        let Ok(mtl) = aa_cry::material::Material::parse(&text) else { return (base, normal_map) };
         base.native_uv = mtl.shader.eq_ignore_ascii_case("WaterSurface") && mtl.gen_mask & 1 != 0;
         base.no_flow = base.native_uv && mtl.gen_mask & 0x200 != 0;
         base.native_cube = static_cube_candidate(&mtl);
+        base.native_environment_2d = base.native_cube && plain_environment_sampler(&text);
         let param = |name: &str, default: f32| mtl.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         base.sun_multiplier = param("SunMultiplier", base.sun_multiplier);
         base.shine = param("SunShinePow", base.shine).max(1.0);
@@ -237,6 +248,7 @@ impl StyleBase {
 
     fn motion_mode(&self) -> f32 {
         if self.native_cube { AUTHORED_WATER_CUBE }
+        else if self.native_environment_2d { AUTHORED_WATER_ENVIRONMENT_2D }
         else if self.native_uv { AUTHORED_WATER_UV }
         else { 0.0 }
     }
@@ -258,6 +270,51 @@ pub struct WaterStyles {
     foam_map: Option<Option<Handle<Image>>>,
     // Image plus whether the authored source itself loaded as a cube (not the fallback).
     env_maps: HashMap<String, Option<(Handle<Image>, bool)>>,
+    environment_2d: HashMap<String, Option<Handle<Image>>>,
+}
+
+// Native default profile: ordinary static 2D images, identity coordinates and no
+// material sampler/view override. aa-cry does not expose those raw attributes.
+fn plain_environment_sampler(text: &str) -> bool {
+    let Ok(doc) = roxmltree::Document::parse(text) else { return false };
+    let root = doc.root_element();
+    if root.attributes().any(|a| a.name().eq_ignore_ascii_case("sRGB")) { return false; }
+    let Some(texture) = root.children().find(|n| n.has_tag_name("Textures"))
+        .and_then(|n| n.children().find(|n| n.has_tag_name("Texture") && n.attribute("Map").is_some_and(|s| s.eq_ignore_ascii_case("Environment"))))
+    else { return false };
+    texture.attributes().all(|a| matches!(a.name(), "Map" | "File"))
+        && texture.children().filter(|n| n.is_element())
+            .all(|n| n.has_tag_name("TexMod") && n.attributes().len() == 0 && !n.children().any(|c| c.is_element()))
+}
+
+const MAX_ENVIRONMENT_2D: usize = 16;
+
+/// Raw BC blocks/mips and the native default SRV: CRYF 0x800 selects sRGB,
+/// independently of sampler.sRGBLookup=0 (38100230 / 380FB9C0).
+fn prepare_environment_2d(bytes: &[u8]) -> Option<Image> {
+    use aa_cry::texture::{Dds, DdsFormat, DdsOptions, dds_to_image};
+    let dds = Dds::parse(bytes).ok()?;
+    if dds.faces != 1 || dds.depth != 1 || dds.mips_truncated
+        || dds.width > 1024 || dds.height > 1024
+        || u64::from(dds.width) * u64::from(dds.height) > 512 * 512
+        || !matches!(dds.format, DdsFormat::Bc1 | DdsFormat::Bc2 | DdsFormat::Bc3)
+    { return None; }
+    let word = |at| u32::from_le_bytes(bytes[at..at+4].try_into().unwrap());
+    if word(36) & 0x1000000 != 0 { return None; } // Native normal-map image variants differ.
+    let srgb = word(4) >= 124 && word(124) == 0x43525946 && word(36) & 0x800 != 0;
+    let mut image = dds_to_image(&dds, DdsOptions { srgb, bc_supported: true, repeat: true }).ok()?;
+    // Cvar default TRILINEAR / anisotropy1. Do not inherit aa-cry's aniso4 preset.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 1,
+        ..default()
+    });
+    Some(image)
 }
 
 /// A cube map from the pak (the default one when the file is missing or not a cube map).
@@ -322,11 +379,29 @@ impl WaterStyles {
                 }
             })
             .clone();
-        let cube = self.env_maps.entry(base.env_map.clone()).or_insert_with(|| load_cube(&base.env_map, images)).clone();
-        base.native_cube &= cube.as_ref().is_some_and(|(_, authored)| *authored);
+        let environment_2d = if base.native_environment_2d {
+            let known_cube = self.env_maps.get(&base.env_map).and_then(|e| e.as_ref()).is_some_and(|(_, authored)| *authored);
+            if !known_cube && !self.environment_2d.contains_key(&base.env_map) && self.environment_2d.len() < MAX_ENVIRONMENT_2D {
+                let bytes = aa_cry::read(&base.env_map).ok();
+                let cube = bytes.as_ref().and_then(|b| aa_cry::texture::Dds::parse(b).ok()).is_some_and(|dds| dds.faces == 6);
+                // A successful cube belongs to the existing cube cache. Do not
+                // let ordinary cubes exhaust the new 2D admission budget.
+                if !cube {
+                    let image = bytes.as_ref().and_then(|b| prepare_environment_2d(b)).map(|image| images.add(image));
+                    self.environment_2d.insert(base.env_map.clone(), image);
+                }
+            }
+            self.environment_2d.get(&base.env_map).cloned().flatten()
+        } else { None };
+        base.native_environment_2d &= environment_2d.is_some();
+        // Keep the existing cube available to optional SSR/fallback paths. All
+        // supported 2D maps share the same fallback instead of duplicating it.
+        let cube_path = if base.native_environment_2d { DEFAULT_ENV_MAP } else { &base.env_map };
+        let cube = self.env_maps.entry(cube_path.to_owned()).or_insert_with(|| load_cube(cube_path, images)).clone();
+        base.native_cube &= !base.native_environment_2d && cube.as_ref().is_some_and(|(_, authored)| *authored);
         let env_map = cube.map(|(image, _)| image);
         let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
-        let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map });
+        let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map, environment_2d });
         self.materials.insert(style.clone(), handle.clone());
         self.bases.push((handle.clone(), base));
         handle
@@ -427,6 +502,70 @@ pub fn update_water(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn environment_2d_declines_unproven_sampler_and_coordinate_overrides() {
+        let xml = |root: &str, attrs: &str, modifier: &str| format!(
+            "<Material {root}><Textures><Texture Map=\"Environment\" File=\"x.dds\" {attrs}>{modifier}</Texture></Textures></Material>"
+        );
+        assert!(plain_environment_sampler(&xml("", "", "<TexMod/>")));
+        for (root, attrs, modifier) in [
+            ("sRGB=\"0\"", "", ""),
+            ("", "Filter=\"4\"", ""),
+            ("", "TexType=\"3\"", ""),
+            ("", "IsTileU=\"0\"", ""),
+            ("", "", "<TexMod TileU=\"2\"/>"),
+            ("", "", "<Unknown/>"),
+        ] { assert!(!plain_environment_sampler(&xml(root, attrs, modifier))); }
+        assert!(!plain_environment_sampler("invalid"));
+    }
+
+    #[test]
+    fn original_environment_2d_preserves_blocks_mips_default_view_and_shared_images() {
+        use bevy::render::render_resource::TextureFormat;
+        if !crate::pak_available() { return }
+        let mut styles=WaterStyles::default();
+        let mut materials=Assets::<WaterMaterial>::default();
+        let mut images=Assets::<Image>::default();
+        for (name, srgb) in [("swamp_rescue",false),("rescue_watertank",false),("river",true),("fleet_watervolume",true)] {
+            let source=WaterStyle::new(&format!("materials/ocean/{name}"),2,[0.0;3],0.2);
+            let handle=styles.material(&source,&mut materials,&mut images);
+            let material=materials.get(&handle).unwrap();
+            assert_eq!(material.params.motion.x,AUTHORED_WATER_ENVIRONMENT_2D,"{name}");
+            let image_id=material.environment_2d.as_ref().unwrap().id();
+            let image=images.get(image_id).unwrap();
+            let cry=aa_cry::material::Material::load(&format!("{}.mtl",source.material)).unwrap();
+            let bytes=aa_cry::read(&cry.texture(&aa_cry::material::TextureMap::Environment).unwrap().pak_path()).unwrap();
+            let dds=aa_cry::texture::Dds::parse(&bytes).unwrap();
+            assert_eq!(image.data.as_deref().unwrap(),dds.data,"unaltered original BC blocks/mips");
+            assert_eq!(image.texture_descriptor.mip_level_count,dds.mips);
+            assert_eq!(image.texture_descriptor.format.is_srgb(),srgb);
+            assert!(matches!(image.texture_descriptor.format,TextureFormat::Bc1RgbaUnorm|TextureFormat::Bc1RgbaUnormSrgb|TextureFormat::Bc2RgbaUnormSrgb));
+            let ImageSampler::Descriptor(sampler)=&image.sampler else {panic!("native sampler")};
+            assert_eq!(sampler.address_mode_u,ImageAddressMode::Repeat);
+            assert_eq!(sampler.address_mode_v,ImageAddressMode::Repeat);
+            assert_eq!(sampler.min_filter,ImageFilterMode::Linear);
+            assert_eq!(sampler.mipmap_filter,ImageFilterMode::Linear);
+            assert_eq!(sampler.anisotropy_clamp,1);
+            let another=WaterStyle::new(&source.material,2,[0.1,0.2,0.3],0.4);
+            let another=styles.material(&another,&mut materials,&mut images);
+            assert_eq!(materials.get(&another).unwrap().environment_2d.as_ref().unwrap().id(),image_id);
+        }
+        assert_eq!(styles.environment_2d.len(),4);
+        assert_eq!(styles.env_maps.len(),1,"one shared fallback cube");
+        let cube_style=WaterStyle::new("materials/ocean/lake_tank",2,[0.0;3],0.2);
+        let cube=styles.material(&cube_style,&mut materials,&mut images);
+        assert_eq!(materials.get(&cube).unwrap().params.motion.x,AUTHORED_WATER_CUBE);
+        assert_eq!(styles.environment_2d.len(),4,"successful cubes cannot consume 2D admissions");
+        let bytes=aa_cry::read(DEFAULT_ENV_MAP).unwrap();
+        assert!(prepare_environment_2d(&bytes).is_none(),"cubes use the existing path");
+        let mut bounded=WaterStyles::default();
+        for i in 0..MAX_ENVIRONMENT_2D {bounded.environment_2d.insert(format!("reserved{i}"),None);}
+        let h=bounded.material(&WaterStyle::new("materials/ocean/swamp_rescue",2,[0.0;3],0.2),&mut materials,&mut images);
+        assert!(materials.get(&h).unwrap().environment_2d.is_none());
+        assert_eq!(materials.get(&h).unwrap().params.motion.x,AUTHORED_WATER_UV);
+        assert_eq!(bounded.environment_2d.len(),MAX_ENVIRONMENT_2D);
+    }
 
     #[test]
     fn native_surface_feature_flags_preserve_signed_gains_and_other_style_fields() {
