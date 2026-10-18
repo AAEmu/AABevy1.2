@@ -1,6 +1,7 @@
 //! Native Count/Remove task outputs, given source-exact pre-row lookup context.
 //!
-//! This does not look up items, update `Inventory`, dispatch observers, or retain history.
+//! Borrowed lookup uses explicit native PRE-row certainty; this never updates `Inventory`,
+//! dispatches observers, or retains history.
 //! In particular, the legacy inventory reducer's relocation and deletion of nonpositive
 //! stacks cannot establish the input to this projection.
 
@@ -24,6 +25,130 @@ pub enum NativeItemTaskContext<'a> {
         location: NativeItemTaskLocation,
         item: &'a Item,
     },
+}
+
+/// Borrowed, explicitly known native PRE-row storage. No legacy empty-slot inference.
+#[derive(Clone, Copy, Debug)]
+pub enum NativeItemTaskStorage<'a> {
+    Unknown,
+    /// Actual native storage pointer is absent, not merely unhydrated.
+    Absent,
+    Present {
+        /// Physical order. None is unknown; Some(empty Item) is an actual record.
+        records: &'a [Option<&'a Item>],
+        /// Equipment: 28. Containers: explicitly known min(configured, 10*enabled chunks).
+        extent: u8,
+        /// Native container header byte (equipment uses 1).
+        container: u8,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeItemTaskInventory<'a> {
+    pub equipment: NativeItemTaskStorage<'a>,
+    pub bag: NativeItemTaskStorage<'a>,
+    pub bank: NativeItemTaskStorage<'a>,
+}
+
+/// Source-exact physical Count lookup or equipment -> bag -> bank Remove lookup.
+/// The caller supplies certainty immediately BEFORE this task and owns all mutations.
+/// Unknown earlier records prevent a later ID match from becoming authoritative.
+/// Equipment indices above 27 are refused as unknown (native physical lookup is unsafe).
+pub fn lookup_native_item_task<'a>(
+    task: &ItemTask,
+    inventory: &NativeItemTaskInventory<'a>,
+) -> Option<NativeItemTaskContext<'a>> {
+    use NativeItemTaskContext as Context;
+    use NativeItemTaskStorage as Storage;
+    fn physical<'a>(storage: Storage<'a>, container: u8, slot: u8, equipment: bool) -> Context<'a> {
+        match storage {
+            Storage::Unknown => Context::Unknown,
+            Storage::Absent => Context::Missing,
+            Storage::Present {
+                records,
+                extent,
+                container: actual,
+            } => {
+                if equipment && (extent != 28 || actual != 1 || slot >= 28) {
+                    return Context::Unknown;
+                }
+                if !equipment && (container != actual || slot >= extent) {
+                    return Context::Missing;
+                }
+                if !equipment && slot >= 130 {
+                    return Context::Unknown;
+                }
+                match records.get(usize::from(slot)).copied().flatten() {
+                    Some(item) => Context::Found {
+                        location: NativeItemTaskLocation { container, slot },
+                        item,
+                    },
+                    None => Context::Unknown,
+                }
+            }
+        }
+    }
+    fn first_id<'a>(storage: Storage<'a>, id: u64, equipment: bool) -> Context<'a> {
+        match storage {
+            Storage::Unknown => Context::Unknown,
+            Storage::Absent => Context::Missing,
+            Storage::Present {
+                records,
+                extent,
+                container,
+            } => {
+                if equipment && (extent != 28 || container != 1) {
+                    return Context::Unknown;
+                }
+                let safe_extent = if equipment { extent } else { extent.min(130) };
+                for slot in 0..safe_extent {
+                    let Some(item) = records.get(usize::from(slot)).copied().flatten() else {
+                        return Context::Unknown;
+                    };
+                    // Native equipment checks ID alone; bag/bank skip invalid templates.
+                    if (!equipment && item.template_id == 0) || item.id != id {
+                        continue;
+                    }
+                    return Context::Found {
+                        location: NativeItemTaskLocation { container, slot },
+                        item,
+                    };
+                }
+                if extent > safe_extent {
+                    Context::Unknown
+                } else {
+                    Context::Missing
+                }
+            }
+        }
+    }
+    match task {
+        ItemTask::Count { container: 4, .. }
+        | ItemTask::Remove { container: 4, .. }
+        | ItemTask::Remove { item_id: 0, .. } => Some(Context::Missing), // no lookup occurs
+        ItemTask::Count {
+            container, slot, ..
+        } => Some(match container {
+            1 | 0xfc | 0xf2 => physical(inventory.equipment, *container, *slot, true),
+            2 | 0x64 | 0x65 | 0x66 => physical(inventory.bag, *container, *slot, false),
+            3 => physical(inventory.bank, *container, *slot, false),
+            _ => Context::Missing,
+        }),
+        ItemTask::Remove { item_id, .. } => {
+            for (storage, equipment) in [
+                (inventory.equipment, true),
+                (inventory.bag, false),
+                (inventory.bank, false),
+            ] {
+                match first_id(storage, *item_id, equipment) {
+                    Context::Missing => {}
+                    context => return Some(context),
+                }
+            }
+            Some(Context::Missing)
+        }
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -289,5 +414,224 @@ mod tests {
                 location: location(3)
             }
         );
+    }
+
+    fn storage<'a>(
+        records: &'a [Option<&'a Item>],
+        extent: u8,
+        container: u8,
+    ) -> NativeItemTaskStorage<'a> {
+        NativeItemTaskStorage::Present {
+            records,
+            extent,
+            container,
+        }
+    }
+
+    #[test]
+    fn lookup_equipment_precedes_bag_even_for_invalid_template_and_duplicates() {
+        let mut empty = item(0);
+        empty.id = 0;
+        empty.template_id = 0;
+        let mut invalid = empty.clone();
+        invalid.id = 77;
+        let mut valid = item(1);
+        valid.id = 77;
+        let mut equipment = [Some(&empty); 28];
+        equipment[5] = Some(&invalid);
+        let bag = [Some(&valid), Some(&valid)];
+        let view = NativeItemTaskInventory {
+            equipment: storage(&equipment, 28, 1),
+            bag: storage(&bag, 2, 2),
+            bank: NativeItemTaskStorage::Absent,
+        };
+        let context = lookup_native_item_task(&remove(0, 77), &view).unwrap();
+        assert!(matches!(
+            context,
+            NativeItemTaskContext::Found {
+                location: NativeItemTaskLocation {
+                    container: 1,
+                    slot: 5
+                },
+                ..
+            }
+        ));
+        let projected = project_native_item_task(&remove(0, 77), context).unwrap();
+        assert!(!projected.admitted);
+        assert!(matches!(
+            projected.mutation,
+            NativeItemTaskMutation::Clear {
+                location: NativeItemTaskLocation {
+                    container: 1,
+                    slot: 5
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn lookup_unknown_prefix_blocks_later_matches_and_known_misses_reach_bank() {
+        let mut empty = item(0);
+        empty.id = 0;
+        empty.template_id = 0;
+        let mut valid = item(1);
+        valid.id = 77;
+        let mut equipment = [Some(&empty); 28];
+        equipment[3] = None;
+        let bag = [Some(&empty), Some(&valid)];
+        let bank = [Some(&valid)];
+        let mut view = NativeItemTaskInventory {
+            equipment: storage(&equipment, 28, 1),
+            bag: storage(&bag, 2, 2),
+            bank: storage(&bank, 1, 3),
+        };
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 77), &view),
+            Some(NativeItemTaskContext::Unknown)
+        ));
+        view.equipment = NativeItemTaskStorage::Absent;
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 77), &view),
+            Some(NativeItemTaskContext::Found {
+                location: NativeItemTaskLocation {
+                    container: 2,
+                    slot: 1
+                },
+                ..
+            })
+        ));
+        let missed_bag = [Some(&empty), Some(&empty)];
+        view.bag = storage(&missed_bag, 2, 2);
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 77), &view),
+            Some(NativeItemTaskContext::Found {
+                location: NativeItemTaskLocation {
+                    container: 3,
+                    slot: 0
+                },
+                ..
+            })
+        ));
+        view.bank = NativeItemTaskStorage::Absent;
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 77), &view),
+            Some(NativeItemTaskContext::Missing)
+        ));
+    }
+
+    #[test]
+    fn physical_count_preserves_empty_record_and_explicit_extent_and_header() {
+        let mut empty = item(0);
+        empty.id = 0;
+        empty.template_id = 0;
+        let rows = [Some(&empty), None, Some(&empty), Some(&empty)];
+        let mut view = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Unknown,
+            bag: storage(&rows, 4, 2),
+            bank: NativeItemTaskStorage::Absent,
+        };
+        let context = lookup_native_item_task(&count(3), &view).unwrap();
+        let projected = project_native_item_task(&count(3), context).unwrap();
+        assert!(projected.admitted);
+        assert_eq!(
+            (
+                projected.output.as_ref().unwrap().template_id,
+                projected.output.as_ref().unwrap().count
+            ),
+            (0, 3)
+        );
+        view.bag = storage(&rows, 3, 2);
+        assert!(matches!(
+            lookup_native_item_task(&count(3), &view),
+            Some(NativeItemTaskContext::Missing)
+        ));
+        view.bag = storage(&rows[..2], 4, 2);
+        assert!(matches!(
+            lookup_native_item_task(&count(3), &view),
+            Some(NativeItemTaskContext::Unknown)
+        ));
+        view.bag = storage(&rows, 4, 0x64);
+        assert!(matches!(
+            lookup_native_item_task(&count(3), &view),
+            Some(NativeItemTaskContext::Missing)
+        ));
+    }
+
+    #[test]
+    fn lookup_bypass_zero_remove_and_unsafe_equipment_are_explicit() {
+        let mut view = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Unknown,
+            bag: NativeItemTaskStorage::Unknown,
+            bank: NativeItemTaskStorage::Unknown,
+        };
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 0), &view),
+            Some(NativeItemTaskContext::Missing)
+        ));
+        let bypass = ItemTask::Count {
+            container: 4,
+            slot: 200,
+            item_id: 1,
+            template_id: 1,
+            delta: 1,
+        };
+        let context = lookup_native_item_task(&bypass, &view).unwrap();
+        assert!(project_native_item_task(&bypass, context).unwrap().admitted);
+        let mut empty = item(0);
+        empty.id = 0;
+        empty.template_id = 0;
+        let rows = [Some(&empty); 28];
+        view.equipment = storage(&rows, 28, 1);
+        let unsafe_count = ItemTask::Count {
+            container: 1,
+            slot: 28,
+            item_id: 1,
+            template_id: 1,
+            delta: 1,
+        };
+        assert!(matches!(
+            lookup_native_item_task(&unsafe_count, &view),
+            Some(NativeItemTaskContext::Unknown)
+        ));
+    }
+    #[test]
+    fn oversized_native_header_preserves_safe_hit_but_cannot_prove_miss_or_out_of_storage() {
+        let mut empty = item(0);
+        empty.id = 0;
+        empty.template_id = 0;
+        let mut valid = item(1);
+        valid.id = 77;
+        let mut rows = [Some(&empty); 200];
+        rows[2] = Some(&valid);
+        let view = NativeItemTaskInventory {
+            equipment: NativeItemTaskStorage::Absent,
+            bag: NativeItemTaskStorage::Absent,
+            bank: storage(&rows, 200, 3),
+        };
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 77), &view),
+            Some(NativeItemTaskContext::Found {
+                location: NativeItemTaskLocation {
+                    container: 3,
+                    slot: 2
+                },
+                ..
+            })
+        ));
+        assert!(matches!(
+            lookup_native_item_task(&remove(0, 999), &view),
+            Some(NativeItemTaskContext::Unknown)
+        ));
+        let count = ItemTask::Count {
+            container: 3,
+            slot: 130,
+            item_id: 1,
+            template_id: 1,
+            delta: 1,
+        };
+        assert!(matches!(
+            lookup_native_item_task(&count, &view),
+            Some(NativeItemTaskContext::Unknown)
+        ));
     }
 }
