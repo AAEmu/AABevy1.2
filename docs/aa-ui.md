@@ -6113,3 +6113,65 @@ also verify its strict hit, matching pressed icon quads and release callback.
 Both report zero script errors/WARN/ERROR and self-close (PIDs1648/48024).
 The copied executable was removed. No app hook, Lua asset, font, shader or
 cooldown timing policy changed.
+
+### Native checkbutton artwork visibility and replacement lifetime (2026-10-18)
+
+Checkbuttons now write the actual shown flags of their bound checkmark artwork,
+instead of applying a separate checked-state predicate while drawing. Native
+39281440/392814c0 write the normal mark first and disabled mark second. Enabled
+checked controls show the normal mark; disabled checked controls show only the
+disabled mark, with no normal-mark fallback when that binding is missing.
+Unchecked controls hide both. Aliased marks retain that write order.
+
+SetChecked repeats reassert those flags even when the checked value is unchanged;
+they still emit OnCheckChanged only on a changed value with its optional event
+flag enabled. Explicit drawable SetVisible lasts until the next applicable
+state write. Rebinding writes only the currently bound marks: an old image
+retains its previous shown flag. Previously, replacing an unchecked bound mark
+could expose that hidden image as unrelated artwork.
+
+The actual typed SetChecked thunk39230c50/parser39230ae0 and binding39230770
+require a boolean or native numeric boolean for the first argument. Missing,
+nil, strings, tables and wrong receivers silently return no values. The second
+argument defaults to true when absent or of an invalid type. The checked-art
+thunk39230c70/parser39230b90/39067ad0 and bindings392307e0/39230960 require a
+drawable object table; nil is not an unbind request. They return no values.
+Retired toolkit objects remain a safe application refusal boundary.
+
+Changed Enable calls reach checkbutton virtual+148 at392842a0 after the own
+enabled byte is written. Repeated Enable with the same value does not reassert
+art. Native3927b290 processes children in order before the parent when recursive
+enable is requested; the toolkit now keeps that ordering, including shared mark
+images. Generic Enable argument coercion and the broader native button-state
+continuations are outside this slice.
+
+checkbutton_oracle.py executes **91 native wrapper/visibility groups**, including
+actual Cry argument conversion, both bindings, visibility writes, alias/rebind
+lifetimes, native Enable3927b290 and its real checkbutton vtable continuation.
+Lua stack/table/reference/cast and script callback delivery are explicit
+endpoints; the final ordinary button-state continuation is recorded separately.
+Artifacts native-checkbutton-oracle-20261018.json and
+native-checkbutton-source-20261018.txt preserve observations and source. This
+does not claim native rendering of arbitrary aliased ordinary-state images or
+dereferencing a destroyed native drawable.
+
+Six new checks cover strict inputs, no disabled fallback, manual visibility,
+repeat/rebind lifetime, aliased marks, recursive ordering and callback
+reentrancy. The actual original CreateCheckButton, SetEnableCheckButton and
+OnCheckChanged bytecode remain unchanged. Strict physical clicks on both its
+checkbox and its text run the original handlers and application callback;
+the original Achievement row-checkbox regression also passes. Crate check,
+example build and **101 selected checks pass**: checkbutton6, natives21,
+event handlers5, drawable color2, button state colors5, chat context3,
+list geometry4, popup9, drag12, animation10, fade12, attachment5, active tabs6
+and ordinary slot state1.
+
+Both aa-dev captures with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-checkbutton-lifetime-720-20261018.png
+(1280x720/default0.85, **363.8-416.7 FPS**) and
+shots/aa-ui/native-checkbutton-lifetime-1080-20261018.png
+(1920x1080/default1.0, **320.0-417.7 FPS**). They show the original checked,
+unchecked and disabled checked artwork, an explicitly hidden mark, and a mark
+restored by a repeated SetChecked without changing its value. Both report
+zero script errors/WARN/ERROR and self-close (PIDs4252/16700); the copied
+executable was removed. No original Lua asset, app API, font or timer changed.

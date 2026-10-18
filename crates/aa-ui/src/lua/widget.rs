@@ -626,13 +626,20 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             let children = a.b(2, false);
             let mut g = ui(lua);
             let u = &mut *g;
-            let mut stack = vec![id];
-            while let Some(w) = stack.pop() {
-                if let Some(wd) = u.tree.widget_mut(w) {
-                    wd.enabled = on;
-                    if children {
-                        stack.extend(wd.children.iter().copied());
+            let mut stack = vec![(id, false)];
+            while let Some((w, visited)) = stack.pop() {
+                if children && !visited {
+                    stack.push((w, true));
+                    if let Some(wd) = u.tree.widget(w) {
+                        stack.extend(wd.children.iter().rev().map(|&c| (c, false)));
                     }
+                    continue;
+                }
+                if u.tree.widget(w).is_some_and(|wd| wd.enabled != on) {
+                    u.tree.widget_mut(w).unwrap().enabled = on;
+                    //3927b290 dispatches the changed-enable continuation only after
+                    // its children. Checkbutton392842a0 reasserts mark visibility.
+                    checked_art(u, w);
                 }
             }
             none()
@@ -1512,7 +1519,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             "SetChecked",
             method(lua, |lua, id, a| {
                 // (checked, fireEvent = true): OnCheckChanged when the state changes.
-                set_checked(lua, id, a.b(1, true), a.b(2, true));
+                if matches!(a.v(1), Value::Boolean(_) | Value::Integer(_) | Value::Number(_)) {
+                    set_checked(lua, id, a.b(1, false), a.b(2, true));
+                }
                 none()
             })?,
         )?;
@@ -1529,27 +1538,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 )
             })?,
         )?;
-        def(
-            "SetCheckedBackground",
-            method(lua, |lua, id, a| {
-                let d = value_id(lua, &a.v(1));
-                if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
-                    b.checked_bg = d;
-                }
+        for (name, disabled) in [
+            ("SetCheckedBackground", false),
+            ("SetDisabledCheckedBackground", true),
+        ] {
+            def(name, method(lua, move |lua, id, a| {
+                //39230b90/392307e0 require a drawable table; nil is not unbind.
+                if !matches!(a.v(1), Value::Table(_)) { return none(); }
+                let Some(d) = value_id(lua, &a.v(1)) else { return none() };
+                let mut u = ui(lua);
+                if !u.tree.get(d).alive || u.tree.get(d).drawable().is_none()
+                    || !u.tree.widget(id).is_some_and(|w| w.ty == WidgetType::CheckButton)
+                { return none(); }
+                let b = u.tree.widget_mut(id).unwrap().button.as_mut().unwrap();
+                if disabled { b.disabled_checked_bg = Some(d); } else { b.checked_bg = Some(d); }
+                checked_art(&mut u, id);
                 none()
-            })?,
-        )?;
-        def(
-            "SetDisabledCheckedBackground",
-            method(lua, |lua, id, a| {
-                let d = value_id(lua, &a.v(1));
-                if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
-                    b.disabled_checked_bg = d;
-                }
-                ui(lua).tree.touch();
-                none()
-            })?,
-        )?;
+            })?)?;
+        }
         def(
             "Click",
             method(lua, |lua, id, _| {
@@ -1780,15 +1786,29 @@ fn is_button_class(class: &str) -> bool {
 /// state changes and `fire` is set.
 pub(crate) fn set_checked(lua: &Lua, id: Id, checked: bool, fire: bool) {
     let mut u = ui(lua);
-    let Some(b) = u.tree.widget_mut(id).and_then(|w| w.button.as_mut()) else {
-        return;
-    };
+    if !u.tree.widget(id).is_some_and(|w| w.ty == WidgetType::CheckButton) { return; }
+    let b = u.tree.widget_mut(id).unwrap().button.as_mut().unwrap();
     let changed = b.checked != checked;
     b.checked = checked;
-    if changed {
-        u.tree.touch();
-        if fire {
-            u.pending.push((id, "OnCheckChanged".into(), vec![]));
+    checked_art(&mut u, id);
+    if changed && fire {
+        u.pending.push((id, "OnCheckChanged".into(), vec![]));
+    }
+}
+
+///39281440/392814c0 write the current marks, including repeated calls. Old
+/// bindings retain their last visibility; disabled marks have no normal fallback.
+fn checked_art(u: &mut super::Ui, id: Id) {
+    let Some(w) = u.tree.widget(id).filter(|w| w.ty == WidgetType::CheckButton) else { return };
+    let b = w.button.as_ref().unwrap();
+    let writes = [(b.checked_bg, b.checked && w.enabled),
+                  (b.disabled_checked_bg, b.checked && !w.enabled)];
+    // Keep the native normal-then-disabled order for aliased drawables.
+    for (d, shown) in writes {
+        if let Some(d) = d
+            && u.tree.get(d).alive && u.tree.get(d).shown != shown
+        {
+            u.tree.get_mut(d).shown = shown;
         }
     }
 }

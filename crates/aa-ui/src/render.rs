@@ -424,20 +424,9 @@ pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
     let Some(dr) = u.tree.get(d).drawable() else {
         return true;
     };
-    // Check marks: `SetCheckedBackground` while checked, `SetDisabledCheckedBackground`
-    // instead while checked and disabled.
-    if let Some(owner) = u.tree.get(d).parent
-        && let Some(w) = u.tree.widget(owner)
-        && let Some(b) = w.button.as_ref()
-    {
-        let disabled = state == ButtonState::Disabled;
-        if b.checked_bg == Some(d) {
-            return b.checked && !(disabled && b.disabled_checked_bg.is_some());
-        }
-        if b.disabled_checked_bg == Some(d) {
-            return b.checked && disabled;
-        }
-    }
+    // Check marks use the real shown flag written by SetChecked/bind/Enable.
+    // A draw-time checked-state predicate would undo explicit visibility and
+    // reveal previously bound hidden artwork after a replacement.
     if let Some((owner, _)) = dr.state_of {
         let Some(b) = u.tree.widget(owner).and_then(|w| w.button.as_ref()) else {
             return true;
