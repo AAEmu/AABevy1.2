@@ -120,6 +120,9 @@ macro_rules! net_state {
                         self.$field.set_changed();
                     }
                 )*
+                if self.units.bypass_change_detection().apply_mate_equipment_flags(event, &self.mates) {
+                    self.units.set_changed();
+                }
                 if self.trade.bypass_change_detection().seed_inventory(event, &self.inventory) {
                     self.trade.set_changed();
                 }
@@ -169,4 +172,24 @@ net_state! {
     game_config: GameConfig,
     combat_status: CombatStatus,
     conflict_zones: ConflictZones,
+}
+
+
+#[cfg(test)]
+mod equipment_flags_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    #[test]
+    fn plugin_fold_updates_existing_owned_equipment_flags() {
+        let mut app = App::new();
+        init_state(&mut app);
+        let mut events = crate::equipment_notice_tests::flags_fixture();
+        events.push(Event::Mate(crate::mate::MateEvent::EquipmentFlagsChanged {
+            mate_tl_id: 0x102, container: 0xfc, slot: 1, flags: 0xa5,
+        }));
+        for event in events {
+            app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
+        }
+        assert_eq!(app.world().resource::<Units>().by_id[&51].equipment.slots[1].as_ref().unwrap().flags, 0xa5);
+    }
 }
