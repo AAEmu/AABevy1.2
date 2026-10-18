@@ -859,13 +859,64 @@ dependent cloud/moon systems retire or hide their draws. Existing sky/ocean enti
 ownership remains with the world plugin; this is not an independent full-world teardown.
 
 Supported slice: the spatial blend of the selected `WorldClock.layer` (normal by default).
-Area-ToD priorities/weights, per-zone relic layer transitions and `env.xml` parameter
-blending remain unsupported. Skybox and
-cloud asset selection still follows the discrete owning zone; native skybox opacity and
-layer-transition fades from **365F0210** remain explicit gaps. No sky/cloud color calibration
-was changed. `environment_border` exercises the actual Solzreed 179 / Silent Sea 210 border
+Area-ToD priorities/weights, automatic per-zone relic activation and `env.xml` parameter
+blending remain unsupported. Native discrete skybox/cloud selection and fades are now
+implemented below. No sky/cloud color calibration was changed.
+`environment_border` exercises the actual Solzreed 179 / Silent Sea 210 border
 at Cry `(15712,15808)`, with `--offset`, `--zone179`, `--zone210`, `--motion-check` and
 `--unload-check` controls.
+
+**Discrete skybox/cloud transitions** (`sky_transition::SkySelection`): native
+`SeamlessSystem::UpdateEnv` **365F0210** uses the same sector-distance weights, picks their
+strongest zone, and computes `clamp(2 * maximumWeight - sumWeights, 0, 1)`. The weights are
+not normalized for this opacity. Equal strongest weights make the assets invisible, so
+native pointer-map tie ordering cannot produce a visible material difference. A new zone
+loads its sky assets with layer weight zero. While that zone and active relic/weather
+layer remain selected, layer weight rises by `frameTime * 0.5`, clamped to 0..1. A same-zone
+layer change lowers it at the same rate, retains the previous assets until zero, then
+loads the new assets and fades in on later frames. Final opacity is spatial opacity times
+layer weight. This fade uses frame time, independently of the time-of-day clock hour.
+
+Exact original engine setters were recovered from C3DEngine vtable **30263718**:
+**3012BF50** (+1048) sets the zone sky material/angle; **3012E8A0** (+1052) reapplies the
+zone's shared distant-cloud list; **30124A90** (+1056) writes sky opacity and calls each
+cloud node's slot +60 (**300B4DE0**, node +116). Cloud Render **300B4410** passes that value
+as render-object alpha. Thus the same opacity multiplies both skybox and cloud alpha.
+Slot +1060 (**3012CE90**) sets a zone effect, and +1064 (**30127FA0**) controls that effect's
+spawn parameters: the extra native area/weather factor there is not a cloud multiplier.
+Evidence is retained in ignored `data/extract/aa-world/environment/sky-setters.txt`.
+
+The implementation consumes the already computed ten-or-fewer spatial inputs without
+new per-frame allocations. `Environment.zone` still reports the containing sector, while
+`SkySelection.zone` reports the strongest asset input. The selected authored layer reads
+`Zone` / `Zone_Dominion_Normal`; **365F3830** leaves absent list layers initialized rather
+than falling back to the first block, and loads a standalone `Zone` into both. Cloud XML
+is one list per zone; native reapplies it when the selected asset layer changes. Only the
+active sky material, at most two active sky metadata entries and the active cloud list
+stay cached. World change or environment off resets the selection; off also drops skybox
+texture references and despawns clouds.
+
+`environment_border --fade-check --motion-check` verifies real border movement, shared
+cloud alpha and zero-opacity asset changes. `--zone179 --layer-check --fade-check` switches
+the real Solzreed sky to its authored dominion variant; `--unload-check` verifies retirement.
+This implements the selected `WorldClock.layer` fade. Automatic per-zone relic activation,
+weather-layer inputs, zone-effect spawning/opacity, area overrides and weighted `env.xml`
+multipliers remain explicit gaps. Existing sky/cloud brightness and shader calibration
+are unchanged.
+
+Fade validation (2026-10-17): all 125 library tests pass (nine existing ignored), including
+the real zone-179 dominion material, scalar shared alpha, interrupted/reversed layer fades,
+world reset, bounded sky caches and texture/entity retirement. All examples pass `cargo
+check`. Inspected captures in `shots/aa-world/environment/` are `sky_border_no_fade.png`
+(old discrete selection, 217–312 FPS), `sky_border_fade.png` (exact border, 235–290),
+`sky_border_motion.png` (202–264), `sky_layer_dominion.png` (184–295) and `sky_unload.png`
+(183–241). The GPU motion fixture crossed the real border in a 0.086914 m frame step with
+sun/fog RGB deltas 0.000077 / 0.000063; attached cloud uniforms matched selection opacity,
+and every asset change occurred at zero. The relic fixture faded to the authored
+`Materials/sky/sky_salpi_nuimari_cbt4` variant; the unload fixture asserted no active sample,
+selection, skybox texture handles or cloud entities. All windows exited normally. There
+is no original-client border or relic transition sequence in `reference/`, so these compare
+the recovered contract against the old sampler and real authored asset controls.
 
 Validation (2026-10-17): 15 native regression tests passed, along with all 13 environment
 tests and the real Solzreed/sea 2 cm border continuity test. The GPU motion fixture crossed
@@ -954,12 +1005,13 @@ first pose, then wraps as the native render call does. The radial plane uses
 `up = right cross normal`; it ignores camera pitch/roll. Its full width and height are both
 `2*size`, rather than a screen-aligned texture-aspect-scaled rectangle.
 
-The XML values continue to pass through the existing parser unchanged. **Producer boundary:**
-the native engine consumes this record layout without conversions, but the original upstream
-XML-to-record adapter has not been recovered. No bearing/clouds.xml literal or matching engine
-vtable caller was found in the readable `x2game_unpacked.dll`, `crygame.dll` or `xlcommon.dll`
-artifacts. These are exact native parameter semantics applied to the existing raw XML adapter;
-they do not prove that an unrecovered producer never transforms a particular XML field.
+The original XML adapter is now recovered in `crysystem.dll` **365F9000**: bearing,
+distance, height, size and speed load directly into record offsets +8/+12/+16/+20/+28.
+Getter **365F9960** returns the zone's one shared cloud list. Engine **3012E8A0** maps
+those fields directly into its node parameters; **300B42A0** initializes the current bearing
+from the authored bearing. There is no XML-unit conversion in this path, confirming the
+parser's unchanged degrees/metres fields. This supersedes the earlier upstream-adapter
+boundary; the original source was in the zone producer rather than the game DLL.
 
 Shading follows the engine's `DistanceClouds` material (`distanceclouds.cfx`): density = the red channel of the sprite texture, the
 colour lerps from the sky shading colour to the sun shading colour by `exp2(-Attenuation x density)` summed over 8 taps towards the sun in the
@@ -1002,7 +1054,7 @@ and zero afterward, then exited normally. The
 disabled control still contains clouds baked into the original skybox: `e_clouds` controls
 the separate distant nodes. The reference comparison retains the existing visibly bluer /
 less hazy sky and brighter-cloud calibration gap; no phase or pixel match can be asserted
-from its single still image and unrecovered XML producer.
+from its single still image and unknown elapsed cloud phase.
 
 ### Post (`post.rs`, `post.wesl`)
 
@@ -1559,7 +1611,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
-  Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: full original cloud XML-producer verification / reference brightness calibration,
+  Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
@@ -1578,8 +1630,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   characters are lit differently in the engine: the time of day has two extra "Char BackLight" lights (`1 Color` 0.49 x 5.0,
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
-* The real client's time-of-day hour warp and spatial raw-curve zone blending are implemented (see Environment). Remaining transition gaps:
-  area-ToD overrides, per-zone relic layer weights, legacy sRGB XML migration and discrete skybox/cloud fades. The plateau of
+* The real client's time-of-day hour warp, spatial raw-curve zone blending and discrete skybox/cloud fades are implemented (see Environment). Remaining transition gaps:
+  area-ToD overrides, per-zone relic layer weights, legacy sRGB XML migration and weighted `env.xml` multipliers. The plateau of
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.

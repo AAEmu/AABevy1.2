@@ -25,6 +25,7 @@ mod roads;
 pub mod sky;
 pub mod sky_clouds;
 pub mod sky_material;
+pub mod sky_transition;
 pub mod stream;
 pub mod terrain;
 pub mod terrain_layers;

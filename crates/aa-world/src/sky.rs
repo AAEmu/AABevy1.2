@@ -27,6 +27,7 @@ use crate::coords::{bevy_to_cry, cry_to_bevy};
 use crate::env::{EnvSample, HdrSetup, Lighting, TimeOfDay};
 use crate::post::{Post, PostUniform};
 use crate::sky_material::{SkyBox, SkyMaterial, ZoneSky, load_sky_box};
+use crate::sky_transition::SkySelection;
 use crate::water::WaterStyle;
 use crate::water_material::{SEA, WaterMaterial, WaterStyles};
 use crate::water_query::{WaterKind, WaterQuery};
@@ -308,7 +309,7 @@ pub struct TodCache {
     lighting: Option<Lighting>,
     hdr: HdrSetup,
     sector_rx: Option<Mutex<Receiver<World>>>,
-    zone_sky: HashMap<Option<u16>, ZoneSky>,
+    zone_sky: HashMap<(Option<u16>, u32), ZoneSky>,
     sky_boxes: HashMap<String, Option<SkyBox>>,
 }
 
@@ -354,6 +355,7 @@ pub fn build(app: &mut App) {
     app.init_resource::<WorldClock>()
         .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3) })
         .init_resource::<TodCache>()
+        .init_resource::<SkySelection>()
         .insert_resource(AtmosphereTuning::from_env())
         .add_systems(Startup, setup_sky)
         .add_systems(Update, (receive_zones, update_clock, update_environment, update_ambient, update_sky, crate::sky_clouds::update_clouds, update_post, crate::water_material::update_water).chain())
@@ -486,12 +488,14 @@ pub(crate) fn view_exposure(cameras: &Query<Option<&Exposure>, With<PostUniform>
 #[allow(clippy::too_many_arguments)]
 pub fn update_environment(
     mut commands: Commands,
+    time: Res<Time>,
     cfg: Res<WorldConfig>,
     info: Res<WorldInfo>,
     clock: Res<WorldClock>,
     tuning: Res<AtmosphereTuning>,
     mut env: ResMut<Environment>,
     mut cache: ResMut<TodCache>,
+    mut selection: ResMut<SkySelection>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut sun: Query<(&mut DirectionalLight, &mut Transform), With<SunLight>>,
@@ -504,6 +508,7 @@ pub fn update_environment(
         env.zone = None;
         cache.zones.clear();
         cache.world_default.clear();
+        selection.clear();
         return;
     }
     let focus_entity = focus.iter().next();
@@ -522,10 +527,12 @@ pub fn update_environment(
         if same_world { info.0.environment_weights(cry_pos) } else { Vec::new() }
     });
     let Some(mut cur) = cache.sample_zones(&cfg.world, &weights, clock.layer, clock.hour) else {
+        selection.clear();
         env.sample = None;
         env.zone = zone;
         return;
     };
+    selection.update(&cfg.world, &weights, clock.layer, time.delta_secs());
     // the clouds are shaded by the sky colour, which some zones keep green (see `update_ambient`): same hue as the ambient light
     cur.cloud_sky = ambient_hue(&cur, &tuning, cur.cloud_sky);
     if tuning.sun_az.is_finite() && tuning.sun_el.is_finite() {
@@ -535,7 +542,7 @@ pub fn update_environment(
     // Native 300A5010 evaluates weighted curves each frame; there is no temporal filter.
     env.zone = zone;
     env.hour = clock.hour;
-    if let Some((c, _)) = zone_sky_of(&mut cache, &cfg.world, zone).ocean_fog {
+    if let Some((c, _)) = zone_sky_of(&mut cache, &cfg.world, zone, 0).ocean_fog {
         env.ocean_fog = crate::env::srgb_to_linear(Vec3::from(c) / 255.0);
     }
 
@@ -733,13 +740,13 @@ fn cube_image(data: Vec<u8>) -> Image {
 }
 
 /// The zone's `env.xml` (sky box, angle, ocean colour), read once.
-fn zone_sky_of(cache: &mut TodCache, world: &str, zone: Option<u16>) -> ZoneSky {
+fn zone_sky_of(cache: &mut TodCache, world: &str, zone: Option<u16>, layer: u32) -> ZoneSky {
     cache
         .zone_sky
-        .entry(zone)
+        .entry((zone, layer))
         .or_insert_with(|| {
             zone.and_then(|z| aa_pak::Pak::global().read_string(&format!("worlds/{world}/zone/{z}/env.xml")).ok())
-                .map(|xml| ZoneSky::parse(&xml, "Zone"))
+                .map(|xml| ZoneSky::parse(&xml, if layer == 1 { "Zone_Dominion_Normal" } else { "Zone" }))
                 .unwrap_or_default()
         })
         .clone()
@@ -749,6 +756,7 @@ fn zone_sky_of(cache: &mut TodCache, world: &str, zone: Option<u16>) -> ZoneSky 
 #[allow(clippy::too_many_arguments)]
 fn update_sky(
     env: Res<Environment>,
+    selection: Res<SkySelection>,
     cfg: Res<WorldConfig>,
     tuning: Res<AtmosphereTuning>,
     assets: Option<Res<SkyAssets>>,
@@ -757,12 +765,23 @@ fn update_sky(
     mut images: ResMut<Assets<Image>>,
     exposure: Query<Option<&Exposure>, With<PostUniform>>,
 ) {
-    let (Some(cur), Some(assets)) = (&env.sample, assets) else { return };
-    if !cfg.environment {
+    let Some(assets) = assets else { return };
+    if !cfg.environment || env.sample.is_none() {
+        cache.zone_sky.clear();
+        cache.sky_boxes.clear();
+        if let Some(mut m) = materials.get_mut(&assets.dome_material) {
+            m.params.box_params.w = 0.0;
+            m.box_12 = None;
+            m.box_34 = None;
+            m.box_5 = None;
+        }
         return;
     }
+    let cur = env.sample.as_ref().unwrap();
     // the zone's sky box (loaded once)
-    let zone_sky = zone_sky_of(&mut cache, &cfg.world, env.zone);
+    let zone_sky = zone_sky_of(&mut cache, &cfg.world, selection.zone, selection.layer);
+    cache.zone_sky.retain(|key, _| *key == (selection.zone, selection.layer) || *key == (env.zone, 0));
+    cache.sky_boxes.retain(|material, _| Some(material) == zone_sky.material.as_ref());
     let sky_box = zone_sky.material.as_ref().and_then(|m| {
         cache
             .sky_boxes
@@ -794,7 +813,7 @@ fn update_sky(
     m.params.sun_color = (sun_col * rs * tuning.sun_sky).extend(tuning.disc);
     match &sky_box {
         Some(b) => {
-            m.params.box_sky = (cur.cloud_sky * b.sky_multiplier * rs * tuning.sky_gain).extend(b.opacity * tuning.box_gain);
+            m.params.box_sky = (cur.cloud_sky * b.sky_multiplier * rs * tuning.sky_gain).extend(b.opacity * tuning.box_gain * selection.opacity);
             m.params.box_sun = (cur.cloud_sun * b.sun_multiplier * rs * tuning.sky_gain).extend(b.attenuation);
             let a = (zone_sky.angle + tuning.box_yaw).to_radians();
             m.params.box_params = Vec4::new(b.alpha_saturation, a.cos(), a.sin(), 1.0);
@@ -804,6 +823,9 @@ fn update_sky(
         }
         None => {
             m.params.box_params.w = 0.0;
+            m.box_12 = None;
+            m.box_34 = None;
+            m.box_5 = None;
         }
     }
 }
@@ -902,17 +924,24 @@ mod tests {
         }
         let mut world = World::load("main_world").unwrap();
         world.load_sector_zones().unwrap();
+        let mut materials = Assets::<SkyMaterial>::default();
+        let dome_material = materials.add(SkyMaterial { params: default(), box_12: None, box_34: None, box_5: None });
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(0.25)))
             .insert_resource(WorldConfig::new("main_world"))
             .insert_resource(WorldInfo(Arc::new(world)))
             .insert_resource(WorldClock { hour: 10.0, zone: None, ..default() })
             .insert_resource(AtmosphereTuning::default())
             .insert_resource(Environment { sample: None, zone: None, hour: 0.0, ocean_fog: Vec3::ZERO })
             .init_resource::<TodCache>()
+            .init_resource::<SkySelection>()
             .init_resource::<GlobalAmbientLight>()
             .init_resource::<ClearColor>()
-            .add_systems(Update, update_environment);
+            .init_resource::<Assets<Image>>()
+            .insert_resource(materials)
+            .insert_resource(SkyAssets { dome_material, ocean_material: None })
+            .add_systems(Update, (update_environment, update_sky).chain());
         let at = cry_to_bevy(Vec3::new(15712.0, 15808.0 - 0.01, 150.0));
         let camera = app.world_mut().spawn((Camera3d::default(), GlobalTransform::from_translation(at))).id();
         app.update();
@@ -936,10 +965,26 @@ mod tests {
         let env = app.world().resource::<Environment>();
         assert_eq!(env.sample.as_ref().unwrap().sun, expected.sun, "clock change has no frame-rate dependent lag");
         assert_eq!(env.sample.as_ref().unwrap().sun_dir, expected.sun_dir);
+        for _ in 0..8 { app.update(); }
+        let selection = app.world().resource::<SkySelection>();
+        assert!(selection.opacity < 0.001, "equal border weights hide discrete assets");
+        app.world_mut().resource_mut::<WorldClock>().zone = Some(179);
+        for _ in 0..9 { app.update(); }
+        assert_eq!(app.world().resource::<SkySelection>().opacity, 1.0);
+        app.world_mut().resource_mut::<WorldClock>().layer = 1;
+        app.update();
+        assert_eq!(app.world().resource::<SkySelection>().layer, 0);
+        for _ in 0..7 { app.update(); }
+        assert_eq!(app.world().resource::<SkySelection>().layer, 1);
+        assert_eq!(app.world().resource::<SkySelection>().opacity, 0.0);
+        let cache = app.world().resource::<TodCache>();
+        assert_eq!(cache.zone_sky[&(Some(179), 1)].material.as_deref(), Some("Materials/sky/sky_salpi_nuimari_cbt4"));
+        assert_eq!(cache.sky_boxes.len(), 1);
+        assert!(cache.zone_sky.len() <= 2);
         app.world_mut().resource_mut::<WorldClock>().zone = Some(186);
         app.update();
         assert_eq!(app.world().resource::<TodCache>().zones.len(), 1);
-        assert!(app.world().resource::<TodCache>().zones.contains_key(&(186, 0)));
+        assert!(app.world().resource::<TodCache>().zones.contains_key(&(186, 1)));
         app.world_mut().resource_mut::<WorldConfig>().world = "login2".into();
         app.update();
         let cache = app.world().resource::<TodCache>();
@@ -950,6 +995,12 @@ mod tests {
         assert!(app.world().resource::<Environment>().sample.is_none());
         assert!(app.world().resource::<TodCache>().zones.is_empty());
         assert!(app.world().resource::<TodCache>().world_default.is_empty());
+        assert!(app.world().resource::<TodCache>().sky_boxes.is_empty());
+        assert!(app.world().resource::<TodCache>().zone_sky.is_empty());
+        assert_eq!(app.world().resource::<SkySelection>().zone, None);
+        let sky = app.world().resource::<SkyAssets>();
+        let material = app.world().resource::<Assets<SkyMaterial>>().get(&sky.dome_material).unwrap();
+        assert!(material.box_12.is_none() && material.box_34.is_none() && material.box_5.is_none());
         app.world_mut().resource_mut::<WorldConfig>().environment = true;
         app.update();
         assert!(app.world().resource::<Environment>().sample.is_some());
