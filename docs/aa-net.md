@@ -6625,3 +6625,41 @@ and zero/nonzero-context cases. Only Lua dispatch, task lookup/close/removal, an
 Unix clock are mocked; no network/process execution. Tests verify callback order,
 getter evidence/context at every boundary, nonlocal repeated notices, unconditional
 wrong-ID cancellation, and preserved oversized raw receipts.
+
+
+### Explicit native trial Unix clock
+
+Trials exposes last_epoch_seconds and expires_at_epoch_seconds as Option<i64>.
+Constructor expiry is known0 (disabled); the native constructor samples local time,
+so last is unknown until an explicit sample is supplied. apply_with_time and the
+apply_with_notices_at/apply_with_dispatch_at variants accept Option<i64> sampled Unix
+seconds. An admitted phase sets last=sample, expiry=sample.wrapping_add(u32ms/1000)
+before its inner notices. Unknown sample marks both unknown, without guessing a start.
+Wrong active-role trial leaves clocks unchanged; changed-context adoption retains them.
+Actual role reset sets expiry0 and last=the supplied sample before Beautyshop callback.
+Application session isolation restores constructor-shaped unknown/disabled state.
+
+advance_time(epoch_seconds) returns optional TrialNotice::Timer { phase,
+remaining_seconds } after assigning last, so callback snapshots see the fresh value.
+It does nothing for unknown/zero expiry or unknown last. Actual MSVCR100 _difftime64
+returns0 if either input is negative; otherwise it subtracts integer64 first and FILDs
+the result. Original398b5706 converts directly from x87 without a f64 store, retaining
+exact valid integer differences above2^53. If now/last is negative or unchanged, no
+callback occurs. A negative expiry with otherwise valid elapsed time yields remaining0.
+Elapsed expiry remains enabled; negative remaining periods are not clamped or reset.
+
+Original queued outer frame39173ab9 first calls client packet pump391e72b0, then TL
+frame3938edb0, then trial tick3907ce50 at39173b1f. Trial phase39080056 samples
+XlGetCurrentFileTime, whose actual implementation is _time64 Unix SECONDS, unrelated
+to battlefield remote time or Windows FILETIME ticks.3907cf5b/61 updates last BEFORE
+period construction and14b TRIAL_TIMER(phase,periodTable). The root HUD bridge owns
+explicit receipt/frame SystemTime samples; WorldState/plugin plain apply deliberately
+introduces no hidden clock, so other consumers must use the clocked API themselves.
+
+trial_timer_oracle.py/native-trial-timer-oracle-20261018.json execute original frame,
+conversion and period bodies plus actual MSVCR100 difftime across13 cases. Read-only
+PID48924 verification confirms the CRT bytes match the local SysWOW64 image; only
+clock return, errno pointer, Lua/table interfaces are mocked. Separate phase-clock
+oracle executes20 cases including0/negative/MAX epochs, unsigned durationMAX, floor
+milliseconds, addition wrap and zero expiry. Embedded tests cover both oracles,
+unknown sampling, reset/adoption/lifecycle, stale-ID refusal and callback-time fields.
