@@ -21,6 +21,7 @@ use bevy::prelude::*;
 pub enum Screen {
     #[default]
     WorldSelect,
+    Login,
     CharacterSelect,
     CharacterCreate,
     Loading,

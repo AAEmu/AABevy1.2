@@ -20,7 +20,9 @@ use bevy::prelude::*;
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
+    /// The custom login screen (`login::login_screen`); the first screen unless a dev flag skips it.
     #[default]
+    Login,
     WorldSelect,
     CharacterSelect,
     CharacterCreate,
@@ -29,14 +31,17 @@ pub enum Screen {
 }
 
 fn main() {
-    App::new()
+    let mut app = App::new();
+    // the login screen's art folder is an asset source: registered before the asset plugin
+    login::login_screen::register_assets(&mut app);
+    app
         // a command on an entity that went in the same frame (screens close while models still come in) is
         // logged, not a crash
         .set_error_handler(bevy::ecs::error::warn)
         .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
         .add_plugins(aa_fx::FxPlugin)
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
-        .init_state::<Screen>()
+        .insert_state(login::login_screen::initial_screen())
         .insert_resource(aa_net::ClientOptions {
             item_recharge_catalog: hud::item_recharge_catalog(),
             ..Default::default()

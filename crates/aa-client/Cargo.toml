@@ -6,7 +6,7 @@ license.workspace = true
 description = "The ArcheAge 1.2 client remake: screen flow from world select to in-game"
 
 [dependencies]
-bevy.workspace = true
+bevy = { workspace = true, features = ["png"] }
 aa-dev.workspace = true
 aa-pak.workspace = true
 aa-cry.workspace = true

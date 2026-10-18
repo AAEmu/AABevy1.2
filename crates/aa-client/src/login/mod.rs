@@ -1,5 +1,7 @@
 //! The login stage: the original Lua UI screens backed by the server and the 3D characters.
 //!
+//! * [`login_screen`]: the custom login screen in front of world select (account, password, server; see
+//!   its docs and `docs/aa-client-login.md`); dev flags skip it
 //! * [`world_select`]: server list (`X2World` from aa-net), connect
 //! * [`character_select`]: character list (`X2LoginCharacter`), 3D character, start / delete
 //! * [`create`]: character creation (race, appearance with live preview, skillset and name)
@@ -9,8 +11,9 @@
 //!
 //! ## Flow
 //!
-//! `cargo run -p aa-client` logs in (`--account`, default `bevytest`) and shows `Screen::WorldSelect`
-//! as soon as the world list is there. Connect goes to the lobby; the character list decides the
+//! `cargo run -p aa-client` shows [`login_screen`], which logs in and then shows `Screen::WorldSelect`. With
+//! a dev flag (`--account`, `--goto`, `--shot`, ...: see [`login_screen::enabled`]) it logs in at startup instead
+//! (`--account`, default `bevytest`) and shows `Screen::WorldSelect` as soon as the world list is there. Connect goes to the lobby; the character list decides the
 //! next screen: no characters = `Screen::CharacterCreate` (like the real client), else
 //! `Screen::CharacterSelect`. Start sends `EnterGame` and shows `Screen::Loading`; the loading screen
 //! waits for the spawn and the terrain around it, then `Screen::InGame` builds the player the same
@@ -46,6 +49,7 @@ pub mod create;
 pub mod gameapi;
 pub mod host;
 pub mod loading;
+pub mod login_screen;
 pub(crate) mod name_policy;
 pub mod stage3d;
 pub mod world_select;
@@ -164,11 +168,11 @@ impl Plugin for LoginPlugin {
             .init_resource::<UiBuilt>()
             .insert_non_send(LoginBridge(gameapi::new_shared()))
             .add_message::<UiRequest>()
-            .add_systems(Startup, (start_login, spawn_world_anchor))
+            .add_systems(Startup, (start_login.run_if(|| login_screen::skipped()), spawn_world_anchor))
             .add_systems(Update, (sync_bridge, route_events, handle_requests, ensure_ui, run_lua).chain())
             .add_systems(OnEnter(Screen::InGame), release_world_anchor)
             .add_systems(OnEnter(Screen::CharacterCreate), |mut grade: ResMut<stage3d::BackgroundGrade>| grade.0 = None)
-            .add_plugins((stage3d::Stage3dPlugin, world_select::plugin, character_select::plugin, create::plugin, loading::plugin));
+            .add_plugins((stage3d::Stage3dPlugin, login_screen::plugin, world_select::plugin, character_select::plugin, create::plugin, loading::plugin));
     }
 }
 
@@ -256,9 +260,18 @@ fn route_events(
     mut exit: MessageWriter<AppExit>,
     args: Res<LoginArgs>,
     bridge: NonSend<LoginBridge>,
+    mut notice: ResMut<login_screen::Notice>,
 ) {
     for NetEvent(event) in events.read() {
         match (event, *screen.get()) {
+            // the login screen handles the session's answers itself
+            (_, Screen::Login) => {}
+            // a lost connection or a refused re-login goes back to the login screen
+            (Event::LoginFailed { message } | Event::Disconnected { message } | Event::Kicked { message, .. }, screen)
+                if login_screen::enabled() && screen != Screen::InGame =>
+            {
+                login_screen::back_to_login(message, &mut notice, &mut next);
+            }
             (Event::CharacterList(list), Screen::WorldSelect) => {
                 let force_select = args.goto.is_some_and(|g| g != Goto::WorldSelect);
                 info!("login: {} character(s) on {}", list.len(), bridge.0.borrow().world_name);
@@ -289,6 +302,7 @@ fn handle_requests(
     rt: Option<NonSend<UiRuntime>>,
     mut net: MessageWriter<NetCommand>,
     mut next: ResMut<NextState<Screen>>,
+    screen: Res<State<Screen>>,
     mut exit: MessageWriter<AppExit>,
     mut forward: MessageWriter<UiRequest>,
 ) {
@@ -299,7 +313,12 @@ fn handle_requests(
         match request {
             Request::Quit => {
                 net.write(NetCommand(Command::Disconnect));
-                exit.write(AppExit::Success);
+                // World Select's Exit Game goes back to the login screen (which has its own Exit)
+                if login_screen::enabled() && *screen.get() == Screen::WorldSelect {
+                    next.set(Screen::Login);
+                } else {
+                    exit.write(AppExit::Success);
+                }
             }
             Request::EnterWorld { world_id } => {
                 bridge.0.borrow_mut().set_world(world_id);
@@ -362,6 +381,8 @@ fn ensure_ui(world: &mut World) {
         Screen::WorldSelect => world_select::build(world),
         Screen::CharacterSelect => character_select::build(world),
         Screen::Loading => loading::build(world),
+        // the login screen draws itself (`login_screen`)
+        Screen::Login => true,
         // the create plugin builds its own UI (see the module docs)
         Screen::CharacterCreate => true,
         // the HUD builds its own stage once the player has spawned (`hud::build_hud`)

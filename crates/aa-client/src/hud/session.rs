@@ -100,6 +100,11 @@ pub fn route_session(
 
 /// The player pressed OK on the disconnect dialog: log in again and show the server list.
 pub fn return_to_world_select(credentials: Option<&Credentials>, net: &mut MessageWriter<NetCommand>, next: &mut NextState<Screen>) {
+    // with the login screen the player signs in again there
+    if crate::login::login_screen::enabled() {
+        next.set(Screen::Login);
+        return;
+    }
     // `--enter-world` keeps the credentials to itself: the same flags give the same ones
     let command = match credentials {
         Some(c) => c.command(),

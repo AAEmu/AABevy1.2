@@ -24,6 +24,7 @@ use login::stage3d::{self, StagePose, StageSlot, StageSubject};
 pub enum Screen {
     #[default]
     WorldSelect,
+    Login,
     CharacterSelect,
     CharacterCreate,
     Loading,

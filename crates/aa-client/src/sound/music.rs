@@ -40,7 +40,8 @@ const COMBAT_TAIL: f64 = 8.0;
 /// The pack item the login screens play where their scripts are silent.
 fn screen_item(screen: Screen) -> Option<&'static str> {
     match screen {
-        Screen::WorldSelect => Some("login_stage_music_before_login"),
+        // the login screen and world select share the track: it goes on across the change
+        Screen::Login | Screen::WorldSelect => Some("login_stage_music_before_login"),
         Screen::CharacterSelect => Some("login_stage_music_character_select"),
         Screen::CharacterCreate => Some("login_stage_music_creator"),
         Screen::Loading | Screen::InGame => None,
