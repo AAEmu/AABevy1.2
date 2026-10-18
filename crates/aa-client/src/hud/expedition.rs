@@ -24,6 +24,12 @@ pub(super) struct View {
     creation_npc: Option<(u32, u32)>,
 }
 
+impl View {
+    pub(super) fn faction_name(&self, id: u32) -> Option<&[u8]> {
+        self.cache.factions.get(&id).map(|faction| faction.name.as_slice())
+    }
+}
+
 fn text(lua: &Lua, bytes: &[u8]) -> mlua::Result<mlua::LuaString> {
     lua.create_string(bytes.split(|byte| *byte == 0).next().unwrap_or_default())
 }

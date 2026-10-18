@@ -133,8 +133,14 @@ pub struct UiRequest(pub Request);
 
 pub struct LoginPlugin;
 
+/// Native gEnv+0x96 is set before ConnectToServer attempts the login. It is
+/// independent of login success and is also consumed by the jury Task6 predicate.
+#[derive(Resource, Default)]
+pub(crate) struct NativeLoginStarted(pub bool);
+
 impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<NativeLoginStarted>();
         let args = LoginArgs::from_env();
         if args.enter_world {
             // dev shortcut: `ingame::enter` logs in and enters the game without the screens
@@ -201,7 +207,8 @@ fn run_lua(
     }
 }
 
-fn start_login(credentials: Res<Credentials>, mut out: MessageWriter<NetCommand>) {
+fn start_login(credentials: Res<Credentials>, mut started: ResMut<NativeLoginStarted>, mut out: MessageWriter<NetCommand>) {
+    started.0 = true;
     info!("login: logging in as {} at {}", credentials.user, credentials.login);
     out.write(NetCommand(credentials.command()));
 }

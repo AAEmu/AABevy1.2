@@ -81,6 +81,7 @@ mod tipcalc;
 mod tipitem;
 mod tips;
 mod trade;
+mod trial;
 mod usable;
 
 /// Run the isolated original-script combat example without a network connection.
@@ -177,6 +178,9 @@ pub(crate) fn chat_config_fixture() { chat::config::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn crime_fixture() { crime::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn trial_fixture() { trial::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -403,6 +407,7 @@ impl Plugin for HudPlugin {
         achievement::plugin(app);
         chat::config::plugin(app);
         crime::plugin(app);
+        trial::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
