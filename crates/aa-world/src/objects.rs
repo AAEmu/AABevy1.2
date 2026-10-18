@@ -554,14 +554,16 @@ pub fn stream_objects(
             let deferred = decal.deferred.is_some();
             let Some(material) = decal.material(&mut cry, &mut road_materials) else { continue };
             let end = decal.distance.min(cfg.brush_distance).max(0.0) + decal.radius;
-            entities.push(commands.spawn((
+            let mut entity = commands.spawn((
                 Name::new(if deferred { "Deferred terrain/object decal" } else { "Terrain/object decal" }),
                 Mesh3d(cry.meshes.add(decal.mesh)),
                 MeshMaterial3d(material),
                 Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
                 VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 20.0, use_aabb: true },
                 NotShadowCaster,
-            )).id());
+            ));
+            if deferred { entity.insert(crate::sky_material::composite::DeferredDecalPass); }
+            entities.push(entity.id());
         }
         if !entities.is_empty() { state.decals.insert(c, entities); }
         if !data.objects.voxels.is_empty() {

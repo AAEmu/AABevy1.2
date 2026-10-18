@@ -1349,6 +1349,23 @@ their CPU sort offset does not pull them through opaque geometry. World transluc
 ordinary receiver depth. This remains Bevy's distance-based overlay sorting, rather than a
 separate native priority-sorted deferred render pass.
 
+The supported ordinary-view deferred draws now precede the water colour copy as
+well as fog volumes. Native renderer **380D792E** calls **3804EC80** with pass 0;
+its **3804EED2 / 3804EF0F** calls invoke the original **380444C0** decal renderer.
+These precede cloud group 0 (**380D7C8B**), fog/list 7 group 0 (**380D7DAC**),
+water/list 8 (**380D8081 / 380D80A0**) and fog group 1 (**380D81E6**).
+`DeferredDecalPass` is attached only when the prepared `RoadMesh` has deferred
+projection data. It requires `NoAutomaticBatching` and reuses the existing early
+pass, preserving material/geometry, prepared GPU offsets, CPU sort bias -500,000
+plus priority, and the existing zero raster depth bias. Fog sorts later at
+-300,000. The source-identity regression uses real `PLACEHOLDER`/`MainEntity` keys,
+checks both view halves and restores every range on source/ocean/view changes.
+Deferred draws remain early without an ocean; mirrored views keep their prior path.
+No asset, geometry or per-frame material work is added. Forward alpha roads and
+legacy decals retain their separate late path; their water-half/opaque-overlay
+ordering remains open. Normal/specular/MRT limits above are unchanged. Raw original
+pass-order disassembly is ignored `lights/fog-water-decal-order-asm.txt`.
+
 Remaining decal limits: this is a diffuse/opacity overlay through the existing PBR shader,
 not native MRT albedo/normal/specular accumulation. In particular native square-root encoded
 buffer blending, receiver normal-map perturbations for wrapping, decal emissive/specular and
@@ -1934,9 +1951,9 @@ The existing world radiance/exposure adapter is reused without new colour gains 
 atmosphere edits. Node **300B7330** puts these draws in transparency list 7 at fixed
 5,000,000 sort distance; renderer **380D6AF0** processes that list in the before/after
 water halves. The supported Bevy path sorts after sky/decal overlays and before
-ordinary transparency, with a separate raster depth state. Native water-half
-partitioning, overlapping-volume priority and per-translucent-object fog tracing
-remain open. Nonzero HDRDynamic and FlowGraph density fades are explicitly
+ordinary transparency, with a separate raster depth state. The normal-pass water
+halves are implemented below; overlapping-volume priority and per-translucent-object
+fog tracing remain open. Nonzero HDRDynamic and FlowGraph density fades are explicitly
 unsupported; global-colour slots use the separate native sample described below.
 Native view-distance/cvar fading is also not reproduced;
 frustum and placement-cell lifetime bound this slice. Existing global post fog and
@@ -1975,8 +1992,8 @@ the green ellipsoid view uses `(21091.446,8552.923,409.69431)` toward
 `(21070,8552.923,369.69431)`. These use `--world --camera x,y,z --target x,y,z`,
 plus `--off` or `--unload-check`. Original height samples establish the shaft's
 347.1 m floor and the green volume's 373.8 m terrain; no lighting/material changes
-were made to expose the effect. The water-adjacent green view retains the stated
-water-pass limitation, and other water/particle clocks continue between captures.
+were made to expose the effect. The water-adjacent green view predates the
+water-half implementation below; other water/particle clocks continue between captures.
 No corresponding native cave/chimney screenshot exists in `reference/`; these
 are supported-renderer controls, not a native screenshot comparison.
 
@@ -2025,16 +2042,34 @@ A further bounded 20-cell survey also found an ordinary local-colour box in
 Proof exports are ignored `lights/fogvolume-global-colour.txt` and
 `lights/fog-global-hdr-asm.txt`. The existing global post fog remains independent.
 
-Fog-volume water-half ordering is still explicitly open. Native **301121C0** classifies
-normal-pass fog by `(cameraZ-oceanZ)*(.5-passId)*(centreZ-oceanZ)>0`;
-**3012B2E0**, called with a null point, returns the global ocean plane or
--1000000, not a local pond's height. The current after-water path covers the
-above-ocean camera/volume case used here. Bevy's current transmissive pass copies
-scene colour before its sorted range, so merely moving the draw into that range
-would not include fog in water refraction. The sky/cloud early pass now supplies
-that boundary, but fog-material routing remains unimplemented. No local-water-height substitute or arbitrary extra copies
-were introduced. HDRDynamic nonzero, FlowGraph fades, view-distance fading,
-overlap priority and per-translucent-object fog tracing retain the limits above.
+Normal-pass fog water ordering now uses the existing sky/cloud early pass. Native
+**300B5B60** copies the Matrix34 translation to node +208/+212/+216 at instructions
+**300B5BEA / 300B5BF2**; neither shape bounds nor the height-falloff base is substituted.
+**300B7523 / 300B7534** pass that stored world centre to **301121C0**, and
+**300B7871 / 300B7872** submit its boolean result with list 7. **380D6AF0** processes
+list 7 group 0 before water, then group 1 after water. The raw gate at **300B7336**
+permits only native pass ID zero for fog nodes. The supported predicate is
+`((cameraZ-oceanZ)*.5)*(centreZ-oceanZ)>0`: true stays after water, strict equality
+goes before. **3012B2E0**, called with a null point, returns the global ocean plane,
+rather than local pond height. Bounded original-x86 execution verifies **nine** matrix
+translation cases (including rotated/mirrored scale and large world coordinates) and
+**36** water-half cases. Proof scripts/exports are ignored
+`lights/fog_water_proof.py` / `fog-water-native-{asm.txt,oracles.json}`.
+
+Streaming attaches `FogWaterPass` with the existing cell-origin-adjusted material
+centre. It requires `NoAutomaticBatching`; the render adapter retains a small
+`MainEntity`-to-height map and ordinary-view map across frames, then preserves the
+prepared draw ranges/offsets while selecting each volume independently in each view.
+The same single finite global `OceanPlane` source supplies height. Missing/ambiguous
+ocean input retains the late path; mirrored views also retain that path because the
+native recursive/reflection pass identity is not mapped. This does not claim native
+recursive fog rendering. No local-water-height substitute, extra material, mesh,
+worker, texture copy or fog uniform update is introduced. The existing **32 total**
+volume budget and explicit entity/mesh/material cleanup remain unchanged. Raw colour,
+radiance, matrix, integration, depth and shader formulas are unchanged. The original
+above-ocean camera/volume case remains late according to the source predicate.
+HDRDynamic nonzero, FlowGraph fades, view-distance fading, overlap priority and
+per-translucent-object fog tracing retain the limits above.
 
 Global-colour QA passes **192 world tests**, nine existing ignored, all examples
 check and the built `fog_volume` fixture. The added real-zone controls execute
@@ -2082,6 +2117,46 @@ The unload run varies roughly **131-295 FPS** after leaving. Other agents' QA
 shares the GPU, so these timings are recorded workload observations rather than
 a controlled performance comparison. All own windows are closed; the inherited
 five sky/post/water/fly calibration files retain their exact original hashes.
+
+**Water-half validation (2026-10-18):** **201** world tests pass, with nine existing
+ignored; all examples check and the fog/decal fixtures build. `fog_water --two-views`
+uses the production fog shader, real opaque depth and `ViewTransmissionTexture`.
+The receiver reverses copied RGB, so coloured fog before the copy differs from an
+incorrect late overlay. Default centre 110 / ocean 100 / eyes 90 and 110 produces
+exact display RGB **(147,155,177)** before water and **(198,155,113)** after water.
+Independent midpoint density integration supplies the CPU swatches. Box/ellipsoid,
+inside, opaque front/middle/behind, equality, zero density, missing depth/ocean,
+forced-late, ocean loss and a two-view camera crossing all pass. The lifecycle
+variants retain one material across crossing/ocean loss or release it completely
+on unload. Use `--shot-after 20` for those three long controls.
+
+`--decal-control` adds an opaque-receiver alpha overlay with the native CPU sort
+offset and zero raster depth bias, then checks decal-before-fog-before-copy order.
+`--late-decal-control` leaves that overlay out of the copy and depth-blocks it behind
+the diagnostic receiver; `--late-control` independently forces fog late. All
+**32** RGB controls are within **one display byte**. Inspected captures are under
+`shots/aa-world/fog_water/`; original-scene runs use `fog_volume --world --global
+--transmission` for day/night/off and actual cell unload. The original 81-decal
+`decals --siege --glass --no-vegetation` on/off runs retain 81 deferred meshes,
+1,143 object parts and zero pending/failed models; `--stream-check` proves all
+decal entities and counts disappear. Materials/geometry and authored lighting were
+not changed. No native same-camera graveyard/siege reference exists.
+
+A submerged original-data probe uses Cry **(12428,10430,99.5)** toward the global
+volume centre, with ocean 100. Its original finest terrain is **98.7923** m, so the
+camera is above ground. The view is substantially occluded by the existing ocean
+surface and does not establish a useful native visual comparison of the before-water
+fog branch; the diagnostic copy controls establish that contribution numerically.
+The sea's existing underwater/reflection approximation remains explicit.
+
+Final last-four-sample FPS under shared load: numeric ordinary **216-246**, box/shape
+controls **167-285**, original day **104-149**, night **133-157**, submerged
+**119-151**, and 81-decal glass **102-149** (off **118-156**). Fog unload releases
+one entity/mesh/material; deferred unload leaves no decal entities. All 25 final
+runs exit normally, with no logged warnings/errors, and every own window closes.
+The complete summary is ignored `lights/fog-water-final-results.json`; the five
+inherited calibration files keep their exact hashes. No full native fog tracing,
+MRT decal accumulation or screenshot parity is claimed.
 
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data
