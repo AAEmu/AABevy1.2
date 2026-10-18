@@ -2245,3 +2245,192 @@ to the top-right, zero script errors, 233–272 FPS, automatic closure and exit 
 Shared HUD/tooltip framing was compared with `reference/ingame/tooltip_hud/real.png`;
 that reference has no pet/overflow scenario, so it is not a pixel comparison of
 the corrected placement. No font, asset layout, or scene calibration changed.
+
+## Native battlefield entrance data contracts (2026-10-18)
+
+These are source contracts for the app-owned `X2BattleField` adapter, traced from
+the unchanged entrance Lua through the original native bindings. They do not add
+battlefield state or database access to aa-ui.
+
+`GetEntranceBasicInfo(npcType)` (`39456130`) requires a local player, a valid NPC
+template, and its nonzero `npcs.recruiting_battle_field_id`. It returns a table
+with `type=battle_fields.id`, `name=battle_fields.name`, and
+`desc=battle_fields.desc`. `type` is not `field_kind_id`. Native SQL `39a14988`
+loads `id,desc,field_kind_id,name,zone_key`; loader `3982d396` / `3982d3cc`
+localizes the description/name through the `battle_fields` table and row ID.
+
+Rule selection `39456970` scans that battlefield's rules in descending
+`level_min` order and selects the first threshold at or below the local player's
+level. Native SQL `39a16a28` explicitly orders
+`game_rule_sets BY battle_field_id,level_min DESC`. The remaining getters use:
+
+| Original method | Binding | Native result |
+|---|---|---|
+| `GetEntranceMaximumPlayers(npcType)` | `39456a40` | Selected rule's `corps_size`, the size of one team |
+| `GetEntranceLevelSection(npcType)` | `39456af0` | Two numbers: selected minimum and next higher threshold minus one; the highest band ends at the game's level cap |
+| `GetEntranceFactionInfo(npcType,corps)` | `39456e00` | Corps 0/1 resolves selected rule's `corps1_id`/`corps2_id` through the faction manager; corps 2 returns literal `ANY_CORPS`; other corps returns an empty string |
+| `GetEntranceVictoryConditionInfo(npcType)` | `39456c50` | Table with `victoryScore=victory_score`, `victoryKillCount=victory_kill_count`, and `victoryTarget=victory_kill_corps1_head` |
+
+The victory target is the first corps-head field's numeric value; the binding
+does not convert it to a boolean or fall back to the second corps-head field.
+Faction resolution follows `3936ce60` -> `397f21d0` -> `392f8100` -> `398a4090`,
+rather than using the battlefield's display name. Missing local player, NPC or
+battlefield returns **zero Lua values**. Maximum/faction/victory also return zero
+values when no threshold matches. Level-section lookup itself can return
+`0,levelCap` for an empty rule list and uses minimum zero below every threshold;
+it does not invent a matching lowest-level rule for the other methods. The
+read-only, module-verified original runtime's level-cap byte was 55.
+
+`GetInteractedNpcType()` (`394568d0`) reads the battlefield manager returned by
+`3936ce50`, specifically manager `+0x3cd8` at `3a172cb0`. This manager is static
+`3a16efd8`, not the current actor or selected target. Constructor/reset
+`3936d0d0` initializes it to the invalid-NPC sentinel (runtime-verified zero).
+The recruiting transition `3936f780` stores a nonzero request NPC type at
+`3936f845`; a request with sentinel zero preserves the existing value. The Lua
+request path `39455e00` supplies the actual NPC type, while server-driven caller
+`391e0812` supplies zero. The getter initially returns numeric zero even without
+a player. Original entrance Lua separately prefers a nearby target NPC only when
+its type differs from this stored value and its distance is below 2.5.
+
+Source and bounded read-only runtime excerpts are in ignored
+`data/extract/aa-ui/native-battlefield-entrance-source-20261018.txt` and
+`native-battlefield-entrance-runtime-20261018.txt`. This audit changes no UI
+rendering; the app owns getter integration and its original-panel validation.
+
+## Native pet information-panel stat contracts (2026-10-18)
+
+Original `hud/pet_action_bar/pet_view.lua` requests
+`X2Unit:UnitInfo("playerpet")` for displayed values and
+`UnitModifierInfo("playerpet")` for text colors. They use the pet's actual actor
+and equipment, not the player's attribute snapshot. `UnitInfo` binding
+`394bdc10` resolves the raw unit, advances to its actor at `unit+8`, then calls
+`398aa290`; its attribute component is `unit+0x1aa8`.
+
+Let `A(i)` be that actor's final signed integer attribute from `398a0bc0`.
+The presentation helper uses f32 operations in the listed order; `f(i)` below
+means conversion of `A(i)` to f32 and `inv=1.0f/f(13)`.
+
+| `UnitInfo` key | Native calculation |
+|---|---|
+| `melee_dps` | `f(96)*0.001f + f(33)*0.001f` (separate scaled terms) |
+| `melee_critical_rate` | `f(16)*inv*100.0f` |
+| `dodge_rate` | `f(178)*inv*100.0f` |
+| `armor` | `f(8)` |
+| `armor_percentage` | `f(8)/(f(8)+5300.0f)*100.0f` |
+| `magic_resist` | `f(64)` |
+| `magic_resist_percentage` | `f(64)/(f(64)+5300.0f)*100.0f` |
+| `persistent_health_regen` | `f(67)*0.2f` |
+| `health_regen` | `f(11)+persistent_health_regen` |
+| `persistent_mana_regen` | `f(68)*0.2f` |
+| `mana_regen` | `f(12)+persistent_mana_regen` |
+
+The armor/resistance denominator is the fixed constant 5300 (`399e3e20`), not a
+formula involving player or pet level. Critical/dodge percentages have no extra
+presentation clamp. The unchanged Lua formats armor/resistance as
+`%d (%.2f%%)`, DPS as `%.2f`, critical/dodge as `%.2f%%`, and regeneration through
+the normal value-to-string path.
+
+### Attribute bases, aggregation and equipment
+
+Mate raw kind 5 uses generic base dispatch `398b4e80` -> `398a0d60` and
+`unit_formulas` owner type 5. Relevant base routes are:
+
+| Attribute | Base source / formula kind |
+|---|---|
+| 11 / 12 | Kinds 16 / 17 (health / mana regeneration) |
+| 13 | Kind 20 (rating denominator) |
+| 33 | Kind 21 (additional melee DPS, stored in thousandths) |
+| 67 / 68 | Kinds 31 / 32 (persistent regeneration) |
+| 16 | Helper `398a7220`, kind 1 and multiplier attribute 77 |
+| 178 | Same helper, kind 46 and multiplier attribute 180 |
+| 8 | Equipped armor sum `398b4b90`; no kind-18 formula in this Mate route |
+| 64 | Truncated kind-19 formula plus equipped resistance `398b4ae0` |
+| 96 | Mainhand slot 15 weapon DPS `398a7ae0`, multiplied by 1000 then truncated |
+
+Helper `398a7220` subtracts
+`trunc(f32(A(multiplier)) * (f32(A(13)) * -0.001f))` from the truncated formula
+result. The multiplier constant at `39a204c8` is **negative 0.001**, so a positive
+multiplier increases the rating. Attributes 54 (`melee_attack_speed_mul`) and
+180 (`dodge_mul`) have zero base in this route. Normal UnitFormula evaluation
+`39567110` explicitly spills/reloads its evaluated result as f32 at
+`395672b3`/`395672b6`, before integer conversion `398b56d0`. Its f64 conversion
+store therefore does not justify retaining an unnarrowed formula result.
+
+For reference, compact owner-5 formulas include kind 1 `(dex*10)*100`, kind 16
+`spi*0.1+7`, kind 17 `spi*0.07+7`, kind 19 `spi*2`, kind 20
+`((level^1.3+level*3+17)*100)*100`, kind 21
+`(((level*2)/3+19)+(level^2/15)+(str*0.2))*1000`, kinds 31/32
+`(spi*0.1)*2`, and kind 46 `((dex+int)/2*8)*100`. These are database formulas,
+not hardcoded replacement formulas in aa-ui.
+
+Final `A` combines all applicable flat and additive percentage deltas into one
+pair initialized to `(0,100)`: buff/provider/temp modifiers (`398a0060`), static
+NPC-template/level modifiers (`3989ffb0`), and for actor kinds 0/5 all three gear
+buckets from `398a0a50`. Percentages from independent sources are added as
+deltas, not multiplied sequentially. Percent 100 uses integer `base+flat`;
+otherwise `f32(base+flat)*f32(percent)*0.01f` is truncated toward zero. Native
+`395729f0` then clamps against `unit_attribute_limits`. Primary-derived formula
+inputs consequently use the pet's final attributes, including its own gear.
+
+Armor base scans armor slots 0..14 and holdable slots 15..18. Armor implementation
+2 and accessory implementation 24 use their armor/slot types to select
+`wearables.armor_bp`; the latter's dedicated native lookup is `396a6d00`
+(`item_accessories`, native SQL `39a01890`).
+Resistance base scans eligible slots 0..14 and 27, using
+`wearables.magic_resistance_bp`. Both require usable durability. Wearable
+helpers `397cc6d0` / `397cc750` evaluate kind 0/1 `wearable_formulas` with
+`item_level` and the matching `item_grades` coefficient, narrow to f32, apply a
+positive received override as a percent, multiply by f32 basis points and
+`0.0001f`, then truncate. Their compact formula is
+`floor(item_level^1.1*45+100)*item_grade`. Armor on holdables uses
+`holdables.formula_armor` through `397cc4c0`.
+
+Mainhand DPS evaluates `holdables.formula_dps` using the template's signed-byte
+item level and `item_grades.var_holdable_dps`. This is a separate evaluation path
+(`397cc440` -> `39568560`): without a positive DPS override, `397cc45b` stores f32
+with **FST**, retaining the evaluated x87 result for the caller's multiply by
+1000 and truncation. A positive override instead uses the narrowed f32 result
+times the received percent times `0.01f`. Do not extend UnitFormula's mandatory
+final f32 spill to this no-override holdable path. Empty mainhand uses
+`398a7320` with the pet's level, default holdable ID 0 and grade 0 (bounded,
+module-verified read-only runtime constants). Compact holdable 0 is `fist` with
+DPS/armor formulas `0`, so its weapon DPS contribution is zero.
+
+### Modifier values and original label colors
+
+`UnitModifierInfo` (`394bec40`) calls `394bb740` for raw modifier deltas. It does
+not subtract an unmodified value from clamped final `A`. That helper first
+obtains raw base `B` through `3989f860`, gathers static template pair `S`, and
+stores an f32 baseline
+`b=(f32(B)+f32(S.flat))*f32(S.percent)*0.01f`. A new pair `T=(0,100)` gathers
+buff/provider/temp modifiers and eligible main-item, rune and gem buckets.
+`skipMainGear=true` omits only the main-item bucket; runes/gems still count.
+Neutral `T` returns zero; otherwise it computes
+`(b+T.flat)*T.percent*0.01f-b` with the native x87 arithmetic and narrows the
+returned Lua value to f32. No integer truncation or attribute-limit clamp is
+applied. This separate static baseline is deliberate and differs from `A`'s
+single aggregate operation.
+
+| Original pet modifier key(s) | Attribute | `skipMainGear` |
+|---|---|---|
+| `melee_dps`, `melee_attack_speed_mul` | 33, 54 | false |
+| `melee_critical_rate`, `dodge_rate`, `dodge_mul` | 16, 178, 180 | false |
+| `armor`, `magic_resist` | 8, 64 | false |
+| `health_regen`, `persistent_health_regen` | 11, 67 | false |
+| `mana_regen`, `persistent_mana_regen` | 12, 68 | false |
+| `dex`, `int`, `spi`, `max_health`, `max_mana`, `move_speed` | 1, 3, 4, 6, 7, 10 | true |
+
+These modifier numbers retain raw attribute units: no DPS `0.001`, critical/dodge
+percentage conversion, or persistent-regeneration `0.2` scaling. Original labels
+sum their declared affect keys; for example dodge sums `dodge_rate,int,dex,dodge_mul`
+and regeneration sums its direct, spirit and persistent fields. The private
+`GetPetModifierColor` treats only `-0.009 < sum < 0.001` as zero; positive becomes
+green, negative red, and zero the default color. Missing modifier keys would
+therefore break the original loop rather than merely lose an optional tooltip.
+
+Disassembly is retained in ignored `data/extract/aa-ui/` artifacts
+`native-pet-unitinfo-source-20261018.txt`, `native-pet-stats-source-20261018.txt`,
+`native-pet-unitmodifier-source-20261018.txt`, and
+`native-pet-attribute-components-20261018.txt`. The app owns real actor, formula,
+equipment and buff integration. This source-only audit changes no Lua toolkit
+code or visual output, so it adds no screenshot or performance claim.
