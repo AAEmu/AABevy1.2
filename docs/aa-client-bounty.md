@@ -36,9 +36,14 @@ bytecode with a real nonempty getter table fails at bounty_bullet.alb:115:
 `attempt to index global 'listCtrl' (a nil value)`. FillData also reads lowercase
 `bountyRecords` and `index`; its button reads `curSelected` and `bountyRecords`,
 while the file defines uppercase local BOUNTY_RECORDS/CUR_SELECTED. This is an
-executed bytecode failure, not just a decompiler discrepancy. Native global
-providers are being audited before any compatibility repair. This adapter does
-not supply invented globals or claim a working nonempty bulletin.
+executed bytecode failure, not just a decompiler discrepancy. The subsequent
+aa-ui audit checks all961 original bytecode files: no script writes listCtrl,
+bountyRecords or curSelected. The native child-binding oracle writes the parent
+table field; pagelist also stores frame.listCtrl. Global index has unrelated
+writers and is not globally absent. The screen is loaded and reachable, making
+this an original asset defect rather than an unused-screen or missing-toolkit
+global assumption. See docs/aa-ui.md. No invented globals or working nonempty
+bulletin are claimed.
 
 The active bevy lane's CS0ea returns an empty bulletin. CS11f/120 payment
 handlers are absent. Natural bulletin interaction still requires the actual

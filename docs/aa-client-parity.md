@@ -13,12 +13,23 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client milestone:268 passed/38 optional probes ignored in93.60s.
+Latest full-client suite: 276 passed / 38 optional probes ignored in 56.13s.
+Seven ranking checks cover the real catalog and native calendar/return shapes,
+ordered receipt and name readiness, original physical tabs/refresh/rewards,
+and the actual HUD scheduler with captured typed requests. Main and ranking
+example build; three ranking fixture captures and real lane world select pass
+with no runtime errors. The playable alias now includes ranking, physical terrain
+support, native 32-slot materials and both cooldown mask paths. Physical terrain support now
+omits native holes, preserves received spawn height and accepts actual lower
+brush floors; the original hole/proxy regression passes. Live traversal remains
+unverified. See aa-client-ranking.md and aa-client-terrain.md.
 Five bounty checks add native fifteen-column getter values, ordered complete-map
 callbacks, actual actor name/local flags, typed captured controls and the original
 empty bulletin/standalone setup button. The nonempty original bulletin still
-fails on undefined original Lua globals; its provider audit and the absent
-SET_BOUNTY-to-setup listener remain explicit gaps. No bounty payment is inferred.
+fails on undefined original Lua globals. The completed all-961-bytecode and
+native child-binding audit identifies an original asset defect; no provider
+global is invented. The absent SET_BOUNTY-to-setup listener remains an explicit
+gap. No bounty payment is inferred.
 Three bounty/world-list captures are inspected without warnings/errors; the
 playable alias now includes the bounty adapter (see aa-client-bounty.md).
 All six trial HUD checks pass, including original physical Task6/7/8, records,
@@ -41,10 +52,13 @@ cooldowns advance once per frame before HUD reads; queries remain side-effect fr
 Earlier achievement tracing/detail/persistence and list-geometry checks remain passed.
 Native slot captions and the actual account option82 integration pass; generic
 cooldown buttons retain masks without invented slot captions. Explicit native
-GCD selection/state and other cooldown producers remain open.
-Network512 tests pass, including bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
+GCD selection/state has a tested opt-in toolkit adapter; the actual application
+producer/accessor mapping remains open. Generic and ordinary slot mask rendering
+now use the source dual-texture path; ordinary slot captures and 42 selected
+UI regressions pass. The toolkit selector remains opt-in pending real producers.
+Network 532 tests pass, including bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
-World210 tests/9
+World 218 tests / 9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
 now reach the transmission copy in their source order. Fog/deferred decal water
@@ -52,8 +66,10 @@ ordering adds32 GPU comparisons and nine original scene/unload runs. Explicit
 subzone queries pass22 native controls and315 original polygon probes; automatic
 live registration remains unwired. Ordinary road order adds36 executed native
 cases, eight exact GPU controls and original scene/unload checks. Owning docs
-retain exact evidence and limits. Trial spatial strings/live validation, bounty
-and ranking HUD integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
+retain exact evidence and limits. Native terrain holes/height packing/diagonal
+and 32-slot surface materials pass numeric regressions, all 64 GPU material
+controls, two original on/legacy pairs and unload checks. Trial spatial strings/live validation, bounty asset
+compatibility and ranking live integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
 
 | Area | Current evidence | Remaining work |
@@ -79,13 +95,13 @@ parity is unfinished.
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
-| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury headers, queue request, original labels/hover/waiting tooltip and dishonor glyph; native19-key trial data, record pages, callback snapshots/ticks and actual Task6/7/8, Confirm/Cancel/Verdict controls; bounded ranking and bounty protocol/cache/commands | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking/bounty HUD integration and name prerequisites, trial spatial strings and mixed-subsystem ordering, crime reporting/prison and racing flows; paired live crime/jury settlement |
+| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury headers, queue request, original labels/hover/waiting tooltip and dishonor glyph; native19-key trial data, record pages, callback snapshots/ticks and actual Task6/7/8, Confirm/Cancel/Verdict controls; original ranking tabs/records/rewards over static catalog, received boards, independent streamed names, native calendar/locks and typed controls; bounty getters/setup/empty bulletin | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking reward-mail formatter and live settlement, original nonempty bounty asset defect/payment lane gaps, trial spatial strings and mixed-subsystem ordering, crime reporting/prison and racing flows; paired live crime/jury settlement |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
 | Options and UI toolkit | Applied account-local options/sound/key bindings and bag persistence; original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, graphics application, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
 
 ## Active ownership
 
-* Root: `aa-client`, original trial tasks/controls and bounty received adapters; ranking HUD integration is next over executed native contracts and the actual static catalog. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
+* Root: `aa-client`, original trial/bounty/ranking received adapters and physical terrain support have documented checks. Right-click self-buff cancellation is next, using native Good-list order and captured received instance identity. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
 * Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
 * UI agent: `aa-ui`, native listbox hierarchy/art/tooltips for original crafting/achievement, including visible/animated templates and white/grey state fallbacks; native48px icon rejection audited. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed. Read-only native repair API audit supports root's next integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
