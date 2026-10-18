@@ -1543,6 +1543,79 @@ shader/GPU errors. The nine existing terrain-layer tests and
 `cargo check -p aa-world --examples` pass; inherited fly/post/sky/water
 calibration hunks are untouched.
 
+#### Native ATI2 heightmap detail components
+
+Heightmap detail normal sampling now preserves the original D3D10 ATI2 component
+contract. `Common.cfi::GetBumpMap`83-97 swaps a base ATI2 texture's sampled YX,
+then `GetNormalMap`101-109 expands to -1..1 and reconstructs base Z with
+`sqrt(saturate(1-dot(XY,XY)))`. `FragLib.cfi`505-514 independently samples the
+detail texture's **raw XY**, expands it and adds `XY*DetailBumpScale` to base XY,
+after that Z reconstruction. It does not apply the base sampler's YX swap or
+reconstruct Z again. `terrain.ext` enables the detail branch with mask 0x8000;
+`terrain.cfx`498-500 supplies the authored scale/tiling. This same distinction
+was already preserved for compiled voxel layers; the heightmap array path had
+applied semantic XY to both samplers.
+
+`terrain_layers.rs` retains its existing semantic-XY ATI2 block conversion for
+base normals. It now carries the source DDS `swapped_rg` provenance as bit 2
+(value 4) of the existing normal array slot flags. The shader ignores this bit
+for base sampling and reverses the conversion only for detail sampling. Copied
+256 px sources and the second normal array keep their independent bits; plain
+BC1 detail remains RG. Existing BC1 transcoding, base normal reconstruction,
+texture bytes/mips, array counts/capacity, cache lifetime and worker budgets do
+not change. No lighting, projection frame, surface weight, fade or detail-scale
+tuning was introduced. The existing BC1 base-Z reconstruction and per-fragment
+heightmap frame/weight approximations remain explicit; this is a component-order
+correction, not a native BRDF/terrain-stream replacement.
+
+A bounded aa-pak survey of cells (12,10),(12,14),(20,8),(21,8) found **54**
+detail-enabled projection references in their first 16 surface slots; all use
+ATI2, across 20 source paths. Original rock406b X/Y uses detail scale 1 and tiling
+6; grass001a uses .2 and .1. The ignored
+`lights/terrain-detail-channel-survey.json` retains exact material/texture paths.
+Source unit checks verify unchanged original ATI2 base blocks, BC1 provenance,
+all four flag combinations and real cell (20,8) material metadata.
+
+`TerrainParams::inspect_normal`, zero normally, lets the standalone aa-dev
+`terrain_detail` fixture encode the production shader's computed normal without
+light/BRDF differences. Its bounded one-cell library retains the real prepared
+arrays: 16 diffuse /22 normal layers, about 10 MB. Twelve actual GPU controls
+use original raw rock ATI2 (86,98), detail ATI2 (113,123), and plain BC1 detail
+(173,57,247) texels. Rows exercise native ATI2, second-array/copied-source routing,
+and the BC1 guard; columns use scales 0/.2/1/-.7. Independent CPU source vectors
+expand signed components, reconstruct base Z before detail addition, and use
+the existing controlled flat terrain frame. All 12 pass within one display
+byte, including zero-detail base controls; inspected
+`shots/aa-world/terrain_detail/numeric.png` logs 250-300 FPS. The default-zero
+diagnostic adds one aligned uniform field and no assets/draws to normal play.
+
+`--world` selects original (20,8), camera Cry `(21091.446,8528.923,384)` toward
+`(21075,8552.923,374)`; `--world --forest` selects (12,14), camera
+`(12842.47,14535.70,172.27849)` toward `(12812.47,14575.70,158.27849)`.
+Both use hour 10 and unchanged lighting, with objects/vegetation disabled to
+isolate terrain. Each view has one cell, 16 patches and one cell material;
+the real tables expose 17/14 ATI2 detail references respectively. `--off`
+clears only detail's provenance bit to reproduce the previous component order,
+retaining the same base normals, images, geometry and authored detail strength.
+Inspected `exterior{,_off}.png` and `forest{,_off}.png` under the same shot folder
+show subtle terrain changes: rows 400..1080 have mean absolute display-RGB
+difference .50 /1.09, with 7.9% /18.5% of pixels changing by more than 2 in a
+channel. A black daytime moon disc is present in both forest images; that
+unchanged sky issue is reported separately and excluded from this terrain ROI.
+No matching native camera capture is available; the existing cover/lighting,
+projection, BC1 base-normal and missing specular/BRDF limits remain explicit.
+
+`--unload-check` moves outside the actual cell at 16 s and, by 23 s, asserts all
+16 patch entity IDs and the cell material ID absent, zero cells/patches and no
+pending load. Both original cells pass, with inspected `exterior_unload.png`
+and `forest_unload.png`; the shared world arrays retain their established
+world-library lifetime. The full suite passes **193 tests**, nine existing
+ignored; all examples check/build and all seven fixture runs exit cleanly.
+The last five two-second logs give exterior **89-173 FPS**, previous-order
+control **168-180**; forest **160-185**, control **121-173**. Unloaded frames vary
+roughly **164-276 FPS**. These shared-GPU runs are not a controlled cost
+comparison. No inherited fly/post/sky/water calibration file was changed.
+
 ### Objects (`objects.rs`, `placement.rs`)
 
 Placement files are parsed on the `aa_cry::workers` threads (max 2 cells in flight, ahead of the models in the queue) and binned per 64 m sector. Models are prepared (parsed, textures

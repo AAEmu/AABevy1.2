@@ -81,9 +81,11 @@ pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 pub struct TerrainParams {
     /// Linear colour factor (`WorldConfig::terrain_tint`), `w` = detail fade distance.
     pub tint: Vec4,
+    /// Isolated aa-dev control: encode the computed normal, bypassing lighting (zero normally).
+    pub inspect_normal: u32,
     /// Four vectors per `(surface type * 3 + projection)`: `(diffuse, normal, uv scale u, v)` (a texture is
     /// `slot + 1000 * flags`: diffuse flags 0 / 1 / 2 = 512 / 1024 / 2048 px array, normal flags bit 0 =
-    /// 2 x 2 copies at half the uv, bit 1 = the second array),
+    /// 2 x 2 copies at half the uv, bit 1 = the second array, bit 2 = ATI2 detail raw-XY provenance),
     /// `(uv offset u, v, DetailTextureStrength, DetailBumpScale)`,
     /// `(detail normal, detail uv scale u, v, material colour r)` and
     /// `(detail uv offset u, v, material colour g, b)`;
@@ -100,7 +102,7 @@ impl TerrainParams {
             entry[2] = Vec4::new(-1.0, 0.0, 0.0, 1.0);
             entry[3] = Vec4::new(0.0, 0.0, 1.0, 1.0);
         }
-        TerrainParams { tint: tint.extend(DETAIL_DISTANCE), layers }
+        TerrainParams { tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, layers }
     }
 }
 
@@ -375,10 +377,13 @@ impl LayerLibrary {
                     dropped += 1;
                     continue;
                 };
-                let Some((kind, tex)) = place(&mut layers, layer.kind, layer.copies) else {
+                let Some((kind, mut tex)) = place(&mut layers, layer.kind, layer.copies) else {
                     dropped += 1;
                     continue;
                 };
+                // Normal arrays retain semantic XY for the base sampler. Native
+                // detailMapSampler reads raw ATI2 XY instead (FragLib.cfi514).
+                if layer.ati2_swapped { tex.flags |= 4; }
                 slots[set].insert(path, tex);
                 data[kind as usize].extend_from_slice(&layer.data);
             }
@@ -584,6 +589,8 @@ struct Layer {
     kind: Kind,
     /// A normal map stored as 2 x 2 copies of a half size source (the shader samples it at half the uv).
     copies: bool,
+    /// ATI2 blocks were swapped into semantic XY; native detail reads original raw XY.
+    ati2_swapped: bool,
     /// `kind.layer_bytes()` of blocks.
     data: Vec<u8>,
 }
@@ -635,7 +642,7 @@ fn load_layer(path: &str, normal: bool) -> Option<Layer> {
         data.extend_from_slice(&level);
     }
     debug_assert_eq!(data.len(), kind.layer_bytes());
-    Some(Layer { kind, copies, data })
+    Some(Layer { kind, copies, ati2_swapped: normal && dds.format == DdsFormat::Bc5 && dds.swapped_rg, data })
 }
 
 /// The blocks of one mip level as the array of `kind` wants them: BC1, or BC5 with x in red.
@@ -915,6 +922,42 @@ mod tests {
         assert_eq!(n.data[..row], n.data[row..2 * row]);
         // a 256 px map is no diffuse map
         assert!(load_layer(small, false).is_none());
+    }
+
+    #[test]
+    fn ati2_provenance_preserves_base_blocks_and_distinguishes_plain_bc1_detail() {
+        if !crate::pak_available() { return }
+        let path = "textures/aa_terrain/canyon/tr_canyon_rock3d_406b01_ddn.dds";
+        let bytes = aa_cry::read(path).unwrap();
+        let dds = Dds::parse(&bytes).unwrap();
+        assert_eq!(dds.format, DdsFormat::Bc5);
+        assert!(dds.swapped_rg);
+        let normal = load_layer(path, true).unwrap();
+        assert!(normal.ati2_swapped && !normal.copies);
+        // Existing array data retains the exact legacy semantic XY block swap.
+        assert_eq!(&normal.data[..8], &dds.data[8..16]);
+        assert_eq!(&normal.data[8..16], &dds.data[..8]);
+        for name in ["wasteland/w_forest_white_sand_a_ddn", "field/tr_field_dirt_241a_ddn"] {
+            let bc1 = load_layer(&format!("textures/aa_terrain/{name}.dds"), true).unwrap();
+            assert!(!bc1.ati2_swapped, "BC1 must retain its plain RG detail input");
+        }
+        // Metadata must coexist with copied source and overflow-array routing,
+        // without changing the slot or allocating an extra texture layer.
+        for (initial, copies, expected) in [(0, false, 4), (0, true, 5), (MAX_LAYERS, false, 6), (MAX_LAYERS, true, 7)] {
+            let mut counts = [0; LAYER_ARRAYS]; counts[Kind::Normal as usize] = initial;
+            let (_, mut tex) = place(&mut counts, Kind::Normal, copies).unwrap();
+            tex.flags |= 4;
+            assert_eq!(tex.flags, expected);
+            assert_eq!(tex.slot, 0);
+            assert_eq!((tex.code() / FLAG).floor() as u8, expected);
+        }
+        let built = LayerLibrary::build("main_world", [(20,8)].into_iter()).unwrap();
+        let params = built.library.params((20,8), Vec3::ONE).unwrap();
+        let entry = (12 * PROJECTIONS) * ENTRY;
+        assert_eq!(((params.layers[entry].y / FLAG).floor() as u32) & 4, 4);
+        assert_eq!(((params.layers[entry+2].x / FLAG).floor() as u32) & 4, 4);
+        assert_eq!(params.layers[entry+1].w, 1.0);
+        assert_eq!(params.inspect_normal, 0);
     }
 
     /// Diffuse maps go to the array of their size: the 2048 px ground of Austera to the huge one, 1024 px maps to

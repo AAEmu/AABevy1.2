@@ -15,6 +15,7 @@ import bevy_pbr::render::{
 struct TerrainParams {
     // rgb: linear tint of the result, w: distance at which the layers have faded out
     tint: vec4<f32>,
+    inspect_normal: u32,
     // four vectors per (surface type * 3 + projection):
     //   0: (diffuse, normal, uv scale u, uv scale v); a texture is slot + 1000 * flags: diffuse flags 0 / 1 / 2
     //       = the 512 / 1024 / 2048 px array, normal flags bit 0 = 2 x 2 copies (half the uv), bit 1 = the
@@ -196,7 +197,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                     if dt.x >= 0.0 {
                         let dc = terrain.layers[entry + 3u];
                         let duv = coord * dt.yz + dc.xy;
-                        let dn = sample_normal(dt.x, duv, cgx * dt.yz, cgy * dt.yz);
+                        var dn = sample_normal(dt.x, duv, cgx * dt.yz, cgy * dt.yz);
+                        // The shared arrays put ATI2 into semantic XY for GetNormalMap.
+                        // Native detailMapSampler reads raw XY, without its D3D10 YX swap.
+                        if (flags_of(dt.x) & 4) != 0 { dn = dn.yx; }
                         t += (dn * 2.0 - 1.0) * b.w;
                     }
                     let nt = vec3<f32>(t, nz);
@@ -211,9 +215,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     pbr_input.material.base_color = vec4<f32>(albedo * terrain.tint.rgb, 1.0);
     pbr_input.N = normal;
+    if terrain.inspect_normal != 0u {
+        pbr_input.material.base_color = vec4<f32>(normal * 0.5 + vec3<f32>(0.5), 1.0);
+    }
 
     var out: FragmentOutput;
-    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+    if terrain.inspect_normal == 0u && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
     } else {
         out.color = pbr_input.material.base_color;
