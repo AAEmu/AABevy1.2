@@ -422,12 +422,17 @@ pub struct ListCtrlData {
     /// `LCCIT_*` item type per column: 0 string, 1 button, 2 window.
     pub column_types: Vec<i64>,
     pub column_height: f32,
+    pub item_line_gap: f32,
     pub rows: Vec<Id>,
     /// Sub-item widgets, `[row][col]`.
     pub sub_items: Vec<Vec<Id>>,
     /// Rows holding data (`InsertData`): only these show their sub-items and can be picked.
     pub has_data: Vec<bool>,
     pub row_height: f32,
+    /// Compatibility for the toolkit's nonnative `SetItemHeight` extension.
+    pub explicit_row_height: Option<f32>,
+    /// Last resolved local extent; bits also make nonfinite extents stable between ticks.
+    pub layout_extent: Option<[u32; 2]>,
     pub selected: i32,
     pub overed: i32,
     pub overed_image: Option<Id>,
@@ -1255,8 +1260,7 @@ impl Widget {
         });
         let button = ty.is_button_like().then(ButtonData::default);
         let list = matches!(ty, WidgetType::ListCtrl).then(|| ListCtrlData {
-            row_height: 25.0,
-            column_height: 25.0,
+            column_height: 30.0,
             selected: -1,
             overed: -1,
             ..Default::default()

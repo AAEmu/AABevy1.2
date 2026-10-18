@@ -4040,3 +4040,78 @@ changes no rendering. Save-key scope source also identifies session `+28`
 as the account ID: `393cfbb0` stores its first argument there at `393cfc0f`
 and writes it to `cl_account_id` at `393cfc34..3f`; that account field is used
 by the separate generic Data manager and is not part of chat's two-number key.
+
+### Native ListCtrl automatic row geometry (2026-10-18)
+
+The original achievement list allocates six rows inside a 440-unit control,
+then sets its column header height to zero. It never supplies an item height.
+The toolkit previously assigned every row 25 units, leaving most of the list
+unused and crowding its nested achievement controls. Rows now receive the
+native automatic height: **73 units**, with the final two units unused.
+
+Native constructor `392a37e0` initializes header height to `30.0` and line gap
+to zero. Layout `392a4410` returns without changing row geometry when either
+the column or row vector is empty. Otherwise its exact arithmetic is:
+
+```text
+occupied = f32(rowCount - 1) * gap + headerHeight
+available = controlHeight - occupied
+rowHeight = f32(CVTTSS2SI(available) / signed(rowCount))
+```
+
+The operations before conversion are f32; division is signed integer
+division toward zero. Invalid/nonfinite/out-of-i32-range conversion produces
+`i32::MIN`, as the native instruction does. Each row receives the full
+resolved control width and this same height. Its first anchor is below the
+first header; subsequent rows anchor below the preceding row with the line
+gap. Sub-items use their recorded column widths, share the row height and
+anchor horizontally to the preceding sub-item. No remainder is distributed.
+
+`SetColumnHeight` (`392a49f0`) updates the header widgets before layout.
+`SetItemLineGap` (`392a4a50`, Lua wrapper `39246e90`) now has its real binding
+instead of the existing class stub. Native geometry callback `392a4a70`
+runs the ordinary widget geometry callback before layout. The toolkit
+handles direct list extent/anchor changes and settles resolved extent changes
+after bounds updates, including changes inherited from anchored parents.
+Unchanged extents do not rebuild rows every frame; objects, data, selection
+and handlers remain intact. Row/column/header/gap mutations lay out immediately.
+The old toolkit-only `SetItemHeight` implementation retains an explicit-height
+override, but remains absent from the captured native Lua class method list;
+this change adds no invented public native method.
+
+`data/extract/aa-ui/native-listctrl-geometry-source-20261018.txt` records the
+targeted original instructions. `listctrl_geometry_oracle.py` and
+`native-listctrl-geometry-oracle-20261018.json` execute **ten native groups**
+with the original PE hash: constructor defaults, complete row/sub-item loops,
+fractional arithmetic, negative/nonfinite conversion, zero guards, both
+setters and the base-then-layout geometry callback. Only widget anchor/extent
+endpoints and constructor external registration/base/name calls are captured;
+extent writes feed the actual native getter. The oracle also records native
+optional event-window gap geometry; creating that separate event-window
+branch of `InsertRows(..., true)` remains outside this layout correction.
+
+`cargo check -p aa-ui`, the example build, and **63 selected tests** pass,
+including four new geometry tests, actual original achievement checkbox
+picking/add/remove, original crafting category controls, achievement category
+templates/art, listboxes, native/HUD widgets, active tabs and popup retirement.
+Resize tests preserve row/sub-item identity and selection, verify anchored
+parent changes, and ensure an unchanged tick does not overwrite row geometry.
+
+`native_achievement_list` opens the actual original window through its content
+trigger and provides six deterministic achievement records. It changes no
+script/fixture geometry. The inspected aa-dev capture
+`shots/aa-ui/native-achievement-list-73px-20261018.png` shows all six properly
+spaced rows at **1280x720, UI scale 0.85**, reports **421.2–567.4 FPS**, zero
+Lua errors and no runtime warnings/errors, and self-closes after its screenshot.
+The repository has no matching real-client achievement screenshot; its exact
+row size is checked against executed native code and the original 73-unit
+achievement background asset coordinates.
+
+Chat save-key character identity is also now source-closed by the aa-net
+audit: `OnCharacterState` (`391d3420 -> 391b9640`) constructs `3930fa80`,
+stores that object at client `+40` (`391b988f`), and passes object `+10` plus
+the received character state to `39089d50`. That helper reads the state's
+first u32 persistent character ID (`39089d58`) and stores it at header `+8`
+(`39089d69`), namely object `+18`. Thus chat's `[[client+40]+18]` component
+is the selected persistent character ID, alongside the already traced world
+byte and the separate account-scoped generic Data storage.

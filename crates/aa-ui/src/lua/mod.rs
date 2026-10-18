@@ -427,6 +427,10 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         bounds::update(lua);
     }
     {
+        let _p = scope("lists");
+        widget::update_lists(lua);
+    }
+    {
         let _p = scope("roadmap");
         roadmap::update(lua);
     }
