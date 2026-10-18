@@ -49,6 +49,7 @@ mod drag;
 mod expansion;
 mod sorting;
 mod formula;
+mod family;
 mod friends;
 mod input;
 mod itemlinks;
@@ -158,6 +159,9 @@ pub(crate) fn battlefield_fixture() { battlefield::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn cooldown_fixture() { cooldown::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn family_fixture() { family::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -379,6 +383,7 @@ impl Plugin for HudPlugin {
         drag::plugin(app);
         party::plugin(app);
         friends::plugin(app);
+        family::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
