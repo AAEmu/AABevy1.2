@@ -449,3 +449,37 @@ fn scores_are_received_totals_and_enable_requires_matching_slot_identity_phase_a
     fold(&mut s,BattlefieldEvent::Ended(end()));let mut late=point();late.scores=[123,456];fold(&mut s,BattlefieldEvent::Point(late));assert_eq!(s.scores,[-30,99]);
     s.apply(&Event::Disconnected{message:String::new()});assert_eq!(s,Battlefield::default());
 }
+
+
+fn kill() -> BattlefieldKill { BattlefieldKill {zone_id:8,instance_id:9,killer_id:77,victim_id:88,killer_corps:0,victim_corps:1,killer_killstreak:-3,killer_name:"killer".into(),victim_name:"victim".into(),killer_corps_kills:123,victim_corps_deaths:456} }
+#[test]
+fn kill_wire_signed_streak_and_names_match_native_lane_with_all_truncations() {
+    let k=kill();let mut w=Writer::new();w.u32(8).u32(9).u32(77).u32(88).u8(0).u8(1).i8(-3).string("killer").string("victim").i32(123).i32(456);
+    check(0x194,&w.finish(),BattlefieldEvent::Kill(k));
+}
+#[test]
+fn local_killstreak_fold_precedes_phase_identity_guard_and_victim_notification_is_separate() {
+    let mut s=Battlefield::default();let mut state=crate::model::CharacterState::default();state.character.id=77;
+    s.apply(&Event::CharacterSelected(Box::new(state)));
+    assert_eq!(s.local_killstreak_notification(&kill()),Some(-3));
+    fold(&mut s,BattlefieldEvent::Kill(kill()));assert_eq!(s.my_killstreak_point,-3);assert_eq!(s.kill_scores,[0;2]);
+    let mut victim=kill();victim.killer_id=88;victim.victim_id=77;victim.killer_killstreak=12;victim.zone_id=999;
+    assert_eq!(s.local_killstreak_notification(&victim),Some(0));
+    fold(&mut s,BattlefieldEvent::Kill(victim.clone()));assert_eq!(s.my_killstreak_point,12);assert_eq!(s.last_kill,Some(victim));
+    let mut unrelated=kill();unrelated.killer_id=99;assert_eq!(s.local_killstreak_notification(&unrelated),None);
+    fold(&mut s,BattlefieldEvent::Kill(unrelated));assert_eq!(s.my_killstreak_point,12);
+    fold(&mut s,BattlefieldEvent::Cancelled{raw:0});assert_eq!(s.local_character_id,Some(77));assert_eq!(s.my_killstreak_point,0);
+    s.apply(&Event::Kicked{reason:0,message:String::new()});assert_eq!(s,Battlefield::default());
+}
+#[test]
+fn kill_team_totals_replace_only_killer_corps_and_join_does_not_reset_local_streak() {
+    let mut s=invited_state();s.local_character_id=Some(77);s.my_killstreak_point=9;
+    let reply=s.respond_to_invitation(invite(),true).unwrap();fold(&mut s,BattlefieldEvent::Requested(reply));fold(&mut s,BattlefieldEvent::Joined(joined()));
+    assert_eq!(s.my_killstreak_point,9);assert_eq!(s.kill_scores,[0;2]);
+    fold(&mut s,BattlefieldEvent::Started(start()));fold(&mut s,BattlefieldEvent::Kill(kill()));assert_eq!(s.kill_scores,[123,0]);
+    fold(&mut s,BattlefieldEvent::Kill(kill()));assert_eq!(s.kill_scores,[123,0]);
+    let mut other=kill();other.killer_corps=1;other.killer_corps_kills=-7;fold(&mut s,BattlefieldEvent::Kill(other));assert_eq!(s.kill_scores,[123,-7]);
+    let mut invalid=kill();invalid.killer_corps=255;fold(&mut s,BattlefieldEvent::Kill(invalid));assert_eq!(s.kill_scores,[123,-7]);
+    let load=Event::LoadInstance(crate::world_msg::InstanceLoad{raw_id:1,zone_id:2,pos:Default::default(),angles:[0.;3]});s.apply(&load);
+    assert_eq!(s.local_character_id,Some(77));assert!(!s.in_instant_game());assert_eq!(s.kill_scores,[0;2]);assert_eq!(s.my_killstreak_point,0);
+}
