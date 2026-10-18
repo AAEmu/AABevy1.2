@@ -5827,3 +5827,84 @@ to make the short animation visible. Both report zero script errors/WARN/ERROR
 and self-close (PIDs36492/20432); the copied executable was removed. Initial
 diagnostics overlapped the fixture status label at active scale; the final
 board provides space without changing original widget extents or animation.
+
+### Native running widget-channel configuration (2026-10-18)
+
+SetAlphaAnimation and SetScaleAnimation now follow their complete typed
+thunks39267dd0/39268bc0, parsers3922f260/392679e0 and bindings39265490/392654f0.
+All four scalar arguments must be actual Lua numbers, narrowed to f32; numeric
+strings, bools, tables and missing values silently return zero results without
+partially changing configuration. Scale additionally requires a fifth string.
+Extra arguments are ignored and a borrowed method on a drawable fails the
+widget cast. Original pivot lookup3922c0a0 uses case-sensitive XlCompareString
+and a C-string prefix: CENTER is recognized, center is unknown, and a NUL after
+CENTER terminates the name. Unknown enum9 has the same zero-origin geometry as
+TOPLEFT in392772b0; the toolkit retains that geometry equivalence rather than
+silently selecting CENTER. The default unconfigured pivot remains CENTER4.
+
+Actual configurators392771c0/39277230 write endpoints, current velocity and
+initial velocity immediately, even while active. They preserve current visible
+alpha/raw scale, active flags and displayed geometry. With f32 delta=to-from,
+velocity=delta/velocityTime; nonzero accelerationTime writes
+`2*(delta-velocity*accelerationTime)/(accelerationTime*accelerationTime)` in
+native operation order. Exactly +/-0 retains the previous acceleration.
+Negative values and NaN are not sanitized: NaN accelerationTime writes NaN;
+zero velocityTime can write infinity. Restart restores the saved initial
+velocity and initial value, retaining the configured acceleration.
+
+Only these widget channels now use native SSE-f32 integration. Full
+WidgetUpdate3927de60 computes dt=frameMilliseconds*.001f32, updates velocity
+before current, then compares current against the endpoints to finish. No
+analytic duration shortcut forces completion for zero/negative times or
+unordered values. The shared effect/motion Timing evaluator is unchanged.
+An actual sequence starts .2->1 with times .5/.4, steps80ms, then configures
+.1->.9 with times .3/0 without restarting. Current stays3eae7d57 at configure
+and tick0, then becomes3eca34b4 after20ms and3ef4b3ae after30ms. Both alpha and
+scale retain those exact bits, and restart resets current to3dcccccd before
+the next step. Nonzero replacement and negative-time controls are also exact.
+
+Raw nonfinite channel/geometry state remains observable. Native Image39220590
+does not reject such coordinates; its actual transform/+0.5/CVTT path collapses
+them to integer-indefinite -2147483648 vertices. Bevy uses floating position
+buffers, so its mesh-upload loop alone omits quads with nonfinite rectangle or
+free-corner coordinates. This is an explicit app rendering boundary, not a
+claimed native argument rejection, clamp, paint-admission change or timer stop.
+A CPU upload integration executes real raw-zero-time scale, retains NaN/current
+active state, uploads the finite neighboring quad, and verifies actual mesh
+positions while rejecting a nonfinite free-corner route as well.
+
+Read-only offline artifacts in data/extract/aa-ui execute **211 native groups**:
+widget_channel_oracle.py86 configure/start/full-update/pivot cases,
+widget_channel_wrapper_oracle.py120 full Lua/Cry conversion cases, and
+widget_channel_draw_oracle.py5 actual image-consumer cases. Matching
+native-widget-channel-*-oracle-20261018.json and
+native-widget-channel-source-20261018.txt retain results/source. Lua stack
+primitives, widget/class callbacks, root identity and final texture submission
+are explicit interface endpoints; native configuration/integration, pivot
+lookup, geometry and image conversion arithmetic execute unchanged.
+
+This slice does not change channel callback ordering. The native scale-end
+callback precedes its final raw-scale/geometry write, whereas toolkit end
+notifications are currently delivered after its channel pass; callback-driven
+reconfiguration at that boundary remains a separate source/lifetime task.
+The existing public frame-time sanitation/hidden-channel scheduling and general
+anchor calibration are also unchanged.
+
+Crate check, example build and **126 selected checks pass**, with one existing
+optional font-metric test ignored. These cover five new strict/configuration/
+native-bit/physical-window tests, 24 units including actual mesh upload,
+inheritance8, animation10, fade12, scale/clip4, popup9, attachment5, scaled
+fitting8, chat alpha6/clip7, tooltip6, slot selector6/mask8/completion7/state1.
+The original CreateWindow/SetttingUIAnimation/OnShow scripts and original button
+skin run unchanged in native_widget_channel; the fixture changes configuration
+during active opening and checks transformed physical button targets.
+
+Final aa-dev captures with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-widget-channel-active-720-20261018.png
+(1280x720/default0.85, **361.8-580.2 FPS**) and
+shots/aa-ui/native-widget-channel-complete-1080-20261018.png
+(1920x1080/1.0, **485.1-529.9 FPS**). The first shows retained-current state and
+different retained/replaced coefficients; the second shows final window art
+and buttons without overlap. Both report zero script errors/WARN/ERROR and
+self-close (PIDs44668/30676); the copied executable was removed. No original
+Lua script, font calibration, root API or ordinary-slot policy was changed.

@@ -84,6 +84,13 @@ pub struct Quad {
     pub vcolors: Option<[[f32; 4]; 4]>,
 }
 
+// Native image CVTT collapses NaN/Inf geometry to integer-indefinite vertices.
+// Keep raw widget/channel values, but do not send nonfinite positions to Bevy.
+fn finite_positions(q: &Quad) -> bool {
+    q.pos.iter().all(|v| v.is_finite())
+        && q.corners.as_ref().is_none_or(|c| c.iter().flatten().all(|v| v.is_finite()))
+}
+
 /// Collect the quads of the whole tree in paint order.
 pub fn build_quads(u: &mut Ui, pressed: Option<Id>) -> Vec<Quad> {
     build_quads_split(u, pressed).0
@@ -1131,6 +1138,9 @@ fn spawn_batches<M: Component>(
         let mut col = Vec::with_capacity(qs.len() * 4);
         let mut idx = Vec::with_capacity(qs.len() * 6);
         for q in qs {
+            if !finite_positions(q) {
+                continue;
+            }
             let base = pos.len() as u32;
             let [x0, y0, x1, y1] = q.pos;
             let [u0, v0, u1, v1] = q.uv;
@@ -1202,4 +1212,58 @@ pub fn sync_atlas(u: &mut Ui, state: &mut UiRenderState, images: &mut Assets<Ima
         None => state.atlas = Some(images.add(img)),
     }
     u.fonts.atlas_dirty = false;
+}
+
+#[cfg(test)]
+mod channel_upload_tests {
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
+    use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn native_nonfinite_scale_stays_raw_while_mesh_upload_preserves_only_finite_neighbor_geometry() {
+        let ui = crate::UiRuntime::new("en_us", 1920., 1080.).unwrap();
+        ui.exec("@nonfinite_upload", r#"
+            w=UIParent:CreateWidget('window','rawChannel','UIParent')
+            w:SetExtent(40,40);w:Show(true)
+            local a=w:CreateColorDrawable(1,1,1,1,'artwork')
+            a:AddAnchor('TOPLEFT',w,0,0);a:AddAnchor('BOTTOMRIGHT',w,0,0)
+            w:SetScaleAnimation(.2,.9,0,0,'CENTER');w:SetStartAnimation(false,true)
+            good=UIParent:CreateWidget('window','finiteNeighbor','UIParent')
+            good:SetExtent(40,40);good:AddAnchor('TOPLEFT',UIParent,100,100);good:Show(true)
+            local a=good:CreateColorDrawable(1,1,1,1,'artwork')
+            a:AddAnchor('TOPLEFT',good,0,0);a:AddAnchor('BOTTOMRIGHT',good,0,0)
+        "#).unwrap();
+        crate::lua::tick(&ui.lua, 0.);
+        let id=crate::lua::value_id(&ui.lua,&ui.lua.load("w").eval().unwrap()).unwrap();
+        assert!(crate::lua::ui(&ui.lua).animations.widget_sample(id).scale.is_nan());
+        assert!(ui.lua.load("w:IsNowAnimation()").eval::<bool>().unwrap());
+        let mut quads = build_quads(&mut crate::lua::ui(&ui.lua), None);
+        assert_eq!(quads.len(), 2);
+        assert!(!finite_positions(&quads[0]));
+        assert!(finite_positions(&quads[1]));
+        // Free corners are another upload route: a finite enclosing rect cannot
+        // make a nonfinite transformed vertex safe for a Bevy position buffer.
+        let mut free = quads[1].clone();
+        free.corners = Some([[f32::INFINITY, 0.]; 4]);
+        quads.push(free);
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<ColorMaterial>::default();
+        let mut masks = Assets::<MaskMaterial>::default();
+        let mut images = Assets::<Image>::default();
+        spawn_batches(
+            &mut Commands::new(&mut queue, &world), &mut UiRenderState::default(),
+            &quads, 0, &mut meshes, &mut materials, &mut masks, &mut images,
+            None, || UiBatch, Vec2::ZERO, 0.,
+        );
+        queue.apply(&mut world);
+        let mesh = meshes.iter().next().unwrap().1;
+        let VertexAttributeValues::Float32x3(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!("positions") };
+        assert_eq!(positions.len(), 4);
+        assert!(positions.iter().flatten().all(|v| v.is_finite()));
+        assert_eq!(positions[0], [100., -100., 0.]);
+        assert!(crate::lua::ui(&ui.lua).animations.widget_sample(id).scale.is_nan());
+    }
 }
