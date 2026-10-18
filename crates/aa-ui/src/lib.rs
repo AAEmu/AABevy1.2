@@ -29,6 +29,7 @@
 pub mod content;
 pub mod dump;
 pub mod input;
+pub mod item_link;
 pub mod lua;
 pub mod prof;
 pub mod render;

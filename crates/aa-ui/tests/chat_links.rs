@@ -1,4 +1,4 @@
-//! Native character links: display text, wrapped bounds and original chat right-click payload.
+//! Native chat links: display text, wrapped bounds and original click/tooltip payloads.
 
 #[path = "../examples/fake/mod.rs"]
 #[allow(dead_code)]
@@ -48,7 +48,7 @@ fn centers(ui: &UiRuntime, raw: &str) -> Vec<(f32, f32)> {
     let fx = text.style.align.fx();
     let ox = ((rect.x + left) * s + (width * s - lo.width) * fx).round();
     let oy = ((rect.y + top) * s + height * s - lo.height).round(); // compose bottom-aligns messages.
-    lo.character_links
+    lo.links
         .iter()
         .map(|link| {
             let dx = ((lo.width - lo.line_widths[link.line]) * fx).round();
@@ -88,19 +88,19 @@ fn character_codes_display_only_names_and_preserve_colored_wrapped_payloads() {
     assert_eq!(linked.glyphs.len(), plain.glyphs.len());
     assert!(
         linked
-            .character_links
+            .links
             .iter()
-            .any(|l| l.name == "Socialpeerone" && !l.is_hostile)
+            .any(|l| matches!(&l.payload,aa_ui::text::ChatLink::Character {name,is_hostile:false} if name=="Socialpeerone"))
     );
     assert!(
         linked
-            .character_links
+            .links
             .iter()
-            .any(|l| l.name == "Hostilepeer" && l.is_hostile)
+            .any(|l| matches!(&l.payload,aa_ui::text::ChatLink::Character {name,is_hostile:true} if name=="Hostilepeer"))
     );
-    assert!(linked.character_links.len() > 2); // Long names wrap into multiple clickable segments.
+    assert!(linked.links.len() > 2); // Long names wrap into multiple clickable segments.
     let literal = fonts.layout_edit("default", 16.0, raw, None, 0.0);
-    assert!(literal.character_links.is_empty());
+    assert!(literal.links.is_empty());
     assert!(literal.width > plain.width);
     assert_eq!(aa_ui::text::expand_codes("|k友人,0;"), "友人");
     assert_eq!(
@@ -237,4 +237,199 @@ fn original_chat_message_and_right_click_keep_character_name_and_hostility() {
         ));
         assert_eq!(eval::<bool>(&ui, "clicked[3]"), hostile);
     }
+}
+
+#[test]
+fn item_quest_labels_colors_raw_payloads_and_missing_lookups() {
+    let ui = setup();
+    ui.exec("@lookup",r#"
+        lookups=0
+        AAUI.ChatLink=function(kind,id,grade)
+            lookups=lookups+1
+            assert(message:GetText()~=nil) -- Callback may read UI; no Ui appdata borrow is held.
+            if kind=='item' and id==24488 then assert(grade==4); return {name='Linked Sword',color={0.2,0.8,0.3,1}} end
+            if kind=='quest' and id==2531 then assert(grade==nil); return {name='The Prophet Terrien',color={1,0.5,0.1,1}} end
+        end
+        raw='|cffabcdefbefore |i24488,4,opaqueInstance; after |q2531; tail |q999999;'
+        message:SetExtent(600,100); message:AddMessage(raw)
+    "#).unwrap();
+    let message = id(&ui);
+    let raw: String = eval(&ui, "raw");
+    let lo = {
+        let mut u = lua::ui(&ui.lua);
+        u.fonts
+            .layout("default", 16.0, &raw, Some(584.0), 0.0, false)
+    };
+    assert_eq!(eval::<u32>(&ui, "lookups"), 3);
+    assert_eq!(lo.links.len(), 2);
+    let original = lua::ui(&ui.lua)
+        .tree
+        .widget(message)
+        .unwrap()
+        .message
+        .as_ref()
+        .unwrap()
+        .lines[0]
+        .0
+        .clone();
+    assert_eq!(original, raw);
+    assert!(
+        lo.glyphs
+            .iter()
+            .any(|g| g.color.is_some_and(|c| (c[0] - 0.2).abs() < 0.001))
+    );
+    let last = lo.glyphs.last().unwrap().color.unwrap();
+    assert!((last[0] - 171.0 / 255.0).abs() < 0.001); // Enclosing chat color restored after links.
+    let points = centers(&ui, &raw);
+    point(&ui, points[0]);
+    assert!(eval::<bool>(
+        &ui,
+        "local i=message:GetLinkInfoOnCursor(); return i.linkType=='item' and i.itemType==24488 and i.itemGrade==4 and i.itemLinkText=='opaqueInstance'"
+    ));
+    point(&ui, points[1]);
+    assert!(eval::<bool>(
+        &ui,
+        "local q=message:GetLinkInfoOnCursor(); return q.linkType=='quest' and q.questType==2531"
+    ));
+    assert_eq!(eval::<u32>(&ui, "lookups"), 3); // Font rendering/picking never calls Lua lookup.
+}
+
+#[test]
+fn item_payload_bounds_and_native_visible_link_capacity() {
+    let ui = setup();
+    ui.exec(
+        "@bounds",
+        r#"
+        AAUI.ChatLink=function() return {name='A'} end
+        message:SetExtent(190,1000)
+        message:AddMessage('|i1,1,'..string.rep('a',382)..';')
+    "#,
+    )
+    .unwrap();
+    let first = centers(&ui, &format!("|i1,1,{};", "a".repeat(382)));
+    assert_eq!(first.len(), 1);
+    ui.exec(
+        "@too_long",
+        "message:Clear(); message:AddMessage('|i1,1,'..string.rep('a',383)..';')",
+    )
+    .unwrap();
+    assert!(centers(&ui, &format!("|i1,1,{};", "a".repeat(383))).is_empty());
+    ui.exec(
+        "@malformed_prefix",
+        "message:AddMessage('|iBROKEN |q2531;')",
+    )
+    .unwrap();
+    assert_eq!(centers(&ui, "|iBROKEN |q2531;").len(), 1);
+    let raw = "|kA,0; ".repeat(151);
+    let lo = lua::ui(&ui.lua)
+        .fonts
+        .layout("default", 16.0, &raw, None, 0.0, false);
+    assert_eq!(lo.links.len(), 150);
+}
+
+#[test]
+fn escaped_link_codes_stay_literal_without_lookup_or_click_targets() {
+    let ui = setup();
+    ui.exec(
+        "@escaped",
+        r#"
+        AAUI.ChatLink=function() error('escaped codes must not resolve') end
+        message:AddMessage('||i24488,4,opaque; ||q2531; ||kName,0; ||cffffffff')
+    "#,
+    )
+    .unwrap();
+    let mut u = lua::ui(&ui.lua);
+    let escaped = u.fonts.layout(
+        "default",
+        16.0,
+        "||i24488,4,opaque; ||q2531; ||kName,0; ||cffffffff",
+        None,
+        0.0,
+        false,
+    );
+    let literal = u.fonts.layout_edit(
+        "default",
+        16.0,
+        "|i24488,4,opaque; |q2531; |kName,0; |cffffffff",
+        None,
+        0.0,
+    );
+    assert_eq!(escaped.width, literal.width);
+    assert_eq!(escaped.glyphs.len(), literal.glyphs.len());
+    assert!(escaped.links.is_empty());
+}
+
+#[test]
+fn original_item_and_quest_left_click_open_original_tooltip_views() {
+    let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
+    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+        .unwrap();
+    fake::install(&mut ui, "en_us", &fake::default_worlds());
+    fake::install_ingame(&mut ui);
+    ui.run_stage(aa_ui::Stage::World);
+    assert!(ui.errors.is_empty(), "{:?}", ui.errors);
+    ui.exec("@message", MESSAGE).unwrap();
+    ui.exec("@native_tooltip_dependencies",r#"
+        AddItemLinkHandlerToMessageWidget(message)
+        originalLinks={}
+        local original,index
+        for i=1,20 do
+            local name,v=debug.getupvalue(DebugShowLootDiceWindow,i)
+            if type(v)=='function' and name=='LootDiceEventHandler' then original,index=v,i; break end
+        end
+        assert(index~=nil)
+        debug.setupvalue(DebugShowLootDiceWindow,index,function(key,time,link) table.insert(originalLinks,link) end)
+        DebugShowLootDiceWindow()
+        debug.setupvalue(DebugShowLootDiceWindow,index,original)
+        AAUI.ChatLink=function(kind,id,grade)
+            if kind=='item' then return {name='Original Item Link',color={1,0.7,0.2,1}} end
+            if kind=='quest' then return {name=X2Quest:GetQuestContextMainTitle(id),color={1,1,1,1}} end
+        end
+        -- Application tooltip data is a known bag fixture; encoded bytes remain opaque to UI.
+        X2Item.InfoFromLink=function(self,payload) requestedPayload=payload; return X2Bag:GetBagItemInfo(1,1,true) end
+        X2Quest.GetLinkedQuestSummary=function(self,id) return X2Quest:GetQuestContextSummary(id) end
+        X2Quest.GetLinkedQuestObjectives=function(self,id) return {} end
+        message:AddMessageRefresh(originalLinks[1])
+    "#).unwrap();
+    let raw: String = eval(&ui, "originalLinks[1]");
+    let p = centers(&ui, &raw)[0];
+    aa_ui::input::update(
+        &ui.lua,
+        &mut Default::default(),
+        Some(p),
+        true,
+        false,
+        false,
+        0.0,
+    );
+    aa_ui::input::update(
+        &ui.lua,
+        &mut Default::default(),
+        Some(p),
+        false,
+        false,
+        true,
+        0.0,
+    );
+    assert!(eval::<bool>(&ui, "requestedPayload==nil")); // Right-click does not open item tooltip.
+    let mut mouse = Default::default();
+    aa_ui::input::update(&ui.lua, &mut mouse, Some(p), true, false, false, 0.0);
+    aa_ui::input::update(&ui.lua, &mut mouse, Some(p), false, true, false, 0.0);
+    let encoded = raw
+        .splitn(3, ',')
+        .nth(2)
+        .unwrap()
+        .strip_suffix(';')
+        .unwrap();
+    assert_eq!(eval::<String>(&ui, "requestedPayload"), encoded);
+    assert!(eval::<bool>(&ui, "tooltip.tooltipWindows[4]:IsVisible()"));
+    ui.exec(
+        "@quest",
+        "tooltip.tooltipWindows[4]:Show(false); message:AddMessageRefresh('|q2531;')",
+    )
+    .unwrap();
+    let p = centers(&ui, "|q2531;")[0];
+    aa_ui::input::update(&ui.lua, &mut mouse, Some(p), true, false, false, 0.0);
+    aa_ui::input::update(&ui.lua, &mut mouse, Some(p), false, true, false, 0.0);
+    assert!(eval::<bool>(&ui, "tooltip.tooltipWindows[8]:IsVisible()"));
 }

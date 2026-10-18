@@ -400,7 +400,7 @@ Cached font layouts retain a link rectangle per wrapped segment and its original
 `{linkType='character', characterName=..., isHostile=...}` on those rectangles, and
 `{linkType='none'}` elsewhere. Picking uses the visible composed message and the renderer's
 inset, alignment, scale and wrapping, so scrolled/expired/cleared lines do not leave old targets.
-Literal edit text does not interpret links. Item and quest link parsing remains unimplemented.
+Literal edit text does not interpret links.
 
 Original `chat_msg_event.alb` authors the two `|k` forms; `chat/common.alb` reads these fields
 for its right-click `ActivatePopupMenu` call. Native binding `3924b360` confirms character
@@ -414,6 +414,73 @@ event to show the corrected friendly name.
 pink whisper line: `Socialpeerone` has no literal metadata suffix. The `aa_dev` run logged
 312-353 FPS, zero script errors, and exited. The final full aa-ui suite passes 120 runtime
 tests and both doc tests, with one existing font metrics test ignored.
+
+Item links use `|i<itemType>,<grade>,<encodedInstance>;`; quest links use
+`|q<questType>;`. The toolkit now resolves their display names and colors once when a
+message arrives, through the optional application hook:
+
+```lua
+AAUI.ChatLink = function(kind, id, grade)
+  -- kind = "item" or "quest"; grade is nil for quests.
+  return {name = resolvedName, color = {r, g, b, a}} -- color optional, defaults white
+end
+```
+
+The callback runs outside the UI appdata borrow and may read UI state. Rendering and
+picking use plain cached data and never invoke Lua. Labels display as `[name]`, with
+the enclosing chat color restored after each link. Missing/invalid lookups suppress the
+link, as a missing native item/quest definition does. Raw message strings stay unchanged.
+The label cache is bounded at 4096 item/grade or quest keys; a changed result invalidates
+only layouts containing item/quest codes. Literal `||` escapes the bar, including apparent
+item, quest, character and color codes. Native link picking retains at most 150 visible
+segments per composed layout; item instance payloads are limited to 382 ASCII bytes.
+
+`GetLinkInfoOnCursor()` adds the native tables:
+
+```lua
+{linkType="item", itemType=24488, itemGrade=4, itemLinkText=encodedInstance}
+{linkType="quest", questType=2531}
+```
+
+`itemLinkText` contains only the encoded instance, not the surrounding `|i...;` string.
+The original `AddItemLinkHandlerToMessageWidget` passes that value to
+`X2Item:InfoFromLink`, then `ShowItemLinkTooltip`; quest left-click calls the original
+`ShowQuestLinkTooltip`. Character right-click continues to use its original popup payload.
+Application-owned insertion, instance decoding into tooltip fields and quest data remain
+game API responsibilities. Native evidence: item parser `3926f690`, quest parser
+`3926fdd0`, item/quest display `39271cc0` / `39271e10`, doubled-bar dispatch `392740ab`,
+and link table binding `3924b360`. Native item grade colors come from `39695c30`; quest
+color depends on quest type/level versus the player, which the application lookup supplies.
+
+`aa_ui::item_link` exposes transport for an exact caller-supplied native item record:
+`encode_payload(&[u8;192])`, `decode_payload(&str) -> Option<[u8;192]>`, and
+`format(&[u8;192]) -> String`. Native codec `394df700` / `394df7f0` uses MSB-first
+six-bit groups and alphabet `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz*+`,
+without padding: 192 bytes become 256 characters. The formatter (`394e4ef0`) clears
+instance ID bytes `0..8`, sets count bytes `16..20` to little-endian one, and reads the
+header item type from little-endian bytes `8..12` and grade from byte `12`.
+Every other supplied byte survives unchanged. This is not a serializer for aa-net's
+Rust `Item`: remaining native field mappings must be established before packing real items.
+The original loot debug constants contain older 235-character/176-byte payloads; the
+current 192-byte decoder rejects them rather than filling unknown tail bytes.
+
+`tests/chat_links.rs` covers colored item/quest labels, enclosing color restoration,
+opaque payload preservation, unresolved definitions, payload/segment limits and literal
+escapes, in addition to character links. Its original `.alb` fixture captures the loot
+debug function's local event upvalue, then clicks through the original item and quest
+tooltip windows. Item tooltip data in that view test comes from a known bag fixture;
+the legacy encoded payload is preserved but is not represented as decoded instance data.
+Three codec unit tests cover alphabet/bit ordering, complete byte round-trips, formatter
+normalization and rejection of truncated/invalid payloads.
+
+`examples/native_item_links.rs` displays the original loot-debug constants using the
+database names and grade colors alongside the original quest tooltip. The inspected
+`shots/aa-ui/native-item-links.png` shows purple Crushing Grip, blue Radiant Fire Lunadrop,
+green Exiled Wizard's Sash, and The Prophet Terrien's title/summary. Shared HUD fonts,
+chat bounds and textures were checked against `reference/ingame/bag/real.png`; there is
+no item/quest chat-tooltip capture in the supplied reference set. The `aa_dev` run logged
+478-518 FPS, zero script errors, and exited. The full suite passes 128 runtime tests and
+both doc tests, with one existing font metrics test ignored.
 
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's

@@ -175,6 +175,7 @@ struct LayoutKey {
     line_space: u32,
     outline: bool,
     edit: bool,
+    link_version: u64,
 }
 
 const LAYOUT_CACHE_MAX: usize = 8192;
@@ -205,23 +206,56 @@ pub struct LaidOutText {
     pub carets: Vec<TextCaret>,
     /// Literal character ranges for visual edit lines, excluding a wrapping separator/newline.
     pub line_ranges: Vec<(usize, usize)>,
-    /// Display geometry and payload of native `|kName,hostile;` character links.
-    pub character_links: Vec<CharacterLink>,
+    /// Display geometry and payload of native chat links.
+    pub links: Vec<PlacedLink>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CharacterLink {
-    pub name: String,
-    pub is_hostile: bool,
+pub struct PlacedLink {
+    pub payload: ChatLink,
     /// Pixel bounds relative to the layout origin, before per-line horizontal alignment.
     pub rect: [f32; 4],
     pub line: usize,
 }
 
-struct CharacterRun {
+struct LinkRun {
     range: std::ops::Range<usize>,
-    name: String,
-    is_hostile: bool,
+    payload: ChatLink,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ChatLink {
+    Character {
+        name: String,
+        is_hostile: bool,
+    },
+    Item {
+        item_type: u32,
+        grade: u8,
+        encoded: String,
+    },
+    Quest {
+        quest_type: u32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LinkLabel {
+    pub name: String,
+    pub color: [f32; 4],
+}
+type LinkLabels = HashMap<(u8, u32, u8), LinkLabel>;
+
+impl ChatLink {
+    pub(crate) fn key(&self) -> Option<(u8, u32, u8)> {
+        match self {
+            Self::Item {
+                item_type, grade, ..
+            } => Some((1, *item_type, *grade)),
+            Self::Quest { quest_type } => Some((3, *quest_type, 0)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -250,6 +284,8 @@ pub struct FontLib {
     layouts_len: usize,
     /// Image fonts by lower-case name.
     image_fonts: HashMap<String, ImageFont>,
+    link_labels: LinkLabels,
+    link_version: u64,
 }
 
 impl FontLib {
@@ -270,6 +306,8 @@ impl FontLib {
             layouts: HashMap::new(),
             layouts_len: 0,
             image_fonts: HashMap::new(),
+            link_labels: HashMap::new(),
+            link_version: 0,
         };
         // A white texel at (0,0) for solid quads.
         lib.atlas[..4].copy_from_slice(&[255, 255, 255, 255]);
@@ -490,10 +528,14 @@ impl FontLib {
     /// Whether the configured font chain has every visible character (combat extraStyle).
     pub(crate) fn supports(&mut self, font: &str, text: &str) -> bool {
         if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
-            return text.chars().all(|c| c.is_whitespace() || f.glyphs.contains_key(&c));
+            return text
+                .chars()
+                .all(|c| c.is_whitespace() || f.glyphs.contains_key(&c));
         }
         let chain = self.chain_for(font);
-        text.chars().all(|c| c.is_whitespace() || self.lookup(&chain, c).is_some_and(|(_, glyph)| glyph != 0))
+        text.chars().all(|c| {
+            c.is_whitespace() || self.lookup(&chain, c).is_some_and(|(_, glyph)| glyph != 0)
+        })
     }
 
     /// Ascent (rounded) and line height for a font size.
@@ -553,6 +595,22 @@ impl FontLib {
             .clone()
     }
 
+    pub(crate) fn set_link_label(&mut self, link: &ChatLink, label: Option<LinkLabel>) {
+        let Some(key) = link.key() else { return };
+        if self.link_labels.get(&key) == label.as_ref() {
+            return;
+        }
+        if let Some(label) = label {
+            if self.link_labels.len() >= 4096 && !self.link_labels.contains_key(&key) {
+                return;
+            }
+            self.link_labels.insert(key, label);
+        } else {
+            self.link_labels.remove(&key);
+        }
+        self.link_version = self.link_version.wrapping_add(1);
+    }
+
     /// Width and height of the laid out text, without copying the layout.
     pub fn layout_size(
         &mut self,
@@ -579,13 +637,20 @@ impl FontLib {
         use std::hash::{Hash, Hasher};
         let mw = max_width.map(f32::to_bits);
         let (sz, ls) = (size.to_bits(), line_space.to_bits());
+        let link_version = if !edit && (text.contains("|i") || text.contains("|q")) {
+            self.link_version
+        } else {
+            0
+        };
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (font, sz, text, mw, ls, outline, edit).hash(&mut h);
+        (font, sz, text, mw, ls, outline, edit, link_version).hash(&mut h);
         let hash = h.finish();
         let same = |k: &LayoutKey| {
             k.font == font
                 && k.text == text
-                && (k.size, k.max_width, k.line_space, k.outline, k.edit) == (sz, mw, ls, outline, edit)
+                && (k.size, k.max_width, k.line_space, k.outline, k.edit)
+                    == (sz, mw, ls, outline, edit)
+                && k.link_version == link_version
         };
         if let Some(i) = self
             .layouts
@@ -607,6 +672,7 @@ impl FontLib {
             line_space: ls,
             outline,
             edit,
+            link_version,
         };
         let v = self.layouts.entry(hash).or_default();
         v.push((key, lo));
@@ -648,12 +714,13 @@ impl FontLib {
         // A last line that is empty or only blanks does not count: the client gives
         // `"We fear no death."\r\n\n` 2 lines and `"Claw to earth, ... fur to fire."\r\n\n `
         // (wrapped in two) 3 lines (GetTextHeight in reference/character_create/step1_*).
-        let (mut expanded, character_runs) = if edit {
+        let (mut expanded, link_runs) = if edit {
             (text.to_string(), Vec::new())
         } else {
-            expand_with_links(text)
+            expand_with_links(text, Some(&self.link_labels))
         };
-        if !edit && let Some(nl) = expanded.rfind('\n')
+        if !edit
+            && let Some(nl) = expanded.rfind('\n')
             && expanded[nl + 1..]
                 .chars()
                 .all(|c| c == ' ' || c == '\t' || c == '\r')
@@ -670,6 +737,7 @@ impl FontLib {
             let ch = chars[i];
             if !edit && ch == '|' && i + 1 < chars.len() {
                 match chars[i + 1] {
+                    '|' => i += 1,
                     'c' | 'C' if i + 10 <= chars.len() => {
                         let hex: String = chars[i + 2..i + 10].iter().collect();
                         if let Ok(v) = u32::from_str_radix(&hex, 16) {
@@ -785,7 +853,11 @@ impl FontLib {
             line_height: line_h,
             ..Default::default()
         };
-        let mut carets = if edit { vec![None; chars.len()+1] } else { Vec::new() };
+        let mut carets = if edit {
+            vec![None; chars.len() + 1]
+        } else {
+            Vec::new()
+        };
         for (li, &(a, b)) in lines.iter().enumerate() {
             let y = li as f32 * (line_h + line_space) + ascent;
             let mut x = 0.0f32;
@@ -794,10 +866,13 @@ impl FontLib {
             if edit {
                 let first = items.get(a).map_or(chars.len(), |it| it.index);
                 carets[first] = Some(TextCaret { x: 0.0, line: li });
-                out.line_ranges.push((first,items.get(b).map_or(chars.len(),|it|it.index)));
+                out.line_ranges
+                    .push((first, items.get(b).map_or(chars.len(), |it| it.index)));
             }
             for it in &items[a..b] {
-                if edit { carets[it.index] = Some(TextCaret { x, line: li }); }
+                if edit {
+                    carets[it.index] = Some(TextCaret { x, line: li });
+                }
                 if it.face == ICON_FACE {
                     let [_, _, cw, ch] = INLINE_ICONS[it.gid as usize];
                     let ih = (cw * size / 13.0).round().max(cw) * ch / cw;
@@ -821,26 +896,24 @@ impl FontLib {
                     }
                     width = x + it.adv;
                 }
-                if let Some(link) = character_runs.iter().find(|r| r.range.contains(&it.index)) {
-                    if let Some(last) = out.character_links.last_mut().filter(|last| {
-                        last.line == li
-                            && last.name == link.name
-                            && last.is_hostile == link.is_hostile
-                            && last.rect[2] == x
+                if let Some(link) = link_runs.iter().find(|r| r.range.contains(&it.index)) {
+                    if let Some(last) = out.links.last_mut().filter(|last| {
+                        last.line == li && last.payload == link.payload && last.rect[2] == x
                     }) {
                         last.rect[2] = x + it.adv;
-                    } else {
+                    } else if out.links.len() < 150 {
                         let top = li as f32 * (line_h + line_space);
-                        out.character_links.push(CharacterLink {
-                            name: link.name.clone(),
-                            is_hostile: link.is_hostile,
+                        out.links.push(PlacedLink {
+                            payload: link.payload.clone(),
                             rect: [x, top, x + it.adv, top + line_h],
                             line: li,
                         });
                     }
                 }
                 x += it.adv;
-                if edit { carets[it.index+1] = Some(TextCaret { x, line: li }); }
+                if edit {
+                    carets[it.index + 1] = Some(TextCaret { x, line: li });
+                }
             }
             if edit && let Some(end) = items.get(b) {
                 carets[end.index] = Some(TextCaret { x, line: li });
@@ -849,7 +922,13 @@ impl FontLib {
         }
         if edit {
             let mut previous = TextCaret::default();
-            out.carets = carets.into_iter().map(|p| { previous = p.unwrap_or(previous); previous }).collect();
+            out.carets = carets
+                .into_iter()
+                .map(|p| {
+                    previous = p.unwrap_or(previous);
+                    previous
+                })
+                .collect();
         }
         out.width = out.line_widths.iter().copied().fold(0.0, f32::max);
         let n = lines.len() as f32;
@@ -962,6 +1041,11 @@ fn strip_colors(text: &str) -> String {
     while i < chars.len() {
         if chars[i] == '|' && i + 1 < chars.len() {
             match chars[i + 1] {
+                '|' => {
+                    out.push('|');
+                    i += 2;
+                    continue;
+                }
                 'c' | 'C' if i + 10 <= chars.len() => {
                     i += 10;
                     continue;
@@ -1099,27 +1183,50 @@ fn money_text(body: &str) -> String {
 /// icon, `|h` the honor medal, `|l` the vocation badge, `|m` coins).
 /// Character links `|kName,hostile;` display only the name; layout retains their click payload.
 pub fn expand_codes(text: &str) -> String {
-    expand_with_links(text).0
+    expand_with_links(text, None).0
 }
 
-fn expand_with_links(text: &str) -> (String, Vec<CharacterRun>) {
+fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<LinkRun>) {
     if !text.contains('|') {
         return (text.to_string(), Vec::new());
     }
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut links = Vec::new();
+    let mut current_color: Option<String> = None;
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '|' && i + 1 < chars.len() {
             let k = chars[i + 1];
+            if k == '|' {
+                // Keep the escape through expansion; glyph layout consumes both as one bar.
+                out.push_str("||");
+                i += 2;
+                continue;
+            }
+            if matches!(k, 'c' | 'C')
+                && i + 10 <= chars.len()
+                && chars[i + 2..i + 10].iter().all(char::is_ascii_hexdigit)
+            {
+                let code: String = chars[i..i + 10].iter().collect();
+                out.push_str(&code);
+                current_color = Some(code);
+                i += 10;
+                continue;
+            }
+            if matches!(k, 'r' | 'R') {
+                out.push_str("|r");
+                current_color = None;
+                i += 2;
+                continue;
+            }
             let is_value =
                 k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
             if is_value {
                 let end = chars[i + 2..]
                     .iter()
-                    .take(64)
+                    .take(512)
                     .position(|&x| x == ';' || x == '|' || x == '\n');
                 if let Some(n) = end.filter(|&n| chars[i + 2 + n] == ';') {
                     let body: String = chars[i + 2..i + 2 + n].iter().collect();
@@ -1131,13 +1238,36 @@ fn expand_with_links(text: &str) -> (String, Vec<CharacterRun>) {
                             {
                                 let start = out.chars().count();
                                 out.push_str(name);
-                                links.push(CharacterRun {
+                                links.push(LinkRun {
                                     range: start..start + name.chars().count(),
-                                    name: name.to_string(),
-                                    is_hostile: hostile == "1",
+                                    payload: ChatLink::Character {
+                                        name: name.to_string(),
+                                        is_hostile: hostile == "1",
+                                    },
                                 });
                             } else {
                                 out.push_str(&body);
+                            }
+                        }
+                        'i' | 'q' => {
+                            if let Some(payload) = parse_chat_link(k, &body)
+                                && let Some(label) = payload
+                                    .key()
+                                    .and_then(|key| labels.and_then(|l| l.get(&key)))
+                            {
+                                let [r, g, b, a] = label
+                                    .color
+                                    .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                                out.push_str(&format!("|c{a:02X}{r:02X}{g:02X}{b:02X}"));
+                                let start = out.chars().count();
+                                out.push('[');
+                                out.push_str(&label.name);
+                                out.push(']');
+                                links.push(LinkRun {
+                                    range: start..out.chars().count(),
+                                    payload,
+                                });
+                                out.push_str(current_color.as_deref().unwrap_or("|r"));
                             }
                         }
                         'm' => out.push_str(&money_text(&body)),
@@ -1160,6 +1290,59 @@ fn expand_with_links(text: &str) -> (String, Vec<CharacterRun>) {
         i += 1;
     }
     (out, links)
+}
+
+pub(crate) fn parse_chat_link(kind: char, body: &str) -> Option<ChatLink> {
+    match kind {
+        'i' => {
+            let mut parts = body.splitn(3, ',');
+            let item_type = parts.next()?.parse().ok()?;
+            let grade = parts.next()?.parse::<u32>().ok()? as u8;
+            let encoded = parts.next()?;
+            // Native 3926f690 reserves 383 bytes including the terminator for instance data.
+            (encoded.len() <= 382 && encoded.is_ascii()).then(|| ChatLink::Item {
+                item_type,
+                grade,
+                encoded: encoded.to_string(),
+            })
+        }
+        'q' => Some(ChatLink::Quest {
+            quest_type: body.parse().ok()?,
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn chat_link_references(text: &str) -> Vec<ChatLink> {
+    let mut links = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find('|') {
+        rest = &rest[at + 1..];
+        let Some(kind) = rest.chars().next() else {
+            break;
+        };
+        if kind == '|' {
+            rest = &rest[1..];
+            continue;
+        }
+        if !matches!(kind, 'i' | 'q') {
+            continue;
+        }
+        let Some(end) = rest
+            .find(';')
+            .filter(|&end| end <= 512 && !rest[..end].contains(['|', '\n']))
+        else {
+            continue;
+        };
+        if let Some(link) = parse_chat_link(kind, &rest[1..end]) {
+            links.push(link);
+        }
+        rest = &rest[end + 1..];
+        if links.len() >= 150 {
+            break;
+        }
+    }
+    links
 }
 
 #[allow(dead_code)]

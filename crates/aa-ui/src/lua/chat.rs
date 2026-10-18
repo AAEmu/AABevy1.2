@@ -121,6 +121,7 @@ fn call_global(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) {
 
 /// Add a line to a message frame.
 pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
+    resolve_links(lua, text);
     let mut u = ui(lua);
     let now = u.time_ms;
     if let Some(w) = u.tree.widget_mut(id) {
@@ -138,6 +139,57 @@ pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
         }
     }
     u.tree.touch();
+}
+
+/// Native link names come from the game's item/quest databases. Resolve once when messages
+/// arrive, outside the Ui borrow; font layout/rendering only reads the resulting plain data.
+fn resolve_links(lua: &Lua, text: &str) {
+    use crate::text::{ChatLink, LinkLabel};
+    let Some(hook) = lua
+        .globals()
+        .raw_get::<Table>("AAUI")
+        .ok()
+        .and_then(|a| a.raw_get::<Option<Function>>("ChatLink").ok().flatten())
+    else {
+        return;
+    };
+    let mut seen = std::collections::HashSet::new();
+    for link in crate::text::chat_link_references(text) {
+        let Some(key) = link.key().filter(|key| seen.insert(*key)) else {
+            continue;
+        };
+        let (kind, grade) = match &link {
+            ChatLink::Item { grade, .. } => ("item", Some(*grade)),
+            ChatLink::Quest { .. } => ("quest", None),
+            _ => continue,
+        };
+        let label = match hook.call::<Option<Table>>((kind, key.1, grade)) {
+            Ok(Some(t)) => (|| -> mlua::Result<Option<LinkLabel>> {
+                let name = t.raw_get::<Option<String>>("name")?.unwrap_or_default();
+                if name.is_empty() || name.len() > 4096 {
+                    return Ok(None);
+                }
+                let mut color = [1.0; 4];
+                if let Some(c) = t.raw_get::<Option<Table>>("color")? {
+                    for (i, v) in color.iter_mut().enumerate() {
+                        *v = c.raw_get::<Option<f32>>(i + 1)?.unwrap_or(1.0);
+                    }
+                }
+                Ok(color
+                    .iter()
+                    .all(|v| v.is_finite())
+                    .then_some(LinkLabel { name, color }))
+            })()
+            .ok()
+            .flatten(),
+            Ok(None) => None,
+            Err(e) => {
+                bevy::log::warn!("aa-ui: AAUI.ChatLink: {e}");
+                None
+            }
+        };
+        ui(lua).fonts.set_link_label(&link, label);
+    }
 }
 
 /// The text block a message frame shows now: its newest lines that fit, bottom-aligned.
@@ -1035,11 +1087,29 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, _| {
             let t = lua.create_table()?;
             t.raw_set("linkType", "none")?;
-            if let Some((name, hostile)) = character_on_cursor(&mut ui(lua), id) {
-                // Native 3924b360 returns precisely these fields for character link type 2.
-                t.raw_set("linkType", "character")?;
-                t.raw_set("characterName", name)?;
-                t.raw_set("isHostile", hostile)?;
+            if let Some(link) = link_on_cursor(&mut ui(lua), id) {
+                // Native 3924b360 returns the fields for item 1, character 2 and quest 3.
+                match link {
+                    crate::text::ChatLink::Character { name, is_hostile } => {
+                        t.raw_set("linkType", "character")?;
+                        t.raw_set("characterName", name)?;
+                        t.raw_set("isHostile", is_hostile)?;
+                    }
+                    crate::text::ChatLink::Item {
+                        item_type,
+                        grade,
+                        encoded,
+                    } => {
+                        t.raw_set("linkType", "item")?;
+                        t.raw_set("itemType", item_type)?;
+                        t.raw_set("itemGrade", grade)?;
+                        t.raw_set("itemLinkText", encoded)?;
+                    }
+                    crate::text::ChatLink::Quest { quest_type } => {
+                        t.raw_set("linkType", "quest")?;
+                        t.raw_set("questType", quest_type)?;
+                    }
+                }
             }
             ret(lua, t)
         })?,
@@ -1057,7 +1127,7 @@ pub(crate) fn message_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
 
 /// Match the cached visible message layout used by rendering, including wrapping, timeout,
 /// scroll, inset, per-line alignment, UI scale and inherited widget transforms.
-fn character_on_cursor(u: &mut super::Ui, id: Id) -> Option<(String, bool)> {
+fn link_on_cursor(u: &mut super::Ui, id: Id) -> Option<crate::text::ChatLink> {
     if !u.tree.visible(id) {
         return None;
     }
@@ -1089,13 +1159,13 @@ fn character_on_cursor(u: &mut super::Ui, id: Id) -> Option<(String, bool)> {
     let fx = text.style.align.fx();
     let ox = (inner.x * scale + (inner.w * scale - layout.width) * fx).round();
     let oy = (inner.y * scale + (inner.h * scale - layout.height) * text.style.align.fy()).round();
-    for link in layout.character_links {
+    for link in layout.links {
         let dx = ((layout.width - layout.line_widths[link.line]) * fx).round();
         let [x0, y0, x1, y1] = link.rect;
         let x = point[0] * scale - ox - dx;
         let y = point[1] * scale - oy;
         if x >= x0 && x < x1 && y >= y0 && y < y1 {
-            return Some((link.name, link.is_hostile));
+            return Some(link.payload);
         }
     }
     None
