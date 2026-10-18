@@ -6577,3 +6577,63 @@ shots/aa-ui/native-drawable-layers-restored-1080-20261018.png
 icon layers; the second restores them while manually hidden art stays hidden.
 Both assert a physical original button click, report zero script/WARN/ERROR,
 self-close (PIDs27216/46216), and leave no copied QA executable running.
+
+## Owner overlays follow descendant content (2026-10-18)
+
+Native Widget3927b010 paints owner background/artwork, its content virtual,
+children through3927afd0, then owner overlay. Both clipped and ordinary
+branches retain that order. The previous flat renderer painted each owner's
+overlay before moving to its children, leaving original stack-counter labels
+above overlays that should cover them. Actual unchanged cooldown_action_button
+SetStack(42)/SetOverlayColor('black') reproduced counter glyph141 after
+overlay137 before the fix. The script's black overlay has alpha0.75; its
+ProcessDurabilityColor also supplies the original red/yellow overlay paths.
+
+The original factory's name table identifies cooldownactionbutton as enum21;
+case392a617b calls constructor392844b0, whose final VT399c6170 uses
+layer virtual+13c3927af50 and content virtual+154392815f0. These are static PE
+table/call/MOV/vtable facts, recorded separately from executed order evidence.
+No application skill eligibility or item metadata is inferred from them.
+
+Painting now has a content pass before descendants and a closing overlay pass.
+Physical hit/input order remains Tree's existing traversal. Each pass retains
+the existing transform and clip processing; an empty overlay pass avoids the
+widget clone. Generic Effects advance once in the pass for their actual layer,
+including alpha-zero admission. Private ordinary-slot cooldown/completion
+work stays once in content. This adds no clock formula, selector, callback,
+input policy, clip geometry or fourth-layer creation behavior.
+
+Ignored widget_draw_order_oracle.py and
+native-widget-draw-order-oracle-20261018.json contain **11 actual native
+order/admission groups plus three FPCW controls**. Widget3927b010, child
+walker3927afd0, layer3927af50, alpha/clip stacks and actual shown/fading/clip
+branches execute. Rectangle lookup and final content/drawable virtual calls
+are controlled endpoints that only record submission order. Three levels,
+siblings, hidden/fading children, alpha0, disabled layers and raw child clip
+admission controls are included. No ordering decision is mocked. The emulator
+default FPCW0x0000 is explicitly recorded; PC24/53/64 controls0x007f/0x027f/
+0x037f give identical traces. This ordering proof makes no claim about the
+real runtime's FPCW or new x87 numeric goldens. The raw native fourth-layer
+trace and child clip flags are evidence, not newly implemented public APIs.
+
+Crate check/example build and **196 selected checks pass**, with one existing
+optional font check ignored, across23 targets. Six new tests cover original
+stack RED -> GREEN/physical input, three-level/clipped/layer-disabled order,
+hidden versus pending-fade admission, one Effect step per layer pass at alpha0,
+unchanged transform/clip results and the background-camera split. Original
+button states/text/masks, private selector/cooldown/completion, chat clipping/
+alpha, channels, fades, frame traversal, casting and HP tests remain covered.
+An old status-bar idle-cache test now settles its immediate hide with tick(0)
+before taking the generation baseline: displayed75, running/pause/resume and
+cache assertions are preserved. It never invokes rendering or effect painting;
+no production status-bar behavior changes.
+
+Both native_overlay_order aa-dev captures were inspected:
+shots/aa-ui/native-overlay-order-tinted-720-20261018.png
+(1280x720/default0.85, **421.9-505.5 FPS**) and
+shots/aa-ui/native-overlay-order-cleared-1080-20261018.png
+(1920x1080/default1.0, **368.6-447.9 FPS**). The original black/red overlays
+cover the stack counters in the first; clearing restores the same counters in
+the second. Both assert an actual physical original-slot click, retain original
+label geometry/text and callbacks, report zero script/WARN/ERROR, self-close
+(PIDs51936/1748), and leave no copied QA executable running.

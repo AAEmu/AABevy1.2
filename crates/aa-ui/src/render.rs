@@ -104,28 +104,56 @@ fn top_layer(tree: &Tree, mut id: Id) -> crate::tree::Layer {
     tree.widget(id).map(|w| w.layer).unwrap_or_default()
 }
 
+/// Native3927b010 paints background/artwork/content, descendants, then overlay.
+/// Input retains Tree's ordinary order; only painting needs the closing pass.
+fn drawable_passes(tree: &Tree) -> Vec<(Id, bool)> {
+    let widgets = tree.fading_paint_order();
+    let mut passes = Vec::with_capacity(widgets.len() * 2);
+    let mut ancestors = Vec::new();
+    for id in widgets {
+        let parent = tree.get(id).parent;
+        while ancestors.last().copied() != parent {
+            let Some(previous) = ancestors.pop() else { break };
+            passes.push((previous, true));
+        }
+        passes.push((id, false));
+        ancestors.push(id);
+    }
+    passes.extend(ancestors.into_iter().rev().map(|id| (id, true)));
+    passes
+}
+
 /// [`build_quads`] plus the number of leading quads that belong to `background`-layer windows
 /// (paint order puts them first): those go to the background camera in split mode.
 pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) {
     let mut out = Vec::new();
-    let order = u.tree.fading_paint_order();
+    let order = drawable_passes(&u.tree);
     let scale = u.ui_scale;
     let mut background_end = None;
-    for id in order {
+    for (id, overlay_pass) in order {
         if background_end.is_none()
             && id != crate::tree::ROOT
             && top_layer(&u.tree, id) > crate::tree::Layer::Background
         {
             background_end = Some(out.len());
         }
-        // Native internal slot effects advance on admitted painting, even at alpha zero.
-        crate::lua::slot::prepare_cooldown_draw(u, id);
-        crate::lua::animation::prepare_effect_draw(u, id);
+        // Most widgets have no overlay. Avoid cloning their data for an empty
+        // closing pass; shown alpha-zero effects still reach their actual pass.
+        if overlay_pass && !u.tree.widget(id).is_some_and(|w| {
+            w.drawable_layers[crate::tree::DrawLayer::Overlay as usize]
+                && w.drawables.iter().any(|&d| {
+                    let o = u.tree.get(d);
+                    o.alive && o.shown && o.drawable().is_some_and(|d| d.layer == crate::tree::DrawLayer::Overlay)
+                })
+        }) { continue; }
+        // Native internal slot effects advance once in content, even at alpha zero.
+        if !overlay_pass { crate::lua::slot::prepare_cooldown_draw(u, id); }
+        crate::lua::animation::prepare_effect_draw(u, id, overlay_pass);
         let alpha = effective_alpha(u, id);
         if alpha <= 0.0 {
             continue;
         }
-        crate::lua::auto_clip::geometry(u, id);
+        if !overlay_pass { crate::lua::auto_clip::geometry(u, id); }
         let Some(w) = u.tree.widget(id).cloned() else {
             continue;
         };
@@ -144,6 +172,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 let o = u.tree.get(d);
                 o.alive && o.shown && o.drawable().is_some_and(|dr| {
                     !dr.row_template && w.drawable_layers[dr.layer as usize]
+                        && (dr.layer == crate::tree::DrawLayer::Overlay) == overlay_pass
                 })
             })
             .collect();
@@ -167,103 +196,105 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 divider_ranges.push((first..out.len(), d));
             }
         }
-        if let Some(dg) = w.diagram.as_ref() {
-            diagram_quads(u, id, dg, alpha, scale, &mut out);
-        }
-        if w.cooldown.is_some() || crate::lua::slot::has_completion(&w) {
-            let background = w.button.as_ref().and_then(|b| b.bg[state_index(state)].or(b.bg[0])).map(|id| (id, state));
-            crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, background, &mut out);
-        }
-        if let Some(p) = w.picker.as_ref() {
-            picker_quads(u, p, alpha, scale, &mut out);
-        }
-        // Message frames: their newest lines.
-        if w.message.is_some() {
-            let rect = u.tree.rect(id);
-            if let Some(t) = crate::lua::chat::compose(u, id, rect)
-                && !t.text.is_empty()
-            {
-                let c = t.style.color;
-                text_quads(u, &t, rect, c, alpha, scale, &mut out);
+        if !overlay_pass {
+            if let Some(dg) = w.diagram.as_ref() {
+                diagram_quads(u, id, dg, alpha, scale, &mut out);
             }
-        } else if crate::lua::tooltip::has_lines(&w) {
-            // Tooltips: their `AddLine` lines.
-            let rect = u.tree.rect(id);
-            crate::lua::tooltip::quads(u, id, rect, alpha, scale, &mut out);
-        } else if w.class == "damagedisplay" {
-            crate::lua::damage::quads(u, id, &w, alpha, scale, &mut out);
-        } else if let Some(d) = w.listbox.as_ref() {
-            if let Some(t) = w.text.as_ref() {
-                crate::lua::listbox::quads(u, id, d, t, alpha, scale, &mut out);
+            if w.cooldown.is_some() || crate::lua::slot::has_completion(&w) {
+                let background = w.button.as_ref().and_then(|b| b.bg[state_index(state)].or(b.bg[0])).map(|id| (id, state));
+                crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, background, &mut out);
             }
-        } else if let Some(t) = w.text.as_ref() {
-            // Widget text above background/artwork, below overlay.
-            let edit = crate::lua::edit::is_edit(&w.ty);
-            let rect = u.tree.rect(id);
-            let shown = if edit {
-                let mut d = t.clone();
-                d.text = crate::lua::edit::display_text(&t.text, w.edit.as_ref());
-                // `SetPrefixText`: the prefix in `prefixStyle` first, the text after it.
-                if let Some(e) = w.edit.as_ref().filter(|e| !e.prefix.is_empty()) {
-                    let mut p = w.aux_style.clone().unwrap_or_default();
-                    p.text = e.prefix.clone();
-                    let pi = e.prefix_inset;
-                    p.inset = [
-                        t.inset[0] + pi[0],
-                        t.inset[1] + pi[1],
-                        t.inset[2],
-                        t.inset[3] + pi[3],
-                    ];
-                    p.style.align = crate::tree::Align::Left;
-                    let pw = u.fonts.measure(&p.style.font, p.style.size, &p.text);
-                    let c = p.style.color;
-                    text_quads(u, &p, rect, c, alpha, scale, &mut out);
-                    d.inset[0] += pi[0] + pw + pi[2];
+            if let Some(p) = w.picker.as_ref() {
+                picker_quads(u, p, alpha, scale, &mut out);
+            }
+            // Message frames: their newest lines.
+            if w.message.is_some() {
+                let rect = u.tree.rect(id);
+                if let Some(t) = crate::lua::chat::compose(u, id, rect)
+                    && !t.text.is_empty()
+                {
+                    let c = t.style.color;
+                    text_quads(u, &t, rect, c, alpha, scale, &mut out);
                 }
-                std::borrow::Cow::Owned(d)
-            } else if t.auto_clip.enabled {
-                let mut d = t.clone();
-                d.text = crate::lua::auto_clip::shown_text(&t.text, t.auto_clip.count).to_string();
-                std::borrow::Cow::Owned(d)
-            } else {
-                std::borrow::Cow::Borrowed(t)
-            };
-            if !shown.text.is_empty() {
-                let color = t.style.color;
-                if !edit {
-                    if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
-                        let start = out.len();
-                        button_text_quads(u, id, &shown, color, alpha, &mut out);
-                        physical_text = Some(start..out.len());
-                    } else {
-                        text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+            } else if crate::lua::tooltip::has_lines(&w) {
+                // Tooltips: their `AddLine` lines.
+                let rect = u.tree.rect(id);
+                crate::lua::tooltip::quads(u, id, rect, alpha, scale, &mut out);
+            } else if w.class == "damagedisplay" {
+                crate::lua::damage::quads(u, id, &w, alpha, scale, &mut out);
+            } else if let Some(d) = w.listbox.as_ref() {
+                if let Some(t) = w.text.as_ref() {
+                    crate::lua::listbox::quads(u, id, d, t, alpha, scale, &mut out);
+                }
+            } else if let Some(t) = w.text.as_ref() {
+                // Widget text above background/artwork, below overlay.
+                let edit = crate::lua::edit::is_edit(&w.ty);
+                let rect = u.tree.rect(id);
+                let shown = if edit {
+                    let mut d = t.clone();
+                    d.text = crate::lua::edit::display_text(&t.text, w.edit.as_ref());
+                    // `SetPrefixText`: the prefix in `prefixStyle` first, the text after it.
+                    if let Some(e) = w.edit.as_ref().filter(|e| !e.prefix.is_empty()) {
+                        let mut p = w.aux_style.clone().unwrap_or_default();
+                        p.text = e.prefix.clone();
+                        let pi = e.prefix_inset;
+                        p.inset = [
+                            t.inset[0] + pi[0],
+                            t.inset[1] + pi[1],
+                            t.inset[2],
+                            t.inset[3] + pi[3],
+                        ];
+                        p.style.align = crate::tree::Align::Left;
+                        let pw = u.fonts.measure(&p.style.font, p.style.size, &p.text);
+                        let c = p.style.color;
+                        text_quads(u, &p, rect, c, alpha, scale, &mut out);
+                        d.inset[0] += pi[0] + pw + pi[2];
+                    }
+                    std::borrow::Cow::Owned(d)
+                } else if t.auto_clip.enabled {
+                    let mut d = t.clone();
+                    d.text = crate::lua::auto_clip::shown_text(&t.text, t.auto_clip.count).to_string();
+                    std::borrow::Cow::Owned(d)
+                } else {
+                    std::borrow::Cow::Borrowed(t)
+                };
+                if !shown.text.is_empty() {
+                    let color = t.style.color;
+                    if !edit {
+                        if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
+                            let start = out.len();
+                            button_text_quads(u, id, &shown, color, alpha, &mut out);
+                            physical_text = Some(start..out.len());
+                        } else {
+                            text_quads(u, &shown, rect, color, alpha, scale, &mut out);
+                        }
                     }
                 }
-            }
-            if edit {
-                let caret = u.focus == Some(id) && u.caret_visible;
-                crate::lua::edit::render(u, id, &shown, w.edit.as_ref(), rect, alpha, scale, caret, &mut out);
-            }
-        }
-        if let Some(t) = w.title.as_ref()
-            && !t.text.is_empty()
-        {
-            let r = u.tree.rect(id);
-            // With `SetTitleInset` the title sits in the window minus the insets, aligned by
-            // `titleStyle` (step 2's tab titles: TOPLEFT at 15, 15). Without, it is placed in
-            // the top 45 units (the baselib title bar height), 1 unit lower: the step 3
-            // confirm dialog in reference/character_create matches to the pixel.
-            let rect = if t.inset != [0.0; 4] {
-                r
-            } else {
-                Rect {
-                    x: r.x,
-                    y: r.y + 1.0,
-                    w: r.w,
-                    h: r.h.min(45.0),
+                if edit {
+                    let caret = u.focus == Some(id) && u.caret_visible;
+                    crate::lua::edit::render(u, id, &shown, w.edit.as_ref(), rect, alpha, scale, caret, &mut out);
                 }
-            };
-            text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
+            }
+            if let Some(t) = w.title.as_ref()
+                && !t.text.is_empty()
+            {
+                let r = u.tree.rect(id);
+                // With `SetTitleInset` the title sits in the window minus the insets, aligned by
+                // `titleStyle` (step 2's tab titles: TOPLEFT at 15, 15). Without, it is placed in
+                // the top 45 units (the baselib title bar height), 1 unit lower: the step 3
+                // confirm dialog in reference/character_create matches to the pixel.
+                let rect = if t.inset != [0.0; 4] {
+                    r
+                } else {
+                    Rect {
+                        x: r.x,
+                        y: r.y + 1.0,
+                        w: r.w,
+                        h: r.h.min(45.0),
+                    }
+                };
+                text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
+            }
         }
         for d in above {
             let first = out.len();

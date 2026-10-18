@@ -663,13 +663,15 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
     }
 }
 
-/// Actual owner paint admission, before alpha and scissor skips. No frame/slot clocks here.
-pub(crate) fn prepare_effect_draw(u: &mut Ui, owner: Id) {
+/// One admitted owner paint pass, before alpha/scissor skips. Overlay follows
+/// descendants; background/artwork precede content. No frame/slot clocks here.
+pub(crate) fn prepare_effect_draw(u: &mut Ui, owner: Id, overlay: bool) {
     let Some(w) = u.tree.widget(owner) else { return };
     let ids: Vec<_> = w.drawables.iter().copied().filter(|&id| {
         let o = u.tree.get(id);
         o.alive && o.shown && o.drawable().is_some_and(|d| {
             d.class == "drawable:effect" && !d.row_template && w.drawable_layers[d.layer as usize]
+                && (d.layer == crate::tree::DrawLayer::Overlay) == overlay
         })
     }).collect();
     for id in ids {

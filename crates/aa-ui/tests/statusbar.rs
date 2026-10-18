@@ -267,9 +267,16 @@ fn zero_and_hidden_owner_preserve_animation_state_then_resume() {
     lua::tick(&ui.lua, 100.0);
     assert_eq!(status(&ui, "bar").displayed, 75.0);
     run(&ui, "bar:Show(false)");
+    // Settle the native immediate hide record before measuring idle caching.
+    // No time or status-bar animation step is consumed by this frame.
+    assert!(status(&ui, "bar").running);
+    lua::tick(&ui.lua, 0.0);
+    assert_eq!(status(&ui, "bar").displayed, 75.0);
+    assert!(status(&ui, "bar").running);
     let generation = lua::ui(&ui.lua).tree.generation;
     lua::tick(&ui.lua, 100.0);
     assert_eq!(status(&ui, "bar").displayed, 75.0);
+    assert!(status(&ui, "bar").running);
     assert_eq!(lua::ui(&ui.lua).tree.generation, generation);
     run(&ui, "bar:Show(true)");
     lua::tick(&ui.lua, 100.0);
