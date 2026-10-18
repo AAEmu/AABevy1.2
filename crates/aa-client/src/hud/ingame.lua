@@ -482,6 +482,10 @@ X2Item.GetLevelRequirement = function(self, itemType)
   if level == nil then return fakeLevel(self, itemType) end
   return level
 end
+local fakeItemInfoByType = X2Item.GetItemInfoByType
+X2Item.GetItemInfoByType = function(self, itemType, grade)
+  return HUD.item_tip(itemType, grade) or fakeItemInfoByType(self, itemType, grade)
+end
 
 -- Worn items: HUD.equipment[ES_*].
 local fakeEquipText, fakeEquipInfo, fakeEquipId = X2Equipment.GetEquippedItemTooltipText, X2Equipment.GetEquippedItemTooltipInfo,

@@ -80,6 +80,7 @@ pub struct HudData {
     pub local_combat: bool,
     pub(super) pvp: super::pvp::View,
     pub(super) breath: super::breath::View,
+    pub(super) expansion: super::expansion::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
@@ -128,6 +129,7 @@ impl Default for HudData {
             local_combat: false,
             pvp: Default::default(),
             breath: Default::default(),
+            expansion: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
@@ -234,6 +236,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::trade::install(lua, bridge)?;
     super::pvp::install(lua, bridge)?;
     super::breath::install(lua, bridge)?;
+    super::expansion::install(lua, bridge)?;
     crate::settings::install_hud(lua)
 }
 
@@ -480,6 +483,7 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let Some(spawn) = world.resource::<Player>().spawn.clone() else {
         bridge.borrow_mut().pvp = Default::default();
+        bridge.borrow_mut().expansion.clear();
         return;
     };
     // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
@@ -506,6 +510,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let mut data = bridge.borrow_mut();
     super::pvp::refresh(world, &mut data, &spawn);
     data.character_id = spawn.character().id;
+    super::expansion::refresh(world, &mut data);
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }

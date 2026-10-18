@@ -18,7 +18,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored static UCC composition/native default, iris color and conservative alpha cutouts | Facial animation/lip sync/blinks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |
 | Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; received skill/tag cooldown durations and preflight gates | Broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
-| Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs | Repair/sorting/expansion, dye/look/enchant/temper/gem workflows and missing tooltip fields |
+| Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original bag/bank expansion confirmation and received capacity | Repair/sorting, natural live expansion, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons | Objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/ship/public-farm icons, climate/conflict overlays |
 | Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages | Native send-size overflow policy, chat layout persistence, full command set, moderation/social integrations and less common channel events |
@@ -34,9 +34,9 @@ live or visual validation. No overall completion percentage is inferred from scr
 
 ## Active ownership
 
-* Root: `aa-client`, original inventory sorting/repair/expansion controls next; received cooldown and original breath bar milestone passed. Key settings, mailbox/group-loot/trade, friends and native combat-display milestones landed.
+* Root: `aa-client`, facial integration and original inventory sorting/repair controls next; expansion confirmation, received cooldown and original breath bar milestones passed. Key settings, mailbox/group-loot/trade, friends and native combat-display milestones landed.
 * Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
-* UI agent: `aa-ui`, native listbox tree hierarchy for original crafting; flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed.
+* UI agent: `aa-ui`, native listbox hierarchy/art for original crafting/achievement, including state textures and separators; native48px icon-path audit continues. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
 * World agent: native skybox/cloud spatial opacity and asset fades; native curve tangents/defaults, spatial raw-curve zone blending, cloud motion/geometry/lifecycle, deferred/wrapped diffuse decals, native moons/coronas/orbit, sky order, static entity props, local lights, stars and rigid windmills landed.
 * Animation agent: authored FSQ/FXL facial curves and compatible expression morph overlays, including original blink sequences; root integration pending tested interface.
@@ -55,7 +55,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client135 passed /20 ignored, plus isolated original social/mail/loot/trade/keybinding/combat/breath stage fixtures passed; UI167 runtime plus2 doctests passed /1 ignored at the last full baseline; network261 library plus
+Current wave: client138 passed /21 ignored, plus isolated original social/mail/loot/trade/keybinding/combat/breath/expansion stage fixtures passed; UI167 runtime plus2 doctests passed /1 ignored at the last full baseline, with13 newer targeted listbox checks passed; network261 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.

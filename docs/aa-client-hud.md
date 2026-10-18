@@ -1067,3 +1067,31 @@ do not copy equipment or recompute attributes. The real-DB regression passed in2
 ready-data and delayed-data paths, with a real attribute91 buff, half-capacity correction and
 same-batch buff removal. This fixes source review findings; the earlier playable hash above
 predates this follow-up and will be refreshed with the next verified build.
+
+## Original bag and bank expansion (2026-10-17)
+
+The original bag expansion button and bank API now open the authored inventory task dialog,
+including the real Expansion Scroll icon/tooltip and cost layout. Quotes come from the read-only
+`bag_expands` rows: bag maximum150, bank maximum130 in this database. Confirmation is bound to
+the current character and latest dialog; the sender rechecks received capacity, money and bag
+certificates before queuing aa-net's eight-byte expansion request. Cancel/close sends nothing.
+Repeated or stale callbacks cannot consume a new quote, including after character changes.
+No item, capacity or balance changes locally: received InventoryExpanded updates capacity and
+raises original BAG_EXPANDED/BANK_EXPANDED; separate item/money reports retain their own reducers.
+
+The auto-AA checkbox is a local session value forwarded in the request. Premium purchase and
+persistence are not implemented. The navigation-context producer remains unresolved, so the
+explicit unset tail is zero; it is not a guessed NPC ID. The lane currently ignores that tail,
+AA and currency ID, and does not send MoneyChange for positive-price expansion. All18 current
+database tiers cost one scroll and zero money. Natural paid/live expansion remains unverified
+while game connections are stalled; fixtures do not grant items to a live character.
+
+Validation: full client suite138 passed/21 intentional probes ignored. The isolated original
+stage probe passed in2.95s using actual mouse hit testing on the bag and dialog buttons. It checks
+cancel, one bag request, received50-to60 capacity, refusal of the old quote, a bank request and
+bank-dialog close, while certificates/balance remain received-only. Original Options/mail/trade
+compatibility passed in2.43/1.72/1.72s after the latest toolkit geometry changes. The inspected
+`shots/hud/sol61-expansion/native-complete.png` uses explicit synthetic inventory and no connection;
+its original count label is refreshed through the same BAG_UPDATE as the production drag system.
+It measured430-483FPS at1920x1080 with zero script errors and exited normally.
+The earlier `native-verified.png` exposed that missing fixture event and is superseded.

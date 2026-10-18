@@ -42,6 +42,7 @@ mod combat;
 mod data;
 mod dialog;
 mod drag;
+mod expansion;
 mod formula;
 mod friends;
 mod input;
@@ -108,6 +109,11 @@ pub(crate) fn pvp_fixture() {
 #[allow(dead_code)]
 pub(crate) fn breath_fixture() {
     breath::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn expansion_fixture() {
+    expansion::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -317,6 +323,7 @@ impl Plugin for HudPlugin {
         combat::plugin(app);
         pvp::plugin(app);
         breath::plugin(app);
+        expansion::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);
