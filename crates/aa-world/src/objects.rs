@@ -899,11 +899,12 @@ fn spawn_instance(
             ));
             // Native ordinary shadow collector301EE5E0 requires node flags&0x8.
             // Extra-range/terrain-only masks are distinct native shadow modes.
-            if matches!(kind, Kind::Vegetation | Kind::Trees)
-                && data.objects.vegetation[idx].flags & 0x8 == 0
-            {
-                entity.insert(NotShadowCaster);
-            }
+            let no_ordinary_shadow = match kind {
+                Kind::Brush => data.objects.brushes[idx].flags & 0x8 == 0,
+                Kind::Vegetation | Kind::Trees => data.objects.vegetation[idx].flags & 0x8 == 0,
+                _ => false,
+            };
+            if no_ordinary_shadow { entity.insert(NotShadowCaster); }
             if matches!(kind, Kind::Vegetation | Kind::Trees)
                 && groups.groups.get(&data.objects.vegetation[idx].group).is_some_and(|g| g.material_layers == 0)
                 && let Some(material) = inst.color_materials.get(&part.material.id())

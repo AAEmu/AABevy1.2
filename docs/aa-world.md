@@ -853,6 +853,58 @@ remain as described above. All captures exit zero without shader/GPU errors;
 every fixture window closes.
 
 
+#### Native brush ordinary-shadow eligibility
+
+The same ordinary-shadow gate also covers `Kind::Brush`, using each original
+brush record's render flags 0x8. `_LoadBrush` (`301F2CA0`) directly copies
+record+32 to render-node+12 and clears 0x300 only; the existing shared native
+collector `301EE5E0` requires bit 0x8 for ordinary shadow maps. Interior and
+exterior brushes use this same node layout and renderer path. This applies
+the authored per-instance exclusion without changing materials/meshes,
+transforms, draw/LOD ranges, collision or streaming lifetime. Static
+`entities.xml` slots retain their separate authored `cast_shadow` policy.
+Extra-range/terrain shadow modes and material-specific shadow techniques
+remain separate unsupported boundaries, as above.
+
+A dedicated-record regression covers 3,590 original brushes: non-casters in
+main-world cells (15,15), (10,10), (21,8), (12,14) are 0/13, 3/760, 68/1660,
+106/1157. Actual examples include indoor house webs, waterfalls, straw, some
+stone wells/props and a few rocks. Native flags also survive independent
+visarea model/material-table remapping: `instance_library` (0,4) has 30,286
+interior brushes and zero ordinary non-casters (a positive control);
+main-world (12,15) has 625 interior brushes including 94 non-casters. No area-wide
+shadow toggle or light approximation is introduced. The read-only proof and
+input survey are retained in ignored `lights/brush-loader-native.txt` and
+`brush-shadow-fixtures.txt`.
+
+
+`cargo check -p aa-world --examples` and the focused original-brush regression
+pass. `brush_shadows` uses aa-dev with the real non-casting stone-wall asset
+`verdura_stonewell_c.cgf` at Cry(12469.9082,15276.5156,154.0391), flags 0x20000000;
+camera targets its original bbox centre (12469.8774,15276.4282,154.8817) from
+(-7,-10,+4)m, hour 10. Despite the filename, the inspected geometry is a wall
+segment. `--all-cast` reproduces prior ordinary casting only for the newly
+excluded brushes; vegetation keeps its authored eligibility in both runs.
+
+Inspected `shots/aa-world/brush_shadows/well_native.png` and
+`well_all_cast_control.png` contain 435 brush parts, 21 authored non-casters,
+414 eligible casters, 4,951 total object parts, and zero pending/failed models.
+The effect is localized around the wall: crop (820,300)-(1100,660) mean native
+minus all-cast RGB+[0.59,0.48,0.25]; 2.06% of pixels differ by more than 2.
+Those changed pixels average +[27.98,22.98,11.82], consistent with removing
+false self/contact shadows. Native 91-140 FPS, all-cast 93-110 FPS; shared machine
+load makes this a functional comparison, not a controlled performance result.
+No matching real-client wall-camera capture exists, and established terrain/
+lighting/material limitations remain unchanged.
+
+`--unload-check --shot ... --shot-after 24` verifies both classes were loaded,
+every one of the 435 actual brush mesh entity IDs disappears, and no streamed
+mesh parts remain under an object sector; objects return to zero
+(`well_unload.png`). Shared model/material assets retain their existing cache
+lifetime. All three runs exit zero without shader/GPU errors and close their
+own windows. No dependency or client hook is added.
+
+
 ### client/object.dat
 
 `u32 n` + `n x { u32, char[256] }` models, `u32 m` + `m x { u32, char[256] }` materials, then a depth first octree:
