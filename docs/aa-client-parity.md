@@ -13,7 +13,14 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite: 292 passed / 38 optional probes ignored in 35.04s.
+Latest full-client suite: 295 passed / 38 optional probes ignored in132.31s
+with one test thread. Three mode checks cover the original bag enchant button,
+physical grade/socket/unsocket/gem controls, native synchronous mode events,
+strict return arities, preserved picked items and received session retirement.
+Six mode/world-list captures are inspected and the playable alias is refreshed
+with NumberOnly labels, authored water normals and the qualified cube correction.
+Item eligibility, info/cost providers and request/planner/controller continuation
+remain open (aa-client-enchant.md).
 Six item-effect checks cover receipt-ordered current versus inline items,
 equipment/BAG lookup priority including ID0, native callback/argument shapes,
 raw grade name/color lookups, deferred lifecycle and all five original grade
@@ -86,7 +93,8 @@ GCD selection/state has a tested opt-in toolkit adapter; the actual application
 producer/accessor mapping remains open. Generic and ordinary slot mask rendering
 now use the source dual-texture path; ordinary slot captures and 42 selected
 UI regressions pass. The toolkit selector remains opt-in pending real producers.
-Network552 tests pass, including received grade/socket/UCC/schedule item results,
+Network555 tests pass, including typed052 item-effect transport with captured
+received-slot rechecks and original payload goldens, received grade/socket/UCC/schedule item results,
 shared static buff catalogs and native buff metadata/capacity/order/descriptor
 guards, SCBuffUpdated and factual decoder-loss uncertainty, bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
@@ -124,7 +132,7 @@ parity is unfinished.
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored body-clock facial overlays/blinks for all eight playable local-player/preview heads and supported NPC heads, source-verified facial bone controllers, explicit received NPC body slots and rigid CDF bone attachments; creature and resolved-part CDF effects with visibility/unload lifetime; authored static UCC composition/native default, iris color and conservative alpha cutouts | Voice lip sync; appearance-change rebuilding, full-world selected remote facial and attachment QA, CDF entity bindings; further render reference checks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |
 | Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; frame-advanced received skill/all-descriptor-tag and admitted stop-duration cooldowns/preflight, superseding stale DB estimates; original equipment constant-button sweeps preserve item icons/actions; native localized slot captions and actual account option82 visibility | Full native TL lifetimes, Fired cooldown/default/custom GCD producers, explicit slot GCD state and modifiers; generic raw-snapshot lifetime; broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
-| Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions | Natural repair service routing/live repair and expansion, native premium repair payment, dye/look/enchant/temper/gem workflows and missing tooltip fields |
+| Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions; original enchant mode controls and receipt-ordered grade/socket/gem result dialogs | Natural repair service routing/live repair and expansion, native premium repair payment, item-enchant selection/info/planning/continuation, dye/look/temper workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original stablehand quote/confirmation over received Bag+Bank summon details; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
 | Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method, hover/idle opacity and owner-window locks persist per world/character; original settings Save/Cancel/Reset, context Lock/Unlock, blocked drag warning, first-tab window movement and full Reset Chat with independent extras reload; native pending trial method at actual chat open and source-ordered trial receipt producers | Native send-size overflow policy, window position persistence, other-tab splitting/reparenting, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |

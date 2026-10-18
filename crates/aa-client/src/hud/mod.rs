@@ -48,6 +48,7 @@ mod crime;
 mod data;
 mod dialog;
 mod drag;
+mod enchant;
 mod expansion;
 mod sorting;
 mod formula;
@@ -155,6 +156,11 @@ pub(crate) fn repair_fixture() {
 #[allow(dead_code)]
 pub(crate) fn item_effects_fixture() {
     item_effects::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn enchant_fixture() {
+    enchant::fixture::run();
 }
 
 #[allow(dead_code)]
@@ -428,6 +434,7 @@ impl Plugin for HudPlugin {
         ranking::plugin(app);
         buffs::cancel::plugin(app);
         item_effects::plugin(app);
+        enchant::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
