@@ -569,6 +569,17 @@ the original write-mail `Clear`/`GetAttachCount`/`OnUpdate` path now displays 50
 Eleven edit tests pass, including a full original write-mail fee regression and explicit
 getter side-effect/event/password/init-value checks. No application normalization is needed.
 
+The subsequent native event audit corrects programmatic edit `SetText`: changed text raises
+`OnTextChanged` synchronously, while repeated identical text is a complete no-op (including
+caret and visual dirtiness). Native setter `39292f70` compares at `39292fab`, skips unchanged
+content at `39292fb6`, writes at `3929309a`, then dispatches vtable `+0x1b8` through
+`39292460` -> event 6 in `3927b8b0`. The event-name table `39ac6ab0` entry 6 (`39ac6ac8`)
+is `OnTextChanged`. The earlier no-event assumption was incorrect. Numeric getter fallback
+remains event-free because it calls the internal buffer writer directly. Reentrant handlers
+can clamp through `SetText` without recursing on identical values. Tests exercise changed /
+unchanged calls, synchronous reentrant clamping, clean repeated setters and original
+`CreateMoneyEdit` max-value and empty-zero normalization.
+
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's
 channel (`/s`, `/local` say, `/shout` `/y` zone, `/p` `/party`, `/raid`, `/guild` `/g`, `/n`
