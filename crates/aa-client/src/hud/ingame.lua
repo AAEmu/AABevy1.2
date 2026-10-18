@@ -10,20 +10,7 @@ local function isPlayer(unit) return unit == "player" or unit == S().unit_id end
 -- Cutscene playback and its UI suppression remain an unimplemented feature.
 Movie.GetNumOfPlayingCutscenes = function() return 0 end
 
--- Names (guild, family, mail ... windows read the limits while they are built). FALLBACK: the limits
--- of the capture's "Enter 2-26 characters." until the server's name policy is on the wire.
-X2Util.GetNamePolicyInfo = function(self, kind)
-  return { local_min = 2, local_max = 26, eng_min = 2, eng_max = 26 }
-end
-X2Util.CheckAvailableName = function(self, text, composing)
-  text = text or ""
-  if composing then return text end
-  return (string.gsub(text, "[^%a]", ""))
-end
-X2Util.IsValidName = function(self, text, kind)
-  text = text or ""
-  return #text >= 2 and #text <= 26 and string.find(text, "^%a+$") ~= nil
-end
+-- Name policies, normalization and validation are installed natively by api.rs.
 
 -- No peace tax on this server (the world map's bottom info reads it for the zone under the cursor).
 X2Dominion.GetPeaceTaxMoney = function(self, zoneId) return "" end

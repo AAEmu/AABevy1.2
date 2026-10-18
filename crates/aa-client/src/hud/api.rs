@@ -244,6 +244,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
+    crate::login::name_policy::install(lua)?;
     super::cooldown::install(lua, bridge)?;
     install_feature_limits(lua, bridge)?;
     super::tips::install_native_lookup(lua, bridge)?;

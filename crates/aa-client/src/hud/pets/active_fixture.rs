@@ -208,6 +208,23 @@ pub(crate) fn run() {
     if std::env::args().any(|a| a == "--modified") {
         buffs = modified(&rt,&bridge,&player,&mut units,&mates);
     }
+    if std::env::args().any(|a| a == "--rename" || a == "--chat-name" || a == "--portal-name") {
+        rt.lua.load(r#"
+            local request=X2DialogManager.RequestDefaultDialog
+            X2DialogManager.RequestDefaultDialog=function(self,handler,owner)
+                local wnd=request(self,handler,owner);NAME_DIALOG=wnd;return wnd
+            end
+        "#).exec().unwrap();
+        let code = if std::env::args().any(|a| a == "--rename") {
+            "ShowChangeMateName('playerpet');NAME_DIALOG.editbox:SetText('a_1B');assert(NAME_DIALOG.editbox:GetText()=='A_1b')"
+        } else if std::env::args().any(|a| a == "--chat-name") {
+            "ShowCreateChatTabName(1);NAME_DIALOG.editbox:SetText('Raid Room!')"
+        } else {
+            "ShowRegisterPotal();NAME_DIALOG.editbox:SetText('Western Coast')"
+        };
+        rt.lua.load(code).exec().unwrap();
+        rt.lua.load("assert(NAME_DIALOG:IsVisible() and NAME_DIALOG.btnOk:IsEnabled())").exec().unwrap();
+    }
     app.add_plugins(aa_ui::UiPlugin {
         config: Some(crate::login::host::ui_config()),
     })

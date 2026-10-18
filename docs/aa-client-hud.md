@@ -1694,7 +1694,7 @@ Global timing remains the existing successful-cast/DB observation. Ordinary acti
 slots separately retain the older own-cast estimate; constant equipment buttons do
 not turn that estimate into a received timer. The new source audit confirms more
 work is required: native start GCD depends on timing_id1 and attribute74, ordinary
-own cooldown inserts on Fired with toggle/timing/final-byte gates and skill-specific
+own cooldown inserts on Fired with toggle/timing/packed-bit1 gates and skill-specific
 modifiers, and stopped casts can insert supplied received durations. These are open
 producer gaps, not completed native cast-manager parity. The lane's received-list
 emitter remains absent; no live cooldown receipt is claimed.
@@ -1995,10 +1995,9 @@ bounded policy rather than a claim of full native NPC planner parity.
 VNT_FACTION2 now exposes the native en_us name-policy record: local2..32,
 English3..32, limit_space_cnt0, space/mixed-case allowed and mixed-language/special
 letter flags false. Its original IsValidName uses the already executed type2
-validator, including the native trailing-byte quirk. Other name-policy kinds keep
-their existing adapters. This corrects the old generic2..26/letters-only fallback
-for these windows. Rename's original edit handler has autoTextChange=false, so
-CheckAvailableName is not part of this path and remains separate work.
+validator, including the native trailing-byte quirk. The later shared-name milestone
+below replaces the other policy adapters too. Rename's original edit handler has
+autoTextChange=false, so it intentionally does not call CheckAvailableName.
 
 Actual empty SC00f opens original nonmodal Task35 only for a cached own faction
 with political_system0 and matching actual owner; failures and duplicate tasks
@@ -2049,3 +2048,66 @@ Tested main: `target/debug/aa-client-20261018-guild-create.exe`, SHA256
 The playable alias `target/debug/aa-client-play.exe` is refreshed from that copy
 after confirming no user process is using it. This build includes32fd907 active
 tabs, c39411a network creation/rename/faction handling and906413a authored fog.
+
+### Shared original English name rules (2026-10-18)
+
+`login/name_policy.rs` now installs the actual en_us policy metadata, validator and
+formatter for all login stages, character creation and HUD name controls. The two
+Lua fallbacks and guild-only override are removed. Policy0/1/6 (character/summons)
+uses2-26 with no internal ASCII whitespace or uppercase after the first character;
+guild policy2 has local2-32/English3-32, family-title3 has2-26, chat-tab4 has2-10,
+and portal5 has3-32. Guild/chat/portal allow internal ASCII whitespace and mixed
+case; family title allows mixed case. The actual nine metadata fields drive the
+original scripts' maximum lengths and localized guides.
+
+These are the original rules, including accepted Latin punctuation/digits, DEL,
+the first-byte English/local length choice and the trailing check that indexes
+original UTF-8 bytes with the decoded scalar count. Raw length includes a leading
+BOM, while validation/format decoding strips exactly one BOM. Embedded NUL ends
+the input before decoding. Formatting preserves punctuation/spaces, limits to32
+decoded scalars, and, when its second argument is false, uppercases an alphabetic
+first scalar and lowercases the rest. A leading ASCII space then yields empty;
+a nonalphabetic first scalar leaves case unchanged. Exact original Xl/English CRT
+maps replace Rust Unicode folding; codepoints above0x7ff remain unchanged. This
+preserves cases such as `a_1B -> A_1b`, `éCOLE -> École` and `ſAbC -> ſabc`.
+
+The typed wrappers preserve native numeric-f32/CVTTSS2SI kinds, numeric/boolean
+formatter arguments, strict string input and zero-result parse failures. An
+accepted numeric but invalid validator kind returns one false. Invalid UTF-8 in
+the C-string prefix is an explicit safe app refusal: validator false, formatter
+zero results. The native unchecked malformed decoder is not reproduced.
+
+Original scripts still decide whether to format: pet/character name fields do,
+chat/portal/guild rename fields intentionally do not. Local acceptance never
+fabricates server availability or create/rename success. The independent native
+captures are retained in the tracked `login/name_policy/native_cases.json` and
+`native_helpers.bin` fixtures:448 validator cases,58 formatting cases,31 typed
+wrapper cases and the helper output domain0..0x7ff. Source/oracle provenance and
+malformed-input limits are also recorded in docs/aa-ui.md.
+
+Validation: all230 normal client tests pass/36 existing probes ignored in17.12s;
+the separate original pet frame/rename/physical Cancel/Confirm/stale-identity probe
+passes in5.39s. The actual original character flow advances Step1→Step2→Step3,
+then checks typed26-character capping, unrestricted SetText, real OnTextChanged
+formatting, pending-create disable and IME preview/commit (`éCOLE -> École`). Chat
+and portal controls test distinct typed caps and intentional unformatted case.
+
+Fresh inspected aa-dev captures under `shots/hud/sol61-names/` show pet rename
+`A_1b` with2-26 guide (250.3-307.7 FPS), chat `Raid Room!` with2-10 guide
+(225.3-293.8), and portal `Western Coast` with3-32 guide (319.4-437.9). All three
+close themselves with zero runtime warnings/errors. Fresh main world selection
+shows live Lane-bevy at196.2-422.0 FPS and zero script errors/warnings. Original
+Elf-female Step3 uses the actual Battlerage button and name-field click, types
+`a_1B`, verifies `A_1b`/enabled Create, and closes without submitting anything;
+80.3-164.0 FPS on shared load. It has zero script errors and the existing one
+missing `login_stage_effect.elf_fog_01` asset warning. The source/reference Step3
+comparison preserves panel/name placement; existing lighting/material/field
+differences remain documented in aa-client-create.md.
+
+Tested main: `target/debug/aa-client-20261018-names.exe`, SHA256
+`A57C89D80CA5B3A5BBFC56B67541CF8550A813FBC07AAB47F3A60F87E3730657`.
+This includes24694fd client skill-payload integration, ce96961/f05af16 complete
+received skill result/identity, f45717b native English edit behavior and the
+333b414 global FogVolume implementation. The playable `aa-client-play.exe` alias
+is refreshed to the same hash after confirming it has no active user process.
+GUI QA processes are all closed.

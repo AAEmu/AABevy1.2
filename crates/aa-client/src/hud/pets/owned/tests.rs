@@ -134,6 +134,13 @@ fn original_pet_frame_passive_rename_and_stale_request_identity() -> Result<(), 
         end
         ShowChangeMateName('playerpet')
         assert(PET_RENAME_DIALOG and PET_RENAME_DIALOG.editbox:GetText()=='Stormmane')
+        PET_RENAME_DIALOG.editbox:SetText('a_1B')
+        assert(PET_RENAME_DIALOG.editbox:GetText()=='A_1b' and PET_RENAME_DIALOG.btnOk:IsEnabled())
+        PET_RENAME_DIALOG.editbox:SetText('a'..string.rep('B',30))
+        assert(PET_RENAME_DIALOG.editbox:MaxTextLength()==26)
+        assert(PET_RENAME_DIALOG.editbox:GetText()=='A'..string.rep('b',30) and not PET_RENAME_DIALOG.btnOk:IsEnabled())
+        PET_RENAME_DIALOG.editbox:SetText('a B')
+        assert(PET_RENAME_DIALOG.editbox:GetText()=='A b' and not PET_RENAME_DIALOG.btnOk:IsEnabled())
         PET_RENAME_DIALOG.editbox:SetText('Thunder')
         assert(PET_RENAME_DIALOG.btnOk:IsEnabled())
         X2Unit:TargetUnit('playerpet')
@@ -192,6 +199,49 @@ fn original_pet_frame_passive_rename_and_stale_request_identity() -> Result<(), 
     app.world().non_send::<UiRuntime>().lua.load("assert(not X2Mate:IsPlayerPetExists() and X2Mate:PetState()==nil); assert(select('#',X2:GetPetExpToNextLevel())==0); assert(petFrame==nil and petBar==nil)").exec()?;
     assert!(app.world().non_send::<UiRuntime>().errors.is_empty());
     drop(app);
+    drop(bridge);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn original_chat_and_portal_name_dialogs_keep_case_spaces_and_distinct_limits() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, bridge, path, _, _, _) = super::super::active_fixture::runtime(1280., 720.)?;
+    rt.lua.load(r#"
+        local request=X2DialogManager.RequestDefaultDialog
+        X2DialogManager.RequestDefaultDialog=function(self,handler,owner)
+            local wnd=request(self,handler,owner);NAME_DIALOG=wnd;return wnd
+        end
+        ShowCreateChatTabName(1)
+        NAME_DIALOG.editbox:SetText('Raid Room!')
+        assert(NAME_DIALOG.editbox:GetText()=='Raid Room!' and NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('aBc DEFGHIJKL')
+        assert(NAME_DIALOG.editbox:MaxTextLength()==10)
+        assert(NAME_DIALOG.editbox:GetText()=='aBc DEFGHIJKL' and not NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('x');assert(not NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('');NAME_DIALOG.editbox:SetFocus()
+    "#).exec()?;
+    rt.type_text("aBc DEFGHIJKL");
+    rt.lua.load("assert(NAME_DIALOG.editbox:GetText()=='aBc DEFGHI' and NAME_DIALOG.btnOk:IsEnabled())").exec()?;
+    super::super::super::expansion::fixture::click(&rt, "NAME_DIALOG.btnCancel")?;
+    aa_ui::lua::tick(&rt.lua, 300.);
+    rt.lua.load(r#"
+        ShowRegisterPotal()
+        NAME_DIALOG.editbox:SetText('AB');assert(not NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('Western Coast')
+        assert(NAME_DIALOG.editbox:GetText()=='Western Coast' and NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('A'..string.rep('B',40))
+        assert(NAME_DIALOG.editbox:MaxTextLength()==32)
+        assert(NAME_DIALOG.editbox:GetText()=='A'..string.rep('B',40) and not NAME_DIALOG.btnOk:IsEnabled())
+        NAME_DIALOG.editbox:SetText('');NAME_DIALOG.editbox:SetFocus()
+    "#).exec()?;
+    rt.type_text(&format!("A{}", "B".repeat(40)));
+    rt.lua.load("assert(NAME_DIALOG.editbox:GetText()=='A'..string.rep('B',31) and NAME_DIALOG.btnOk:IsEnabled())").exec()?;
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    assert!(bridge.borrow().pets.owned.requests.is_empty());
+    drop(rt);
     drop(bridge);
     if path.exists() {
         std::fs::remove_file(path)?;

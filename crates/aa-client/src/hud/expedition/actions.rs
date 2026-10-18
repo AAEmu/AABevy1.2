@@ -13,23 +13,9 @@ fn member<'a>(view: &'a View, name: &[u8]) -> Option<&'a ExpeditionMember> {
     view.cache.members.values().find(|row| cstr(&row.name).eq_ignore_ascii_case(name))
 }
 
-/// Original en_us/type2 policy-name path, checked against23 executed native cases.
-/// Invalid UTF-8 is refused as an app boundary; native malformed decoding is not claimed.
+/// Guild actions use the same original en_us/type2 policy as every name edit box.
 pub(super) fn valid_policy_name(bytes: &[u8]) -> bool {
-    let bytes = cstr(bytes);
-    let Ok(name) = std::str::from_utf8(bytes) else { return false };
-    let space = |value: u32| matches!(value, 9..=13 | 32);
-    let count = name.chars().count();
-    let minimum = if bytes.first().is_some_and(u8::is_ascii_alphabetic) { 3 } else { 2 };
-    if count < minimum || count > 32 || bytes.first() == Some(&b'.') || name.chars().next().is_some_and(|ch| space(ch as u32)) {
-        return false;
-    }
-    // Preserve the original byte-indexed trailing-space test after codepoint length.
-    if bytes.get(count - 1).is_some_and(|byte| space(u32::from(*byte))) {
-        return false;
-    }
-    name.chars()
-        .all(|ch| space(ch as u32) || matches!(ch as u32, 0x20..=0x7f | 0xa0..=0x17f))
+    crate::login::name_policy::valid_bytes(bytes, 2)
 }
 
 pub(super) fn error(lua: &Lua, code: i16) -> mlua::Result<()> {

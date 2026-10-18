@@ -209,7 +209,8 @@ pub fn install(rt: &UiRuntime, shared: &Shared) -> mlua::Result<()> {
     // sounds: `AAUI.PlaySound`, `PlayMusic`, `WidgetSound` ... (the HUD installs this first, too)
     crate::sound::bind(lua);
     crate::settings::install_options(lua)?;
-    lua.load(include_str!("gameapi.lua")).set_name("@gameapi.lua").exec()
+    lua.load(include_str!("gameapi.lua")).set_name("@gameapi.lua").exec()?;
+    super::name_policy::install(lua)
 }
 
 fn int(args: &MultiValue, i: usize) -> Option<i64> {

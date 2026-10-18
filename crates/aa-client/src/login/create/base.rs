@@ -110,5 +110,63 @@ pub fn install(ui: &mut UiRuntime, shared: &SharedRef) -> anyhow::Result<()> {
     ui.exec("@game_base.lua", include_str!("game_base.lua")).map_err(|e| anyhow::anyhow!("game_base.lua: {e}"))?;
     crate::settings::install_options(lua).map_err(|e| anyhow::anyhow!("{e}"))?;
     ui.exec("@game_create.lua", include_str!("game_create.lua")).map_err(|e| anyhow::anyhow!("game_create.lua: {e}"))?;
+    crate::login::name_policy::install(lua).map_err(|e| anyhow::anyhow!("name policy: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn original_character_name_field_normalizes_punctuation_and_uses_native_26_character_limit() -> anyhow::Result<()> {
+        use super::super::api::{Request, Shared};
+        use super::super::look::Customizer;
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(Shared {
+            cz: Customizer::open(aa_anim::Race::Nuian, aa_anim::Gender::Male)?,
+            step: 3,
+            requests: Vec::new(),
+            race_congestion: [0; 9],
+            zoom: 0.,
+            ability: 1,
+            create_pending: false,
+            locale: "en_us".into(),
+        }));
+        let mut rt = UiRuntime::new("en_us", 1280., 720.)?;
+        rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+        install(&mut rt, &shared)?;
+        rt.run_stage(aa_ui::Stage::CharacterCreate);
+        rt.fire_event("SHOW_CHARACTER_CREATE_WINDOW", true);
+        rt.lua.load("characterCreate.OnNextStep()").exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        rt.fire_event("SHOW_CHARACTER_CREATE_WINDOW", false);
+        rt.fire_event("SHOW_CHARACTER_CUSTOMIZE_WINDOW", true);
+        rt.lua.load("characterCreate.OnNextStep()").exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        rt.fire_event("SHOW_CHARACTER_CUSTOMIZE_WINDOW", false);
+        rt.fire_event("SHOW_CHARACTER_ABILITY_WINDOW", true);
+        aa_ui::lua::tick(&rt.lua, 1000.);
+        rt.lua.load(r#"
+            assert(characterCreate.state=='Step3');SelectAbility(1);characterCreate.createRequested=false
+            local edit=characterCreate.step3.content.nameWnd.characterName
+            local ok=characterCreate.bgWindow.stepCompleteButton
+            edit:SetText('a_1B');assert(edit:GetText()=='A_1b' and ok:IsEnabled())
+            assert(edit:MaxTextLength()==26)
+            edit:SetText('a'..string.rep('B',30));assert(edit:GetText()=='A'..string.rep('b',30) and not ok:IsEnabled())
+            edit:SetText('!aBc');assert(edit:GetText()=='!aBc' and not ok:IsEnabled())
+            edit:SetText('aBc DEF');assert(edit:GetText()=='Abc def' and not ok:IsEnabled())
+            edit:SetText('a-b.c');assert(edit:GetText()=='A-b.c' and ok:IsEnabled())
+            characterCreate.createRequested=true;UpdateCreateCharacterBtnState();assert(not ok:IsEnabled())
+            characterCreate.createRequested=false;EnableEditBox(false);edit:SetText('');edit:SetFocus()
+        "#).exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        assert!(rt.type_text(&format!("a{}", "B".repeat(30))), "original visible field must receive typed input");
+        rt.lua.load("local edit=characterCreate.step3.content.nameWnd.characterName;assert(edit:GetText()=='A'..string.rep('b',25) and characterCreate.bgWindow.stepCompleteButton:IsEnabled(),edit:GetText());edit:SetText('');edit:SetFocus()").exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let window = bevy::prelude::Entity::PLACEHOLDER;
+        assert!(rt.ime_event(&bevy::window::Ime::Enabled { window }));
+        assert!(rt.ime_event(&bevy::window::Ime::Preedit { window, value: "éCOLE".into(), cursor: Some((6, 6)) }));
+        rt.lua.load("local edit=characterCreate.step3.content.nameWnd.characterName;assert(edit:IsComposingText() and edit:GetText()=='éCOLE')").exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        assert!(rt.ime_event(&bevy::window::Ime::Commit { window, value: "éCOLE".into() }));
+        rt.lua.load("local edit=characterCreate.step3.content.nameWnd.characterName;assert(not edit:IsComposingText() and edit:GetText()=='École' and characterCreate.bgWindow.stepCompleteButton:IsEnabled())").exec().map_err(|e| anyhow::anyhow!("{e}"))?;
+        assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+        assert!(!super::super::api::lock(&shared).requests.iter().any(|r| matches!(r, Request::Create { .. })));
+        Ok(())
+    }
 }
