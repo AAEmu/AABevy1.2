@@ -488,6 +488,8 @@ pub enum ServerMsg {
     SkillEnded { tl: u16 },
     SkillStopped { obj_id: u32, skill_id: u32 },
     CastingStopped { tl: u16, duration_ms: u32 },
+    /// Received skill/tag cooldown lists for the current player; empty is not a reset.
+    Cooldowns(crate::skill::SkillCooldowns),
     SkillCooldownReset { obj_id: u32, skill_id: u32, tag_id: u32, gcd: bool },
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
@@ -609,6 +611,7 @@ impl ServerMsg {
             Self::SkillEnded { .. } => "SCSkillEnded",
             Self::SkillStopped { .. } => "SCSkillStopped",
             Self::CastingStopped { .. } => "SCCastingStopped",
+            Self::Cooldowns(_) => "SCCooldowns",
             Self::SkillCooldownReset { .. } => "SCSkillCooldownReset",
             Self::SkillLearned { .. } => "SCSkillLearned",
             Self::SkillUpgraded { .. } => "SCSkillUpgraded",
@@ -994,6 +997,7 @@ impl ServerMsg {
             sc::SCSkillEndedPacket => Self::SkillEnded { tl: r.u16()? },
             sc::SCSkillStoppedPacket => Self::SkillStopped { obj_id: r.bc()?, skill_id: r.u32()? },
             sc::SCCastingStoppedPacket => Self::CastingStopped { tl: r.u16()?, duration_ms: r.u32()? },
+            sc::SCCooldownsPacket => Self::Cooldowns(crate::skill::SkillCooldowns::read(r)?),
             sc::SCSkillCooldownResetPacket => Self::SkillCooldownReset {
                 obj_id: r.bc()?,
                 skill_id: r.u32()?,
@@ -1905,4 +1909,77 @@ mod tests {
         assert_eq!(characters[0].name, "Ab");
         assert_eq!(characters[0].zone_id, 8);
     }
+    #[test]
+    fn cooldown_dd04_preserves_empty_nonempty_reset_and_tail_order() {
+        use crate::skill::{Cooldown, SkillCooldowns};
+        let expected = SkillCooldowns {
+            skills: vec![Cooldown {
+                id: 18132,
+                total_ms: 60_000,
+                remaining_ms: 4321,
+            }],
+            tags: vec![Cooldown {
+                id: 77,
+                total_ms: 1000,
+                remaining_ms: 999,
+            }],
+        };
+        let mut body = Writer::new();
+        body.i32(1)
+            .u32(18132)
+            .u32(60_000)
+            .u32(4321)
+            .i32(1)
+            .u32(77)
+            .u32(1000)
+            .u32(999);
+        let body = body.finish();
+        assert_eq!(
+            decode(sc::SCCooldownsPacket, &body),
+            ServerMsg::Cooldowns(expected.clone())
+        );
+        assert_eq!(ServerMsg::Cooldowns(expected.clone()).name(), "SCCooldowns");
+        for len in 0..body.len() {
+            assert!(ServerMsg::decode(&game_frame(sc::SCCooldownsPacket, &body[..len])).is_err());
+        }
+        let mut batch = Writer::new();
+        batch.u16(0).u16(sc::SCCooldownsPacket).raw(&[0; 8]);
+        batch.u16(0).u16(sc::SCCooldownsPacket).raw(&body);
+        batch
+            .u16(0)
+            .u16(sc::SCSkillCooldownResetPacket)
+            .bc(5)
+            .u32(18132)
+            .u32(77)
+            .bool(true);
+        batch.u16(0).u16(sc::SCCooldownsPacket).raw(&[0; 8]);
+        batch.u16(0).u16(sc::SCSetBreathPacket).u32(u32::MAX);
+        let mut frame = vec![MAGIC, LEVEL_COMPRESSED, 5, 0];
+        frame.extend(stored(&batch.finish(), true));
+        assert_eq!(
+            ServerMsg::decode(&frame).unwrap(),
+            ServerMsg::Batch(vec![
+                ServerMsg::Cooldowns(SkillCooldowns::default()),
+                ServerMsg::Cooldowns(expected),
+                ServerMsg::SkillCooldownReset {
+                    obj_id: 5,
+                    skill_id: 18132,
+                    tag_id: 77,
+                    gcd: true
+                },
+                ServerMsg::Cooldowns(SkillCooldowns::default()),
+                ServerMsg::SetBreath { breath: u32::MAX },
+            ])
+        );
+        // A corrupt count cannot be skipped by guessing where the next packet begins.
+        let mut batch = Writer::new();
+        batch.u16(0).u16(sc::SCSetBreathPacket).u32(7);
+        batch.u16(0).u16(sc::SCCooldownsPacket).i32(-1).i32(0);
+        batch.u16(0).u16(sc::SCSetBreathPacket).u32(8);
+        assert_eq!(
+            ServerMsg::decode_batch(&batch.finish(), 3),
+            vec![ServerMsg::SetBreath { breath: 7 }]
+        );
+    }
+
 }

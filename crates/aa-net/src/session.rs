@@ -492,7 +492,9 @@ pub enum Event {
     SkillStopped { obj_id: u32, skill_id: u32 },
     /// The cast `tl` was cancelled.
     CastingStopped { tl: u16, duration_ms: u32 },
-    /// The cooldown of `skill_id` (or of all skills with `tag_id`) was reset.
+    /// Received skill/tag cooldown lists for the current player; empty is not a reset.
+    Cooldowns(crate::skill::SkillCooldowns),
+    /// The cooldown of `skill_id` / `tag_id` and optionally the global cooldown was reset.
     SkillCooldownReset { obj_id: u32, skill_id: u32, tag_id: u32, gcd: bool },
     /// The player's active quests, listed when the character spawns.
     QuestsLoaded(Vec<Quest>),
@@ -1449,6 +1451,7 @@ impl Session {
             M::SkillEnded { tl } => self.emit(Event::SkillEnded { tl }),
             M::SkillStopped { obj_id, skill_id } => self.emit(Event::SkillStopped { obj_id, skill_id }),
             M::CastingStopped { tl, duration_ms } => self.emit(Event::CastingStopped { tl, duration_ms }),
+            M::Cooldowns(cooldowns) => self.emit(Event::Cooldowns(cooldowns)),
             M::SkillCooldownReset { obj_id, skill_id, tag_id, gcd } => {
                 self.emit(Event::SkillCooldownReset { obj_id, skill_id, tag_id, gcd });
             }
@@ -3433,4 +3436,82 @@ mod tests {
         let pings = stub.await.unwrap().iter().filter(|f| **f == (game::LEVEL_PROXY, pp::PingPacket)).count();
         assert!(pings >= 4, "{pings} pings");
     }
+    #[tokio::test]
+    async fn received_cooldowns_and_reset_preserve_session_order_without_cast_events() {
+        use crate::skill::{Cooldown, SkillCooldowns};
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.self_obj = 5;
+        let mut state = crate::state::WorldState::default();
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 5,
+            state: Default::default(),
+            unit: crate::state::tests::unit(5),
+        })));
+        let entries = SkillCooldowns {
+            skills: vec![Cooldown {
+                id: 18132,
+                total_ms: 60_000,
+                remaining_ms: 30_000,
+            }],
+            tags: vec![],
+        };
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::Cooldowns(entries.clone()),
+                game::ServerMsg::Cooldowns(SkillCooldowns::default()),
+                game::ServerMsg::SkillCooldownReset {
+                    obj_id: 5,
+                    skill_id: 18132,
+                    tag_id: 0,
+                    gcd: true,
+                },
+                game::ServerMsg::Cooldowns(entries.clone()),
+                game::ServerMsg::SetBreath { breath: 123 },
+            ])))
+            .await;
+        for index in 0..5 {
+            let event = events.try_recv().unwrap();
+            match (index, &event) {
+                (0 | 3, Event::Cooldowns(actual)) => assert_eq!(*actual, entries),
+                (1, Event::Cooldowns(actual)) => assert_eq!(*actual, SkillCooldowns::default()),
+                (
+                    2,
+                    Event::SkillCooldownReset {
+                        obj_id: 5,
+                        skill_id: 18132,
+                        gcd: true,
+                        ..
+                    },
+                ) => {}
+                (4, Event::SetBreath { breath: 123 }) => {}
+                other => panic!("wrong event order: {other:?}"),
+            }
+            state.apply(&event);
+            if index == 1 {
+                assert!(
+                    state.skills.cooldown_left(18132, 0, 0).is_some(),
+                    "empty is not reset"
+                );
+            }
+            if index == 2 {
+                assert!(state.skills.cooldown_left(18132, 0, 0).is_none());
+            }
+        }
+        assert!(events.try_recv().is_err());
+        assert_eq!(state.skills.received_skill_cooldowns.len(), 2);
+        assert!(
+            state.skills.received_skill_cooldowns[0].reset
+                && !state.skills.received_skill_cooldowns[1].reset
+        );
+        assert!(state.skills.cooldown_left(18132, 0, 0).is_some());
+        assert!(
+            state.skills.last_used.is_empty()
+                && state.skills.last_cast.is_none()
+                && state.skills.casting.is_empty()
+        );
+        assert_eq!(state.combat_status.breath, Some(123));
+    }
+
 }
