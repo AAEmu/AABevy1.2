@@ -590,6 +590,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn original_brush_ordinary_shadow_flags_and_interior_remap_are_preserved() {
+        if !crate::pak_available() { return; }
+        let pak = aa_pak::Pak::global();
+        for (cell, count, noncasters) in [("015_015",13,0),("010_010",760,3),("021_008",1660,68),("012_014",1157,106)] {
+            let data = pak.read(&format!("worlds/main_world/cells/{cell}/client/brush.dat")).unwrap();
+            let brushes = parse_brush_dat(&data).unwrap();
+            assert_eq!(brushes.len(),count);
+            assert_eq!(brushes.iter().filter(|b| b.flags & 0x8 == 0).count(),noncasters,"{cell}");
+        }
+        for (world, cell, count, noncasters) in [("instance_library","000_004",30286,0),("main_world","012_015",625,94)] {
+            let data = pak.read(&format!("worlds/{world}/cells/{cell}/client/visareas.dat")).unwrap();
+            let interior = parse_visareas_dat(&data).unwrap();
+            let flags:Vec<_> = interior.brushes.iter().map(|b| b.flags).collect();
+            assert_eq!((flags.len(),flags.iter().filter(|f| **f & 0x8 == 0).count()), (count,noncasters), "{world}/{cell}");
+            let mut merged = CellObjects { models:vec!["outside.cgf".into()], materials:vec!["outside".into()], ..Default::default() };
+            visareas::append_objects(&mut merged,interior);
+            assert_eq!(merged.brushes.iter().map(|b| b.flags).collect::<Vec<_>>(),flags,
+                "independent interior table remapping must preserve native flags");
+        }
+    }
+
+    #[test]
     fn vegetation_color_tail_is_not_the_legacy_bright_byte() {
         let mut rec = [0; 64];
         rec[51..55].copy_from_slice(&2.5f32.to_le_bytes());
