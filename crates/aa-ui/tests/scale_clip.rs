@@ -147,6 +147,11 @@ fn rotated_effect_clips_to_original_bounds_with_affine_uvs_and_phase_changes() {
     }
     near(area, 42.0 * 42.0);
     lua::tick(&ui.lua, 600.0);
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+    assert!(lua::ui(&ui.lua).animations.sample(id(&ui, "effect")).clip);
+    // Native finishes one phase on this draw and initializes the next on a later draw.
+    lua::tick(&ui.lua, 0.0);
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     assert!(!lua::ui(&ui.lua).animations.sample(id(&ui, "effect")).clip);
 }
 

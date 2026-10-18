@@ -6418,9 +6418,10 @@ native-effect-start-source-20261018.txt under the ignored aa-ui extract.
 The original LifeAlertEffect zero-HP branch calls SetVisible(true) separately.
 An additional actual3928f810/3928e6c0 draw control proves that manual re-show can
 advance color time while the stopped running flags remain false. The current
-generic effect renderer's separate stopped flag and global clock do not yet
-match that path. Native IsStartEffect also tests both color and motion flags;
-its separate-channel getter/paint-clock contract remains open. This correction
+generic effect renderer's separate stopped flag and global clock did not yet
+match that path. Native IsRunning also tests both color and motion flags;
+its separate-channel getter/paint-clock contract was open in this correction
+(implemented by the following milestone). This correction
 does not claim those behaviors or change the existing ordinary-slot completion
 clock and selector.
 
@@ -6443,3 +6444,73 @@ script errors/WARN/ERROR and self-close (PIDs26044/45844); the copied executable
 was removed. The fixture invokes the real original UpdateAll without an
 unnecessary ENTERED_WORLD event; an earlier diagnostic with that extra event
 hit the existing fake battlefield maxCount=nil boundary and is not clean QA.
+
+### Generic Effect admitted painting and independent native clocks (2026-10-18)
+
+Original LifeAlertEffect's zero-HP branch manually SetVisible(true) after a
+healthy SetStartEffect(false). Native3928f810 admits that effect by its shown
+byte, irrespective of its stopped flags. The toolkit now advances generic
+Effects at the actual owner paint traversal before the alpha/scissor skips.
+Hidden owners/ancestors, hidden effects, missing membership and retired objects
+pause; hidden fading owners, alpha zero, empty clips and offscreen rectangles
+still admit the native clock. Update only requests painting; an unpainted
+frame does not advance an Effect. Atlas frames and private ordinary-slot
+edge/completion/cooldown clocks are unchanged.
+
+Color3928e6c0 and motion3928f460 retain separate f32 seconds, delay/hold clocks,
+phase indices, carry, repeat counters and running flags. Start initializes both
+channels through3928df00/3928ea80. A finished phase hands off on a subsequent
+draw and retains the new initial sample for that draw, carrying time without
+skipping phases. Coefficients latch at initialization; live endpoints/timing
+records do not retroactively replace them. Finite completion preserves the
+last sample. Zero coefficients with different endpoints stay at the initial
+sample. Raw internal nonfinite arithmetic is not normalized by the clock;
+the existing finite-position GPU upload fence remains in force.
+
+The constructor uses repeat0/counter1 for both channels and priority0/scalex
+for a new color phase. The actual scaley branch3928e7e0 adds displacement to
+final Y, unlike the other six priority branches; its native crossing behavior
+is retained. Edge movement3928a950 multiplies before subtracting the half
+extent as separate f32 operations. The existing correct Lua-facing radius
+argument order and other effect transform geometry remain unchanged.
+
+Registration39239704 names binding39235b00 **IsRunning**: it returns exactly
+one boolean equal to color_flag AND motion_flag, with zero results on a failed
+effect cast. The older toolkit IsStartEffect alias is retained as compatibility.
+Native clear39290e20/39290e80 hides and stops both flags, clears only the chosen
+phase vector, and preserves sampled values and the other channel configuration.
+Manual visibility resumes admitted clock work without turning either flag on.
+No widget callbacks or application producers are added. Existing configuration
+setter coercion/index admission outside the source-closed ordinary inputs is
+not revised or claimed by this clock slice.
+
+The ignored aa-ui artifacts contain **58 actual native groups**:43 temporal
+groups in effect_temporal_oracle.py,6 constructor/getter groups in
+effect_clock_defaults_oracle.py and9 generic widget/layer/effect paint controls
+in effect_paint_admission_oracle.py. The real initializer, kinematics, both
+phase machines, interpolation, clear, cast/AND/result code and admitted draw
+path execute; raw phase records and host/render/time endpoints are explicit
+fixture inputs. No phase/sample/carry/repeat algorithm is mocked. Corresponding
+native-effect-*-oracle-20261018.json outputs and
+native-effect-clock-source-20261018.txt preserve the evidence.
+
+Crate check/example build and **151 selected checks pass**, with the existing
+optional font check ignored:12 new clock tests,14 animation/start checks,
+26 library checks and99 broader checks across13 targets. The actual original
+zero-HP warning paints after manual re-show while IsRunning stays false;
+CreateLoadingTextureSet rotates with an empty motion channel and pauses under
+its hidden owner. Physical original button/mask callbacks, clipped affine UVs,
+fades/channel callbacks, retirement, map pings and private slot clocks remain
+covered. The old effect tests now explicitly paint and retain native handoff/
+hidden-clock assertions; the atlas and widget-channel test paths stay distinct.
+
+Both aa-dev `--shot-after 8` captures were inspected:
+shots/aa-ui/native-effect-clock-zero-720-20261018.png
+(1280x720/default0.85, **175.7-215.2 FPS**) and
+shots/aa-ui/native-effect-clock-paused-1080-20261018.png
+(1920x1080/default1.0, **179.0-190.8 FPS**). The first shows the real zero-HP
+manual warning plus original active loading/autoattack/toggle art. The second
+shows recovered health, no warning and the hidden paused loading owner.
+Both report zero script errors/WARN/ERROR and self-close (PIDs31140/24744);
+the copied executable was removed. Original Lua, app APIs and native-selector
+activation are unchanged.

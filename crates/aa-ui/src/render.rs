@@ -120,6 +120,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         }
         // Native internal slot effects advance on admitted painting, even at alpha zero.
         crate::lua::slot::prepare_cooldown_draw(u, id);
+        crate::lua::animation::prepare_effect_draw(u, id);
         let alpha = effective_alpha(u, id);
         if alpha <= 0.0 {
             continue;
@@ -438,7 +439,7 @@ fn drawable_image_quads(
     let o = u.tree.get(d).clone();
     if !o.alive || !o.shown { return; }
     let Kind::Drawable(dr) = &o.kind else { return };
-    if dr.effect == Some(false) {
+    if dr.class == "drawable:effect" && !crate::lua::animation::effect_draws(u, d) {
         return;
     }
     // Native listbox templates are placed at fractional row centres. Keep their explicit

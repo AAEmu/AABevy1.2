@@ -1,5 +1,5 @@
-//! Drawable timelines used by the original Lua UI. Only running timelines are ticked;
-//! samples live outside the anchor tree, so animation never invalidates layout.
+//! Drawable timelines used by the original Lua UI. Generic Effects advance on painting;
+//! atlas frames retain their own update clock. Samples do not invalidate layout.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -11,7 +11,7 @@ use crate::tree::{Id, Point, Rect};
 mod motion;
 mod timing;
 pub mod widgets;
-use timing::Timing;
+use timing::{Clock, Timing};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
@@ -126,8 +126,10 @@ struct Effect {
     phases: BTreeMap<i64, Phase>,
     repeat: u32,
     delay: f32,
-    elapsed: f64,
-    running: bool,
+    clock: Clock,
+    current: Sample,
+    draw_color: bool,
+    draw_motion: bool,
     motion: motion::Motion,
 }
 
@@ -135,10 +137,12 @@ impl Default for Effect {
     fn default() -> Self {
         Self {
             phases: Default::default(),
-            repeat: 1,
+            repeat: 0,
             delay: 0.0,
-            elapsed: 0.0,
-            running: false,
+            clock: Clock::default(),
+            current: Sample::default(),
+            draw_color: false,
+            draw_motion: false,
             motion: motion::Motion::new(),
         }
     }
@@ -161,7 +165,7 @@ impl Default for Phase {
     fn default() -> Self {
         Self {
             timing: Default::default(),
-            priority: 3,
+            priority: 0,
             hold: 0.0,
             initial: [1.0; 4],
             final_color: [1.0; 4],
@@ -186,29 +190,28 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
 }
 
 impl Phase {
-    fn duration(self) -> f64 {
-        let delta = match self.priority {
-            0 => self.scale[1] - self.scale[0],
-            1 => self.scale[3] - self.scale[2],
-            2 => self.rotation[1] - self.rotation[0],
-            p => {
-                self.final_color[[3, 0, 1, 2][p.saturating_sub(3).min(3)]]
-                    - self.initial[[3, 0, 1, 2][p.saturating_sub(3).min(3)]]
-            }
-        };
-        if delta == 0.0 {
-            0.0
-        } else {
-            self.timing.duration()
+    fn endpoint(self, final_point: bool) -> Sample {
+        Sample {
+            color: Some(if final_point { self.final_color } else { self.initial }),
+            scale: if final_point { [self.scale[1], self.scale[3]] } else { [self.scale[0], self.scale[2]] },
+            rotation: self.rotation[usize::from(final_point)].to_radians(),
+            pivot: self.pivot, clip: self.clip, ..Default::default()
         }
     }
 
-    fn sample(self, elapsed: f64) -> Sample {
-        let t = if self.duration() == 0.0 {
-            1.0
-        } else {
-            self.timing.fraction(elapsed)
-        };
+    fn bounds(self) -> [f32; 2] {
+        match self.priority {
+            0 => [self.scale[0], self.scale[1]],
+            1 => [self.scale[2], self.scale[3]],
+            2 => self.rotation,
+            p => {
+                let i = [3, 0, 1, 2][p.saturating_sub(3).min(3)];
+                [self.initial[i], self.final_color[i]]
+            }
+        }
+    }
+
+    fn sample(self, t: f32) -> Sample {
         Sample {
             color: Some(std::array::from_fn(|i| {
                 lerp(self.initial[i], self.final_color[i], t)
@@ -226,48 +229,60 @@ impl Phase {
 }
 
 impl Effect {
-    fn sample(&self, rect: Rect) -> (Sample, bool) {
-        let (mut sample, color_running) = self.color_sample();
-        let (movement, move_running) = self.motion.sample(self.elapsed, rect);
-        sample.offset = movement.offset;
-        sample.rotation += movement.rotation;
-        (sample, color_running || move_running)
+    fn initialize(&mut self, phase: usize) {
+        if let Some(p) = self.phases.values().nth(phase).copied() {
+            let [initial, final_value] = p.bounds();
+            self.clock.initialize(phase, final_value - initial, p.timing);
+            self.current = p.endpoint(false);
+        }
     }
 
-    fn color_sample(&self) -> (Sample, bool) {
-        let duration: f64 = self
-            .phases
-            .values()
-            .map(|p| p.duration() + p.hold as f64)
-            .sum();
-        let elapsed = self.elapsed - self.delay as f64;
-        if elapsed < 0.0 {
-            return (
-                Sample {
-                    alpha: 0.0,
-                    ..Default::default()
-                },
-                true,
-            );
-        }
-        let Some(last) = self.phases.last_key_value().map(|(_, p)| p) else {
-            return (Sample::default(), false);
+    fn sample(&self) -> Sample {
+        let mut sample = self.current;
+        let movement = if self.draw_motion { self.motion.sample() } else { Sample::default() };
+        sample.offset = movement.offset;
+        sample.rotation += movement.rotation;
+        sample
+    }
+
+    fn advance_color(&mut self, dt: f32) -> bool {
+        let Some(p) = self.phases.values().nth(self.clock.phase).copied() else {
+            self.clock.running = false;
+            return false;
         };
-        if duration <= 0.0 {
-            return (last.sample(f64::MAX), false);
-        }
-        if self.repeat > 0 && elapsed >= duration * self.repeat as f64 {
-            return (last.sample(f64::MAX), false);
-        }
-        let mut t = elapsed % duration;
-        for p in self.phases.values() {
-            let len = p.duration() + p.hold as f64;
-            if t < len {
-                return (p.sample(t), true);
+        let Some(dt) = self.clock.time(dt, self.delay) else { return false };
+        if self.clock.finished {
+            if let Some((phase, carry)) = self.clock.following(dt, p.hold, self.phases.len(), self.repeat) {
+                self.initialize(phase);
+                self.clock.elapsed += carry;
             }
-            t -= len;
+        } else {
+            let [initial, final_value] = p.bounds();
+            //3928e7e0's scaley branch adds displacement to final Y, unlike the other six.
+            let base = if p.priority == 1 { final_value } else { initial };
+            let value = base + self.clock.displacement(dt);
+            if timing::crossed(initial, final_value, value) {
+                self.current = p.endpoint(true);
+                self.clock.finish(p.timing);
+            } else {
+                self.current = p.sample(((value - initial) / (final_value - initial)).abs());
+            }
         }
-        (last.sample(f64::MAX), true)
+        true
+    }
+
+    fn advance(&mut self, dt: f32, rect: Rect) -> Sample {
+        self.draw_color = self.advance_color(dt);
+        self.draw_motion = self.motion.advance(dt, rect);
+        if let Some(p) = self.phases.values().nth(self.clock.phase) {
+            self.current.pivot = p.pivot;
+            self.current.clip = p.clip;
+        }
+        self.sample()
+    }
+
+    fn pending(&self) -> bool {
+        (!self.phases.is_empty() && !self.clock.terminal) || self.motion.pending()
     }
 }
 
@@ -331,11 +346,10 @@ impl Frames {
 
 fn phase(lua: &Lua, id: Id, a: &Args, change: impl FnOnce(&mut Phase)) {
     let mut u = ui(lua);
-    let e = u.animations.effects.entry(id).or_insert_with(|| Effect {
-        repeat: 1,
-        ..Default::default()
-    });
+    let e = u.animations.effects.entry(id).or_default();
     change(e.phases.entry(a.f(1) as i64).or_default());
+    e.clock.terminal = false;
+    u.tree.repaint();
 }
 
 pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
@@ -357,8 +371,8 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, a| {
             phase(lua, id, a, |p| {
                 p.timing = Timing {
-                    velocity: positive(a.f(3)) * 1000.0,
-                    acceleration: positive(a.f(4)) * 1000.0,
+                    velocity: positive(a.f(3)),
+                    acceleration: positive(a.f(4)),
                 };
                 p.priority = match a.s(2).unwrap_or_default().as_str() {
                     "scalex" => 0,
@@ -413,29 +427,29 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.set(
         "SetEffectInterval",
         method(lua, |lua, id, a| {
-            phase(lua, id, a, |p| p.hold = positive(a.f(2)) * 1000.0);
+            phase(lua, id, a, |p| p.hold = positive(a.f(2)));
             none()
         })?,
     )?;
     m.set(
         "SetRepeatCount",
         method(lua, |lua, id, a| {
-            ui(lua).animations.effects.entry(id).or_default().repeat = positive(a.f(1)) as u32;
+            let mut u = ui(lua);
+            let e = u.animations.effects.entry(id).or_default();
+            e.repeat = positive(a.f(1)) as u32;
+            e.clock.terminal = false;
+            u.tree.repaint();
             none()
         })?,
     )?;
     m.set(
         "SetInterval",
         method(lua, |lua, id, a| {
-            ui(lua)
-                .animations
-                .effects
-                .entry(id)
-                .or_insert_with(|| Effect {
-                    repeat: 1,
-                    ..Default::default()
-                })
-                .delay = positive(a.f(1)) * 1000.0;
+            let mut u = ui(lua);
+            let e = u.animations.effects.entry(id).or_default();
+            e.delay = positive(a.f(1));
+            e.clock.terminal = false;
+            u.tree.repaint();
             none()
         })?,
     )?;
@@ -456,24 +470,19 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let old_sample = u.animations.sample(id);
             let rect = u.tree.rect(id);
             if on {
-                let e = u.animations.effects.entry(id).or_insert_with(|| Effect {
-                    repeat: 1,
-                    ..Default::default()
-                });
-                e.elapsed = 0.0;
-                let (sample, running) = e.sample(rect);
-                e.running = running;
+                let e = u.animations.effects.entry(id).or_default();
+                e.initialize(0);
+                e.clock.start();
+                e.motion.start(rect);
+                e.draw_color = !e.phases.is_empty();
+                e.draw_motion = e.motion.configured();
+                let sample = e.sample();
                 u.animations.samples.insert(id, sample);
-                if running {
-                    u.animations.active.insert(id);
-                } else {
-                    u.animations.active.remove(&id);
-                }
             } else {
                 if let Some(e) = u.animations.effects.get_mut(&id) {
-                    e.running = false;
+                    e.clock.running = false;
+                    e.motion.stop();
                 }
-                u.animations.active.remove(&id);
             }
             //3928fb50 writes the drawable's own visibility for both branches.
             // Original low-health warnings use IsVisible() to admit the next restart.
@@ -491,13 +500,16 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         m.set(
             name,
             method(lua, |lua, id, _| {
+                if !ui(lua).tree.get(id).drawable().is_some_and(|d| d.class == "drawable:effect") {
+                    return none();
+                }
                 ret(
                     lua,
                     ui(lua)
                         .animations
                         .effects
                         .get(&id)
-                        .is_some_and(|e| e.running),
+                        .is_some_and(|e| e.clock.running && e.motion.running()),
                 )
             })?,
         )?;
@@ -506,12 +518,14 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "ClearEffect",
         method(lua, |lua, id, _| {
             let mut u = ui(lua);
+            if !u.tree.get(id).drawable().is_some_and(|d| d.class == "drawable:effect") {
+                return none();
+            }
             if let Some(e) = u.animations.effects.get_mut(&id) {
                 e.phases.clear();
-                e.running = false;
+                e.clock.running = false;
+                e.motion.stop();
             }
-            u.animations.active.remove(&id);
-            u.animations.samples.remove(&id);
             if let Some(d) = u.tree.drawable_mut(id) {
                 d.effect = Some(false);
             }
@@ -604,13 +618,7 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
             u.animations.remove(id);
             continue;
         }
-        let rect = u.tree.rect(id);
-        let (sample, running, hide) = if let Some(e) = u.animations.effects.get_mut(&id) {
-            e.elapsed += positive(dt_ms) as f64;
-            let (sample, running) = e.sample(rect);
-            e.running = running;
-            (sample, running, false)
-        } else if let Some(f) = u.animations.frames.get_mut(&id) {
+        let (sample, running, hide) = if let Some(f) = u.animations.frames.get_mut(&id) {
             f.elapsed += positive(dt_ms) as f64;
             let (sample, running) = f.sample();
             f.running = running;
@@ -631,9 +639,44 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
             u.tree.get_mut(id).shown = false;
         }
     }
+    // Request painting, without advancing an Effect that native traversal would skip.
+    for (&id, e) in &u.animations.effects {
+        if !e.pending() { continue; }
+        let mut owner = id;
+        loop {
+            let o = u.tree.get(owner);
+            if !o.alive || !(o.shown || o.widget().is_some_and(|w| w.fading)) { break; }
+            if let Some(parent) = o.parent { owner = parent; }
+            else {
+                repaint |= u.tree.top.contains(&owner);
+                break;
+            }
+        }
+        if repaint { break; }
+    }
     if repaint {
         u.tree.repaint();
     }
+}
+
+/// Actual owner paint admission, before alpha and scissor skips. No frame/slot clocks here.
+pub(crate) fn prepare_effect_draw(u: &mut Ui, owner: Id) {
+    let Some(w) = u.tree.widget(owner) else { return };
+    let ids: Vec<_> = w.drawables.iter().copied().filter(|&id| {
+        let o = u.tree.get(id);
+        o.alive && o.shown && o.drawable().is_some_and(|d| d.class == "drawable:effect" && !d.row_template)
+    }).collect();
+    for id in ids {
+        let rect = u.tree.rect(id);
+        if let Some(e) = u.animations.effects.get_mut(&id) {
+            let sample = e.advance(u.frame_ms / 1000., rect);
+            u.animations.samples.insert(id, sample);
+        }
+    }
+}
+
+pub(crate) fn effect_draws(u: &Ui, id: Id) -> bool {
+    u.animations.effects.get(&id).is_some_and(|e| e.draw_color)
 }
 
 pub(super) fn tick_widget(lua: &Lua, id: Id, dt_ms: f32) {

@@ -59,6 +59,7 @@ fn stop_hides_and_preserves_sample_and_configuration_for_a_real_restart() {
     let ui = setup();
     ui.exec("@start", "e:SetStartEffect(true)").unwrap();
     lua::tick(&ui.lua, 250.);
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     let sample = lua::ui(&ui.lua).animations.sample(id(&ui, "e"));
     assert_eq!(sample.color.unwrap()[3], 0.5);
     ui.exec(
@@ -79,6 +80,7 @@ fn stop_hides_and_preserves_sample_and_configuration_for_a_real_restart() {
         0.
     );
     lua::tick(&ui.lua, 250.);
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     assert_eq!(lua::ui(&ui.lua).animations.sample(id(&ui, "e")), sample);
 }
 #[test]
