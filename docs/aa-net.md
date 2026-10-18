@@ -6344,3 +6344,84 @@ absence does not select zeros. There is no native missing-header return path. A 
 startup empty table is an app accommodation for that undefined native domain, not a
 native default. GetJuryPoint394969c0 explicitly returns one0 only if global client pointer
 is absent; otherwise it reads header+660 without a separate missing-header guard.
+
+
+### Received trial counters, ruling and history (2026-10-18)
+
+SC179/17a are two signed i32s (count,total);17d is i32 count,total,u8 sentence type,
+i32 sentence bits;181 is u32 player ID followed by ten i32 values. Their native factory
+writes391b336b/33eb/356b/326b select vtables399b3cd8/3ce4/3d08/3cc0 and readers
+397af900/af940,397b6b10/6970. Lane trial.rs has the same full bodies.
+TrialEvent::JuryOkCount/VerdictCount, RulingStatus(TrialRulingStatus) and
+History(TrialHistory) retain all fields and reach existing Session/plugin/WorldState folds.
+
+179 handler391dd730 calls3907c660/3907c1a0, stores manager+f4/+f8 BEFORE
+JURY_OK_COUNT(count,total), event14c.17a391dd7b0 calls3907c680/3907c260, stores
++110/+114 BEFORE VERDICT_COUNT(count,total),14d. Both arguments are signed i32
+converted to f32; repeated receipts emit repeated notices. No equality/role guard exists.
+
+17d stores count/total into the same +110/+114, type+118, sentence+11c and sets byte3true
+in3907c6e0, then3907c4f0 emits RULING_STATUS(count,total,type,sentence),13f. Count/total
+and the zero-extended u8 type convert to numeric f32; sentence converts UNSIGNEDu32
+bits to f32. Native count>=total can also open a localized task12 (with additional defendant
+and sentence-type conditions). This receive-only API does not synthesize that task, user
+response or result. Even when no task opens, the genuine ruling callback still fires.
+
+181391dd610/3907bb20 ignores the packet player ID and writes ten shared cache stats:
+crimePoint,arrest,acceptGuilty,acceptTrial,notGuilty,guilty,totalSeconds,curSeconds,
+crimeRecordCount,botReport. It emits no Lua callback and does not reconcile ownership.
+TrialHistory.player_id remains raw metadata; do not interpret it as an admitted own identity.
+All signed bits remain intact. No cap, nonnegative clamp or success is invented.
+
+Trials exposes separate optional jury_ok_count/jury_ok_total, verdict_counts, ruling,
+has_ruling and history. The native constructor does not initialize these fields, including
+byte3, so initial unknown stays None. Changed general trial3907f660 initializes ONLY
+jury OK count0, verdict count/total0 and byte3false; it retains jury OK total, ruling
+sentence/type and history. A coherent ruling struct keeps its count/total synchronized
+with subsequent17a updates and changed-context resets. Role resets/ruling close/cancel
+retain all these fields; explicit app character/session isolation clears them.
+
+trial_counts_oracle.py/native-trial-count-ruling-history-oracle-20261018.json execute
+original3907c1a0/3907c260/3907c6e0+3907c4f0/3907bb20 in local Unicorn. Lua dispatch
+only records actual ScriptAnyValue/cache; locale lookup is mocked missing so no modal UI
+is executed. Goldens prove assignment-before-dispatch, signed extrema, duplicate delivery,
+UINT_MAX sentence4294967296f32 and ignored history player ID/no callback. Tests also
+cover exact bytes/every truncation/DD04 following-packet alignment and runtime lifecycle.
+
+Original getter follow-up source is native-trial-original-getters-source-20261018.txt.
+GetTrialType registration390790cf calls39078790: manager+8 signed i32 to f32, i.e.
+records_raw_unknown, NOT phase or role. GetCrimeRecordsByPage registration39079242
+calls390788a0, subtracts1 from page, then390803c0 scans actual append order using
+manager+188 page size (changed-context default10); negative internal page returns an
+empty table. Full record strings/localized lookups and full GetCrimeData projection
+remain client adapter source work, not fabricated from raw IDs.
+
+Trial elapsed time is independent of Battlefield's mapped clock. Native import38ff6f1c
+XlGetCurrentFileTime is xlcommon3301ca70 -> MSVCR100 _time64(NULL), despite its name;
+38ff6ef4 XlDiffTime ->3301ca80 -> _difftime64. Accepted178 stores local epoch seconds
+and expiry=start+(remaining_ms/1000). Frame3907ce50 emits TRIAL_TIMER(phase,periodTable)
+only for nonzero expiry and a nonzero truncated second difference from its last update;
+it then stores fresh local epoch seconds. The period helper394245f0/39429b20 is the
+existing six-key year/month/day/hour/minute/second formatter. No elapsed state/tick API
+is added here, and raw phase duration is never treated as a completion ACK.
+
+
+Trials.crime_kind_counts is an optional [murder,assault,theft,etc] cache. It becomes
+known zero on changed-context adoption, and is recomputed ONLY during an admitted176
+receipt over current evidence (kind3/2/4/other respectively). Appending177 does not update
+it; deriving counts each UI frame would diverge from native receipt ordering.
+Original GetCrimeData.total uses records_total, not the sum of kind counters.
+totalRecords selects history.crime_record_count when trial type(records_raw_unknown)0,
+otherwise history.bot_report. Details race/faction getter outputs are localized strings.
+
+Read-only original PID48924 with verified StandMode module marker established faction-name
+threshold39ac373c=100 and invalid expedition39ade6c4=0; see
+native-trial-name-threshold-runtime-20261018.json. Both details faction and record column6
+only ask392f8120(id,true) when ID>=100. Record6 prefers nonzero victim expedition ID,
+otherwise victim faction. This threshold is distinct from guild creation's1000 constant.
+GetCrimeRecordsByPage column1 uses XlI32toA and is a signed decimal ID STRING, not numeric
+u32. Columns2/3/4/5 are reporter string/kind numeric/victim string/raw report message.
+Column10 calls3907e6e0/XlGetLocalTime then localized category102 year_to_minute with
+five decimal strings (year+1900,month+1,day,hour,minute). It is local calendar time, not
+UTC/ISO or an invented fixed format. Invalid timestamp behavior and column9 position
+localization remain adapter boundaries; raw packet fields are preserved independently.

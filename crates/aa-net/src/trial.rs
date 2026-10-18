@@ -1,6 +1,8 @@
 //! Received trial wait cache and every received producer of its defendant callback gate.
 //! Does not implement elapsed trial clocks, invitations, votes or automatic CS072.
 mod data;
+mod progress;
+pub use progress::{TrialHistory, TrialRulingStatus};
 pub use data::{TrialCrimeRecord, TrialDefendantData, TrialRecords};
 use crate::{
     session::{Event, Phase},
@@ -8,6 +10,10 @@ use crate::{
 };
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialEvent {
+    JuryOkCount{count:i32,total:i32},
+    VerdictCount{count:i32,total:i32},
+    RulingStatus(TrialRulingStatus),
+    History(TrialHistory),
     DefendantData(TrialDefendantData),
     Records(TrialRecords),
     PhaseChanged { trial_id:u32,phase:u8,current_jury:i32,remaining_time_ms:u32 },
@@ -22,11 +28,15 @@ pub enum TrialEvent {
 }
 impl TrialEvent {
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x173 | 0x175 | 0x176 | 0x177 | 0x178 | 0x17b | 0x17c | 0x17e | 0x17f | 0x180 | 0x183)
+        matches!(op, 0x173 | 0x175 | 0x176 | 0x177 | 0x178 | 0x179 | 0x17a | 0x17b | 0x17c | 0x17d | 0x17e | 0x17f | 0x180 | 0x181 | 0x183)
     }
     /// Native and active lane bodies agree; consume complete raw names, including NULs.
     pub fn read(op: u16, r: &mut Reader) -> Result<Self> {
         Ok(match op {
+            0x179 => Self::JuryOkCount{count:r.i32()?,total:r.i32()?},
+            0x17a => Self::VerdictCount{count:r.i32()?,total:r.i32()?},
+            0x17d => Self::RulingStatus(TrialRulingStatus::read(r)?),
+            0x181 => Self::History(TrialHistory::read(r)?),
             0x176 => Self::DefendantData(TrialDefendantData::read(r)?),
             0x177 => Self::Records(TrialRecords::read(r)?),
             0x178 => Self::PhaseChanged{trial_id:r.u32()?,phase:r.u8()?,current_jury:r.i32()?,remaining_time_ms:r.u32()?},
@@ -62,6 +72,12 @@ impl TrialEvent {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrialNotice {
+    /// JURY_OK_COUNT(count,total), both signed numericf32.
+    JuryOkCount{count:i32,total:i32},
+    /// VERDICT_COUNT(count,total), both signed numericf32.
+    VerdictCount{count:i32,total:i32},
+    /// RULING_STATUS(count,total,type,unsigned sentence bits), after cache assignment.
+    RulingStatus(TrialRulingStatus),
     /// UPDATE_INGAME_BEAUTYSHOP_STATUS(), emitted when native trial availability changes.
     BeautyshopStatus,
     /// TRIAL_STATUS(phase,current jury), before phase cache admission.
@@ -96,6 +112,15 @@ pub struct Trials {
     pub records_raw_unknown:Option<u32>,
     /// Native count+100 can be known before its separate total+104.
     pub current_jury:Option<i32>,
+    pub jury_ok_count:Option<i32>,
+    pub jury_ok_total:Option<i32>,
+    pub verdict_counts:Option<[i32;2]>,
+    pub ruling:Option<TrialRulingStatus>,
+    /// Native byte3 is uninitialized in constructor; context adoption initializes false.
+    pub has_ruling:Option<bool>,
+    pub history:Option<TrialHistory>,
+    /// Cached [murder,assault,theft,etc], refreshed by176, not each177 append.
+    pub crime_kind_counts:Option<[i32;4]>,
     /// Native constructor does not initialize these wait fields. Unknown until a receipt.
     pub waiting_order: Option<u32>,
     pub jury_counts: Option<[i32; 2]>,
@@ -130,6 +155,20 @@ impl Trials {
             Event::Trial(receipt) => {
                 self.last_receipt = Some(receipt.clone());
                 match receipt {
+                    TrialEvent::JuryOkCount{count,total} => {
+                        self.jury_ok_count=Some(*count);self.jury_ok_total=Some(*total);
+                        notices.push(TrialNotice::JuryOkCount{count:*count,total:*total});
+                    }
+                    TrialEvent::VerdictCount{count,total} => {
+                        self.verdict_counts=Some([*count,*total]);
+                        if let Some(status)=self.ruling.as_mut(){status.count=*count;status.total=*total;}
+                        notices.push(TrialNotice::VerdictCount{count:*count,total:*total});
+                    }
+                    TrialEvent::RulingStatus(status) => {
+                        self.verdict_counts=Some([status.count,status.total]);self.ruling=Some(*status);self.has_ruling=Some(true);
+                        notices.push(TrialNotice::RulingStatus(*status));
+                    }
+                    TrialEvent::History(history) => self.history=Some(history.clone()),
                     TrialEvent::Waiting { order, sentence_time_ms } => {
                         self.waiting_order = Some(*order);
                         self.jury_counts = Some([0, 0]);
@@ -166,6 +205,10 @@ impl Trials {
                     TrialEvent::DefendantData(data) => {
                         if data.name.len()<=128 {
                             self.defendant=Some(data.clone());self.sentence_time_ms=Some(data.sentence_time_ms);
+                            let mut counts=[0i32;4];for record in &self.records {
+                                let i=match record.crime_kind {3=>0,2=>1,4=>2,_=>3};counts[i]=counts[i].wrapping_add(1);
+                            }
+                            self.crime_kind_counts=Some(counts);
                             notices.push(TrialNotice::ShowCrimeRecords{phase:self.phase});
                             if !self.is_defendant()&&self.is_jury&&self.trial_id!=0 {
                                 if let Some(count)=self.current_jury {notices.push(TrialNotice::Status{phase:self.phase,current_jury:count});}
@@ -225,6 +268,8 @@ impl Trials {
         if self.trial_id==id{return}
         self.trial_id=id;self.defendant_context=None;self.is_jury=false;
         self.defendant=None;self.records.clear();self.records_received=Some(0);self.records_total=Some(0);
+        self.jury_ok_count=Some(0);self.verdict_counts=Some([0,0]);self.has_ruling=Some(false);self.crime_kind_counts=Some([0;4]);
+        if let Some(status)=self.ruling.as_mut(){status.count=0;status.total=0;}
         notices.push(TrialNotice::BeautyshopStatus);
     }
     fn reset_role(&mut self,notices:&mut Vec<TrialNotice>){
@@ -316,8 +361,8 @@ mod tests {
             }
             batch.u16(0).u16(*op).raw(body);
         }
-        assert!(!TrialEvent::handles(0x17d));
-        assert!(TrialEvent::read(0x17d, &mut Reader::new(&[])).is_err());
+        assert!(!TrialEvent::handles(0x174));
+        assert!(TrialEvent::read(0x174, &mut Reader::new(&[])).is_err());
         batch.u16(0).u16(0x1bc).u32(99);
         use std::io::Write;
         let mut compressor = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
