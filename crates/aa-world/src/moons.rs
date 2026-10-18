@@ -165,7 +165,7 @@ impl Material for MoonMaterial {
         AlphaMode::Blend
     }
     fn depth_bias(&self) -> f32 {
-        self.rank as f32 + 1.0
+        crate::night_sky::SKY_SORT_BIAS + self.rank as f32 + 1.0
     }
     fn enable_prepass() -> bool {
         false
@@ -536,5 +536,45 @@ mod tests {
         assert_eq!(w.query::<&MoonDisc>().iter(w).count(), 0);
         assert_eq!(w.resource::<Assets<MoonMaterial>>().len(), 0);
         assert_eq!(w.resource::<MoonStats>().authored, 0);
+    }
+
+    #[test]
+    fn sky_sort_stays_behind_glass_on_either_side_of_the_origin() {
+        use bevy::core_pipeline::core_3d::TransparentSortingInfo3d;
+        use bevy::render::render_phase::ViewRangefinder3d;
+        let stars = crate::night_sky::StarMaterial { params: default() };
+        let moon = |rank| MoonMaterial {
+            params: default(),
+            texture: default(),
+            rank,
+        };
+        let (az, el) = (150.0_f32.to_radians(), 35.0_f32.to_radians());
+        let look = cry_to_bevy(Vec3::new(
+            az.sin() * el.cos(),
+            az.cos() * el.cos(),
+            el.sin(),
+        ));
+        for position in [
+            Vec3::new(15579.5, 15385.85, 137.0),
+            Vec3::new(30000.0, 10000.0, 800.0),
+        ] {
+            let at = cry_to_bevy(position);
+            let camera = Transform::from_translation(at).looking_to(look, Vec3::Y);
+            let rangefinder = ViewRangefinder3d::from_world_from_view(&camera.compute_affine());
+            let key = |bias| {
+                TransparentSortingInfo3d::Sorted {
+                    mesh_center: Vec3::ZERO,
+                    depth_bias: bias,
+                }
+                .sort_distance(&rangefinder)
+            };
+            let glass = rangefinder.distance(&(at + look * 50.0));
+            assert!(key(stars.depth_bias()) < key(moon(0).depth_bias()));
+            assert!(key(moon(0).depth_bias()) < key(moon(1).depth_bias()));
+            assert!(
+                key(moon(3).depth_bias()) < glass,
+                "sky must draw before the nearby alpha pane"
+            );
+        }
     }
 }

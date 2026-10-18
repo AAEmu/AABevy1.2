@@ -641,6 +641,19 @@ so nighttime brightness remains on the existing atmosphere calibration. All wind
 Focused moon tests pass 4/4 (real textures, numeric quad / UV / scale units, colour HDR factor, primary phase / planet offset,
 daylight secondary, disable / world-change cleanup); the 12 environment regression tests and all-example check pass.
 
+**Sky transparency order**: original sky draw `380C3E40` invokes the stars' draw slot (`380BCF50`) before moons
+`380BDAC0` at default `r_stars_rotate=0` (`night/moon-native-order.txt` / `moon-native-order-detail.txt`). The port preserves
+that sequence ahead of world transparency. Bevy 0.20's `TransparentSortingInfo3d::Sorted` uses projected mesh centre plus
+material bias, but our sky shaders ignore translation: an origin behind the camera previously sorted stars / moons over nearby
+alpha surfaces. Stars now use a CPU sort-only bias of -1,000,000 (outside these worlds' bounds; main is 35 x 38 cells), and
+moon ranks add 1..4 so the intra-sky order remains representable in f32. This changes neither geometry nor depth testing.
+The regression uses Bevy's real rangefinder / transparent sort key at cameras on both sides of the origin; all sky keys stay
+before a pane 50 m away, with stars before ordered moons. `--behind-origin --glass` reproduces the issue with a green 75%-alpha
+pane in the existing moon harness. `night/sky_glass_before.png` shows untinted discs / stars over that pane.
+`night/sky_glass_after.png` correctly tints and attenuates both planets and the stars through it (211-241 FPS, no shader
+errors). The rangefinder regression passes; native relative sky order is preserved. The later night-direction capture
+`night/moons_light.png` was also inspected (171-206 FPS). All capture windows close automatically.
+
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
 `CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
 `T(0, 0, -sin axis) x Rz((hour + 12) / 24 turn) x Rx(latitude - 90) x Ry(-rotation)` are multiplied and inverted and the point (0, 1, 0) is
