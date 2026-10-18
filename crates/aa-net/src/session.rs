@@ -536,6 +536,7 @@ pub enum Event {
     UnhandledGamePacket { level:u8, opcode:u16, len:usize },
     /// Actual wire decode failure; no complete event can be reconstructed from this receipt.
     GameDecodeFailed { message:String },
+    Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
     JuryWaitingNumberRequested { character_id:u32 },
     JuryWaitingNumberRequestRejected { character_id:u32, message:String },
@@ -1615,6 +1616,7 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Dominion(value) => self.emit(Event::Dominion(value)),
+            M::Trial(e) => self.emit(Event::Trial(e)),
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
@@ -4385,6 +4387,17 @@ mod tests {
             assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn trial_wait_and_gate_receipts_forward_order_duplicates_without_summon_ack() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let value=crate::TrialEvent::SummonJury{trial_id:7,court:u32::MAX,jury_number:-1};
+        for receipt in [value.clone(),value,crate::TrialEvent::JuryWaiting{count:-1,total:0,sentence_time_ms:i32::MIN}] {
+            session.game_msg(Ok(game::ServerMsg::Trial(receipt.clone()))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::Trial(actual)) if actual==receipt));
+        }
+        assert!(events.try_recv().is_err(),"no inferred trial choice or CS072 success");
     }
 
     #[tokio::test]

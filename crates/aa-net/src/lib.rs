@@ -13,6 +13,8 @@
 //!
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
+pub mod trial;
+pub use trial::{TrialEvent,TrialNotice,Trials};
 pub mod crime;
 pub use crime::{CrimeEvent, CrimeNotice, CrimeReputation, Crimes};
 pub mod achievement;

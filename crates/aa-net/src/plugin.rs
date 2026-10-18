@@ -181,6 +181,7 @@ net_state! {
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
     dominion: crate::Dominion,
+    trials: crate::trial::Trials,
     crimes: crate::crime::Crimes,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
@@ -304,6 +305,18 @@ mod equipment_flags_tests {
         app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ScheduledEventStarted(start.clone()))).unwrap();
         assert_eq!(app.world().resource::<crate::battlefield::Battlefield>().my_corps_kill_death_ratio,-7);
         assert_eq!(app.world().resource::<crate::scheduled::ScheduledEvents>().starts[&3].open_message,b"notice");
+    }
+
+    #[test]
+    fn plugin_trial_wait_cache_and_defendant_gate_follow_received_state() {
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState| {
+            state.apply(&Event::Trial(crate::TrialEvent::SummonDefendant{trial_id:7}));
+            state.apply(&Event::Trial(crate::TrialEvent::JuryWaiting{count:2,total:5,sentence_time_ms:-1}));
+        }).unwrap();
+        let state=app.world().resource::<crate::Trials>();assert_eq!(state.defendant_context,Some(7));assert_eq!(state.jury_counts,Some([2,5]));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert_eq!(*app.world().resource::<crate::Trials>(),crate::Trials::default());
     }
 
     #[test]
