@@ -44,8 +44,10 @@ mod drag;
 mod formula;
 mod friends;
 mod input;
+mod itemlinks;
 mod items;
 mod loot;
+mod loot_roll;
 mod mail;
 mod marks;
 mod markers;
@@ -73,6 +75,11 @@ pub(crate) fn combat_fixture() {
 #[allow(dead_code)]
 pub(crate) fn mailbox_fixture() {
     mail::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn loot_roll_fixture() {
+    loot_roll::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -288,6 +295,7 @@ impl Plugin for HudPlugin {
         party::plugin(app);
         friends::plugin(app);
         mail::plugin(app);
+        loot_roll::plugin(app);
         store::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));

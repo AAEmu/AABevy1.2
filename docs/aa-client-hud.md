@@ -762,3 +762,51 @@ under `shots/hud/sol61-mail/` show the original controls with a real Heart's Bea
 4-item stack,5c incoming and50c/100c outgoing fees. Both have zero Lua errors; read measured
 303?465FPS and compose404?455FPS at1920?1080. Both root-owned windows exited. Source fixtures do not substitute for live transaction verification: the lane game
 connection timeout still blocks that follow-up.
+
+## Native item links and group loot (2026-10-17)
+
+`itemlinks.rs` maps actual lane items to the native 192-byte record and formatter recovered in
+aa-ui. Retained detail payloads preserve opaque fixed tags and equipment reserved bytes. Typed
+synthetic fixtures support None/Equip/Mate; absent unknown bytes are never invented. The lane's
+33-byte slave detail cannot fit native tag2's 29-byte wire payload and remains unsupported rather
+than truncated. The native formatter normalizes only instance ID to0 and count to1; the real
+corpse key and offered count remain separately in `LootRolls`.
+
+AAUI.ChatLink resolves real item/quest names and colors outside the toolkit's UI borrow.
+Item colors use the real grade tables; quest colors follow native39271e10's task/detail6 and
+level-difference bands. `X2Quest:GetQuestLinkText` now returns native `|qID;` markup.
+`X2Item:InfoFromLink` accepts canonical full item markup and the bare encoded payload used by
+original chat clicks. Payload type/grade are authoritative, as in native394dfae0. Malformed and
+obsolete 176-byte debug links fail. The original tooltip uses existing real template/instance
+tables; retained rune/dye/gem fields do not imply every tooltip section is complete. Label lookup
+is cached when a message arrives; old quest-label colors are not refreshed on a level change yet.
+Bag add/use/remove/store chat events now use native clickable links when actual details survive;
+missing instances retain plain colored labels.
+
+`loot_roll.rs` binds X2Loot.DoDiceAction, RequestNextDiceItem and the exact
+SetMaxConcurrentNotifyDiceItem setter. Original `loot/loot_dice.lua` owns the three window
+positions, Roll/Pass/close handlers, fade, 60-second pass deadline and 500ms next-item delay.
+Opaque local u32 UI keys resolve to exact packed corpse keys without a Lua64-bit conversion.
+Duplicate queued choices are suppressed. Packet-send notifications and server responses remain
+distinct; no request grants an item, invents a winner or changes balances. Signed notifications
+raise original LOOT_DICE chat events. Summary packets do not become a synthetic winner event.
+An unsupported detail reports its limit instead of building a false item record.
+
+The shared game API now supplies X2Time.GetUiMsec from the toolkit's monotonic frame clock.
+The original native394b37f0 reads UI timer selector 1, returning milliseconds. Our stage-local
+epoch is not claimed to match the original epoch or f32 quantization. Prompt receipt timestamps
+are translated to that epoch while preserving age, so original delays and deadlines agree.
+
+Validation: 117 client tests pass, 16 probes are ignored. Binary adapter tests preserve real
+fields, opaque payloads, reserved bytes and native normalization; controller tests check exact
+key/choice requests, duplicate refusal, concurrency and nonoptimistic state. The isolated original
+stage exercises real item/quest lookups, native Roll/Pass/deadline, next queued item and title-bar
+close. Mail read/send/recovery also passes with these bindings. `loot_dice_hud` is an aa-dev
+example with explicit synthetic instances of original debug templates, not live loot settlement.
+Its inspected `shots/hud/sol61-loot/native.png` shows all three original windows and measured
+185–213FPS at1920×1080, with zero Lua errors. The main client world-select smoke has zero script
+errors and231–277FPS; its inspected capture is in the same folder. All root QA windows exited.
+Natural paired live loot settlement remains pending while the lane game connection is stalled.
+
+The root playable copy is refreshed at `target/debug/aa-client-play.exe` (SHA256
+`887F09EBADA1D9848DA7B4ED262C93730988B09FD445C005B02C184350B4D8D8`).

@@ -188,8 +188,12 @@ pub fn install(rt: &UiRuntime, shared: &Shared) -> mlua::Result<()> {
     for name in GAME_OBJECTS {
         install_game_stub(lua, name)?;
     }
-    // `ADDON` is the same native table as `X2`.
     let g = lua.globals();
+    // Original Lua deadlines and DelayCall share the toolkit's monotonic UI frame clock.
+    // Network receipt timestamps are translated into this clock's stage-local epoch.
+    let time: Table = g.raw_get("X2Time")?;
+    time.set("GetUiMsec", lua.create_function(|lua, _: Table| Ok(aa_ui::lua::ui(lua).time_ms))?)?;
+    // `ADDON` is the same native table as `X2`.
     let x2: Table = g.raw_get("X2")?;
     g.raw_set("ADDON", x2)?;
     // aa-ui installs the client's real constants; any other ALL_CAPS global the UI reads but never
