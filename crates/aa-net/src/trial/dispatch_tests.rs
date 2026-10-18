@@ -291,7 +291,7 @@ fn close_and_audience_native_dispatch_has_pre_and_post_reset_getters() {
     assert_eq!(ds.iter().map(|(_,v)|v.trial_id).collect::<Vec<_>>(),[8,0,0]);
     let (_,ds)=s.apply_with_dispatch(&Event::Trial(TrialEvent::AudienceLeft{obj_id:42,name:vec![]}));
     assert_eq!(ds.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),[TrialNotice::BeautyshopStatus,TrialNotice::AudienceLeft{name:vec![]}]);
-    for (e,tail) in [(TrialEvent::RulingClosed,vec![TrialNotice::RulingClosed,TrialNotice::Closed]),(TrialEvent::Canceled{trial_id:999},vec![TrialNotice::Closed,TrialNotice::Canceled])] {
+    for (e,tail) in [(TrialEvent::RulingClosed,vec![TrialNotice::CloseTrialTasks,TrialNotice::RulingClosed,TrialNotice::Closed]),(TrialEvent::Canceled{trial_id:999},vec![TrialNotice::CloseTrialTasks,TrialNotice::Closed,TrialNotice::Canceled])] {
         s=seed();s.defendant_context=Some(7);let(_,ds)=s.apply_with_dispatch(&Event::Trial(e));
         assert_eq!(ds[0].0,TrialNotice::BeautyshopStatus);assert_eq!(ds[1..].iter().map(|(n,_)|n.clone()).collect::<Vec<_>>(),tail);
         for (_,v) in ds {assert_eq!((v.trial_id,v.is_defendant(),v.phase),(0,false,0));assert_eq!(ids(&v),[11,12]);}
