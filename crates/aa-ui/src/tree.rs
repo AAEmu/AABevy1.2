@@ -401,8 +401,12 @@ pub enum ButtonState {
     Disabled,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ButtonData {
+    /// Native +2d0, retained independently of the current pointer snapshot.
+    pub state: ButtonState,
+    /// Native fresh initialization registers LeftButton, not Middle/RightButton.
+    pub click_buttons: [bool; 3],
     /// Drawables per state: normal, highlight, pushed, disabled.
     pub bg: [Option<Id>; 4],
     /// Text colours per state.
@@ -414,6 +418,22 @@ pub struct ButtonData {
     pub cooldown_skill: Option<crate::lua::slot::ConstantSkillCooldown>,
     /// Generic cooldown mask texture and normalized source rectangle, independent of its timer.
     pub cooldown_mask: Option<crate::lua::slot::CooldownMask>,
+}
+
+impl Default for ButtonData {
+    fn default() -> Self {
+        Self {
+            state: ButtonState::Normal,
+            click_buttons: [true, false, false],
+            bg: [None; 4],
+            text_color: [None; 4],
+            checked: false,
+            checked_bg: None,
+            disabled_checked_bg: None,
+            cooldown_skill: None,
+            cooldown_mask: None,
+        }
+    }
 }
 
 /// Native list control state.
@@ -559,10 +579,11 @@ pub struct Drawable {
     pub color: [f32; 4],
     /// Text drawables.
     pub text: Option<TextBlock>,
-    /// Shown only while its owning button is in this state (state backgrounds).
+    /// Most recent button-background membership (used by layer operations).
+    /// State application writes `Object::shown`; this is not a draw-time predicate.
     pub state_of: Option<(Id, ButtonState)>,
     /// Extra drawables of one button state (`CreateHighlightDrawable`, `CreateStateDrawable`):
-    /// shown exactly while the owner is in that state, independent of the backgrounds.
+    /// state application writes their visibility independently of the backgrounds.
     pub state_only: Option<ButtonState>,
     /// Status bar fill: layout uses this fraction, from the left (or top when vertical).
     pub fill: Option<(f32, bool)>,

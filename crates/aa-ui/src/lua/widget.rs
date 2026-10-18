@@ -640,6 +640,13 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                     //3927b290 dispatches the changed-enable continuation only after
                     // its children. Checkbutton392842a0 reasserts mark visibility.
                     checked_art(u, w);
+                    let state = u.tree.widget(w).and_then(|w| w.button.as_ref()).map(|b| b.state);
+                    if !on {
+                        apply_button_state(u, w, ButtonState::Disabled);
+                    } else if state == Some(ButtonState::Disabled) {
+                        let over = u.hover.is_some_and(|h| u.tree.is_descendant(h, w));
+                        apply_button_state(u, w, if over { ButtonState::Highlight } else { ButtonState::Normal });
+                    }
                 }
             }
             none()
@@ -1253,7 +1260,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         })?,
     )?;
     for name in [
-        "RegisterForClicks",
         "RegisterForDrag",
         "StartMoving",
         "StopMovingOrSizing",
@@ -1400,6 +1406,8 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                         dr.state_only = Some(st);
                         dr.color = color;
                     }
+                    let mut u = ui(lua);
+                    reapply_button_state(&mut u, id);
                     ret(lua, t)
                 })?,
             )?;
@@ -1426,6 +1434,8 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 {
                     dr.state_only = Some(st);
                 }
+                let mut u = ui(lua);
+                reapply_button_state(&mut u, id);
                 ret(lua, t)
             })?,
         )?;
@@ -1438,12 +1448,47 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             def(
                 name,
                 method(lua, move |lua, id, a| {
-                    let d = value_id(lua, &a.v(1));
-                    set_button_bg(lua, id, state, d);
+                    if !matches!(a.v(1), Value::Table(_)) { return none(); }
+                    let Some(d) = value_id(lua, &a.v(1)) else { return none() };
+                    let valid = { let u = ui(lua); u.tree.get(d).alive && u.tree.get(d).drawable().is_some() };
+                    if valid { set_button_bg(lua, id, state, d); }
                     none()
                 })?,
             )?;
         }
+        def("SetButtonState", method(lua, |lua, id, a| {
+            let Value::String(raw) = a.v(1) else { return none() };
+            let bytes = raw.as_bytes();
+            let name = bytes.split(|&b| b == 0).next().unwrap_or_default();
+            let state = if name.eq_ignore_ascii_case(b"DISABLED") { ButtonState::Disabled }
+                else if name.eq_ignore_ascii_case(b"HIGHLIGHTED") { ButtonState::Highlight }
+                else if name.eq_ignore_ascii_case(b"PUSHED") { ButtonState::Pushed }
+                else { ButtonState::Normal };
+            apply_button_state(&mut ui(lua), id, state);
+            none()
+        })?)?;
+        def("GetButtonState", method(lua, |lua, id, _| {
+            let state = ui(lua).tree.widget(id).and_then(|w| w.button.as_ref()).map(|b| b.state);
+            match state {
+                Some(ButtonState::Disabled) => ret(lua, "DISABLED"),
+                Some(ButtonState::Normal) => ret(lua, "NORMAL"),
+                Some(ButtonState::Highlight) => ret(lua, "HIGHLIGHTED"),
+                Some(ButtonState::Pushed) => ret(lua, "PUSHED"),
+                None => none(),
+            }
+        })?)?;
+        def("RegisterForClicks", method(lua, |lua, id, a| {
+            let Value::String(raw) = a.v(1) else { return none() };
+            let bytes = raw.as_bytes();
+            let name = bytes.split(|&b| b == 0).next().unwrap_or_default();
+            let index = match name { b"LeftButton" => 0, b"MiddleButton" => 1, b"RightButton" => 2, _ => return none() };
+            //3922e490 parses the optional value only when its script type is bool.
+            let enabled = if let Value::Boolean(v) = a.v(2) { v } else { true };
+            if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
+                b.click_buttons[index] = enabled;
+            }
+            none()
+        })?)?;
         for (name, index, state) in [
             ("SetNormalColor", 0usize, ButtonState::Normal),
             ("SetHighlightColor", 1, ButtonState::Highlight),
@@ -1849,29 +1894,73 @@ fn set_layer_visible(lua: &Lua, id: Id, layer: Option<&str>, on: bool) {
     }
 }
 
-fn set_button_bg(lua: &Lua, id: Id, state: usize, d: Option<Id>) {
+fn set_button_bg(lua: &Lua, id: Id, state: usize, d: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
-    let Some(b) = u.tree.widget_mut(id).and_then(|w| w.button.as_mut()) else {
-        return;
-    };
-    b.bg[state] = d;
+    let Some(b) = u.tree.widget(id).and_then(|w| w.button.as_ref()) else { return };
+    let old = b.bg[state];
+    if let Some(old) = old && u.tree.get(old).alive { u.tree.get_mut(old).shown = false; }
+    u.tree.widget_mut(id).unwrap().button.as_mut().unwrap().bg[state] = Some(d);
     let st = [
         ButtonState::Normal,
         ButtonState::Highlight,
         ButtonState::Pushed,
         ButtonState::Disabled,
     ][state];
-    if let Some(d) = d {
-        if let Some(dr) = u.tree.drawable_mut(d) {
-            // A drawable can serve several states (SetBGPushed uses one for two).
-            dr.state_of = Some((id, st));
-        }
-        // Becoming a state background shows the drawable again: `SetBGPushed(btn, false)`
-        // restores `bgs[NORMAL]` after `SetBGPushed(btn, true)` hid it with `SetVisible(false)`
-        // (race / gender buttons in reference/character_create/step1_*).
-        u.tree.get_mut(d).shown = true;
+    if let Some(dr) = u.tree.drawable_mut(d) {
+        // Retain membership for layer operations; rendering uses actual shown flags.
+        dr.state_of = Some((id, st));
     }
+    reapply_button_state(u, id);
+}
+
+fn reapply_button_state(u: &mut super::Ui, id: Id) {
+    if let Some(state) = u.tree.widget(id).and_then(|w| w.button.as_ref()).map(|b| b.state) {
+        apply_button_state(u, id, state);
+    }
+}
+
+///39282f70 clears all current state art, then shows only the selected state.
+/// Explicit drawable visibility survives until one of these native state writes.
+pub(crate) fn apply_button_state(u: &mut super::Ui, id: Id, desired: ButtonState) {
+    if !u.tree.get(id).alive { return; }
+    let Some(w) = u.tree.widget(id) else { return };
+    let Some(b) = w.button.as_ref() else { return };
+    let state = if w.enabled { desired } else { ButtonState::Disabled };
+    let mut writes = Vec::new();
+    for (st, i) in [(ButtonState::Disabled, 3), (ButtonState::Normal, 0),
+                    (ButtonState::Highlight, 1), (ButtonState::Pushed, 2)] {
+        if let Some(d) = b.bg[i] { writes.push((d, false)); }
+        writes.extend(w.drawables.iter().copied().filter(|&d| {
+            u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(st))
+        }).map(|d| (d, false)));
+    }
+    let index = match state { ButtonState::Normal => 0, ButtonState::Highlight => 1,
+                             ButtonState::Pushed => 2, ButtonState::Disabled => 3 };
+    if let Some(d) = b.bg[index] { writes.push((d, true)); }
+    writes.extend(w.drawables.iter().copied().filter(|&d| {
+        u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(state))
+    }).map(|d| (d, true)));
+    if b.state != state { u.tree.widget_mut(id).unwrap().button.as_mut().unwrap().state = state; }
+    for (d, shown) in writes {
+        if u.tree.get(d).alive && u.tree.get(d).shown != shown { u.tree.get_mut(d).shown = shown; }
+    }
+}
+
+pub(crate) fn button_pointer_down(lua: &Lua, id: Id, button: usize) {
+    let mut u = ui(lua);
+    let admitted = u.tree.widget(id).and_then(|w| w.button.as_ref()).is_some_and(|b| {
+        b.state != ButtonState::Disabled && b.click_buttons[button]
+    });
+    if admitted { apply_button_state(&mut u, id, ButtonState::Pushed); }
+}
+
+pub(crate) fn button_pointer_up(lua: &Lua, id: Id, button: usize) {
+    let mut u = ui(lua);
+    let admitted = u.tree.widget(id).and_then(|w| w.button.as_ref()).is_some_and(|b| {
+        b.state == ButtonState::Pushed && b.click_buttons[button]
+    });
+    if admitted { apply_button_state(&mut u, id, ButtonState::Highlight); }
 }
 
 /// `OnScale` after a size change of the root-anchored windows is what the client sends on

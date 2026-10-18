@@ -237,12 +237,14 @@ pub fn update_buttons(
         for &o in old_chain.iter().rev() {
             if !new_chain.contains(&o) {
                 lua::listbox::leave(lua, o);
+                lua::widget::apply_button_state(&mut ui(lua), o, crate::tree::ButtonState::Normal);
                 call_handler(lua, o, "OnLeave", vec![]);
                 lua::chat::alpha::hover(lua, o, false);
             }
         }
         for &n in &new_chain {
             if !old_chain.contains(&n) {
+                lua::widget::apply_button_state(&mut ui(lua), n, crate::tree::ButtonState::Highlight);
                 call_handler(lua, n, "OnEnter", vec![]);
                 lua::chat::alpha::hover(lua, n, true);
                 lua::sound::over_sound(lua, n);
@@ -265,6 +267,7 @@ pub fn update_buttons(
         }
         let resizing = hover.is_some_and(|h| lua::resize::press(lua, h));
         if let Some(h) = hover.filter(|_| !resizing) {
+            lua::widget::button_pointer_down(lua, h, 0);
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
@@ -289,6 +292,7 @@ pub fn update_buttons(
     }
     if right_down {
         if let Some(h) = hover {
+            lua::widget::button_pointer_down(lua, h, 2);
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "RightButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "RightButton");
         }
@@ -318,6 +322,7 @@ pub fn update_buttons(
         ui(lua).tree.touch();
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
+            lua::widget::button_pointer_up(lua, h, 0);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
         }
         mouse_event(lua, cursor, hover, "MOUSE_UP");
@@ -335,6 +340,7 @@ pub fn update_buttons(
     if right_up {
         if let Some(h) = hover {
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "RightButton")]);
+            lua::widget::button_pointer_up(lua, h, 2);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "RightButton");
         }
         mouse_event(lua, cursor, hover, "MOUSE_UP");
