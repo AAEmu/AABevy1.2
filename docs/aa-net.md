@@ -5964,3 +5964,55 @@ implemented0x1ff to unsupported0x7fff; the independent Python-zlib generator cha
 only that raw/compressed fixture and its hashes. Ignored native source archive:
 `data/extract/aa-net/native-achievement-source-20261018.txt`. Lane sources:
 `systems/social/packets/misc.rs` and `aaemu-commons/src/packet_stream.rs`.
+
+#### Achievement list and local presentation source follow-up
+
+GetMainCategoryCount39058f50 returns literal5.0; GetSubCategoryCount39058fd0 ->
+3900c6f0 maps main1/2 to4, main3 to5, main4/5 to3, others0. List helper3900ef30
+requires those positive subcategory ranges. Main0 requires sub0: filter2 returns
+all completed cached IDs, filter5 returns occupied tracing slots, other filters
+empty. Normal category/sub matches require is_active; hidden entries are excluded
+only until completed. Filter1=all,2=nonzero completion timestamp,3=zero timestamp,
+4=signed amount>0 and zero timestamp; other filter IDs return empty normal lists.
+
+Filters1/3 sort via3900c9b0: same parent ID uses signed own priority then original
+ID; differing parents resolve nonzero parent descriptors and compare their signed
+priorities then original ID. Filter2 sorts timestamp as unsigned u64 descending,
+then ID ascending. Filter4 sorts f32 signed-amount/completion-threshold descending,
+then3900c9b0. Native zero-threshold comparator has a non-strict special case;
+malformed zero-threshold progressing rows are not claimed to have a stable order.
+GetAchievementList emits dense1-based IDs as u32-to-f32 in a table (empty table
+for no results). GetSubcategoryInfo counts filter2 and filter1 into complete/all.
+
+GetTracingAchievementCount39059160 returns TWO f32 numbers: occupied count and
+max6 (literal3999ecf4). AddTracing3900cf60 rejects duplicates, including invalid0,
+then fills the first empty of six slots; full returns false. Success persists
+local UI data and emits Update. RemoveTracing3900cfc0 clears the first matching
+slot without compaction, persists and emits Update; absent ID does nothing.
+RemoveNewComplete3900e7a0 removes only the first duplicate marker and emits Update
+if found. RemoveAllNewComplete3900e900 clears recent markers and emits Update even
+when already empty. GetNewCompleteCount39059210 counts duplicates; Info.isNew
+3900db40 means any matching marker. These are local UI state, not wire ACKs.
+
+Info.highRank tests parent ID against39addc08; child icon uses own icon unless it
+matches39addc0c, then parent icon. Both sentinels and tracing invalid39ada854 were
+verified0 by PROCESS_VM_READ in existing PID48924 after image/StandMode checks;
+no writes/input/injection were performed, and the handle was closed. Main literal5
+and tracing max6 are separate constants. Runtime artifact:
+`data/extract/aa-net/native-achievement-runtime-20261018.json`.
+
+Info.objective39059db9..eb3 iterates objective descriptors, resolves record_id via
+39744560, and emits only records with kind_id==9; each dense1-based table value is
+record.value1 converted signed-i32-to-f32. Zero qualifying records yields nil,
+not an empty table. This differs deliberately from completion objective_count,
+which counts all loaded linked rows regardless of record validity/kind. Native
+CharRecord SQL399f91e0 selects id,kind_id,value1,value2. Full source excerpts and
+jump-table entries are appended to native-achievement-source-20261018.txt.
+
+Twelve local executed-original comparator fixtures are archived in
+`native-achievement-sort-oracle-20261018.json` with `achievement_sort_oracle.py`.
+Original3900c9b0/3900e1f0/3900e2a0 execute; only static descriptor lookup397445a0
+and keyed-cache lookup3900db70 are mocked. They verify parent/signed priority,
+unsigned negative timestamp ordering, f32 ratio tie/priority fallback, objective
+count fallback and both-zero denominator non-strict behavior. No full sort output
+is claimed from pairwise comparator execution.
