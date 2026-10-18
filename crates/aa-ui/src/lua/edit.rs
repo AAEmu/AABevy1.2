@@ -36,6 +36,8 @@ pub struct EditData {
     pub password: bool,
     pub digit: bool,
     pub digit_max: Option<f64>,
+    /// `SetInitVal`: empty, non-password digit edits materialize this value on GetText.
+    pub init_val: i32,
     pub read_only: bool,
     pub clear_on_enter: bool,
     /// `EnableFocus(false)`: clicks do not focus it.
@@ -723,6 +725,42 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetText",
         method(lua, |lua, id, a| {
             set_text(lua, id, a.s(1).unwrap_or_default());
+            none()
+        })?,
+    )?;
+    def(
+        "GetText",
+        method(lua, |lua, id, _| {
+            let (text, init_val) = {
+                let u = ui(lua);
+                let w = u.tree.widget(id);
+                let text = w
+                    .and_then(|w| w.text.as_ref())
+                    .map(|t| t.text.clone())
+                    .unwrap_or_default();
+                let init_val = w
+                    .and_then(|w| w.edit.as_ref())
+                    .filter(|e| e.digit && !e.password && text.is_empty())
+                    .map(|e| e.init_val);
+                (text, init_val)
+            };
+            // Native 392930c0: numeric fallback is a getter side effect, not a SetText rule.
+            // It writes the default back into the buffer without dispatching OnTextChanged.
+            let text = if let Some(value) = init_val {
+                let text = value.to_string();
+                set_text(lua, id, text.clone());
+                text
+            } else {
+                text
+            };
+            ret(lua, text)
+        })?,
+    )?;
+    def(
+        "SetInitVal",
+        method(lua, |lua, id, a| {
+            let value = a.s(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) as i32;
+            with(lua, id, |e| e.init_val = value);
             none()
         })?,
     )?;
