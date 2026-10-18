@@ -92,7 +92,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
 | client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
 Everything else the server sends (houses, guilds, mount-owner packets ...) is decoded as
@@ -407,7 +407,8 @@ for other units is event only.
 | `SCSkillFired` | `SkillFired` | `casting[caster].fired`; starts the skill when no `SkillStarted` came first |
 | `SCPlotEvent` | `PlotEvent { tl, event_id, skill_id, caster_obj_id, target_obj_id, caster_pos, target_pos, casting_ms }` (`event_id` is the `plots` step; the positions are the ones a step aimed at the ground carries) | the first step of a plot skill starts it (`casting`, `last_used`); steps with `casting_ms` > 0 set the cast time |
 | `SCSkillEnded`, `SCCastingStopped`, `SCSkillStopped`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped` | `SkillEnded`, `CastingStopped`, `SkillStopped`, `PlotEnded`, `PlotStopped` | `casting` entry removed |
-| `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags` |
+| `SCCooldowns` | `Cooldowns(SkillCooldowns)` | received skill/tag timers appended for an existing local player (see native cooldown lists below) |
+| `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags`, first matching received entries reset, GCD cleared when requested |
 | `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, hit_type })` | event only (HP follows in `UnitPoints`) |
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |
@@ -420,7 +421,8 @@ derives the flight from `SkillFired::delay_ms`. `Unit::dead` is set for a unit t
 by `UnitDeath`, and cleared by `UnitPoints` with `hp > 0` or `Resurrected`. A skill the player aims badly is refused with
 `SkillStarted` `result::OUTOF_ANGLE` (0x10): the client has to face the target first.
 
-The server sends no cooldown lengths or timers; the client times from the last use. The HUD
+The lane uses cast observations and DB durations; the native `SCCooldowns` receive contract also
+allows explicit duration/remaining timers (see below). The HUD
 reads `Skills::cooldown_left(skill_id, cooldown_tag_id, cooldown_ms)` (`skills.cooldown_time` and
 `cooldown_tag_id` come from the game database), `gcd_left(ms)`, `since_used(skill)` and
 `casting_of(obj_id) -> Option<&Casting>` (`progress()` is the cast bar, 0.0 to 1.0; the target frame
@@ -2162,8 +2164,9 @@ automatic response. Unknown opcodes still stop a DD04 batch: this is a focused c
 not a claim that all lane packets are decoded. Gimmick elevator/raft lifecycle `0x13c/0x13d/0x13e`
 was the next coordinated family and is covered below together with its required `0x13f` boundary. Login configuration/faction snapshots, expedition state,
 shipyard state, district/portal lists, duel/crime state and notices remain further audit candidates.
-`SCCooldowns 0x04a` and `SCBuffUpdated 0x0b9` have declarations, but the lane source audit found no
-writer or send sites for them; they were not ranked as currently emitted receive gaps.
+`SCCooldowns 0x04a` has an empty-only writer and no runtime send sites; its full native reader
+is now covered below. `SCBuffUpdated 0x0b9` has an opcode declaration but no writer/send site.
+Neither was ranked as a currently emitted receive gap in this audit.
 
 ### Loading and blink directives
 
@@ -2657,3 +2660,100 @@ pending while the lane is stalled; no lane traffic or server modifications were 
 Validation: `cargo test -p aa-net --features bevy --quiet` passed242 library tests and2
 scripted loopback integration tests;9 live lane tests remained ignored. No dependency,
 server or other-crate changes were needed.
+
+
+## Native cooldown lists (`SCCooldowns 0x04a`)
+
+The exact original receive body is `i32 skillCount`, that many triples
+`u32 id, u32 total_ms, u32 remaining_ms`, `i32 tagCount`, then the same triples for tags.
+`skill::{SkillCooldowns, Cooldown, COOLDOWN_LIMIT}` are also reexported at crate root.
+`ServerMsg::Cooldowns` and `Event::Cooldowns` retain both lists, arrival order, duplicate IDs,
+zeros and all original u32 values. A remaining value greater than its total is not clamped.
+There is no object/character ID, acknowledgement, global cooldown or learned-skill list here.
+
+Source proof: factory `391a9eb0` assigns opcode at `391a9ece`, allocates `0xe24` bytes and
+uses vtable `399b3b94`. Body reader `397b64d0` calls record reader `397b2350`. It reads signed
+counts with stream slot `+0x4c` and three u32 words per entry with slot `+0x3c`, with no 10 ms
+conversion. Its first fixed array starts record+4, the second count is record+`0x70c`, and its
+array starts +`0x710`: 150 triples per list. The original reader has no safe count clamp;
+aa-net rejects negative counts and counts above 150, rather than reproducing an out-of-bounds
+native write or guessing a DD04 tail boundary. Empty bodies are eight zero bytes; empty and
+nonempty lists each consume only their exact payload.
+
+Native `OnCooldowns` (`391d43c0`, name at `399b7d28`) only calls into an existing current
+player's manager (+`0x2c48`). `39899d40` appends skill entries to manager+`0x720` (count+`0x71c`)
+and tag entries to +`0x14` (count+`0x10`), each capped at 150. It does not clear or deduplicate;
+an empty packet is not a reset. It transforms each wire `[id,total,remaining]` into internal
+`[id,remaining,total]`. `39899e50`, called by unit update `3936a280` with clock delta from
+`3936a7f8`/`3936a836`, subtracts elapsed time from remaining with a zero floor. These are the
+same millisecond counters used for cast/DB cooldown presentation, not server epoch times.
+`3989a290` queries all ordered skill tags followed by direct skill entries and chooses the
+strictly greatest remaining time; a tie keeps the first candidate and its total.
+
+`state::Skills` retains received-only entries as
+`received_skill_cooldowns` and `received_tag_cooldowns`, each
+`Vec<state::ReceivedCooldown { cooldown: Cooldown, received_at: Instant, reset: bool }>`.
+`received_cooldown(skill_id, tags: &[u32]) -> Option<(Duration, Duration)>` returns
+**remaining then total**, using the native maximum/tie order. `received_cooldown_at` accepts
+an explicit `Instant`; `ReceivedCooldown::left_at` exposes one entry's timer. The helpers
+subtract monotonic elapsed time from the received remaining value, never invent a DB duration,
+rewrite original wire triples, create a cast or infer a global cooldown. Timing begins when the
+app folds the event; network/app-pump latency compensation is not guessed.
+
+`cooldown_with_total(skill_id, tag, cooldown_ms)` returns `(remaining, total)` from the greatest
+received remaining or the previous cast/DB estimate, using one clock sample. Equal remaining
+keeps the received winner and its native tie order. Received total zero is preserved.
+Existing `cooldown_left` wraps that query for HUD eligibility, so consumers do not duplicate
+last-used/reset logic or guess the winning total. Its
+single tag argument retains its existing meaning (zero = none); callers with the native full
+ordered tag list can use `received_cooldown`. Observed casts are still separate from the
+received-only vectors. This milestone does not reconstruct the full native cooldown manager's
+DB tag generation or its compaction during later local casts.
+
+`SkillCooldownReset` only changes an own player's timers. Native helpers `39899ec0` and
+`39899f00` stop at the **first** matching skill/tag entry, including a previously reset first
+entry; aa-net marks only that received entry `reset=true` and retains the original triple.
+The existing use-derived reset behavior remains. `gcd=true` now also clears `last_cast` and
+`last_cast_skill`, matching handler `391d64b2` -> manager `39899d00` (global remaining/total
+set to zero). A tag reset is not guessed to clear unrelated direct received skill entries.
+
+The cache requires an existing own `PlayerSpawn` (`obj_id != 0`); earlier packets are still
+forwarded as events but are not assigned to a speculative character. `PlayerSpawn`,
+`CharacterSelected`, `LeftWorld` and `Disconnected` clear it. No snapshot is copied across
+characters or reconstructed on re-entry. The exact native current-player creation timing before
+the app's PlayerSpawn event is not claimed here.
+
+Lane `systems/skills/packets.rs:395..407` declares only `SCCooldownsPacket` with two i32 zero
+counts. A source-wide search finds no runtime emitter, only definition/test/opcode references.
+Thus parsing nonempty native data and received-only timers are verified offline; the lane does
+not currently demonstrate persisted cooldown restoration. No lane sockets were opened while
+it remains stalled. Tests cover native golden triples, all truncated prefixes, independent
+empty/full lists, invalid signed counts, capacity 150, exact DD04 tails, session event order,
+append/no-clear semantics, expiry, duplicate/tie precedence, first-match resets and lifecycle.
+
+Validation: `cargo test -p aa-net --features bevy --quiet` passed 252 library tests and two
+loopback integration tests; nine lane-dependent tests stayed ignored.
+`cargo check -p aa-net --features bevy --examples --quiet` and `git diff --check` passed.
+
+### Environment presentation follow-up (read-only native contract)
+
+`39391720` handles only source 0 (fall) and 2 (drown): it builds a generic record whose source
+and target IDs both equal the environment packet target, and passes it to `3940a3e0`. That
+function resolves both names using `393905b0`/`39390660` (literal `unknown` on missing unit),
+formats the target ID using `39424820`, and dispatches `COMBAT_MSG` through
+`39424300(0x17, args)` with twelve arguments:
+
+```text
+(targetIdString, "ENVIRONMENTAL_DAMAGE", targetName, targetName,
+ "FALLING" | "DROWNING", amount, "HEALTH", "HIT", 0, "idle", 0, false)
+```
+
+`amount == 0` suppresses this event (`3940a9cf..d4`). The presentation amount is native
+signed-i32 -> f32 -> Lua number (`3940a9dd` uses `cvtsi2ss xmm0,eax` without an unsigned
+correction), while `EnvironmentDamage.amount` retains the original unsigned u32. Source-name
+table `39ac93f8` maps index0=`DROWNING`, index1=`FALLING`; event-name table entry
+`39ac93c0` is `ENVIRONMENTAL_DAMAGE`. Zero damage type goes through `3940a1a0(0)` = `idle`.
+There is no `COMBAT_TEXT` call in this handler; original
+`x2ui/combattext/combat_text.lua` consumes this COMBAT_MSG event and presents environment text.
+Sources 1 and other values return without this presentation. This is an aa-client integration
+contract, with no inferred HP subtraction or extra network traffic.

@@ -1,14 +1,14 @@
 //! Skills: what the player knows, what units are casting, and when skills were last used.
 //!
-//! The server never sends cooldown lengths or timers: the client keeps the time of the last use
-//! of each skill and takes the cooldown (`skills.cooldown_time`, `custom_gcd`, `default_gcd`
-//! in the game database) from its tables. A `SkillCooldownReset` clears the timer.
+//! Cast observations use the game's database lengths. Native `SCCooldowns` can additionally
+//! supply explicit skill/tag duration and remaining-time lists; the current lane only declares
+//! an empty writer and has no emitter. Received lists append without resetting existing timers.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::session::Event;
-use crate::skill::SkillTarget;
+use crate::skill::{Cooldown, SkillTarget, COOLDOWN_LIMIT};
 
 /// A skill the player has learned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +55,27 @@ pub struct SkillFailure {
     pub at: Instant,
 }
 
+/// An original received entry, its local reception time, and any authoritative reset.
+/// Values are retained after expiry/reset; this is not an invented cast or learned skill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReceivedCooldown {
+    pub cooldown: Cooldown,
+    pub received_at: Instant,
+    /// A later own `SkillCooldownReset` cleared this entry. Original wire values stay intact.
+    pub reset: bool,
+}
+
+impl ReceivedCooldown {
+    pub fn left_at(&self, now: Instant) -> Option<Duration> {
+        if self.reset {
+            return None;
+        }
+        Duration::from_millis(u64::from(self.cooldown.remaining_ms))
+            .checked_sub(now.saturating_duration_since(self.received_at))
+            .filter(|left| !left.is_zero())
+    }
+}
+
 resource! {
     /// Skills of the local player and the casts in view.
     pub struct Skills {
@@ -75,6 +96,10 @@ resource! {
         /// Cooldown tags reset by the server (`SkillCooldownReset::tag_id`) and when: a skill with
         /// that `cooldown_tag_id` used before that moment is ready again.
         pub reset_tags: Vec<(u32, Instant)>,
+        /// Received native lists in arrival order, including duplicates and expired/reset entries.
+        /// Each list stops accepting entries at the native capacity of 150.
+        pub received_skill_cooldowns: Vec<ReceivedCooldown>,
+        pub received_tag_cooldowns: Vec<ReceivedCooldown>,
         /// The last refused skill (not enough mana, too far ...).
         pub last_failure: Option<SkillFailure>,
     }
@@ -99,15 +124,98 @@ impl Skills {
         self.last_used.get(&skill_id).map(Instant::elapsed)
     }
 
-    /// Cooldown left of `skill_id` given its cooldown time in ms (`skills.cooldown_time`); `None`
-    /// when it is ready. `tag` is the skill's `cooldown_tag_id` (0 for none): a reset of the tag
-    /// after the last use makes the skill ready.
-    pub fn cooldown_left(&self, skill_id: u32, tag: u32, cooldown_ms: u32) -> Option<Duration> {
-        let used = *self.last_used.get(&skill_id)?;
-        if tag != 0 && self.reset_tags.iter().any(|&(t, at)| t == tag && at >= used) {
-            return None;
+    /// Received-only `(remaining, total)` for a skill and its native ordered tag list.
+    /// The greatest remaining time wins, tags before direct skill entries; ties keep the first.
+    /// This excludes global cooldowns and cast observations. No DB duration replaces wire data.
+    pub fn received_cooldown(&self, skill_id: u32, tags: &[u32]) -> Option<(Duration, Duration)> {
+        self.received_cooldown_at(skill_id, tags, Instant::now())
+    }
+
+    pub fn received_cooldown_at(
+        &self,
+        skill_id: u32,
+        tags: &[u32],
+        now: Instant,
+    ) -> Option<(Duration, Duration)> {
+        let mut result: Option<(Duration, Duration)> = None;
+        let candidates = tags
+            .iter()
+            .flat_map(|tag| {
+                self.received_tag_cooldowns
+                    .iter()
+                    .filter(move |entry| entry.cooldown.id == *tag)
+            })
+            .chain(
+                self.received_skill_cooldowns
+                    .iter()
+                    .filter(|entry| entry.cooldown.id == skill_id),
+            );
+        for entry in candidates {
+            if let Some(left) = entry.left_at(now) {
+                if result.is_none_or(|(best, _)| left > best) {
+                    result = Some((
+                        left,
+                        Duration::from_millis(u64::from(entry.cooldown.total_ms)),
+                    ));
+                }
+            }
         }
-        Duration::from_millis(u64::from(cooldown_ms)).checked_sub(used.elapsed())
+        result
+    }
+
+    /// `(remaining, total)` from received timers and the existing cast/DB estimate.
+    /// The greatest remaining time wins; equal remaining keeps the received candidate and its
+    /// native tag/skill tie order. A received total of zero stays zero, never replaced by DB data.
+    /// `tag` is the existing single cooldown_tag_id (zero = none).
+    pub fn cooldown_with_total(
+        &self,
+        skill_id: u32,
+        tag: u32,
+        cooldown_ms: u32,
+    ) -> Option<(Duration, Duration)> {
+        self.cooldown_with_total_at(skill_id, tag, cooldown_ms, Instant::now())
+    }
+
+    fn cooldown_with_total_at(
+        &self,
+        skill_id: u32,
+        tag: u32,
+        cooldown_ms: u32,
+        now: Instant,
+    ) -> Option<(Duration, Duration)> {
+        let tags = if tag == 0 {
+            &[][..]
+        } else {
+            std::slice::from_ref(&tag)
+        };
+        let received = self.received_cooldown_at(skill_id, tags, now);
+        let observed = self.last_used.get(&skill_id).and_then(|&used| {
+            if tag != 0
+                && self
+                    .reset_tags
+                    .iter()
+                    .any(|&(t, at)| t == tag && at >= used)
+            {
+                return None;
+            }
+            let total = Duration::from_millis(u64::from(cooldown_ms));
+            total
+                .checked_sub(now.saturating_duration_since(used))
+                .filter(|left| !left.is_zero())
+                .map(|left| (left, total))
+        });
+        match (received, observed) {
+            (Some(received), Some(observed)) if observed.0 > received.0 => Some(observed),
+            (Some(received), _) => Some(received),
+            (None, observed) => observed,
+        }
+    }
+
+    /// Cooldown left using received timers and the previous cast/DB-duration estimate.
+    /// This wraps cooldown_with_total, so slot eligibility and presentation use the same winner.
+    pub fn cooldown_left(&self, skill_id: u32, tag: u32, cooldown_ms: u32) -> Option<Duration> {
+        self.cooldown_with_total(skill_id, tag, cooldown_ms)
+            .map(|(left, _)| left)
     }
 
     /// Global cooldown left given its length in ms (`custom_gcd` of [`Skills::last_cast_skill`]).
@@ -251,7 +359,56 @@ impl Skills {
                 }
                 return self.casting.len() != before;
             }
-            Event::SkillCooldownReset { obj_id, skill_id, tag_id, .. } if self.is_own(*obj_id) => {
+            Event::Cooldowns(cooldowns) if self.obj_id != 0 => {
+                fn append(
+                    target: &mut Vec<ReceivedCooldown>,
+                    entries: &[Cooldown],
+                    now: Instant,
+                ) -> bool {
+                    let before = target.len();
+                    let available = COOLDOWN_LIMIT.saturating_sub(before);
+                    target.extend(
+                        entries
+                            .iter()
+                            .take(available)
+                            .map(|&cooldown| ReceivedCooldown {
+                                cooldown,
+                                received_at: now,
+                                reset: false,
+                            }),
+                    );
+                    target.len() != before
+                }
+                let skills = append(&mut self.received_skill_cooldowns, &cooldowns.skills, now);
+                let tags = append(&mut self.received_tag_cooldowns, &cooldowns.tags, now);
+                return skills || tags;
+            }
+            Event::SkillCooldownReset {
+                obj_id,
+                skill_id,
+                tag_id,
+                gcd,
+            } if self.is_own(*obj_id) => {
+                // Native reset helpers stop at the first matching entry, even if it was reset
+                // already. Do not coalesce duplicates or turn this into a list-wide clear.
+                if let Some(entry) = self
+                    .received_skill_cooldowns
+                    .iter_mut()
+                    .find(|e| e.cooldown.id == *skill_id)
+                {
+                    entry.reset = true;
+                }
+                if let Some(entry) = self
+                    .received_tag_cooldowns
+                    .iter_mut()
+                    .find(|e| e.cooldown.id == *tag_id)
+                {
+                    entry.reset = true;
+                }
+                if *gcd {
+                    self.last_cast = None;
+                    self.last_cast_skill = 0;
+                }
                 if *skill_id != 0 {
                     self.last_used.remove(skill_id);
                 }
@@ -269,7 +426,7 @@ impl Skills {
                 }
                 self.passive_buffs.push(*buff_id);
             }
-            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if *self == Self::default() {
                     return false;
                 }
@@ -291,6 +448,8 @@ impl PartialEq for Skills {
             && self.last_cast == o.last_cast
             && self.last_cast_skill == o.last_cast_skill
             && self.reset_tags == o.reset_tags
+            && self.received_skill_cooldowns == o.received_skill_cooldowns
+            && self.received_tag_cooldowns == o.received_tag_cooldowns
             && self.last_failure == o.last_failure
     }
 }
@@ -452,4 +611,218 @@ mod tests {
         assert!(s.apply(&Event::Disconnected { message: String::new() }));
         assert_eq!(s, Skills::default());
     }
+    fn received(id: u32, total_ms: u32, remaining_ms: u32, at: Instant) -> ReceivedCooldown {
+        ReceivedCooldown {
+            cooldown: Cooldown {
+                id,
+                total_ms,
+                remaining_ms,
+            },
+            received_at: at,
+            reset: false,
+        }
+    }
+
+    #[test]
+    fn received_timers_are_independent_of_casts_and_select_native_maximum() {
+        let now = Instant::now();
+        let mut s = skills();
+        s.received_skill_cooldowns = vec![
+            received(18132, 20_000, 5000, now),
+            received(18132, 30_000, 6000, now),
+        ];
+        s.received_tag_cooldowns = vec![
+            received(77, 10_000, 6000, now),
+            received(78, 40_000, 6000, now),
+        ];
+        let ms = Duration::from_millis;
+        assert_eq!(
+            s.received_cooldown_at(18132, &[77, 78], now),
+            Some((ms(6000), ms(10_000))),
+            "tags before skills and ordered ties"
+        );
+        assert_eq!(
+            s.received_cooldown_at(18132, &[78, 77], now),
+            Some((ms(6000), ms(40_000)))
+        );
+        assert_eq!(
+            s.received_cooldown_at(18132, &[], now + ms(2000)),
+            Some((ms(4000), ms(30_000)))
+        );
+        assert_eq!(s.received_cooldown_at(18132, &[77], now + ms(6000)), None);
+        assert_eq!(
+            s.received_cooldown_at(999, &[77], now),
+            Some((ms(6000), ms(10_000))),
+            "tag does not require a cast or learned skill"
+        );
+        assert!(s.last_used.is_empty() && s.last_cast.is_none() && !s.knows(999));
+        assert!(
+            s.cooldown_left(18132, 0, 0).unwrap() > ms(5000),
+            "received timer needs no DB duration"
+        );
+        s.last_used.insert(18132, now);
+        assert!(
+            s.cooldown_left(18132, 77, 60_000).unwrap() > ms(59_000),
+            "retain existing cast estimate when it is greater"
+        );
+        assert_eq!(
+            s.received_skill_cooldowns[0].cooldown.remaining_ms, 5000,
+            "queries never rewrite wire data"
+        );
+        let zero = received(0, 0, 0, now);
+        assert_eq!(zero.left_at(now), None);
+        let raw = received(0, 1, u32::MAX, now);
+        assert_eq!(
+            raw.left_at(now),
+            Some(ms(u32::MAX as u64)),
+            "native does not clamp remaining to total"
+        );
+    }
+
+    #[test]
+    fn received_lists_append_until_native_capacity_and_empty_never_clears() {
+        use crate::skill::SkillCooldowns;
+        let packet = Event::Cooldowns(SkillCooldowns {
+            skills: vec![
+                Cooldown {
+                    id: 1,
+                    total_ms: 1000,
+                    remaining_ms: 999
+                };
+                149
+            ],
+            tags: vec![],
+        });
+        let mut s = Skills::default();
+        assert!(
+            !s.apply(&packet),
+            "no local player: no fabricated ownership"
+        );
+        s.obj_id = 5;
+        assert!(s.apply(&packet));
+        assert!(s.apply(&packet));
+        assert_eq!(s.received_skill_cooldowns.len(), COOLDOWN_LIMIT);
+        let before = s.clone();
+        assert!(
+            !s.apply(&packet),
+            "full native list ignores additional records"
+        );
+        assert!(!s.apply(&Event::Cooldowns(SkillCooldowns::default())));
+        assert_eq!(s, before);
+        assert!(s.apply(&Event::Cooldowns(SkillCooldowns {
+            skills: vec![],
+            tags: vec![Cooldown {
+                id: 2,
+                total_ms: 2000,
+                remaining_ms: 1000
+            }]
+        })));
+        assert_eq!(
+            s.received_tag_cooldowns.len(),
+            1,
+            "tag capacity is independent"
+        );
+    }
+
+    #[test]
+    fn received_resets_clear_first_match_only_and_preserve_original_wire_fields() {
+        let now = Instant::now();
+        let mut s = skills();
+        s.received_skill_cooldowns = vec![
+            received(18132, 2000, 1000, now),
+            received(18132, 3000, 2000, now),
+        ];
+        s.received_tag_cooldowns = vec![received(77, 2000, 1000, now)];
+        s.apply(&started(18132, 4, 5, 0, 0));
+        let reset = |obj_id, gcd| Event::SkillCooldownReset {
+            obj_id,
+            skill_id: 18132,
+            tag_id: 77,
+            gcd,
+        };
+        assert!(!s.apply(&reset(6, true)));
+        assert!(s.last_cast.is_some());
+        assert!(s.apply(&reset(5, true)));
+        assert!(s.last_cast.is_none() && s.last_cast_skill == 0);
+        assert!(s.received_skill_cooldowns[0].reset && !s.received_skill_cooldowns[1].reset);
+        assert!(s.received_tag_cooldowns[0].reset);
+        assert_eq!(s.received_skill_cooldowns[0].cooldown.remaining_ms, 1000);
+        assert_eq!(
+            s.received_cooldown_at(18132, &[77], now),
+            Some((Duration::from_millis(2000), Duration::from_millis(3000)))
+        );
+        s.apply(&reset(5, false));
+        assert!(
+            !s.received_skill_cooldowns[1].reset,
+            "native repeated reset still stops at the first match"
+        );
+        assert_eq!(s.since_used(18132), None);
+    }
+
+    #[test]
+    fn received_cooldowns_clear_on_character_spawn_selection_leave_and_disconnect() {
+        let now = Instant::now();
+        let mut original = skills();
+        original
+            .received_skill_cooldowns
+            .push(received(18132, 1000, 1000, now));
+        original
+            .received_tag_cooldowns
+            .push(received(77, 2000, 2000, now));
+        for event in [
+            Event::CharacterSelected(Box::default()),
+            Event::LeftWorld { target: 0 },
+            Event::Disconnected {
+                message: String::new(),
+            },
+            Event::PlayerSpawn(Box::new(crate::session::PlayerSpawn {
+                obj_id: 6,
+                state: Default::default(),
+                unit: crate::state::tests::unit(6),
+            })),
+        ] {
+            let mut s = original.clone();
+            assert!(s.apply(&event));
+            assert!(s.received_skill_cooldowns.is_empty() && s.received_tag_cooldowns.is_empty());
+            assert_eq!(s.received_cooldown_at(18132, &[77], now), None);
+        }
+    }
+
+    #[test]
+    fn combined_cooldown_uses_one_clock_and_returns_winning_total_without_fallback() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        let mut s = skills();
+        s.last_used.insert(18132, now);
+        s.received_skill_cooldowns
+            .push(received(18132, 10_000, 5000, now));
+        s.received_tag_cooldowns.push(received(77, 0, 5000, now));
+        assert_eq!(
+            s.cooldown_with_total_at(18132, 77, 5000, now),
+            Some((ms(5000), ms(0))),
+            "tie keeps native tag winner including zero total"
+        );
+        assert_eq!(
+            s.cooldown_with_total_at(18132, 77, 6000, now),
+            Some((ms(6000), ms(6000))),
+            "greater observed remaining uses DB total"
+        );
+        assert_eq!(
+            s.cooldown_with_total_at(18132, 0, 4000, now + ms(1000)),
+            Some((ms(4000), ms(10_000))),
+            "greater received remaining uses actual received total"
+        );
+        s.reset_tags.push((77, now));
+        assert_eq!(
+            s.cooldown_with_total_at(18132, 77, 60_000, now),
+            Some((ms(5000), ms(0))),
+            "tag reset excludes use estimate but not unrelated received direct entries"
+        );
+        s.received_skill_cooldowns[0].reset = true;
+        s.received_tag_cooldowns[0].reset = true;
+        assert_eq!(s.cooldown_with_total_at(18132, 77, 60_000, now), None);
+        assert_eq!(s.cooldown_with_total(18132, 77, 60_000), None);
+        assert_eq!(s.cooldown_left(18132, 77, 60_000), None);
+    }
+
 }

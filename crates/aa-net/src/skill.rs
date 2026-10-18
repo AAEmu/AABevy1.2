@@ -2,11 +2,56 @@
 //!
 //! Layouts follow the server's `systems/skills/packets.rs` and `types.rs` (`SCSkillStarted`,
 //! `SCSkillFired`, `SCUnitDamaged`, `SCUnitHealed`, `SCPlotEvent` ...) and the reader of
-//! `CSStartSkill`. Times on the wire are in units of 10 ms (some with an offset of 10); the types
-//! here are in milliseconds.
+//! `CSStartSkill`. Cast/stop times use 10 ms wire units (some with an offset of 10);
+//! exposed values are milliseconds. Native `SCCooldowns` entries already use milliseconds.
 
 use crate::buff::{caster_kind, BuffCaster};
 use crate::wire::{Pos, Reader, Result, Writer};
+
+/// Native fixed capacity of each skill/tag cooldown list.
+pub const COOLDOWN_LIMIT: usize = 150;
+
+/// One native cooldown entry, in its original wire order. No timestamp or scaling is encoded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cooldown {
+    /// Skill ID in `SkillCooldowns::skills`, cooldown-tag ID in `SkillCooldowns::tags`.
+    pub id: u32,
+    pub total_ms: u32,
+    pub remaining_ms: u32,
+}
+
+/// `SCCooldowns` (0x04a), received for the current player. Empty lists do not mean reset.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillCooldowns {
+    pub skills: Vec<Cooldown>,
+    pub tags: Vec<Cooldown>,
+}
+
+impl SkillCooldowns {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        fn list(r: &mut Reader) -> Result<Vec<Cooldown>> {
+            let count = r.i32()?;
+            if !(0..=COOLDOWN_LIMIT as i32).contains(&count) {
+                return Err(crate::wire::WireError::Invalid(format!(
+                    "cooldown count {count} outside native capacity 0..={COOLDOWN_LIMIT}"
+                )));
+            }
+            (0..count)
+                .map(|_| {
+                    Ok(Cooldown {
+                        id: r.u32()?,
+                        total_ms: r.u32()?,
+                        remaining_ms: r.u32()?,
+                    })
+                })
+                .collect()
+        }
+        Ok(Self {
+            skills: list(r)?,
+            tags: list(r)?,
+        })
+    }
+}
 
 /// `SkillCastTargetType`.
 pub mod target_kind {
@@ -721,5 +766,98 @@ mod tests {
         assert_eq!(e.caster_pos, None);
         let p = e.target_pos.expect("a position target");
         assert!((p.x - 10.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01 && (p.z - 30.0).abs() < 0.1, "{p:?}");
+    }
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+
+    #[test]
+    fn native_cooldowns_keep_both_lists_and_original_values() {
+        // Native 397b2350: i32 skill count, triples, i32 tag count, triples. No 10ms scale.
+        let body = [
+            2, 0, 0, 0, 4, 3, 2, 1, 0xe8, 3, 0, 0, 0xfa, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1, 0, 0,
+            0, 0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0, 77, 0, 0, 0, 0x20, 0x4e, 0, 0, 0x88, 0x13, 0, 0,
+            0xab,
+        ];
+        let mut r = Reader::new(&body);
+        let decoded = SkillCooldowns::read(&mut r).unwrap();
+        assert_eq!(
+            decoded,
+            SkillCooldowns {
+                skills: vec![
+                    Cooldown {
+                        id: 0x0102_0304,
+                        total_ms: 1000,
+                        remaining_ms: 250
+                    },
+                    Cooldown {
+                        id: u32::MAX,
+                        total_ms: 1,
+                        remaining_ms: u32::MAX
+                    }
+                ],
+                tags: vec![Cooldown {
+                    id: 77,
+                    total_ms: 20_000,
+                    remaining_ms: 5000
+                }],
+            }
+        );
+        assert_eq!(r.rest(), &[0xab], "do not consume the next DD04 packet");
+        for len in 0..body.len() - 1 {
+            assert!(
+                SkillCooldowns::read(&mut Reader::new(&body[..len])).is_err(),
+                "truncated at {len}"
+            );
+        }
+        assert_eq!(
+            SkillCooldowns::read(&mut Reader::new(&[0; 8])).unwrap(),
+            SkillCooldowns::default()
+        );
+    }
+
+    #[test]
+    fn cooldown_counts_reject_negative_or_over_native_capacity_in_either_list() {
+        for count in [-1, i32::MIN, 151, i32::MAX] {
+            for second_list in [false, true] {
+                let mut w = Writer::new();
+                if second_list {
+                    w.i32(0);
+                }
+                w.i32(count).raw(&[0; 24]);
+                assert!(
+                    matches!(
+                        SkillCooldowns::read(&mut Reader::new(&w.finish())),
+                        Err(crate::wire::WireError::Invalid(_))
+                    ),
+                    "{count}, tags={second_list}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cooldown_native_capacity_and_independent_empty_lists_are_framed() {
+        for (skills, tags) in [(150, 150), (0, 150), (150, 0)] {
+            let mut w = Writer::new();
+            for count in [skills, tags] {
+                w.i32(count);
+                for id in 0..count {
+                    w.u32(id as u32).u32(123_456).u32(9999);
+                }
+            }
+            w.u16(0xbeef);
+            let bytes = w.finish();
+            let mut r = Reader::new(&bytes);
+            let value = SkillCooldowns::read(&mut r).unwrap();
+            assert_eq!(
+                (value.skills.len(), value.tags.len()),
+                (skills as usize, tags as usize)
+            );
+            assert_eq!(r.u16().unwrap(), 0xbeef);
+            assert!(r.is_empty());
+        }
     }
 }
