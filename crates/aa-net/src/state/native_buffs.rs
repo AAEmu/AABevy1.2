@@ -186,6 +186,17 @@ mod tests {
         }
     }
     #[test]
+    fn cooldown_skill_preserves_constructor_identity_across_repeat_and_snapshot() {
+        let mut v=view(4,false);let mut event=created(1,10,1);
+        let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.raw_cooldown_skill=Some(77);
+        v.apply(&event);assert_eq!(v.of(9).unwrap()[0].buff.raw_cooldown_skill,Some(77));
+        let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.raw_cooldown_skill=Some(88);buff.index=2;
+        v.apply(&event);let result=&v.of(9).unwrap()[0].buff;
+        assert_eq!((result.index,result.raw_cooldown_skill),(2,Some(77)));
+        let mut snapshot=result.clone();snapshot.raw_cooldown_skill=Some(u32::MAX);
+        v.seed(9,&[snapshot]);assert_eq!(v.of(9).unwrap()[0].buff.raw_cooldown_skill,Some(u32::MAX));
+    }
+    #[test]
     fn repeated_created_tick_projection_matches_executed_reconciliation_fragment() {
         for (rule, old_elapsed, incoming, tick, expected_elapsed, expected_index) in [
             (1,100,25,7,25,3),(1,25,100,7,25,3),(1,u32::MAX,1,1,1,1),
