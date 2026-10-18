@@ -123,6 +123,7 @@ opcodes! {
         CSInteractNPCPacket = 0x065,
         CSInteractNPCEndPacket = 0x066,
         CSStartInteractionPacket = 0x068,
+        CSRequestJuryWaitingNumberPacket = 0x079,
         CSInviteToTeamPacket = 0x07a,
         CSInviteAreaToTeamPacket = 0x07b,
         CSReplyToJoinTeamPacket = 0x07c,

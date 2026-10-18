@@ -275,6 +275,8 @@ pub enum Command {
     Expedition { character_id: u32, command: crate::ExpeditionCommand },
     /// Captured persistent character identity is local-only, never part of the Family wire body.
     Family { character_id: u32, command: crate::FamilyCommand },
+    /// App-captured persistent identity; the native CS079 body is empty.
+    RequestJuryWaitingNumber { character_id:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
@@ -534,6 +536,9 @@ pub enum Event {
     UnhandledGamePacket { level:u8, opcode:u16, len:usize },
     /// Actual wire decode failure; no complete event can be reconstructed from this receipt.
     GameDecodeFailed { message:String },
+    Crime(crate::crime::CrimeEvent),
+    JuryWaitingNumberRequested { character_id:u32 },
+    JuryWaitingNumberRequestRejected { character_id:u32, message:String },
     Achievement(crate::achievement::AchievementEvent),
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
@@ -1040,6 +1045,15 @@ impl Session {
                     self.emit(Event::ExpeditionRequested { character_id, command });
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
+                }
+            }
+            Command::RequestJuryWaitingNumber { character_id } => {
+                if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
+                    self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request requires the same active selected character".into()});
+                } else if self.send_game(game::ClientMsg::RequestJuryWaitingNumber).await {
+                    self.emit(Event::JuryWaitingNumberRequested{character_id});
+                } else {
+                    self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request was not sent".into()});
                 }
             }
             Command::Family { character_id, command } => {
@@ -1601,6 +1615,7 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Dominion(value) => self.emit(Event::Dominion(value)),
+            M::Crime(e) => self.emit(Event::Crime(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
@@ -4242,6 +4257,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn jury_number_request_is_empty_and_rechecks_active_identity_and_failed_writes() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let request=||Command::RequestJuryWaitingNumber{character_id:42};
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::JuryWaitingNumberRequestRejected{character_id:42,..})));
+        session.phase=Phase::InWorld;session.selected=42;session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::JuryWaitingNumberRequestRejected{..})));
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        session.selected=43;session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::JuryWaitingNumberRequestRejected{..})));
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.selected=42;session.command(request()).await;
+        assert!(matches!(events.try_recv(),Ok(Event::JuryWaitingNumberRequested{character_id:42})));
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length)as usize];peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..],&[0x79,0]);assert!(events.try_recv().is_err(),"request is not a queue receipt");
+        session.game.as_mut().unwrap().shutdown().await;session.command(request()).await;
+        let mut rejected=false;while let Ok(event)=events.try_recv(){assert!(!matches!(event,Event::JuryWaitingNumberRequested{..}));rejected|=matches!(event,Event::JuryWaitingNumberRequestRejected{..});}assert!(rejected);
+    }
+
+    #[tokio::test]
     async fn family_commands_recheck_captured_character_and_only_notify_actual_writes() {
         use crate::FamilyCommand;
         let (tx, mut events) = unbounded_channel();
@@ -4347,6 +4383,16 @@ mod tests {
             crate::ExpeditionEvent::MembershipChanged{obj_id:77,character_id:7,kicker:vec![255],name:vec![0],old_expedition_id:9,new_expedition_id:0,expel:2}] {
             session.game_msg(Ok(game::ServerMsg::Expedition(value.clone()))).await;
             assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
+        }
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn crime_receipts_forward_every_duplicate_without_requests_or_fake_choices() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        for receipt in [crate::CrimeEvent::JuryPointChanged{jury_point:i32::MIN},crate::CrimeEvent::JuryPointChanged{jury_point:i32::MIN},crate::CrimeEvent::JuryWaitingNumber{waiting_number:-1}] {
+            session.game_msg(Ok(game::ServerMsg::Crime(receipt))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::Crime(actual)) if actual==receipt));
         }
         assert!(events.try_recv().is_err());
     }

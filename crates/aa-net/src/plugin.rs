@@ -181,6 +181,7 @@ net_state! {
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
     dominion: crate::Dominion,
+    crimes: crate::crime::Crimes,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
@@ -303,6 +304,19 @@ mod equipment_flags_tests {
         app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ScheduledEventStarted(start.clone()))).unwrap();
         assert_eq!(app.world().resource::<crate::battlefield::Battlefield>().my_corps_kill_death_ratio,-7);
         assert_eq!(app.world().resource::<crate::scheduled::ScheduledEvents>().starts[&3].open_message,b"notice");
+    }
+
+    #[test]
+    fn plugin_crime_receipts_fold_selected_header_without_queue_cache_fabrication() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState| {
+            state.apply(&Event::CharacterSelected(Box::new(crate::model::CharacterState::default())));
+            state.apply(&Event::Crime(crate::CrimeEvent::JuryPointChanged{jury_point:-7}));
+        }).unwrap();
+        assert_eq!(app.world().resource::<crate::Crimes>().jury_point,Some(-7));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert_eq!(*app.world().resource::<crate::Crimes>(),crate::Crimes::default());
     }
 
     #[test]
