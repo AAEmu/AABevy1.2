@@ -220,6 +220,7 @@ fn focus_transfer_and_programmatic_replacement_reject_stale_results() {
 #[test]
 fn eligibility_excludes_native_digit_password_readonly_hidden_and_key_capture() {
     for script in [
+        "edit:SetEnglish(true)",
         "edit:SetDigit(true)",
         "edit:SetPassword(true)",
         "edit:SetReadOnly(true)",

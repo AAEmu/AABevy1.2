@@ -3809,3 +3809,62 @@ They are separate evidence of the native decoder boundary, not a claim that
 safe Rust strings reproduce arbitrary invalid-buffer reads. No live-client
 execution/writes, Cargo runs, production edits or additional visual deliverable
 were needed for this source-only audit.
+
+### Native English edit input and model clearing (2026-10-18)
+
+Original `loginstage/login/login_view.lua` calls `SetEnglish(true)` on both
+`nameEdit` and `passwdEdit` (lines 108 and 83). The previous toolkit method was
+a no-op, so the username accepted typed spaces and Unicode and remained an
+IME owner. `EditData::english` now implements the native typed-input flag.
+
+Registration `3923a89a` binds `392398c0`; the bool adapter `3923a230` accepts
+Lua booleans or numbers (`double != 0`, including NaN), rejects missing/nil/
+string/table arguments, and returns no values. Widget setter `392923e0` writes
+`+c28` then calls model setter `39228c70`. The latter always invokes clear
+`39228510`, even for repeated or false calls: all four text buffers and caret/
+selection positions become empty/zero. It preserves the input-dirty byte and
+composing byte `+88` and dispatches no `OnTextChanged`. The toolkit clears the
+visible buffer and composition base without notifying; context completion of
+that cleared preview also produces no synthetic text-change callback.
+
+Typed path `392298d0` checks English `model+98` and accepts only signed
+character values **0x21..0x7e inclusive** (`!` through `~`). Rejected characters
+leave the text and selection alone. Native focus acceptance `39292230` detaches
+the IME context for password, English or digit edits. Result `392277b0` clears
+composing before refusing an English result; preedit `39227da0` cancels a
+nonempty English composition. English edits are therefore excluded from the
+portable IME owner; enabling the flag during a preview cannot resurrect stale
+text on context release.
+
+`SetText` remains unrestricted. Paste `39228270` converts the OS clipboard,
+then directly inserts its UTF32 buffer at `3922836f..392284c4` without the typed
+English/digit filters. It still uses the native maximum-length rule and text
+callback. `UseClipboard` is independent of English input.
+
+Ignored offline evidence is `data/extract/aa-ui/english_edit_oracle.py`,
+`native-english-edit-oracle-20261018.json` and
+`native-english-edit-source-20261018.txt`. **51 groups** execute the original
+setter/clear, typed guard, focus branches, paste insertion/copy, and typed bool
+adapter. Setter and typed guard use no mocked calls. Focus captures context/
+base-callback endpoints; paste starts after OS clipboard conversion with
+supplied UTF32 data and executes native insertion/copy instructions unchanged.
+The bool adapter captures `GetParamAny` at the documented Cry `3550BF90`
+conversion boundary. No live process or OS clipboard is accessed.
+
+QA: `cargo check -p aa-ui`, the example build, and **61 selected tests** pass
+(one pre-existing font-metrics test ignored). Coverage includes seven English
+cases, original login pointer picking and character-by-character callbacks,
+IME, clipboard, selection, physical keyboard and library regressions. The
+original password helper hides and the real callback enables Login; no login
+submission is made. The example uses the original login constructors/handlers,
+development-mode visibility and the existing fake option values required by
+`SetReadyToLogin`'s hidden option window.
+
+Both final **1280x720 / 0.85** captures were inspected:
+`shots/aa-ui/native-english-typed-final-20261018.png` shows typed `Account!`
+and a masked password (**240.8–350.7 FPS**);
+`shots/aa-ui/native-english-paste-final-20261018.png` shows pasted `René Test`
+with its space/accent preserved (**263.0–300.9 FPS**). Both report zero Lua
+errors and self-close (owned PIDs 6748 and 30012). The standalone 2D login
+still has a partially shown logo and no `login_camera` scene entity; each run
+logs that one missing-camera warning. Full login-scene rendering remains open.
