@@ -90,6 +90,11 @@ pub(crate) fn ranking_fixture() {
     ranking::fixture::run();
 }
 
+#[allow(dead_code)]
+pub(crate) fn buff_fixture() {
+    buffs::cancel::fixture::run();
+}
+
 /// Run the isolated original-script combat example without a network connection.
 #[allow(dead_code)]
 pub(crate) fn combat_fixture() {
@@ -415,6 +420,7 @@ impl Plugin for HudPlugin {
         crime::plugin(app);
         trial::plugin(app);
         ranking::plugin(app);
+        buffs::cancel::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);

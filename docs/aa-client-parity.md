@@ -13,7 +13,15 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite: 276 passed / 38 optional probes ignored in 56.13s.
+Latest full-client suite: 281 passed / 38 optional probes ignored in 57.26s.
+Five self-buff checks cover native folded Good-list icon order, real physical
+left/right input, valid received instance0, original system-buff warning,
+captured identity/lifetime, selection/disconnect guards and receipt-only removal.
+Five buff/world-list captures are inspected without runtime errors, and the
+playable alias includes this adapter and independent terrain normal UVs.
+Fresh QA entry receives an empty character list for the HUD-only account;
+the previously documented create account still times out before character list.
+No live buff removal or server restart is claimed. See aa-client-buffs.md.
 Seven ranking checks cover the real catalog and native calendar/return shapes,
 ordered receipt and name readiness, original physical tabs/refresh/rewards,
 and the actual HUD scheduler with captured typed requests. Main and ranking
@@ -56,9 +64,10 @@ GCD selection/state has a tested opt-in toolkit adapter; the actual application
 producer/accessor mapping remains open. Generic and ordinary slot mask rendering
 now use the source dual-texture path; ordinary slot captures and 42 selected
 UI regressions pass. The toolkit selector remains opt-in pending real producers.
-Network 532 tests pass, including bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
+Network 541 tests pass, including native buff metadata/capacity/order/descriptor
+guards, SCBuffUpdated and factual decoder-loss uncertainty, bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
-World 218 tests / 9
+World 220 tests / 9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
 now reach the transmission copy in their source order. Fog/deferred decal water
@@ -68,7 +77,9 @@ live registration remains unwired. Ordinary road order adds36 executed native
 cases, eight exact GPU controls and original scene/unload checks. Owning docs
 retain exact evidence and limits. Native terrain holes/height packing/diagonal
 and 32-slot surface materials pass numeric regressions, all 64 GPU material
-controls, two original on/legacy pairs and unload checks. Trial spatial strings/live validation, bounty asset
+controls, two original on/legacy pairs and unload checks. Independent diffuse/bump
+tiling and cell phase pass eight original ATI2 texel controls, original scene pairs
+and unload. Trial spatial strings/live validation, bounty asset
 compatibility and ranking live integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
 
@@ -101,7 +112,7 @@ parity is unfinished.
 
 ## Active ownership
 
-* Root: `aa-client`, original trial/bounty/ranking received adapters and physical terrain support have documented checks. Right-click self-buff cancellation is next, using native Good-list order and captured received instance identity. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
+* Root: `aa-client`, original trial/bounty/ranking received adapters, physical terrain support and native Good-list self-buff cancellation have documented checks. Native buff getter flag/count/charge projection is next over executed source contracts. Original Folio browsing, proficiency controls, pet information/rename/behavior, explicit received NPC body slots/rigid attachments, repair/notifier, auto-AA, facial integration, inventory sorting/150-slot pool, expansion confirmation, cooldowns, breath, keys, mail/group-loot/trade, friends and combat-display milestones passed their documented checks. Natural service routing, remaining pet/transport actions and live settlement stay open.
 * Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
 * UI agent: `aa-ui`, native listbox hierarchy/art/tooltips for original crafting/achievement, including visible/animated templates and white/grey state fallbacks; native48px icon rejection audited. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed. Read-only native repair API audit supports root's next integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
