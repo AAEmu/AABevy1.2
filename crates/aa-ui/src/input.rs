@@ -488,6 +488,10 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         lua::flush(lua);
         return;
     }
+    if button == "RightButton" && lua::chat::context_clicked(lua, target) {
+        lua::flush(lua);
+        return;
+    }
     // The world map: left shows the zone under the cursor, right the map above.
     if lua::worldmap::clicked(lua, target, button) {
         lua::flush(lua);
