@@ -4880,3 +4880,54 @@ isolated explicit timer fixture, not a claim that native +311 selection is
 implemented. Initial diagnostic captures mistakenly rebound every hidden HUD
 slot each frame; the final example updates only its three demonstrated slots
 and hides unrelated roots after original initialization settles.
+
+### Generic cooldown draw snapshots (2026-10-18)
+
+A generic SetCoolDown call stores drawing state rather than starting another
+clock. Setter `392809b0` writes raw f32 total/remain at +5a8/+5ac. Base button
+frame virtual+158 (`39280f50`) updates its ordinary repeat-click accumulator;
+it does not decrement those drawing fields. The Action/Inventory/Constant
+frame overrides are `392816b0`/`39281c20`/`39281df0`. They query providers and
+notify the original OnContentUpdated consumer; those notifications do not
+independently replace the stored drawing sample. The consumer's subsequent
+SetCoolDown call does so.
+
+`data/extract/aa-ui/cooldown_snapshot_oracle.py` and
+`native-cooldown-snapshot-oracle-20261018.json` execute **seven groups**:
+five raw setter/base-frame cases and two actual Inventory/Constant provider
+notification cases. The base frame runs at raw dt values0/16/1000/9000 and
+keeps identical stored fields and mask input. The two derived frames receive
+explicit500/1000 provider values while an old8000/12000 draw sample is stored;
+they emit those new values without mutating the old drawing fields. Executing
+the actual setter afterward changes the sample. Provider/descriptor lookups,
+final delivery and memory allocation/copy are explicit captured endpoints;
+native setter/frame/variant control and mask arithmetic execute unchanged.
+Disassembly and field-write scan are in
+`native-cooldown-snapshot-source-20261018.txt`. No live process is modified.
+
+The toolkit now retains generic remaining time in `Cooldown.sampled_ms` and
+excludes generic snapshots from the local countdown registry. Ordinary slots
+continue using end_ms and preserve expiry/events. Original generic provider
+queries and original Lua consumer ordering remain intact. A callback that is
+removed cannot silently change the drawing sample; reinstating the original
+consumer applies its next actual value. Native raw-total normalization and
+out-of-range mask/shader behavior remain separate boundaries; this change
+does not alter existing setter normalization or infer a GCD classification.
+
+All **20 selected tests pass**: constant cooldown seven, captions six, HUD
+widgets six and original slot state one. New coverage verifies all four
+generic classes retain their mask past9000 UI milliseconds and clear only
+when explicitly set to zero; the actual original constant-button consumer
+alone replaces8000/12000 with500/1000, then clears on received readiness.
+Existing ordinary slot countdown/exactly-once completion, physical original
+action-slot use, equipped-item icon/callback identity and caption option tests
+remain green.
+
+The aa-dev `native_cooldown_snapshot` example builds. Its inspected unique
+`shots/aa-ui/native-cooldown-snapshot-720-20261018.png` at1280x720/scale0.85
+after8seconds shows the original base button still masked from its single
+1200/1500 call, while the ordinary first slot has expired and other ordinary
+captions have advanced to53s/24h. Original provider-driven equipment remains
+visible. It reports **260.5-325.3 FPS**, zero script/runtime warnings/errors,
+and self-closes (PID9068); the copied executable was removed. The isolated
+panel and explicit sample values are fixture settings.
