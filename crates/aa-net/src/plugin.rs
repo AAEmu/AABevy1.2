@@ -19,6 +19,7 @@ use bevy::ecs::system::SystemParam;
 use crate::session::{Client, Command, Event};
 use crate::actability::Actabilities;
 use crate::mate::Mates;
+use crate::slave::Slaves;
 use crate::state::{
     Auction, ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, LootRolls, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
     Skills, Status, Target, Trade, Units, WorldInfo, Worlds,
@@ -155,4 +156,5 @@ net_state! {
     loot_rolls: LootRolls,
     actabilities: Actabilities,
     mates: Mates,
+    slaves: Slaves,
 }

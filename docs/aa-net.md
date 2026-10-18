@@ -1971,3 +1971,58 @@ milestone; slave equipment handlers are still logging stubs in this lane.
 Offline tests cover zero/one/two entries, both success flags, opaque full-item identities and detail
 bytes, raw passenger ID/BTS, every truncation, invalid counts, DD04 continuation, ownership/timeline
 matching and the absence of inferred inventory/Unit changes. Live equipment QA remains deferred.
+
+
+### Slave creation and owned timeline lifecycle (2026-10-17)
+
+`ServerMsg::Slave` / `Event::Slave` carry `SlaveEvent::{Created(SlaveCreated), Removed { obj_id,
+tl_id }, Despawn { obj_id }}`. `SlaveCreated` contains `owner_obj_id: u32, tl_id: u16,
+obj_id: u32, hide_spawn_effect: bool, raw_id: i64, creator_name: String`. Exact receive bodies:
+
+- SC061: `bc ownerObj, u16 TL, bc slaveObj, bool hide, i64 rawId, string creator`.
+- SC062: `bc objId, u16 TL`; the ID's role depends on the lane call site, so it stays neutral.
+- SC063: `bc slaveObj`; this announces vehicle/effect despawn, not a full Unit removal packet.
+
+Source: vehicles/packets.rs writers and slaves.rs create_spawn/delete/riders_escape; native packet
+readers 397b34d0 / 397b3610 / 397b3690. SC061 is broadcast around the owner before the actual slave
+is constructed/spawned, including nearby peers. Raw i64 is zero in the lane; no item/database ID
+meaning is inferred. Native OnSlaveCreated 391d45d0 -> 3934a6c0 compares ownerObj with the local
+runtime player object, remembers its own timeline, and emits `SLAVE_SPAWN()` with no Lua arguments
+(event 0x66), before its remaining creation/effect metadata registration. A creation packet alone
+never supplies a template, position, model, equipment or a visible Unit.
+
+`Slaves` is a plain resource registered by NetPlugin and available as `WorldState.slaves`:
+`own: Option<SlaveCreated>` is the latest locally owned announcement, while
+`created: HashMap<u32, SlaveCreated>` records creation/effect metadata keyed by slave object ID.
+It correlates owner runtime ID with `PlayerSpawn.obj_id`, in either packet order; it never compares
+that field with the stored character ID. Per the lane CreateForOwner replacement rule, a newer
+announcement replaces older creation metadata for that same nonzero owner. Other owners' packets
+cannot claim local ownership. UnitSpawned of another kind/timeline at a remembered object ID drops
+stale metadata/ownership; selection, logout, disconnect and kick reset it.
+
+Keep despawn and owned-timeline cleanup distinct. Native OnSlaveRemoved 391d4660 -> 39345cb0
+clears the owned timeline only when `objId == localPlayerObj` AND `TL == currentOwnedTL`.
+Normal lane delete sends SC063(slaveObj), then SC062(ownerObj, TL). Rider's Escape instead sends
+SC063(slaveObj), SC062(slaveObj, TL), and respawns it; that SC062 is not the native owner ACK.
+The resource clears matching creation metadata for either source-backed role, but clears `own`
+only on the native owner-ID/timeline match. SC063 / generic visibility removal clear the creation
+cache while retaining the owned announcement: **`own.is_some()` does not assert active visibility**.
+Use the actual Units resource for visibility; these notifications do not invent or immediately
+remove Unit instances. An old timeline removal cannot clear a newer replacement.
+
+Existing `MateEvent::SlaveState` (SC1ab) retains its independent exact dynamic state fields; it is
+not ownership proof. SCSlaveBound064, MySlave066, Escape067, owned commands/equipment, HP/position
+UI and native presentation effects remain subsequent work. In particular, no completed summon,
+dismissal or equipment transaction is fabricated while the live lane is unavailable.
+
+Offline coverage: all three bodies and every truncation, raw i64 / Unicode creator, combined DD04
+continuation, runtime-vs-stored owner identity, both arrival orders, peer announcements, replacement,
+stale removal, Rider's Escape distinction, object reuse, visibility loss and disconnect. Session
+bridging also verifies creation and mate-equipment notifications arrive before subsequent points,
+without creating a Unit or claiming an unknown local owner. Live summon/despawn QA remains pending.
+
+
+Validation for these receive milestones: `cargo test -p aa-net` passes 207 library tests and two
+scripted loopback login tests; all nine live-lane tests remain ignored. The Unicode/DD04 slave
+fixture also passes its targeted rerun. `cargo check -p aa-net --features bevy --examples` passes.
+Only aa-net and this document changed; no lane connections or server changes were used.
