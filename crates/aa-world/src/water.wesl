@@ -50,7 +50,7 @@ struct WaterParams {
     env_lit: vec4<f32>,
     // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / output (1 wave, 2 alpha,
     // 3 sun, 4 reflection, 5 NdotI/Fresnel, 6 compressed bump; +10 old-normal diagnostics,
-    // -1 old softness, -2 old normal stages)
+    // 8 injected cube-sampler ray; -1 old softness, -2 old normal stages)
     motion: vec4<f32>,
 }
 
@@ -61,6 +61,10 @@ struct WaterParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var foam_map_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(5) var env_map: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(6) var env_map_sampler: sampler;
+
+// Matches water_material::AUTHORED_WATER_CUBE: actual authored static cube,
+// ENVIRONMENT_MAP+BUMP_MAP, no REALTIME_REFLECTIONS, successful source load.
+const AUTHORED_WATER_CUBE: f32 = 2.0;
 
 // Static authored water and ocean meshes use the standard Bevy world transform.
 // Native WaterSurfaceVS carries endpoint alpha twice: RGB untouched and A near-faded.
@@ -213,10 +217,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let ndotv = clamp(abs(dot(v, select(nr,bump,native_normals))), 0.0, 1.0);
     let f0 = water.refl.x;
     let fresnel = clamp((f0 + (1.0 - f0) * pow(1.0 - ndotv, 5.0)) * water.refl.y, 0.0, 1.0);
-    if inspect_mode > 5.5 { return vec4<f32>(bump*0.5+vec3<f32>(0.5),1.0); }
-    if inspect_mode > 4.5 { return vec4<f32>(ndotv,fresnel,0.0,1.0); }
-    if inspect_mode > 3.5 { return vec4<f32>(nr*0.5+vec3<f32>(0.5),1.0); }
-    if inspect_mode > 2.5 { return vec4<f32>(n*0.5+vec3<f32>(0.5),1.0); }
+    if inspect_mode == 6.0 { return vec4<f32>(bump*0.5+vec3<f32>(0.5),1.0); }
+    if inspect_mode == 5.0 { return vec4<f32>(ndotv,fresnel,0.0,1.0); }
+    if inspect_mode == 4.0 { return vec4<f32>(nr*0.5+vec3<f32>(0.5),1.0); }
+    if inspect_mode == 3.0 { return vec4<f32>(n*0.5+vec3<f32>(0.5),1.0); }
     // From below, the surface remains the post pass's responsibility.
     if view.world_position.y < p.y { discard; }
     // the foam is looked up unconditionally (uniform control flow), see below
@@ -249,19 +253,26 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var colour = mix(water.body.rgb, refracted, transmit);
 
     // ---- reflection: the scene where the ray hits it, the sky elsewhere (two rays spread vertically: the surface is rough) ----
-    let r = reflect(-v, nr);
-    let rdir = normalize(vec3<f32>(r.x, abs(r.y), r.z));
+    var r = reflect(-v, nr);
+    // Isolated original-DDS cube sampling controls inject a known reflected Bevy ray.
+    if inspect_mode == 8.0 { r = water.sky_h.xyz; }
+    let folded_rdir = normalize(vec3<f32>(r.x, abs(r.y), r.z));
+    // The native cube sampler consumes the reflected Cry vector without folding its Z.
+    // The analytic sky, optional SSR and every fallback keep their existing hemisphere.
+    let native_cube = water.motion.x == AUTHORED_WATER_CUBE && water.misc.x <= 0.5;
+    let rdir = select(folded_rdir,r,native_cube);
     // the engine reflects a fixed cube map (Cry axes: x east, y north, z up) lit by the sun and the sky colour
     let cube = textureSample(env_map, env_map_sampler, vec3<f32>(rdir.x, -rdir.z, rdir.y)).rgb * water.env_lit.rgb;
-    let sky = mix(sky_color(rdir), cube, water.env_lit.a);
+    if inspect_mode == 8.0 { return vec4<f32>(cube,1.0); }
+    let sky = mix(sky_color(folded_rdir), cube, water.env_lit.a);
     var refl = sky;
     if water.misc.x > 0.5 && dist < 160.0 {
         // rough water smears the reflection vertically: two rays above and below the mirror direction
-        let side = normalize(cross(rdir, up));
-        let top = cross(side, rdir);
+        let side = normalize(cross(folded_rdir, up));
+        let top = cross(side, folded_rdir);
         var sum = vec3<f32>(0.0);
         for (var k = 0; k < 2; k = k + 1) {
-            let dir = normalize(rdir + top * (water.misc.z * (f32(k) * 2.0 - 1.0)));
+            let dir = normalize(folded_rdir + top * (water.misc.z * (f32(k) * 2.0 - 1.0)));
             let hit = trace(p, vec3<f32>(dir.x, abs(dir.y), dir.z), pixel, size);
             var c = sky;
             if hit.x >= 0.0 {
