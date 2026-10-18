@@ -78,6 +78,8 @@ pub struct Ui {
     pub entered: Vec<Id>,
     pub focus: Option<Id>,
     pub keyboard: keyboard::Keyboard,
+    /// Native edit clipboard transfer buffer, reused when Unicode clipboard text is unavailable.
+    pub(crate) clipboard: String,
     /// Caret blink state of the focused edit box and the time its phase started.
     pub caret_visible: bool,
     pub caret_t0: f64,

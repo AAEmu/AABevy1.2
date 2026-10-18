@@ -16,6 +16,9 @@ rusqlite.workspace = true
 # Glyph outlines + hinted rasterisation; same version Bevy's text stack already builds.
 swash = "0.2.10"
 
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4.1"
+
 [dev-dependencies]
 aa-dev.workspace = true
 mlua.workspace = true
