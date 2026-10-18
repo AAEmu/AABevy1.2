@@ -2950,3 +2950,79 @@ Inspected that unique capture: original item 4045 icons show 8 seconds,
 builds, zero Lua errors and no WARN/ERROR; process 46448 self-closed.
 The spawn reference supplies HUD context but has no matching equipped-item
 cooldown sample, so a timed pixel match is not claimed.
+
+### Native cooldown production audit (2026-10-18, app/state work pending)
+
+The new constant-button observer above consumes timers; the following audit
+does not make the existing cast/DB estimates exact native state. Normal
+`OnSkillStarted` (`391d57f0` -> `3939a810`) starts a global timer at
+`3939aa97..aadd` only on its successful path, with an existing source actor,
+the final internal suppression flag false, and descriptor `timing_id == 1`
+(`+1bc`). `default_gcd` (`+9c`) selects `39899f30`; otherwise positive
+`custom_gcd` (`+94`) selects `39899df0`. Both query actual actor attribute
+74 (`global_cooldown_mul`) through `398a0bc0`, clamp it below at -999, and
+set global remaining and total together. Default duration is unsigned
+`1000000 / (1000 + attribute)`; custom duration is unsigned
+`wrapping(custom_ms * 1000) / (1000 + attribute)`. The addition also wraps.
+An actor `+3af1` flag suppresses these writes; its gameplay setter is not
+closed here. SQL field mappings are explicit in `LoadSkillDescs`, including
+column 135 `timing_id`, 45 `default_gcd`, and 43 `custom_gcd`.
+
+The ordinary direct/tag cooldown begins in `OnSkillFired` (`391d58a0` ->
+`3939b010`), at `3939b3d1..3eb`, rather than unconditionally at Started.
+It requires the resolved source actor, final received byte `packet+160`
+(native argument `+34`) false, `toggle_buff_id == 0` (`+1c0`) and nonzero
+`timing_id`. It calls `39368f90` with descriptor `cooldown_time` (`+88`),
+then `39368440` -> `3989a360` -> `3989f900` -> `39899f90`. If Fired has no
+matching timeline, `3939b0b6..e9` first runs the Started setup, so a missing
+Started packet does not imply the global timer is absent.
+
+`3989f900` evaluates a separate skill-modifier query with category 1 and
+an initial flat/percentage pair 0/100. It invokes the native provider at
+manager `+4`, actor collection `+3a8c` through `3989e5c0` (selector 1),
+and the base collection selected by actor `+4a4/+4a8` through `3989e6a0`.
+Callbacks `398a05b0/05f0` -> `398a0480` select matching skill-modifier rows
+by attribute category, universal selector, exact skill ID or generic tag
+membership. Modifier type 0 adds flat; type 1 adds percentage; each value
+is multiplied by its callback's stack factor. The base and flat sum wraps
+as i32. Percentage 100 returns that sum directly; otherwise native f32
+conversions/multiplications by percentage and 0.01 precede truncation to
+i32. The final duration has a signed floor at zero. Substituting a generic
+player attribute for these skill-specific sources would lose this contract.
+
+Insertion `39899f90` chooses a tag row when descriptor `cooldown_tag_id`
+(`+84`) is nonzero, otherwise a direct raw-skill row. It first searches
+existing entries, stopping at the first matching ID. Only a strictly larger
+unsigned new duration replaces that entry's remaining and total; duplicate
+later entries are untouched. Zero duration and actor `+3af1` are no-ops.
+On a miss at capacity 150 it compacts only positive-remaining rows in
+original order, appends if space exists, or rejects if all 150 remain active.
+This differs from the received `SCCooldowns` append-only handler.
+
+Received stop durations are another authoritative producer. Native
+`OnCastingStopped` (`391d5cf0` -> `39396000`) resolves the timeline's
+actor/skill, inserts its nonzero received u32 duration directly through
+`39899f90`, then ends the timeline. `OnPlotCastingStopped` (`391d5af0` ->
+`3938c410`) and `OnPlotChannelingStopped` (`391d5b70` -> `3938d970`)
+likewise apply the received duration to the tracked skill before ending it.
+These paths do not derive a new duration from the database. The current
+state fold discards these durations; this remains an integration gap.
+Ordinary Ended/Stopped is not evidence for clearing an existing cooldown.
+The separate local-player Fired call to `3939ce90` concerns a skill ID
+extracted by `3939c950` from SpecialEffect 48; it is not a general reset
+of every Fired skill. That replacement/combo subsystem remains open.
+
+Artifacts: `data/extract/aa-ui/native-cooldown-producer-contracts-20261018.txt`,
+`native-cooldown-packet-handlers-20261018.txt`,
+`native-cooldown-fired-body-20261018.txt`, and
+`native-cooldown-local-producers-20261018.txt`. The local, offline-only
+`cooldown_producer_oracle.py` executes the original insertion and global
+setter instructions, stubbing only memory-copy/log/cookie helpers and the
+actor attribute query. Its ten recorded groups in
+`native-cooldown-producer-oracle-20261018.json` verify duplicate-first
+extension, preserved totals, expiry compaction, full-list rejection,
+zero/flag no-ops, denominator clamping and custom multiplication wrap.
+For example default attribute 333 yields 750 ms; -1001 clamps to a
+1,000,000 ms timer; custom `0xffffffff` at attribute zero yields
+4,294,966 ms. No live client execution, input, injection or source writes
+were performed.
