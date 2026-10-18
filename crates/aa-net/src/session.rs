@@ -268,6 +268,8 @@ pub enum Command {
     Interact(crate::interaction::Interact),
     Shop(crate::shop::ShopCommand),
     Bank(crate::bank::BankCommand),
+    /// Request only; getter changes on the received action 18 item task.
+    SetAutoUseAaPoint(bool),
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
@@ -533,6 +535,8 @@ pub enum Event {
     Friend(crate::friend::FriendEvent),
     Repair(crate::repair::RepairEvent),
     Bank(crate::bank::BankEvent),
+    AutoUseAaPointRequested(bool),
+    AutoUseAaPointRequestRejected { value: bool, message: String },
     UiData(crate::ui_data::UiDataEvent),
     SkillLearned { skill_id: u32, level: u8 },
     SkillUpgraded { skill_id: u32, level: u8 },
@@ -979,6 +983,13 @@ impl Session {
                     self.emit(Event::UiData(UiDataEvent::RequestRejected { command, message: message.into() }));
                 } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
                     self.emit(Event::UiData(UiDataEvent::Requested(command)));
+                }
+            }
+            Command::SetAutoUseAaPoint(value) => {
+                if self.phase != Phase::InWorld {
+                    self.emit(Event::AutoUseAaPointRequestRejected { value, message: "AA point setting requires an active character".into() });
+                } else if self.send_game(game::ClientMsg::SetAutoUseAaPoint(value)).await {
+                    self.emit(Event::AutoUseAaPointRequested(value));
                 }
             }
             Command::Bank(command) => {
@@ -2045,6 +2056,18 @@ mod tests {
             })
         ));
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn aa_point_request_without_successful_send_never_latches_pending() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.command(Command::SetAutoUseAaPoint(true)).await;
+        assert!(matches!(events.try_recv(), Ok(Event::AutoUseAaPointRequestRejected { value: true, .. })));
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        session.command(Command::SetAutoUseAaPoint(true)).await;
+        assert!(events.try_recv().is_err(), "no connection cannot mark a request pending");
     }
 
     #[tokio::test]

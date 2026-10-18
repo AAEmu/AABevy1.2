@@ -58,6 +58,10 @@ resource! {
     pub struct Inventory {
         pub bag_slots: u32,
         pub bank_slots: u32,
+        /// Last server value; native getter is true only for exactly one.
+        pub auto_use_aa_point_raw: u8,
+        /// Sent request awaiting an authoritative item task.
+        pub pending_auto_use_aa_point: Option<bool>,
         pub bag: Vec<Option<Item>>,
         pub bank: Vec<Option<Item>>,
         /// Worn items by `model::slot`.
@@ -68,6 +72,13 @@ resource! {
 }
 
 impl Inventory {
+    pub fn auto_use_aa_point(&self) -> bool { self.auto_use_aa_point_raw == 1 }
+
+    /// Native UI change/pending guard; the command itself is a transport request.
+    pub fn can_set_auto_use_aa_point(&self, value: bool) -> bool {
+        self.auto_use_aa_point_raw != u8::from(value) && self.pending_auto_use_aa_point.is_none()
+    }
+
     /// The bag's items with their slot index.
     pub fn bag_items(&self) -> impl Iterator<Item = (usize, &Item)> {
         self.bag.iter().enumerate().filter_map(|(i, it)| it.as_ref().map(|it| (i, it)))
@@ -202,13 +213,16 @@ impl Inventory {
                     *s = to;
                 }
             }
+            ItemTask::AutoUseAaPoint(value) => {
+                self.auto_use_aa_point_raw = *value;
+                self.pending_auto_use_aa_point = None;
+            }
             // Purse and points are the player stats'.
             ItemTask::Money(_)
             | ItemTask::BankMoney(_)
             | ItemTask::GamePoint { .. }
             | ItemTask::AaPoint(_)
-            | ItemTask::BankAaPoint(_)
-            | ItemTask::AutoUseAaPoint(_) => return false,
+            | ItemTask::BankAaPoint(_) => return false,
         }
         true
     }
@@ -232,12 +246,15 @@ impl Inventory {
                 *self = Self {
                     bag_slots: u32::from(cs.num_inventory_slots),
                     bank_slots: cs.num_bank_slots.max(0) as u32,
+                    auto_use_aa_point_raw: u8::from(cs.character.auto_use_aa_point),
+                    pending_auto_use_aa_point: None,
                     bag: vec![None; usize::from(cs.num_inventory_slots)],
                     bank: vec![None; cs.num_bank_slots.max(0) as usize],
                     equipment: cs.character.equipment.clone(),
                     own_obj_id: 0,
                 };
             }
+            Event::AutoUseAaPointRequested(value) => self.pending_auto_use_aa_point = Some(*value),
             Event::PlayerSpawn(s) => self.own_obj_id = s.obj_id,
             Event::InventoryInit { bag_slots, bank_slots } => {
                 self.bag_slots = *bag_slots;
@@ -284,7 +301,8 @@ impl Inventory {
                 }
             }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                if self.bag.is_empty() && self.bank.is_empty() && self.bag_slots == 0 {
+                if self.bag.is_empty() && self.bank.is_empty() && self.bag_slots == 0
+                    && self.auto_use_aa_point_raw == 0 && self.pending_auto_use_aa_point.is_none() {
                     return false;
                 }
                 *self = Self::default();
@@ -399,6 +417,39 @@ mod tests {
 
     fn tasks(reason: u8, tasks: Vec<ItemTask>) -> Event {
         Event::ItemsChanged(ItemTasks { reason, tasks, force_remove: vec![], truncated: false })
+    }
+
+    #[test]
+    fn aa_point_request_wire_is_native_single_byte() {
+        use crate::game::ClientMsg;
+        for value in [false, true] {
+            let packet = ClientMsg::SetAutoUseAaPoint(value);
+            assert_eq!(packet.opcode(), 0x133);
+            assert_eq!(packet.encode_body(), vec![u8::from(value)]);
+        }
+    }
+
+    #[test]
+    fn aa_point_setting_is_received_state_with_repeat_reports_and_raw_values() {
+        let mut inv = Inventory::default();
+        let mut character = CharacterState::default();
+        character.character.auto_use_aa_point = true;
+        inv.apply(&Event::CharacterSelected(Box::new(character)));
+        assert!(inv.auto_use_aa_point());
+        assert!(!inv.can_set_auto_use_aa_point(true));
+        assert!(inv.can_set_auto_use_aa_point(false));
+        inv.apply(&Event::AutoUseAaPointRequested(false));
+        assert!(inv.auto_use_aa_point());
+        assert!(!inv.can_set_auto_use_aa_point(false));
+        for raw in [0, 0, 2, 255, 1] {
+            assert!(inv.apply(&tasks(0, vec![ItemTask::AutoUseAaPoint(raw)])));
+            assert_eq!(inv.auto_use_aa_point_raw, raw);
+            assert_eq!(inv.auto_use_aa_point(), raw == 1);
+            assert_eq!(inv.pending_auto_use_aa_point, None);
+        }
+        inv.apply(&Event::Disconnected { message: String::new() });
+        assert!(!inv.auto_use_aa_point());
+        assert_eq!(inv.auto_use_aa_point_raw, 0);
     }
 
     #[test]
