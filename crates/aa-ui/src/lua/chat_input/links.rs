@@ -34,7 +34,7 @@ pub(super) fn activate(lua: &Lua, target: Id) {
     }
 }
 
-fn active(lua: &Lua) -> Option<(Id, Id)> {
+pub(super) fn active(lua: &Lua) -> Option<(Id, Id)> {
     let u = ui(lua);
     u.tree.of_class("chatwindow").into_iter().find_map(|id| {
         let c = u.tree.widget(id)?.chat.as_ref()?;

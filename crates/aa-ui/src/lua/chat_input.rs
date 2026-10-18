@@ -54,6 +54,36 @@ pub(crate) fn activate(lua: &Lua, target: Id) {
 const CHAT_SAY: i64 = 0;
 const CHAT_WHISPER: i64 = -3;
 
+/// Native UIData +80. Reloading the application's chat configuration resets it to -6.
+struct ForcedMethod(i32);
+
+/// Store the native pending input method, applying it immediately to the selected
+/// window only when its edit's own visibility flag is set. `-6` clears the pending
+/// request without changing an input. Applications call this at the received Trial
+/// transition or chat-manager reload, before their corresponding UI callbacks.
+pub fn set_forced_method(lua: &Lua, method: i32) {
+    lua.set_app_data(ForcedMethod(method));
+    if method != -6 && let Some((window, _)) = links::active(lua) {
+        restore_method(lua, window, i64::from(method));
+    }
+}
+
+/// Apply the native deferred Trial method immediately before opening this input.
+/// The application calls this before Show/prefill/focus. Ordinary Show/SetFocus
+/// calls do not consume it; an input already in method 11 leaves it pending.
+pub fn prepare_input(lua: &Lua, window: Id) {
+    let pending = lua.app_data_ref::<ForcedMethod>().map(|m| m.0).unwrap_or(-6);
+    let current = {
+        let u = ui(lua);
+        u.tree.objects.get(window as usize).filter(|o| o.alive)
+            .and_then(|o| o.widget()).and_then(|w| w.chat.as_ref()).map(|c| c.method)
+    };
+    if pending == 11 && current.is_some_and(|method| method != 11) {
+        restore_method(lua, window, 11);
+        lua.set_app_data(ForcedMethod(-6));
+    }
+}
+
 /// Channel -> (`locale.chatChannel` key of its name, English fallback).
 const NAMES: &[(i64, &str, &str)] = &[
     (0, "say", "General"),
@@ -167,10 +197,10 @@ fn edit_text(lua: &Lua, edit: Id) -> String {
 /// Show the input's channel: the selector's text, the edit's whisper prefix, and the selector's
 /// `OnContentUpdated` for the scripts.
 pub(crate) fn show_method(lua: &Lua, window: Id) {
-    show_method_inner(lua, window, false);
+    show_method_inner(lua, window, false, true);
 }
 
-fn show_method_inner(lua: &Lua, window: Id, persist: bool) {
+fn show_method_inner(lua: &Lua, window: Id, persist: bool, update_prefix: bool) {
     let Some(c) = ui(lua).tree.widget(window).and_then(|w| w.chat.clone()) else {
         return;
     };
@@ -180,7 +210,7 @@ fn show_method_inner(lua: &Lua, window: Id, persist: bool) {
     } else {
         String::new()
     };
-    {
+    if update_prefix {
         let mut u = ui(lua);
         if let Some(e) = u.tree.widget_mut(c.edit).and_then(|w| w.edit.as_mut()) {
             e.prefix = prefix;
@@ -231,7 +261,35 @@ pub(crate) fn set_method(lua: &Lua, window: Id, ch: i64, target: &str) {
             String::new()
         };
     }
-    show_method_inner(lua, window, true);
+    show_method_inner(lua, window, true, true);
+}
+
+/// Native395107d0 differs from a parsed slash command: clear the prefix and edit
+/// before writing the method. The original text callback therefore sees the old
+/// method. Keep the cached whisper target when restoring another method.
+pub(crate) fn restore_method(lua: &Lua, window: Id, method: i64) {
+    let edit = {
+        let mut u = ui(lua);
+        let Some(object) = u.tree.objects.get(window as usize).filter(|o| o.alive) else { return };
+        let Some(chat) = object.widget().and_then(|w| w.chat.as_ref()) else { return };
+        let edit = chat.edit;
+        if let Some(e) = u.tree.widget_mut(edit).and_then(|w| w.edit.as_mut()) {
+            e.prefix.clear();
+        }
+        edit
+    };
+    if !edit_text(lua, edit).is_empty() && super::edit::set_text(lua, edit, String::new()) {
+        text_changed(lua, edit);
+        call_handler(lua, edit, "OnTextChanged", vec![]);
+    }
+    {
+        let mut u = ui(lua);
+        let Some(object) = u.tree.objects.get_mut(window as usize).filter(|o| o.alive) else { return };
+        let Some(chat) = object.widget_mut().and_then(|w| w.chat.as_mut()) else { return };
+        chat.method = method;
+    }
+    // Non-whisper restoration does not clear a prefix installed by the text callback.
+    show_method_inner(lua, window, true, method == CHAT_WHISPER);
 }
 
 /// A leading command in `text`: `(channel, whisper target, rest of the text)`. The command (and a
