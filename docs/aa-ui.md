@@ -2965,7 +2965,11 @@ set global remaining and total together. Default duration is unsigned
 `1000000 / (1000 + attribute)`; custom duration is unsigned
 `wrapping(custom_ms * 1000) / (1000 + attribute)`. The addition also wraps.
 An actor `+3af1` flag suppresses these writes; its gameplay setter is not
-closed here. SQL field mappings are explicit in `LoadSkillDescs`, including
+closed here. These offsets are relative to the cooldown manager's stored
+unit interface pointer, which initialization `3936621f..37` sets to the
+raw actor plus 8; the flag is therefore raw actor `+3af9`, not part of the
+raw actor's mounted-object ID at `+3af0`. SQL field mappings are explicit
+in `LoadSkillDescs`, including
 column 135 `timing_id`, 45 `default_gcd`, and 43 `custom_gcd`.
 
 The ordinary direct/tag cooldown begins in `OnSkillFired` (`391d58a0` ->
@@ -3026,3 +3030,107 @@ For example default attribute 333 yields 750 ms; -1001 clamps to a
 1,000,000 ms timer; custom `0xffffffff` at attribute zero yields
 4,294,966 ms. No live client execution, input, injection or source writes
 were performed.
+
+### Family identity, getters and original UI events (2026-10-18 audit)
+
+Family ownership is not inferred from the first received roster. Created
+(`39300250`), Described (`39300220`) and MemberAdded (`39300340`) copy the
+keyed roster through `398a8df0` and call `392ff2e0` for every received row
+with its family ID. That callback resolves a loaded character by persistent
+character ID (`3935e370`, character field `+418`) and calls unit virtual
+`+28`, whose setter `390b3a20` writes family `+3aec`. This includes the
+actual local character when present. Replacing a roster does not clear IDs
+of members omitted from the replacement. The subsequent `39300020` updates
+the relationship/contact cache, not the family ID.
+
+Removed (`392ff310` -> `398a8c90`) calls the same callback with zero for
+every cached member before deleting the roster. MemberRemoved (`392ff910`
+-> `398a8d40` -> `398a8160`) clears the first matching member's ID, removes
+that first row, and preserves survivor order. If fewer than two remain,
+it also clears the remaining member and deletes the keyed family. Unknown
+family/member is a no-op. These callbacks do not require the actor's current
+family ID to equal the removed packet ID; actual cached membership drives
+them. Role/name/title/online updates do not change family identity.
+
+Native registered getters are `IsOwner`, `IsMyFamily(name)` and `IsFamily`.
+`IsOwner` (`39474b10` -> `392fff40` -> `398a81f0`) checks the actual local
+persistent character ID in its own cached family and accepts any nonzero
+role, independently of online status. `IsMyFamily` (`39474b90` -> `392fff70`)
+uses case-sensitive `strcmp` against the own roster's names. Both return
+false without an actor/cache. `IsFamily` (`39474c10` -> `39300000`) tests
+actor family ID nonzero, even if no roster is cached. No `IsMember` or
+`GetFamilyID` registration was found in this original X2Family binding;
+those names must not be invented as native aliases.
+
+Event IDs are registered at `39215d84..f7`. Events occur after cache and
+loaded-character ID updates, without an additional own-family filter:
+
+| Receipt/native entry | Original UI event and arguments |
+| --- | --- |
+| Created `39300250` | `FAMILY_MEMBER_ADDED(row0.name, row1.name, row1.title)`; native assumes its initial two-member roster |
+| MemberAdded `39300340` | `FAMILY_MEMBER_ADDED(ownerName, addedRow.name, addedRow.title)`; received row index is zero-based |
+| TitleChanged `392ffcc0` | `FAMILY_MEMBER_ADDED(ownerName, changedRow.name, newTitle)`, when found |
+| MemberRemoved `392ff910` | `FAMILY_MEMBER_KICKED(name)` or `FAMILY_MEMBER_LEFT(name)`, after a successful removal |
+| OwnerChanged `392ffa10` | `FAMILY_OWNER_CHANGED(newOwner.name)`, when found |
+| Removed `392ff310` | `FAMILY_REMOVED()`, even when no cached roster existed |
+| MemberOnline `392ffdc0` | `FAMILY_MEMBER_ONLINE(name, receivedBool)`, when found, including repeated status |
+| NameChanged `392ff340` | `FAMILY_REFRESH()`, when found |
+| Described `39300220` | No immediate UI event |
+
+The owner name helper `398a8130` returns the last nonzero-role row's name.
+OwnerChanged clears every cached row's role even when the new owner is
+missing; in that case there is no owner-change UI event. Dissolution from
+MemberRemoved does not add an extra `FAMILY_REMOVED` event. Original
+`relationship/family_tab.lua` refreshes its member data on these authored
+events. Its member popup offers transfer/title/kick only for an owner;
+the local row offers title for an owner and leave for a non-owner.
+
+Native command guards are separate from that popup. Invite (`392ff770`)
+allows an actor with no family or an owner of its existing family. Leave
+(`392ff8b0`) only requires a nonzero family ID. Kick (`392ffa90`) and
+ChangeTitle (`392ffb60`) require ownership and an exact cached target name.
+ChangeOwner (`392ffc30` -> `398a8b00`) also rejects the local character as
+target. These paths do not require the target online, mutate the cache or
+optimistically assign ownership. Their protocol builders select CS1a/1c/
+1d/1e/1f respectively. Native wrappers commonly check game flags `+14`
+bit 2 before forwarding mutations. Transport/app integration remains with
+the owning crates.
+
+Sources: `data/extract/aa-ui/native-family-receive-dispatch-20261018.txt`,
+`native-family-lifecycle-20261018.txt`,
+`native-family-cache-callback-source-20261018.txt`,
+`native-family-unit-id-callbacks-20261018.txt`,
+`native-family-lua-controls-20261018.txt` and
+`native-family-controls-final-20261018.txt`. This is a read-only audit;
+no Family UI or outgoing request is fabricated by aa-ui.
+
+### Pet equipment empty tooltip and refresh contracts (2026-10-18 audit)
+
+`GetEquippedItemTooltipText` (`3946f1b0`) resolves the supplied unit with
+`3945fcd0`, requiring a valid actor result of resolver kind 1. Invalid
+unit/kind returns zero Lua results. Reading equipment does not require the
+owned-Mate predicate. It formats the actual physical item at actor
+`+3f8 + LuaSlot * c0`, equivalent to `+4b8 + (LuaSlot-1)*c0`; the native
+wrapper has no explicit slot bounds check. A valid empty item still returns
+a table: `39423560` calls `39421e20`, which creates the Lua table before
+descriptor lookup and writes raw `itemType` and `lookType` under the full
+mask. Thus an empty type zero yields `itemType=0, lookType=0`, not nil.
+Only the local-player branch creates player-equipment container 1; the
+nonlocal actor's formatter location stays invalid. No pet/player ownership
+or player set-count substitution follows from this read API.
+
+`UNIT_NPC_EQUIPMENT_CHANGED` is native event d5 and has exactly one numeric,
+one-based physical slot argument, with no unit selector or object ID.
+`3936b850` and `394efae0` assign each received physical item and emit this
+event when `3933b1f0(actualActor)` identifies an owned Mate; they do not
+compare old/new item values. The flag-location path `394e1d20` checks
+container fc, current mate identity and raw slot at most 1b before writing
+the received flags; dispatcher `394e111d` extracts the slot and emits
+`slot+1`. The event lets the original pet equipment view refresh its icons
+and details from received state. The read getter's permissive actor rule
+does not replace `IsMateEquipableSlot`'s separate owned-Mate/slot-pack guard.
+
+Sources: `data/extract/aa-ui/native-pet-equipment-tooltip-20261018.txt`,
+`native-pet-equipment-empty-base-20261018.txt`, and
+`native-pet-equipment-event-producers-20261018.txt`; the existing aa-net
+mate-equipment notes cover the corresponding receipt and physical slot pack.
