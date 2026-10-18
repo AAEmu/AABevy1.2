@@ -20,15 +20,15 @@
 //! Here the same blend runs in one pass of a [`TerrainMaterial`] (`StandardMaterial` extended by
 //! `terrain_layers.wesl`):
 //!
-//! * [`LayerLibrary`] (built once per world on a task, 0.3 s): reads the 16 entry `SurfaceTypes` table of every
+//! * [`LayerLibrary`] (built once per world on a task): reads the native 32-slot `SurfaceTypes` table of every
 //!   cell's `leveldata.xml`, the `.mtl` of each `DetailMaterial` and every referenced texture and packs
 //!   them into [`LAYER_ARRAYS`] texture arrays, copying the DDS blocks: BC1 diffuse maps at 512 px (1024 px
 //!   for the maps of that size, 2048 px for the few that big: a third array each), BC5 normal and detail
 //!   normal maps at 512 px (the 256 px ones stored as 2 x 2 copies) and a second normal array for what does
 //!   not fit the first; each with its mip chain down to 4 px and at most 255 layers (the limit of a wgpu
 //!   texture array is 256). The BC1 (`NORMAL_DXT1`) normal maps are transcoded to BC5.
-//! * per cell: an `R8Uint` image of the 4 bit surface type of every 2 m sample (`heightmap.dat`) and a
-//!   uniform table (`TerrainParams`) with, for each of the 16 surface types and 3 projections, the
+//! * per cell: an `R8Uint` image of the five-bit surface type of every 2 m sample (`heightmap.dat`) and a
+//!   uniform table (`TerrainParams`) with, for each of the 32 surface slots and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
 //!   continuous across cell borders, the detail strength and the detail normal map's tiling.
 //!
@@ -59,8 +59,8 @@ use crate::world::cell_dir;
 
 /// A wgpu texture array has at most 256 layers by default.
 const MAX_LAYERS: usize = 255;
-/// Surface types per cell (the heightmap stores 4 bits).
-pub const SURFACE_TYPES: usize = 16;
+/// Native five-bit surface table. Slot 31 is reserved for holes and remains unbound.
+pub const SURFACE_TYPES: usize = 32;
 /// Projections of a layer: x, y, z.
 const PROJECTIONS: usize = 3;
 /// Vectors of the uniform table per surface type and projection.
@@ -324,7 +324,7 @@ impl LayerLibrary {
             let Ok(xml) = pak.read_string(&path) else { continue };
             let mut table: CellTable = [(u32::MAX, [1.0, 1.0]); SURFACE_TYPES];
             let mut seen = Vec::new();
-            for (i, e) in parse_surface_types(&xml).into_iter().take(SURFACE_TYPES).enumerate() {
+            for (i, e) in parse_surface_types(&xml).into_iter().take(SURFACE_TYPES - 1).enumerate() {
                 if e.material.is_empty() {
                     continue;
                 }
@@ -992,6 +992,24 @@ mod tests {
         // a projection the material does not have stays white
         let unused = (13 * PROJECTIONS) * ENTRY;
         assert_eq!((params.layers[unused + 2].w, params.layers[unused + 3].zw()), (1.0, Vec2::ONE));
+    }
+
+    #[test]
+    fn original_five_bit_surface_slots_keep_authored_materials_and_hole_unbound() {
+        if !crate::pak_available() { return; }
+        assert_eq!(SURFACE_TYPES,32); // Original getter/registration stride; 2,053 native controls.
+        let built=LayerLibrary::build("main_world",[(20,8),(21,8)].into_iter()).unwrap();
+        for cell in [(20,8),(21,8)] {
+            let params=built.library.params(cell,Vec3::ONE).unwrap();
+            let table=&built.library.cells[&cell];
+            for sid in [17,20] {
+                assert_ne!(table[sid].0,table[sid&15].0,"original XML material must not alias: {cell:?} SID{sid}");
+                assert!((0..PROJECTIONS).any(|p|params.layers[(sid*PROJECTIONS+p)*ENTRY].x>=0.0),"original high-ID layer {cell:?} SID{sid}");
+            }
+            assert!(params.layers[31*PROJECTIONS*ENTRY..].chunks(ENTRY).all(|e|e[0].x<0.0));
+            assert!(table[21..].iter().all(|&(m,_)|m==u32::MAX));
+        }
+        assert!(built.library.layers.iter().all(|&n|n<=MAX_LAYERS));
     }
 
     #[test]
