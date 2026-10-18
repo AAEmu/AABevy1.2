@@ -115,8 +115,8 @@ pub fn hotkey(lua: &Lua, action: &str) -> mlua::Result<bool> {
 }
 
 /// Escape outside an edit box: hide the topmost shown window that has `SetCloseOnEscape(true)`
-/// (its `OnHide` runs), else raise `OPEN_CONFIG` (the scripts open the system menu, which
-/// itself closes on Escape). Returns what it did.
+/// (its `OnCloseByEsc` runs before hiding, followed by `OnHide`), else raise `OPEN_CONFIG`
+/// (the scripts open the system menu, which itself closes on Escape). Returns what it did.
 pub fn escape(lua: &Lua) -> mlua::Result<Escaped> {
     let top = {
         let u = ui(lua);
@@ -129,6 +129,9 @@ pub fn escape(lua: &Lua) -> mlua::Result<Escaped> {
     };
     match top {
         Some(id) => {
+            // Native 392d4500 dispatches handler index 0x29 (OnCloseByEsc) before hiding.
+            // The original dialog handler uses it for CancelProc and manager cleanup.
+            lua::call_handler(lua, id, "OnCloseByEsc", vec![]);
             if let Some(t) = object_table(lua, id)? {
                 let f: Function = t.get("Show")?;
                 f.call::<()>((t, false))?;

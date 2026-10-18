@@ -319,10 +319,14 @@ pub fn scripted_input(
     mut ptr: ResMut<aa_ui::UiVirtualPointer>,
     mut done: Local<Vec<usize>>,
     mut release_next: Local<bool>,
+    mut right_release_next: Local<bool>,
 ) {
     let Some(rt) = rt else { return };
     if std::mem::take(&mut *release_next) {
         ptr.release = true;
+    }
+    if std::mem::take(&mut *right_release_next) {
+        ptr.right_release = true;
     }
     let args: Vec<String> = std::env::args().collect();
     let t = time.elapsed_secs();
@@ -347,7 +351,8 @@ pub fn scripted_input(
                 }
                 // `--rclick X Y T`: a right click (OnClick "RightButton" fires on release).
                 if a == "--rclick" {
-                    ptr.right_release = true;
+                    ptr.right_press = true;
+                    *right_release_next = true;
                 }
                 info!("fake: {a} {x} {y}");
             }

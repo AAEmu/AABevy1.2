@@ -65,6 +65,8 @@ pub struct Ui {
     pub events: HashMap<String, Vec<Id>>,
     /// Handler calls queued by natives, run once the native returns.
     pub pending: Vec<(Id, String, Vec<Value>)>,
+    /// Widgets awaiting completed hiding before native removal.
+    pub(crate) retiring: std::collections::BTreeSet<Id>,
     pub fades: HashMap<Id, Fade>,
     pub animations: animation::Animations,
     pub damage: damage::Damage,
@@ -282,7 +284,7 @@ pub fn object_table(lua: &Lua, id: Id) -> mlua::Result<Option<Table>> {
     reg(lua).objs.raw_get(id)
 }
 
-/// Resolve a Lua value naming an object: an object table, or a widget name (`"UIParent"`).
+/// Resolve an object table, a widget name (`"UIParent"`), or our numeric `GetId()` identity.
 pub fn value_id(lua: &Lua, v: &Value) -> Option<Id> {
     match v {
         Value::Table(t) => reg(lua).ids.raw_get::<Option<Id>>(t).ok().flatten(),
@@ -290,12 +292,25 @@ pub fn value_id(lua: &Lua, v: &Value) -> Option<Id> {
             let name = s.to_str().ok()?.to_string();
             ui(lua).tree.find(&name)
         }
+        Value::Integer(id) if *id >= 0 => {
+            let id = u32::try_from(*id).ok()?;
+            ui(lua).tree.objects.get(id as usize).filter(|o| o.alive).map(|_| id)
+        }
+        Value::Number(id)
+            if id.is_finite() && *id >= 0.0 && id.fract() == 0.0 && *id <= u32::MAX as f64 =>
+        {
+            let id = *id as Id;
+            ui(lua).tree.objects.get(id as usize).filter(|o| o.alive).map(|_| id)
+        }
         _ => None,
     }
 }
 
 /// Call a script handler (`OnClick`, `OnEvent` ...) on an object now. Errors are logged.
 pub fn call_handler(lua: &Lua, id: Id, name: &str, args: Vec<Value>) {
+    if !ui(lua).tree.get(id).alive {
+        return;
+    }
     let r = reg(lua);
     let Ok(Some(hs)) = r.handlers.raw_get::<Option<Table>>(id) else {
         return;
@@ -478,6 +493,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         call_handler(lua, id, h, vec![Value::Number(dt_ms as f64)]);
         crate::prof::handler_done(t0, || format!("{h} {}", ui(lua).tree.get(id).name));
     }
+    widget::remove_hidden(lua);
 }
 
 /// Argument helpers for natives (`args[0]` is `self` for methods).
@@ -544,6 +560,9 @@ where
                 "aa-ui: method called without a UI object as self",
             ));
         };
+        if !ui(lua).tree.get(id).alive {
+            return none();
+        }
         let r = f(lua, id, &args);
         flush(lua);
         r

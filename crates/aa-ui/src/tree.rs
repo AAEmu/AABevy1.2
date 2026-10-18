@@ -482,6 +482,8 @@ pub struct Widget {
     pub modal: bool,
     /// `SetCloseOnEscape(true)`: [`crate::UiRuntime::escape`] hides it (topmost first).
     pub close_on_escape: bool,
+    /// `EnableHidingIsRemove(true)`: retire this widget after its hide completes.
+    pub remove_on_hide: bool,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
 }
@@ -1242,6 +1244,7 @@ impl Widget {
             aux_style: None,
             modal: false,
             close_on_escape: false,
+            remove_on_hide: false,
             raise: 0,
         }
     }

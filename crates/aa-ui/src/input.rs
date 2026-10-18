@@ -40,6 +40,15 @@ pub struct MouseState {
     drag: Option<DragPress>,
 }
 
+/// Mouse button edges for this frame. Right clicks still activate on release.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MouseButtons {
+    pub press: bool,
+    pub release: bool,
+    pub right_press: bool,
+    pub right_release: bool,
+}
+
 /// A left button press on a widget registered with `RegisterForDrag` ([`lua::drag`]).
 #[derive(Clone, Copy)]
 struct DragPress {
@@ -156,6 +165,35 @@ pub fn update(
     right_up: bool,
     wheel: f32,
 ) {
+    update_buttons(
+        lua,
+        mouse,
+        cursor,
+        MouseButtons {
+            press: down,
+            release: up,
+            right_release: right_up,
+            ..Default::default()
+        },
+        wheel,
+    );
+}
+
+/// Process mouse input including both right-button edges. Native mouse handlers run before
+/// `MOUSE_DOWN` / `MOUSE_UP`, whose argument is the target's `GetId()` identity.
+pub fn update_buttons(
+    lua: &Lua,
+    mouse: &mut MouseState,
+    cursor: Option<(f32, f32)>,
+    buttons: MouseButtons,
+    wheel: f32,
+) {
+    let MouseButtons {
+        press: down,
+        release: up,
+        right_press: right_down,
+        right_release: right_up,
+    } = buttons;
     if let Some(c) = cursor {
         ui(lua).cursor = c;
         lua::drag::move_to(lua, c);
@@ -207,6 +245,7 @@ pub fn update(
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
+        mouse_event(lua, cursor, hover, "MOUSE_DOWN");
         mouse.slider = hover.and_then(|h| slider_of(lua, h));
         mouse.drag = hover
             .and_then(|h| lua::drag::source_of(lua, h))
@@ -219,6 +258,13 @@ pub fn update(
         && mouse.last_cursor != Some(c)
     {
         drag_slider(lua, s, c);
+    }
+    if right_down {
+        if let Some(h) = hover {
+            call_handler(lua, h, "OnMouseDown", vec![arg(lua, "RightButton")]);
+            lua::worldmap::bubble(lua, h, "OnMouseDown", "RightButton");
+        }
+        mouse_event(lua, cursor, hover, "MOUSE_DOWN");
     }
     if cursor.is_some() {
         mouse.last_cursor = cursor;
@@ -245,6 +291,7 @@ pub fn update(
             call_handler(lua, h, "OnMouseUp", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseUp", "LeftButton");
         }
+        mouse_event(lua, cursor, hover, "MOUSE_UP");
         lua::drag::stop_moving(lua);
         if let Some(p) = dragged {
             // the release of a drag: the drop, not a click
@@ -254,6 +301,13 @@ pub fn update(
         {
             click(lua, mouse, h, "LeftButton");
         }
+    }
+    if right_up {
+        if let Some(h) = hover {
+            call_handler(lua, h, "OnMouseUp", vec![arg(lua, "RightButton")]);
+            lua::worldmap::bubble(lua, h, "OnMouseUp", "RightButton");
+        }
+        mouse_event(lua, cursor, hover, "MOUSE_UP");
     }
     if right_up && lua::drag::holding(lua) {
         // a right click puts what the pointer holds back
@@ -290,6 +344,14 @@ pub fn update(
                 lua::chat::wheel(lua, c, hover, wheel);
             }
         }
+    }
+}
+
+fn mouse_event(lua: &Lua, cursor: Option<(f32, f32)>, target: Option<Id>, name: &str) {
+    if cursor.is_some() {
+        // Native 39277da0 emits index 4/5 after the widget handler. Empty UI space belongs
+        // to UIParent; a pointer outside the OS window does not produce a UI mouse event.
+        lua::fire_ui_event(lua, name, vec![Value::Integer(target.unwrap_or(ROOT) as i64)]);
     }
 }
 
