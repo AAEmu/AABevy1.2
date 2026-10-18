@@ -3904,3 +3904,52 @@ The lane's empty-scan silence is retained as an explicit producer limitation.
 Fish/school-of-fish radar remains a separate format.
 
 Ship radar validation: cargo check and all 305 aa-net library tests passed.
+
+
+### Fishfinder contacts and original map consumers (2026-10-18)
+
+SC1b6/1b7 use `RadarEvent::FishToggled` / `FishContacts` and the independent
+`FishRadar` resource. Native factories391b5500/vtable399b3fc4/397afcc0 and
+391b5590/vtable399b60a8/397c42c0 prove bool+f32 toggle and bool last/u8 count,
+then BC object ID, u32 template and packed position. Lane fish_school.rs writes
+the same entry layout. Active decoding consumes its entire advertised count;
+native caps10. Toggle39366b40 clears published/pending buffers; list39369350
+ignores disabled data, appends and swaps on last. No Doodad/Unit is created or
+fish population/state inferred. Lifecycle, independent channels and the explicit
+local4096-contact partial-snapshot memory bound match the other radar resources.
+
+Original world_map.lua346..356/441..460 and road_map.lua44..54/134..153 consume
+UPDATE_TELESCOPE_INFO, UPDATE_TRANSFER_TELESCOPE_INFO and UPDATE_FISH_SCHOOL_INFO
+with no arguments, forwarding to Map widget UpdateTelescopeInfo,
+UpdateTransferTelescopeInfo and UpdateFishSchoolInfo. Corresponding UPDATE_*_AREA
+and CLEAR_*_INFO handlers also take no arguments. REMOVE_*_INFO(arg) forwards one
+argument. These scripts do not fetch a Lua table of radar rows: native Map widget
+methods consume the C++ published vectors directly. An app bridge must provide
+those methods using these received contacts, not synthesize visible actors.
+
+Toggle calls directly emit noargument area events: ship0x18f, transfer0x190,
+fish0x191 (registration39215ae1, names UPDATE_TELESCOPE_AREA,
+UPDATE_TRANSFER_TELESCOPE_AREA and UPDATE_FISH_SCHOOL_AREA). Completed lists notify
+the native map category observer via39202fb0/39202db0: category0x30 ship,0x31
+transfer,0x39 fish. This is not yet proof of a direct synchronous Lua UPDATE_INFO
+emission at packet decode; observer dispatch remains an explicit integration edge.
+
+`X2Map:GetTelescopeUnitHealth(objId NUMBER)` registration3906962e selects390685b0
+and39068210, then getter39068460. It scans published ship contacts39354c60 by
+runtime objectID (entry+4). Absent returns zero Lua values; found returns TWO
+NUMBERs HP then maxHP (entry+4bc/+4c0), both CVTSI2SS f32 values. It does not fall
+back to arbitrary nearby Units or the owner's ship metadata.
+
+
+Map observer closure:39202db0 dispatches category subscribers, and39051ba0 switch
+routes categories0x30/0x31/0x39 to3904bd90/3904c270/3904c030. When enabled, these
+compare cached map object IDs against the new published list, emit one numeric
+runtime-object ID REMOVE event for each vanished entry, update their caches, then
+emit noargument UPDATE_INFO. Ship event0x178, transfer0x179, fish0x17b; ship REMOVE
+0x17c, fish REMOVE0x17f (transfer counterpart at3904c2dd). Disabled routes emit
+CLEAR events instead (ship0x180 at3904bfd3, transfer0x181 at3904c4b3), with no UPDATE.
+Thus the map-side diff is after publication, not a packet-level fabricated removal.
+Area centering/render scale remains an aa-ui native Map widget contract to trace.
+
+Fishfinder validation: cargo check and all 308 aa-net library tests passed, including
+session receive ordering and publication through the registered Bevy resources.
