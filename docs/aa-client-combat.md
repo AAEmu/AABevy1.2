@@ -484,3 +484,18 @@ the client runs; "shown" = the shown tree skills):
 * Footsteps now read the supporting object's or terrain's physical material with `WorldCollision::surface_below`;
   `WaterQuery::water_at` supplies pond, lake and sea footsteps when the foot is submerged. The original terrain lookup
   remains the fallback while collision materials load.
+
+## Complete received skill payloads (2026-10-18)
+
+Synthetic combat/crafting/cooldown fixtures now supply the additive aa-net raw result,
+caster and target data alongside their existing display projections. Actual incoming
+Started/Fired packets retain every optional result field and identity component; a
+nonzero result header no longer shifts Fired's animation/final-byte fields. The native
+cooldown-suppression query tests packed bit1 only. Raw final byte1 does not suppress.
+Legacy animation/crafting/timer behavior stays unchanged by this integration.
+
+These fields are prerequisites for native cast-manager admission. Received Started/Fired
+alone do not prove that a timeline key is absent: native local callers can create one,
+and ending a retained node does not immediately erase its tree entry. Full native Fired
+and attribute74/GCD producers remain open; no timer success is inferred from these
+parser changes. aa-net.md records source/oracle coverage and retained-node limits.

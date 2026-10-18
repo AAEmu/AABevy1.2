@@ -80,6 +80,9 @@ pub(crate) fn run() {
             synergy: 0,
             result: 0,
             result_value: 0,
+            raw_result: Default::default(),
+            raw_caster: aa_net::SkillCasterData::Unit(100),
+            raw_target: aa_net::SkillTargetData::Unit(100),
         }));
         data.cooldowns.apply(&aa_net::Event::CastingStopped { tl: 8, duration_ms: 12000 });
     }
