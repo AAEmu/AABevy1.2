@@ -366,6 +366,9 @@ pub struct SkillFired {
     /// Channeling time, ms (0 for plain skills).
     pub channeling_ms: i32,
     pub fire_anim_id: u32,
+    /// Final wire byte, preserved without assigning a general cooldown meaning.
+    /// The active lane writes zero; native consumers use nonzero as one cooldown insertion gate.
+    pub raw_final_flag: u8,
 }
 
 impl SkillFired {
@@ -379,7 +382,7 @@ impl SkillFired {
         let channeling = i32::from(r.i16()?);
         r.skip(1)?;
         let fire_anim_id = r.u32()?;
-        r.skip(1)?;
+        let raw_final_flag = r.u8()?;
         Ok(Self {
             skill_id,
             tl,
@@ -388,6 +391,7 @@ impl SkillFired {
             delay_ms: (delay - 10) * 10,
             channeling_ms: (channeling - 10) * 10,
             fire_anim_id,
+            raw_final_flag,
         })
     }
 }
@@ -695,6 +699,17 @@ mod tests {
         let f = SkillFired::read(&mut r).unwrap();
         assert!(r.is_empty());
         assert_eq!((f.skill_id, f.tl, f.delay_ms, f.channeling_ms, f.fire_anim_id), (18132, 3, 300, 0, 296));
+        assert_eq!(f.raw_final_flag, 0);
+        for end in 0..bytes.len() {
+            assert!(SkillFired::read(&mut Reader::new(&bytes[..end])).is_err(), "truncation {end}");
+        }
+        for flag in [1, 2, 255] {
+            let mut native_bytes = bytes.clone();
+            *native_bytes.last_mut().unwrap() = flag;
+            let mut r = Reader::new(&native_bytes);
+            assert_eq!(SkillFired::read(&mut r).unwrap().raw_final_flag, flag);
+            assert!(r.is_empty());
+        }
     }
 
     #[test]

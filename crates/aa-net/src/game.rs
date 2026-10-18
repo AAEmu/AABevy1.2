@@ -1887,7 +1887,7 @@ mod tests {
         let mut raw = Writer::new();
         raw.u16(0).u16(sc::SCSkillFiredPacket);
         raw.u32(16064).u16(1291).u8(0).bc(0x10).u8(0).bc(0x20).u8(0);
-        raw.i16(37 + 10).i16(10).u8(0).u32(32).u8(0);
+        raw.i16(37 + 10).i16(10).u8(0).u32(32).u8(0x82);
         raw.u16(0).u16(sc::SCUnitDamagedPacket);
         raw.u8(0).u32(16064).u16(1291).u8(0).bc(0x10).bc(0x10).bc(0x20).u8(0);
         raw.pisc(&[24, 0, 0]).pisc(&[0, 0, 0]).u8(0).u16(288 | 0x09).u8(1).u8(1);
@@ -1901,6 +1901,7 @@ mod tests {
         assert_eq!(list.len(), 4, "{list:?}");
         let ServerMsg::SkillFired(f) = &list[0] else { panic!("not a fire: {:?}", list[0]) };
         assert_eq!((f.skill_id, f.tl, f.caster.obj_id, f.target.obj_id, f.delay_ms, f.fire_anim_id), (16064, 1291, 0x10, 0x20, 370, 32));
+        assert_eq!(f.raw_final_flag, 0x82);
         let ServerMsg::UnitDamaged(d) = &list[1] else { panic!("not a hit: {:?}", list[1]) };
         assert_eq!((d.caster_obj_id, d.target_obj_id, d.damage, d.action.tl), (0x10, 0x20, 24, 1291));
         assert_eq!(d.hit_type, crate::skill::hit_type::RANGED_HIT);

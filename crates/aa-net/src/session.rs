@@ -4174,4 +4174,23 @@ mod tests {
         assert!(state.combat_status.by_unit.is_empty() && state.player.spawn.is_none());
     }
 
+    #[tokio::test]
+    async fn fired_final_wire_flag_survives_repeated_session_forwarding() {
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let mut wire = crate::wire::Writer::new();
+        wire.u32(18132).u16(3).u8(0).bc(1).u8(0).bc(2).u8(0);
+        wire.i16(10).i16(10).u8(0).u32(296).u8(255);
+        let bytes = wire.finish();
+        let fired = SkillFired::read(&mut crate::wire::Reader::new(&bytes)).unwrap();
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::SkillFired(fired.clone()),
+            game::ServerMsg::SkillFired(fired),
+        ]))).await;
+        for _ in 0..2 {
+            assert!(matches!(events.try_recv(), Ok(Event::SkillFired(f)) if f.raw_final_flag == 255));
+        }
+        assert!(events.try_recv().is_err());
+    }
+
 }

@@ -495,6 +495,7 @@ mod tests {
             delay_ms: 0,
             channeling_ms: 0,
             fire_anim_id: 0,
+            raw_final_flag: 0,
         })
     }
 
