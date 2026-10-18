@@ -1219,6 +1219,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if ty == "worldmap" {
         super::worldmap::methods(lua, &m)?;
     }
+    if matches!(ty, "roadmap" | "worldmap") {
+        super::radar::methods(lua, &m)?;
+    }
     if ty == "listbox" {
         super::listbox::methods(lua, &m)?;
     }

@@ -83,7 +83,8 @@
 //! has a `tooltip`, the tooltip controller (`worldmap:GetTooltipController()`) is put on it and
 //! `SHOW_WORLDMAP_TOOLTIP({ { tooltipType = "normal", text = tooltip } }, 1)` is raised;
 //! `HIDE_WORLDMAP_TOOLTIP` when it leaves. `markers_version` works as on the roadmap. The
-//! telescope, ship and fish school natives are no-ops (their game data is not available).
+//! radar contacts use the injected published buffers of [`super::radar`]; range-circle
+//! drawing remains open.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -749,6 +750,7 @@ fn sync_markers(lua: &Lua, wm: Id, table: Option<&Table>) {
         with(lua, wm, |x| x.marker_applied = Some(key));
         d = snapshot(lua, wm).unwrap_or(d);
     }
+    super::radar::update_map(lua, wm);
     update_marker_tooltip(lua, wm, &d);
 }
 
@@ -821,6 +823,10 @@ fn tooltip_controller(lua: &Lua, wm: Id) -> Option<Id> {
 /// The map tooltip of the marker under the cursor, as the roadmap's: the controller goes onto the
 /// marker and the map scripts get `SHOW_WORLDMAP_TOOLTIP` / `HIDE_WORLDMAP_TOOLTIP`.
 fn update_marker_tooltip(lua: &Lua, wm: Id, d: &WorldMapData) {
+    if super::radar::has_tooltip(lua, wm) {
+        with(lua, wm, |d| d.marker_hover = None);
+        return;
+    }
     let hover = {
         let u = ui(lua);
         let over_map = u.hover.is_some_and(|h| h == wm || u.tree.is_descendant(h, wm));
@@ -1040,14 +1046,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     // Information the app has no data for: shown nowhere.
     for name in [
         "SetTempNotifyCoord",
-        "UpdateTransferTelescopeInfo",
         "UpdateTransferTelescopeArea",
-        "UpdateTelescopeInfo",
         "UpdateTelescopeArea",
         "UpdateNpcInfo",
         "UpdateMySlaveInfo",
         "UpdateHousingInfo",
-        "UpdateFishSchoolInfo",
         "UpdateFishSchoolArea",
         "UpdateDoodadInfo",
         "UpdateDominionInfo",
@@ -1060,15 +1063,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "ShowCommonFarm",
         "SetTempNotifyColor",
         "SaveConflictZoneImg",
-        "RemoveTransferTelescopeInfo",
-        "RemoveTelescopeInfo",
         "RemoveNotifyQuestInfo",
         "RemoveGivenQuestInfo",
-        "RemoveFishSchoolInfo",
         "RemoveCarryingBackpackSlaveInfo",
         "ExploredRegionUpdated",
-        "ClearTransferTelescopeInfo",
-        "ClearTelescopeInfo",
         "ClearNpcInfo",
         "ClearNotifyQuestInfo",
         "ClearMySlaveInfo",

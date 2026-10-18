@@ -2059,3 +2059,72 @@ the current own pet through `3935aa10`; it includes kind/alive, unattached playe
 controller/casting/channel, status, squared distance <=625 (25 units), two-second
 cooldown, buff and model-seat gates. It is broader than `IsMountablePet`, and these
 unresolved planner details must stay explicit when integrating native commands.
+
+## Published radar rows in original Map widgets (2026-10-18)
+
+`lua::radar::set_snapshot(&Lua, Snapshot)` supplies plain published data to the
+native Map methods used by unchanged `world_map.alb` and `road_map.alb`. Snapshot
+contains `Arc<Vec<MapBounds>>` and independent ship, transfer and fish contact
+lists. Bounds are `{ level: u8, id: u32, rect: [x,y,width,height] }`, matching the
+client's `GameData` rectangles; coordinates use game Y up. A contact supplies its
+runtime object ID, world XY, classified `Symbol`, and optional tooltip metadata.
+The toolkit has no aa-net dependency and adds no Lua row-getter API. Pending
+network chunks, classification, localization and relationships remain app-owned.
+
+Original `UpdateTelescopeInfo`, `UpdateTransferTelescopeInfo`, and
+`UpdateFishSchoolInfo` copy only their own published channel into each widget's
+cache. Injection alone does not replace displayed rows. `Remove*Info(id)` accepts
+the numeric runtime identity without a lossy f32 conversion; `Clear*Info()` clears
+only its channel. Drawable pools are reused. Markers reproject when map bounds,
+current map or size changes. World-map and roadmap positions both anchor to the
+Map widget; roadmap art cropping does not alter this native world projection.
+They use `u=(x-originX)/worldWidth`, `v=1-(y-originY)/worldHeight` and original 24x24
+`npc_icon.dds` cells, staying 24x24 through zoom. Native source is `392b0c90` /
+`392b1190` / `392b1680` and shared creation `392afaa0`. Module-verified read-only
+Map descriptor inspection confirmed all eight radar symbols enable continent,
+zone and city, hide on world level, and remain enabled when the NPC checkbox is off
+(descriptor visibility bytes `[0,1,1,1]`, category 3, NPC-off flag 1).
+
+Source classification belongs in the app adapter: observer `3904bd90` explicitly
+tests raw ship-row kind ==2 for ship, all other values for shipyard; result byte 1
+from `39027f40` / `39838880` chooses enemy variants. This is a full polymorphic
+relationship predicate, not proof that different factions always mean enemy.
+Existing cached IDs update only position, retaining their first symbol; the cached
+map row contains no health/name/owner strings. Transfer observer `3904c270` follows
+`transfers.model_id` to `models.name`: `airship` selects airship, `carriage_main`
+selects carriage, other names select landship. Missing template/model selects an
+out-of-range symbol and should be omitted. Native SQL column order confirms the
+model's name at `+0x1c` and transfer model ID at `+0x0c`.
+
+Tooltips pass the original `SHOW_*MAP_TOOLTIP(rows,count)` schema and anchor its
+original controller to the marker. Ship/shipyard metadata includes numeric ID,
+name, enemy, owner, expedition, optional kind, buff, hp and maxHp. The unchanged Lua
+builds its own title, owner/guild text, line and live health bar; its OnUpdate still
+calls app-owned `X2Map:GetTelescopeUnitHealth`. Native builder `392ad655` sets buff
+only for raw tail ==3554, clamps the initial tooltip HP to min(hp,maxHp), and reads
+live published ship metadata. Its kind conversion `39571630` maps slave_kind_id
+1..9 to `big_sailing_ship`, `small_sailing_ship`, `speedboat`, `boat`, `tank`,
+`machine`, `siege_weapon`, `slave_equipment`, `fishboat`. Kind and buff may be
+omitted while unresolved. Transfer tooltip `392ad940` uses the received name;
+fish tooltip `392ad810` resolves the received template through DoodadAlmighty and
+uses its name. Normal text tooltips use the same original handler.
+
+Range circles remain undrawn: their separate native area methods need the exact
+static `war_circle.dds` and pulsing `territory_circle.dds` styles and visibility
+rules. Native explored-map and excluded-instance masks also remain outside this
+first renderer milestone. The app must retain any unresolved enemy relation as a
+documented limitation rather than claiming native relationship parity.
+
+Validation: `cargo check -p aa-ui --lib` and all 13 tests across `map_radar`,
+`map_markers`, `map_ping_original` and `event_handlers` passed. The new tests use
+unchanged World-stage map event handlers, verify both maps' geometry, channel
+independence, publication boundaries, large object IDs, world-level hiding,
+continent projection, zoom and the actual original ship tooltip/removal lifecycle.
+`examples/native_radar.rs` uses `aa-dev` default plugins and `DevPlugin`; its unique
+`--shot` capture `shots/aa-ui/native-radar-published-20261018.png` was inspected.
+It shows the eight original symbols and original Windfinder health tooltip,
+logged 190 FPS during startup and 491-544 FPS thereafter, zero script errors and
+exit 0 with automatic closure. Common framing was compared with
+`reference/ingame/worldmap_zone/real.png`; the fixture deliberately uses full-map
+zoom 1, while that reference uses zoom 3 and contains no radar rows. It omits the
+3D scene, and no font/layout calibration was changed.
