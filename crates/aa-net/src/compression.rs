@@ -169,6 +169,6 @@ mod tests {
         ));
         // Compression is complete and valid here; its final game packet is truncated.
         let truncated = include_bytes!("../tests/fixtures/deflate/truncated-packet.deflate");
-        assert_eq!(batch(2, truncated), vec![ServerMsg::Snow(true)]);
+        assert!(matches!(batch(2,truncated).as_slice(),[ServerMsg::Snow(true),ServerMsg::DecodeFailed{..}]));
     }
 }

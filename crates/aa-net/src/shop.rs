@@ -321,7 +321,7 @@ mod tests {
         assert!(ShopEvent::read(&mut Reader::new(&sold.finish())).is_err());
         let mut tasks = Writer::new();
         tasks.u8(52).u8(2).u8(1).i32(-500).u8(99);
-        assert!(batch(&[(sc::SCItemTaskSuccessPacket, tasks.finish()), (sc::SCOnOffSnowPacket, vec![1])]).is_empty());
+        assert!(matches!(batch(&[(sc::SCItemTaskSuccessPacket, tasks.finish()), (sc::SCOnOffSnowPacket, vec![1])]).as_slice(),[ServerMsg::DecodeFailed{..}]));
     }
 
     #[test]

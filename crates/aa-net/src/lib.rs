@@ -105,6 +105,8 @@ mod equipment_notice_tests;
 
 pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, BattlefieldInvitation, BattlefieldQueue};
 
+pub mod dominion;
+pub use dominion::{Dominion, DominionEvent, DominionData, DominionTerritory, DominionSiegeTimers, DominionParticipant, DominionPosition};
 pub mod expedition;
 pub use expedition::{ExpeditionNotice, Expeditions, ExpeditionEvent, ExpeditionFaction, ExpeditionMember, ExpeditionRolePolicy};
 pub mod family;
