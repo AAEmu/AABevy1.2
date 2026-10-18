@@ -5024,3 +5024,79 @@ Artifacts under `data/extract/aa-net/skill-planner-native/` include the exact
 entry map, read-only tag204 rows, module-verified runtime snippets and bounded
 local-attempt result/unique instruction record. No original process input,
 control, injection, write, network action or live lane transaction was performed.
+
+
+### Shared native formula recursion and pet detail audit (2026-10-18)
+
+The common formula interpreter is shared by owner5 unit formulas, wearable formulas and
+holdable formulas. Its24-entry dispatch table at3a5bd4c0 was read through the verified
+original module using PROCESS_VM_READ only; the captured table is
+`data/extract/aa-net/mate-stats-native/formula-dispatch-runtime.json`.
+Node0 (39566d00) loads a literal f32 at node+8. Node1 (39567fb0) loads a context f32
+at context+10+index*4, accepting variable indices0..34. ADD395676c0, SUB39567740,
+MUL395677c0, DIV39567840 and POW395678d0 explicitly spill EACH evaluated child to
+f32 before combining it. Their own output remains x87 until a parent or caller spills
+it. Thus a whole-expression f64 evaluator does not reproduce the original recursion.
+NEG39567a70 also narrows its child before FCHS. FLOOR39567e70 narrows its child,
+reloads/spills it as f64 and calls MSVCR100 floor through398b57c4/IAT38ff6814.
+POW uses _CIpow398b57ca/IAT38ff681c with the narrowed operands. Division's zero
+denominator path reports a local error and returns FLDZ, rather than infinity; its
+UCOMISS/LAHF parity branch admits unordered NaN to arithmetic. This
+bounded audit does not define all24 node kinds or authorize guessing unsupported ones.
+
+`equipment_formula_oracle.py` / `.json` under that directory execute the ORIGINAL
+397cc440/4c0/6d0/750 wrappers,39568560/68610 dispatch and native recursive operators
+locally in Unicorn, using AST nodes and grade fields reconstructed from real read-only
+DB records. Static DB/basis-point lookup returns are mocked. External CRT _CIpow uses
+Python libm double and floor returns an integral double; those CRT bodies are NOT
+executed. Formula results and recursive operator arithmetic are not mocked. These
+limitations are distinct from a fully executed CRT oracle. Raw grades0/1/6 and positive
+117-percent overrides are retained in the JSON. Representative no-override outputs:
+
+| Item | Quantity | Grade0 | Grade1 | Grade6 |
+|---|---|---:|---:|---:|
+|31432|wearable armor|647|517|809|
+|19326|wearable armor|109|87|136|
+|19326|wearable resistance|547|437|683|
+|28905|holdable DPS|389.04461669921875|311.23569799714824|486.30577087402344|
+|18420|holdable armor|747|598|934|
+
+The independent owner5 level5/STR26 AST run gives kind21 x87 result spilled to double
+29200.000762939453, then mandatory unit-formula f32=29200 and i32=29200. Kind20 gives
+401032.8369140625, then f32=401032.84375 and i32=401032. These outputs distinguish
+recursive f32 inputs, an extended final expression and the caller's final f32 narrowing.
+
+Generic/Mate BASE attributes10 and77 both select398b526d in398b4e80, then the default
+398a10ee in398a0d60, which returns zero. Their FINAL attributes may still include all
+modifier pools. This zero-base proof does not justify returning final zero.
+
+GetSpeedInfo registration3906b899 selects3906ac40. It resolves the current owned mate,
+its object ID+20, actor39360020 and controller390b3750 (actor+3be8). The controller must
+exist and virtual+4 return1; its virtual+204 must return a component, whose virtual+74
+returns the speed float. The wrapper spills f32 and390699b0 returns ONE numeric Lua
+value (ScriptAnyValue type4). A missing mate/actor/controller/component returns NO Lua
+values. There is no zero fallback or table in this getter. Concrete controller vtable
+399a4f68 has virtual+4=390e54d0 and+204=390e5510 (returns controller+1f0).
+Candidate component vtables399ac3d8/399ac698/399ac918 have+74=391138b0; the exact
+controller+1f0 producer/class mapping remains open, so its formula is not yet claimed
+as the complete getter contract.391138b0 multiplies motion-state scale by a clamped
+`1 + FINAL(attribute10)*0.001f` factor, and has additional conditional attribute66/139
+and status-scale branches. The0.001f constant3999cf30 differs from0.01f3999cf90.
+Do not replace this runtime movement component with a static NPC speed or attribute10.
+Exact excerpts are retained in `speed-and-base-attributes-20261018.txt`.
+
+Tooltip modifier394bb740 has its own precision chain: baseline SSE converts B, static
+flat and percent to f32, then ADDSS, MULSS percent, MULSS f32(0.01), storing baselinef32.
+After collecting buff/gear T, the helper returns exact FLDZ if Tflat==0 and Tpercent==100.
+Otherwise its x87 chain is `((baseline + Tflat) * Tpercent) * f32(0.01) - baseline`,
+retaining x87 precision until caller storage. It does not divide by100 and does not
+subtract static baseline from the already-clamped final A attribute. This formula
+is independent of the generated-primary3989fa80 chain recorded earlier.
+
+`tooltip_modifier_oracle.py` / `.json` independently execute394bb740 itself with explicit
+mocked B/S/T source lookups and identity gear pairs; NONE of its arithmetic is mocked.
+Seven fixtures include exact no-modifier shortcut and large-integer f32 boundaries.
+B29200,S(3,101) gives baseline29495.029296875; T(1,100) returns x87-spilled-double
+0.9993407123693032 (f32=0.9993407130241394), while T(0,101) gives294.94962711081826
+(f32=294.9496154785156). T(0,100) returns exact zero regardless of nonidentity S.
+B401032,S(11,127),T(-37,88) yields -61151.52126744902 (f32=-61151.51953125).
