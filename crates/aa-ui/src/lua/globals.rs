@@ -336,7 +336,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
 ///   `btnCancel`, run the decorator with `(wnd, info)` (`info.buttonType` `DBT_OK_CANCEL` /
 ///   `DBT_OK`, modal), then `fn(wnd, info)`, and show it; `RequestTaskDialog(task, info, ownerId)`
 ///   is the same with the handler registered for the task (`DLG_TASK_*`) as `fn`, `info` merged
-///   into the dialog's info; `OnOK` / `OnCancel` / `OnCustom(id)`
+///   before default decoration (including explicit button type and modal state);
+///   `OnOK` / `OnCancel` / `OnCustom(id)`
 ///   close it, `DeleteByOwnerWindow(ownerId)` closes an owner's dialogs.
 /// * `X2Locale:LocalizeUiText` returns the key until the app provides the UI text table.
 const TOOLKIT_LUA: &str = r#"
@@ -377,16 +378,17 @@ local dialogHandlers, dialogs, dialogCount = {}, {}, 0
 function X2DialogManager:SetHandler(task, fn)
   dialogHandlers[task] = fn
 end
-local function requestDialog(fn, owner, buttonType)
+local function requestDialog(fn, owner, buttonType, suppliedInfo)
+  local info = { buttonType = buttonType, isModal = true }
+  for k, v in pairs(suppliedInfo or {}) do info[k] = v end
   dialogCount = dialogCount + 1
   local wnd = UIParent:CreateWidget("window", "x2Dialog" .. dialogCount, "UIParent")
   wnd:CreateChildWidget("textbox", "textbox", 0, true)
   wnd:CreateChildWidget("button", "btnOk", 0, true)
   wnd:CreateChildWidget("button", "btnCancel", 0, true)
-  if buttonType ~= DBT_OK_CANCEL then
+  if info.buttonType ~= DBT_OK_CANCEL then
     wnd.btnCancel:Show(false)
   end
-  local info = { buttonType = buttonType, isModal = true }
   local decorate = dialogHandlers[DLG_TASK_DEFAULT]
   if decorate then decorate(wnd, info) end
   if fn then fn(wnd, info) end
@@ -402,11 +404,7 @@ function X2DialogManager:RequestNoticeDialog(fn, owner)
   return requestDialog(fn, owner, DBT_OK)
 end
 function X2DialogManager:RequestTaskDialog(task, info, owner)
-  return requestDialog(function(wnd, dialogInfo)
-    for k, v in pairs(info or {}) do dialogInfo[k] = v end
-    local handler = dialogHandlers[task]
-    if handler then handler(wnd, dialogInfo) end
-  end, owner, DBT_OK_CANCEL)
+  return requestDialog(dialogHandlers[task], owner, DBT_OK_CANCEL, info)
 end
 local function closeDialog(id)
   local d = dialogs[id]

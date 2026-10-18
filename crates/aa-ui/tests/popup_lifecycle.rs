@@ -349,6 +349,42 @@ fn original_confirmation_escape_runs_cancel_and_notice_escape_runs_ok_before_hid
 }
 
 #[test]
+fn original_task_decoration_uses_explicit_buttons_and_modal_state() {
+    let ui = original();
+    ui.exec(
+        "@task_dialog_info",
+        r#"
+        invite=X2DialogManager:RequestTaskDialog(DLG_TASK_JOIN_BATTLE_FIELD,{
+            buttonType=DBT_CUSTOM,isModal=false,name='Arena',corpsName='Nuia'
+        },owner:GetId())
+        assert(invite.btnOk:IsVisible() and invite.btnSecond:IsVisible() and invite.btnThird:IsVisible())
+        assert(not invite.btnCancel:IsVisible())
+        assert(invite.btnOk:GetText()==locale.messageBoxBtnText.enterInstantRoom)
+        assert(invite.btnSecond:GetText()==locale.messageBoxBtnText.nextInstantRoomEntry)
+        assert(invite.btnThird:GetText()==locale.messageBoxBtnText.reject)
+        X2DialogManager:SetHandler(9999,function(wnd,info)
+            assert(info.title=='Before decoration' and info.content=='Already supplied')
+        end)
+        notice=X2DialogManager:RequestTaskDialog(9999,{
+            buttonType=DBT_OK,btnOkText='Continue',title='Before decoration',content='Already supplied'
+        },owner:GetId())
+        assert(not notice.btnCancel:IsVisible() and notice.btnOk:GetText()=='Continue')
+        assert(notice.textbox:GetText()=='Already supplied')
+        X2DialogManager:SetHandler(9999,function(wnd,info)
+            assert(info.buttonType==DBT_OK_CANCEL and info.isModal==true)
+        end)
+        fallback=X2DialogManager:RequestTaskDialog(9999,nil,owner:GetId())
+        assert(fallback.btnOk:IsVisible() and fallback.btnCancel:IsVisible())
+    "#,
+    )
+    .unwrap();
+    for (name, modal) in [("invite", false), ("notice", true)] {
+        let id = lua::value_id(&ui.lua, &eval(&ui, name)).unwrap();
+        assert_eq!(lua::ui(&ui.lua).tree.widget(id).unwrap().modal, modal, "{name}");
+    }
+}
+
+#[test]
 fn removal_waits_for_a_shown_to_hidden_transition_and_fade_completion() {
     let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
     ui.exec(
