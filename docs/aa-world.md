@@ -165,11 +165,108 @@ Automatic area loading remains unresolved after three bounded candidates:
 
 Header (version, flags, chunk size, 4096 units, unit 2 m, sector 64 m, `zRatio`, `oceanLevel`), then a depth first quadtree of 341 nodes
 (1 + 4 + 16 + 64 + 256). Only the 256 leaves (one per 64 m sector) hold data: `size x size` u16 samples, `size` 33 (sometimes 2, 3, 5, 9
-or 17 for flat sectors: 6051 such leaves exist, resampled bilinearly). A sample is `height << 4 | surfaceType`; the height is
-`offset + (raw & 0xFFF0) * range` per node (node versions < 7, all of 1.2). Node boxes use the engine's 8 x 8 cell window coordinates, so
-positions are taken relative to the root box minimum. `CellHeights` has `heights` (`iy * 513 + ix`), `surface` (the 4 bit surface type per
+or 17 for flat sectors: 6051 such leaves exist, resampled bilinearly). Native node-v5 samples use five surface bits (31 means a hole); the height is
+`offset + (raw & 0xFFE0) * range`. Node boxes use the engine's 8 x 8 cell window coordinates, so
+positions are taken relative to the root box minimum. `CellHeights` has `heights` (`iy * 513 + ix`), `surface` (the 5 bit surface type per
 sample, an index into the `SurfaceTypes` of `leveldata.xml`, see "client/leveldata.xml" below), `ocean_level`, `min_z`, `max_z`, bilinear
 `sample`, `normal`.
+
+### Native height packing, holes and terrain triangles (2026-10-18)
+
+The original 1.2 `cry3dengine.dll` closes the serialized/runtime contract directly.
+`CTerrainNode::Load` **300DB920**, version check **300DB94D**, accepts dword
+version 5, transfers offset/range from header +29/+33 into node +49/+4D and
+copies the raw `size²` u16 values unchanged at **300DBB35..300DBB52**. Runtime
+**300C8B60** masks heights with **0xFFE0**, while **300CA120** masks surface
+IDs with **0x1F**. The former four-bit split treated a surface bit as height
+and aliased authored surface IDs. Primary height decode retains x87 product
+and sum precision until the final f32 store (**300C8BA1..300C8BAC**); the
+other three quad corners round the product separately. Our shared grid uses
+the primary decode, with fractional native controls allowing 0.1 mm for
+that original mixed-precision corner difference.
+
+Native point **IsHole 300CAB30** selects the containing sector and its
+lower sample, then compares surface ID with **31** at **300CAB6D**. Smaller
+node grids shift coordinates by their spacing, rather than rounding to the
+nearest sample. Shared sector edges belong to the positive-side sector;
+the previous node's far-edge SID must not overwrite that owner. A bounded
+ten-cell survey found `hasHoles` leaf counts **7/3/2/6/0/9/0/0/8/0** in
+cells **20,8 / 21,8 / 8,13 / 12,15 / 14,11 / 18,7 / 12,14 / 15,15 /
+13,10 / 23,10**. The earlier statement that no 1.2 holes were known was wrong.
+
+Full index generation **300E0A10** disables its shared non-hole path when
+node +1B has bits **0xC**. Both interior and border loops call IsHole at
+`nodeOrigin + quadOrigin + step/2` (**300E0D4C..300E0D82** and
+**300E0E7D..300E0EB3**); a hole omits all six emitted vertices, hence both
+triangles. The emitted order at **300E0D88..300E0E1F** is `(x,y),
+(x+s,y), (x,y+s), (x+s,y), (x+s,y+s), (x,y+s)`: the native diagonal is
+**south east to north west**. Terrain, physical triangle queries and terrain
+road/decal receivers now share that diagonal and skip the same finest quads.
+Coarse terrain uses the native centre rule, so a small opening can disappear
+at a coarse LOD; we do not enlarge holes speculatively. Our artificial patch
+skirts also omit edges whose adjacent drawn quad is a hole.
+
+The native height API **300C91B0** remains defined over a hole. Its ray path
+checks SID31 before testing a quad (**300C97AE..300C97B4**). Accordingly
+`TerrainQuery::height_at` remains a raw height query; `is_hole_at` is additive;
+`ground_at`, normal/slope and `WorldCollision` ground/ray/sphere queries omit
+holes while retaining lower brush/compiled-voxel support. Apps must use
+physical ground queries for support, rather than a raw-height fallback.
+
+Native executable oracles are retained under ignored
+`data/extract/aa-world/roads/native_hole_{packing,indices,height}.py` and
+their `native-hole-*-oracles.json` results. The loader oracle substitutes
+only memcpy, null-free and a bounded allocator; all header parsing, raw
+copy lengths, height/SID math and full IsHole branches execute original x86.
+The full index generator substitutes its final vertex-emission adapter to
+record six-argument calls, leaving original LOD loops and hole queries intact.
+Real 20,8 leaf at file offset **536543**, cell-local **704,832**, passes
+**1,024** height/SID/hole points (**22 holes**, FNV **20D861C1961FC442**),
+**20** LOD/flag cases (omitted quads **22/6/3/0/0** at LOD0..4) and **20**
+fractional height controls, including **12** over holes. Rust regressions
+retain those goldens, sector-boundary ownership, coarse-grid SID sampling,
+triangle order and terrain-only hole ray/sphere misses.
+
+Verified global controls: hole **21204.25,9026.5**, raw height **446.40103 m**;
+nearby solid **21188.25,9030.5**, height **498.16614 m**. Native height/surface
+decoding and topology change the original interior 12,15 receiver fixture
+from 45 to **43** prepared decal meshes; original 8,13 and 20,8 controls
+remain **18** and **4**.
+
+The actual hole **21270.5,8960.5** has raw height **474.8673 m** and a
+walkable compiled/brush proxy floor at **464.76614 m** after loading cell
+20,8. Regression checks reach that floor through the hole with physical
+ground and non-terrain ray hits, then release the cell.
+
+Validation: `cargo check -p aa-world` and the new example check/build pass;
+the full world suite has **217 passed, 9 existing optional ignored**.
+`terrain_holes` uses `aa_dev` and two real original patch meshes for its
+numeric native/filled control views. All five LOD screenshots pass exact
+centre pixels: native LOD0..2 **[30,180,50]** sees the underlay, while
+LOD3..4 and every filled control **[210,40,40]** retain terrain. Captures
+are `shots/aa-world/terrain_holes/lod0.png` through `lod4.png`; numerical
+scenes log **208.0–336.7 FPS at 1920×1080**. These colours are fixture
+controls, not production terrain substitutions.
+
+Original `--world --pos 21270.5,8958.5,500 --look 21270.5,8960.5,465`
+and `--filled-control` captures at **1280×720** show the removed terrain
+cap between the authored cave rocks: `proxy_on.png` / `proxy_filled.png`,
+**10,899 pixels** differ by more than 3 display values, maximum **155**.
+They log **68.4–79.4 FPS on**, **50.4–102.0 filled**, with concurrent
+shared compilation; these are diagnostic readings, not isolated benchmarks.
+The first `cave_on` / `cave_filled` camera is obstructed and is retained
+without claiming a useful comparison. `--world --unload-check --shot-after 20`
+passes zero loaded cells, pending cell tasks, patch entities and captured
+mesh assets after moving outside the map. All **10** runs self-close
+without errors. No corresponding original-client cave screenshot exists
+in `reference/`; original x86/math and actual assets are the reference here.
+
+Material boundary retained for the next slice: CPU surfaces now preserve
+IDs **16..30**, but the current heightmap detail shader still aliases them
+through its 16-slot material table. This milestone does not claim those
+native detail materials, native terrain geomorphing, or exact hole-edge
+sphere collision; the existing sphere query remains a plane approximation.
+No calibrated sky/post/water/fly values were changed.
 
 ### terrain/cover.ctc
 
@@ -190,8 +287,8 @@ must therefore be a non-sRGB texture and the shader decodes it (`terrain_layers.
 ### client/leveldata.xml and the terrain layer materials
 
 `leveldata.xml` is Sandbox's level data. `<SurfaceTypes>` lists 21 `<SurfaceType Name, DetailMaterial, DetailScaleX, DetailScaleY, ProjAxis="Z",
-Id>` (optional `<VegetationGroup Id>` children). The 4 bit surface nibble of `heightmap.dat` is the **position** in this list (only the first 16
-can be referenced; unused slots repeat `__default__` = `beach_white_sand_dry`), `Id` is the global surface type number (up to about 900).
+Id>` (optional `<VegetationGroup Id>` children). The five-bit surface ID of `heightmap.dat` is the **position** in this list (31 means a hole;
+the current detail renderer still aliases IDs above 15; unused slots repeat `__default__` = `beach_white_sand_dry`), `Id` is the global surface type number (up to about 900).
 Checked on the spawn: cell `015_015` nibble 4 (`tr_field_dirt_001c`) is exactly the flat dirt square of the spawn (`terrain_height` 126.2),
 nibble 1 / 3 (rock) have mean slopes of 37 / 45 degrees. Ocean cells are all nibble 0 (`tr_snow_field_ground_708a`, the seabed). 306 different
 `DetailMaterial`s are used by the 1205 cells (`materials/aa_terrain/{field,canyon,mix,wasteland,wet,...}`, a few `materials/terrain/`), all
@@ -3644,21 +3741,22 @@ no window and no `AaWorldPlugin`, and is a clonable `Arc` handle (`&self` method
 let terrain = TerrainQuery::new("main_world");                    // or Res<TerrainQuery>
 terrain.height_at(x, y)         // Option<f32>   game metres: x east, y north, as the server sends them
 terrain.ground_at(x, y)         // Option<Ground { height, normal }>, one cell lookup (normal: unit, up = +Z)
+terrain.is_hole_at(x, y)        // Option<bool>; height_at remains defined over holes, ground_at returns None
 terrain.normal_at(x, y)         // Option<Vec3>   terrain.slope_at(x, y)  // Option<f32> radians, 0 flat, pi / 2 wall
 terrain.prefetch(x, y, 600.0)   // load the cells around a position on a background thread (call when entering a cell)
 terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. for surface type nibbles
 ```
 
-* The surface is the finest mesh the renderer draws (`CellHeights::mesh_height` / `mesh_normal`: 2 m quads split from the south west to the north
-  east corner, linear over the triangles), so feet and ground agree where you look. It differs from a bilinear interpolation of the four
+* The surface is the finest mesh the renderer draws (`CellHeights::mesh_height` / `mesh_normal`: 2 m quads split from the south east to the north
+  west corner, linear over the triangles), so feet and ground agree where you look. It differs from a bilinear interpolation of the four
   corners (what `CellHeights::sample` and the client's old cache return) by up to 0.8 m on steep faces and a few cm on meadows. `normal_at` is
   the face normal of that triangle, not the smoothed shading normal.
 * `None` outside the map: negative or non-finite coordinates, a cell that does not exist or fails to parse (`warn!` for the latter).
 * Cost: a cell is loaded on first use (2.6 ms: pak read + parse; the very first query of a process also opens the pak, 0.3 s if nothing else
   did), then a query is about 0.1 microseconds. At most `TerrainQuery::DEFAULT_CACHE_CELLS` (48, 1.3 MB each) parsed cells are kept (least
   recently used dropped; `with_capacity`); concurrent first queries of a cell load it once. Missing cells are remembered as `None`.
-* Not included: terrain holes (`hasHoles` is parsed over, none known in 1.2 data), water (use `WaterQuery`, see Water),
-  and the surface type (the nibble is in `CellHeights::surface`, its meaning in the cell's `leveldata.xml`, see `terrain_layers::parse_surface_types`).
+* Native SID31 holes omit physical ground/normal/slope; raw `height_at` remains defined there. Surface IDs are in `CellHeights::surface`,
+  their meanings in the cell's `leveldata.xml` (see `terrain_layers::parse_surface_types`). Water uses `WaterQuery` (see Water).
 
 ### Collision with brushes and vegetation (`collide.rs`, `collide/`, `aa_cry::physics`)
 

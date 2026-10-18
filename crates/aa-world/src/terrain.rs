@@ -69,12 +69,15 @@ pub fn build_patch_mesh(h: &CellHeights, px: usize, py: usize, lod: usize) -> Me
     let mut idx: Vec<u32> = Vec::with_capacity(n * n * 6 + 4 * n * 6);
     for j in 0..n {
         for i in 0..n {
+            if h.quad_is_hole(ox + i * step, oy + j * step, step) {
+                continue;
+            }
             let a = (j * side + i) as u32;
             let b = a + 1;
             let d = a + side as u32;
             let c = d + 1;
             // counter clockwise seen from above (+Y)
-            idx.extend_from_slice(&[a, b, c, a, c, d]);
+            idx.extend_from_slice(&[a, b, d, b, c, d]);
         }
     }
 
@@ -97,6 +100,16 @@ pub fn build_patch_mesh(h: &CellHeights, px: usize, py: usize, lod: usize) -> Me
         });
     }
     for (p, &a) in border.iter().enumerate() {
+        // Do not seal an opening on a patch border with its artificial crack skirt.
+        let (i, j) = match p / n {
+            0 => (p % n, 0),
+            1 => (n - 1, p % n),
+            2 => (n - 1 - p % n, n - 1),
+            _ => (0, n - 1 - p % n),
+        };
+        if h.quad_is_hole(ox + i * step, oy + j * step, step) {
+            continue;
+        }
         let b = border[(p + 1) % border.len()];
         let (a2, b2) = (skirt_idx[&a], skirt_idx[&b]);
         idx.extend_from_slice(&[a, b2, b, a, a2, b2]);
@@ -156,6 +169,7 @@ mod tests {
         let h = CellHeights {
             heights: (0..crate::heightmap::GRID * crate::heightmap::GRID).map(|i| (i % 7) as f32).collect(),
             surface: vec![1; crate::heightmap::GRID * crate::heightmap::GRID],
+            hole_sectors: [false; 256],
             ocean_level: 100.0,
             min_z: 0.0,
             max_z: 6.0,
@@ -166,6 +180,31 @@ mod tests {
             let n = PATCH_UNITS / LOD_STEPS[lod];
             assert_eq!(m.count_vertices(), (n + 1) * (n + 1) + 4 * n);
             assert_eq!(m.indices().unwrap().len(), n * n * 6 + 4 * n * 6);
+        }
+    }
+
+    #[test]
+    fn original_hole_leaf_uses_native_lod_centre_and_triangle_order() {
+        if !crate::pak_available() { return; }
+        let bytes = aa_pak::Pak::global().read("worlds/main_world/cells/020_008/client/terrain/heightmap.dat").unwrap();
+        let h = CellHeights::parse(&bytes).unwrap();
+        // Full original 300E0A10 branch outputs, both interior and border loops.
+        for (lod, omitted) in [22, 6, 3, 0, 0].into_iter().enumerate() {
+            let step = LOD_STEPS[lod];
+            let native_holes = (352..384).step_by(step).flat_map(|x|
+                (416..448).step_by(step).map(move |y| (x,y)))
+                .filter(|&(x,y)| h.quad_is_hole(x,y,step)).count();
+            assert_eq!(native_holes, omitted);
+            let mesh = build_patch_mesh(&h, 2, 3, lod);
+            let side = PATCH_UNITS / step + 1;
+            let tris: Vec<_> = mesh.indices().unwrap().iter().collect();
+            for tri in tris.chunks_exact(3).filter(|t| t.iter().all(|&v| v < side * side)) {
+                let coords: Vec<_> = tri.iter().map(|&v| (256 + v % side * step, 384 + v / side * step)).collect();
+                let x = coords.iter().map(|c| c.0).min().unwrap();
+                let y = coords.iter().map(|c| c.1).min().unwrap();
+                assert!(!h.quad_is_hole(x,y,step));
+                assert!(!coords.contains(&(x,y)) || !coords.contains(&(x+step,y+step)), "native diagonal");
+            }
         }
     }
 }

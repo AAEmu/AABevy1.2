@@ -16,7 +16,7 @@
 //! ```
 //!
 //! **The surface** is the triangle mesh the renderer draws at its finest level of detail: a 2 m grid whose
-//! quads are split along the diagonal from the south west to the north east corner (`terrain.rs`,
+//! quads are split along the native south east to north west diagonal (`terrain.rs`,
 //! `build_patch_mesh`), so a character standing at [`height_at`](TerrainQuery::height_at) stands on the
 //! visible ground to the millimetre close by (coarser levels of detail of far patches differ, as they do on
 //! screen). [`normal_at`](TerrainQuery::normal_at) is the face normal of that triangle, not the smoothed
@@ -29,8 +29,8 @@
 //! [`prefetch`](TerrainQuery::prefetch) loads the surroundings of a position on a background thread so the
 //! first step into a new cell does not stall a frame.
 //!
-//! Not covered (see `docs/aa-world.md`, "Ground queries"): terrain holes (`hasHoles` nodes, none are known to be
-//! used in the 1.2 data), water (use `World::ocean_level` and the water volumes of
+//! Height queries remain available over holes; physical [`TerrainQuery::ground_at`] queries skip them.
+//! Not covered: water (use `World::ocean_level` and the water volumes of
 //! `placement::parse_water`), and collision with brushes and other objects.
 
 use std::collections::HashMap;
@@ -136,10 +136,16 @@ impl TerrainQuery {
         Some((cell, x - cx as f32 * CELL_SIZE, y - cy as f32 * CELL_SIZE))
     }
 
-    /// Terrain height (metres) under game position `(x, y)`; `None` outside the map.
+    /// Native terrain height (metres), including over holes; `None` outside the map.
     pub fn height_at(&self, x: f32, y: f32) -> Option<f32> {
         let (cell, lx, ly) = self.locate(x, y)?;
         Some(cell.mesh_height(lx, ly))
+    }
+
+    /// Native terrain-hole query; `None` outside available cells. Heights still exist over holes.
+    pub fn is_hole_at(&self, x: f32, y: f32) -> Option<bool> {
+        let (cell, lx, ly) = self.locate(x, y)?;
+        Some(cell.is_hole(lx, ly))
     }
 
     /// Unit normal of the terrain surface (game space, up = +Z) under `(x, y)`.
@@ -152,9 +158,12 @@ impl TerrainQuery {
         self.ground_at(x, y).map(|g| g.slope())
     }
 
-    /// Height and normal under `(x, y)` with one cell lookup.
+    /// Physical height and normal under `(x, y)` with one cell lookup; `None` in a hole.
     pub fn ground_at(&self, x: f32, y: f32) -> Option<Ground> {
         let (cell, lx, ly) = self.locate(x, y)?;
+        if cell.is_hole(lx, ly) {
+            return None;
+        }
         let (height, n) = (cell.mesh_height(lx, ly), cell.mesh_normal(lx, ly));
         Some(Ground { height, normal: Vec3::from(n) })
     }
@@ -241,16 +250,36 @@ mod tests {
         }
         let q = TerrainQuery::new("main_world");
         let cell = q.cell(15, 14).unwrap();
-        // the triangle (a, b, c) below the diagonal and (a, c, d) above it share the diagonal's heights
+        // Native triangles (a,b,d) and (b,c,d) share the south-east/north-west diagonal.
         let (ix, iy) = (100usize, 200usize);
         let (a, b, c, d) = (cell.at(ix, iy), cell.at(ix + 1, iy), cell.at(ix + 1, iy + 1), cell.at(ix, iy + 1));
         let origin = (15.0 * CELL_SIZE + ix as f32 * UNIT_SIZE, 14.0 * CELL_SIZE + iy as f32 * UNIT_SIZE);
         let on_diagonal = q.height_at(origin.0 + 1.0, origin.1 + 1.0).unwrap();
-        assert!((on_diagonal - (a + c) / 2.0).abs() < 0.05);
-        let below = q.height_at(origin.0 + 1.5, origin.1 + 0.5).unwrap();
-        assert!((below - (a + 0.75 * (b - a) + 0.25 * (c - b))).abs() < 0.05);
-        let above = q.height_at(origin.0 + 0.5, origin.1 + 1.5).unwrap();
-        assert!((above - (a + 0.25 * (c - d) + 0.75 * (d - a))).abs() < 0.05);
+        assert!((on_diagonal - (b + d) / 2.0).abs() < 0.05);
+        let below = q.height_at(origin.0 + 0.5, origin.1 + 0.5).unwrap();
+        assert!((below - (a + 0.25 * (b - a) + 0.25 * (d - a))).abs() < 0.05);
+        let above = q.height_at(origin.0 + 1.5, origin.1 + 1.5).unwrap();
+        assert!((above - (c + 0.25 * (d - c) + 0.25 * (b - c))).abs() < 0.05);
+    }
+
+    #[test]
+    fn native_fractional_heights_remain_available_over_holes() {
+        if !crate::pak_available() { return; }
+        let q = TerrainQuery::new("main_world");
+        // Full native 300C91B0 outputs, not derived from this implementation.
+        for (x, y, z, hole) in [
+            (4.25, 6.5, 498.16614, false), (5.5, 7.5, 498.0302, false),
+            (14.25, 4.5, 480.03955, true), (15.5, 5.5, 479.17603, true),
+            (14.5, 5.5, 484.93304, true), (15.75, 4.5, 465.80695, true),
+            (20.25, 2.5, 446.40103, true), (21.5, 3.5, 450.39096, true),
+        ] {
+            let (x, y) = (21184.0 + x, 9024.0 + y);
+            assert!((q.height_at(x, y).unwrap() - z).abs() < 0.0001);
+            assert_eq!(q.is_hole_at(x, y), Some(hole));
+            assert_eq!(q.ground_at(x, y).is_none(), hole);
+        }
+        assert_eq!(q.is_hole_at(f32::NAN, 9024.0), None);
+        assert_eq!(q.is_hole_at(-1.0, 9024.0), None);
     }
 
     #[test]

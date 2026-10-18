@@ -243,6 +243,9 @@ fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) 
                 ix.rem_euclid(CELL_UNITS as i32) as usize,
                 iy.rem_euclid(CELL_UNITS as i32) as usize,
             );
+            if h.quad_is_hole(x, y, 1) {
+                continue;
+            }
             let q = [(0, 0), (1, 0), (1, 1), (0, 1)].map(|(dx, dy)| Vertex {
                 pos: Vec3::new(
                     (ix + dx as i32) as f32 * UNIT_SIZE,
@@ -251,8 +254,8 @@ fn terrain_mesh(projector: Projector, cell: (i32, i32), terrain: &TerrainQuery) 
                 ),
                 normal: Vec3::from(h.normal(x + dx, y + dy)),
             });
-            geometry.triangle([q[0], q[1], q[2]], projector);
-            geometry.triangle([q[0], q[2], q[3]], projector);
+            geometry.triangle([q[0], q[1], q[3]], projector);
+            geometry.triangle([q[1], q[2], q[3]], projector);
             if geometry.over_budget {
                 warn!(
                     "deferred decal terrain receiver exceeds geometry budget at {:?}",
@@ -704,7 +707,8 @@ mod tests {
         }
         let terrain = TerrainQuery::new("main_world");
         let loader = loader();
-        for (cell, expected) in [((8, 13), 18), ((12, 15), 45), ((20, 8), 4)] {
+        // Corrected native height/surface decoding and topology change the 12,15 terrain receivers.
+        for (cell, expected) in [((8, 13), 18), ((12, 15), 43), ((20, 8), 4)] {
             let path = format!("{}/client/visareas.dat", crate::world::cell_dir("main_world", cell.0, cell.1));
             let data = aa_pak::Pak::global().read(&path).unwrap();
             let mut objects = crate::placement::load_cell_objects("main_world", cell.0, cell.1);
