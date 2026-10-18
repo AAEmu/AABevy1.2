@@ -24,6 +24,8 @@ mod loot;
 mod quests;
 mod skills;
 mod stats;
+mod native_buffs;
+pub use native_buffs::{NativeBuffRule, NativeBuffs};
 mod world;
 pub use gear::{ActionBar, Inventory};
 pub use loot::{Loot, LootFailure, item_index, item_owner, owner_type};

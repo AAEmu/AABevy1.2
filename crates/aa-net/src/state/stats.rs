@@ -238,6 +238,8 @@ resource! {
     /// Buffs and debuffs by unit object id, for the player's own buff bar and the target frame.
     /// A unit's list starts from its unit-state packet and follows the buff packets.
     pub struct Buffs {
+        /// Catalog-aware original-client fold; raw lane entries remain in `by_unit`.
+        pub native: super::NativeBuffs,
         pub by_unit: HashMap<u32, Vec<BuffEntry>>,
     }
 }
@@ -256,6 +258,7 @@ impl Buffs {
     }
 
     pub fn apply(&mut self, e: &Event) -> bool {
+        self.native.apply(e);
         match e {
             Event::PlayerSpawn(s) => self.seed(s.obj_id, &s.unit.buffs),
             Event::UnitSpawned(u) => self.seed(u.obj_id, &u.buffs),
@@ -280,7 +283,7 @@ impl Buffs {
                 list.retain(|b| b.buff.index != *index);
                 return list.len() != before;
             }
-            Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+            Event::CharacterSelected(_) | Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_unit.is_empty() {
                     return false;
                 }

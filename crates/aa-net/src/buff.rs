@@ -2,7 +2,8 @@
 //!
 //! Layouts follow the server's `Buff.write_net` (`SCUnitStatePacket.WriteBuff`) and
 //! `SCBuffCreatedPacket`. The server sends no stack count with a new buff: `charge` is the stack /
-//! charge count there (1 when the buff is not stackable).
+//! charge count used by the active lane convenience view. Native stacks require static catalog
+//! rules and received history; see `state::NativeBuffs`. Charge alone is not a native stack count.
 
 use crate::wire::{Reader, Result};
 
@@ -66,7 +67,8 @@ pub struct Buff {
     /// Time already elapsed in ms when the packet was written (0 for a new buff).
     pub elapsed_ms: u32,
     pub tick_ms: u32,
-    /// Stack count (the "charge" of `SCBuffCreated`).
+    /// Genuine snapshot stack count; Created uses the lane charge convenience value.
+    /// For original-client modifiers use the catalog-aware `state::NativeBuffs` view.
     pub stacks: i32,
     pub charged: i32,
     pub kind: BuffKind,
@@ -128,7 +130,7 @@ impl Buff {
         let ability_level = r.i16()?;
         let skill_id = r.u32()?;
         // Charge, duration / 10, 0, tick / 10.
-        let [charge, duration, _, tick] = r.pisc(4)?;
+        let [charge, duration, elapsed, tick] = r.pisc(4)?;
         Ok((
             owner,
             Self {
@@ -140,7 +142,7 @@ impl Buff {
                 ability_level,
                 skill_id,
                 duration_ms: (duration * 10) as i32,
-                elapsed_ms: 0,
+                elapsed_ms: (elapsed * 10) as u32,
                 tick_ms: (tick * 10) as u32,
                 stacks: charge.max(1) as i32,
                 charged: charge as i32,
@@ -214,6 +216,19 @@ pub(crate) mod tests {
         assert_eq!(owner, 0x0A0B0C);
         assert_eq!((b.index, b.buff_id, b.duration_ms, b.stacks), (2, 8_000_011, 30_000, 1));
         assert_eq!(b.kind, BuffKind::Unknown);
+    }
+
+    #[test]
+    fn created_retains_elapsed_and_charge_without_consuming_next_packet() {
+        let mut w = Writer::new();
+        w.u8(0).bc(1).u32(10).bc(2).u32(3).u32(77).u8(4).i16(5).u32(6);
+        w.pisc(&[9, 100, 25, 7]);
+        w.u8(0xaa);
+        let bytes = w.finish();
+        let mut r = Reader::new(&bytes);
+        let (_, b) = Buff::read_created(&mut r).unwrap();
+        assert_eq!((b.charged, b.duration_ms, b.elapsed_ms, b.tick_ms), (9, 1000, 250, 70));
+        assert_eq!(r.u8().unwrap(), 0xaa);
     }
 
     #[test]
