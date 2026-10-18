@@ -1,4 +1,4 @@
-import aa_world::water_motion::{coordinates,endpoint_weights,sun_normal,bump_normal};
+import aa_world::water_motion::{coordinates,endpoint_weights,sun_normal,bump_normal,refraction_uv,refraction_behind};
 // Water volumes and the sea, see `water_material.rs`.
 //
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
@@ -50,7 +50,7 @@ struct WaterParams {
     env_lit: vec4<f32>,
     // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / output (1 wave, 2 alpha,
     // 3 sun, 4 reflection, 5 NdotI/Fresnel, 6 compressed bump; +10 old-normal diagnostics,
-    // 8 injected cube-sampler ray; -1 old softness, -2 old normal stages)
+    // 8 injected cube-sampler ray; -1 old softness, -2 old normal stages, -3 old refraction)
     motion: vec4<f32>,
 }
 
@@ -108,6 +108,19 @@ fn scene_color(uv: vec2<f32>) -> vec3<f32> {
 }
 @else
 fn scene_color(uv: vec2<f32>) -> vec3<f32> {
+    return water.body.rgb;
+}
+
+// Native screenMapSampler is POINT/CLAMP; Bevy's shared transmission sampler is
+// linear. The copy already contains linear HDR colour, so no second sRGB decode.
+@if(VIEW_TRANSMISSION_TEXTURE)
+fn scene_color_point(uv: vec2<f32>) -> vec3<f32> {
+    let size=vec2<i32>(textureDimensions(view_transmission_texture));
+    let pixel=clamp(vec2<i32>(uv*vec2<f32>(size)),vec2<i32>(0),size-vec2<i32>(1));
+    return textureLoad(view_transmission_texture,pixel,0).rgb;
+}
+@else
+fn scene_color_point(uv: vec2<f32>) -> vec3<f32> {
     return water.body.rgb;
 }
 
@@ -240,13 +253,25 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     } else {
         thickness = 60.0;
     }
-    var uv = pixel / size;
-    let shift = n.xz * vec2<f32>(1.0, -1.0) * water.misc.y * clamp(thickness, 0.0, 1.0);
-    let shifted = uv + shift;
-    if scene_ndc <= 0.0 || scene_depth(shifted * size) <= frag.z * 1.0001 {
-        uv = shifted;
+    var native_refraction=false;
+    @if(DEPTH_PREPASS) {
+        @if(VIEW_TRANSMISSION_TEXTURE) {
+            native_refraction=water.motion.x>0.5 && water.motion.w != -3.0;
+        }
     }
-    let refracted = scene_color(uv);
+    var uv = pixel / size;
+    if native_refraction {
+        let shifted=refraction_uv(pixel,bump,view.viewport,size);
+        if refraction_behind(frag.z,scene_depth(shifted*size)) {uv=shifted;}
+    } else {
+        let shift = n.xz * vec2<f32>(1.0, -1.0) * water.misc.y * clamp(thickness, 0.0, 1.0);
+        let shifted = uv + shift;
+        if scene_ndc <= 0.0 || scene_depth(shifted * size) <= frag.z * 1.0001 {
+            uv = shifted;
+        }
+    }
+    var refracted: vec3<f32>;
+    if native_refraction {refracted=scene_color_point(uv);} else {refracted=scene_color(uv);}
     // WaterVolumeInto uses 1-a+T*a, independently of the surface's nonlinear fade.
     let transmit = 1.0-endpoints.x+exp(-water.body.a*thickness)*endpoints.x;
     let fogged_background=mix(water.body.rgb,scene_color(pixel/size),transmit);

@@ -3862,9 +3862,10 @@ binding, uniform size, material, geometry, draw or per-frame CPU allocation is
 added. Authored UVs, raw texture channels, wave clock, endpoint/shore alpha,
 body/light/exposure gains, reflection/refraction constants and the inherited cube
 LOD edits are preserved. The sea's old normalized reflection/Fresnel arithmetic
-and distance flattening remain exact. This does not close native water pass
-ordering, refraction/projection, cubemap orientation/confinement, sloped surfaces,
-physical currents, the complete native BRDF, or their existing calibration limits.
+and distance flattening remain exact. The later refraction/cube slices below close
+their qualified branches. Native water pass ordering, cubemap confinement, sloped
+surfaces, physical currents, complete native BRDF and existing calibration limits
+remain open.
 
 The aa-dev `water_normals` fixture samples the original river and lake DDS inputs
 with independently decoded wrapping bilinear raw XY, their actual big/small/bump
@@ -3964,8 +3965,81 @@ evidence, primary API references, captures/logs and separately archived pre-edit
 water/material files. Both inherited calibration patches retain their exact
 added/removed payload and operation semantics; nearby owned context may move.
 Only owned cached patches are staged for those two files. The other three
-calibration file hashes remain exact. Native refraction, full pass/lighting
+calibration file hashes remain exact. Full pass/lighting
 composition and cubemap/visarea confinement remain open.
+
+### Native authored water refraction
+
+Original `watersurface.cfx`230-255 declares both scene colour and depth as
+**POINT/CLAMP**. `WaterSurfacePS`455-473 offsets projected viewport UV by the
+compressed bump XY **times .1**, equivalent to full normalized bump XY **times
+.015**. The source has no thickness attenuation. It accepts the displaced sample
+only for **surface depth < displaced scene depth**; equality and foreground
+reject. The prior combined shader used a fitted .012 gain, faded it with
+thickness, admitted equal/slightly nearer receivers and bypassed the shifted
+depth test when the base pixel was clear.
+
+The authored WaterSurface/BUMP_MAP path now follows these operations when both
+the camera depth prepass and transmission copy exist. Original surface VS340 and
+ordinary `commonzpass.cfi`156 scale clip W by the same positive far-distance
+factor; `shadelib.cfi`902/908/923 preserves this value in scene-depth R. For native
+ordinary perspective cameras this maps exactly to Bevy's reversed-Z comparison
+**displaced depth < surface depth**, including clear0. The same strict Bevy test
+also handles orthographic cameras; that is projection robustness, not a claim
+that native orthographic clipW carried linear distance. Native nearest/POM-adjusted
+depth variants remain outside this equivalence.
+
+Bevy0.20 copies the complete physical target before drawing its camera viewport
+(`transmission/node.rs`); its shared transmission sampler is linear. The native
+branch therefore scales its viewport UV delta by the physical viewport size,
+clamps to viewport-edge texel centres, and loads the selected scene texel directly.
+The HDR scene copy is already linear, so no second sRGB decode is applied.
+`water_motion.wesl` holds the exact offset/bounds and strict depth helpers. The
+sea, unqualified material and absent-depth/copy fallback retain their prior
+offset/filtering path and fitted gain. No new images, copies, bindings, mesh data,
+per-frame allocations or material variants are added; fog, reflection, light,
+endpoint and shoreline-alpha operations retain their existing order and values.
+
+The aa-dev `water_refraction` fixture uses pixel-aligned opaque receivers and an
+independent CPU projection/depth/colour oracle. It checks strict nearer/equal/
+farther receivers, shifted clear, base-clear/shifted foreground, shallow/deep
+offsets, matched-offset point-versus-linear filtering, zero fitted gain, signed XY
+and physical viewport edges. `--ortho`, `--viewport`, `--legacy` and `--no-depth`
+exercise projection and retained-fallback controls. `water_motion --world
+--refraction` / `--legacy-refraction` freeze original waves at0 and change only
+the refraction branch; diagnostic -3 leaves the native normal/cube/alpha paths
+active. All **84 GPU checks match the CPU bytes exactly**, across seven runs:
+perspective native/legacy, orthographic native/legacy, physical subviewport
+perspective/orthographic, and absent-depth fallback. The matched-offset one-texel
+receiver is native `[218,48,39]` versus linear `[175,73,139]`; the forced-legacy
+controls also admit the deliberately nearer/equal receivers rejected by native.
+Numeric captures log **271-458 FPS**. Four additional final-composite shallow
+controls and four sea controls agree within one byte. The whole 1920x1080 sea PNG
+is pixel-identical to the historical sea control, maximum zero.
+
+Original captures in `shots/aa-world/water_refraction/` include the source river
+view (six styles /1,312 vertices, **181-238 FPS**) and the proved shallow pond
+camera/target from the shoreline fixture. Native/legacy pond captures were
+inspected: ROI [320,315,690,405] mean absolute channel delta **2.382**, 28.55% of
+pixels above three values, maximum67. Native pond logs **144-237 FPS**, legacy
+**189-228**; these shared-machine captures establish behaviour, not a speed claim.
+One style /eight vertices and zero pending/failed models remain. Actual camera
+movement releases every captured water mesh asset and entity; the existing
+shared style/image cache lifetime remains explicit.
+
+The original combat05 camera/hour was also captured at1920x1080 and inspected
+against `reference/ingame/combat_triple_slash/real_05.png`. Its twelve water
+patches have **5.92** mean RGB error, **156-193 FPS**. Vegetation/actors, sky,
+wave phase and full native lighting/pass composition still differ; no broader
+image-match claim or colour tuning is made. All fourteen final deliverable runs
+self-close without warnings/errors. **223 library tests pass /9 existing ignored**;
+the example builds and all examples check.
+
+Ignored `roads/water-refraction-audit/` retains source notes, pre-edit shader and
+calibration hashes, run logs and numeric results. Only the owned cached shader
+patch is staged; the inherited calibration additions/removals retain their exact
+payload and operation semantics. Full native scene-copy/pass/lighting ordering,
+underwater surface refraction and the other water limitations remain explicit.
 
 ### Native river endpoint opacity and counted outlines
 
