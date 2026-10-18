@@ -1896,10 +1896,20 @@ original screen displays ten rows from each callback. Native f32/signed conversi
 and wrapping page decrement are preserved, including invalid float conversion;
 non-boolean/non-numeric inputs are refused at the app adapter boundary. Online
 locations use id3 subzone, zone-key display text and localized world-group name.
-Offline rows use actual Unix seconds,365-day years and30-day months, with all six
+Offline rows use actual Unix seconds,360-day years and30-day months, with all six
 duration fields and the native unsigned future/negative-time guard. This is not
 Windows FILETIME despite the native helper's name. Missing location data remains
 absent rather than using the player's location.
+
+The shared period formatter follows original394245f0: unsigned64 division,
+signed low-DWORD components converted through native f32, and subtraction of the
+full quotient only when its signed component is positive. A365-day duration is
+one year and five days. Calendar date formatting remains separate. Eighteen
+executed original x86 cases in hud/period_cases.json cover normal boundaries,
+negative raw bit patterns, signed/unsigned quotient overflow and f32 rounding;
+the expedition caller retains its unsigned future-time clamp. Oracle instructions
+and captures are in data/extract/aa-client/period/. Focused verification is
+recorded with the later reset milestone after compilation.
 
 Received changes update the cache before their ordered original EXPEDITION_*
 events. MemberStatus emits exactly one notice: an existing name-flag row emits

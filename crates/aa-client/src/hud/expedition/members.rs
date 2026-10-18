@@ -76,20 +76,7 @@ pub(super) fn now() -> u64 {
 fn offline(lua: &Lua, last: i64, now: u64) -> mlua::Result<Table> {
     // Original xlcommon's XlGetCurrentFileTime/_time64 and XlDiffTime/_difftime64
     // operate in Unix seconds. Its future check compares unsigned 64-bit values.
-    let mut age = now.saturating_sub(last as u64);
-    let out = lua.create_table()?;
-    for (key, seconds) in [
-        ("year", 31_536_000),
-        ("month", 2_592_000),
-        ("day", 86_400),
-        ("hour", 3_600),
-        ("minute", 60),
-        ("second", 1),
-    ] {
-        out.set(key, f64::from((age / seconds) as i32 as f32))?;
-        age %= seconds;
-    }
-    Ok(out)
+    super::super::period::table(lua, now.saturating_sub(last as u64))
 }
 
 fn row(lua: &Lua, received: &ExpeditionMember, position: Table) -> mlua::Result<Table> {
@@ -169,7 +156,7 @@ mod tests {
     fn unix_offline_age_keeps_native_calendar_components_and_unsigned_future_guard() -> mlua::Result<()> {
         let lua = Lua::new();
         let now = 1_800_000_000;
-        let age = 31_536_000 + 2 * 2_592_000 + 3 * 86_400 + 4 * 3_600 + 5 * 60 + 6;
+        let age = 31_104_000 + 2 * 2_592_000 + 3 * 86_400 + 4 * 3_600 + 5 * 60 + 6;
         let time = offline(&lua, now as i64 - age, now)?;
         for (key, expected) in [
             ("year", 1.),
@@ -187,6 +174,9 @@ mod tests {
                 assert_eq!(time.get::<f64>(key)?, 0.);
             }
         }
+        let time = offline(&lua, now as i64 - 31_536_000, now)?;
+        assert_eq!(time.raw_get::<f64>("year")?, 1.);
+        assert_eq!(time.raw_get::<f64>("day")?, 5., "native years contain twelve 30-day months");
         let member = ExpeditionMember {
             name: b"Name\0hidden".to_vec(),
             level: 55,
