@@ -227,6 +227,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::mail::install(lua, bridge)?;
     super::itemlinks::install(lua, bridge)?;
     super::loot_roll::install(lua)?;
+    super::trade::install(lua, bridge)?;
     crate::settings::install_hud(lua)
 }
 
@@ -686,6 +687,7 @@ pub fn handle_requests(
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
             Request::Chat { chat_type, message, target } => {
+                let message = aa_ui::lua::chat::encode_for_transport(&message);
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));
             }
             Request::Leave { how } => {
@@ -854,6 +856,25 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_requests_apply_native_transport_encoding_once() {
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        bridge.borrow_mut().requests.push(Request::Chat {
+            chat_type: -3,
+            target: "Peer".into(),
+            message: "@name |literal\r\n|q42; |i5,2,payload;".into(),
+        });
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge)).init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::ActionBar>().init_resource::<aa_net::state::Inventory>()
+            .init_resource::<aa_net::state::Target>().init_resource::<aa_net::state::Skills>().init_resource::<aa_net::state::Buffs>()
+            .add_message::<NetCommand>().add_message::<super::super::alerts::UseFailed>().add_systems(Update, handle_requests);
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        assert!(matches!(&commands[..], [NetCommand(Command::Chat { chat_type:-3,target,message })]
+            if target=="Peer" && message=="@@name ||literal |q42; |i5,2,payload;"));
+    }
 
     #[test]
     fn money_events_use_numeric_delta_and_decimal_delta_string() {

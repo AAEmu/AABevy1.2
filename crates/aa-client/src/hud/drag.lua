@@ -46,7 +46,7 @@ local function holdBag(real, amount)
   if s == nil then return end
   local count = amount or s.count
   X2Cursor:SetHeld({
-    kind = "bag", slot = real, uid = s.uid, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade),
+    kind = "bag", cursorInfo = s.stack and "Item" or "Item_Id", slot = real, uid = s.uid, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade),
     count = count, total = s.count, partial = count < s.count,
   })
 end
@@ -147,7 +147,7 @@ X2Equipment.PickupEquippedItem = function(self, es)
   if h == nil then
     local s = HUD.equipment[es]
     if s == nil then return end
-    X2Cursor:SetHeld({ kind = "equip", slot = es, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade) })
+    X2Cursor:SetHeld({ kind = "equip", cursorInfo = s.stack and "Item" or "Item_Id", slot = es, uid = s.uid, id = s.id, grade = s.grade, icon = s.icon, frame = gradeFrame(s.grade) })
   elseif h.kind == "bag" then
     if not h.partial and canWearAt(h.id, es) then HUD.drag_equip(h.slot, es) end
     X2Cursor:ClearCursor()
@@ -182,13 +182,13 @@ AAUI.PickupSlot = function(info)
     local s = HUD.actions[info.slotIdx]
     if s == nil then return end
     X2Cursor:SetHeld({
-      kind = "action", slot = info.slotIdx, what = s.kind, id = s.id, icon = s.icon,
+      kind = "action", cursorInfo = s.kind == "skill" and "Spell" or "Item", slot = info.slotIdx, what = s.kind, id = s.id, icon = s.icon,
       frame = s.kind == "item" and gradeFrame(s.grade) or nil, count = s.stack and s.count or 0,
     })
   elseif content.type == "skill" and content.learned ~= false then
-    X2Cursor:SetHeld({ kind = "skill", id = content.id, icon = content.icon })
+    X2Cursor:SetHeld({ kind = "skill", cursorInfo = "Spell", id = content.id, icon = content.icon })
   elseif content.type == "item" then
-    X2Cursor:SetHeld({ kind = "item", id = content.id, grade = content.grade, icon = content.icon, frame = gradeFrame(content.grade) })
+    X2Cursor:SetHeld({ kind = "item", cursorInfo = "Item", id = content.id, grade = content.grade, icon = content.icon, frame = gradeFrame(content.grade) })
   end
 end
 

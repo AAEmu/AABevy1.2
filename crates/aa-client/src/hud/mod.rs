@@ -64,6 +64,7 @@ mod targeting;
 mod tipcalc;
 mod tipitem;
 mod tips;
+mod trade;
 mod usable;
 
 /// Run the isolated original-script combat example without a network connection.
@@ -80,6 +81,11 @@ pub(crate) fn mailbox_fixture() {
 #[allow(dead_code)]
 pub(crate) fn loot_roll_fixture() {
     loot_roll::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn trade_fixture() {
+    trade::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -296,6 +302,7 @@ impl Plugin for HudPlugin {
         friends::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
+        trade::plugin(app);
         store::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
