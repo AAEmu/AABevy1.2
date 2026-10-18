@@ -4527,3 +4527,51 @@ Current compact DB conditional joins contain no attributes0..7. Relevant dynamic
 HP6 buffs68,698,699,700,701,711; MP7 buffs712,1892..1895; primaries2591(STA/SPI),
 6663(STR/DEX),6664(STA/INT),6665(STA/SPI),6666(STR/SPI). These are observations of the
 current rows, not protocol constants; load child associations and test actual attributes.
+
+
+### Native mount/dismiss local model-action boundary
+
+Local actor+3be8 is source-named ActorUnitModel, not a network combat-state component:
+constructor390e53bd uses vtable399a4f68; destructor diagnostic399a521c names
+`X2::ActorUnitModel::~ActorUnitModel`. Getter390b3750 returns it. CanDismiss39357861
+calls virtual+8c?390e2f90, which returns model+58. That field holds a pending model-action
+object: mount390ca4d0 constructs390a5f00/vtable399a30b8, dismiss390ca560 constructs
+390a6110/vtable399a3108, and other model actions also occupy it. This closes its meaning
+as a local action pointer; no received Unit.flags substitute or guessed combat flag is valid.
+
+Lua DismissPet39069790?39362070 first validates39357830 and clears pet target through
+39361fc0(2). If local player is attached to the SAME owned pet, it invokes39361e80(reason10)
+and returns without directly sending CSa4. Otherwise it checks shared2s cooldown3a169944,
+queues ActorUnitModel390ca560(targetPetObject,reason10,0), sets mate+bc pending and emits
+Lua event0x111 DISMISS_PET() (registered3921537f..89, string399bdc0c).
+This is local initiation, before removal send/ACK, and does not remove received ownership. The action finalizer virtual+40=390961f0
+resolves target and current owned mate, requires reason10 and targetobject==ownedmate+20,
+then3909626e..277 calls3933b230 with owned timeline+14 to send exact existing CSa4.
+
+Update390aaff0 marks done after elapsed>1000ms for reason10 (>500ms reason9), alongside
+model/fade updates. However this is NOT permission to emulate dismissal with a fixed timer:
+ActorUnitModel virtual+98=390ca040 calls action virtual+40 at390ca120 before destruction
+and clearing+58, and action replacement invokes this common finalizer too. Mounted
+reason10 unmount continuation is detailed below. Existing raw
+MateCommand controls remain exact protocol operations, not full native local planner APIs.
+No additional receive packet or synthetic completion was added on this evidence.
+
+Formula precision cross-check:395672b3 explicitly FSTP DWORD[ebp+8], then395672b6 FLD
+DWORD[ebp+8], narrowing formula result to f32 before downstream398b56e2 FSTP QWORD and
+398b56e5 CVTTSD2SI. A398a0bc0 initializes flat0/percent100, folds Buff398a0060 and
+Npc3989ffb0 into that same pair, then398a0cf6/0cfb adds cached gear flat/percentage deltas.
+Only after all sources combine does398a0d08..35 apply one percentage multiplication
+(or integer add when percent100), then395729f0 clamps to attribute limits.
+
+Mounted continuation is present at ActorUnitModel virtual+280=390cea80 (slot399a51e8).
+The detach-model callback clears seat bookkeeping, resolves actor/controller objects and
+static3963b490(second argument, model_attach_point_strings.id); only successful controller/static resolution reaches
+390cec02..0e, queuing390ca560(parentModel+10 target, third-argument reason, true) on
+the detached child model. A reason10 finalizer can then send CSa4 with matching owned
+identity. String399a2d44 names `UnMountHorseController`. Loader39678963 uses gameDB+98d0 and SQL399fa26c
+`SELECT id, actor, prefab FROM model_attach_point_strings` (label399fef2c).
+Receive handler391d4a70 (`OnUnitDetached`, diagnostic399b7e34) resolves packet child+c
+and passes reason+10 to39355bd0?390b4000. The latter clears actor attachment+3af0/3af4,
+then390dca30 passes saved child model/seat/reason to parentModel virtual+280. Thus the
+existing UnitDetached child/reason event has sufficient wire data, but model/controller
+prerequisites and action finalization remain real local work, not synthetic completion.
