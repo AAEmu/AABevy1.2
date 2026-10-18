@@ -837,3 +837,20 @@ slot details to `effective_detail` before `resolve_with_headgear`/`apply_headgea
 Image-item substitution is an earlier descriptor-production concern; the two pointers
 in `AdjustHairAsset` do not establish its policy. No automatic image substitution rule
 is inferred here.
+
+### Image-item substitution before descriptor selection
+
+Native `394E58A0` reads the base item template from instance+8 and looks up its
+template record through `39695DC0`. For native template-class values 1 or 2, or
+class 22 with instance detail type 9, a nonzero image template at instance+0x19
+replaces the base ID. It then calls `394E5630` exactly once with that chosen ID.
+A missing substituted visual returns null; it does **not** retry the base item's
+visual. Other classes/detail types keep the base ID. Class names are not inferred
+from these numeric checks. The original-byte Unicorn regression
+`hair-native/image-override-oracle.py` executes all 30 combinations of classes
+0/1/2/3/22, detail types 0/1/9 and absent/present image IDs, verifying the exact
+lookup arguments and null-return behavior. This is independent of the later
+cosplay-before-head descriptor priority.
+
+After the priority correction, the complete own-crate library check passes
+**68 tests / 1 ignored** (`cargo test -p aa-anim --lib`).
