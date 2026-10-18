@@ -10,7 +10,8 @@
 //! * a sector is alive while the camera is within the largest view distance of its instances (capped by
 //!   [`WorldConfig::brush_distance`] / [`WorldConfig::vegetation_distance`]); every part also carries a
 //!   [`VisibilityRange`] for its own distance, so the renderer drops far instances without our help;
-//! * level of detail: a sector is spawned with the `_lodN` / `$lodN` level for its distance band and respawned
+//! * level of detail: brushes retain their authored ratio and use the normal camera's native requested level;
+//!   other objects use distance bands. A sector is respawned
 //!   when the band changes (the new sector is built hidden next to the old one and swapped in when complete);
 //! * water volumes (rivers, lakes, ponds) of a cell are merged into one flat mesh per water style (material and
 //!   fog), built on the task, drawn with `water_material::WaterMaterial`;
@@ -29,7 +30,7 @@ use std::time::Instant;
 use aa_cry::scene::LoadedModel;
 use aa_cry::workers::Workers;
 use aa_cry::{CryAssets, ModelOptions, PreparedModel};
-use bevy::camera::visibility::VisibilityRange;
+use bevy::camera::visibility::{RenderLayers, VisibilityRange};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use crate::vegetation_color::{self, VegetationMaterial, VegetationColorPart};
@@ -50,6 +51,7 @@ pub mod sounds;
 pub mod lights;
 pub mod rigid;
 pub mod voxels;
+pub mod lod;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -145,6 +147,7 @@ struct SectorState {
     /// Where the sector's root is (Bevy space).
     translation: Vec3,
     lod: u8,
+    brush_lods: Option<lod::BrushLods>,
     /// Next index into the sector's bin (spawning resumes here).
     next: usize,
     spawned: usize,
@@ -172,6 +175,7 @@ struct ModelKey {
 
 /// A model ready to be instanced: the loaded assets and the model space transform of each drawn node.
 struct Instanced {
+    lod: u8,
     loaded: Arc<LoadedModel>,
     nodes: Vec<Mat4>,
     rigid: Option<Arc<rigid::Clip>>,
@@ -252,6 +256,8 @@ pub struct ObjectState {
     groups_tx: Sender<Option<VegGroups>>,
     /// Counter for [`ObjectStats::entities`] while models are still being prepared.
     busy_ticks: usize,
+    /// Round-robin starting sector for bounded completed-brush LOD checks.
+    lod_sector_cursor: usize,
     /// Counters for diagnostics.
     pub stats: ObjectStats,
 }
@@ -269,6 +275,10 @@ pub struct ObjectStats {
     pub models_pending: usize,
     pub models_failed: usize,
     pub spawn_ms: f32,
+    pub brush_lod_checks: usize,
+    pub brush_lod_instances: usize,
+    pub brush_lod_rebuilds: usize,
+    pub models_cached: usize,
     pub water_cells: usize,
     pub roads: usize,
     /// Drawn decal meshes (a combined terrain/object decal can produce two).
@@ -320,6 +330,7 @@ impl ObjectState {
             fog: HashMap::new(),
             groups_tx,
             busy_ticks: 0,
+            lod_sector_cursor: 0,
             stats: ObjectStats::default(),
         }
     }
@@ -389,15 +400,18 @@ pub fn stream_objects(
     mut fog_assets: crate::fog::FogAssets,
     terrain: Res<crate::TerrainQuery>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection, Option<&RenderLayers>), With<Camera3d>>,
     timers: Option<Res<crate::profile::Timers>>,
     time: Res<Time>,
 ) {
     if !cfg.objects {
         return;
     }
-    let Some(cam) = focus.iter().next().or_else(|| cameras.iter().next()) else { return };
+    let Some(cam) = focus.iter().next().or_else(|| cameras.iter().next().map(|(_, t, _, _)| t)) else { return };
     let p = bevy_to_cry(cam.translation());
+    // A portrait camera on another layer must not drive world LOD. Multiple world
+    // views and orthographic projections retain the previous sector policy.
+    let view = lod::select_view(cameras.iter());
     let state = &mut *state;
     let _t = timers.as_deref().map(|t| t.time("objects.stream"));
     // vegetation groups (world level)
@@ -637,7 +651,7 @@ pub fn stream_objects(
                 // Separate LOD assets have no retained original root bounds here, so leave that path unsupported.
                 let wind=(key.lod == 0).then_some(groups.wind);
                 let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &styles, wind, epoch, &mut state.color_mirrors, &mut vegetation_materials);
-                ModelState::Ready(Arc::new(Instanced { loaded, nodes, rigid, color_materials, ao_meshes }))
+                ModelState::Ready(Arc::new(Instanced { lod: key.lod, loaded, nodes, rigid, color_materials, ao_meshes }))
             }
             Err(e) => {
                 debug!("aa-world: model {key_path}: {e}");
@@ -691,17 +705,44 @@ pub fn stream_objects(
             }
         }
     }
-    // a new level of detail: build the sector again next to the old one, swap when it is complete
+    wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    state.stats.brush_lod_checks = 0;
+    // Check only completed sectors, round-robin, at most512 instances per frame.
+    // Snapshot only at a scan boundary; never restart a hidden replacement while
+    // its shared-worker model requests are still outstanding.
+    let mut brush_relod = Vec::new();
+    for _ in 0..wanted.len() {
+        if state.stats.brush_lod_checks >= lod::MAX_CHECKS { break; }
+        let i = state.lod_sector_cursor % wanted.len();
+        state.lod_sector_cursor = (i + 1) % wanted.len();
+        let (distance, cell, sector, kind) = wanted[i];
+        if kind != Kind::Brush { continue; }
+        let key = (cell.0, cell.1, sector as u8, kind);
+        let Some(s) = state.sectors.get_mut(&key) else { continue };
+        let data = &state.cells[&cell];
+        let bin = &data.brush_bins[sector];
+        if s.hidden || !s.complete(bin.len()) { continue; }
+        s.lod = object_lod(kind, distance, Some(s.lod));
+        let levels = s.brush_lods.as_mut().unwrap();
+        let (checked, changed) = levels.scan(lod::MAX_CHECKS - state.stats.brush_lod_checks, |i| {
+            view.and_then(|v| v.requested(&data.objects.brushes[bin[i] as usize], cell)).unwrap_or(s.lod)
+        });
+        state.stats.brush_lod_checks += checked;
+        if changed { levels.snapshot(); brush_relod.push((key, s.lod)); }
+    }
+    state.stats.brush_lod_rebuilds += brush_relod.len();
+    // A new level of detail: build next to the old sector, swap when complete.
     let relod: Vec<_> = state
         .sectors
         .iter()
         .filter_map(|(k, s)| {
+            if k.3 == Kind::Brush { return None; }
             let d = sector_distance(p, (k.0, k.1), k.2 as usize);
             let lod = object_lod(k.3, d, Some(s.lod));
             (lod != s.lod).then_some((*k, lod))
         })
         .collect();
-    for (k, lod) in relod {
+    for (k, lod) in relod.into_iter().chain(brush_relod) {
         let Some(s) = state.sectors.get_mut(&k) else { continue };
         let root = commands
             .spawn((ObjectSector { cell: (k.0, k.1), sector: k.2, kind: k.3 }, Transform::from_translation(s.translation), Visibility::Hidden))
@@ -715,7 +756,6 @@ pub fn stream_objects(
     }
 
     // spawn, nearest first, within the time budget
-    wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let start = Instant::now();
     let budget = cfg.object_budget_ms / 1000.0;
     let workers = Workers::global();
@@ -737,9 +777,10 @@ pub fn stream_objects(
             let root = commands
                 .spawn((ObjectSector { cell: c, sector: sector as u8, kind }, Transform::from_translation(translation), Visibility::default()))
                 .id();
-            SectorState { entity: root, translation, lod: object_lod(kind, d, None), next: 0, spawned: 0, waiting: Vec::new(), hidden: false, retired: Vec::new() }
+            SectorState { entity: root, translation, lod: object_lod(kind, d, None),
+                brush_lods: (kind == Kind::Brush).then(lod::BrushLods::default),
+                next: 0, spawned: 0, waiting: Vec::new(), hidden: false, retired: Vec::new() }
         });
-        let lod = entry.lod;
         let models = &mut state.models;
         let model_tx = &state.model_tx;
 
@@ -794,8 +835,13 @@ pub fn stream_objects(
             entry.waiting.extend(rest);
         }
         while entry.next < bin.len() && start.elapsed().as_secs_f32() <= budget {
+            let bin_index = entry.next;
             let idx = bin[entry.next];
             entry.next += 1;
+            let lod = if let Some(levels) = &mut entry.brush_lods {
+                let requested = view.and_then(|v| v.requested(&data.objects.brushes[idx as usize], c)).unwrap_or(entry.lod);
+                levels.initial(bin_index, requested)
+            } else { entry.lod };
             let Some((a, b)) = instance_model(&data, kind, idx as usize, &groups) else { continue };
             let fast = (c.0, c.1, kind, a, b, lod);
             let id = match models.fast.get(&fast) {
@@ -833,6 +879,8 @@ pub fn stream_objects(
     let pending = state.models.states.iter().filter(|m| matches!(m, ModelState::Loading)).count() + state.model_queue.len();
     state.stats.sectors = state.sectors.len();
     state.stats.models_pending = pending;
+    state.stats.models_cached = state.models.keys.len();
+    state.stats.brush_lod_instances = state.sectors.values().filter_map(|s| s.brush_lods.as_ref()).map(|s| s.current.len()).sum();
     state.stats.models_failed = state.models.states.iter().filter(|m| matches!(m, ModelState::Failed)).count();
     let spawned: usize = state.sectors.values().map(|s| s.spawned).sum();
     state.stats.entity_props = state.sectors.iter().filter(|(k, _)| k.3 == Kind::Entity).map(|(_, s)| s.spawned).sum();
@@ -947,6 +995,9 @@ fn spawn_instance(
                 _ => false,
             };
             if no_ordinary_shadow { entity.insert(NotShadowCaster); }
+            if kind == Kind::Brush {
+                entity.insert(lod::BrushLodPart { cell, index: idx as u32, requested: inst.lod });
+            }
             if matches!(kind, Kind::Vegetation | Kind::Trees)
                 && let Some(group) = groups.groups.get(&data.objects.vegetation[idx].group)
                 && group.material_layers == 0

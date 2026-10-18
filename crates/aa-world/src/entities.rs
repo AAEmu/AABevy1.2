@@ -242,7 +242,7 @@ mod tests {
         objects.models.push(p.model.clone());
         objects.materials.push("materials/lamp".into());
         objects.brushes.push(crate::placement::Brush {
-            model: 0, material: 0, flags: 8, max_view_dist: 200.0, bbox: [0.0; 6],
+            model: 0, material: 0, flags: 8, max_view_dist: 200.0, lod_ratio: 100, bbox: [0.0; 6],
             matrix: [2.0, 0.0, 0.0, 12.0, 0.0, 3.0, 0.0, 26.0, 0.0, 0.0, 4.0, 42.0],
         });
         objects.entity_props = props;
@@ -352,6 +352,7 @@ mod tests {
             material: -1,
             flags: 0,
             max_view_dist: 200.0,
+            lod_ratio: 100,
             bbox: [0.0; 6],
             matrix: [1.0, 0.0, 0.0, 40.0, 0.0, 1.0, 0.0, 90.0, 0.0, 0.0, 1.0, 0.0],
         });

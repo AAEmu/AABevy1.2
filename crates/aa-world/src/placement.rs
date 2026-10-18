@@ -51,6 +51,8 @@ pub struct Brush {
     pub material: i32,
     pub flags: u32,
     pub max_view_dist: f32,
+    /// Native SBrushChunk byte37, copied to CBrush+21 (100 is unity).
+    pub lod_ratio: u8,
     /// Cell-local bounding box `[min xyz, max xyz]`.
     pub bbox: [f32; 6],
 }
@@ -381,6 +383,7 @@ fn read_brush(rec: &[u8], origin: Vec3) -> Brush {
         material: i32_at(rec, 115),
         flags: u32_at(rec, 32),
         max_view_dist: f32_at(rec, 28),
+        lod_ratio: rec[37],
         bbox,
     }
 }
@@ -593,6 +596,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn authored_brush_lod_ratio_byte_and_real_nondefault_records() {
+        let mut rec = [0;128];
+        rec[36..39].copy_from_slice(&[13,255,7]);
+        let origin = Vec3::new(64.0,128.0,0.0);
+        let brush = read_brush(&rec,origin);
+        assert_eq!(brush.lod_ratio,255);
+        assert_eq!(brush.translation(),origin);
+        assert_eq!(brush.bbox,[64.0,128.0,0.0,64.0,128.0,0.0]);
+        if !crate::pak_available() { return; }
+        let pak = aa_pak::Pak::global();
+        let mut nondefault = 0;
+        for (cell,count) in [("009_012",1703),("012_010",1302),("012_014",1157),
+            ("013_010",1852),("015_015",13),("021_008",1660)] {
+            let data = pak.read(&format!("worlds/main_world/cells/{cell}/client/brush.dat")).unwrap();
+            let brushes = parse_brush_dat(&data).unwrap();
+            assert_eq!(brushes.len(),count);
+            nondefault += brushes.iter().filter(|b| b.lod_ratio != 100).count();
+        }
+        assert_eq!(nondefault,722);
+        let data = pak.read("worlds/main_world/cells/009_012/client/brush.dat").unwrap();
+        let brushes = parse_brush_dat(&data).unwrap();
+        assert_eq!(brushes[427].lod_ratio,255);
+    }
+
+    #[test]
     fn original_brush_ordinary_shadow_flags_and_interior_remap_are_preserved() {
         if !crate::pak_available() { return; }
         let pak = aa_pak::Pak::global();
@@ -606,11 +634,13 @@ mod tests {
             let data = pak.read(&format!("worlds/{world}/cells/{cell}/client/visareas.dat")).unwrap();
             let interior = parse_visareas_dat(&data).unwrap();
             let flags:Vec<_> = interior.brushes.iter().map(|b| b.flags).collect();
+            let ratios:Vec<_> = interior.brushes.iter().map(|b| b.lod_ratio).collect();
             assert_eq!((flags.len(),flags.iter().filter(|f| **f & 0x8 == 0).count()), (count,noncasters), "{world}/{cell}");
             let mut merged = CellObjects { models:vec!["outside.cgf".into()], materials:vec!["outside".into()], ..Default::default() };
             visareas::append_objects(&mut merged,interior);
             assert_eq!(merged.brushes.iter().map(|b| b.flags).collect::<Vec<_>>(),flags,
                 "independent interior table remapping must preserve native flags");
+            assert_eq!(merged.brushes.iter().map(|b| b.lod_ratio).collect::<Vec<_>>(),ratios);
         }
     }
 
