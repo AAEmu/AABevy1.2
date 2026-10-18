@@ -150,6 +150,12 @@ fn bound_descriptor_catalog_routes_real_stop_duration_and_supersedes_only_its_ol
     app.update();
     let mut skills = app.world_mut().resource_mut::<Skills>();
     skills.apply(&aa_net::Event::PlayerSpawn(Box::new(super::super::expansion::fixture::spawn())));
+    assert_eq!(skills.native_gm_mode1, None, "spawn's legacy PISH word is not effective GM state");
+    skills.apply(&aa_net::Event::UnitGmModeChanged(aa_net::unit_msg::UnitGmModeChanged {
+        obj_id: 100,
+        mode: 1,
+        value: 0,
+    }));
     skills.apply(&start(7, 3));
     assert!(skills.apply(&aa_net::Event::CastingStopped { tl: 3, duration_ms: 7000 }));
     let timer = skills.native_tag_cooldowns[0];
