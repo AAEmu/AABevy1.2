@@ -16,8 +16,8 @@
 //!
 //! Only the 256 leaf nodes (64 m sectors) have data, `size` = 33 (sometimes 17 / 5 for flat
 //! sectors: resampled here). `data[x * size + y]` is x major; sector edges are shared with the
-//! neighbours. A sample is `height << 4 | surfaceType`: the low 4 bits select the surface layer
-//! (an index into the `SurfaceTypes` of the cell's `leveldata.xml`, kept in [`CellHeights::surface`], not rendered yet), the high 12 bits the height: `offset + (raw & 0xFFF0) * range` for
+//! neighbours. Native node-v5 samples use five surface bits (31 means a hole), and eleven height
+//! bits: `offset + (raw & 0xFFE0) * range` for
 //! node versions < 7 (all of 1.2's data); newer nodes use 5 cm integer steps.
 //!
 //! The node boxes are in the coordinates of the engine's 8x8-cell window (a cell sits at some
@@ -35,8 +35,10 @@ pub const GRID: usize = CELL_UNITS + 1;
 pub struct CellHeights {
     /// `heights[iy * GRID + ix]`, `ix` along cry X, `iy` along cry Y, 2 m apart, cell-local.
     pub heights: Vec<f32>,
-    /// Surface type (0..15) per sample, same indexing.
+    /// Native surface type (0..31; 31 is a hole) per sample, same indexing.
     pub surface: Vec<u8>,
+    /// Native `hasHoles != 0` gate of each 64 m sector, indexed `sy * 16 + sx`.
+    pub hole_sectors: [bool; 256],
     /// Ocean level stored in the file header (metres).
     pub ocean_level: f32,
     pub min_z: f32,
@@ -65,6 +67,7 @@ struct Node {
     offset: f32,
     range: f32,
     size: usize,
+    has_holes: bool,
     data: Vec<u16>,
 }
 
@@ -98,6 +101,7 @@ impl CellHeights {
 
         let mut heights = vec![0.0f32; GRID * GRID];
         let mut surface = vec![1u8; GRID * GRID];
+        let mut hole_sectors = [false; 256];
         let mut sectors = 0;
         for n in nodes.iter().filter(|n| n.size > 0) {
             let sx = ((n.min[0] - ox) / UNIT_SIZE).round() as isize;
@@ -106,22 +110,44 @@ impl CellHeights {
                 continue;
             }
             sectors += 1;
+            hole_sectors[sy as usize / 32 * 16 + sx as usize / 32] = n.has_holes;
             for y in 0..33usize {
                 for x in 0..33usize {
                     let (z, raw) = sample_node(n, x, y);
                     let i = (sy as usize + y) * GRID + sx as usize + x;
                     heights[i] = z;
-                    surface[i] = (raw & 0xF) as u8;
+                    // A boundary belongs to the sector on its positive side. Shared far-edge
+                    // samples may carry a different SID and must not overwrite that owner.
+                    if (x < 32 || sx as usize + x == CELL_UNITS)
+                        && (y < 32 || sy as usize + y == CELL_UNITS)
+                    {
+                        surface[i] = (raw & if n.version < 7 { 0x1F } else { 0xF }) as u8;
+                    }
                 }
             }
         }
         let (min_z, max_z) = heights.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
-        Ok(CellHeights { heights, surface, ocean_level, min_z, max_z, sectors })
+        Ok(CellHeights { heights, surface, hole_sectors, ocean_level, min_z, max_z, sectors })
     }
 
     #[inline]
     pub fn at(&self, ix: usize, iy: usize) -> f32 {
         self.heights[iy.min(GRID - 1) * GRID + ix.min(GRID - 1)]
+    }
+
+    /// Native point hole query. A sample owns the 2 m square on its positive X/Y side.
+    /// Height queries remain defined over holes, as in the original engine.
+    pub fn is_hole(&self, x: f32, y: f32) -> bool {
+        let ix = ((x / UNIT_SIZE).floor() as usize).min(CELL_UNITS - 1);
+        let iy = ((y / UNIT_SIZE).floor() as usize).min(CELL_UNITS - 1);
+        self.surface[iy * GRID + ix] == 31
+    }
+
+    /// Native index-generation gate: test the LOD quad centre if its sector has holes.
+    pub fn quad_is_hole(&self, ix: usize, iy: usize, step: usize) -> bool {
+        let x = (ix + step / 2).min(CELL_UNITS - 1);
+        let y = (iy + step / 2).min(CELL_UNITS - 1);
+        self.hole_sectors[y / 32 * 16 + x / 32] && self.surface[y * GRID + x] == 31
     }
 
     /// Bilinear terrain height at a cell-local position in metres (clamped to the cell).
@@ -137,18 +163,17 @@ impl CellHeights {
         (a + (b - a) * tx) * (1.0 - ty) + (c + (d - c) * tx) * ty
     }
 
-    /// The triangle of the finest terrain mesh (`terrain.rs`: quads split from their south west to their north
-    /// east corner) under cell-local `(x, y)` metres: its height there and its slopes `d height / d x`, `d y`.
+    /// Native finest-grid triangle (south east to north west diagonal), with height and slopes.
     fn facet(&self, x: f32, y: f32) -> (f32, f32, f32) {
         let fx = (x / UNIT_SIZE).clamp(0.0, CELL_UNITS as f32);
         let fy = (y / UNIT_SIZE).clamp(0.0, CELL_UNITS as f32);
         let (ix, iy) = ((fx.floor() as usize).min(CELL_UNITS - 1), (fy.floor() as usize).min(CELL_UNITS - 1));
         let (tx, ty) = (fx - ix as f32, fy - iy as f32);
         let (a, b, c, d) = (self.at(ix, iy), self.at(ix + 1, iy), self.at(ix + 1, iy + 1), self.at(ix, iy + 1));
-        if tx >= ty {
-            (a + (b - a) * tx + (c - b) * ty, (b - a) / UNIT_SIZE, (c - b) / UNIT_SIZE)
+        if tx + ty <= 1.0 {
+            (a + (b - a) * tx + (d - a) * ty, (b - a) / UNIT_SIZE, (d - a) / UNIT_SIZE)
         } else {
-            (a + (c - d) * tx + (d - a) * ty, (c - d) / UNIT_SIZE, (d - a) / UNIT_SIZE)
+            (c + (d - c) * (1.0 - tx) + (b - c) * (1.0 - ty), (c - d) / UNIT_SIZE, (c - b) / UNIT_SIZE)
         }
     }
 
@@ -189,12 +214,12 @@ fn read_node(r: &mut Reader) -> Result<Node, HeightmapError> {
     r.skip(3)?;
     let min = [r.f32()?, r.f32()?, r.f32()?];
     r.skip(12)?; // box max
-    let _has_holes = r.u8()?;
+    let has_holes = r.u8()? != 0;
     let offset = r.f32()?;
     let range = r.f32()?;
     let size = r.i32()?;
     let unk = r.i32()?;
-    if !(0..=1024).contains(&size) {
+    if !(0..=1024).contains(&size) || size == 1 {
         return Err(HeightmapError::Invalid(format!("node size {size}")));
     }
     let size = size as usize;
@@ -207,7 +232,7 @@ fn read_node(r: &mut Reader) -> Result<Node, HeightmapError> {
         r.skip_clamped(unk as usize);
     }
     r.skip_clamped(36);
-    Ok(Node { version, min, offset, range, size, data })
+    Ok(Node { version, min, offset, range, size, has_holes, data })
 }
 
 /// Height and raw sample for sector-local point `(x, y)` (0..=32) of a node. Nodes smaller than 33 x 33
@@ -224,14 +249,16 @@ fn sample_node(n: &Node, x: usize, y: usize) -> (f32, u16) {
     let h = |a: usize, b: usize| node_height(n, n.data[a * n.size + b]);
     let top = h(ix, iy) * (1.0 - tx) + h(ix + 1, iy) * tx;
     let bottom = h(ix, iy + 1) * (1.0 - tx) + h(ix + 1, iy + 1) * tx;
-    // the surface type of the nearest sample
-    let near = n.data[((fx.round() as usize).min(n.size - 1)) * n.size + (fy.round() as usize).min(n.size - 1)];
+    // Native surface lookup shifts by the sample spacing; it does not round to nearest.
+    let near = n.data[(fx.floor() as usize).min(n.size - 1) * n.size + (fy.floor() as usize).min(n.size - 1)];
     (top * (1.0 - ty) + bottom * ty, near)
 }
 
 fn node_height(n: &Node, raw: u16) -> f32 {
     if n.version < 7 {
-        n.offset + (raw & 0xFFF0) as f32 * n.range
+        // 300C8BA1..300C8BAC keeps the product and sum in x87 precision before
+        // storing the primary sample. Preserve that single final f32 rounding.
+        (n.offset as f64 + (raw & 0xFFE0) as f64 * n.range as f64) as f32
     } else {
         let f_max = n.offset + 0xFFF0 as f32 * n.range;
         let i_offset = (n.offset * 20.0) as i32;
@@ -244,6 +271,45 @@ fn node_height(n: &Node, raw: u16) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_v5_loader_height_surface_and_hole_oracle() {
+        if !crate::pak_available() { return; }
+        let bytes = aa_pak::Pak::global().read("worlds/main_world/cells/020_008/client/terrain/heightmap.dat").unwrap();
+        let h = CellHeights::parse(&bytes).unwrap();
+        // Executed original 300DB920 loader, 300C8B60 heights and full 300CAB30 hole query.
+        // Leaf file offset 536543, native box minimum (4800,5952), cell-local (704,832).
+        let mut signature = 0xcbf29ce484222325_u64;
+        let mut holes = 0;
+        for x in 0..32 {
+            for y in 0..32 {
+                let (ix, iy) = (352 + x, 416 + y);
+                let sid = h.surface[iy * GRID + ix];
+                signature = (signature ^ (h.at(ix, iy).to_bits() as u64 | ((sid as u64) << 32)))
+                    .wrapping_mul(0x100000001b3);
+                holes += usize::from(h.is_hole(ix as f32 * 2.0 + 0.5, iy as f32 * 2.0 + 0.5));
+            }
+        }
+        assert_eq!(signature, 0x20d861c1961fc442);
+        assert_eq!(holes, 22);
+        // This authored hole lies immediately above a sector boundary. The positive-side
+        // sector owns the SID; the previous sector's shared far-edge sample must not replace it.
+        assert!(h.is_hole(731.0, 833.0));
+        assert!(!h.is_hole(731.0, 831.99));
+    }
+
+    #[test]
+    fn native_coarse_surface_uses_shift_not_nearest_sample() {
+        let n = Node {
+            version: 5, min: [0.0; 3], offset: 10.0, range: 0.25,
+            size: 17, has_holes: true,
+            data: (0..17 * 17).map(|i| 0x4000 | (i % 31) as u16).collect(),
+        };
+        assert_eq!(sample_node(&n, 1, 1).1 & 31, 0);
+        assert_eq!(sample_node(&n, 2, 2).1 & 31, 18);
+        assert_eq!(sample_node(&n, 3, 3).1 & 31, 18);
+        for sid in 0..32 { assert_eq!(node_height(&n, 0x4000 | sid), 4106.0); }
+    }
 
     #[test]
     fn real_cell() {

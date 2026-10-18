@@ -338,11 +338,13 @@ impl<'a> TerrainSampler<'a> {
     }
 
     fn height(&mut self, x: f32, y: f32) -> Option<f32> {
-        self.locate(x, y).map(|(c, lx, ly)| c.mesh_height(lx, ly))
+        let (c, lx, ly) = self.locate(x, y)?;
+        (!c.is_hole(lx, ly)).then(|| c.mesh_height(lx, ly))
     }
 
     fn normal(&mut self, x: f32, y: f32) -> Option<Vec3> {
-        self.locate(x, y).map(|(c, lx, ly)| Vec3::from(c.mesh_normal(lx, ly)))
+        let (c, lx, ly) = self.locate(x, y)?;
+        (!c.is_hole(lx, ly)).then(|| Vec3::from(c.mesh_normal(lx, ly)))
     }
 }
 
@@ -1207,6 +1209,38 @@ mod tests {
         // a sphere rests one radius above flat ground
         let sweep = w.sweep_sphere(Vec3::new(x, y, h + 3.0), Vec3::NEG_Z, 10.0, 0.5, Mask::TERRAIN).unwrap();
         assert!((sweep.t - (3.0 - 0.5 / w.terrain().normal_at(x, y).unwrap().z)).abs() < 0.05, "{}", sweep.t);
+    }
+
+    #[test]
+    fn native_hole_has_no_terrain_ground_ray_or_sphere_contact() {
+        let Some(w) = world() else { return };
+        let (x,y) = (21204.25,9026.5);
+        let z = w.terrain().height_at(x,y).unwrap();
+        assert_eq!(w.terrain().is_hole_at(x,y), Some(true));
+        assert!(w.terrain().ground_at(x,y).is_none());
+        assert!(w.ground_below(x,y,z+10.0,0.0).is_none());
+        assert!(w.raycast_mask(Vec3::new(x,y,z+10.0),Vec3::NEG_Z,100.0,Mask::TERRAIN).is_none());
+        assert!(w.sweep_sphere(Vec3::new(x,y,z+10.0),Vec3::NEG_Z,100.0,0.3,Mask::TERRAIN).is_none());
+        let (x,y) = (21188.25,9030.5);
+        let z = w.terrain().height_at(x,y).unwrap();
+        assert!(w.raycast_mask(Vec3::new(x,y,z+10.0),Vec3::NEG_Z,15.0,Mask::TERRAIN).is_some());
+    }
+
+    #[test]
+    fn original_cave_proxy_floor_is_reachable_through_a_native_terrain_hole() {
+        let Some(w) = world() else { return };
+        w.build_blocking(20,8).unwrap();
+        let (x,y) = (21270.5,8960.5);
+        let raw = w.terrain().height_at(x,y).unwrap();
+        assert!((raw-474.8673).abs()<0.001);
+        assert_eq!(w.terrain().is_hole_at(x,y),Some(true));
+        assert!(w.terrain().ground_at(x,y).is_none());
+        let ground = w.ground_below(x,y,raw+1.0,0.0).unwrap();
+        assert!((ground.height-464.76614).abs()<0.001);
+        let hit = w.raycast_mask(Vec3::new(x,y,raw+1.0),Vec3::NEG_Z,100.0,Mask::ALL).unwrap();
+        assert!(!hit.terrain, "actual cave collision must remain reachable through a terrain opening");
+        w.release_outside(-100000.0,-100000.0,10.0);
+        assert_eq!(w.stats().cells,0);
     }
 
     /// Which models make a cell's collision big (`--ignored --nocapture`).

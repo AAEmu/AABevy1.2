@@ -421,6 +421,9 @@ fn road_mesh(road: &Road, cell: (i32, i32), terrain: &TerrainQuery) -> Option<Me
             ix.rem_euclid(CELL_UNITS as i32) as usize,
             iy.rem_euclid(CELL_UNITS as i32) as usize,
         );
+        if heights.quad_is_hole(lx, ly, 1) {
+            return None;
+        }
         Some(std::array::from_fn(|i| {
             let (ox, oy) = [(0, 0), (1, 0), (1, 1), (0, 1)][i];
             Vertex {
@@ -478,7 +481,7 @@ fn build_mesh(road: &Road, mut quad: impl FnMut(i32, i32) -> Option<[Vertex; 4]>
         for iy in (min.y / UNIT_SIZE).floor() as i32..(max.y / UNIT_SIZE).ceil() as i32 {
             for ix in (min.x / UNIT_SIZE).floor() as i32..(max.x / UNIT_SIZE).ceil() as i32 {
                 let Some(q) = quad(ix, iy) else { continue };
-                for triangle in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]] {
+                for triangle in [[q[0], q[1], q[3]], [q[1], q[2], q[3]]] {
                     let polygon = clip(triangle.to_vec(), &edges);
                     if polygon.len() < 3 {
                         continue;
