@@ -256,6 +256,14 @@ impl Doodads {
                 d.puzzle_group = *puzzle_group;
                 d.item_template_id = *item_template_id;
             }
+            Event::DoodadChanged { obj_id, data } => {
+                let Some(d) = self.by_id.get_mut(obj_id) else { return false };
+                d.data = *data;
+            }
+            Event::DoodadOriginator { obj_id, new_owner_id, .. } => {
+                let Some(d) = self.by_id.get_mut(obj_id) else { return false };
+                d.owner_id = *new_owner_id;
+            }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
                     return false;
@@ -359,10 +367,8 @@ pub(crate) mod tests {
     use crate::model::{Equipment, ModelParams, Movement, UnitKind};
     use crate::wire::Pos;
 
-    #[test]
-    fn doodad_phase_updates_only_the_existing_authoritative_object_and_can_clear_fields() {
-        let obj_id = 0x010203;
-        let doodad = Doodad {
+    fn doodad_fixture(obj_id: u32) -> Doodad {
+        Doodad {
             obj_id,
             template_id: 2336,
             owner_obj_id: 0,
@@ -385,7 +391,13 @@ pub(crate) mod tests {
             owner_type: 0,
             owner_db_id: 0,
             data: 0,
-        };
+        }
+    }
+
+    #[test]
+    fn doodad_phase_updates_only_the_existing_authoritative_object_and_can_clear_fields() {
+        let obj_id = 0x010203;
+        let doodad = doodad_fixture(obj_id);
         let mut state = Doodads::default();
         let event = Event::DoodadPhaseChanged {
             obj_id,
@@ -440,6 +452,60 @@ pub(crate) mod tests {
         );
         state.apply(&Event::DoodadsRemoved(vec![obj_id]));
         assert!(!state.apply(&event));
+        assert!(state.by_id.is_empty());
+    }
+
+    #[test]
+    fn doodad_data_and_originator_update_known_objects_without_inventing_owner_object_or_faction() {
+        let obj_id = 8;
+        let mut state = Doodads::default();
+        let data = Event::DoodadChanged { obj_id, data: -3 };
+        let owner = Event::DoodadOriginator {
+            obj_id,
+            new_owner_id: 0xf1234567,
+            new_faction: 0x80000000,
+        };
+        let sound = Event::DoodadSound {
+            obj_id,
+            sound_id: u32::MAX,
+        };
+        for event in [&data, &owner, &sound] {
+            assert!(!state.apply(event));
+        }
+        assert!(state.by_id.is_empty());
+        let mut original = doodad_fixture(obj_id);
+        original.owner_obj_id = 0x112233;
+        original.parent_obj_id = 0x445566;
+        original.owner_type = 3;
+        original.owner_db_id = 12345;
+        state.apply(&Event::DoodadsSpawned(vec![original.clone()]));
+        assert!(state.apply(&data));
+        assert!(state.apply(&owner));
+        let changed = state.by_id.get(&obj_id).unwrap();
+        assert_eq!((changed.data, changed.owner_id), (-3, 0xf1234567));
+        let mut expected = original.clone();
+        expected.data = -3;
+        expected.owner_id = 0xf1234567;
+        assert_eq!(
+            changed, &expected,
+            "owner object/attachment/permission/phase metadata is not on this wire"
+        );
+        assert!(!state.apply(&sound));
+        assert_eq!(state.by_id.get(&obj_id), Some(&expected));
+        state.apply(&Event::DoodadChanged { obj_id, data: 0 });
+        state.apply(&Event::DoodadOriginator {
+            obj_id,
+            new_owner_id: 0,
+            new_faction: 0,
+        });
+        assert_eq!(
+            (state.by_id[&obj_id].data, state.by_id[&obj_id].owner_id),
+            (0, 0)
+        );
+        state.apply(&Event::DoodadsRemoved(vec![obj_id]));
+        for event in [&data, &owner, &sound] {
+            assert!(!state.apply(event));
+        }
         assert!(state.by_id.is_empty());
     }
 
