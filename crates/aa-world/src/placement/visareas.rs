@@ -1,6 +1,6 @@
 //! The compiled visarea container, recovered from the 1.2 engine's 3017A020/30170860.
 //! Supported placements use the ordinary cell streamer; portal visibility and area lighting
-//! remain separate work. Compiled voxel/distant-cloud payloads are only skipped.
+//! remain separate work. First-LOD voxel proxies are retained for collision; distant clouds are skipped.
 
 use super::{CellObjects, PlacementError, walk_node};
 use crate::reader::{Reader, cstr, u32_at};
@@ -117,6 +117,7 @@ pub(super) fn append_objects(out: &mut CellObjects, mut interior: CellObjects) {
     out.decals.extend(interior.decals);
     out.roads.extend(interior.roads);
     out.water.extend(interior.water);
+    out.voxels.extend(interior.voxels);
 }
 
 #[cfg(test)]

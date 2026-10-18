@@ -12,7 +12,7 @@
 //!                    then an octree: node { u32 version, f32 box[6], u32 objectsBlockSize, u8 childMask },
 //!                    objects block = repeated { u32 type, payload }, then one child node per mask bit.
 //!                    types: 1 brush (128 B), 2 vegetation (64 B), 9 decal (111 B), 13 road (63 B + 12 n),
-//!                    11 water volume (119 B + two float3 arrays), 6 voxel (compiled records skipped),
+//!                    11 water volume (119 B + two float3 arrays), 6 voxel (first compiled LOD retained),
 //!                    14 distant cloud (79 B, skipped).
 //! ```
 //!
@@ -30,6 +30,10 @@
 
 mod visareas;
 pub use visareas::parse_visareas_dat;
+mod voxels;
+pub use voxels::PlacedVoxel;
+pub(crate) use voxels::collision as voxel_collision;
+pub(crate) use voxels::decoded_size as voxel_decoded_size;
 
 use bevy::math::{Mat4, Quat, Vec3};
 
@@ -252,6 +256,9 @@ pub struct CellObjects {
     pub decals: Vec<Decal>,
     pub roads: Vec<Road>,
     pub water: Vec<Water>,
+    /// Native type-6 voxel slots. Only the first compiled LOD is retained, with bounded bytes.
+    /// Used by collision; native surface-atlas rendering remains unsupported.
+    pub voxels: Vec<PlacedVoxel>,
     /// Static render slots from `entities.xml`, including hidden cinematic props as data.
     pub entity_props: Vec<crate::entities::PlacedProp>,
     pub animated_props: Vec<crate::entities::PlacedProp>,
@@ -467,7 +474,7 @@ fn walk_node_depth(r: &mut Reader, out: &mut CellObjects, depth: usize) -> Optio
         match t {
             1 => out.brushes.push(read_brush(block.bytes(128).ok()?, Vec3::ZERO)),
             2 => out.vegetation.push(read_vegetation(block.bytes(64).ok()?, Vec3::ZERO)),
-            6 => skip_voxel(&mut block)?,
+            6 => voxels::read_record(&mut block, &mut out.voxels)?,
             9 => out.decals.push(read_decal(block.bytes(111).ok()?)),
             13 => {
                 let head = block.bytes(63).ok()?;
@@ -493,28 +500,6 @@ fn walk_node_depth(r: &mut Reader, out: &mut CellObjects, depth: usize) -> Optio
     for bit in 0..8 {
         if mask >> bit & 1 != 0 {
             walk_node_depth(r, out, depth + 1)?;
-        }
-    }
-    Some(())
-}
-
-/// Native 301F5E30/3019D570: a version-5 voxel record, optionally followed by compiled
-/// CGF memory blocks. Do not decompress or retain them until native voxel materials/atlases
-/// are supported; consuming their exact boundaries preserves subsequent placed objects.
-fn skip_voxel(r: &mut Reader) -> Option<()> {
-    let header = r.bytes(198_775).ok()?;
-    if u32_at(header, 39) != 5 {
-        return None;
-    }
-    // SVoxelChunkVer5 begins at +39; nFlags at +28, bit5 = compiled meshes present.
-    if u32_at(header, 67) & 0x20 != 0 {
-        let count = r.u32().ok()? as usize;
-        if count > r.remaining() / 4 {
-            return None;
-        }
-        for _ in 0..count {
-            let size = r.u32().ok()? as usize;
-            r.skip(size).ok()?;
         }
     }
     Some(())
@@ -568,6 +553,7 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.decals = o.decals;
         objects.roads = o.roads;
         objects.water = o.water;
+        objects.voxels = o.voxels;
     }
     // Interior placements are not the exterior octree's duplicate export. Keep their own table
     // indices until parsing succeeds, then remap once on this cell's existing placement worker.
