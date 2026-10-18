@@ -1709,3 +1709,62 @@ Inspected `equipment_cooldown` aa-dev captures in
 active native-handler countdowns at188-268 FPS and unchanged ready icons at405-417
 FPS. Both QA processes self-close and contain no runtime errors. Shared build load
 differs between captures; these are behavior checks, not a performance comparison.
+
+### Owned-pet equipment presentation (2026-10-18)
+
+The original pet information window now reads its own received physical equipment
+and the NPC's `mate_equip_slot_pack_id`. Pack1 exposes head/saddle/feet, pack2
+head/chest/feet and pack3 none. The native one-based slot IDs are1/3/4/7; missing
+NPC/pack data enables no slots. `IsMateEquipableSlot` uses the existing uniquely
+correlated owned-Mate identity, including owner and timeline checks. It does not
+turn an unowned NPC template into an equipable pet.
+
+`GetEquippedItemTooltipText` retains the existing player getter, with its bridge
+borrow released before the callback. The current pet's token, object-ID alias
+and a target alias that actually denotes that pet read the pet's own28-slot array.
+An empty physical item returns a table with itemType/lookType0. A known unit with
+an unknown static item retains the received template/look identity. Unknown units
+return zero Lua values instead of falling back to the player's worn items.
+The original native read getter accepts other resolved actor units without an
+ownership guard; broader actor inspection remains unwired in this bounded adapter.
+Its slot bounds check is an app guard; the native wrapper lacks that check.
+
+The original `OnEquipmentChanged` helper owns item/grade icons, locks, durability
+presentation and hover tooltips. Received full equipment rows and current-mate
+FC flag rows raise `UNIT_NPC_EQUIPMENT_CHANGED` with exactly one numeric argument,
+the one-based physical slot, retaining duplicate rows and order. Native event
+sources3936b850/394e111d do not use item equality as an event gate. Snapshot-only
+refreshes invoke the original presentation helper without inventing received
+notifications. Raw mate equipment transaction receipts are still not settled into
+bag/pet state: their nominal success flag is not a reliable settlement signal.
+
+The item formatter shares the existing static item tooltip calculations and reads
+the pet item's received grade, flags, durability and temper. All63 actual Pet Gear
+catalog rows have no equipment-set row, so their display does not borrow the
+player's set counts. Native pet actor attribute calculations remain separate from
+the existing general tooltip arithmetic and its open corner cases. Cursor pickup,
+drag destination mapping, bind/unpack confirmations and transaction settlement
+remain separate work; this milestone does not claim those controls are complete.
+
+Native `GetFeatureSet` reads initial-config byte1 as numeric `levelLimit` and
+byte8 as numeric `mateLevelLimit` (39497025/39497071). These now come from received
+GameConfig even before player spawn; a received zero remains zero. Missing bytes
+use an explicit app zero sentinel, never an inferred XP-table maximum. Other
+feature fields still retain their prior providers. The original tooltip therefore
+uses the pet's own level/cap. Native item formatter3942281a calls397cf020 with tag29
+to produce the boolean `isPetOnly`; that field now comes from actual tagged_items.
+All63 current Pet Gear templates have tag29. Source artifacts are under
+`data/extract/aa-ui/native-feature-level-caps-20261018.txt` and
+`data/extract/aa-net/pet-only-{source,runtime,items}-20261018.*`.
+
+Validation: full client203 passed/35 ignored in53.62s; four focused equipment
+tests pass, including the original physical panel toggle and real hover tooltip.
+The original pet-statistics and equipped-item-cooldown probes also pass separately
+(3.25s/3.09s). Duplicate slot events, removal of an actual icon, replacement pet
+identity, absent/unknown items and the two NPC pack layouts are covered. Numeric
+feature cap tests include absent, zero and255 bytes without positive defaults.
+Inspected aa-dev captures in `shots/hud/sol61-pet-equipment/` show the Snowlion's
+head/saddle/feet at194.6-196.8 FPS and Wolfhound's head/chest/feet at189.2-222.3 FPS.
+Both capture processes self-close with no runtime errors; the user's existing
+world-selection client remains open. These captures use explicit received fixtures
+and do not claim a live pet-equipment transaction.

@@ -333,7 +333,7 @@ impl Fake {
         let tl = arg(0) as u16;
         Some(match op {
             "start" => Event::SkillStarted(SkillStarted { skill_id: arg(1), tl, caster, target, cast_ms: arg(2), base_cast_ms: arg(2), synergy: 0, result: 0, result_value: 0 }),
-            "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4) }),
+            "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4), raw_final_flag: 0 }),
             "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: me, caster_pos: None, target_pos: None, casting_ms: arg(3) }),
             "hit" => Event::UnitDamaged(UnitDamage {
                 action: CastAction { kind: 0, skill_id: arg(1), tl, buff_id: 0 },

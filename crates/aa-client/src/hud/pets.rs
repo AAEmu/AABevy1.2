@@ -153,6 +153,7 @@ pub(super) fn update(
     let mut starts = Vec::new();
     let mut errors = Vec::new();
     let mut combat = Vec::new();
+    let mut equipment = Vec::new();
     {
         let mut data = bridge.0.borrow_mut();
         if owner == 0 {
@@ -161,6 +162,7 @@ pub(super) fn update(
             return;
         }
         for NetEvent(event) in events.read() {
+            equipment.extend(owned::equipment_slots(&data, event));
             if let Some(change)=owned::event(&mut data, event) { combat.push(change); }
             if let Event::Mate(aa_net::mate::MateEvent::RequestRejected {
                 command: MateCommand::ReviveItems { .. },
@@ -205,6 +207,7 @@ pub(super) fn update(
         if let Some(mates)=mates { owned::commands(&mut data,&player,&units,&mates,&mut net); }
     }
     owned::push(&rt,&bridge.0);
+    for slot in equipment { rt.fire_event("UNIT_NPC_EQUIPMENT_CHANGED", slot); }
     for object in starts {
         rt.fire_event("NPC_INTERACTION_START", ("stabler", "", object.to_string()));
     }

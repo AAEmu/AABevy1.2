@@ -155,6 +155,7 @@ pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Op
     let grade = grade.unwrap_or_else(|| i64::from(super::store::ui_grade(info.fixed_grade.max(0) as u8)));
     let t = lua.create_table()?;
     t.raw_set("itemType", id)?;
+    t.raw_set("isPetOnly", info.pet_only)?;
     t.raw_set("lookType", id)?;
     t.raw_set("itemGrade", grade)?;
     if let Some((name, color)) = game.grades.get(&grade) {

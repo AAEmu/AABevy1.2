@@ -22,6 +22,8 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
         d.snapshot.max_hp = 100;
         d.snapshot.mp = 100;
         d.snapshot.max_mp = 100;
+        // Explicit received feature bytes, independent of XP tables.
+        d.feature_limits = (Some(55), Some(50));
         d.panels.actions_known = true;
         d.panels.bag_slots = 50;
         d.breath.actor = Some(100);

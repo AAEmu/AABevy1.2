@@ -121,6 +121,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Inv
             expedition_id: 0,
             appellation: 0,
             flags: 0,
+            gm_modes: [0;4],
             skills: vec![],
             passive_buffs: vec![],
             ability_exp: vec![],
