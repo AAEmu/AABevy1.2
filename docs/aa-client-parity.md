@@ -13,8 +13,8 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest checked milestone: client245 passed/37 optional probes ignored, plus the
-separate original equipment-cooldown probe. Native local chat tabs, filters,
+Latest checked milestone: client249 passed/38 optional probes ignored, plus the
+separate original crime/jury physical-hover and tooltip probe. Native local chat tabs, filters,
 palette, selection and opacity persist per selected world/character; original
 Save/Cancel/Reset controls and seven chat/cooldown/world-list captures pass.
 Received cooldown rows advance once per process frame before HUD reads, keeping
@@ -22,7 +22,12 @@ queries side-effect free. Earlier achievement tracing/detail/persistence and
 native list geometry checks remain passed. Network463 tests pass, including
 crime/jury and first trial receipts. World197 tests/9 existing probes ignored,
 direct/transmission/dual-viewport GPU controls and original scene/unload checks
-pass with sky composition before the water transmission copy. Owning docs retain
+pass with sky composition before the water transmission copy. Received crime/jury
+header getters, native ordered callbacks and the guarded CS079 request now drive
+original character labels and the waiting tooltip. Three captures are inspected;
+the native dishonor rich-text icon remains an identified toolkit gap. Network474
+tests now pass, including trial history/progress and automatic native CS072 replies.
+Owning docs retain
 exact evidence and limits. Remaining native cooldown producers and further
 rendering/gameplay gaps stay active; overall1.2 parity is unfinished.
 
@@ -49,7 +54,7 @@ rendering/gameplay gaps stay active; overall1.2 parity is unfinished.
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
-| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed | Native list geometry and all four original pages captured; English summary/description data, unsupported UI-data grammar and live save/re-entry validation; ranking, trial/jury/crime/prison and racing flows |
+| Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury header fields and native callbacks, captured-identity jury queue request, original character labels/physical hover/localized waiting tooltip | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; dishonor inline icon; ranking, remaining trial/jury/crime reporting/prison and racing flows; paired live crime/jury settlement |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
 | Options and UI toolkit | Applied account-local options/sound/key bindings and bag persistence; original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, graphics application, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
 

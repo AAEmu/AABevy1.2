@@ -111,6 +111,7 @@ pub struct HudData {
     pub(super) expedition: super::expedition::View,
     pub(super) achievement: super::achievement::View,
     pub(super) chat_config: super::chat::config::View,
+    pub(super) crime: super::crime::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -164,6 +165,7 @@ impl Default for HudData {
             expedition: Default::default(),
             achievement: Default::default(),
             chat_config: Default::default(),
+            crime: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -275,6 +277,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::achievement::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::chat::config::install(lua, bridge)?;
+    super::crime::install(lua, bridge)?;
     super::sorting::install(lua, bridge)
 }
 
