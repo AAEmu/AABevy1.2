@@ -549,6 +549,7 @@ pub enum ServerMsg {
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// Raw skill-effect feedback. Authoritative item updates are separate item-task receipts.
+    ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
     LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
@@ -689,6 +690,7 @@ impl ServerMsg {
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffUpdated { .. } => "SCBuffUpdated",
+            Self::ItemUccDataChanged { .. } => "SCItemUccDataChanged",
             Self::GradeEnchantResult(_) => "SCItemGradeEnchantResult",
             Self::GradeEnchantBroadcast(_) => "SCItemGradeEnchantBroadcast",
             Self::LunagemSocketingResult { .. } => "SCItemSocketingLunagemResult",
@@ -1110,6 +1112,7 @@ impl ServerMsg {
             }
             sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
             sc::SCBuffUpdatedPacket => Self::BuffUpdated { obj_id:r.bc()?, index:r.u32()?, stacks:r.i32()?, charged:r.i32()? },
+            sc::SCItemUccDataChangedPacket => Self::ItemUccDataChanged { ucc_id:r.u64()?, player_id:r.u32()?, target_item_id:r.u64()? },
             sc::SCItemGradeEnchantResultPacket => Self::GradeEnchantResult(crate::item_effect::GradeEnchantResult::read(r)?),
             sc::SCItemGradeEnchantBroadcastPacket => Self::GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast::read(r)?),
             sc::SCItemSocketingLunagemResultPacket => Self::LunagemSocketingResult { raw_result:r.u8()?, item_id:r.u64()?, template_id:r.u32()?, raw_install:r.u8()? },
@@ -2143,6 +2146,18 @@ mod tests {
         for (opcode,body) in [(sc::SCItemGradeEnchantResultPacket,&result),(sc::SCItemGradeEnchantBroadcastPacket,&broadcast)] {for n in 0..body.len(){assert!(ServerMsg::decode(&game_frame(opcode,&body[..n])).is_err());}}
         let mut batch=Writer::new();batch.u16(0).u16(sc::SCItemGradeEnchantResultPacket).raw(&result).u16(0).u16(sc::SCItemGradeEnchantBroadcastPacket).raw(&broadcast).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
         assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![ServerMsg::GradeEnchantResult(expected),ServerMsg::GradeEnchantBroadcast(announced),ServerMsg::BuffRemoved{obj_id:9,index:7}]);
+    }
+
+    #[test]
+    fn ucc_result_native_golden_truncation_and_dd04_alignment() {
+        let raw=[8,7,6,5,4,3,2,1,0xdd,0xcc,0xbb,0xaa,0x18,0x17,0x16,0x15,0x14,0x13,0x12,0x11];
+        let expected=ServerMsg::ItemUccDataChanged{ucc_id:0x0102030405060708,player_id:0xaabbccdd,target_item_id:0x1112131415161718};
+        assert_eq!(decode(sc::SCItemUccDataChangedPacket,&raw),expected);
+        for n in 0..raw.len(){assert!(ServerMsg::decode(&game_frame(sc::SCItemUccDataChangedPacket,&raw[..n])).is_err());}
+        assert_eq!(decode(sc::SCItemUccDataChangedPacket,&[255;20]),ServerMsg::ItemUccDataChanged{ucc_id:u64::MAX,player_id:u32::MAX,target_item_id:u64::MAX});
+        assert_eq!(decode(sc::SCItemUccDataChangedPacket,&[0;20]),ServerMsg::ItemUccDataChanged{ucc_id:0,player_id:0,target_item_id:0});
+        let mut batch=Writer::new();batch.u16(0).u16(sc::SCItemUccDataChangedPacket).raw(&raw).u16(0).u16(sc::SCItemUccDataChangedPacket).raw(&raw).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
+        assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::BuffRemoved{obj_id:9,index:7}]);
     }
 
 }
