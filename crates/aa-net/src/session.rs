@@ -540,6 +540,7 @@ pub enum Event {
     GameDecodeFailed { message:String },
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Bounty(crate::BountyEvent),
     /// Local successful CS072 transport write, never an authoritative jury/seat response.
     JurySummonReplyRequested { character_id:u32,trial_id:u32,court:u32,jury_number:i32 },
     JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
@@ -1650,6 +1651,7 @@ impl Session {
                 }
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
+            M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
@@ -4546,6 +4548,14 @@ mod tests {
             if matches!(receipt,crate::TrialEvent::SummonJury{..}) {assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRejected{character_id:0,..})));}
         }
         assert!(events.try_recv().is_err(),"no inferred jury choice or seat response");
+    }
+
+    #[tokio::test]
+    async fn bounty_receipts_forward_duplicates_without_automatic_payments() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let receipt=crate::BountyEvent::Paid{hunter:b"H\0tail".to_vec(),arrested:vec![255],money:i64::MIN};
+        for _ in 0..2 {session.game_msg(Ok(game::ServerMsg::Bounty(receipt.clone()))).await;assert!(matches!(events.try_recv(),Ok(Event::Bounty(actual)) if actual==receipt));}
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]

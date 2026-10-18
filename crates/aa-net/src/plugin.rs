@@ -183,6 +183,7 @@ net_state! {
     dominion: crate::Dominion,
     trials: crate::trial::Trials,
     crimes: crate::crime::Crimes,
+    bounties:crate::Bounties,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
@@ -317,6 +318,21 @@ mod equipment_flags_tests {
         let state=app.world().resource::<crate::Trials>();assert_eq!(state.defendant_context,Some(7));assert_eq!(state.jury_counts,Some([2,5]));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert_eq!(*app.world().resource::<crate::Trials>(),crate::Trials::default());
+    }
+
+    #[test]
+    fn plugin_bounty_existing_actor_and_cache_retention() {
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState| {
+            state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(8))));
+            state.apply(&Event::Bounty(crate::BountyEvent::UnitMoney{obj_id:8,money:-1}));
+        }).unwrap();
+        assert_eq!(app.world().resource::<Units>().by_id[&8].bounty_money,Some(-1));
+        assert!(matches!(app.world().resource::<crate::Bounties>().last_receipt,Some(crate::BountyEvent::UnitMoney{money:-1,..})));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::LeftWorld{target:0})).unwrap();
+        assert!(app.world().resource::<crate::Bounties>().last_receipt.is_some());
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert_eq!(*app.world().resource::<crate::Bounties>(),crate::Bounties::default());
     }
 
     #[test]

@@ -124,3 +124,6 @@ pub use family::{Families, FamilyEvent, FamilyInvitation, FamilyMember, FamilyRo
 
 pub mod unpack;
 pub use unpack::UnpackItemRequest;
+
+mod bounty;
+pub use bounty::{Bounties,BountyEvent,BountyNotice,BountyRow};
