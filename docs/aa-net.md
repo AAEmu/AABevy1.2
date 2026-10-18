@@ -4449,3 +4449,81 @@ then contribute their own descriptor+dc modifiers with multiplier1 and signed ow
 Seven gem entries are visited, stopping at first sentinel. Base-slot eligibility rejection
 at397cc080 skips all those contributions; it is a descriptor impl_id switch with static
 subtype/equip-slot mask lookups, not a proven simple use_as_stat predicate.
+
+
+### Mate equipment eligibility and count helper follow-up
+
+397cc080's jump table at397cc160 accepts only impl1(weapon),2(armor),22(backpack),
+24(accessory). Weapon resolves396a6d40 then holdable39695ab0, takes holdable+74
+slot_type; armor resolves39695e00+30; accessory396a6d00+20. Backpack396a6e40+8 must
+be type2 or7 and uses slot_type30. All other impls reject. Nonzero slot_type must map
+through3956f2e0 primary or3956f430 secondary to the actual raw equipped slot.
+Primary mappings:1..9?0..8,10?9,11?11,12?13,13?14,14?15,15?16,16/17?15,
+18?17,19invalid,20?16,21?18,22invalid,23..31?19..27. Secondary only10?10,
+11?12,17?16; otherwise?1. The separate slot27 helper398a0350 applies the same
+broken-item/static-slot checks and Item/rune/gem modifier calls as slots0..18.
+
+Neither outer helper nor generated-primary3989fa80 checks use_as_stat. Generated
+primaries require attr0..4, a resolved subtype mod_set, selected nonzero weight and
+nonzero weight count. Count397cc670 tests nonzero DWORDs, not positive-only; selected
+weight397cc610 and total397cc6b0 are consumed as low unsigned bytes. Main arithmetic
+uses x87/f64 intermediates, unsigned config constants, signed item level byte, a narrowed
+f32 power result, f64 exact0.01 (39a1fe78), signed grade stat_multiplier, then f64?f32
+and floor(x+0.5f). Weapon applies a second equivalent round after holdable stat multiplier.
+Power exponent uses unsigned stat_value_const times f32 0.01 (3999cf90), reciprocal;
+bases are3 for one weight,1.5 for two,1 otherwise. Existing client tooltip/stat f32-chain
+helpers are not proven exact substitutes. No use_as_stat eligibility was inferred.
+
+CountBagItemByItemType registration39450cfe points to3944de50. It uses bag global
+394e0960?3a5ad9a0 and3961faf0(template,nullFilter), summing physical available bag slots
+with matching template+8 and count+10. It has no bank, flag4, secured-item or pending-slot
+filter. Native expansion3930c2e8..f4 instead calls397ccda0(template,false,true): same bag
+count but with inventory+C348 pending-location map exclusion; no secured-item flag test.
+Thus the ordinary Lua count getter and actual expansion preflight differ for pending slots.
+
+
+Native3989fa80 oracle (ignored helper `mate-stats-native/item_stat_oracle.py`) executes
+its full x87/SSE arithmetic and397cc610/670/6b0. Only lookup return pointers are mocked
+to current SQLite descriptors and external MSVCR100 `_CIpow` is mocked with Python
+libm double after spilling native x87 arguments. Thus this is not a no-stub claim for
+the external pow implementation. Real raw grades0/1/6, attributes STA/INT respectively:
+
+| Template | Level | Grade0 | Grade1 | Grade6 |
+|---|---:|---|---|---|
+| armor31432 |62|29,23|23,19|41,33|
+| accessory32920 |45|5,4|4,3|7,6|
+| weapon28905 |62|32,63|26,50|44,89|
+
+Config item_stat350, holdable_stat10, wearable_stat90, stat_value110. Weapon modset64
+weights STA1/INT2; two-weight pow base1.5, exponent0.9090909294106748, narrowed result
+1.4457159042358398. Its base double is31.372035121917726, first pre-round STA values
+20.914690081278483/16.731752065022786/29.280566113789877; first rounded values21/17/29.
+Holdable multiplier150 is then applied and separately rounded to32/26/44. The JSON
+artifact records every row's actual config/weights/coverage/grade and intermediate values.
+This evidence supports a distinct native helper rather than reusing f32 tooltip formulas.
+
+
+Previously unnamed Buff descriptor+128 is `buffs.one_time`: SQL39a07550 column0x58,
+loader397344ce..f4 stores parsed T/t/1 boolean at temp?218, record base?340. Native
+398a097d..84 skips the entire Buff modifier callback when this is nonzero, including
+base, conditional and duration-dependent vectors. This is distinct from charge/stack
+rules and must be checked before applying the resource's native stack multiplier.
+
+
+Conditional/duration Buff presence is identified by child rows, not a scalar `buffs` flag.
+Conditional vector+234: buff_unit_modifiers(owner_type='Buff',owner_id=buffID), each
+row's id joining unit_modifiers(owner_type='BuffUnitModifier',owner_id=row.id). SQL
+39a0c158 loader3973d14a builds gameDB+11a0; buff loader39735483..3973555a selects
+'Buff'/owner and appends into temporary?10c (=record+234). Consumer398a07c0 tests
+current unit buff identity/tag predicates before adding the linked unit modifier.
+Duration vector+254: dynamic_unit_modifiers(buff_id=buffID), SQL39a08e00 loader3972a800,
+postlink39735b80..bc8. Rows directly name unit_attribute_id and unit_modifier_type_id,
+with LinearFunc or ManualFunc references. Consumer3989fee0 is called only when runtime
+tick_ms AND duration_ms are nonzero (398a09bb..ca), and uses tick index / total tick count
+with runtime stack multiplier. A base-only stat adapter can identify unsupported relevant
+rows explicitly rather than silently dropping these contributions.
+
+Current compact DB conditional joins contain no attributes0..7. Relevant dynamic rows:
+HP6 buffs68,698,699,700,701,711; MP7 buffs712,1892..1895; primaries2591(STA/SPI),
+6663(STR/DEX),6664(STA/INT),6665(STA/SPI),6666(STR/SPI). These are observations of the
+current rows, not protocol constants; load child associations and test actual attributes.
