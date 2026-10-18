@@ -96,6 +96,71 @@ FPS claim applies to this numeric lookup. Ignored reproducible source/oracle
 artifacts: `environment/spatial/native-world-query-{source.txt,goldens.json}`
 and `native_world_query.py` under `data/extract/aa-world/`.
 
+#### Explicit native Group-18 subzone query (`subzone.rs`)
+
+`NativeSubZonePolygon` prepares already-transformed seamless-local Cry vertices
+and raw polygon height. `NativeSubZoneSnapshot::refresh` accepts AreaManager
+registration order plus a resolver for live IEntity/Area proxies. It retains
+only Group 18, caps discovery at 1024 **before** live resolution, and saves each
+resolved area ID/entity ID. `query` takes global Cry XYZ and explicit signed
+seamless origin cells, resolves full entity IDs again, and returns the saved ID
+of the last active containing polygon. Missing/stale proxies and disabled areas
+are skipped; no priority sort, minimum-area preference or parent-ID walk occurs.
+The resolver must validate full entity identity, including generation, and
+provide CArea's active byte rather than inferring it from entity visibility.
+
+No plugin/resource, automatic XML loader or HUD fallback is installed. Input
+registration/liveness and native-local geometry remain an explicit integration
+boundary. Box/sphere Group-18 areas are outside this polygon slice. Invalid or
+nonfinite polygon inputs are declined. Snapshot memory is at most 1024 ID pairs
+and reused after refresh; query allocates nothing and checks at most 1024 saved
+entries. Empty refresh clears all results without retaining geometry handles.
+
+Native proof: client `39173B56 -> 391EF3B0` (`GameClient::SubZoneManager::Update`)
+rebuilds the snapshot at `391EEE00`. EntitySystem ctor `320218A0` installs
+`320C63A0`; `+0xE0 -> 3201B890 -> 32099720` walks AreaManager's area vector,
+filters CArea+0x44 equal to 18 and emits entity IDs at +0x48, capped at 1024.
+`3201B8F0` resolves the full entity ID and checks generation. Entity proxy 5's
+`+0x60 -> 32085370` supplies the area ID. Query `391EEF00` re-resolves each
+saved entity/proxy; `320CD970+0xB0 -> 320854F0 -> 3208F090` tests containment
+with `ignoreHeight=false`. Each hit overwrites the result, without an early
+exit. Origin conversion is the independent `365EB1C0` adapter described above.
+`32094AD0` produces segment slopes/intercepts and minimum vertex Z. Polygon
+height <=0 is unbounded; positive height includes both floor and ceiling.
+Crossings use `lowY < y <= highY`; vertical edges use `edgeX >= x`, slopes
+strict `intersectionX > x`, and horizontal edges do not contribute.
+
+The original x86 producer, discovery, entity identity check, snapshot, origin
+adapter and containment/query execute in the ignored native oracle. Only heap
+allocation and fixture IEntity GetId/GetProxy storage are supplied; producer
+execution stops before the external AreaManager dirty notification. Controls
+cover order reversal, stale entity/missing proxy/disabled last entry, snapshot
+refresh/unload, cap, height/axis/sloped edges and positive/negative origins.
+Additional original numeric fixtures use all 45 Group-18 polygons in zone129
+mission `Objects`, seven probes each: 315 queries, 46 hits, native FNV sequence
+`A2EF7777D53F10B8`. These are geometry fixtures, not runtime load discovery.
+Source/oracles are under ignored `environment/spatial/`:
+`native_subzone_query.py`, `native-subzone-{query,real}-goldens.json`,
+`native-polygon-producer.txt`, `subzone-{manager,bootstrap}-asm.txt`.
+
+Automatic area loading remains unresolved after three bounded candidates:
+
+* Seamless `+0x74 -> 365EE220` loads a zone's `mission_mission0.xml`, selects
+  `Objects`/`ObjectsSyncless` using raw global flags, injects `zoneId`, then
+  calls EntitySystem `+0x94 -> 3201BC20`. Its closed caller `365EB040` is the
+  explicit **ss_load_zone_objects** debug command registered at `365EE970`;
+  this is insufficient proof for automatic production activation.
+* CryAction `3050D7E0` enumerates WorldSystem zones to build mission metadata;
+  `306ABD00/306ABEBA` loads a selected level/mission's `Objects` through the
+  same EntitySystem method. Which seamless zone set/order this activates,
+  and its unload/registration lifetime, are not yet closed.
+* Native cell loading `30145DE4/30145EBD` consumes `client/entities.xml`.
+  Eight bounded main-world cells (9,14;12,10;15,15;20,8;21,8;13,10;12,14;15,16)
+  contain no Group-18 records. Editor `level_design/.../subzone_area.xml`
+  is also insufficient: zone129 has 13 shapes there versus 45 in mission
+  `Objects` (and a duplicate set in `ObjectsSyncless`). Neither all editor
+  polygons nor all missions are automatically treated as live areas.
+
 ### terrain/heightmap.dat
 
 Header (version, flags, chunk size, 4096 units, unit 2 m, sector 64 m, `zRatio`, `oceanLevel`), then a depth first quadtree of 341 nodes
