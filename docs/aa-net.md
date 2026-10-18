@@ -2491,3 +2491,91 @@ round trip, reconnect durability and native UI application remain unverified whi
 Validation: `cargo test -p aa-net --features bevy --quiet` passed235 library tests and2
 scripted loopback integration tests;9 live lane tests remained ignored. No lane traffic,
 server mutations, dependency changes or other-crate edits were made for this milestone.
+
+
+## Environmental reports and authoritative combat flags (2026-10-17)
+
+Four previously unhandled receives now have exact boundaries in DD01/DD04:
+
+| Opcode | `ServerMsg` / session `Event` | Exact body |
+|---|---|---|
+|0b3|`EnvDamage(EnvironmentDamage)`|u8 raw source, BC target, u32 amount; full u32 gimmick ID only for source1|
+|1bc|`SetBreath { breath: u32 }`|one unsigned u32 for the local character|
+|043|`ForceAttackSet { obj_id, on }`|BC object ID, bool|
+|078|`UnitInvisible { obj_id, invisible }`|BC object ID, bool|
+
+`EnvironmentDamage { source, target_obj_id, amount, gimmick_id: Option<u32> }` preserves
+unsigned values and unknown source bytes. Exactly source1 has the additional field; all other
+source values have an eight-byte body rather than twelve. The source1 gimmick ID is a full
+u32 (including high bits), unlike the target's 24-bit ID. No raw source is coerced to an enum,
+no target is spawned, and the report never subtracts HP or invents death/combat engagement.
+The existing points/death events remain authoritative. In particular the lane's reported fall
+amount can differ from the applied HP delta when the fall cap/stun path is used.
+
+`CombatStatus` (root export, NetPlugin resource and `WorldState.combat_status`) records only
+received metadata. `get(obj_id)` / `by_unit` expose `UnitCombatFlags { force_attack:
+Option<bool>, invisible: Option<bool> }`. A player/unit announcement creates an unknown
+entry; explicit flags update **known objects only**, and duplicate announcements retain the
+last received flag. No initial true/false is inferred from buffs, movement or skipped spawn
+bits. Removal drops that object's flags; reuse starts unknown. Character selection, logout
+and disconnect clear the resource. Receiving invisibility does not delete a unit or decide
+how it should render. There are no new required `Unit` or `PlayerStats` literal fields.
+
+`CombatStatus.breath: Option<u32>` is the last local report, including0 and u32::MAX, without
+a guessed maximum, percentage, countdown, underwater state or automatic reset. This packet
+contains no object ID. It is scoped to the selected-character/connection lifecycle rather
+than assigned to a nearby target, and elapsed time never changes this raw received value.
+
+Native 1.2 reader/consumer evidence (`D:/aa-re/client12/x2game_unpacked.dll`):
+
+- EnvDamage factory opcode assignment391ac0bb, vtable399b399c -> reader397c3560 ->
+  shared damage record397c01b0. The record reads source via byte slot44, target through
+  BC slotscc/d0 with width3, amount via unsigned32 slot3c, then `source==1` gates another
+  unsigned32 at397c0250. Handler391d60e0 ->39391720 builds combat presentation for native
+  source0 (fall) and2 (drowning); no matching native presentation for the lane's collision3
+  was inferred. aa-net exposes every source neutrally.
+- SetBreath assignment391b3b6b, vtable399b40b4 -> reader397afd50: unsigned32 slot3c.
+  Handler391ddf30 targets the current player and calls3930b050. That native method adjusts
+  fields at+0xb24/+0xb28 using the engine clock; reproducing its full breathing model would
+  require the surrounding native state/GetBreathTime/UnitBreath contract. This receive cache
+  does not mistake the adjusted native field for a directly usable wire countdown.
+  Original `unitframe/player_breath_bar.lua` polls `X2Player:GetBreathTime()` for
+  `(totalTime,leftTime)` each OnUpdate and uses `DIVE_START`, `DIVE_END`, `LEFT_LOADING` to
+  manage visibility. GetBreathTime registration39499367 points to wrapper39495d10. SetBreath
+  alone proves neither a dive event nor the total/max value required by this Lua getter.
+  Getter3930b660 starts with0/0 when stored start is zero or the actor is absent. It queries
+  actor attribute0x5b through390b3a80 for capacity. With unchanged capacity its remaining value
+  is `capacity - now + stored_start`; SetBreath sets `stored_start = now - old_capacity + raw`.
+  If capacity changes, it rescales elapsed time proportionally before returning total/left.
+  This identifies the raw value as remaining at receipt, but the cache deliberately adds no
+  timer: establishing dive start/end, actor capacity and its changes belongs to client planning.
+- ForceAttack assignment391a99eb, vtable399b3228 -> reader397b31e0: BC then bool slot78.
+  Handler391d3c60 looks up the existing object via39360020, stores its flag at+0x3bbc, then
+  formats the looked-up object's+8 through39424820 and emits
+  `FORCE_ATTACK_CHANGED(stringId, on)`. Original Lua handlers agree: `unitframe/player.lua`,
+  `target.lua`, `target_to_target.lua`, `party.lua` take `(stringId,on)`;
+  `centermessage/center_message_manager.lua` takes `(id,isNewState)` and filters the player.
+  aa-client owns translation to this Lua identifier and presentation event.
+- Invisible assignment391aa62b, vtable399b3360 -> reader397c61b0: the BC helper397b27d0
+  then bool slot78. Handler391d4b10 looks up an existing unit and calls its virtual setter
+  at+4c; it ignores a missing unit. No direct Lua invisibility event name/shape was proved.
+
+All four layouts match the Rust lane writers in `systems/skills/packets.rs`.
+`combat::set_force_attack` updates the unit, adds/removes Bloodlust and broadcasts043;
+`set_invisible` updates the unit and broadcasts078. Trial paths also send043. Regen
+`breath_tick` decrements positive breath by1000 and sends1bc, or applies drowning HP changes
+then emits0b3/source2 at zero. `combat::do_fall_damage` applies its points/stun logic and then
+broadcasts0b3/source0. `systems/ai/physics::apply_collision_damage` applies damage, computes
+actual dealt HP and broadcasts0b3/source3. These are real emitters rather than declarations
+or fabricated acknowledgements. No corresponding outbound command was added in this slice.
+
+Offline tests cover independent exact-byte goldens for all four, every truncation, conditional
+full-u32 gimmick identity, all256 raw source bytes in one DD04 batch with following flag,
+breath and snow packets, known-only flags/false-vs-unknown/reuse/lifecycle, raw breath extrema,
+no HP double-subtraction or phantom units, and session forwarding/order with an authoritative
+points tail. Natural fall/drowning/force-attack/visibility live QA remains pending while the
+lane is stalled; no lane traffic or server changes were made.
+
+Validation: `cargo test -p aa-net combat_status --quiet` passed all5 new targeted tests.
+`cargo test -p aa-net --features bevy --quiet` passed240 library +2 scripted loopback
+integration tests;9 live lane tests stayed ignored. No dependencies or other crates changed.

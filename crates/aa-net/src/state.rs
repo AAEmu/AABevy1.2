@@ -44,6 +44,7 @@ pub use crate::slave::Slaves;
 pub use crate::trade::Trade;
 pub use crate::gimmick::Gimmicks;
 pub use crate::ui_data::UiData;
+pub use crate::combat_status::CombatStatus;
 
 resource! {
     /// The login server's worlds and the account's characters on them, plus the queue position.
@@ -345,6 +346,7 @@ pub struct WorldState {
     pub slaves: Slaves,
     pub gimmicks: Gimmicks,
     pub ui_data: UiData,
+    pub combat_status: CombatStatus,
 }
 
 impl WorldState {
@@ -378,6 +380,7 @@ impl WorldState {
         self.slaves.apply(e);
         self.gimmicks.apply(e);
         self.ui_data.apply(e);
+        self.combat_status.apply(e);
         self.trade.apply(e);
         self.trade.seed_inventory(e, &self.inventory);
     }

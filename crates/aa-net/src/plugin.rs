@@ -22,6 +22,7 @@ use crate::mate::Mates;
 use crate::slave::Slaves;
 use crate::gimmick::Gimmicks;
 use crate::ui_data::UiData;
+use crate::combat_status::CombatStatus;
 use crate::state::{
     Auction, ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, LootRolls, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
     Skills, Status, Target, Trade, Units, WorldInfo, Worlds,
@@ -161,4 +162,5 @@ net_state! {
     slaves: Slaves,
     gimmicks: Gimmicks,
     ui_data: UiData,
+    combat_status: CombatStatus,
 }
