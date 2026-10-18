@@ -257,7 +257,7 @@ pub struct CellObjects {
     pub roads: Vec<Road>,
     pub water: Vec<Water>,
     /// Native type-6 voxel slots. Only the first compiled LOD is retained, with bounded bytes.
-    /// Used by collision; native surface-atlas rendering remains unsupported.
+    /// Used by collision and the baked-colour base pass; native surface atlases remain unsupported.
     pub voxels: Vec<PlacedVoxel>,
     /// Static render slots from `entities.xml`, including hidden cinematic props as data.
     pub entity_props: Vec<crate::entities::PlacedProp>,

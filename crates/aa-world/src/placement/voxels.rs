@@ -1,4 +1,4 @@
-//! Native type-6 compiled voxel data: first-LOD serialized collision, not reconstructed terrain.
+//! Native type-6 compiled voxel data: first-LOD base geometry and serialized collision.
 
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ pub struct PlacedVoxel {
     pub bbox: [f32; 6],
     /// SVoxelChunkVer5 flags (+67); unrelated to the common render-node flags.
     pub flags: u32,
+    pub max_view_dist: f32,
     /// Local physics/material palette, resolved by name against cell leveldata.xml.
     pub surfaces: [String; 32],
     /// The first native compiled CGF memory block. Other LODs are consumed without copies.
@@ -32,6 +33,12 @@ impl PlacedVoxel {
     /// Unsupported/malformed variants return None; this does not reconstruct voxel surfaces.
     pub fn compiled_collision(&self) -> Option<CollisionMesh> {
         collision(self)
+    }
+    /// Native Terrain base pass of a compiled static voxel. Colours are the original
+    /// linear baked RGB reconstructed from COLORS.r/b and COLORS2.b. Projected terrain
+    /// detail layers are not included; vertices requiring the cover-texture path are unsupported.
+    pub fn compiled_base_mesh(&self) -> Option<aa_cry::mesh::MeshData> {
+        base_mesh(self)
     }
     pub fn mat4(&self) -> Mat4 {
         let m = self.matrix;
@@ -72,6 +79,7 @@ pub(super) fn read_record(r: &mut Reader, out: &mut Vec<PlacedVoxel>) -> Option<
         matrix: std::array::from_fn(|i| f32_at(header, 198727 + i * 4)),
         bbox: std::array::from_fn(|i| f32_at(header, i * 4)),
         flags,
+        max_view_dist: f32_at(header, 28),
         surfaces: std::array::from_fn(|i| cstr(&header[65607 + i * 64..65607 + (i + 1) * 64])),
         compiled: Arc::from(first),
     });
@@ -110,20 +118,13 @@ fn decode(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(raw)
 }
 
-/// Native 301A0790 physicalizes the first compiled LOD through 3019BFA0. Supported
-/// files contain one merged static mesh and its serialized triangle proxy/material IDs.
-/// Runtime-generated geometry and foreign-index/no-material variants stay unsupported.
-pub(crate) fn collision(voxel: &PlacedVoxel) -> Option<CollisionMesh> {
-    let matrix = voxel.mat4();
-    if !matrix.is_finite() || matrix.determinant().abs() < 1e-9 {
+/// Shared resource preflight for the retained first compiled LOD.
+fn checked_file(raw: &[u8]) -> Option<ChunkFile<'_>> {
+    let table = u32_at(raw, 16) as usize;
+    if u32_at(raw, table) > 64 {
         return None;
     }
-    let raw = decode(&voxel.compiled)?;
-    let table = u32_at(&raw, 16) as usize;
-    if u32_at(&raw, table) > 64 {
-        return None;
-    }
-    let file = ChunkFile::parse(&raw).ok()?;
+    let file = ChunkFile::parse(raw).ok()?;
     let mut meshes = file.of_type(ty::MESH);
     let mesh = meshes.next()?;
     if meshes.next().is_some()
@@ -147,7 +148,12 @@ pub(crate) fn collision(voxel: &PlacedVoxel) -> Option<CollisionMesh> {
     {
         return None;
     }
-    let model = aa_cry::Model::from_chunks(&file).ok()?;
+    drop(meshes);
+    Some(file)
+}
+
+fn static_model(file: &ChunkFile<'_>) -> Option<aa_cry::Model> {
+    let model = aa_cry::Model::from_chunks(file).ok()?;
     if model.nodes.len() != 1
         || model.nodes[0].name != "Merged"
         || !Mat4::from(model.nodes[0].local).abs_diff_eq(Mat4::IDENTITY, 1e-6)
@@ -155,6 +161,75 @@ pub(crate) fn collision(voxel: &PlacedVoxel) -> Option<CollisionMesh> {
     {
         return None;
     }
+    Some(model)
+}
+
+// TerrainVS uses g >= 0.5, hence byte 128 is included. Native CRenderMesh's
+// 382051A0 puts COLORS2 byte 2 into Normal.w; TerrainVS assembles (Color.r,b,Normal.w).
+fn base_colour(colour: [u8; 4], extra: [u8; 4]) -> Option<[u8; 4]> {
+    (colour[1] >= 128).then_some([colour[0], colour[2], extra[2], 255])
+}
+
+fn base_mesh(voxel: &PlacedVoxel) -> Option<aa_cry::mesh::MeshData> {
+    let transform = voxel.mat4();
+    if !transform.is_finite() || transform.determinant().abs() < 1e-9 {
+        return None;
+    }
+    let raw = decode(&voxel.compiled)?;
+    let file = checked_file(&raw)?;
+    let model = static_model(&file)?;
+    if model.meshes.len() != 1 || model.nodes[0].mesh != Some(0) {
+        return None;
+    }
+    let header = file.of_type(ty::MESH).next()?;
+    let extra = file.get_typed(u32_at(header.data, 28 + 4 * 4) as i32, ty::DATA_STREAM)?;
+    let mut mesh = model.meshes.into_iter().next()?;
+    let count = mesh.positions.len();
+    if count == 0
+        || mesh.indices.is_empty()
+        || mesh.normals.len() != count
+        || mesh.colors.len() != count
+        || !mesh.uvs.is_empty()
+        || u32_at(extra.data, 4) != 4
+        || u32_at(extra.data, 8) as usize != count
+        || u32_at(extra.data, 12) != 4
+        || mesh.positions.iter().any(|p| !p.is_finite())
+        || mesh
+            .normals
+            .iter()
+            .any(|n| !n.is_finite() || n.length_squared() < 1e-10)
+    {
+        return None;
+    }
+    let colours = extra.data.get(24..24 + count * 4)?.as_chunks::<4>().0;
+    // Only referenced vertices affect the native base pass. Unflagged vertices need
+    // cover-texture projection, not a guessed palette tint or a detail-map substitute.
+    if mesh
+        .indices
+        .iter()
+        .any(|&i| mesh.colors.get(i as usize).is_none_or(|c| c[1] < 128))
+    {
+        return None;
+    }
+    for (colour, &extra) in mesh.colors.iter_mut().zip(colours) {
+        if let Some(baked) = base_colour(*colour, extra) {
+            *colour = baked;
+        }
+    }
+    Some(mesh)
+}
+
+/// Native 301A0790 physicalizes the first compiled LOD through 3019BFA0. Supported
+/// files contain one merged static mesh and its serialized triangle proxy/material IDs.
+/// Runtime-generated geometry and foreign-index/no-material variants stay unsupported.
+pub(crate) fn collision(voxel: &PlacedVoxel) -> Option<CollisionMesh> {
+    let matrix = voxel.mat4();
+    if !matrix.is_finite() || matrix.determinant().abs() < 1e-9 {
+        return None;
+    }
+    let raw = decode(&voxel.compiled)?;
+    let file = checked_file(&raw)?;
+    let _model = static_model(&file)?;
     let mut chunks = file.of_type(ty::MESH_PHYSICS_DATA);
     let chunk = chunks.next()?;
     if chunks.next().is_some() {
@@ -203,6 +278,53 @@ mod tests {
     use super::*;
     use bevy::math::Vec3;
     use std::io::Write;
+
+    #[test]
+    fn native_base_colour_flag_threshold_preserves_linear_packed_channels() {
+        assert_eq!(base_colour([21, 127, 14, 255], [0, 0, 11, 0]), None);
+        for g in [128, 140, 255] {
+            assert_eq!(
+                base_colour([21, g, 14, 255], [0, 0, 11, 0]),
+                Some([21, 14, 11, 255])
+            );
+        }
+    }
+
+    #[test]
+    fn original_voxel_baked_base_pass_and_cover_path_are_distinct() {
+        if !crate::pak_available() {
+            return;
+        }
+        let objects = crate::placement::load_cell_objects("main_world", 20, 8);
+        let voxel = &objects.voxels[0];
+        let mesh = voxel.compiled_base_mesh().unwrap();
+        assert_eq!(mesh.colors[0], [21, 14, 11, 255]);
+        assert!(mesh.uvs.is_empty());
+        assert!(
+            mesh.colors
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                > 100
+        );
+        let mut raw = decode(&voxel.compiled).unwrap();
+        let file = checked_file(&raw).unwrap();
+        let stream = file
+            .of_type(ty::DATA_STREAM)
+            .find(|c| u32_at(c.data, 4) == 3)
+            .unwrap();
+        let g = stream.offset as usize + 16 + 24 + 1;
+        let mut control = voxel.clone();
+        raw[g] = 127; // Native base pass would require the terrain cover projection.
+        control.compiled = raw.into();
+        assert!(control.compiled_base_mesh().is_none());
+        // Two original exterior slots nearby mix baked-colour and cover-projection vertices.
+        // Keep the native cover branch unsupported instead of painting those vertices with IDs.
+        let exterior = crate::placement::load_cell_objects("main_world", 21, 8);
+        assert_eq!(exterior.voxels.len(), 2);
+        assert!(exterior.voxels.iter().all(|v| v.compiled_base_mesh().is_none()));
+    }
 
     #[test]
     fn compressed_memory_blocks_have_bounded_exact_lengths_and_checked_checksums() {
