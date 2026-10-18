@@ -24,8 +24,8 @@ pub struct FacialSentence {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SentenceWord {
     pub word: String,
-    pub start: f32,
-    pub end: f32,
+    pub start_ms: i32,
+    pub end_ms: i32,
 }
 
 pub(super) fn parse(root: roxmltree::Node<'_, '_>) -> Result<Vec<SoundEntry>> {
@@ -54,8 +54,8 @@ fn entry(node: roxmltree::Node<'_, '_>, start: f32) -> Result<SoundEntry> {
                 .map(|word| {
                     Ok(SentenceWord {
                         word: word.attribute("Word").unwrap_or("").to_owned(),
-                        start: number(word, "Start", 0.0)?,
-                        end: number(word, "End", 0.0)?,
+                        start_ms: word_time(word, "Start")?,
+                        end_ms: word_time(word, "End")?,
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -78,6 +78,15 @@ fn entry(node: roxmltree::Node<'_, '_>, start: f32) -> Result<SoundEntry> {
     })
 }
 
+fn word_time(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<i32> {
+    node.attribute(attr).unwrap_or("0").parse().map_err(|_| {
+        crate::Error::Format(format!(
+            "invalid sentence {attr}={}",
+            node.attribute(attr).unwrap_or("")
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,7 +99,7 @@ mod tests {
               <Sentence Text="old"/>
               <SoundEntry Sound="Game/Voice/Line.wav" StartTime="-0.25">
                 <Sentence Text="Hello &amp; goodbye">
-                  <Words><Word Word="Hello" Start="0.1" End="0.4"/></Words>
+                  <Words><Word Word="Hello" Start="100" End="400"/></Words>
                   <Phonemes>100:200:AA,200:400:M</Phonemes>
                 </Sentence>
               </SoundEntry><SoundEntry/>
@@ -106,8 +115,8 @@ mod tests {
                 text: "Hello & goodbye".into(),
                 words: vec![SentenceWord {
                     word: "Hello".into(),
-                    start: 0.1,
-                    end: 0.4
+                    start_ms: 100,
+                    end_ms: 400
                 }],
                 phonemes: "100:200:AA,200:400:M".into(),
             })
