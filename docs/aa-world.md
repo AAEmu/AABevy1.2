@@ -852,10 +852,101 @@ Area attributes, polygon and nested ToD. **3208ECB0** creates/loads that ToD onl
 area Group 14; **32083A10** transforms its points with the entity matrix. Proxy
 **32085470** returns the master weight at CArea +244 (initialized to 1). Seamless native
 slot +148 (**365F1290**) accepts area registration inputs, then **365EEC20** resolves
-priorities and normalized area/zone weights. The registration-event producer and exact
-numerator/falloff input semantics are still unresolved, so automatic area activation is
-not exposed as a speculative public API. Read-only exports are under ignored
-`data/extract/aa-world/environment/area-*.txt`.
+priorities and normalized area/zone weights. The producer is now recovered, as detailed
+below. Read-only exports are under ignored `data/extract/aa-world/environment/area-*.txt`.
+
+#### Native polygon area inputs
+
+`area_tod` supports authored Group-14 polygons, their nested legacy/modern curves and
+cell lifetime. The native bridge is **32099ED0**. **3209CD40 CAreaManager::Update**
+calls **3209BFD0 CAreaManager::UpdatePlayer**, which reaches the bridge.
+It passes the owner entity ID, inward boundary distance, serialized `value1` and
+`Priority` to Seamless slot +148 (**365F1290**). Leaving calls +156 (**365EEB10**).
+Other area groups and flag-bit-1 zone effects are not turned into ToD layers.
+
+The subject is an **IEntity carrying flags bit 0x20**, checked through slot +24
+(**32016AA0**, returns entity +24). The area manager samples its world position
+(slot +152, **32016BA0**) plus **0.01 m in Cry Z**. This is not the orbit camera.
+Owner hidden state is slot +200 (**32016BD0**, entity +8 bit 0x10); hidden owners
+do not register. `AreaToDSubject` explicitly designates this qualified subject's
+`GlobalTransform`. Zero or multiple markers disable area inputs; there is no camera
+fallback. **The gameplay producer assigning bit 0x20 is still unresolved.** A bounded
+read-only game/entity operand audit did not establish which local player/login actor
+gets it, so aa-client must not add the marker merely because an entity is local.
+The new automatic evaluator stays inactive in the integrated client until that hook
+is proved. No global login-area override is installed.
+`CEntity::OnRellocate` **32010A90** queues area work for mask `0x40004000`;
+script binding **3204A280** separately confirms `ENTITY_FLAG_TRIGGER_AREAS=0x4000`.
+That generic area-trigger flag does not establish the additional ToD bit 0x20.
+
+**32083A10** transforms the polygon, then **32094AD0 SetPoints** uses its minimum Z as the base;
+serialized positive `Height` remains unscaled. **3208F090** uses the native half-open
+XY crossings and inclusive height bounds; nonpositive height is vertically unbounded.
+**32094360** returns the closest inward XY segment distance, additionally bounded by
+unobstructed floor/ceiling for positive height. The slice uses the native unobstructed
+defaults; external obstruction setters and sphere/box/Bezier area geometry remain open.
+Parent transforms/hidden state reuse the entity parser and cell origin is added once.
+
+**365EEC20** computes `clamp(distance / denominator, 0, 1)`, where only an exactly-zero
+`value1` selects the native **30 m** denominator. Master weight is CArea +244 (default
+1; getter **32085470**, setter **32085450**). Runtime master-weight producers remain
+unwired. Highest priority starts at zero. If total exceeds one, only positive weights
+below the highest priority lose their proportional share of the excess, clamped to
+0..1; highest-priority weights can still sum above one. Areas enter the manager first.
+**300A4270** replaces an existing ToD pointer's weight and admits at most **ten unique
+inputs**. The producer's total still includes valid areas rejected by this cap.
+Every spatial zone then uses `clamp(sectorWeight - areaTotal, 0, 1)`, followed by
+raw-curve normalization in **300A5010**. No contributing sector falls back to the
+current zone at weight **1**, rather than multiplying it by the remainder.
+
+The optional input from `gEnv +60` slot +308 is a **movie-system ToD**, not server
+ZoneData: **3654D3D0** (CSystem vtable **3660C588** +20) returns `CSystem +40`, and
+**36552EE0 InitMovieSystem** stores `CreateMovieSystem` at `CSystem +100`.
+When present, it supplies the remaining area weight and bypasses spatial zones.
+This movie producer is not implemented. The inspected login sequence has empty
+`TimeOfDayName`. Read-only server ZoneData contains zone/conflict state; existing
+`SCTimeOfDay`/`SCDetailedTimeOfDay` supply the clock, not an area or movie-ToD pointer.
+No network layer/override is inferred from them or `ConflictZoneState`.
+
+Area XML reads/parses run on the shared workers, at most **two outstanding jobs**,
+independently of `WorldConfig.objects`. Curves reside only with loaded terrain cells.
+Leaving a polygon removes its registration; cell unload, environment-off, missing
+subject and world changes discard resident curves and active inputs. Outstanding
+workers remain counted until drained, so repeated resets cannot flood the pool;
+late results are accepted only for the active world/cell/subject. An unchanged point
+and unchanged resident cells perform no polygon evaluation or curve work.
+Existing registrations retain encounter order. In an overfull overlap, simultaneous
+cross-cell encounter order has not been calibrated against native streaming.
+
+Validation: original x86 **3208F090/32094360** executed for **15** real login/boundary
+samples, and original **365EEC20 +300A4270** for **eight** denominator/priority/master/
+capacity cases in a bounded Unicorn sandbox. Ignored scratch oracles and numeric
+outputs are `environment/native_area_{geometry,oracle}.py` and `native-area-*.json`.
+Committed regressions cover those values, parent transforms, hidden/group exclusions,
+negative priorities, ten slots, area-first raw blending, spatial subtraction and the
+current-zone fallback. Original entity DLL SHA-256:
+`d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e`.
+
+`cargo run -p aa-world --example area_tod -- --shot shots/aa-world/environment/area_inside.png --shot-after 16`
+uses the real `login_224_oktop_2` polygon and original `03_character_select_s` camera.
+`--outside` / `--no-subject` are controls, `--motion-check` crosses its authored 3 m
+falloff, `--unload-check` disables the environment and changes worlds, and
+`--cell-unload-check` moves the streaming camera away while leaving the subject inside.
+`--no-objects` verifies area loading without rendered placements. These are world
+fixture controls; the real character-select reference uses the separate authored
+map stage and cannot provide a same-camera lighting comparison for this cinema.
+No brightness constants were tuned to match the area screenshots.
+
+Final validation (2026-10-17): **133 passed / nine existing ignored**, all examples
+check clean. Six inspected captures are `area_{inside,outside,motion,no_subject,
+unload,cell_unload}.png` under `shots/aa-world/environment/`. Motion logged native
+weights **0 -> 0.127584 -> 0.949127 -> 1** at a fixed camera; no subject loaded zero
+area cells. Both environment-off/world-change and actual terrain-cell unload cleared
+all resident curves/registrations; the latter ran with objects disabled and the subject
+still inside the original polygon. Jobs stayed <=2 and accepted inputs <=10. Scene
+controls logged roughly **180-226 FPS**; the no-object control logged **201-217 FPS**
+before unload. These are shared-machine fixture rates, not a native-client benchmark.
+All fixture windows exited with process code 0.
 
 Weighted `env.xml` LDR loading/blending is also proved by **365F8DD0**, **365F0210** and
 engine **30122CC0**. However, **30128050** bypasses Sun/Sky LDR multipliers when renderer
@@ -903,8 +994,9 @@ dependent cloud/moon systems retire or hide their draws. Existing sky/ocean enti
 ownership remains with the world plugin; this is not an independent full-world teardown.
 
 Supported slice: the spatial blend of the selected `WorldClock.layer` (normal by default).
-Area-ToD priorities/weights, automatic per-zone relic activation and `env.xml` parameter
-blending remain unsupported. Native discrete skybox/cloud selection and fades are now
+Polygon area-ToD priorities/weights are supported for an explicitly qualified subject;
+the client flag producer, automatic per-zone relic activation and `env.xml` parameter
+blending remain open. Native discrete skybox/cloud selection and fades are now
 implemented below. No sky/cloud color calibration was changed.
 `environment_border` exercises the actual Solzreed 179 / Silent Sea 210 border
 at Cry `(15712,15808)`, with `--offset`, `--zone179`, `--zone210`, `--motion-check` and
@@ -944,7 +1036,7 @@ texture references and despawns clouds.
 cloud alpha and zero-opacity asset changes. `--zone179 --layer-check --fade-check` switches
 the real Solzreed sky to its authored dominion variant; `--unload-check` verifies retirement.
 This implements the selected `WorldClock.layer` fade. Automatic per-zone relic activation,
-weather-layer inputs, zone-effect spawning/opacity, area overrides and weighted `env.xml`
+weather-layer inputs, zone-effect spawning/opacity, automatic area subject qualification and weighted `env.xml`
 multipliers remain explicit gaps. Existing sky/cloud brightness and shader calibration
 are unchanged.
 
@@ -1675,7 +1767,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
 * The real client's time-of-day hour warp, spatial raw-curve zone blending and discrete skybox/cloud fades are implemented (see Environment). Remaining transition gaps:
-  area-ToD overrides, per-zone relic layer weights and weighted `env.xml` multipliers. The plateau of
+  area subject qualification/movie/master-weight producers, per-zone relic layer weights and weighted `env.xml` multipliers. The plateau of
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.

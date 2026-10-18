@@ -41,13 +41,13 @@ impl PlacedProp {
     }
 }
 
-fn vector<const N: usize>(value: &str) -> Option<[f32; N]> {
+pub(crate) fn vector<const N: usize>(value: &str) -> Option<[f32; N]> {
     let values: Vec<f32> = value.split(',').map(|p| p.trim().parse()).collect::<Result<_, _>>().ok()?;
     let values: [f32; N] = values.try_into().ok()?;
     values.iter().all(|v| v.is_finite()).then_some(values)
 }
 
-fn guid(value: &str) -> Option<u64> {
+pub(crate) fn guid(value: &str) -> Option<u64> {
     u64::from_str_radix(value.trim().trim_start_matches("0x"), 16).ok()
 }
 
@@ -69,7 +69,7 @@ fn local(node: roxmltree::Node<'_, '_>) -> Option<Mat4> {
 
 // ParentGUID positions are parent-local in the native CEntityLoader::LoadEntity. Parents
 // can have a class we do not render, so look them up among all direct mission entities.
-fn transform(
+pub(crate) fn transform(
     node: roxmltree::Node<'_, '_>,
     nodes: &HashMap<u64, roxmltree::Node<'_, '_>>,
     visiting: &mut HashSet<u64>,

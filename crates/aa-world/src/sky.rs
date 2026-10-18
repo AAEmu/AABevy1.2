@@ -327,20 +327,37 @@ impl TodCache {
             .ok().and_then(|x| HdrSetup::parse(&x)).unwrap_or_default();
     }
 
-    fn sample_zones(&mut self, world: &str, weights: &[(u16, f32)], layer: u32, hour: f32) -> Option<EnvSample> {
+    fn sample_zones(&mut self, world: &str, weights: &[(u16, f32)], layer: u32, hour: f32, areas: &crate::area_tod::AreaToDState, current_zone: Option<u16>) -> Option<EnvSample> {
         self.sync_world(world);
         // Only nearby inputs stay resident; revisiting another world/zone cannot reuse stale curves.
         self.zones.retain(|(zone, l), _| *l == layer && weights.iter().take(10).any(|(z, _)| z == zone));
-        let layers: Vec<_> = weights.iter().take(10).filter_map(|(zone, weight)| {
+        let mut layers: Vec<_> = weights.iter().take(10).filter_map(|(zone, weight)| {
+            // Seamless365EEC20 subtracts area total from each spatial zone.
+            let weight = (*weight - areas.total).clamp(0.0, 1.0);
+            if weight == 0.0 { return None; }
             self.zones.entry((*zone, layer)).or_insert_with(|| load_tod(world, Some(*zone), layer))
-                .clone().map(|tod| (tod, *weight))
+                .clone().map(|tod| (tod, weight))
         }).collect();
+        // Native fallback when no sector contributed: current zone at weight 1,
+        // even with a partial area. The manager normalizes the combined inputs.
+        if layers.is_empty() && areas.total < 1.0 && let Some(zone) = current_zone {
+            if let Some(tod) = self.zones.entry((zone, layer)).or_insert_with(|| load_tod(world, Some(zone), layer)).clone() {
+                layers.push((tod, 1.0));
+            }
+        }
         let lighting = self.lighting.unwrap_or_default();
-        if layers.is_empty() {
+        if layers.is_empty() && areas.inputs.is_empty() {
             return self.world_default.entry(layer).or_insert_with(|| load_tod(world, None, layer))
                 .as_ref().map(|tod| tod.sample(hour, lighting));
         }
-        let inputs: Vec<_> = layers.iter().map(|(tod, weight)| (tod.as_ref(), *weight)).collect();
+        let mut inputs: Vec<(&TimeOfDay, f32)> = Vec::with_capacity(10);
+        for (tod, weight) in areas.inputs.iter().chain(layers.iter()) {
+            if let Some((_, previous)) = inputs.iter_mut().find(|(existing, _)| std::ptr::eq(*existing, tod.as_ref())) {
+                *previous = *weight;
+            } else if inputs.len() < 10 {
+                inputs.push((tod.as_ref(), *weight));
+            }
+        }
         Some(TimeOfDay::sample_blended(&inputs, hour, lighting))
     }
 }
@@ -356,9 +373,10 @@ pub fn build(app: &mut App) {
         .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3) })
         .init_resource::<TodCache>()
         .init_resource::<SkySelection>()
+        .init_resource::<crate::area_tod::AreaToDState>()
         .insert_resource(AtmosphereTuning::from_env())
         .add_systems(Startup, setup_sky)
-        .add_systems(Update, (receive_zones, update_clock, update_environment, update_ambient, update_sky, crate::sky_clouds::update_clouds, update_post, crate::water_material::update_water).chain())
+        .add_systems(Update, (receive_zones, update_clock, crate::area_tod::update_areas, update_environment, update_ambient, update_sky, crate::sky_clouds::update_clouds, update_post, crate::water_material::update_water).chain())
         .add_systems(PostUpdate, follow_camera.before(bevy::transform::TransformSystems::Propagate));
 }
 
@@ -502,6 +520,7 @@ pub fn update_environment(
     cameras: Query<(Entity, &GlobalTransform, Has<PostUniform>), With<Camera3d>>,
     exposure: Query<Option<&Exposure>, With<PostUniform>>,
     focus: Query<Entity, With<WorldFocus>>,
+    areas: Res<crate::area_tod::AreaToDState>,
 ) {
     if !cfg.environment {
         env.sample = None;
@@ -526,7 +545,7 @@ pub fn update_environment(
     let weights = clock.zone.map(|z| vec![(z, 1.0)]).unwrap_or_else(|| {
         if same_world { info.0.environment_weights(cry_pos) } else { Vec::new() }
     });
-    let Some(mut cur) = cache.sample_zones(&cfg.world, &weights, clock.layer, clock.hour) else {
+    let Some(mut cur) = cache.sample_zones(&cfg.world, &weights, clock.layer, clock.hour, &areas, zone) else {
         selection.clear();
         env.sample = None;
         env.zone = zone;
@@ -905,6 +924,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_areas_precede_zones_subtract_weight_and_share_ten_slots() {
+        if !crate::pak_available() { return; }
+        let mut cache = TodCache::default();
+        let mut areas = crate::area_tod::AreaToDState::default();
+        let area = load_tod("main_world", Some(186), 0).unwrap();
+        areas.inputs.push((area.clone(), 0.25));
+        areas.total = 0.25;
+        let a = load_tod("main_world", Some(179), 0).unwrap();
+        let b = load_tod("main_world", Some(210), 0).unwrap();
+        let actual = cache.sample_zones("main_world", &[(179, 0.8), (210, 0.6)], 0, 3.8, &areas, Some(179)).unwrap();
+        let expected = TimeOfDay::sample_blended(&[(&area, 0.25), (&a, 0.8 - 0.25), (&b, 0.6 - 0.25)], 3.8, Lighting::default());
+        assert_eq!(actual.sun, expected.sun);
+        assert_eq!(actual.fog, expected.fog);
+        // No spatial candidates: native current-zone fallback gets weight 1.
+        let actual = cache.sample_zones("main_world", &[], 0, 3.8, &areas, Some(179)).unwrap();
+        let expected = TimeOfDay::sample_blended(&[(&area, 0.25), (&a, 1.0)], 3.8, Lighting::default());
+        assert_eq!(actual.sun, expected.sun);
+        // Original manager300A4270 rejects the 11th input; area total in producer
+        // still includes all area weights, independently of that manager cap.
+        areas.inputs = (0..10).map(|_| (Arc::new(area.as_ref().clone()), 0.01)).collect();
+        areas.total = 0.1;
+        let actual = cache.sample_zones("main_world", &[(179, 1.0)], 0, 3.8, &areas, Some(179)).unwrap();
+        let expected = area.sample(3.8, Lighting::default());
+        assert!((actual.sun - expected.sun).length() < 0.00001);
+    }
+
+    #[test]
     fn native_directional_light_switches_at_the_horizon() {
         let mut sample = TimeOfDay::default().sample(0.0, Lighting::default());
         assert_eq!(directional_light_dir(&sample), sample.moon_dir);
@@ -936,6 +982,7 @@ mod tests {
             .insert_resource(Environment { sample: None, zone: None, hour: 0.0, ocean_fog: Vec3::ZERO })
             .init_resource::<TodCache>()
             .init_resource::<SkySelection>()
+            .init_resource::<crate::area_tod::AreaToDState>()
             .init_resource::<GlobalAmbientLight>()
             .init_resource::<ClearColor>()
             .init_resource::<Assets<Image>>()
