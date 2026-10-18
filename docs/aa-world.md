@@ -48,6 +48,54 @@ Everything is little endian. Paths are relative to `worlds/<world>/`.
 `zones ( name, id )`, `cells ( x, y, zones )`. `world.xml` (4.6 MB) lists the 64 m sectors each zone owns; `World::zone_at(pos)` answers
 which zone (and thus which `zone/<id>/time_of_day.xml`) a position is in. It is parsed on a thread at startup.
 
+#### Strict spatial zone lookup (`World::sector_zone_at`)
+
+`sector_zone_at(Vec3)` accepts global Cry-space XY, ignores Z, and returns only
+the authored 64 m sector owner after `load_sector_zones`. Missing cells and
+unowned sectors return `None`. The older `zone_at` keeps its first-cell-zone
+fallback for existing environment callers. Trial location strings require the
+strict query: an absent owner must not become a player, nearby or cell-default
+zone. The query performs two hash lookups at most, allocates nothing, and is
+independent of render streaming/camera position.
+
+Native 1.2 proof, from the original `crysystem.dll` and `x2game_unpacked.dll`:
+
+* `3907F9D9` obtains `gEnv+0x80`, selects literal `main_world` through vslot
+  `+0x10`, calls the layer's XY point query `+0x38`, then zone `+0x38` for its
+  database key. CSystem ctor `36547100` installs vtable `3660C588`; its
+  `+0x14 -> 3654D3D0` returns `this+0x28`, the global environment. Init
+  `365586F1` installs WorldSystem at `this+0xA8`, hence `gEnv+0x80`.
+* WorldSystem vtable `3661FD10+0x10 -> 365F45B0` selects the layer by exact
+  name. Layer vtable `3661FC50+0x38 -> 365F3250` multiplies XY by `1/1024`,
+  uses `cvttss2si` (truncation toward zero), then bounded cell lookup
+  `365F32E0`. Residual XY times `1/64`, again truncated, selects a bounded
+  16x16 sector through `3661FB38+0x20 -> 365F2680`. Neither function searches
+  for another owner. Zone `3661FB88+0x38 -> 365F98B0` returns its ID.
+* `365F6D90` loads `world.xml`; `365F2A40` walks `ZoneList/cellList/sectorList`
+  in file order and writes each owner via cell `+0x24 -> 365F26E0`. Main-world
+  original data has no duplicate sector assignments. The existing loader
+  already retains this mapping; this slice adds the strict query only.
+* The separate subzone query `391EEF00` calls `gEnv+0x84/+0x30` first.
+  CSystem `3655872B` installs SeamlessSystem at `this+0xAC`; its vtable
+  `3661EE20+0x30 -> 365EB1C0` subtracts signed origin-cell XY times 1024 from
+  a mutable point. This changes the callee's by-value copy; the caller keeps
+  global XY for the main-world query. The subzone route requires live Group-18
+  Area entities and has its own height/order rules; it is not this sector API.
+
+Validation: all six `world::tests` passed, including original x86 execution
+goldens for 22 sparse-layout edge/invalid-coordinate cases and 1,336 original
+main-world queries (all 1,330 cell centres plus six border/scene controls).
+The complete centre sequence hashes to `7284F3A5117503E5` (FNV-1a over IDs,
+zero for absence). The native sea border returns 179 immediately below Cry
+Y=15808 and 210 at/above it; Cry `(12428,10430)` returns 149. A synthetic
+unowned sector verifies that `zone_at` may return a cell fallback while the
+strict query remains absent. Native truncation admits coordinates in
+`(-64,0)` into sector zero when that cell exists; `-64` is rejected. XY NaN,
+infinity and out-of-range values return absence; Z is ignored. No visual or
+FPS claim applies to this numeric lookup. Ignored reproducible source/oracle
+artifacts: `environment/spatial/native-world-query-{source.txt,goldens.json}`
+and `native_world_query.py` under `data/extract/aa-world/`.
+
 ### terrain/heightmap.dat
 
 Header (version, flags, chunk size, 4096 units, unit 2 m, sector 64 m, `zRatio`, `oceanLevel`), then a depth first quadtree of 341 nodes
