@@ -353,6 +353,7 @@ opcodes! {
         SCMailStatusUpdatedPacket = 0x122,
         SCMailRemovedPacket = 0x123,
         SCQuestRewardedByMailPacket = 0x14e,
+        SCUnderWaterPacket = 0x187,
         SCCharacterGamePointsPacket = 0x188,
         SCGamePointChangedPacket = 0x189,
         SCKickedPacket = 0x1a0,

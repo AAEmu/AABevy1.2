@@ -386,6 +386,8 @@ pub enum ServerMsg {
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
+    /// Received local dive/surface report. No Lua event or breathing timer is synthesized.
+    UnderWater { start: bool },
     /// World-level report; raw state and timestamp bits, independent of own spawn.
     ConflictZoneState(crate::conflict::ConflictZoneState),
     ForceAttackSet { obj_id: u32, on: bool },
@@ -635,6 +637,7 @@ impl ServerMsg {
             Self::UiData(_) => "SCResponseUIData",
             Self::EnvDamage(_) => "SCEnvDamage",
             Self::SetBreath { .. } => "SCSetBreath",
+            Self::UnderWater { .. } => "SCUnderWater",
             Self::ConflictZoneState(_) => "SCConflictZoneState",
             Self::ForceAttackSet { .. } => "SCForceAttackSet",
             Self::UnitInvisible { .. } => "SCUnitInvisible",
@@ -943,6 +946,7 @@ impl ServerMsg {
             sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
             sc::SCEnvDamagePacket => Self::EnvDamage(crate::combat_status::EnvironmentDamage::read(r)?),
             sc::SCSetBreathPacket => Self::SetBreath { breath: r.u32()? },
+            sc::SCUnderWaterPacket => Self::UnderWater { start: r.bool()? },
             sc::SCConflictZoneStatePacket => Self::ConflictZoneState(crate::conflict::ConflictZoneState::read(r)?),
             sc::SCForceAttackSetPacket => Self::ForceAttackSet { obj_id: r.bc()?, on: r.bool()? },
             sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
