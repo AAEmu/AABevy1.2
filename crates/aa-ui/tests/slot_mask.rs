@@ -48,9 +48,11 @@ fn fields(ui: &UiRuntime, id: Id) -> (f32, f32) {
 
 fn edge(ui: &UiRuntime) -> Option<Quad> {
     let path = lua::ui(&ui.lua).textures.resolve(HUD).unwrap();
+    let (w, h) = lua::ui(&ui.lua).textures.size(HUD).unwrap();
+    let uv = [748. / w as f32, 166. / h as f32, 753. / w as f32, 188. / h as f32];
     aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None)
         .into_iter()
-        .find(|q| q.tex == Tex::Image(path.clone()))
+        .find(|q| q.tex == Tex::Image(path.clone()) && q.uv == uv)
 }
 
 #[test]

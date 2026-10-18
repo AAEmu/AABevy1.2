@@ -72,6 +72,8 @@ use crate::tree::{
     Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock, TextStyle, Widget,
 };
 
+mod completion;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SlotData {
     /// How the slot was bound, to ask again on refresh.
@@ -83,6 +85,7 @@ pub struct SlotData {
     pub cooldown_mask: Option<String>,
     /// Actual slot-frame selector flags +311/+312, present only for the explicit native adapter.
     pub native_cooldown: Option<NativeCooldownState>,
+    completion: Option<completion::Completion>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -143,16 +146,18 @@ pub fn set_native_cooldown_mode(lua: &Lua, enabled: bool) {
                 let w = o.widget_mut()?;
                 let s = w.slot.as_mut()?;
                 s.native_cooldown = enabled.then(NativeCooldownState::default);
+                s.completion = None;
                 w.cooldown = None;
                 Some(id as Id)
             })
             .collect()
     };
     if let Ok(active) = active(lua) {
-        for id in ids {
-            let _ = active.raw_set(id, Value::Nil);
+        for id in &ids {
+            let _ = active.raw_set(*id, Value::Nil);
         }
     }
+    for id in ids { completion::untrack(lua, id); }
     ui(lua).tree.touch();
 }
 
@@ -279,6 +284,7 @@ pub fn update_native_slot_cooldown(
             },
             running.then_some(value.total_ms),
         );
+        if !running { completion::start(lua, id, value.total_ms as f32); }
     }
 }
 
@@ -838,6 +844,11 @@ fn drawn_state(cd: &Cooldown, remain: f64, options: &CaptionOptions, slot: bool)
 /// goes, scripts get `OnContentUpdated(self, "skill_cooldown_done")`) and touch the tree when a
 /// sweep or a label changed on screen.
 pub(crate) fn update(lua: &Lua, dt_ms: f32) {
+    update_clocks(lua, dt_ms);
+    completion::invalidate(lua);
+}
+
+fn update_clocks(lua: &Lua, dt_ms: f32) {
     let Ok(act) = active(lua) else { return };
     let ids: Vec<Id> = act
         .pairs::<Id, bool>()
@@ -847,6 +858,7 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
         return;
     }
     let mut finished: Vec<Id> = Vec::new();
+    let mut flashes = Vec::new();
     {
         let mut g = ui(lua);
         let u = &mut *g;
@@ -874,6 +886,7 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
                 finished.push(id);
                 let slot = u.tree.widget(id).is_some_and(|w| w.slot.is_some());
                 if slot {
+                    flashes.push((id, cd.total_ms));
                     u.pending.push((
                         id,
                         "OnContentUpdated".into(),
@@ -898,8 +911,12 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
             let _ = act.raw_set(id, Value::Nil);
         }
         super::flush(lua);
+        for (id, total) in flashes { completion::start(lua, id, total); }
     }
 }
+
+pub(crate) fn prepare_cooldown_draw(u: &mut Ui, id: Id) { completion::draw_frame(u, id); }
+pub(crate) fn has_completion(w: &Widget) -> bool { completion::has(w) }
 
 /// Native perimeter fan with `frac` of its time left, mapped to `r` without pixel snapping.
 /// The slot's separate progress gate precedes this geometry routine.
@@ -1055,6 +1072,7 @@ pub(crate) fn cooldown_quads(
     background: Option<(Id, crate::tree::ButtonState)>,
     out: &mut Vec<Quad>,
 ) {
+    completion::quads(u, id, w, alpha, scale, out);
     let Some(cd) = w.cooldown.as_ref() else {
         return;
     };

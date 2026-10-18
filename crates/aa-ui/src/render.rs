@@ -111,6 +111,8 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         {
             background_end = Some(out.len());
         }
+        // Native internal slot effects advance on admitted painting, even at alpha zero.
+        crate::lua::slot::prepare_cooldown_draw(u, id);
         let alpha = effective_alpha(u, id);
         if alpha <= 0.0 {
             continue;
@@ -158,7 +160,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         if let Some(dg) = w.diagram.as_ref() {
             diagram_quads(u, id, dg, alpha, scale, &mut out);
         }
-        if w.cooldown.is_some() {
+        if w.cooldown.is_some() || crate::lua::slot::has_completion(&w) {
             let background = w.button.as_ref().and_then(|b| b.bg[state_index(state)].or(b.bg[0])).map(|id| (id, state));
             crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, background, &mut out);
         }

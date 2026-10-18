@@ -5409,3 +5409,71 @@ The aa-dev original-control fixture was built fresh and both captures inspected:
 reference `reference/ingame/combat_triple_slash/real_05.png` was inspected again
 for toolbar context, with its unknown live phase kept separate from native
 geometry goldens. No original scripts, source assets or app providers change.
+
+### Ordinary slot completion-child draw lifetime (2026-10-18)
+
+The slot's completion child now uses its original stock nine-part art and a
+private native phase machine. Loader392c32f3..3612 selects
+`ui/common/hud.dds` crop743/35/13/16, insets6/7/6/8 and slot anchors+1/-1.
+Phase0 moves white alpha0->1 and scale0.3->1 with velocity/acceleration
+times0.5/0.4 seconds. Phase1 keeps scale1 and moves alpha0.9->0 with
+times0.3/0.2 seconds; repeat count is1. No substitute art is introduced.
+
+Actual392c7360 clears the accessor-active flag, delivers
+skill_cooldown_done to Lua, then calls SetStartEffect(true). Failed queries
+and global-done do not start this child; ResetState leaves it intact.
+The toolkit follows that order. Its existing compatibility countdown still
+removes its timer and delivers its existing callback before starting the same
+visual child; the child's retained total only supplies the native draw gate
+after that compatibility timer has gone. A current provider timer takes
+precedence, including changes made by the callback. No cooldown manager,
+query result, selector flag or estimated countdown is replaced by this effect.
+
+The phase machine advances only during actual paint-order traversal, BEFORE
+the renderer's alpha skip. Native3927b010/392a8830 controls establish the
+admission boundary: hidden ancestors and omitted manager layers do not draw;
+fully clipped, offscreen, fading and alpha-zero controls still run the child.
+The normal renderer's paint traversal supplies membership; completion does
+not invent its own layer/viewport policy. An active mask or total below200
+pauses the completion child. Slot ticking only requests repaint and never
+advances this clock, so later fade/OnUpdate visibility changes and orphaned
+subtrees are respected by the final paint traversal.
+
+Native3928e6c0 advances at most one phase per draw and retains overshoot.
+At100ms draw intervals its alphas are0.2125,0.45,0.7125,1,0.9,0, with the
+next phase's initial value receiving its own draw. It is not interchangeable
+with the existing generic analytic animation sampler. That sampler and every
+Lua motion/effect method are unchanged. Final nine-part transforms, pixel
+snapping and packed colors follow the native image path.
+
+`slot_completion_oracle.py` /
+`native-slot-completion-oracle-20261018.json` execute **36 actual groups**:
+full loader/configuration, phase stepping/restart/overshoot, native UV/slice/
+matrix/snap/color arithmetic, own/global/false-query/reset triggers, callback
+timer mutation, short totals, mask pause, hidden/fading/transparent/clipped/
+offscreen/nested admission and manager layer inclusion/exclusion. Texture
+allocation, frame-time interface and final renderer submission are explicit
+endpoints; the atlas dimensions come from the original DDS extracted through
+aa-pak. `native-slot-completion-source-20261018.txt` archives the source paths.
+
+Fresh crate check and example build pass. **92 selected tests pass** across
+completion7, ordinary-mask8, native-selector6, slot-state1, animation10,
+attachment5, constant7, caption6, generic-mask7, drag12, HUD6, keyboard4,
+popup-lifecycle9 and scale/clip4. The completion goldens include the actual
+nine-part vertices/UVs, phase handoff/overshoot, callback-before-restart,
+callback-mutated total, native mask/minimum-total admission, hidden ancestors,
+alpha0, empty clipping, offscreen placement and orphaned paint membership.
+Two older test helpers now discriminate the mask texture or edge UV rectangle,
+so genuine completion quads do not masquerade as those independent effects.
+
+The original CreateActionSlot/equipment aa-dev fixture was built fresh and all
+four captures inspected: `native-slot-completion-active-720-20261018.png`
+(**293.0-353.6 FPS**), `native-slot-completion-paused-720-20261018.png`
+(**259.0-321.6 FPS**), `native-slot-completion-paused-resumed-1080-20261018.png`
+(**301.0-351.7 FPS**) and `native-slot-completion-completed-720-20261018.png`
+(**262.9-301.8 FPS**), under `shots/aa-ui/`. The 720p captures use default0.85
+scale and 1080p uses1.0. The paused slot is hidden; after reopening, its saved
+phase resumes. All four report zero script errors/WARN/ERROR and self-close
+(PIDs33776/42180/9128/40704); the copied executable was removed. No source asset,
+original script or app producer changes, and native selector activation still
+requires the genuine raw GCD/accessor inputs documented above.
