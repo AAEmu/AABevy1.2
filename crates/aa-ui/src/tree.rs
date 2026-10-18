@@ -1119,7 +1119,7 @@ impl Tree {
         let mut r = r;
         if let Some((fraction, vertical)) = o.drawable().and_then(|d| d.fill) {
             if self.widget(owner).and_then(|w| w.status.as_ref())
-                .is_some_and(|s| s.bar == Some(id) && s.max > s.min && s.value > s.min)
+                .is_some_and(|s| s.bar == Some(id) && s.bar_visible())
             {
                 let owner = self.resolve(owner, cache, visiting);
                 r.w = owner.w * if vertical { 1.0 } else { fraction };

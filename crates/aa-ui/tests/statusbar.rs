@@ -5,6 +5,8 @@ mod castingbar;
 #[path = "../examples/fake/mod.rs"]
 #[allow(dead_code)]
 mod fake;
+#[path = "../examples/fake/healthbar.rs"]
+mod healthbar;
 
 use aa_ui::{UiRuntime, lua};
 
@@ -191,4 +193,147 @@ fn unchanged_original_casting_view_anchors_flare_to_each_progress_endpoint() {
             .unwrap();
         near(u.tree.rect(image).w, u.tree.rect(id).w * i as f32 * 0.25);
     }
+}
+
+fn status(ui: &UiRuntime, name: &str) -> aa_ui::lua::statusbar::StatusBarData {
+    let id = lua::value_id(&ui.lua, &eval(ui, name)).unwrap();
+    lua::ui(&ui.lua)
+        .tree
+        .widget(id)
+        .unwrap()
+        .status
+        .clone()
+        .unwrap()
+}
+
+#[test]
+fn target_is_immediate_and_native_seconds_drive_the_separate_fill() {
+    let ui = setup();
+    run(
+        &ui,
+        "bar:SetMinMaxValues(0,100);bar:SetValue(20);bar:SetValue(80,true,0.2);assert(bar:GetValue()==80)",
+    );
+    assert_eq!(status(&ui, "bar").displayed, 20.0);
+    lua::tick(&ui.lua, 50.0);
+    assert_eq!(status(&ui, "bar").displayed, 35.0);
+    lua::tick(&ui.lua, 50.0);
+    assert_eq!(status(&ui, "bar").displayed, 50.0);
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 80.0);
+    assert!(!status(&ui, "bar").running);
+    // A completed (or hidden) gauge must not invalidate the layout every frame.
+    let generation = lua::ui(&ui.lua).tree.generation;
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(lua::ui(&ui.lua).tree.generation, generation);
+}
+
+#[test]
+fn same_target_keeps_animation_and_interruption_uses_remaining_duration() {
+    let ui = setup();
+    run(
+        &ui,
+        "bar:SetMinMaxValues(0,100);bar:SetValue(100);bar:SetValue(40,true,0.3)",
+    );
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 80.0);
+    run(&ui, "bar:SetValue(40,false,0)");
+    assert!(status(&ui, "bar").animate);
+    // Actual native oracle: new duration 1s is ignored here; remaining old duration is ~0.2s.
+    run(&ui, "bar:SetValue(20,true,1)");
+    assert_eq!(status(&ui, "bar").speed.to_bits(), 299.99997_f32.to_bits());
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 50.0);
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(
+        status(&ui, "bar").displayed.to_bits(),
+        20.000002_f32.to_bits()
+    );
+    lua::tick(&ui.lua, 1.0);
+    assert_eq!(status(&ui, "bar").displayed, 20.0);
+    assert!(!status(&ui, "bar").running);
+}
+
+#[test]
+fn zero_and_hidden_owner_preserve_animation_state_then_resume() {
+    let ui = setup();
+    run(
+        &ui,
+        "bar:SetMinMaxValues(0,100);bar:SetValue(100);bar:SetValue(0,true,0.3)",
+    );
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 100.0);
+    assert!(!status(&ui, "bar").running);
+    run(&ui, "bar:SetValue(50,true,0.2)");
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 75.0);
+    run(&ui, "bar:Show(false)");
+    let generation = lua::ui(&ui.lua).tree.generation;
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 75.0);
+    assert_eq!(lua::ui(&ui.lua).tree.generation, generation);
+    run(&ui, "bar:Show(true)");
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "bar").displayed, 50.0);
+}
+
+#[test]
+fn range_setter_preserves_target_ignores_reversed_ranges_and_starts_at_zero() {
+    let ui = setup();
+    run(
+        &ui,
+        r#"
+        local lo,hi=bar:GetMinMaxValues();assert(lo==0 and hi==0)
+        bar:SetValue(50);assert(bar:GetValue()==0)
+        bar:SetMinMaxValues(0,100);bar:SetValue(80)
+        bar:SetMinMaxValues(20,60);assert(bar:GetValue()==80)
+        bar:SetMinMaxValues(50,10)
+        lo,hi=bar:GetMinMaxValues();assert(lo==20 and hi==60)
+        bar:SetValue(100);assert(bar:GetValue()==60)
+    "#,
+    );
+}
+
+#[test]
+fn native_optional_animation_arguments_require_boolean_and_numeric_seconds() {
+    let ui = setup();
+    run(
+        &ui,
+        r#"
+        bar:SetMinMaxValues(0,100);bar:SetValue(20)
+        bar:SetValue(40,1,0.2)
+    "#,
+    );
+    assert_eq!(status(&ui, "bar").displayed, 40.0);
+    run(&ui, "bar:SetValue(60,true,'0.2')");
+    assert_eq!(status(&ui, "bar").displayed, 60.0);
+    run(&ui, "bar:SetValue(80,true,0)");
+    assert_eq!(status(&ui, "bar").displayed, 80.0);
+}
+
+#[test]
+fn unchanged_player_hp_method_animates_gain_and_after_image_loss() {
+    let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    healthbar::install(&mut ui);
+    run(&ui, "playerFrame=nativeHealthFrame");
+    healthbar::lose_health(&ui);
+    assert_eq!(status(&ui, "playerFrame.hpBar.statusBar").displayed, 40.0);
+    assert_eq!(
+        status(&ui, "playerFrame.hpBar.statusBarAfterImage").displayed,
+        100.0
+    );
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(
+        status(&ui, "playerFrame.hpBar.statusBarAfterImage").displayed,
+        80.0
+    );
+    lua::tick(&ui.lua, 201.0);
+    run(&ui, "FAKE.player.hp=80;playerFrame:SetHp(80,100)");
+    assert_eq!(status(&ui, "playerFrame.hpBar.statusBar").value, 80);
+    assert_eq!(status(&ui, "playerFrame.hpBar.statusBar").displayed, 40.0);
+    assert_eq!(
+        status(&ui, "playerFrame.hpBar.statusBarAfterImage").displayed,
+        80.0
+    );
+    lua::tick(&ui.lua, 100.0);
+    assert_eq!(status(&ui, "playerFrame.hpBar.statusBar").displayed, 60.0);
 }

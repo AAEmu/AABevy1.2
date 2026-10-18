@@ -498,6 +498,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         call_handler(lua, id, h, vec![Value::Number(dt_ms as f64)]);
         crate::prof::handler_done(t0, || format!("{h} {}", ui(lua).tree.get(id).name));
     }
+    statusbar::tick(lua, dt_ms);
     widget::remove_hidden(lua);
 }
 

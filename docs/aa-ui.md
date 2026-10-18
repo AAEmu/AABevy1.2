@@ -2760,8 +2760,8 @@ The original vertical UV path has a distinct quirk, which is preserved:
 **width** slot and leaves UV height unchanged. This is not inferred from
 the geometry. Wrapper `392574c0` passes x/y/width/height in that order,
 `392c8410` stores them unchanged, and image conversion `3928b260` confirms
-their use. Horizontal crops its UV width normally. Bar value interpolation
-requested by `SetValue(value, animate, ms)` remains unimplemented.
+their use. Horizontal crops its UV width normally. Value interpolation is
+covered by the following milestone.
 
 `tests/statusbar.rs` checks missing-bar no-op, ordinary child target IDs,
 moving fill endpoints, range/owner changes, cached hidden lengths in both
@@ -2782,3 +2782,68 @@ and process 34436 closed automatically after the capture. The spawn reference
 was inspected for HUD context; it contains no active cast, so this is an
 original-component/native-geometry check rather than a claimed active-cast
 pixel comparison.
+
+### Native HP gauge and after-image interpolation (2026-10-18)
+
+The unchanged `unitframe/unitframe.lua` `SetHp` animates player/target HP
+gains for 0.2 seconds, and their HP after-image losses for 0.3 seconds.
+The toolkit previously jumped both immediately. Native wrapper `39257a80`
+accepts an optional boolean and numeric duration in **seconds**, not
+milliseconds; untyped substitutes do not enable interpolation. `GetValue`
+continues returning the new target immediately while a separate f32 offset
+controls the displayed image.
+
+Native `392c82e0` clamps the new i32 target to the i32 range. A same-target
+call leaves the existing animation settings intact, even when it supplies
+`false, 0`; this matters because the original unit frame refreshes its HP
+every frame. For a changed target with animation enabled and positive
+duration, the normal speed is `abs((displayed - newOffset) / seconds)`.
+An interruption with nonzero old speed and remaining delta instead uses
+`remaining = abs((displayed - oldOffset) / oldSpeed)`, then
+`abs((displayed - newOffset) / remaining)`, preserving the previous remaining
+duration. The newly supplied duration is not used in that branch.
+
+`392c7f80` steps by `(speed * dt_ms) * 0.001` in f32, with the original
+strict overshoot comparison and operation order. Tick `392c8280` requires
+both animation and running flags. Widget update `3927e286..3927e29f` invokes
+that virtual update after its Lua `OnUpdate`; child update traversal checks
+the child's `+ba` visible flag (`3927e1f2`). aa-ui advances visible gauges
+after Lua updates and preserves their state while hidden. Minimum/zero and
+degenerate-range updates hide immediately and retain the displayed offset,
+extent and running state, as the native early return does.
+
+The related scalar prerequisites are now native too: constructor
+`392c7cb9..392c7cd0` initializes the range and target to zero; reversed
+`SetMinMaxValues` ranges are ignored (`392c82b0`); accepted range changes
+preserve the existing target. Internal minimum/maximum/target fields are
+i32, while displayed offset and speed are f32. The native update compares
+the adjusted target with the absolute maximum (`392c7fec`), including its
+nonzero-minimum range-change behavior.
+
+Six groups of original arithmetic were executed locally in Unicorn:
+gain, loss/same-target, interruption, zero while settled/running, and range
+changes. The oracle executes unmodified `392c82e0`, `392c82b0`, `392c8280`
+and `392c7f80`; only anchor/extent/UV helpers are stubbed. It reads the
+offline DLL and performs no live-client execution or writes. Exact recorded
+f32 checkpoints, including interrupted speed 299.9999694824219 and displayed
+20.000001907348633 before the final snap, are checked by regression tests.
+Artifacts: `data/extract/aa-ui/native-statusbar-animation-source-20261018.txt`,
+`native-statusbar-animation-oracle-20261018.json`, and `statusbar_oracle.py`.
+
+The shared `fake/healthbar.rs` fixture obtains the registered original
+player frame through `ADDON:GetContent(UIC_PLAYER_UNITFRAME)` and updates
+the fake received HP together with its unchanged `SetHp` method. Its
+original per-frame refresh remains active. Tests verify HP gain and damage
+after-images in that original path; `native_healthbar_animation` captures
+the original damage fade near its midpoint using aa-dev.
+
+Validation: `cargo check -p aa-ui --lib` and **87 selected tests** passed,
+with one existing font-metric test ignored. The library, statusbar, original
+widgets/HUD, animation, resize, scale/clip, popup and screen-bounds suites
+were included. Built and ran the copied `native_healthbar_animation`
+example with `--shot shots/aa-ui/native-healthbar-animation-20261018.png
+--shot-after 8`; inspected the unique PNG showing the main fill at 40%
+and the original brighter after-image still near 70%. The aa-dev run logged
+**250.1–314.1 FPS**, zero Lua errors and no WARN/ERROR. Process 25604 closed
+automatically. The spawn reference provides original HUD/texture context;
+it has no matching active damage sample, so no timed pixel match is claimed.
