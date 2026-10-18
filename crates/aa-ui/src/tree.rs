@@ -538,6 +538,8 @@ pub struct Object {
     /// Parent widget (for drawables: the owning widget).
     pub parent: Option<Id>,
     pub anchors: Vec<Anchor>,
+    /// RemoveAllAnchors retains the last resolved geometry instead of moving to the owner.
+    pub unanchored_origin: Option<[f32; 2]>,
     pub width: f32,
     pub height: f32,
     /// `Show` / `SetVisible`.
@@ -621,6 +623,7 @@ impl Tree {
             name: "UIParent".into(),
             parent: None,
             anchors: Vec::new(),
+            unanchored_origin: None,
             width: screen_w,
             height: screen_h,
             shown: true,
@@ -801,6 +804,7 @@ impl Tree {
             name: name.to_string(),
             parent,
             anchors: Vec::new(),
+            unanchored_origin: None,
             width: 0.0,
             height: 0.0,
             // Child widgets start shown, top-level windows hidden until `Show(true)`.
@@ -829,6 +833,7 @@ impl Tree {
             name: String::new(),
             parent: Some(owner),
             anchors: Vec::new(),
+            unanchored_origin: None,
             width: 0.0,
             height: 0.0,
             shown: true,
@@ -882,11 +887,25 @@ impl Tree {
             return;
         }
         let o = self.get_mut(id);
+        o.unanchored_origin = None;
         if let Some(old) = o.anchors.iter_mut().find(|o| o.point == a.point) {
             *old = a;
         } else {
             o.anchors.push(a);
         }
+    }
+
+    /// Native 39276940 removes anchor/dependency records without resetting geometry.
+    pub fn remove_anchors(&mut self, id: Id) {
+        if self.get(id).anchors.is_empty() {
+            return;
+        }
+        let r = self.rect(id);
+        let o = self.get_mut(id);
+        o.anchors.clear();
+        o.unanchored_origin = Some([r.x, r.y]);
+        o.width = r.w;
+        o.height = r.h;
     }
 
     /// Whether `from` is `on` or is placed (through its anchors' targets, transitively) by it.
@@ -983,22 +1002,32 @@ impl Tree {
         let mut anchors: Vec<Anchor> = o.anchors.clone();
         let mut fill = false;
         if anchors.is_empty() {
-            // Unanchored: at the owner's top left with its extent. Only text drawables without
-            // an extent fill their owner; an image without anchors or extent is 0 x 0 like in
-            // the client (`honorPointWarWnd.bg` in reference/ingame/spawn).
-            let text = matches!(&o.kind, Kind::Drawable(d) if d.kind == DrawKind::Text);
-            if o.is_widget() || o.width > 0.0 || o.height > 0.0 || !text {
-                // (An empty image drawable reports the screen origin, like the reference.)
-                let empty = !o.is_widget() && o.width == 0.0 && o.height == 0.0;
+            if let Some([x, y]) = o.unanchored_origin {
                 anchors.push(Anchor {
                     point: Point::TopLeft,
-                    target: if empty { ROOT } else { owner },
+                    target: ROOT,
                     rel: Point::TopLeft,
-                    x: 0.0,
-                    y: 0.0,
+                    x,
+                    y,
                 });
             } else {
-                fill = true;
+                // Unanchored: at the owner's top left with its extent. Only text drawables without
+                // an extent fill their owner; an image without anchors or extent is 0 x 0 like in
+                // the client (`honorPointWarWnd.bg` in reference/ingame/spawn).
+                let text = matches!(&o.kind, Kind::Drawable(d) if d.kind == DrawKind::Text);
+                if o.is_widget() || o.width > 0.0 || o.height > 0.0 || !text {
+                    // (An empty image drawable reports the screen origin, like the reference.)
+                    let empty = !o.is_widget() && o.width == 0.0 && o.height == 0.0;
+                    anchors.push(Anchor {
+                        point: Point::TopLeft,
+                        target: if empty { ROOT } else { owner },
+                        rel: Point::TopLeft,
+                        x: 0.0,
+                        y: 0.0,
+                    });
+                } else {
+                    fill = true;
+                }
             }
         }
         let r = if fill {
