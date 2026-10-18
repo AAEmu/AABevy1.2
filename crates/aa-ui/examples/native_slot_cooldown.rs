@@ -8,7 +8,7 @@ mod original;
 use aa_ui::{UiRuntime, lua};
 use bevy::prelude::*;
 use lua::slot::{CooldownSample as Sample, update_native_slot_cooldown};
-fn samples(rt: Option<NonSend<UiRuntime>>) {
+fn samples(rt: Option<NonSend<UiRuntime>>, time: Res<Time>) {
     if let Some(rt) = rt {
         let slots: mlua::Table = rt.lua.globals().get("captionSlots").unwrap();
         for (i, t) in slots.sequence_values::<mlua::Table>().enumerate() {
@@ -39,6 +39,26 @@ fn samples(rt: Option<NonSend<UiRuntime>>) {
                 })
             });
         }
+        let t: mlua::Table = rt.lua.globals().get("completionSlot").unwrap();
+        let id = lua::value_id(&rt.lua, &mlua::Value::Table(t)).unwrap();
+        let now = time.elapsed_secs();
+        let paused =
+            std::env::args().any(|s| s == "--pause-completion") && (6.05..8.0).contains(&now);
+        rt.exec(
+            "@completion_visibility",
+            if paused {
+                "completionSlot:Show(false)"
+            } else {
+                "completionSlot:Show(true)"
+            },
+        )
+        .unwrap();
+        update_native_slot_cooldown(&rt.lua, id, 15, Sample::default(), |_, _| {
+            Some(Sample {
+                remaining_ms: if now < 6. { 500 } else { 0 },
+                total_ms: 1000,
+            })
+        });
     }
 }
 fn main() {
@@ -57,7 +77,7 @@ fn main() {
                 "@selector_caption",
                 r#"
    panel.slotTitle:SetText('Native selector: global / retained accessor / kind16')
-   panel:SetExtent(640,420);panel.slotTitle:SetExtent(620,24)
+   panel:SetExtent(640,520);panel.slotTitle:SetExtent(620,24)
    local title=panel:CreateChildWidget('label','perimeterTitle',0,true)
    title:SetExtent(620,24);title:AddAnchor('TOP',panel,0,265);title.style:SetFontSize(16)
    title:SetText('Native mask + edge: 1/16 / 1/5 / 1/2 / rectangular')
@@ -73,6 +93,11 @@ fn main() {
      if i==4 then slot:SetExtent(58,72) end
      slot:Show(true);perimeterSlots[i]=slot
    end
+   local completionTitle=panel:CreateChildWidget('label','completionTitle',0,true)
+   completionTitle:SetExtent(620,24);completionTitle:AddAnchor('TOP',panel,0,402)
+   completionTitle.style:SetFontSize(16);completionTitle:SetText('Native completion flash')
+   completionSlot=CreateActionSlot(panel,'completionAction',ISLOT_ACTION,8)
+   completionSlot:RemoveAllAnchors();completionSlot:AddAnchor('TOP',panel,0,446);completionSlot:Show(true)
   "#,
             )
             .unwrap();

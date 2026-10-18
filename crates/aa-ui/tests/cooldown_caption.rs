@@ -12,7 +12,7 @@ fn eval<T: mlua::FromLua>(ui: &UiRuntime, code: &str) -> T {
 fn counts(ui: &UiRuntime) -> (usize, usize) {
     let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     (
-        quads.iter().filter(|q| q.corners.is_some()).count(),
+        quads.iter().filter(|q| matches!(q.tex, Tex::MaskedImage { .. })).count(),
         quads
             .iter()
             .filter(|q| q.corners.is_none() && q.tex == Tex::Atlas)
