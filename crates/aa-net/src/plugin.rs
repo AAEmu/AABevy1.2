@@ -22,6 +22,7 @@ use crate::mate::Mates;
 use crate::slave::Slaves;
 use crate::gimmick::Gimmicks;
 use crate::ui_data::UiData;
+use crate::initial_config::GameConfig;
 use crate::combat_status::CombatStatus;
 use crate::conflict::ConflictZones;
 use crate::state::{
@@ -163,6 +164,7 @@ net_state! {
     slaves: Slaves,
     gimmicks: Gimmicks,
     ui_data: UiData,
+    game_config: GameConfig,
     combat_status: CombatStatus,
     conflict_zones: ConflictZones,
 }

@@ -520,6 +520,7 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
+    InitialConfig(crate::initial_config::InitialConfig),
     CraftItemUnlocked(crate::craft::CraftItemUnlock),
     /// Raw loading directive; the app must plan the load/response separately.
     LoadInstance(crate::world_msg::InstanceLoad),
@@ -1492,6 +1493,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
+            M::InitialConfig(config) => self.emit(Event::InitialConfig(config)),
             M::CraftItemUnlocked(e) => self.emit(Event::CraftItemUnlocked(e)),
             M::CraftFailureNotice(e) => self.emit(Event::CraftFailureNotice(e)),
             M::LoadInstance(e) => self.emit(Event::LoadInstance(e)),
@@ -2067,6 +2069,30 @@ mod tests {
                 mp: 6
             })
         ));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn received_initial_configs_reach_app_before_following_packets_without_defaulting_short_features() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let mut raw = crate::wire::Writer::new();
+        raw.blob(b"host").blob(&[0x80]).i32(0).i32(50).raw(&[1; 7]).u8(2).u8(0).u16(0);
+        let raw = raw.finish();
+        let config = crate::initial_config::InitialConfig::read(&mut crate::wire::Reader::new(&raw)).unwrap();
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::InitialConfig(config.clone()),
+            game::ServerMsg::InitialConfig(config.clone()),
+            game::ServerMsg::Snow(true),
+        ]))).await;
+        let mut state = crate::state::WorldState::default();
+        for _ in 0..2 {
+            let event = events.try_recv().unwrap();
+            assert!(matches!(&event, Event::InitialConfig(actual) if actual == &config));
+            state.apply(&event);
+            assert_eq!(state.game_config.received.as_ref().unwrap().mate_level_limit(), None);
+        }
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
 
