@@ -617,6 +617,7 @@ pub enum Event {
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// Received result only; does not grant, consume or modify any item.
+    ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
     LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
@@ -1781,6 +1782,7 @@ impl Session {
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
             M::BuffUpdated { obj_id, index, stacks, charged } => self.emit(Event::BuffUpdated { obj_id, index, stacks, charged }),
+            M::ItemUccDataChanged {ucc_id,player_id,target_item_id} => self.emit(Event::ItemUccDataChanged{ucc_id,player_id,target_item_id}),
             M::GradeEnchantResult(result) => self.emit(Event::GradeEnchantResult(result)),
             M::GradeEnchantBroadcast(result) => self.emit(Event::GradeEnchantBroadcast(result)),
             M::LunagemSocketingResult { raw_result, item_id, template_id, raw_install } => self.emit(Event::LunagemSocketingResult { raw_result, item_id, template_id, raw_install }),
@@ -4842,6 +4844,16 @@ mod tests {
             assert!(events.try_recv().is_err());
         }
         assert!(session.selected_state.is_none());assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.player.spawn.is_none());
+    }
+
+    #[tokio::test]
+    async fn ucc_results_forward_every_receipt_without_appearance_mutation() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());let mut world=crate::state::WorldState::default();
+        for ucc_id in [u64::MAX,u64::MAX,0] {
+            session.game_msg(Ok(game::ServerMsg::ItemUccDataChanged{ucc_id,player_id:u32::MAX,target_item_id:u64::MAX})).await;
+            let e=events.try_recv().unwrap();assert!(matches!(&e,Event::ItemUccDataChanged{ucc_id:id,player_id:u32::MAX,target_item_id:u64::MAX} if *id==ucc_id));world.apply(&e);assert!(events.try_recv().is_err());
+        }
+        assert!(session.selected_state.is_none());assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());assert!(world.player.spawn.is_none());
     }
 
 }
