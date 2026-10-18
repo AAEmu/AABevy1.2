@@ -854,3 +854,42 @@ cosplay-before-head descriptor priority.
 
 After the priority correction, the complete own-crate library check passes
 **68 tests / 1 ignored** (`cargo test -p aa-anim --lib`).
+
+### Explicit beard inventory and original NPC facial heads
+
+The existing `Cdf::bind_body_part` handles explicitly received wire beard slot 25
+(database body-part slot 29) through an already declared `CA_SKIN beard` attachment.
+No additional playable-character beard API or inferred beard default is needed.
+Original dwarf male CDF binds the real item 392/model 14/asset 180
+(`dw_m_beard01.chr`). Its Type3 alternate is asset 181 (`dw_m_beard01_hm.chr`),
+which is absent from this pak; the other zero alternates fall back to asset 180,
+and selector 1 remains explicitly hidden. Ferre item 564/model 20/asset 229 and
+orc item 584/model 40/asset 246 exist in the DB but their meshes are absent from
+the original 1.2 pak. Database presence does not establish renderable geometry.
+The real-asset regression verifies dwarf explicit binding, untouched other slots,
+selector outcomes and all three missing paths. No cross-model substitute is used.
+
+The complete set of NPC head CALs under `objects/characters/people/*/face/` is
+chef face01, blacksmith face01/face02 and girl01 face01. The chef and both
+blacksmith heads already pass the public loaded-head factory with their exact
+23 native targets and `pc_expressions.fxl`. Girl01 exposed a concrete eligibility
+omission: its head CAL selects `animations/people/girl01/facial/girl01.fxl`, and
+its rendered head has 24 native `npc_*` targets, including `npc_a` and
+`npc_eye_close_l`. The factory previously recognized only the `m_a`/`eye_close_l`
+family and wrongly tried a nonexistent expression companion. It now recognizes
+the authored girl family too, retaining the same native internal/external vertex
+and delta validation. It uses this head's own targets with no renaming or transfer.
+
+The public-path regression prepares all four original heads, verifies original
+target order, subset morph descriptors and selected FXL, and samples their actual
+CAL-linked FSQs. Girl talk_01/talk_02 FSQs are available for explicit playback;
+they are not inferred aliases for the different body talk_11 etc. names. Normal
+body following still uses only same-name authored CAL entries.
+`facial --girl` uses the original girl's head, body skeleton and CA_BONE eyeballs
+through the same public preparation API, showing original talk_02 samples.
+
+Verified capture: `shots/aa-anim/facial_girl_native_final_20261018.png`, inspected at
+0, 3.46667 and 4.16667 seconds of the original talk_02 FSQ. The head opens its
+mouth at the authored A key and returns at the authored end; both original
+eyeballs remain correctly attached. Shared-GPU FPS: **257.0?282.6**.
+`cargo test -p aa-anim --lib`: **70 passed / 1 ignored**.

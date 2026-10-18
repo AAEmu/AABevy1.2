@@ -181,7 +181,11 @@ pub(crate) fn expression_set(path: &str, neutral: &aa_cry::Model) -> Result<Arc<
     // customizable PC heads whose face01 contains only static shape sliders.
     // These indices already address the rendered model: still validate the native
     // internal/external records, but do not require an absent face00 companion.
-    if MorphSet::load(path)?.is_some_and(|set| set.find("m_a").is_some() && set.find("eye_close_l").is_some()) {
+    // The girl01 export uses its own npc_* names, addressed directly by girl01.fxl.
+    if MorphSet::load(path)?.is_some_and(|set| {
+        [("m_a", "eye_close_l"), ("npc_a", "npc_eye_close_l")]
+            .into_iter().any(|(mouth, lid)| set.find(mouth).is_some() && set.find(lid).is_some())
+    }) {
         if neutral.meshes.len() != 1 {
             return Err(Error::Format("facial native head needs one mesh".into()));
         }

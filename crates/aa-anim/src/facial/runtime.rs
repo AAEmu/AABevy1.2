@@ -227,6 +227,59 @@ mod tests {
     use crate::{ClipLibrary, SampleOptions, pose::shared_rig};
 
     #[test]
+    fn original_npc_loaded_head_catalog() {
+        if !aa_cry::pak_available() { return; }
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<Image>>();
+        world.init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>();
+        world.init_resource::<aa_cry::scene::CryCache>();
+        let mut state = bevy::ecs::system::SystemState::<CryAssets>::new(&mut world);
+        let mut cry = state.get_mut(&mut world).unwrap();
+        for (head, body, count, prefix, library) in [
+            ("npc_chef01/face/npc_chef01_face01", "npc_chef01/nude/npc_chef01_base", 23, "animations/people/chef_01", "animations/pc_expressions.fxl"),
+            ("npc_blacksmith01/face/face01/npc_blacksmith01_face01", "npc_blacksmith01/nude/npc_blacksmith01_base", 23, "animations/people/npc_blacksmith01", "animations/pc_expressions.fxl"),
+            ("npc_blacksmith01/face/face02/npc_blacksmith01_face02", "npc_blacksmith01/nude/npc_blacksmith01_base", 23, "animations/people/npc_blacksmith01", "animations/pc_expressions.fxl"),
+            ("girl01/face/face01/girl01_face01", "girl01/nude/girl01_base", 24, "animations/people/girl01", "animations/people/girl01/facial/girl01.fxl"),
+        ] {
+            let head = format!("objects/characters/people/{head}.chr");
+            let cal = format!("objects/characters/people/{body}.cal");
+            let loaded = cry.load_model(&head, &aa_cry::scene::ModelOptions::default()).unwrap();
+            let (prepared, mut face, weights) = prepare_loaded_face(&mut cry, &head, &cal, &loaded).unwrap();
+            let native = crate::MorphSet::load(&head).unwrap().unwrap();
+            assert_eq!(face.targets, native.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>());
+            assert_eq!(face.targets.len(), count);
+            assert_eq!(weights.weights().len(), count);
+            assert!(Arc::ptr_eq(&face.library, &ExpressionLibrary::load(library).unwrap()));
+            for (_, subsets) in &prepared.parts {
+                for subset in subsets {
+                    assert_eq!(cry.meshes.get(&subset.mesh).unwrap().morph_target_names().unwrap(), &face.targets);
+                }
+            }
+            let table = Cal::shared(&cal).unwrap();
+            let name = if count == 24 { "fist_ba_relaxed_idle" } else { "fist_ac_talk_11" };
+            let body = table.animation(name).unwrap();
+            let authored = table.facial.get(name).unwrap();
+            assert!(authored.path.starts_with(prefix), "{}", authored.path);
+            assert_eq!(face.sequences.get(&body.path), Some(&authored.path));
+            // Exercise the selected original library/FSQ on these actual native targets.
+            face.follow_body = false;
+            face.fade_seconds = 0.0;
+            let sequence = FacialSequence::load(&authored.path).unwrap();
+            face.play(sequence, false);
+            let mut output = vec![0.0; count];
+            let mut peak = 0.0f32;
+            for frame in 0..120 {
+                face.time = frame as f32 / 30.0;
+                face.update(None, 0.0, &mut output);
+                peak = peak.max(output.iter().copied().fold(0.0f32, |a, b| a.max(b.abs())));
+            }
+            assert!(peak > 0.1, "{head}: authored speech remained neutral");
+        }
+    }
+
+    #[test]
     fn loaded_factory_isolates_meshes_and_follows_original_npc_body_clock() {
         if !aa_cry::pak_available() { return; }
         let mut world = World::new();
