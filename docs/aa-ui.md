@@ -2516,3 +2516,152 @@ units, original guide, zero script errors, 360-408 FPS, automatic closure and
 exit 0. Shared HUD/map framing was compared with `reference/ingame/spawn/real.png`;
 that reference has an empty tracker and no resizing gesture. This fixture omits
 the 3D world and changes no font, authored content layout or UI calibration.
+
+## Original battlefield progress getters and clock (2026-10-18)
+
+These are source contracts for the app's received-state bridge, not new aa-ui
+game-state defaults. The native bindings for `GetProgressEntireInfo`
+(`39456450`), `GetProgressTimeInfo` (`39456540`), `GetProgressScoreInfo`
+(`39456630`), and `GetProgressVictoryConditionInfo` (`39456720`) all call
+`3936cfd0`: states exactly 5/6/7/8 are admitted, and every other state returns
+**zero Lua values**. The returned state names are `JOINED`, `COUNTDOWN`,
+`STARTED`, and `ENDED` (native string pointer table `39ac74ec`).
+
+Time builder `3936da30` always adds `state` and `nowtime`. Its phase-dependent
+keys are:
+
+| State | `startTime` | `endTime` | `nowtime` |
+|---|---|---|---|
+| JOINED (5) | omitted | omitted | fresh mapped timer value |
+| COUNTDOWN (6) | manager `+3ce8` | manager `+3cec` | mapped timer + 6000 |
+| STARTED (7) | manager `+3cec` | `startTime + manager[3ce0]` | mapped timer |
+| ENDED (8) | manager `+3cf0` | `startTime + manager[3ce4]` | mapped timer |
+
+All additions above use wrapping 32-bit arithmetic. Time values are unsigned
+u32 converted to f32 before becoming Lua numbers (`3901c950` and the inline
+`nowtime` conversion); they are neither decimal strings nor exact f64 integers.
+The countdown adjustment applies to `nowtime`, not every phase's clock.
+
+Score builder `3936dbd0` returns the following keys. The selected team starts at
+`manager + 58 + manager[8] * 1df8`; its index is the accepted/received corps,
+not the player's current faction or the invitation's separately stored choice.
+
+| Key | Native source |
+|---|---|
+| `myKillStreakPoint` | signed i32 manager `+3cd0` |
+| `myCorpsVictoryState` | signed i32 selected team `+0` |
+| `myCorpsKill`, `myCorpsDeath` | unsigned u16 selected team `+c`, `+e` |
+| `score1`, `score2` | signed i32 manager `+3c48`, `+3c4c` |
+| `killScore1`, `killScore2` | signed i32 manager `+3c50`, `+3c54` |
+
+Each score is narrowed to f32. Victory builder `3936de90` adds
+`victoryScore` from signed i32 `+3c`, `victoryKillCount` from signed i32 `+40`,
+and `victoryTarget` from signed i32 `+44`, all via f32. The received kill count
+is originally u16, promoted on receipt. Target equal to the native invalid-NPC
+sentinel becomes numeric zero; it is a template ID, not a boolean objective flag.
+
+Entire builder `3936e7a0` adds `corpsName`, `corpsName1`, `corpsName2`, and
+signed-i32-to-f32 `endReason` (`+38`), then merges the complete Time, Score and
+Victory fields into the same table. `corpsName` resolves the stored rule ID
+(`+c`) and invitation choice (`+18`): 0/1 uses that rule's faction name,
+2 returns literal `ANY_CORPS`, and unresolved/other cases return `""`.
+`corpsName1/2` are separately cached faction names (`+50/+54`) resolved from the
+two received faction IDs (`+48/+4c`), with an empty string for failed lookup.
+Reply acceptance `3936f646..3936f654` replaces the selected-team index `+8`
+with its correlated accepted corps; it does not rewrite invitation choice `+18`.
+
+`GetMyKillstreakSkillsInfos` (`39456000` -> `3936e5e0`) is **not state-gated**.
+It always returns 24 numbered rows, indexed 1..24, each with unsigned-u32-to-f32
+`skill_type` from manager `+3c58 + (row-1)*4` and boolean `enable` from
+`+3cb8 + (row-1)`. Its top-level `skill_count` counts IDs different from the native
+invalid-skill sentinel. That sentinel (`3a172cdc`) is zero, verified by a bounded
+read-only read in the existing original process after module verification.
+Zero-ID and disabled rows remain present; neither filtering nor compaction is
+part of this getter.
+
+Reset `3936d0d0` zeros `endReason`, victory score/count, both full team blocks,
+killstreak points, all skill enables, three phase durations and four time
+anchors. Skill IDs and victory target use their zero invalid sentinels. The
+JOINED receiver `3936d890` requires state 4 and matching zone, instance and
+accepted corps. It stores received score/count/target and the three phase
+durations at `+3cdc/+3ce0/+3ce4`, sets state 5, clears time anchors
+`+3ce8/+3cec/+3cf0/+3cf4`, resolves the two faction names, copies all 24 skill
+IDs, disables all skills, and clears the four aggregate score fields. Wrapper
+`3936e0c0` raises `ENTERED_INSTANT_GAME_ZONE` only after that receiver succeeds.
+No start/end key is invented merely because the reset anchors contain zeros.
+
+The original waiting alarm's Joined-event branch shows its people-waiting
+message without reading start/end times. The action bar reads the killstreak
+table's `skill_count`. The mini scoreboard opens on `INSTANT_GAME_START` or
+`ENTERED_WORLD`, not the Joined event; its EnteredWorld path can attempt timing
+while state is JOINED. Preserve the native key omission and event sequence
+instead of supplying fictional start/end values to bypass that timing edge.
+
+### Native mapped clock producer
+
+`3936da9c..3936dabe` queries the environment's timer (`[3a5bb1d8] + 14`), calls
+virtual `+10` with timer index 0, then calls virtual `+20` with that result.
+There is no battlefield-manager `nowtime` field. Verified read-only runtime
+source identifies those virtuals as CrySystem `3656f740` and `3656ea30`:
+timer-0's cached i64 microseconds become milliseconds through integer
+`*1000/1000000`, then the timer's embedded `xlcommon::TimeKeeper` maps them.
+Its named `GetRemoteTime` export (`33025600`; CrySystem import `36608788`)
+returns `localMilliseconds + remoteAnchor - localMean`, wrapping u32.
+Constructor `330321d0` zeros both anchors and five sample pairs; `Init`
+(`33032010`) resets sample index and remote anchor. The first sample replaces
+the retained local mean after Init.
+
+The actual sample producer is **proxy Pong 0x13**. CryNetwork registration
+`1626bbff` binds callback `1626b6e6` through `16270d7e`, whose packet constructor
+`1626c606` writes opcode `13` and vtable `1629b190`. Serializer `16267a47`
+reads four i64 fields in order (`tm`, `when`, `elapsed`, `remote`) followed by
+two u32 fields (`local`, `world`), a 40-byte payload. Visible callback body
+`1626b0d8..1626b119` calls timer virtual `+1c` with
+`AddSample(packet.local, packet.world, freshTimer0Milliseconds)`. It does not
+use the packet's four i64 values for this mapping. The call requires a nonnull
+connection-owned listener pointer at `+2c`; that pointer starts null and also
+receives ordinary virtual listener calls (`16269eaa..16269ebb`). Its protected
+attachment path has not been interpreted as an invented enable flag.
+
+`TimeKeeper::AddSample` (`33032040`) computes wrapping RTT `receive-send`,
+interprets it as signed i32, and multiplies its f32 conversion by `0.5f`.
+For the first sample, `remoteAnchor=packet.world`, and all five pairs become
+`(RTT, trunc(f32(receive as i32)-halfRTT))`. Later samples use
+`trunc(f32(remoteAnchor-packet.world+receive as i32)-halfRTT)` at the ring index,
+advancing modulo 5. The five pair pointers are sorted by signed RTT comparison,
+with sorted index 2 as the median. The native threshold is signed truncation of
+`(square(r0-r2)+square(r1-r2)+square(r3-r2))/5`, using wrapping i32 arithmetic:
+the highest sample's squared difference is computed but is not included in
+that threshold sum (`3303211e..3303214b`). It averages the signed local samples
+whose squared RTT difference is at most this threshold; no selected samples
+sets the mean to zero. Preserve that actual instruction sequence rather than
+substituting a conventional statistical filter.
+
+The imported MSVCR100 `qsort` (`63194a80`) routes five elements through its
+short sort (`63194993`): for last index 4 down to 1, scan indices 1..last,
+replace the selected maximum only for a positive wrapping comparator result,
+and swap that maximum with the last element. This preserves behavior even
+when extreme RTT differences make the comparator nontransitive. A local
+Unicorn oracle executes the original AddSample, comparator and CRT short-sort
+instructions without mocked sorting. Its seven vector groups cover odd RTTs,
+outliers, f32 boundaries, u32 wrap, zero remote anchors, threshold overflow with
+zero selected samples, and nontransitive RTT comparisons. Results are in
+`data/extract/aa-ui/native-timekeeper-oracle-20261018.json`; only the local
+emulator's synthetic memory is modified.
+
+The separate `SCInstantGameStartPacket.now` value is unused by the native start
+receiver `3936d9b0`; that receiver queries this mapped timer and adds 6000.
+The read-only server lane currently gives proxy Pong and battlefield scheduling
+independent `OnceLock` tick-counter origins. Those producers do not establish
+a common native remote-clock domain. The app/network owners must account for
+that integration gap; swapping in the unused received `now` field would change
+the proven client contract.
+
+Source artifacts are ignored `data/extract/aa-ui/` files
+`native-battlefield-progress-bindings-20261018.txt`,
+`native-battlefield-progress-source-20261018.txt`,
+`native-battlefield-clock-source-20261018.txt`, and
+`native-progress-time-runtime-20261018.txt`. Runtime inspection used only
+`PROCESS_VM_READ` in the already-running original client, with `StandMode` at
+`399a08dc` verified before each read; no input, writes or injection. This is a
+source audit, so it adds no new rendered scenario or performance claim.
