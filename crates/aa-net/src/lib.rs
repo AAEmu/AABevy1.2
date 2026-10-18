@@ -24,6 +24,7 @@ pub mod craft;
 pub mod friend;
 pub mod game;
 pub mod gimmick;
+pub mod housing;
 pub mod interaction;
 pub mod initial_config;
 pub mod items;
@@ -58,6 +59,7 @@ pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFail
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use bank::{BankCommand, BankEvent};
+pub use housing::{House, HouseSnapshot, Houses, HousingEvent};
 pub use gimmick::{Gimmick, GimmickEvent, GimmickJoint, GimmickMovement, GimmickSpawn, Gimmicks};
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
 pub use craft::{CraftFailureNotice, CraftItemUnlock};

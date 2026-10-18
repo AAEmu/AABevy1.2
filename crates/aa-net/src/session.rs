@@ -529,6 +529,7 @@ pub enum Event {
     /// Raw item timer metadata; does not change inventory contents or guess an expiry.
     ItemLifespan(crate::items::ItemLifespan),
     Gimmick(crate::gimmick::GimmickEvent),
+    Housing(crate::housing::HousingEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
@@ -1508,6 +1509,7 @@ impl Session {
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
+            M::Housing(e) => self.emit(Event::Housing(e)),
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
             M::SetBreath { breath } => self.emit(Event::SetBreath { breath }),
@@ -2077,6 +2079,24 @@ mod tests {
                 mp: 6
             })
         ));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn housing_reports_forward_every_received_action_in_order() {
+        use crate::housing::HousingEvent;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let expected = HousingEvent::State(crate::housing::tests::snapshot());
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::Housing(expected.clone()),
+            game::ServerMsg::Housing(expected.clone()),
+            game::ServerMsg::Housing(HousingEvent::Demolished { tl_id: 7 }),
+            game::ServerMsg::Snow(true),
+        ]))).await;
+        for _ in 0..2 { assert!(matches!(events.try_recv(), Ok(Event::Housing(actual)) if actual == expected)); }
+        assert!(matches!(events.try_recv(), Ok(Event::Housing(HousingEvent::Demolished { tl_id: 7 }))));
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
 

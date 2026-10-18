@@ -3489,3 +3489,70 @@ This read-only audit adds no protocol/state API: current mate identity, explicit
 requests, attachment events, authoritative rename, physical inventory details and pending
 slots already cover the proven boundaries. Natural summon/ride/service QA, exact action-slot
 automatic-use control, and the protected max-mate-level producer remain unresolved.
+
+### Received house snapshots and native/lane model boundary (2026-10-18)
+
+`housing::{HouseSnapshot, HousingEvent, Houses}` adds the missing read-only house metadata
+resource. The active SC0bc dispatch follows this project's bevy lane
+`models/house.rs::House::write` exactly. A separate explicit `HouseSnapshot::read_native`
+reads the original client format; there is no payload heuristic or transport profile.
+
+Native factory391e3e48 installs vtable399b765c and opcode0xbc. Its serializer397ab210
+passes packet+10 to39897460 (`NetHouse`). The field sequence is:
+
+| Field | Lane wire | Native wire |
+| --- | --- | --- |
+| timeline, database ID, runtime object ID, housing template | u16, u32, BC, u32 | same |
+| model | PISC(model_id, second value) | one fixed32-bit value (`ht`, virtual+4c at39897501) |
+| co-owner ID, owner character ID, owner name, account ID | u32, u32, string, u32 | same; native owner string capped128 bytes |
+| permission, total/current build actions, tax | u8, i32, i32, i32 | same |
+| position | i64 X, i64 Y, f32 Z | same;3961e270 |
+| house name, recover flag | string, byte boolean | same; native name capped128 bytes |
+| sale price, designated buyer ID/name | 32-bit money, u32, string | same; native buyer name capped128 bytes |
+
+The model mismatch is concrete:39897501 uses virtual+4c, exactly the same method used by
+`allstep`398975ef and `curstep`39897607. The lane instead calls `write_pisc(&[model_id,0])`.
+The active reader preserves both PISC values (`lane_model_aux` is Some); the native reader
+has no auxiliary value. Native signed money bits remain i32; the lane's unsigned sale
+price is preserved bit-for-bit. Raw permission values and raw long XY are retained rather
+than converted into guessed permission policy or quantized spatial state.
+
+SC0bd build progress (u16 TL, u32 model, i32 total/current actions) and SC0be permission
+(u16 TL, u8) update known snapshots only. Source handler391d7890 resolves TL through
+3932b510 and calls39327990 with the three progress fields;391d7920 similarly resolves TL
+before permission setter39325df0. Unknown TL updates never construct a house/unit.
+SC0c0 demolition carries u16 TL. Handler391d7a40 calls3932a300, which marks native+148
+rather than immediately erasing the object. `House::demolished` therefore records the
+received notice; it does not fabricate a `UnitsRemoved` event. Genuine unit removals
+remove matching snapshot object IDs. Character selection, world leave and disconnect
+clear the resource; a fresh full snapshot replaces its TL record and resets the notice.
+All received actions, including repeated snapshots, remain forwarded session events even
+when the resource's change detection sees identical state.
+
+Native OnHouseState391d77f0 first requires an existing runtime object at packet+18,
+then passes NetHouse to3932fa00 and emits native event0x104. `Houses` records received
+metadata separately and does not fabricate an ordinary unit, world placement, current
+interaction or housing UI event from the snapshot alone. Existing `UnitKind::Housing`
+provides the independent received unit model/build-step shell.
+
+SC0bc contains no decoration list or precomputed proficiency bonus. Existing received
+`Doodad` records preserve owner/parent object IDs, item_template_id and owner metadata,
+and existing removal events remove them. The prior source-proven `housing_decorations`
+static aggregation and house permission/enclosure predicates remain required before an
+app can calculate actual local proficiency modifiers. This milestone adds neither a
+synthetic decoration packet nor an enclosure/bonus calculation. My-house/login lists,
+sale/tax/recovery deltas and construction commands remain separate follow-ups.
+
+Validation: `cargo check -p aa-net --features bevy` passes; the full library suite is
+282 passed. Four new tests cover independent lane/native goldens, exact DD04 tail
+alignment, every payload truncation, native128-byte name bounds, unknown permission
+values, repeated reports, delta-before-snapshot, object/TL replacement, demolition versus
+actual removal, lifecycle resets and ordered session forwarding. No live housing command
+or server mutation was attempted.
+
+The decoration mutation source also distinguishes attachment from a house snapshot:
+39038941 checks the parent unit's kind+410==3, resolves its timeline+418 through3932b510,
+and passes doodad+7c (runtime object ID) and+2a8 (item template) to39330270. Removal
+39038a97 resolves the doodad's attached unit+88 and passes the same pair to39330310.
+This supports later use of received attachment and item identity; it does not prove that
+all world doodads merely owned by the same player are decorations of that house.
