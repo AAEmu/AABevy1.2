@@ -378,8 +378,9 @@ The same cached literal layout drives text, selection, picking, and navigation, 
 markup characters and final empty lines. Text, backing and caret clip to the authored inset;
 typing/navigation scroll the caret into view, and wheel input scrolls multiline text.
 The native multiline Lua class has no `SetFocus`; pointer input and the application focus API
-can focus it. Native clipboard shortcuts are implemented below; IME composition and Ctrl-word
-navigation remain unimplemented.
+can focus it. Native clipboard shortcuts are implemented below; IME composition remains
+unimplemented. Native Left/Right remain per-scalar with Ctrl held: model `392291f0` uses
+`3922962d` / `3922964a`, then `39224c70` applies Shift selection without a Ctrl-word branch.
 
 Native evidence: select-all flag `39239c40` / focus path `39292230`; single/multiline rendering
 `392935b0` / `39295060`; selected backing in `39220fd0` uses the game's
@@ -1132,6 +1133,63 @@ binding on the secondary row. Its original `OnHide` ends capture. These are inpu
 the motion milestone above contains the associated UI rendering verification.
 Final regression check: `cargo test -p aa-ui --tests` — **88 passed, one font metrics test
 ignored**.
+
+## Native hotkey application contract
+
+The app owns hotkey definitions, draft/live state, persistence and gameplay dispatch. The
+toolkit already provides the original binding page's keyboard/wheel capture, modifier queries
+and release suppression described above. Install app `X2Hotkey` methods after both example
+fallback scripts: `fake_options.lua` and `fake_ingame.lua` replace binding getters.
+
+| Method | Native contract |
+|---|---|
+| `GetBinding(action, manager)` | Live lookup; manager 1/2 is primary/secondary. Returns a key string or `""`, never nil for an unbound entry. |
+| `GetOptionBinding(action, manager, option, index)` | Boolean `option` selects draft when true, live when false; it is not a modifier-format flag. Indexed builtin actions use their original 1-based index; ordinary actions use 0. |
+| `GetBindingButton(name, manager)` / `GetOptionBindingButton(name, manager)` | Named widget/button lookup in live/draft state respectively, returning `""` when unbound. |
+| `SetOptionBindingWithIndex(action, key, manager, index)` | Draft only. Manager must be positive and is converted to manager-1 internally. Index > 0 stores builtin_multi kind 5 and preserves the index; otherwise builtin kind 0. |
+| `SetOptionBindingButtonWithIndex(name, key, manager)` | Draft only, widget/button kind 2, manager-1. |
+| `RemoveOptionBinding(action, manager, index)` | Remove the matching draft action/manager/index. Preserve an explicit deleted-default marker when saving so default merging cannot resurrect it. |
+| `BindingToOption()` | Copy live to draft, emit `UPDATE_OPTION_BINDINGS` without arguments. |
+| `InitOptionHotKey()` | Reload draft defaults; live bindings stay unchanged until save. |
+| `SaveHotKey()` | In native world stage 6: copy draft to live, emit `UPDATE_BINDINGS`, then persist; other stages return without applying it. |
+| `EnableHotkey(on)` | Register/unregister the application hotkey listener independently of widget capture. |
+
+Mutators return no Lua value. Getters format modifier prefixes in `CTRL-ALT-SHIFT-` order,
+then the native lowercase physical name. Original `MakeBindingKey` composes
+`SHIFT-CTRL-ALT-`; native parsing finds each modifier substring independently and uses the
+name after the final dash. Normalize both forms to the same physical binding.
+
+The conflict identity is (mode, physical key, modifiers), shared by primary and secondary
+managers. Rebinding first removes the previous key for the same action/manager/index, then
+displaces a conflicting record in that mode. A successful changed option assignment emits
+`UPDATE_OPTION_BINDINGS(overridden, displacedAction)`: exactly two arguments, and the displaced
+name is the base action without its builtin_multi index. The original callback has three
+formals, but its third is nil. Removing a binding emits the same event without arguments.
+Assigning an unchanged binding returns early without an event. Other modes can retain the
+same physical combination.
+
+`IsValidActionName` matches the exact 104 native spellings at array `39ac8e68` through
+`393f8d20`; its import is `XlCompareString`, distinct from `XlCompareStringI`.
+`IsOverridableAction` (`393f8db0`) finds the action in an 18-entry (enum, mode) table
+`39ac9060` and checks mode > 0. Five names/order are directly readable at `39ac9020`:
+normal 0, mode_action 1, builder_rotate 2, screen_shot 3, quest_directing 4. The 18-entry
+table's raw PE values require runtime decoding, so its exact membership was not recovered.
+The pak's `game/default_binding.g` has 18 distinct non-normal actions; equating those with
+that native table remains an inference. Load actual defaults from this pak file, not the
+example fake key maps.
+
+Native evidence: getters `39476a30` / `39476b10` / `39476ce0` / `39476dc0` call `393fcfb0`,
+whose argument +0x14 selects live (+0x28) or draft (+0x88). Setters `39476460` / `39476370`
+call `393ffc20`; conflict metadata is assembled at `394000e8`..`394001ee` and the two-argument
+event at `39400394`. Removal `39476250` -> `393fdf60` -> `393fcd90` marks deleted defaults at
+`393fcf47`. Copy directions are `393ff140` / `393ff190`; save is `393ff1f0`, draft reset
+`39400e50`, key parsing `393f81a0`, formatting `393fc400`.
+
+Read-only target-menu integration audit: `X2:GetTargetFactionRelationship` (`39442960`)
+returns hostile 1, neutral 2, friendly 3, invalid faction 0, or 2 when no target exists.
+It reads target faction +0x3ae4 via `390b39c0`, then `392f8210` -> `398a4130`. Native string
+conversion `394bb977`..`394bb99b` confirms the enum labels. Original popup bytecode excludes
+result 1 before checking character/player and not-self; it does not require friendly 3.
 
 ## Native persistent scale and effect clipping
 
