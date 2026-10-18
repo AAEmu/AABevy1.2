@@ -4,8 +4,8 @@ use crate::{
     item_task_projection::{
         NativeItemTaskInventory, NativeItemTaskLocation, NativeItemTaskMutation,
         NativeItemTaskStorage, lookup_native_item_detail_update, lookup_native_item_task,
-        lookup_native_item_task_move, project_native_item_detail_update, project_native_item_task,
-        project_native_item_task_move,
+        lookup_native_item_task_move, project_native_item_detail_update,
+        project_native_item_task_move, project_native_item_task_with_recharge,
     },
     items::{ItemDetailUpdate, ItemTask, ItemTasks},
     model::{Equipment, Item},
@@ -21,6 +21,7 @@ pub struct NativeItemRecords {
     bag_extent: Option<u8>,
     bank_extent: Option<u8>,
     lost: bool,
+    recharge_catalog: Option<std::sync::Arc<std::collections::HashMap<u32, u32>>>,
 }
 
 /// Returned only after all mutations of this individual row are visible.
@@ -62,8 +63,25 @@ fn extent(slots: u32) -> u8 {
     (slots as u8 / 10) * 10
 }
 impl NativeItemRecords {
-    fn selected(&mut self, owner: u32, equipment: &Equipment) {
+    /// Complete successful static lookup: absent templates mean known no recharge.
+    /// This supplies future projections only and never repairs unknown records.
+    pub fn set_recharge_catalog(
+        &mut self,
+        catalog: std::sync::Arc<std::collections::HashMap<u32, u32>>,
+    ) {
+        self.recharge_catalog = Some(catalog);
+    }
+    fn reset(&mut self) {
+        let recharge_catalog = self.recharge_catalog.clone();
         *self = Self {
+            recharge_catalog,
+            ..Self::default()
+        };
+    }
+    fn selected(&mut self, owner: u32, equipment: &Equipment) {
+        let recharge_catalog = self.recharge_catalog.clone();
+        *self = Self {
+            recharge_catalog,
             owner: Some(owner),
             equipment: equipment_snapshot(equipment),
             bag: vec![None; 130],
@@ -153,7 +171,7 @@ impl NativeItemRecords {
             // available, an unhandled receipt cannot preserve exact records.
             | Event::UnhandledGamePacket { opcode: 0x93, len: 1.., .. } => self.lose(),
             Event::LoginSucceeded(_) | Event::ReadyToConnect{..} | Event::LeftWorld{..} | Event::Disconnected{..} | Event::Kicked{..}
-            | Event::PhaseChanged(crate::Phase::Authenticating | crate::Phase::Connecting) => *self = Self::default(),
+            | Event::PhaseChanged(crate::Phase::Authenticating | crate::Phase::Connecting) => self.reset(),
             _ => {}
         }
     }
@@ -210,7 +228,14 @@ impl NativeItemRecords {
             ))
         } else {
             let context = lookup_native_item_task(task, &inventory)?;
-            let projected = project_native_item_task(task, context)?;
+            let recharge = match context {
+                crate::item_task_projection::NativeItemTaskContext::Found { item, .. } => self
+                    .recharge_catalog
+                    .as_ref()
+                    .map(|catalog| catalog.get(&item.template_id).copied().unwrap_or(0)),
+                _ => None,
+            };
+            let projected = project_native_item_task_with_recharge(task, context, recharge)?;
             Some((
                 vec![projected.mutation],
                 NativeItemRowOutput {

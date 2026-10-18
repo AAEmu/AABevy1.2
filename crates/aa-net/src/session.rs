@@ -46,6 +46,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Tunables of a session. The defaults are what an app wants; the fields exist for tests.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature="bevy", derive(bevy::prelude::Resource))]
 pub struct ClientOptions {
     /// Interval of the keep-alive `PingPacket`, `None` for no pings at all.
     ///
@@ -55,11 +56,14 @@ pub struct ClientOptions {
     pub ping_interval: Option<Duration>,
     /// How long after the game connection opens the first ping goes out (default: at once).
     pub first_ping_delay: Duration,
+    /// Complete sparse template->recharge buff catalog for native item task guards.
+    /// None preserves unknown equipment-unpack behavior; absent entries in Some mean0.
+    pub item_recharge_catalog: Option<std::sync::Arc<std::collections::HashMap<u32,u32>>>,
 }
 
 impl Default for ClientOptions {
     fn default() -> Self {
-        Self { ping_interval: Some(PING_INTERVAL), first_ping_delay: Duration::ZERO }
+        Self { ping_interval: Some(PING_INTERVAL), first_ping_delay: Duration::ZERO, item_recharge_catalog:None }
     }
 }
 
@@ -779,6 +783,8 @@ async fn recv_stream(c: &mut Option<StreamConn>) -> net::Result<stream::ServerMs
 
 impl Session {
     fn new(evt: UnboundedSender<Event>, options: ClientOptions) -> Self {
+        let mut native_records=crate::NativeItemRecords::default();
+        if let Some(catalog)=&options.item_recharge_catalog {native_records.set_recharge_catalog(catalog.clone());}
         Self {
             evt,
             options,
@@ -804,7 +810,7 @@ impl Session {
             battlefield: Default::default(),
             server_clock: Default::default(),
             received_inventory: Default::default(),
-            received_native_records: Default::default(),
+            received_native_records: std::cell::RefCell::new(native_records),
             received_trials: Default::default(),
             received_rankings:Default::default(),
             waiting: None,
@@ -5016,6 +5022,27 @@ mod tests {
         }
         assert_eq!(session.received_inventory.borrow().bag,legacy.bag);assert_eq!(session.received_inventory.borrow().equipment,legacy.equipment);
         assert_eq!(session.received_native_records.borrow().item(1,0).unwrap().id,u64::MAX);
+    }
+
+    #[tokio::test]
+    async fn session_catalog_seeds_native_unpack_retry_and_survives_selected_reset() {
+        use crate::item_effect::ItemEffectMode;
+        let catalog=std::sync::Arc::new(std::collections::HashMap::from([(26390,4874)]));
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions{item_recharge_catalog:Some(catalog),..Default::default()});
+        let mut payload=vec![0;55];payload[11..19].copy_from_slice(&102i64.to_le_bytes());
+        let source=Item{id:11,template_id:26390,count:2,detail:crate::model::ItemDetail::Equip(crate::model::EquipDetail{charge_time:102,..Default::default()}),detail_payload:Some(payload),..Default::default()};
+        let mut items=vec![Some(source),Some(Item{id:22,template_id:202,count:1,..Default::default()})];items.resize(10,None);
+        seed_item_effect_records(&mut session,items.clone());
+        session.emit(Event::LeftWorld{target:0});seed_item_effect_records(&mut session,items);
+        let old=native_item_effect_request(&session,ItemEffectMode::Gem);
+        session.emit(Event::ItemsChanged(ItemTasks{tasks:vec![crate::items::ItemTask::Security{container:2,slot:0,item_id:999,bits:4,is_unsecure_excess:0,is_unsecure_set:0,is_unpack:1,unsecure_time:-7,unpack_time:-9}],..Default::default()}));
+        assert!(matches!(&session.received_native_records.borrow().item(2,0).unwrap().detail,crate::model::ItemDetail::Equip(e) if e.charge_time == -9));
+        assert!(old.recheck_native(&session.received_native_records.borrow(),0).is_err());
+        let refreshed=native_item_effect_request(&session,ItemEffectMode::Gem);while events.try_recv().is_ok(){}
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(conn,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(conn.unwrap());
+        session.command(Command::ItemEffect{character_id:42,request:refreshed.clone()}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&refreshed).await;
+        session.game.as_mut().unwrap().shutdown().await;
     }
 
 }
