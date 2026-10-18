@@ -116,6 +116,7 @@ pub struct HudData {
     pub(super) ranking: super::ranking::View,
     pub(super) buff_cancel: super::buffs::cancel::View,
     pub(super) item_effects: super::item_effects::View,
+    pub(super) enchant: super::enchant::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
@@ -174,6 +175,7 @@ impl Default for HudData {
             ranking: Default::default(),
             buff_cancel: Default::default(),
             item_effects: Default::default(),
+            enchant: Default::default(),
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
@@ -272,6 +274,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::mail::install(lua, bridge)?;
     super::itemlinks::install(lua, bridge)?;
     super::item_effects::install(lua, bridge)?;
+    super::enchant::install(lua, bridge)?;
     super::loot_roll::install(lua)?;
     super::trade::install(lua, bridge)?;
     super::pvp::install(lua, bridge)?;
