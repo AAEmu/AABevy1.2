@@ -1848,7 +1848,7 @@ The CSV preserves all ten oracle inputs/results; no server charge was changed or
 
 Payment helper `394f0eb0` receives amount, currency selector, auto-AA, deferred task and error
 code. The repair selector defaults to money (0); only player flag `0x1000` permits lookup of
-currency-config record 11 (`39744420`). Selector 0 checks money and emits error `0x1a` when
+currency-config kind 11 (`39744420`). Selector 0 checks money and emits error `0x1a` when
 insufficient. Selector 3 checks AA funds and offers dialog 39 when insufficient. Selector 4
 uses money directly when sufficient; otherwise auto-AA permits money plus AA if enough,
 offers dialog 39 if still short, or opens confirmation dialog 38 when auto-AA is disabled.
@@ -1856,6 +1856,17 @@ Original handlers identify 38 as `DLG_TASK_ASK_USE_AA_POINT` (with auto-AA check
 as `DLG_TASK_ASK_CHARGE_AA_POINT`. The helper returns 0 to proceed, 1 to reject/offer charge,
 or 2 for deferred confirmation. This does not prove that the current lane enables selectors
 3/4 or entitlement flag `0x1000`.
+
+The selector lookup is a static game-definition table, not a direct SCInitialConfig getter.
+Loader `39750960` uses `SELECT kind_id, currency_id FROM currency_configs` (SQL at `39a0cdbc`),
+stores the key/value arrays at game DB `+f7f4`/`+f7f8`, then builds their range map with
+`3974e380`. Getter `39744420` searches that map at `+f798` by **kind_id**, not the table's
+primary `id`. Repair requests kind 11 (`394f1127`) and reads its `currency_id`; a missing
+record yields gold selector 0. The read-only lane `compact.sqlite3` currently has zero rows
+in `currency_configs(id, kind_id, currency_id)`. No link from raw SCInitialConfig
+`secondPriceType` (packet `+2bc`) to this record or the enabling player flag was established;
+its runtime handler's protected body remains the source boundary. Raw server bytes must
+not be substituted for this selector.
 
 Item tooltip generation (`394237b0` / `394e4b60`) supplies numeric `repairCost` only for a
 damaged repairable item, using that same native price function. Original tooltip Lua displays
