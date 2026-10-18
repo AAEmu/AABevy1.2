@@ -6545,3 +6545,31 @@ negative i64 inputs are not a conventional negative period: -1bits yields
 separate. period_time_oracle.py/native-period-time-oracle-20261018.json archive executed
 positive/zero/negative cases and the360-year boundary. Prior365-day wording is corrected;
 this source milestone still adds no trial timer behavior.
+
+
+### Original trial confirmation and cancellation controls
+
+TrialCommand::ConfirmCrimeRecords { trial_id, jury_number } writes CS073 u32/i32;
+CancelTrial { trial_id } writes CS074 u32. Original zero-argument Lua wrappers
+39078390/390783d0 call3907c8a0/3907c8f0 and return zero values. Confirmation checks only
+native jury-role byte+1; cancellation checks only current-jury dword+100==0. There is
+no native phase, defendant, nonzero-trial, or positive-seat requirement. Neither sender
+updates the cache. Native constructors397ac180/397ac1a0 and packet serializers agree
+with the active lane's actual jury_end_testimony/cancel_trial handlers.
+
+Trials now retains received SummonJury court and signed jury_number after its changed-
+context Beautyshop callback. Those fields survive native context/role resets; application
+session isolation clears them. Command::Trial captures the selected persistent character
+ID and native context. Session checks active InWorld/header identity, matching trial and
+seat, and the native weak gate at actual send time. These stale-identity checks are
+stronger application guards. Unknown current_jury refuses cancellation rather than
+inventing zero. Duplicate valid requests remain possible. TrialRequested and
+TrialRequestRejected are local transport observations only, never completion ACKs or
+optimistic state changes; failed/missing writes reject explicitly.
+
+Ignored native-trial-controls-source-20261018.txt and trial_controls_oracle.py /
+native-trial-controls-oracle-20261018.json execute the original control bodies and
+constructors locally, with only socket sender39186810 mocked. All twelve role/count
+cases preserve cache bytes, including zero trial and negative seat. Golden bodies/full
+frames plus real loopback session tests cover duplicate sends, unknown count, actual
+waiting admission, stale character/context/seat, lifecycle and failed transport.

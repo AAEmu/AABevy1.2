@@ -124,6 +124,8 @@ opcodes! {
         CSInteractNPCEndPacket = 0x066,
         CSStartInteractionPacket = 0x068,
         CSJurySummonedPacket = 0x072,
+        CSJuryEndTestimonyPacket = 0x073,
+        CSCancelTrialPacket = 0x074,
         CSRequestJuryWaitingNumberPacket = 0x079,
         CSInviteToTeamPacket = 0x07a,
         CSInviteAreaToTeamPacket = 0x07b,

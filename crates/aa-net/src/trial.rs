@@ -1,6 +1,8 @@
 //! Received trial wait cache and every received producer of its defendant callback gate.
-//! Does not implement elapsed trial clocks, invitations, votes or automatic CS072.
+//! Does not implement elapsed trial clocks or verdict votes. Session owns the automatic CS072 reply.
 mod data;
+mod commands;
+pub use commands::TrialCommand;
 mod progress;
 #[cfg(test)]
 mod dispatch_tests;
@@ -103,6 +105,9 @@ pub struct Trials {
     pub defendant_context: Option<u32>,
     pub trial_id:u32,
     pub is_jury:bool,
+    /// Native173 assigns these after changed-context callbacks; resets retain both.
+    pub jury_court:Option<u32>,
+    pub jury_number:Option<i32>,
     pub phase:u8,
     /// Raw last received phase duration; this resource does not advance a trial clock.
     pub remaining_time_ms:u32,
@@ -209,8 +214,8 @@ impl Trials {
                     TrialEvent::SummonDefendant { trial_id } => {
                         self.adopt_trial(*trial_id,emit);self.defendant_context=Some(*trial_id);self.is_jury=false;
                     }
-                    TrialEvent::SummonJury { trial_id,.. } => {
-                        self.adopt_trial(*trial_id,emit);self.defendant_context=None;self.is_jury=true;
+                    TrialEvent::SummonJury { trial_id,court,jury_number } => {
+                        self.adopt_trial(*trial_id,emit);self.jury_court=Some(*court);self.jury_number=Some(*jury_number);self.defendant_context=None;self.is_jury=true;
                     }
                     TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.reset_role(emit),
                     TrialEvent::DefendantData(data) => {
