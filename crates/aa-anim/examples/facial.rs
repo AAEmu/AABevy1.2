@@ -59,6 +59,15 @@ fn spawn_chef(commands: &mut Commands, cry: &mut CryAssets, transform: Transform
     assert_eq!(face.targets.len(), 23);
     let head = spawn_loaded(commands, head_path, &loaded, &options);
     commands.entity(head).insert(ChildOf(model_root));
+    let cdf = aa_anim::Cdf::load("objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf").unwrap();
+    for attachment in &cdf.attachments {
+        if attachment.kind != aa_anim::cdf::AttachmentKind::Bone || attachment.binding.is_empty() || attachment.flags & 1 != 0 { continue; }
+        let (bone, local) = attachment.bone_binding(&rig.skeleton).unwrap();
+        let options = ModelOptions { material: attachment.material.clone(), cry_space: true, ..default() };
+        let loaded = cry.load_model(&attachment.binding, &options).unwrap();
+        let part = spawn_loaded(commands, &attachment.binding, &loaded, &options);
+        commands.entity(part).insert((Transform::from_matrix(Mat4::from(local)), ChildOf(bones[bone])));
+    }
     commands.entity(root).insert((Animator::new(rig, bones), face, weights));
     root
 }

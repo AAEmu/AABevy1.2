@@ -641,6 +641,39 @@ meshes without claiming a complete helmet-equipped appearance match.
 Inspected final capture `shots/aa-anim/hair_native_variants_final_20261018.png` shows all
 six choices with aligned labels at **321.2–405.4 FPS**, after the shared build lock cleared.
 
+### Rigid CDF attachments (NPC eyes)
+
+`cdf::Attachment::bone_binding(&Skeleton)` returns the named joint index and a Cry-space
+joint-local `Affine3A` for a `CA_BONE` binding. `BoneAlignment` preserves the original
+`AlignBoneAttachment` mode. The original loader `3150D870`, assembly `3150BA00`, constructor
+`31513900` and attachment methods `315199E0` / `3150C530` establish these rules:
+
+* `Bone`: the loader ignores serialized `Rotation`/`Position`; the created attachment is
+  aligned to its joint, with only the declared uniform scale applied locally.
+* Absent/other (`Model`): the serialized quaternion/position is an absolute character-space
+  default, converted to local space by `joint.bind_model.inverse() * authored_transform`.
+  The native loader only applies CDF scale in Bone mode.
+* `Skin`: native surface projection is required and the helper returns an explicit error.
+
+The helper rejects missing joints/non-bone attachments and leaves visibility, empty-slot
+filtering, binding asset/material loading and animation to the caller. Spawn the rigid
+binding with `cry_space = true`, then insert `Transform::from_matrix(Mat4::from(local))`
+and `ChildOf(body_bones[joint])` on its loaded-model root. This reuses the existing animated
+joint hierarchy and performs no second Cry-to-Bevy conversion. The local default remains
+correct as body/facial animation moves the joint. Bounded original decompilations are in
+`data/extract/aa-anim/attachments-native/`.
+
+CDF pak-path normalization now collapses repeated slashes. The original chef left-eye
+binding contains `face//npc_chef01_eye_l.cgf`; it now resolves to the real pak file. The
+public `facial --chef` example loads both original rigid CGFs from its base CDF and uses
+`bone_binding` directly. Inspected `shots/aa-anim/facial_npc_bone_eyes_20261018.png` shows
+both eyeballs correctly seated across neutral/A/return heads at **260.2–294.1 FPS**. This
+remains an isolated-head diagnostic with uncalibrated native materials; NPC clothing/hair
+appearance is not compared here. Latest own tests: **65 passed, 1 ignored**, including
+original eye paths/joints, ignored Bone-mode offsets, uniform scale, absolute-to-local
+composition, and unsupported Skin/missing-joint errors. Client CDF attachment assembly
+still needs this opt-in helper; existing character assembly/calibration was untouched.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/

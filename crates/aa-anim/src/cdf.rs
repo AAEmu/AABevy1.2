@@ -22,7 +22,7 @@
 //!   `Material`; the part is attached to a base skeleton by bone name;
 //! * `Attachment` elements of **part** files may also carry a `Material`.
 
-use glam::{Quat, Vec3};
+use glam::{Affine3A, Quat, Vec3};
 
 use crate::{Error, Result};
 
@@ -36,6 +36,16 @@ pub enum AttachmentKind {
     Other,
 }
 
+/// Original `AlignBoneAttachment` mode. `Bone` ignores XML Rotation/Position;
+/// `Model` uses a model-space default transform. `Skin` needs surface projection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoneAlignment {
+    #[default]
+    Model,
+    Bone,
+    Skin,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attachment {
     pub name: String,
@@ -45,6 +55,7 @@ pub struct Attachment {
     pub material: Option<String>,
     /// Bone of a `CA_BONE` attachment.
     pub bone_name: String,
+    pub bone_alignment: BoneAlignment,
     pub position: Vec3,
     pub rotation: Quat,
     pub scale: f32,
@@ -99,6 +110,11 @@ impl Cdf {
                     binding: norm(a.attribute("Binding").unwrap_or("")),
                     material: a.attribute("Material").map(norm).filter(|m| !m.is_empty()),
                     bone_name: a.attribute("BoneName").unwrap_or("").to_string(),
+                    bone_alignment: match a.attribute("AlignBoneAttachment") {
+                        Some(mode) if mode.eq_ignore_ascii_case("Bone") => BoneAlignment::Bone,
+                        Some(mode) if mode.eq_ignore_ascii_case("Skin") => BoneAlignment::Skin,
+                        _ => BoneAlignment::Model,
+                    },
                     position: a.attribute("Position").and_then(floats::<3>).map(Vec3::from).unwrap_or(Vec3::ZERO),
                     rotation,
                     scale: a.attribute("scale").or(a.attribute("Scale")).and_then(|v| v.trim().parse().ok()).unwrap_or(1.0),
@@ -126,6 +142,26 @@ impl Cdf {
     }
 }
 
+impl Attachment {
+    /// Joint index and Cry-space local transform for parenting a rigid attachment to
+    /// an existing animated joint. The model-root already performs Cry-to-Bevy conversion.
+    /// Callers retain visibility/empty-slot filtering and load the binding/material normally.
+    pub fn bone_binding(&self, skeleton: &aa_cry::Skeleton) -> Result<(usize, Affine3A)> {
+        if self.kind != AttachmentKind::Bone {
+            return Err(Error::Format("not a CA_BONE attachment".into()));
+        }
+        let bone = skeleton.bones.iter().position(|bone| bone.name.eq_ignore_ascii_case(&self.bone_name))
+            .ok_or_else(|| Error::Missing(format!("attachment bone {}", self.bone_name)))?;
+        let local = match self.bone_alignment {
+            BoneAlignment::Bone => Affine3A::from_scale(Vec3::splat(self.scale)),
+            BoneAlignment::Model => skeleton.bones[bone].bind_model.inverse()
+                * Affine3A::from_rotation_translation(self.rotation, self.position),
+            BoneAlignment::Skin => return Err(Error::Format("skin-aligned bone attachment projection is unsupported".into())),
+        };
+        Ok((bone, local))
+    }
+}
+
 fn floats<const N: usize>(s: &str) -> Option<[f32; N]> {
     let mut out = [0f32; N];
     let mut it = s.split(',');
@@ -138,7 +174,8 @@ fn floats<const N: usize>(s: &str) -> Option<[f32; N]> {
 /// Lowercase, `/` separators, without a leading `game/`.
 pub fn norm(p: &str) -> String {
     let p = p.trim().replace('\\', "/").to_ascii_lowercase();
-    p.trim_start_matches("./").trim_start_matches('/').trim_start_matches("game/").to_string()
+    p.trim_start_matches("./").trim_start_matches('/').trim_start_matches("game/")
+        .split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("/")
 }
 
 #[cfg(test)]
@@ -188,5 +225,37 @@ mod tests {
     fn rejects_other_xml() {
         assert!(Cdf::parse("<Material/>").is_err());
         assert!(Cdf::parse("not xml").is_err());
+    }
+
+    #[test]
+    fn original_chef_eyes_bind_to_joints_and_normalize_authored_double_slash() {
+        if !aa_cry::pak_available() { return; }
+        let cdf = Cdf::load("objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf").unwrap();
+        let skeleton = aa_cry::Skeleton::load(&cdf.model).unwrap();
+        for name in ["eye_left", "eye_right"] {
+            let eye = cdf.attachment(name).unwrap();
+            assert_eq!(eye.bone_alignment, BoneAlignment::Bone);
+            assert!(aa_pak::Pak::global().exists(&eye.binding), "{}", eye.binding);
+            assert!(!eye.binding.contains("//"));
+            let (bone, local) = eye.bone_binding(&skeleton).unwrap();
+            assert_eq!(skeleton.bones[bone].name, eye.bone_name);
+            assert!(local.abs_diff_eq(Affine3A::IDENTITY, 1e-6));
+            // Native Bone alignment ignores the serialized model-space offset entirely.
+            let mut changed = eye.clone();
+            changed.position = Vec3::splat(100.0);
+            changed.rotation = Quat::from_rotation_z(1.0);
+            assert_eq!(changed.bone_binding(&skeleton).unwrap(), (bone, local));
+            changed.scale = 0.5;
+            assert!(changed.bone_binding(&skeleton).unwrap().1.abs_diff_eq(Affine3A::from_scale(Vec3::splat(0.5)), 1e-6));
+            // Without alignment, the same XML transform is absolute in character space.
+            changed.bone_alignment = BoneAlignment::Model;
+            let desired = Affine3A::from_rotation_translation(changed.rotation, changed.position);
+            let (bone, local) = changed.bone_binding(&skeleton).unwrap();
+            assert!((skeleton.bones[bone].bind_model * local).abs_diff_eq(desired, 1e-4));
+            changed.bone_alignment = BoneAlignment::Skin;
+            assert!(changed.bone_binding(&skeleton).is_err());
+            changed.bone_name = "not_a_joint".into();
+            assert!(changed.bone_binding(&skeleton).is_err());
+        }
     }
 }
