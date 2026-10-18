@@ -173,8 +173,8 @@ fn numeric(
                 xy.y + (d.y * 2. - 1.) * strength,
                 (1. - xy.length_squared()).max(0.).sqrt(),
             );
-            // Existing flat heightmap frame: U=+X,V=-Z,N=+Y in Bevy space.
-            let n = Vec3::new(bump.x, bump.z, -bump.y).normalize();
+            // Native flat heightmap frame: U=+X,V=+Z,N=+Y in Bevy space (Cry V=-Y).
+            let n = Vec3::new(bump.x, bump.z, bump.y).normalize();
             let linear = n * 0.5 + Vec3::splat(0.5);
             let rgb = linear.to_array().map(|v| {
                 ((if v <= 0.0031308 {

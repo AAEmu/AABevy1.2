@@ -464,13 +464,14 @@ impl LayerLibrary {
             let Some(mat) = self.mats.get(mat as usize) else { continue };
             for (p, proj) in mat.proj.iter().enumerate() {
                 let Some(proj) = proj else { continue };
-                let (su, sv) = (scale[0] * proj.tile[0], scale[1] * proj.tile[1]);
+                // Native LayerTexGen (300DC9B0): X=(Y,-Z), Y=(X,-Z), Z=(X,-Y).
+                let (su, sv) = (scale[0] * proj.tile[0], -scale[1] * proj.tile[1]);
                 let off = offset(p, su, sv);
                 let i = (s * PROJECTIONS + p) * ENTRY;
                 let mut normal = proj.normal;
                 if normal.is_some() {
                     let ratio = [proj.normal_tile[0] / proj.tile[0], proj.normal_tile[1] / proj.tile[1]];
-                    let normal_off = offset(p, scale[0] * proj.normal_tile[0], scale[1] * proj.normal_tile[1]);
+                    let normal_off = offset(p, scale[0] * proj.normal_tile[0], -scale[1] * proj.normal_tile[1]);
                     // Removing diffuse's integer world phase before a noninteger ratio would shift
                     // the normal. Restore its independently reduced world phase in this affine map.
                     let transform = Vec4::new(ratio[0], ratio[1],
@@ -1068,8 +1069,9 @@ mod tests {
                 _=>[cell.0 as f64*1024.0,cell.1 as f64*1024.0],
             };
             for axis in 0..2 {
+                let sign=if axis==0 {1.0} else {-1.0};
                 let expected=((source[axis]+f64::from(local[axis]))
-                    *f64::from(scale[axis]*proj.normal_tile[axis])).rem_euclid(1.0) as f32;
+                    *f64::from(sign*scale[axis]*proj.normal_tile[axis])).rem_euclid(1.0) as f32;
                 let delta=(actual[axis]-expected).rem_euclid(1.0);
                 assert!(delta.min(1.0-delta)<0.0001,"normal phase {cell:?} slot{sid}/{p} axis{axis}: {actual:?} expected{expected}");
             }
@@ -1089,6 +1091,44 @@ mod tests {
                 _=>modifier.unhandled.push(("TexGenType".into(),"1".into())),
             }
             texture.tex_mod=Some(modifier);assert!(static_tile(&texture).is_none());
+        }
+    }
+
+    #[test]
+    fn native_signed_diffuse_and_detail_projection_phase() {
+        if !crate::pak_available() { return; }
+        let cell = (21, 8);
+        let built = LayerLibrary::build("main_world", [cell].into_iter()).unwrap();
+        let params = built.library.params(cell, Vec3::ONE).unwrap();
+        let table = built.library.cells[&cell];
+        let (mat, scale) = table[7]; // Original rock401b, authored X/Y/Z projections.
+        let local = Vec3::new(12.3731, 91.6237, 37.1713);
+        let world = bevy::math::DVec3::new(cell.0 as f64 * 1024.0, cell.1 as f64 * 1024.0, 0.0) + local.as_dvec3();
+        for p in 0..3 {
+            let projection = built.library.mats[mat as usize].proj[p].unwrap();
+            let e = (7 * 3 + p) * ENTRY;
+            assert!(params.layers[e].z > 0.0 && params.layers[e].w < 0.0);
+            // Original 300DC9B0 numeric controls: X=(Y,-Z), Y=(X,-Z), Z=(X,-Y).
+            let (coord, global) = match p {
+                0 => (local.yz(), bevy::math::DVec2::new(world.y, -world.z)),
+                1 => (local.xz(), bevy::math::DVec2::new(world.x, -world.z)),
+                _ => (local.xy(), bevy::math::DVec2::new(world.x, -world.y)),
+            };
+            let base = coord * params.layers[e].zw() + params.layers[e + 1].xy();
+            let coefficient = Vec2::from_array(scale) * Vec2::from_array(projection.tile);
+            let expected = global * coefficient.as_dvec2();
+            let compare = |actual: Vec2, expected: bevy::math::DVec2| {
+                for axis in 0..2 {
+                    let d = (f64::from(actual[axis]) - expected[axis]).rem_euclid(1.0);
+                    assert!(d.min(1.0-d) < 0.0002, "axis{axis}: {actual:?} expected{expected:?}");
+                }
+            };
+            compare(base, expected);
+            if projection.detail.is_some() {
+                assert!(params.layers[e + 2].z < 0.0);
+                let detail = coord * params.layers[e + 2].yz() + params.layers[e + 3].xy();
+                compare(detail, global * (coefficient * Vec2::from_array(projection.detail_tile)).as_dvec2());
+            }
         }
     }
 

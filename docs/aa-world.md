@@ -2127,6 +2127,65 @@ assets by 17 s; the shared arrays retain their world-library lifetime. All six
 capture runs self-close with exit 0 and no warnings/errors. The inherited
 fly/post/sky/water calibration files remain untouched.
 
+#### Native signed heightmap projection coordinates and frame
+
+The native heightmap uses the same signed plane generator as the supported voxel
+path: **X=(Y,-Z), Y=(X,-Z), Z=(X,-Y)**. Original engine `300DC9B0` writes the two
+rows; `CTerrainNode::UpdateSurfaceRenderMeshes` at `300DFA60` calls it and sends
+the 16-float block through render-element vslot+92. Renderer `380011B0` queues
+the data and `38001240` copies it to custom-data+24. The renderer's semantic table
+at `383841BC` maps `PB_TerrainLayerGen` to 55; switch case `38076B8D` calls
+`3806F9A0`, which copies those same 16 floats unchanged. `terrain.cfx`53/371/379
+uses the rows directly for diffuse/bump coordinates, and 387-397 normalizes their
+directions for the projected U/V frame. No transpose or V reversal occurs in
+that bridge. The audit used a disposable copy of the original renderer IDB;
+the original files were unchanged and the 130 MB working copy was removed.
+
+Twenty-four executions of the original x86 generator cover all six axis labels
+and four actual scale magnitudes; only its two external view-distance getters
+are stubbed. Three executions of the original renderer getter verify the 64-byte
+copy and absent-render-element/custom-data gates. Ignored
+`roads/native-heightmap-layer-{projection,upload}-oracles.json` and the adjacent
+disassembly/decompiler records retain that proof.
+
+The heightmap previously used positive V for all three planes and a matching
+positive-V frame. `terrain_layers.rs` now negates the authored V scale before
+resolving the world-origin fraction, independently for diffuse, base normal and
+direct detail coordinates. The relative base-normal affine transform retains
+its own noninteger phase. `terrain_layers.wesl` uses native negative-V binormals:
+in Bevy space X/Y planes use -Y and the Z plane uses +Z. Texture gradients keep
+their signed scales. Authored TexMod tiling remains positive under the existing
+validation; signed projection is separate from unsupported signed TexMods.
+Geometry, cover sampling, material colour, gains, assets, uniforms, array caps,
+workers and lifetime are unchanged. Frames are still projected/normalized at
+fragments rather than native vertices; LOD layer weights, axis selection and
+other lighting/BRDF differences remain open. No native camera-reference
+comparison is claimed.
+
+The full world suite passes **221 tests**, nine existing optional ignored;
+all 14 terrain-layer tests pass, including original all-axis diffuse/detail
+world phase, independent normal phase and shared-cell continuity. The aa-dev
+`terrain_normal_uv` fixture now includes rock Y as a fifth row: all ten raw
+ATI2/relative-UV GPU controls agree with the independent signed CPU frames
+within one display byte. The earlier `terrain_detail` fixture's CPU frame is
+updated to native V; its 12 original base/detail/BC1/copy/second-array GPU
+controls also pass within one byte. Inspected numeric captures under
+`shots/aa-world/terrain_projection/` log **254-312 FPS** at 1280x720.
+
+The original Palace/rock cameras described above retain the same hour, geometry,
+materials and gains. `--positive-v` restores positive diffuse/base/detail UVs
+only and deliberately retains the corrected native normal frame. This isolates
+UV sampling from the frame correction. Inspected native/control pairs show the
+authored texture orientation change; rows 180..720 have mean channel differences
+10.67/24.17 and 88.9%/93.9% of pixels changing by more than 3 in a channel.
+Comparison against the exact prior `f25e9cc` captures, which also retain the
+former positive frame, gives 10.72/24.21 and 89.0%/94.1%. No subjective colour or
+brightness fitting was performed. Palace logs **188-270 FPS** (UV control
+241-291); rock **249-287** (control 240-263), under shared builds. The original
+rock unload again verifies zero per-cell cells/tasks/patches/materials/surface
+maps/meshes; all seven runs self-close with exit 0 and no warnings/errors.
+All five inherited calibration files retain their exact hashes.
+
 ### Objects (`objects.rs`, `placement.rs`)
 
 Placement files are parsed on the `aa_cry::workers` threads (max 2 cells in flight, ahead of the models in the queue) and binned per 64 m sector. Models are prepared (parsed, textures

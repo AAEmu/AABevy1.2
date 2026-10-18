@@ -1,5 +1,6 @@
 //! Native independent terrain bump UVs. Actual ATI2 texels + native/legacy numeric controls;
-//! --world [--rock] [--legacy] [--unload-check] keeps diffuse/detail/lighting unchanged.
+//! --world [--rock] [--legacy] [--positive-v] [--unload-check].
+//! --positive-v mirrors texture coordinates only; it retains the native signed normal frame.
 use aa_cry::{
     material::{Material as CryMaterial, TextureMap},
     texture::{Dds, DdsFormat},
@@ -82,6 +83,7 @@ fn numeric(
         ((15, 15), 8, 2),
         ((15, 15), 9, 2),
         ((21, 8), 7, 0),
+        ((21, 8), 7, 1),
     ]
     .into_iter()
     .enumerate()
@@ -137,7 +139,7 @@ fn numeric(
         let b = original.layers[from + 1];
         let diffuse_uv = local * a.zw() + b.xy();
         for column in 0..2 {
-            let center = Vec2::new(column as f32 * 3.0 - 1.5, 2.8 - row as f32 * 1.85);
+            let center = Vec2::new(column as f32 * 3.0 - 1.5, 3.7 - row as f32 * 1.85);
             let mut params = TerrainParams::new(Vec3::ONE);
             params.inspect_normal = 1;
             params.tint.w = 1e9;
@@ -157,8 +159,10 @@ fn numeric(
                 } else {
                     diffuse_tile[axis]
                 };
-                ((origin[axis] + f64::from(local[axis])) * f64::from(entry.scale[axis] * tile))
-                    .rem_euclid(1.0) as f32
+                let sign = if axis == 0 { 1.0 } else { -1.0 };
+                ((origin[axis] + f64::from(local[axis]))
+                    * f64::from(sign * entry.scale[axis] * tile))
+                .rem_euclid(1.0) as f32
             }));
             let point = (uv * size as f32)
                 .floor()
@@ -169,9 +173,9 @@ fn numeric(
             let xy = Vec2::new(texels[i + 1] as f32, texels[i] as f32) * (2.0 / 255.0) - Vec2::ONE;
             let z = (1.0 - xy.length_squared()).max(0.0).sqrt();
             let n = match p {
-                0 => Vec3::new(z, xy.y, -xy.x),
-                1 => Vec3::new(xy.x, xy.y, -z),
-                _ => Vec3::new(xy.x, z, -xy.y),
+                0 => Vec3::new(z, -xy.y, -xy.x),
+                1 => Vec3::new(xy.x, -xy.y, -z),
+                _ => Vec3::new(xy.x, z, xy.y),
             }
             .normalize();
             let linear = n * 0.5 + Vec3::splat(0.5);
@@ -227,12 +231,12 @@ fn numeric(
         Transform::from_xyz(0.0, 0.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: bevy::camera::ScalingMode::FixedVertical {
-                viewport_height: 9.0,
+                viewport_height: 11.0,
             },
             ..OrthographicProjection::default_3d()
         }),
     ));
-    commands.spawn((Text::new("Independent native normal UV / former diffuse UV. Original ATI2 texels + CPU swatches.\nRows: wet sand 5x / coral 2.5x / dry sand .5x / rock .7x. Diffuse/detail composition unchanged."),TextFont{font_size:FontSize::Px(18.0),..default()},Node{position_type:PositionType::Absolute,left:px(12.0),top:px(10.0),..default()}));
+    commands.spawn((Text::new("Native signed normal UV / former diffuse UV. Original ATI2 texels + CPU swatches.\nRows: wet sand 5x / coral 2.5x / dry sand .5x / rock X,Y .7x. All three signed projection frames."),TextFont{font_size:FontSize::Px(18.0),..default()},Node{position_type:PositionType::Absolute,left:px(12.0),top:px(10.0),..default()}));
 }
 fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
     let image = shot.image.clone().try_into_dynamic().unwrap().to_rgb8();
@@ -240,8 +244,8 @@ fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
     for (i, (p, cpu)) in controls.0.iter().enumerate() {
         let gpu = image
             .get_pixel(
-                (w as f32 * 0.5 + p.x * h as f32 / 9.0) as u32,
-                (h as f32 * 0.5 - p.y * h as f32 / 9.0) as u32,
+                (w as f32 * 0.5 + p.x * h as f32 / 11.0) as u32,
+                (h as f32 * 0.5 - p.y * h as f32 / 11.0) as u32,
             )
             .0;
         assert!(
@@ -307,6 +311,21 @@ fn world_check(
             && let Some(mut m) = mats.get_mut(handle.id())
         {
             state.images.insert(m.extension.surface.id());
+            if flag("--positive-v") {
+                // UV-only control; the production native frame stays unchanged.
+                let params = &mut m.extension.params;
+                for p in 0..params.normal_uv.len() {
+                    let e = p * 4;
+                    let ratio = params.normal_uv[p].y;
+                    let normal_offset = params.layers[e + 1].y * ratio + params.normal_uv[p].w;
+                    params.layers[e].w = -params.layers[e].w;
+                    params.layers[e + 1].y = (-params.layers[e + 1].y).rem_euclid(1.0);
+                    params.normal_uv[p].w =
+                        (-normal_offset).rem_euclid(1.0) - params.layers[e + 1].y * ratio;
+                    params.layers[e + 2].z = -params.layers[e + 2].z;
+                    params.layers[e + 3].y = (-params.layers[e + 3].y).rem_euclid(1.0);
+                }
+            }
             if flag("--legacy") {
                 m.extension
                     .params
