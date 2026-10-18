@@ -3300,3 +3300,56 @@ Executable-count secure policy is source-specific:394d3e39 passes playerflags200
 as3961fbc0's last bool argument, which skips item flag04 only when true. MaterialInfo
 instead checks feature byte5 bit20 plus item flag04. Their counts must not be assumed
 identical when these independent received/config flags differ.
+
+### Base information, search and raw grade boundaries (2026-10-18)
+
+GetCraftBaseInfo39461860 exact keys: craft_type,ac_type,title,desc,tool_type,skill_type,
+cast_delay,recommend_level. title (not name) is recipe+28. doodad_name is included only
+when req_doodad_id resolves3963b290 and comes from that record+3c. A resolved skill adds
+consume_lp,needed_lp,laborpower_satisfied; missing skill omits all labor/proficiency
+keys. A resolved skill group adds required_actability_type/name/point and compares
+effective received+attribute+spatial points against crafts.actability_limit. Missing
+group omits those required fields but sets actability_satisfied=true. Labor satisfaction
+is current labor>=native rounded neededLP, without an additional workbench/range gate.
+
+GetCraftTypeByItemType39462010 returns the FIRST global craft_products397de110 record
+in native catalog order whose item_id matches and show_lower_crafts(+14) is true.
+It returns product.craft_id without checking grade/rate/current bench/proficiency or
+resolving that recipe; no match returns nil.
+
+All/CurrentDoodadCraftTypesInGroupByName39461640/39461700 call394d3ea0 with different
+source selections. They require XlStringLen(name)1..30, convert multibyte to wide through
+XlMultiToWide, filter group/category sentinel rules, then match recipe.title with
+XlFindStringI (case-insensitive substring, no trimming/tokenization). All scans native
+recipe catalog order; Current scans selected-bench recipe-ID tree order, without a
+visible_order sort. Material-name variants39461d60/39461e20 call394d24d0 with the same
+length/conversion/matching rules on material item.name. They append per matching
+material and retain duplicate consuming recipes. Current material search resolves
+active kind3 doodad and compares recipe.req_doodad_id to its actual templateID, rather
+than testing current-map membership. Invalid search/empty output returns nil.
+
+XlStringLen implementation is read directly from read-only client12/bin/xlcommon.dll,
+export3301b000. It counts UTF-8 sequences, not bytes: ASCII advances1, lead c2..df2,
+e0..ef3,f0..f44 and validates continuation bytes, incrementing once per sequence.
+Malformed input stops counting; the routine does not fully enforce Unicode scalar
+validity beyond these byte checks. For valid UTF-8, Unicode scalar count matches this
+1..30 search gate. The imported XlFindStringI locale/casefold implementation was not
+replaced with an assumed Rust Unicode casefold policy.
+
+Material required_grade compares directly with received raw grade byte; products export
+raw grade byte without grade_order conversion. If no eligible material and require_grade
+is-1,3946280f reads zero-filled static byte3a5aa2d0 and passes raw grade0 to39421e20.
+It does not substitute item.fixed_grade. Synthetic item_info exports itemGrade directly
+from that argument at39421fb0; fixedGrade is separate metadata itemdesc+3c, exported only
+if nonnegative. Display tooltip grade_order conversion must not change raw comparisons.
+
+GetExpandExpertInfo3943ba20 uses next-row lookup397a9540(received expansionCount),
+which queries key count+1. Missing returns nil/error1fd. Fields: requireLP=row life_point;
+requireItemType and requireItemCount only when itemID differs from invalid3a5a9e2c;
+remainExpandCnt excludes the immediate next row. At3943bb20 it starts i1 and queries
+lookup(count+i), itself adding1, until missing, returning i-1. For contiguous keys1..10,
+received count0 therefore returns9, count9 returns0 while key10 is still available.
+No LP/item affordability is checked by this getter or CanExpandExpert.
+Native3301b000 Unicorn oracle (no stubs) confirms ASCII30bytes->30, Korean30chars/
+90bytes->30, Korean31/93bytes->31, emoji30/120bytes->30, and a+ff+z->1. Ignored helper:
+data/extract/aa-net/search_length_oracle.py.
