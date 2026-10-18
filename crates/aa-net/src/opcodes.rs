@@ -108,6 +108,7 @@ opcodes! {
         CSDepositMoneyPacket = 0x047,
         CSWithdrawMoneyPacket = 0x048,
         CSResurrectCharacterPacket = 0x04e,
+        CSSetForceAttackPacket = 0x04f,
         CSStartSkillPacket = 0x052,
         CSStopCastingPacket = 0x054,
         CSSendChatMessagePacket = 0x063,

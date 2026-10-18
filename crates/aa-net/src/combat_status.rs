@@ -5,6 +5,9 @@ use std::collections::{HashMap, hash_map::Entry};
 use crate::session::Event;
 use crate::wire::{Reader, Result};
 
+/// Native SCUnitState bit3, converted to the same current flag used by the toggle and SC043.
+pub const FORCE_ATTACK_FLAG: u16 = 0x0008;
+
 /// `SCEnvDamage`: a presentation report, separate from authoritative HP changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnvironmentDamage {
@@ -29,7 +32,8 @@ impl EnvironmentDamage {
     }
 }
 
-/// Latest explicit reports for a known unit; absence is unknown, not false.
+/// Force attack starts from the native snapshot bit and then follows explicit reports.
+/// Invisibility is unknown until its separate report arrives.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UnitCombatFlags {
     pub force_attack: Option<bool>,
@@ -50,9 +54,12 @@ impl CombatStatus {
         self.by_unit.get(&obj_id)
     }
 
-    fn announce(&mut self, obj_id: u32) -> bool {
-        if let Entry::Vacant(entry) = self.by_unit.entry(obj_id) {
-            entry.insert(UnitCombatFlags::default());
+    fn announce(&mut self, unit: &crate::model::Unit) -> bool {
+        if let Entry::Vacant(entry) = self.by_unit.entry(unit.obj_id) {
+            entry.insert(UnitCombatFlags {
+                force_attack: Some(unit.flags & FORCE_ATTACK_FLAG != 0),
+                invisible: None,
+            });
             true
         } else {
             false
@@ -61,8 +68,8 @@ impl CombatStatus {
 
     pub fn apply(&mut self, event: &Event) -> bool {
         match event {
-            Event::UnitSpawned(unit) => self.announce(unit.obj_id),
-            Event::PlayerSpawn(player) => self.announce(player.obj_id),
+            Event::UnitSpawned(unit) => self.announce(unit),
+            Event::PlayerSpawn(player) => self.announce(&player.unit),
             Event::ForceAttackSet { obj_id, on } => {
                 let Some(flags) = self.by_unit.get_mut(obj_id) else {
                     return false;
@@ -137,6 +144,40 @@ mod tests {
             .u16(!length)
             .raw(&inner);
         ServerMsg::decode(&frame.finish())
+    }
+
+    #[test]
+    fn force_attack_request_is_exactly_one_bool_and_initial_snapshot_uses_only_bit_three() {
+        for on in [false, true] {
+            let message = crate::game::ClientMsg::SetForceAttack { on };
+            assert_eq!(message.encode(7), [0xdd, 1, 0, 7, 0x4f, 0, u8::from(on)]);
+            assert_eq!(message.name(), "CSSetForceAttackPacket");
+            let body = message.encode_body();
+            let mut r = Reader::new(&body);
+            assert_eq!(r.bool().unwrap(), on);
+            assert!(
+                r.is_empty(),
+                "lane reader consumes exactly one bool with no object ID"
+            );
+        }
+        for flags in [0, 1, 2, 4, 8, 16, 0x2000, 0xffff, 0xfff7] {
+            let mut unit = crate::state::tests::unit(7);
+            unit.flags = flags;
+            let mut cache = CombatStatus::default();
+            assert!(cache.apply(&Event::UnitSpawned(Box::new(unit.clone()))));
+            assert_eq!(cache.get(7).unwrap().force_attack, Some(flags & 8 != 0));
+            assert_eq!(cache.get(7).unwrap().invisible, None);
+            assert!(cache.apply(&Event::ForceAttackSet {
+                obj_id: 7,
+                on: flags & 8 == 0
+            }));
+            assert!(!cache.apply(&Event::UnitSpawned(Box::new(unit))));
+            assert_eq!(
+                cache.get(7).unwrap().force_attack,
+                Some(flags & 8 == 0),
+                "duplicate announcement must not undo a later explicit report"
+            );
+        }
     }
 
     #[test]
@@ -253,11 +294,16 @@ mod tests {
         assert!(!state.combat_status.apply(&flag));
         assert!(!state.combat_status.apply(&hidden));
         assert!(state.combat_status.by_unit.is_empty());
-        let spawn = Event::UnitSpawned(Box::new(crate::state::tests::unit(7)));
+        let mut unit = crate::state::tests::unit(7);
+        unit.flags = FORCE_ATTACK_FLAG;
+        let spawn = Event::UnitSpawned(Box::new(unit));
         state.apply(&spawn);
         assert_eq!(
             state.combat_status.get(7),
-            Some(&UnitCombatFlags::default())
+            Some(&UnitCombatFlags {
+                force_attack: Some(true),
+                invisible: None
+            })
         );
         assert!(!state.combat_status.apply(&spawn));
         assert!(state.combat_status.apply(&flag));
@@ -290,7 +336,10 @@ mod tests {
         state.apply(&spawn);
         assert_eq!(
             state.combat_status.get(7),
-            Some(&UnitCombatFlags::default()),
+            Some(&UnitCombatFlags {
+                force_attack: Some(true),
+                invisible: None
+            }),
             "a reused ID must not inherit stale flags"
         );
         for lifecycle in [

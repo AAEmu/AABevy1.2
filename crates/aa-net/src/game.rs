@@ -96,6 +96,8 @@ pub enum ClientMsg {
     /// `CSResurrectCharacter`: stand up where the character died (`in_place`) or at the return
     /// point; the character must be dead.
     Resurrect { in_place: bool },
+    /// Explicit Bloodlust state request; only SCForceAttackSet updates received state.
+    SetForceAttack { on: bool },
     /// `CSStartSkill`: a unit, bag item or explicit mount caster starts `skill_id`.
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
@@ -169,6 +171,7 @@ impl ClientMsg {
             Self::SplitItem { .. } => cs::CSSplitBagItemPacket,
             Self::DestroyItem { .. } => cs::CSDestroyItemPacket,
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
+            Self::SetForceAttack { .. } => cs::CSSetForceAttackPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
             Self::ExecuteCraft { .. } => cs::CSExecuteCraft,
@@ -247,6 +250,7 @@ impl ClientMsg {
             Self::DestroyItem { item_id, container, slot, count } => {
                 w.u64(*item_id).u8(*container).u8(*slot).i32(*count);
             }
+            Self::SetForceAttack { on } => { w.bool(*on); }
             Self::Resurrect { in_place } => {
                 w.bool(*in_place);
             }

@@ -2514,11 +2514,12 @@ amount can differ from the applied HP delta when the fall cap/stun path is used.
 
 `CombatStatus` (root export, NetPlugin resource and `WorldState.combat_status`) records only
 received metadata. `get(obj_id)` / `by_unit` expose `UnitCombatFlags { force_attack:
-Option<bool>, invisible: Option<bool> }`. A player/unit announcement creates an unknown
-entry; explicit flags update **known objects only**, and duplicate announcements retain the
-last received flag. No initial true/false is inferred from buffs, movement or skipped spawn
-bits. Removal drops that object's flags; reuse starts unknown. Character selection, logout
-and disconnect clear the resource. Receiving invisibility does not delete a unit or decide
+Option<bool>, invisible: Option<bool> }`. A player/unit announcement seeds force attack from
+its received native flags bit3 (proved in the next section); invisibility remains unknown.
+Explicit flags update **known objects only**, and duplicate announcements retain a later
+explicit report. No true/false is inferred from buffs or movement. Removal drops that
+object's flags; reuse starts from its new snapshot. Character selection, logout and
+disconnect clear the resource. Receiving invisibility does not delete a unit or decide
 how it should render. There are no new required `Unit` or `PlayerStats` literal fields.
 
 `CombatStatus.breath: Option<u32>` is the last local report, including0 and u32::MAX, without
@@ -2579,3 +2580,80 @@ lane is stalled; no lane traffic or server changes were made.
 Validation: `cargo test -p aa-net combat_status --quiet` passed all5 new targeted tests.
 `cargo test -p aa-net --features bevy --quiet` passed240 library +2 scripted loopback
 integration tests;9 live lane tests stayed ignored. No dependencies or other crates changed.
+
+
+## Explicit Bloodlust request and initial flag source (2026-10-17)
+
+`Command::SetForceAttack { on: bool }` / `ClientMsg::SetForceAttack` send CS04f with exactly
+one bool and **no object ID**. Both true and false are explicit values. The session requires
+an active player (`InWorld`, nonzero self object); otherwise it emits
+`ForceAttackRejected { on, message }`. `ForceAttackRequested { on }` means only that the local
+socket write succeeded. Neither event changes `CombatStatus`, HP, combat engagement, buffs
+or PvP UI. Send failure follows the existing disconnect path. Server SC043 remains the
+received flag report, without a request token or a fabricated success/matching revision.
+
+Native action/current state proof:
+
+- Native action-name lookup393f8d20 scans104 entries at39ac8e68; `toggle_force_attack` is
+  index39 (string pointer39ac8f04 ->399d5a98). Invocation393f8d70 calls callback array+13c;
+  initializer39401d13 installs393f8430 at+1d8 (=13c+39*4), which jumps to39390ec0.
+- Sender39390ec0 checks the network/current-player pointers, reads the player's byte+3bbc,
+  sends its **logical inverse**, and does not mutate that byte. Packet opcode assignment
+ 39390ef2 is04f, constructor397abb70 copies one bool at packet+c, vtable399d1c00 points to
+  body397b09b0 (bool slot78), common send39390f08. Repeated native toggles before the server
+  response therefore request the same value, rather than alternate a predicted sent state.
+- That exact current byte is updated by native SC043 handler391d3c60. Initial state also
+  comes from SCUnitState: shared reader397c992b/397c995b extracts bit3 of its u16 flags into
+  record+2052. Conversion398a222a ->398a2231 copies it into destination+3bb4. Caller3936b114
+  passes unit+8 to conversion398a1f90 at3936b122, so the field lands at actual unit+3bbc.
+  Initializer398a1aa0 clears the bit's storage at398a1b2f before received snapshot data is
+  applied. Other same-offset dword references are different struct fields; this mapping uses
+  the proven unit+8 offset rather than conflating those references.
+
+`Unit.flags` already retains the u16 snapshot field, so no new required model literal or
+packet read field is needed. `combat_status::FORCE_ATTACK_FLAG = 0x0008` names the proven
+bit. New `CombatStatus` entries now use `Some(unit.flags & 0x0008 != 0)` for force attack;
+invisibility remains `None` until SC078. Duplicate announcements preserve a later explicit
+SC043 report; removal/reuse or a new character starts with its new snapshot. This is received
+initial state, never an optimistic acknowledgement. Initial seeding emits no synthetic
+`ForceAttackSet` or Lua event. The pre-existing best-effort Unit decoder can leave raw flags0
+if its trailing details fail; it has no per-field completeness marker, a separate parser
+limitation. This feature does not claim to repair that broader decoder behavior.
+
+The current lane `world/unit_state.rs` character writer emits flags0 and NPC writer emits
+0x2000, without serializing runtime `unit.force_attack`. Thus a newly visible lane character
+reports false even if the lane's runtime flag was previously true; later real SC043 corrects
+the cache. The limitation is preserved and documented, not hidden by guessing a buff-based
+value. Native unit flags can carry either value and are decoded accordingly. Lane
+`CSSetForceAttackPacket` in `systems/skills/handlers.rs` reads one bool, applies it only to
+`active_char`, and calls `combat::set_force_attack`, which updates runtime state,
+adds/removes Bloodlust and broadcasts SC043. No active character means no reply. The lane
+adds no separate duel/battlefield rejection in this handler; aa-net does not invent one.
+
+Original Lua getter/event boundary for root integration:
+
+- `X2Unit:UnitIsForceAttack(target)` registration394c4d97 points to wrapper394bd710.
+  Resolver3945fcd0 must return category1; otherwise the wrapper pushes **boolean false**,
+  not nil/no values. It also returns false for kind field+410 !=0 (non-character). Only a
+  character kind0 returns its byte+3bbc as a bool. `CombatStatus` retains raw unit reports;
+  aa-client applies that character-only/missing-unit behavior for the Lua getter.
+- `unitframe/unitframe.lua::UpdatePVPIcon` first calls `GetUnitId(self.target)` then
+  `UnitIsForceAttack(self.target)`, so initial frames use the snapshot/cache through the
+  getter. Subsequent native SC043 emits `FORCE_ATTACK_CHANGED(stringId,on)` as documented
+  above. `ShowPVPIcon` verifies stringId matches that frame's target before showing the icon.
+- Every SC043 event, including repeated identical values, is forwarded in wire order. A
+  resource's value may already be the last DD04 transition when app Update runs, so Lua
+  transition events must use each event's `on` argument. A send alone must not emit the
+  acknowledgement event, change cached flags, alternate a guessed pending toggle or alter
+  combat engagement. Root owns hotkey/Lua dispatch; aa-net intentionally exposes explicit
+  SetForceAttack rather than a second local toggle state machine.
+
+Offline tests add exact false/true frame goldens and lane-reader consumption, isolated bit3
+seeding with other raw bits, duplicate/reused-object precedence, active-player preflight,
+failed-send behavior, repeated queued values without optimistic mutation, and authoritative
+true/true/false batch order followed by later state. Live combat/Bloodlust verification remains
+pending while the lane is stalled; no lane traffic or server modifications were used.
+
+Validation: `cargo test -p aa-net --features bevy --quiet` passed242 library tests and2
+scripted loopback integration tests;9 live lane tests remained ignored. No dependency,
+server or other-crate changes were needed.
