@@ -3077,7 +3077,9 @@ loaded-character ID updates, without an additional own-family filter:
 | NameChanged `392ff340` | `FAMILY_REFRESH()`, when found |
 | Described `39300220` | No immediate UI event |
 
-The owner name helper `398a8130` returns the last nonzero-role row's name.
+The owner name helper `398a8130` returns the last nonzero-role row's name,
+or literal `"X"` when none exists. MemberAdded indexes the received roster
+directly without a native bounds check; an app bounds guard is separate.
 OwnerChanged clears every cached row's role even when the new owner is
 missing; in that case there is no owner-change UI event. Dissolution from
 MemberRemoved does not add an extra `FAMILY_REMOVED` event. Original
@@ -3134,3 +3136,57 @@ Sources: `data/extract/aa-ui/native-pet-equipment-tooltip-20261018.txt`,
 `native-pet-equipment-empty-base-20261018.txt`, and
 `native-pet-equipment-event-producers-20261018.txt`; the existing aa-net
 mate-equipment notes cover the corresponding receipt and physical slot pack.
+
+### Family invitation task and rejection option (2026-10-18 audit)
+
+`OnFamilyInvitation` (`391d29e0` -> `392ff820`) captures received inviter
+character ID, inviter name and title in task `392ff4c0` (name buffer 129,
+title buffer 105 bytes). It returns silently if the game/local actor is
+absent, with no reply. It does not test existing family membership or an
+invented stale-invitation condition. Task vtable `399cd330` reports type 4,
+button type 0 (OK/Cancel), and `isModal=false`. Common builder `3902d400`
+explicitly maps virtual methods `+4/+8/+c` to `type/buttonType/isModal`;
+`39300130` adds exact string keys `invitorName` and `familyTitle`.
+
+Admission `392ff560` rejects an already queued type-4 task or option index
+3 equal to 1. CVar registration `390fa82c..85c` binds that option at store
+`+330` (`+324 + 3*4`) to `g_ignore_family_invite`, default 0, help text
+`0(accept family invite), 1(ignore family invite)`. The Lua constant
+`OPTION_ITEM_IGNORE_FAMILY_INVITATION` is 74 (`394950cf..d8`). Failed task
+admission calls its result callback with false (`3902d5c0..d9`), whereas a
+missing actor never constructs a task and never reaches that callback.
+The callback `392ff590` constructs CS1b using the captured inviter ID/title
+and dialog result. Its serializer `397c7340` emits ID, bool, string, as
+independently recorded in the aa-net Family command audit. No reply changes
+Family membership before a received roster/identity update.
+
+Source: `data/extract/aa-ui/native-family-invitation-closure-20261018.txt`,
+plus the earlier invitation task and common-behavior artifacts.
+
+### Native cooldown suppression flag producer (2026-10-18 audit)
+
+The cooldown manager's owner is the unit interface at raw actor `+8`.
+Its checked byte `owner+3af1` is therefore raw actor `+3af9`, index 1 of a
+four-byte flag array at raw `+3af8`. Handler `39186420` resolves received
+runtime object ID at packet `+c`, then writes packet byte `+14` to
+`actor[3af8 + packet.i32(+10)]`. Registration `391cd2d0` selects factory
+vtable `399b6144`, whose `391b7b50` allocates opcode **203**. This is the
+lane's `SCUnitGmModeChangedPacket`; serializer `397c7270` names its BC
+`unitId`, i32 `mode`, and u8 `value`. Thus received mode 1 controls the
+actual guard on local global/direct cooldown insertion. Other flag names
+are not inferred from their adjacent positions.
+
+Reset helper `398a1aa0` copies default word `3a5e136c` to raw actor `+3af8`;
+that default is zero in the verified original module. Hydration
+`398a218d..93` copies UnitState `+2020` to the same flags. These are not
+four extra snapshot bytes: serializer `397c9870..9890` decodes a four-integer
+PISH pack immediately after `raceGender`, storing its first decoded integer
+at `+2020`. The reverse path `397c9a81..ad8` emits those four integers as
+`pish`. Preserve the first integer's little-endian four bytes and apply
+explicit SC203 mode updates; do not reinterpret mounting identity or add
+an unobserved wire field.
+
+Sources: `data/extract/aa-ui/native-cooldown-suppression-producer-20261018.txt`
+and `native-cooldown-suppression-default-readonly-20261018.txt`. This audit
+performs no live writes, injection or input and does not introduce an aa-ui
+network-state dependency.
