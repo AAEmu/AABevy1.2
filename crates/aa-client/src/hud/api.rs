@@ -121,6 +121,7 @@ pub struct HudData {
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
     pub store: super::store::View,
+    pub(super) specialty: super::specialty::View,
 }
 
 pub type Shared = Rc<RefCell<HudData>>;
@@ -180,6 +181,7 @@ impl Default for HudData {
             party_pushed: None,
             character_id: 0,
             store: Default::default(),
+            specialty: Default::default(),
         }
     }
 }
@@ -272,6 +274,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::dialog::load_script(lua)?;
     super::party::load_script(lua)?;
     super::store::load_script(lua)?;
+    super::specialty::install(lua, bridge)?;
     super::mail::install(lua, bridge)?;
     super::itemlinks::install(lua, bridge)?;
     super::item_effects::install(lua, bridge)?;

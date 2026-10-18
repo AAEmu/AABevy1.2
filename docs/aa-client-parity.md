@@ -24,18 +24,23 @@ The startup adapter supplies the same complete readonly recharge catalog to
 both consumers before asynchronous GameData readiness, preserving lifecycle
 resets and unknown-versus-known-zero behavior.
 The combined build and visual verification pass; the latest immutable main is
-target/debug/aa-client-20261018-recharge-clock-hdr.exe, SHA256
-A0901E12A50C66A82B0D4895BD5E3BC06DD9AF6F3DE84E7F499D64B97BAC7798.
-The idle target/debug/aa-client-play.exe alias was refreshed from it at17:13:53
+target/debug/aa-client-20261018-specialty-layers.exe, SHA256
+2495C40316A0E83F735E64D1E2FDC8FA4FECD8F697ACDA6B84742CB450E87994.
+The idle target/debug/aa-client-play.exe alias was refreshed from it at17:31:23
 local and hash-verified equal.
-Its frozen suite passes323 /38 optional ignores in72.11s; nine provider tests
-moved to aa-net, whose full609 tests and actual native retry loopbacks pass.
-Main and enchant build in1m45s. Three original grade idle/working/world-list
-captures are inspected without runtime errors; earlier12 captures include all
-four dimmed working states. This cut includes the UI healthy/low-health warning
-restart and admitted-paint Effect clocks (5194c1a), authored ordinary point HDR
-gain (3dc3010), and shared startup recharge data (networkf674b41). Their original
-health/spinner and dock day/night/unload captures are documented by their owners.
+Its frozen suite passes327 /38 optional ignores in72.75s; nine provider tests
+moved to aa-net, whose full611 tests and actual native retry loopbacks pass.
+Main+specialty build in2m, final diagnostic example refresh44.78s. The original
+localized specialty ratio error and live world-list captures are inspected
+without runtime errors; preceding grade idle/working captures and all four
+dimmed working states remain documented. This cut includes the UI healthy/
+low-health warning restart, admitted-paint Effect clocks (5194c1a), ordinary
+drawable-layer flags (3332e92), authored ordinary point HDR gain (3dc3010),
+shared startup recharge data (networkf674b41) and the received specialty ratio
+getter/callback adapter (networkf51d264). The latter preserves error-before-reset
+and cache-before-event ordering; actual request/price/confirmation/sale remain
+separate (aa-client-specialty.md). Owner overlay traversal and brush LOD work
+are outside this cut. Owned health/spinner/dock captures remain in their docs.
 Protected native planning,
 global selection pending/effect registration and retained-Timeline stop handling
 remain explicit gaps (aa-client-enchant.md).
