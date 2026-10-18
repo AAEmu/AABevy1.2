@@ -2847,3 +2847,45 @@ and the original brighter after-image still near 70%. The aa-dev run logged
 **250.1–314.1 FPS**, zero Lua errors and no WARN/ERROR. Process 25604 closed
 automatically. The spawn reference provides original HUD/texture context;
 it has no matching active damage sample, so no timed pixel match is claimed.
+
+### Direct text-drawable style methods (2026-10-18)
+
+The original action-slot view creates required-point and skill-level text
+drawables and calls their direct `SetAlign(ALIGN_CENTER)`. Direct alignment
+was a stub (426 calls in the full HUD), although `text.style:SetAlign` was
+implemented. Direct `SetColor` also wrote only the generic drawable tint,
+which the text renderer did not read. These calls now update the existing
+`TextBlock.style` fields, so the original direct methods affect the rendered
+glyphs without introducing a second style or changing fonts.
+
+The native bindings establish the shared state: direct alignment wrapper
+`3925b110` and widget-style alignment wrapper `39235000` both call
+`39274940`, which writes TextStyle `+30`. Direct color wrapper `3925b1d0`
+calls `39274950`, copying RGBA to TextStyle `+20`. Shadow wrapper
+`3925b0d0` calls `392748a0` (flag bit 1), and outline wrapper `3925b150`
+calls `392748e0` (flag bit 4). Direct shadow/outline now reach the same
+existing rendering fields as their style methods. Generic image/color
+drawable tint behavior is preserved. Snap behavior remains open; its
+existing flag is not consumed by the current text renderer.
+
+`tests/drawable_text.rs` verifies all nine existing alignment values,
+independent image tint, identical direct/style glyph quads including RGBA
+and decoration, and the unchanged original action-slot view's centered
+required-point text and authored font selection. The shared fixture uses
+the original ability-view slot constructor and supplies three unlearned
+passive-buff entries with required-point counts 1/2/3 through `SlotContent`.
+Their ordinary content refresh controls text visibility; explicit
+white/blue/red test colors and shadow/outline enable visual inspection.
+Source: `data/extract/aa-ui/native-text-drawable-style-source-20261018.txt`.
+
+Validation: `cargo check -p aa-ui --lib` and **52 selected tests** passed
+(drawable text, animation, original natives, tooltip, scale/clip and statusbar).
+The three drawable tests were rerun after making the visual fixture use the
+ordinary passive-slot content path. Built and ran the copied example with
+`--shot shots/aa-ui/native-drawable-text-final-20261018.png --shot-after 8`;
+inspected that unique PNG with all three original centered required-point
+digits still visible after normal refresh. The run logged **439.3–508.7 FPS**,
+zero Lua errors and no WARN/ERROR, and its process 25604 closed automatically.
+The spawn reference was used for HUD context; it has no matching passive-slot
+sample. The fixture colors intentionally multiply the authored Snail image
+font, rather than replacing it with a guessed font or recolored asset.

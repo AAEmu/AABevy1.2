@@ -4,7 +4,7 @@ use mlua::{Lua, Table, Value};
 
 use super::widget::parse_anchor;
 use super::{method, none, ret, ui};
-use crate::tree::Id;
+use crate::tree::{Align, Id};
 
 fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut crate::tree::Drawable) -> R) -> Option<R> {
     ui(lua).tree.drawable_mut(id).map(f)
@@ -17,6 +17,7 @@ fn read<R>(lua: &Lua, id: Id, f: impl FnOnce(&crate::tree::Drawable) -> R) -> Op
 
 pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     let m = lua.create_table()?;
+    let text_drawable = class == "drawable:text";
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
 
     def(
@@ -131,9 +132,15 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     )?;
     def(
         "SetColor",
-        method(lua, |lua, id, a| {
+        method(lua, move |lua, id, a| {
             let c = [a.f(1), a.f(2), a.f(3), a.opt_f(4).unwrap_or(1.0)];
-            if read(lua, id, |d| d.color) != Some(c) {
+            if text_drawable {
+                if read(lua, id, |d| d.text.as_ref().map(|t| t.style.color)).flatten() != Some(c) {
+                    if let Some(t) = ui(lua).tree.get_mut(id).text_mut() {
+                        t.style.color = c;
+                    }
+                }
+            } else if read(lua, id, |d| d.color) != Some(c) {
                 with(lua, id, |d| d.color = c);
             }
             none()
@@ -273,6 +280,32 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         "SetTextureColor",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
+    }
+    if class == "drawable:text" {
+        def(
+            "SetAlign",
+            method(lua, |lua, id, a| {
+                if let Some(t) = ui(lua).tree.get_mut(id).text_mut() {
+                    t.style.align = Align::from_i(a.f(1) as i64);
+                }
+                none()
+            })?,
+        )?;
+        for name in ["SetShadow", "SetOutline"] {
+            def(
+                name,
+                method(lua, move |lua, id, a| {
+                    if let Some(t) = ui(lua).tree.get_mut(id).text_mut() {
+                        if name == "SetShadow" {
+                            t.style.shadow = a.b(1, false);
+                        } else {
+                            t.style.outline = a.b(1, false);
+                        }
+                    }
+                    none()
+                })?,
+            )?;
+        }
     }
     if class == "drawable:effect" {
         super::animation::effect_methods(lua, &m)?;
