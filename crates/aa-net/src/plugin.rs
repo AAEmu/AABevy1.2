@@ -163,6 +163,7 @@ net_state! {
     trade: Trade,
     auction: Auction,
     loot_rolls: LootRolls,
+    battlefield: crate::battlefield::Battlefield,
     actabilities: Actabilities,
     mates: Mates,
     slaves: Slaves,
@@ -182,6 +183,17 @@ net_state! {
 mod equipment_flags_tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    #[test]
+    fn plugin_fold_publishes_correlated_battlefield_queue_and_resets() {
+        use crate::battlefield::{Battlefield, BattlefieldCommand as C, BattlefieldEvent as E, BattlefieldQueue};
+        let mut app=App::new();init_state(&mut app);
+        for event in [E::Requested(C::Apply { battlefield_id:7,corps:2 }),E::Applied { battlefield_id:7,corps:2,error:0 },E::QueueState(BattlefieldQueue { battlefield_id:7,corps_size:3,counts:[9,1,9] })] {
+            app.world_mut().run_system_once(move |mut state:NetState| state.apply(&Event::Battlefield(event.clone()))).unwrap();
+        }
+        assert_eq!(app.world().resource::<Battlefield>().joined_infos(),(6,3,2));
+        app.world_mut().run_system_once(|mut state:NetState| state.apply(&Event::Kicked { reason:1,message:"test".into() })).unwrap();
+        assert_eq!(app.world().resource::<Battlefield>(),&Battlefield::default());
+    }
     #[test]
     fn plugin_fold_publishes_received_transfer_radar_snapshot() {
         use crate::radar::{RadarEvent, RadarToggle, ShipRadar, TransferRadar};

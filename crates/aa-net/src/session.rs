@@ -275,6 +275,7 @@ pub enum Command {
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
+    Battlefield(crate::battlefield::BattlefieldCommand),
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
@@ -518,6 +519,7 @@ pub enum Event {
     Shop(crate::shop::ShopEvent),
     Party(crate::party::PartyEvent),
     LootRoll(crate::loot_roll::LootRollEvent),
+    Battlefield(crate::battlefield::BattlefieldEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
     InitialConfig(crate::initial_config::InitialConfig),
@@ -1035,6 +1037,17 @@ impl Session {
                     self.emit(Event::Friend(crate::friend::FriendEvent::Requested(command)));
                 }
             }
+            Command::Battlefield(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase != Phase::InWorld {
+                    self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::RequestRejected { command, message: "battlefield request requires an active character".into() }));
+                } else if self.send_game(game::ClientMsg::Battlefield(command)).await {
+                    self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::Requested(command)));
+                } else {
+                    self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::RequestRejected { command, message: "battlefield request was not sent".into() }));
+                }
+            }
             Command::Actability(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::RequestRejected { command, message: message.into() }));
@@ -1505,6 +1518,7 @@ impl Session {
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
+            M::Battlefield(e) => self.emit(Event::Battlefield(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::InitialConfig(config) => self.emit(Event::InitialConfig(config)),
             M::CraftItemUnlocked(e) => self.emit(Event::CraftItemUnlocked(e)),
@@ -2155,6 +2169,36 @@ mod tests {
         assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::FishToggled(RadarToggle { on: false, range: 15.0 })))));
         assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::FishContacts { last: true, contacts })) if contacts.is_empty()));
         assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn battlefield_commands_and_receipts_preserve_write_outcomes_and_event_order() {
+        use crate::battlefield::{BattlefieldCommand as C, BattlefieldEvent as E, BattlefieldQueue};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let commands = [C::Apply { battlefield_id: 7, corps: 2 }, C::Cancel];
+        for phase in [Phase::Idle, Phase::CharacterSelect, Phase::InWorld] {
+            session.phase = phase;
+            for command in commands {
+                session.command(Command::Battlefield(command)).await;
+                assert!(matches!(events.try_recv(), Ok(Event::Battlefield(E::RequestRejected { command: actual, .. })) if actual==command));
+            }
+        }
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr=listener.local_addr().unwrap().to_string();
+        let (connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());
+        let (mut peer,_)=accepted.unwrap(); session.game=Some(connection.unwrap());
+        for command in commands {
+            session.command(Command::Battlefield(command)).await;
+            assert!(matches!(events.try_recv(), Ok(Event::Battlefield(E::Requested(actual))) if actual==command));
+            let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();
+            let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(&frame[6..],game::ClientMsg::Battlefield(command).encode_body());
+        }
+        let expected=[E::Applied { battlefield_id:7,corps:2,error:0 },E::QueueState(BattlefieldQueue { battlefield_id:7,corps_size:5,counts:[1,2,3] }),E::Cancelled{raw:0x12345678}];
+        session.game_msg(Ok(game::ServerMsg::Batch(expected.iter().cloned().map(game::ServerMsg::Battlefield).collect()))).await;
+        for e in expected {assert!(matches!(events.try_recv(),Ok(Event::Battlefield(actual)) if actual==e));}
         assert!(events.try_recv().is_err());
     }
 
