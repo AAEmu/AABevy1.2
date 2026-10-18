@@ -24,8 +24,8 @@
     "unknown-opcode": {
       "compressed_bytes": 28,
       "raw_bytes": 27,
-      "compressed_sha256": "e0a94a50bbfa2fcd8c21c7e99a43cecbbe701bdeca57292b16e342a893abfbc6",
-      "raw_sha256": "083c165998ae169a8e667a1f4b70b259de3681a75665bea7fb02c5140b41cd0a"
+      "compressed_sha256": "8f41066eedb4a87086bbca70bd541e343dd5fe998ea7403b739ab0d9a97d9c9d",
+      "raw_sha256": "598ac8d3eef5b8be5e27cb5664975405d5ed4621c47cad03be9e517d7885a4c4"
     },
     "truncated-packet": {
       "compressed_bytes": 19,

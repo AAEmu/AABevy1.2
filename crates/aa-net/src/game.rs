@@ -552,6 +552,7 @@ pub enum ServerMsg {
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
     Dominion(crate::DominionEvent),
+    Achievement(crate::achievement::AchievementEvent),
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
@@ -690,6 +691,7 @@ impl ServerMsg {
             Self::Battlefield(e) => e.name(),
             Self::ScheduledEventStarted(_) => "SCScheduledEventStarted",
             Self::Dominion(_) => "SCDominion",
+            Self::Achievement(_) => "SCAchievement",
             Self::Expedition(_) => "SCExpedition",
             Self::Family(_) => "SCFamily",
             Self::UnitGmModeChanged(_) => "SCUnitGmModeChanged",
@@ -1131,6 +1133,7 @@ impl ServerMsg {
             sc::SCCraftFailedPacket => Self::CraftFailureNotice(crate::craft::CraftFailureNotice::read(r)?),
             sc::SCUnitGmModeChangedPacket => Self::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged::read(r)?),
             opcode if crate::DominionEvent::handles(opcode) => Self::Dominion(crate::DominionEvent::read_lane(opcode,r)?),
+            opcode if crate::achievement::AchievementEvent::handles(opcode) => Self::Achievement(crate::achievement::AchievementEvent::read_lane(opcode,r)?),
             opcode if crate::expedition::ExpeditionEvent::handles(opcode) => Self::Expedition(crate::expedition::ExpeditionEvent::read_lane(opcode,r)?),
             0x02d..=0x037 => Self::Family(crate::family::FamilyEvent::read_lane(opcode,r)?),
             sc::SCScheduledEventStartedPacket => Self::ScheduledEventStarted(crate::scheduled::ScheduledEventStarted::read_native(r)?),
@@ -1272,8 +1275,8 @@ mod tests {
         assert_eq!(m, ServerMsg::ErrorMsg { code: 95, kind: 0, notify: false });
 
         // Unknown packets are reported with their opcode, not an error.
-        let m = ServerMsg::decode(&game_frame(0x1ff, &[1, 2, 3])).unwrap();
-        assert_eq!(m, ServerMsg::Unhandled { level: LEVEL_GAME, opcode: 0x1ff, len: 3 });
+        let m = ServerMsg::decode(&game_frame(0x7fff, &[1, 2, 3])).unwrap();
+        assert_eq!(m, ServerMsg::Unhandled { level: LEVEL_GAME, opcode: 0x7fff, len: 3 });
         assert!(ServerMsg::decode(&[0x00, 0x01]).is_err());
         assert!(ServerMsg::decode(&game_frame(sc::SCUnitPointsPacket, &[1])).is_err());
     }
@@ -1756,7 +1759,7 @@ mod tests {
         // The stream may span several stored blocks; a packet we cannot decode ends the batch.
         let mut raw = Writer::new();
         raw.u16(0).u16(sc::SCSkillEndedPacket).u16(8);
-        raw.u16(0).u16(0x1ff).raw(&[1, 2, 3]);
+        raw.u16(0).u16(0x7fff).raw(&[1, 2, 3]);
         raw.u16(0).u16(sc::SCSkillEndedPacket).u16(9);
         let raw = raw.finish();
         let (a, b) = raw.split_at(5);
@@ -1766,7 +1769,7 @@ mod tests {
         let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], ServerMsg::SkillEnded { tl: 8 });
-        assert!(matches!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x1ff, .. }));
+        assert!(matches!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x7fff, .. }));
 
         // Truncated Huffman/stored blocks are invalid, rather than silently skipped batches.
         assert!(ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).is_err());

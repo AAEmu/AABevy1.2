@@ -404,6 +404,7 @@ pub struct WorldState {
     pub loot_rolls: LootRolls,
     pub scheduled_events: crate::scheduled::ScheduledEvents,
     pub dominion: crate::Dominion,
+    pub achievements: crate::achievement::Achievements,
     pub expeditions: crate::expedition::Expeditions,
     pub families: crate::family::Families,
     pub server_clock: crate::clock::ServerClock,
@@ -453,6 +454,7 @@ impl WorldState {
         self.loot_rolls.apply(e);
         self.scheduled_events.apply(e);
         self.dominion.apply(e);
+        self.achievements.apply(e);
         self.expeditions.apply(e);
         self.families.apply(e);
         self.server_clock.apply(e);

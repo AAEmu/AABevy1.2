@@ -39,7 +39,7 @@ assert (dynamic[0] >> 1) & 3 == 2
 # produced final dynamic Huffman stream; this is one stream, not concatenated streams.
 stored = struct.pack("<BHH", 0, len(fixed_raw), ~len(fixed_raw) & 0xFFFF) + fixed_raw
 mixed = stored + dynamic
-unknown_raw = points(0) + packet(0x1FF, b"\x01\x02\x03") + packet(0xB4, b"\x01")
+unknown_raw = points(0) + packet(0x7FFF, b"\x01\x02\x03") + packet(0xB4, b"\x01")
 truncated_packet_raw = packet(0xB4, b"\x01") + points(0)[:-1]
 cases = {
     "fixed": (fixed_raw, fixed),
