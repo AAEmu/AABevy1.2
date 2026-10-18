@@ -6385,3 +6385,61 @@ fixture, not a purchase/network-flow implementation. The second uses an actual
 pointer press. Both report zero script errors/WARN/ERROR and self-close
 (PIDs45568/10092); the copied executable was removed. No icon/art color, timer,
 selector, application hook or original Lua asset changed.
+
+### Effect visibility and original low-health warning restart (2026-10-18)
+
+The original hud/main_menu_bar/main.alb:42 and unitframe/player.alb:288 restart
+their low-health effect only when its IsVisible() flag is false. A healthy
+UpdateHpMp/UpdateAll stops the effect through SetStartEffect(false). The toolkit
+already suppressed stopped effect art in its renderer, but retained shown=true;
+that stale visibility blocked the next low-health warning. The actual unchanged
+player UpdateAll regression failed on19def45 with "healthy menu border still
+marked visible" before this correction. This was a restart-admission bug, not
+an ordinary stopped-glow rendering bug.
+
+Native SetStartEffect thunk39236830/parser39235f40, binding39234cc0 and setter
+3928fb50 require an actual boolean or numeric boolean. Numeric comparison keeps
+the original double precision, including tiny nonzero values and NaN. Invalid/
+missing arguments or a failed effect-interface cast return no values without
+changing state; extra arguments are ignored. The setter writes the drawable's
+own shown byte for both start and stop. Stop preserves the phase/sample data;
+start resets its color/motion initialization through3928df00/3928ea80. No new
+widget callbacks, timer formula, effect phase selection or getter policy is
+introduced in this slice.
+
+effect_start_oracle.py executes **50 actual native groups** covering those full
+wrappers and initializers, strict/failed-class gates, raw numeric booleans,
+configured/empty color vectors, stop storage, manual visibility and restart.
+Lua stack/host casts/results are controlled endpoints; raw phases are fixture
+inputs, with no replacement visibility/reset algorithm. Raw outputs/source are
+native-effect-start-oracle-20261018.json and
+native-effect-start-source-20261018.txt under the ignored aa-ui extract.
+
+The original LifeAlertEffect zero-HP branch calls SetVisible(true) separately.
+An additional actual3928f810/3928e6c0 draw control proves that manual re-show can
+advance color time while the stopped running flags remain false. The current
+generic effect renderer's separate stopped flag and global clock do not yet
+match that path. Native IsStartEffect also tests both color and motion flags;
+its separate-channel getter/paint-clock contract remains open. This correction
+does not claim those behaviors or change the existing ordinary-slot completion
+clock and selector.
+
+Crate/example check and example build pass. **72 selected checks pass** across
+nine targets: four new effect start tests plus68 existing animation, ordinary
+button/text, drawable-mask, fade/frame and slot completion/selector checks.
+The genuine player UpdateAll recovery/low-health sequence now passes twice;
+the unchanged action-slot autoattack/combo/toggle helpers stop and restart their
+existing effect objects. Sample/configuration preservation and strict wrapper
+arity/type/class gates are checked separately. No app-owned producer changed.
+
+Both aa-dev `--shot-after 8` final captures were inspected:
+shots/aa-ui/native-effect-restarted-low-final-720-20261018.png
+(1280x720/default0.85, **242.3-290.2 FPS**) and
+shots/aa-ui/native-effect-recovered-final-1080-20261018.png
+(1920x1080/default1.0, **298.6-319.8 FPS**). They exercise the unchanged original
+health warning and autoattack/combo/toggle consumers. The low-health border
+returns after recovery; the healthy capture has no border. Both report zero
+script errors/WARN/ERROR and self-close (PIDs26044/45844); the copied executable
+was removed. The fixture invokes the real original UpdateAll without an
+unnecessary ENTERED_WORLD event; an earlier diagnostic with that extra event
+hit the existing fake battlefield maxCount=nil boundary and is not clean QA.

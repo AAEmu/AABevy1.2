@@ -442,8 +442,17 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.set(
         "SetStartEffect",
         method(lua, |lua, id, a| {
-            let on = a.b(1, true);
+            //39236830/39235f40: required bool or numeric bool, without a default.
+            let on = match a.v(1) {
+                mlua::Value::Boolean(v) => v,
+                mlua::Value::Integer(v) => v != 0,
+                mlua::Value::Number(v) => v != 0.,
+                _ => return none(),
+            };
             let mut u = ui(lua);
+            if !u.tree.get(id).drawable().is_some_and(|d| d.class == "drawable:effect") {
+                return none();
+            }
             let old_sample = u.animations.sample(id);
             let rect = u.tree.rect(id);
             if on {
@@ -460,13 +469,15 @@ pub(super) fn effect_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 } else {
                     u.animations.active.remove(&id);
                 }
-                u.tree.get_mut(id).shown = true;
             } else {
                 if let Some(e) = u.animations.effects.get_mut(&id) {
                     e.running = false;
                 }
                 u.animations.active.remove(&id);
             }
+            //3928fb50 writes the drawable's own visibility for both branches.
+            // Original low-health warnings use IsVisible() to admit the next restart.
+            u.tree.get_mut(id).shown = on;
             if let Some(d) = u.tree.drawable_mut(id) {
                 d.effect = Some(on);
             }
