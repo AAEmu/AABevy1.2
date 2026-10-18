@@ -602,8 +602,8 @@ mod tests {
         let mut inv = Inventory::default();
         inv.apply(&selected(10));
         inv.apply(&tasks(9, vec![
-            ItemTask::Add { action: action::CREATE, container: 2, slot: 3, item: item(8001, 77, 12) },
-            ItemTask::Add { action: action::CREATE, container: 2, slot: 5, item: item(8001, 78, 8) },
+            ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 3, item: item(8001, 77, 12) },
+            ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 5, item: item(8001, 78, 8) },
         ]));
         assert_eq!(bar.item_count(10, &inv), Some(20));
         assert_eq!(bar.item_count(1, &inv), Some(12));
@@ -633,7 +633,7 @@ mod tests {
         // Use one, pick up 5 more in a new stack, then move the new stack onto slot 0.
         assert!(inv.apply(&tasks(13, vec![ItemTask::Count { container: 2, slot: 13, item_id: 555, delta: -1, template_id: 8001 }])));
         assert_eq!(inv.count_of(8001), 19);
-        assert!(inv.apply(&tasks(9, vec![ItemTask::Add { action: action::CREATE, container: 2, slot: 4, item: item(8001, 600, 5) }])));
+        assert!(inv.apply(&tasks(9, vec![ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 4, item: item(8001, 600, 5) }])));
         assert_eq!(inv.count_of(8001), 24);
         assert!(inv.apply(&tasks(5, vec![ItemTask::Move {
             from_container: 2,
@@ -688,7 +688,7 @@ mod tests {
         assert!(inv.apply(&tasks(1, vec![ItemTask::Remove { container: 1, slot: 9, item_id: 600, template_id: 1 }])));
         assert!(inv.worn(slot::HEAD).is_none());
         // Force remove and growth.
-        inv.apply(&tasks(9, vec![ItemTask::Add { action: action::CREATE, container: 2, slot: 2, item: item(1, 9, 1) }]));
+        inv.apply(&tasks(9, vec![ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 2, item: item(1, 9, 1) }]));
         assert!(inv.apply(&Event::ItemsChanged(ItemTasks { force_remove: vec![9], ..ItemTasks::default() })));
         assert!(inv.bag[2].is_none());
         assert!(inv.apply(&Event::InventoryExpanded { container: container::INVENTORY, slots: 30 }));
@@ -701,8 +701,8 @@ mod tests {
         let mut inv = Inventory::default();
         inv.apply(&selected(10));
         inv.apply(&tasks(9, vec![
-            ItemTask::Add { action: action::CREATE, container: 2, slot: 1, item: item(8001, 55, 20) },
-            ItemTask::Add { action: action::CREATE, container: 2, slot: 4, item: item(77, 66, 1) },
+            ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 1, item: item(8001, 55, 20) },
+            ItemTask::Add { raw_detail_block: None, action: action::CREATE, container: 2, slot: 4, item: item(77, 66, 1) },
         ]));
         assert_eq!(inv.first_free_bag_slot(), Some(0));
         assert_eq!(inv.item_at(container::INVENTORY, 1).map(|i| i.id), Some(55));

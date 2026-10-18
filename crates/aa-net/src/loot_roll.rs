@@ -796,7 +796,7 @@ mod tests {
         };
         state.apply(&Event::ItemsChanged(ItemTasks {
             reason: 9,
-            tasks: vec![ItemTask::Add {
+            tasks: vec![ItemTask::Add { raw_detail_block: None,
                 action: action::CREATE,
                 container: 2,
                 slot: 0,

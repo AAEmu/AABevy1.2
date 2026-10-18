@@ -257,7 +257,7 @@ pub enum ItemTask {
     BankAaPoint(i32),
     AutoUseAaPoint(u8),
     /// An item entered `container` at `slot` (`action` = create / change owner / take).
-    Add { action: u8, container: u8, slot: u8, item: Item },
+    Add { action: u8, container: u8, slot: u8, item: Item, raw_detail_block: Option<Vec<u8>> },
     /// `delta` more (or fewer) in a stack.
     Count { container: u8, slot: u8, item_id: u64, delta: i32, template_id: u32 },
     Grade { container: u8, slot: u8, item_id: u64, grade: u8 },
@@ -336,7 +336,8 @@ impl ItemTask {
             action::CREATE | action::CHANGE_OWNER | action::TAKE => {
                 let container = r.u8()?;
                 let slot = r.u8()?;
-                Self::Add { action: act, container, slot, item: read_task_item(r)? }
+                let (item, raw_detail_block) = read_task_item_with_raw(r)?;
+                Self::Add { action: act, container, slot, item, raw_detail_block: Some(raw_detail_block) }
             }
             action::ADD_STACK => Self::Count {
                 container: r.u8()?,
@@ -391,6 +392,7 @@ impl ItemTask {
 }
 
 /// `i16` length (128) followed by the detail type, the details and zero padding.
+#[cfg(test)]
 fn read_padded_detail(r: &mut Reader) -> Result<(ItemDetail, Option<Vec<u8>>)> {
     let (detail, payload, _) = read_padded_detail_block(r)?;
     Ok((detail, payload))
@@ -414,14 +416,20 @@ fn read_padded_detail_block<'a>(r: &mut Reader<'a>) -> Result<(ItemDetail, Optio
 
 /// An item as `write_task_item_details` writes it: like `Item.Write`, but the detail block is
 /// padded to a fixed length.
+#[cfg(test)]
 fn read_task_item(r: &mut Reader) -> Result<Item> {
+    read_task_item_with_raw(r).map(|(item, _)| item)
+}
+
+fn read_task_item_with_raw(r: &mut Reader) -> Result<(Item, Vec<u8>)> {
     let template_id = r.u32()?;
     let id = r.u64()?;
     let grade = r.u8()?;
     let flags = r.u8()?;
     let count = r.i32()?;
-    let (detail, detail_payload) = read_padded_detail(r)?;
-    Ok(Item {
+    let (detail, detail_payload, raw_detail_block) = read_padded_detail_block(r)?;
+    let raw_detail_block = raw_detail_block.to_vec();
+    Ok((Item {
         template_id,
         id,
         grade,
@@ -435,7 +443,7 @@ fn read_task_item(r: &mut Reader) -> Result<Item> {
         world_id: r.u8()?,
         unsecure_time: r.i64()?,
         unpack_time: r.i64()?,
-    })
+    }, raw_detail_block))
 }
 
 #[cfg(test)]
@@ -719,6 +727,24 @@ mod tests {
             assert_eq!(ItemTask::read(&mut reader).unwrap(), ItemTask::Money(0x01020304));
             assert!(reader.is_empty());
         }
+    }
+
+    #[test]
+    fn add_receipt_retains_declared_padding_and_following_task_alignment() {
+        // Independent native397d0a00/lane Add5 literal body, not Item serializer reuse.
+        let mut block=vec![0xa5;128];block[0]=3;block[1..5].copy_from_slice(&(-1i32).to_le_bytes());block[5]=0xf2;block[6]=0xfe;
+        let mut raw=vec![5,2,3];raw.extend_from_slice(&9001u32.to_le_bytes());raw.extend_from_slice(&999u64.to_le_bytes());
+        raw.extend_from_slice(&[8,4]);raw.extend_from_slice(&17i32.to_le_bytes());raw.extend_from_slice(&128i16.to_le_bytes());raw.extend_from_slice(&block);
+        raw.extend_from_slice(&(-7i64).to_le_bytes());raw.extend_from_slice(&(-9i32).to_le_bytes());raw.extend_from_slice(&55u32.to_le_bytes());raw.push(7);
+        raw.extend_from_slice(&66i64.to_le_bytes());raw.extend_from_slice(&77i64.to_le_bytes());
+        for end in 0..raw.len() {assert!(ItemTask::read(&mut Reader::new(&raw[..end])).is_err(),"prefix {end}");}
+        raw.extend_from_slice(&[1,50,0,0,0]);
+        let mut reader=Reader::new(&raw);
+        let ItemTask::Add {action,container,slot,item,raw_detail_block}=ItemTask::read(&mut reader).unwrap() else {panic!()};
+        assert_eq!((action,container,slot),(5,2,3));assert_eq!(raw_detail_block,Some(block.clone()));
+        assert_eq!(item.detail_payload.as_deref(),Some(&block[1..7]));assert_eq!(item.id,999);assert_eq!(item.template_id,9001);
+        assert_eq!((item.create_time,item.lifespan_mins,item.made_unit_id,item.world_id,item.unsecure_time,item.unpack_time),(-7,-9,55,7,66,77));
+        assert_eq!(ItemTask::read(&mut reader).unwrap(),ItemTask::Money(50));assert!(reader.is_empty());
     }
 
 }

@@ -2572,7 +2572,7 @@ mod tests {
         assert!(matches!(events.try_recv(),Ok(Event::UnpackItemRequestRejected{request:actual,..}) if actual==request));
         session.phase=Phase::InWorld;session.selected=42;
         session.emit(Event::InventoryInit{bag_slots:1,bank_slots:0});
-        let add=|id|ItemTasks{tasks:vec![ItemTask::Add{action:1,container:2,slot:0,item:Item{id,template_id:99,flags:0x80,unpack_time:7,..Default::default()}}],..Default::default()};
+        let add=|id|ItemTasks{tasks:vec![ItemTask::Add{ raw_detail_block: None,action:1,container:2,slot:0,item:Item{id,template_id:99,flags:0x80,unpack_time:7,..Default::default()}}],..Default::default()};
         session.emit(Event::ItemsChanged(add(55)));while events.try_recv().is_ok(){}
         // Valid snapshot, missing transport: reject with no local unpack success.
         session.command(Command::UnpackItem(request)).await;
