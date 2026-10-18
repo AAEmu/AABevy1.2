@@ -275,6 +275,8 @@ pub enum Command {
     Expedition { character_id: u32, command: crate::ExpeditionCommand },
     /// Captured persistent character identity is local-only, never part of the Family wire body.
     Family { character_id: u32, command: crate::FamilyCommand },
+    /// Captured character and received trial context; never an optimistic state change.
+    Trial { character_id:u32,command:crate::TrialCommand },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -541,6 +543,8 @@ pub enum Event {
     /// Local successful CS072 transport write, never an authoritative jury/seat response.
     JurySummonReplyRequested { character_id:u32,trial_id:u32,court:u32,jury_number:i32 },
     JurySummonReplyRejected { character_id:u32,trial_id:u32,court:u32,jury_number:i32,message:String },
+    TrialRequested { character_id:u32,command:crate::TrialCommand },
+    TrialRequestRejected { character_id:u32,command:crate::TrialCommand,message:String },
     JuryWaitingNumberRequested { character_id:u32 },
     JuryWaitingNumberRequestRejected { character_id:u32, message:String },
     Achievement(crate::achievement::AchievementEvent),
@@ -708,6 +712,7 @@ struct Session {
     battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
     server_clock: std::cell::RefCell<crate::clock::ServerClock>,
     received_inventory: std::cell::RefCell<crate::state::Inventory>,
+    received_trials: std::cell::RefCell<crate::Trials>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -758,6 +763,7 @@ impl Session {
             battlefield: Default::default(),
             server_clock: Default::default(),
             received_inventory: Default::default(),
+            received_trials: Default::default(),
             waiting: None,
         }
     }
@@ -804,6 +810,7 @@ impl Session {
     fn emit(&self, e: Event) {
         if matches!(e,Event::Kicked{..}) {*self.received_inventory.borrow_mut()=Default::default();}
         self.received_inventory.borrow_mut().apply(&e);
+        self.received_trials.borrow_mut().apply(&e);
         self.server_clock.borrow_mut().apply(&e);
         self.advance_battlefield_clock();
         self.battlefield.borrow_mut().apply_with_time(&e,self.server_clock.borrow().mapped_now());
@@ -1050,6 +1057,14 @@ impl Session {
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
                 }
+            }
+            Command::Trial{character_id,command} => {
+                let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || !self.selected_state.as_ref().is_some_and(|s|s.character.id==character_id) {
+                    Some("trial request requires the actual active captured character header")
+                }else{command.validate_received(&self.received_trials.borrow()).err()};
+                if let Some(message)=invalid {self.emit(Event::TrialRequestRejected{character_id,command,message:message.into()});}
+                else if self.send_game(game::ClientMsg::Trial(command)).await {self.emit(Event::TrialRequested{character_id,command});}
+                else {self.emit(Event::TrialRequestRejected{character_id,command,message:"trial request was not sent".into()});}
             }
             Command::RequestJuryWaitingNumber { character_id } => {
                 if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
@@ -4273,6 +4288,47 @@ mod tests {
             assert!(matches!(events.try_recv(), Ok(Event::SkillFired(f)) if f.raw_final_flag == 255));
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn trial_controls_use_actual_receipts_and_send_no_optimistic_confirmation_or_cancel(){
+        use crate::{TrialCommand,TrialEvent};
+        async fn frame(peer:&mut tokio::net::TcpStream)->Vec<u8>{let n=peer.read_u16_le().await.unwrap();let mut out=vec![0;n as usize];peer.read_exact(&mut out).await.unwrap();out[4..].to_vec()}
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());session.phase=Phase::InWorld;session.selected=42;
+        let mut header=crate::model::CharacterState::default();header.character.id=42;session.selected_state=Some(header);
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        session.game_msg(Ok(game::ServerMsg::Trial(TrialEvent::SummonJury{trial_id:7,court:1,jury_number:-1}))).await;
+        assert_eq!(&frame(&mut peer).await[..2],&[0x72,0]);assert!(matches!(events.try_recv(),Ok(Event::Trial(_))));assert!(matches!(events.try_recv(),Ok(Event::JurySummonReplyRequested{..})));
+        let confirm=TrialCommand::ConfirmCrimeRecords{trial_id:7,jury_number:-1};
+        for _ in 0..2{
+            let before=session.received_trials.borrow().clone();session.command(Command::Trial{character_id:42,command:confirm}).await;
+            assert_eq!(frame(&mut peer).await,[0x73,0,7,0,0,0,255,255,255,255]);assert!(matches!(events.try_recv(),Ok(Event::TrialRequested{character_id:42,command}) if command==confirm));
+            assert_eq!(*session.received_trials.borrow(),before,"transport writes never add an OK count or pending receipt");
+        }
+        let cancel=TrialCommand::CancelTrial{trial_id:7};session.command(Command::Trial{character_id:42,command:cancel}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.game_msg(Ok(game::ServerMsg::Trial(TrialEvent::Waiting{order:1,sentence_time_ms:0}))).await;assert!(matches!(events.try_recv(),Ok(Event::Trial(_))));
+        let before=session.received_trials.borrow().clone();session.command(Command::Trial{character_id:42,command:cancel}).await;
+        assert_eq!(frame(&mut peer).await,[0x74,0,7,0,0,0]);assert!(matches!(events.try_recv(),Ok(Event::TrialRequested{character_id:42,command}) if command==cancel));assert_eq!(*session.received_trials.borrow(),before);
+        session.command(Command::Trial{character_id:41,command:confirm}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        session.command(Command::Trial{character_id:42,command:TrialCommand::ConfirmCrimeRecords{trial_id:8,jury_number:-1}}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        session.command(Command::Trial{character_id:42,command:TrialCommand::ConfirmCrimeRecords{trial_id:7,jury_number:0}}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.game.as_mut().unwrap().shutdown().await;session.command(Command::Trial{character_id:42,command:confirm}).await;
+        let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::TrialRequested{..}));rejected|=matches!(e,Event::TrialRequestRejected{..});}assert!(rejected);
+    }
+    #[tokio::test]
+    async fn trial_control_identity_header_missing_send_and_lifecycle_are_checked_at_write(){
+        use crate::{TrialCommand,TrialEvent};let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let command=TrialCommand::CancelTrial{trial_id:0};
+        session.command(Command::Trial{character_id:42,command}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        session.phase=Phase::InWorld;session.selected=42;session.emit(Event::Trial(TrialEvent::Waiting{order:0,sentence_time_ms:0}));events.try_recv().unwrap();
+        let mut header=crate::model::CharacterState::default();header.character.id=43;session.selected_state=Some(header.clone());
+        session.command(Command::Trial{character_id:42,command}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));
+        header.character.id=42;session.selected_state=Some(header);let before=session.received_trials.borrow().clone();
+        session.command(Command::Trial{character_id:42,command}).await;assert!(matches!(events.try_recv(),Ok(Event::TrialRequestRejected{..})));assert_eq!(*session.received_trials.borrow(),before);
+        session.emit(Event::CharacterSelected(Box::default()));events.try_recv().unwrap();assert_eq!(*session.received_trials.borrow(),crate::Trials::default());assert!(command.validate_received(&session.received_trials.borrow()).is_err());assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
