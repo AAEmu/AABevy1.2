@@ -14,16 +14,74 @@ use super::data::GameData;
 use super::tipcalc::Attrs;
 use super::tipitem::{slot_type_name, Class};
 
-/// The tooltip's `item_impl` of an `items.impl_id` (`ItemImplEnum`). The equipment and portal ones have
-/// sections of their own; everything else is "etc" (a plain item).
-fn item_impl(id: i64) -> &'static str {
-    match id {
-        1 => "weapon",
-        2 => "armor",
-        14 => "portal",
-        24 => "accessory",
-        _ => "etc",
-    }
+/// Native39570b90 ItemImplEnum names. Crafting compares these classes when inheriting grades.
+pub(super) fn item_impl(id: i64) -> &'static str {
+    const NAMES: [&str; 30] = [
+        "misc",
+        "weapon",
+        "armor",
+        "body",
+        "bag",
+        "housing",
+        "housing_decoration",
+        "tool",
+        "summon_slave",
+        "spawn_doodad",
+        "accept_quest",
+        "summon_mate",
+        "recipe",
+        "crafting",
+        "portal",
+        "enchanting_gem",
+        "report_crime",
+        "logic_doodad",
+        "has_ucc",
+        "open_emblem_ui",
+        "shipyard",
+        "socket",
+        "backpack",
+        "open_paper",
+        "accessory",
+        "treasure",
+        "music_sheet",
+        "dyeing",
+        "slave_equipment",
+        "grade_enchanting_support",
+    ];
+    usize::try_from(id).ok().and_then(|id| NAMES.get(id)).copied().unwrap_or("invalid item_impl")
+}
+
+/// X2Item's argument/returned itemGrade is a raw native grade ID. Internal bag snapshots
+/// and item_tip use display order; keep that conversion at this public lookup boundary.
+pub(super) fn install_native_lookup(lua: &Lua, bridge: &super::api::Shared) -> mlua::Result<()> {
+    let item: Table = lua.globals().get("X2Item")?;
+    let prior: mlua::Function = item.get("GetItemInfoByType")?;
+    let state = bridge.clone();
+    item.set(
+        "GetItemInfoByType",
+        lua.create_function(move |lua, (owner, id, grade): (mlua::Value, u32, Option<u8>)| {
+            let data = state.borrow();
+            if let (Some(game), Some(grade)) = (data.game.get(), grade) {
+                let result = item_tip(
+                    lua,
+                    game,
+                    &data.tips,
+                    id,
+                    Some(i64::from(super::store::ui_grade(grade))),
+                    None,
+                    Instance::default(),
+                )?;
+                if let Some(info) = &result {
+                    info.set("itemGrade", grade)?;
+                    info.set("stack", mlua::Value::Nil)?;
+                }
+                Ok(result)
+            } else {
+                drop(data);
+                prior.call::<Option<Table>>((owner, id, grade))
+            }
+        })?,
+    )
 }
 
 /// `skills.ability_id` -> the key of the tooltip's ability colour and name (`locale.common.abilityCategory`).
@@ -261,4 +319,54 @@ pub fn skill_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, level: u
 /// A buff's description with its numbers filled in (the buff tooltips); `None` when it has no placeholders.
 pub fn buff_text(game: &GameData, state: &TipState, id: u32, ab_level: i32) -> Option<String> {
     game.tips.buff_text(id, ab_level, &state.attrs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn native_item_lookup_keeps_raw_grade_and_distinct_crafting_classes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut game = GameData::default();
+        game.items.insert(
+            42,
+            super::super::data::ItemInfo {
+                impl_id: 11,
+                ..Default::default()
+            },
+        );
+        game.grades.insert(0, ("Crude".into(), "FF888888".into()));
+        game.grades.insert(1, ("Basic".into(), "FFFFFFFF".into()));
+        let data = super::super::api::HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        let bridge = Rc::new(RefCell::new(data));
+        let lua = Lua::new();
+        let api = lua.create_table()?;
+        api.set("GetItemInfoByType", lua.create_function(|_, _: mlua::MultiValue| Ok(None::<Table>))?)?;
+        lua.globals().set("X2Item", api)?;
+        install_native_lookup(&lua, &bridge)?;
+        lua.load(
+            r#"
+          local basic=X2Item:GetItemInfoByType(42,0)
+          local crude=X2Item:GetItemInfoByType(42,1)
+          assert(basic.itemGrade==0 and basic.grade=='Basic' and basic.gradeColor=='FFFFFFFF')
+          assert(crude.itemGrade==1 and crude.grade=='Crude' and crude.gradeColor=='FF888888')
+          assert(basic.item_impl=='summon_mate' and basic.stack==nil)
+          assert(X2Item:GetItemInfoByType(43,0)==nil)
+        "#,
+        )
+        .exec()?;
+        let data = bridge.borrow();
+        let game = data.game.get().unwrap();
+        let bag = item_tip(&lua, game, &data.tips, 42, Some(1), Some(7), Instance::default())?.unwrap();
+        assert_eq!(bag.get::<String>("grade")?, "Basic");
+        assert_eq!(bag.get::<u8>("itemGrade")?, 1);
+        assert_eq!(bag.get::<i32>("stack")?, 7);
+        assert_ne!(item_impl(3), item_impl(5));
+        assert_ne!(item_impl(11), item_impl(22));
+        assert_eq!(item_impl(21), "socket");
+        assert_eq!(item_impl(30), "invalid item_impl");
+        Ok(())
+    }
 }

@@ -39,6 +39,7 @@ mod cameras;
 mod cast;
 mod chat;
 mod combat;
+mod crafting;
 mod data;
 mod dialog;
 mod drag;
@@ -126,6 +127,11 @@ pub(crate) fn sorting_fixture() {
 #[allow(dead_code)]
 pub(crate) fn repair_fixture() {
     repair::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn crafting_fixture() {
+    crafting::fixture::run();
 }
 
 use aa_net::state::Player;
