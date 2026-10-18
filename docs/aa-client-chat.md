@@ -39,7 +39,11 @@ retire on the next update. ClearChatContentByUser clears only the actual target
 message frame and returns the native boolean result.
 
 AAUI.ChatSelection saves the numeric index before original selection callbacks,
-preserving the separate method field. Tab append/update/remove use aa-ui's
+preserving the separate method field. AAUI.ChatMethod resolves its retained raw
+tab ID through the current global model, saves that owner's method before the
+selector display callback, and preserves its selected index. Unknown raw IDs
+still display through aa-ui but do not write extras. Repeated method choices and
+restoration use the same native save path. Tab append/update/remove use aa-ui's
 source-verified lifecycle helpers, retaining other widgets, histories, handlers
 and message scroll state. A newly allocated reusedID clears its old history.
 
@@ -61,7 +65,7 @@ palette/filter provenance and PE SHA256.
 
 Remaining boundaries: provider-specific extra name filtering at39507e18,
 InitChatWindow full reset, native window locks/tab dragging/tearing off,
-and input-method saving require their remaining toolkit/source integration.
+require their remaining toolkit/source integration.
 Original physical right-click context dispatch is implemented in aa-ui, including
 the protected rawID0 clear action without changing selection. Legacy fallbacks for the remaining
 methods are not counted as implemented. Character-scoped writes preserve other
@@ -71,7 +75,13 @@ settings and do not commit pending graphics/options edits.
 
 All seven focused configuration checks pass, including physical original
 Save/Cancel/Reset, complete palette restart, signed character keys, raw float
-bits and six-character file-size admission. The strict native palette parser
+bits and six-character file-size admission. The restart check also types /p
+through the original input, verifies method4 and selected3 on disk and in the
+fresh stage, and proves unknown retained raw IDs leave saved bytes unchanged.
+These seven checks pass again after the method hook integration. aa-ui separately
+passes30 selected input/method checks,12 executed native method groups and an
+inspected restored-input capture at517.4-566.5 FPS.
+The strict native palette parser
 also exposed the toolkit's prior sequence-only Drawable.GetColor result;
 aa-ui now supplies its native named r/g/b/a table, allowing the original Save
 handler to succeed without weakening native validation.

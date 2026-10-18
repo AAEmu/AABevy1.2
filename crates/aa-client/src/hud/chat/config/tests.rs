@@ -75,10 +75,19 @@ fn original_chat_controls_and_character_scoped_restart_keep_native_rows() -> Res
         .exec()?;
     assert_eq!(state.borrow().chat_config.model.windows[&0], [0, 2, 3, 1]);
     assert_eq!(state.borrow().chat_config.model.extra[&0].selected, 3);
+    let edit: Table = select.call_method("GetChatEdit", ())?;
+    edit.call_method::<()>("Show", true)?;
+    edit.call_method::<()>("SetFocus", ())?;
+    rt.type_text("/p ");
+    assert_eq!(state.borrow().chat_config.model.extra[&0], model::Extra { selected: 3, method: 4 });
     let bytes = std::fs::read(&path)?;
     let saved: serde_json::Value = serde_json::from_slice(&bytes)?;
     assert!(saved["chat"]["17:-2147483647"]["tabs"].is_array());
     assert_eq!(saved["chat"]["17:-2147483647"]["extra"][0]["selected"], 3);
+    assert_eq!(saved["chat"]["17:-2147483647"]["extra"][0]["method"], 4);
+    // The input can retain a removed raw ID; an unknown owner must not save any extra row.
+    rt.lua.load("AAUI.ChatMethod(-1,7);AAUI.ChatMethod(99,7)").exec()?;
+    assert_eq!(std::fs::read(&path)?, bytes);
     // Real fresh Lua/store, independent of the in-memory writer.
     let mut next = UiRuntime::new("en_us", 1280., 720.)?;
     next.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
@@ -112,6 +121,7 @@ fn original_chat_controls_and_character_scoped_restart_keep_native_rows() -> Res
         let chat = u.tree.widget(window).unwrap().chat.as_ref().unwrap();
         assert_eq!(chat.tabs.iter().map(|t| t.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
         assert_eq!(chat.selected, 3);
+        assert_eq!(chat.method, 4);
     }
     other.borrow_mut().chat_config.identity(Some(18), 0x8000_0001);
     next.lua
