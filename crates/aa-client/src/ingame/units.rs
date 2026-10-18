@@ -601,7 +601,7 @@ pub fn move_units(
         let pose = unit.track.sample(dt);
         let mut pos = pose.pos;
         // on the ground: the terrain under it (the server's height differs by a few centimetres from our mesh)
-        let ground = terrain.height_at(pos.x, pos.y);
+        let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
         let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
         if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) {
             pos.z = g;

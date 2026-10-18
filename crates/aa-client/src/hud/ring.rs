@@ -159,7 +159,7 @@ pub fn update_ring(
         Some(t) => bevy_to_cry(t.translation),
         None => Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
     };
-    let ground_at = |x: f32, y: f32| terrain.as_ref().and_then(|t| t.height_at(x, y)).unwrap_or(game_pos.z);
+    let ground_at = |x: f32, y: f32| terrain.as_ref().and_then(|t| t.ground_at(x, y)).map_or(game_pos.z, |ground| ground.height);
     let diameter = MIN_DIAMETER.max(0.95 * unit.scale.max(0.1));
     let size = diameter / INK;
     // the ground basis: "up" of the texture is away from the camera

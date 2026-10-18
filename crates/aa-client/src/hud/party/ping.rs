@@ -153,7 +153,7 @@ fn sync(
                     // Native queries two surfaces from Z=1000 and takes max+2. Our terrain and
                     // authored water queries reproduce ground/sea/lake placement. Brush roofs and
                     // instance-specific collision surfaces are not represented by these queries yet.
-                    let ground = terrain.as_ref().and_then(|q| q.height_at(p.x, p.y));
+                    let ground = terrain.as_ref().and_then(|q| q.ground_at(p.x, p.y)).map(|ground| ground.height);
                     let surface = water
                         .as_ref()
                         .and_then(|q| q.water_at(Vec3::new(p.x, p.y, 1000.0)))

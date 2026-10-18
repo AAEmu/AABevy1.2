@@ -100,9 +100,9 @@ pub fn right(yaw: f32) -> Vec2 {
 /// Heightmap cells within this many metres of the player are loaded ahead of use.
 const PREFETCH_RADIUS: f32 = 600.0;
 
-/// Terrain height under a game position, or `fallback` outside the map.
+/// Physical terrain under a game position, or `fallback` over holes/outside the map.
 pub fn height_or(terrain: &TerrainQuery, x: f32, y: f32, fallback: f32) -> f32 {
-    terrain.height_at(x, y).unwrap_or(fallback)
+    terrain.ground_at(x, y).map_or(fallback, |ground| ground.height)
 }
 
 pub fn placement(pos: Vec3, yaw: f32, scale: f32) -> Transform {
@@ -273,11 +273,19 @@ struct Support {
 /// The highest surface under `(x, y)` that is not above `z + step_up`: a brush (bridge, stairs, floor) or the terrain; the terrain
 /// also where it is higher than that (the character is inside the ground and comes out on top of it). `None` off the map.
 fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z: f32, step_up: f32) -> Option<Support> {
-    let terr = terrain.height_at(x, y)?;
-    match collision.ground_below(x, y, z, step_up) {
-        Some(g) if g.height > terr + 0.02 => Some(Support { height: g.height, brush: true }),
-        _ => Some(Support { height: terr, brush: false }),
+    let terr = terrain.ground_at(x, y).map(|ground| ground.height);
+    match (terr, collision.ground_below(x, y, z, step_up)) {
+        (terrain, Some(g)) if terrain.is_none_or(|height| g.height > height + 0.02) => Some(Support { height: g.height, brush: true }),
+        (Some(height), _) => Some(Support { height, brush: false }),
+        _ => None,
     }
+}
+
+fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: Vec3, step_up: f32) -> f32 {
+    support(terrain, collision, pos.x, pos.y, pos.z, step_up).map_or_else(
+        || if terrain.is_hole_at(pos.x, pos.y) == Some(true) { f32::NEG_INFINITY } else { pos.z },
+        |support| support.height,
+    )
 }
 
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
@@ -402,7 +410,7 @@ pub fn control_player(
             // terrain steeper than the climb angle is not walked up: looked at over half a metre ahead, the facets of the
             // mesh are rougher than that (a brush under the feet, stairs, is not terrain)
             let ahead = Vec2::new(candidate.x, candidate.y) + step.normalize_or_zero() * CLIMB_LOOK;
-            let rise = terrain.height_at(ahead.x, ahead.y).map_or(0.0, |h| h - pos.z);
+            let rise = terrain.ground_at(ahead.x, ahead.y).map_or(0.0, |ground| ground.height - pos.z);
             let climbing = !swimming && mover.grounded && rise > CLIMB_LOOK * MAX_CLIMB_TAN;
             let on_brush = climbing && support(&terrain, &collision, candidate.x, candidate.y, pos.z, STEP_UP).is_some_and(|s| s.brush);
             if !climbing || on_brush {
@@ -414,7 +422,7 @@ pub fn control_player(
 
     // what is under the feet and the water around
     let step_up = if mover.grounded || swimming { STEP_UP } else { 0.05 };
-    let ground = support(&terrain, &collision, pos.x, pos.y, old.z, step_up).map_or(old.z, |s| s.height);
+    let ground = floor_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up);
     let wet = water.water_at(pos).map(|(surface, kind)| Wet { surface, kind, depth: (surface - ground).max(0.0) });
     mover.wading = if swimming { 0.0 } else { wet.map_or(0.0, |w| w.depth) };
     let rising = !mover.grounded && mover.vz > 0.0 && !swimming;
@@ -644,6 +652,34 @@ pub fn follow_server(
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn native_hole_height_is_not_a_player_floor_and_preserves_the_received_spawn_height() {
+        let terrain = TerrainQuery::new("main_world");
+        let collision = WorldCollision::new("main_world", terrain.clone());
+        // Executed original 300C91B0/300CAB30: a real 20,8 leaf, not synthetic missing terrain.
+        let hole = Vec3::new(21204.25, 9026.5, 446.40103);
+        assert_eq!(terrain.is_hole_at(hole.x, hole.y), Some(true));
+        assert!((terrain.height_at(hole.x, hole.y).unwrap() - hole.z).abs() < 0.001);
+        assert!(support(&terrain, &collision, hole.x, hole.y, hole.z + 10.0, STEP_UP).is_none());
+        assert_eq!(floor_at(&terrain, &collision, hole, STEP_UP), f32::NEG_INFINITY);
+        assert_eq!(height_or(&terrain, hole.x, hole.y, 430.0), 430.0);
+        let solid = Vec3::new(21188.25, 9030.5, 498.16614);
+        assert_eq!(terrain.is_hole_at(solid.x, solid.y), Some(false));
+        let ground = support(&terrain, &collision, solid.x, solid.y, solid.z + 10.0, STEP_UP).unwrap();
+        assert!(!ground.brush && (ground.height - solid.z).abs() < 0.001);
+        assert!((floor_at(&terrain, &collision, solid, STEP_UP) - solid.z).abs() < 0.001);
+        // Missing cells retain the application's streaming/map fallback; only known holes permit a fall.
+        let outside = Vec3::new(-1.0, -1.0, 123.0);
+        assert_eq!(floor_at(&terrain, &collision, outside, STEP_UP), outside.z);
+        // The same genuine hole can expose a lower compiled cave/brush floor.
+        assert!(collision.build_blocking(20, 8).is_some());
+        let cave = Vec3::new(21270.5, 8960.5, 474.8673);
+        assert_eq!(terrain.is_hole_at(cave.x, cave.y), Some(true));
+        let ground = support(&terrain, &collision, cave.x, cave.y, cave.z + 5.0, STEP_UP).unwrap();
+        assert!(ground.brush && (ground.height - 464.76614).abs() < 0.001);
+        assert!((floor_at(&terrain, &collision, cave, STEP_UP) - 464.76614).abs() < 0.001);
+    }
 
     #[test]
     fn only_the_local_resurrection_moves_the_player_and_restarts_collision_wait() {
