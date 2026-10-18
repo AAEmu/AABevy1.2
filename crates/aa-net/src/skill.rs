@@ -5,6 +5,9 @@
 //! `CSStartSkill`. Cast/stop times use 10 ms wire units (some with an offset of 10);
 //! exposed values are milliseconds. Native `SCCooldowns` entries already use milliseconds.
 
+mod detail;
+pub use detail::{SkillCasterData,SkillTargetData,SkillPosition};
+
 use crate::buff::{caster_kind, BuffCaster};
 use crate::wire::{Pos, Reader, Result, Writer};
 
@@ -334,6 +337,8 @@ pub struct SkillStarted {
     pub tl: u16,
     pub caster: BuffCaster,
     pub target: SkillTarget,
+    pub raw_caster:SkillCasterData,
+    pub raw_target:SkillTargetData,
     /// Cast time with haste, ms (0 = instant), and without.
     pub cast_ms: u32,
     pub base_cast_ms: u32,
@@ -350,8 +355,10 @@ impl SkillStarted {
     pub fn read(r: &mut Reader) -> Result<Self> {
         let skill_id = r.u32()?;
         let tl = r.u16()?;
-        let caster = BuffCaster::read(r)?;
-        let target = SkillTarget::read(r)?;
+        let raw_caster=SkillCasterData::read(r)?;
+        let raw_target=SkillTargetData::read(r)?;
+        let caster=raw_caster.projection();
+        let target=raw_target.projection();
         skip_skill_object(r)?;
         let cast_ms = u32::from(r.u16()?) * 10;
         let base_cast_ms = u32::from(r.u16()?) * 10;
@@ -360,7 +367,7 @@ impl SkillStarted {
         let result=raw_result.code;
         // Preserve the historical app field: u32 takes precedence over the u16 detail.
         let result_value=if raw_result.raw_flags&4!=0 {raw_result.value} else {u32::from(raw_result.extra)};
-        Ok(Self { skill_id, tl, caster, target, cast_ms, base_cast_ms, synergy, result, result_value, raw_result })
+        Ok(Self { skill_id, tl, caster, target, cast_ms, base_cast_ms, synergy, result, result_value, raw_result, raw_caster, raw_target })
     }
 
     /// The skill did not start.
@@ -376,6 +383,8 @@ pub struct SkillFired {
     pub tl: u16,
     pub caster: BuffCaster,
     pub target: SkillTarget,
+    pub raw_caster:SkillCasterData,
+    pub raw_target:SkillTargetData,
     /// Delay until the effects land, ms.
     pub delay_ms: i32,
     /// Channeling time, ms (0 for plain skills).
@@ -394,8 +403,10 @@ impl SkillFired {
     pub fn read(r: &mut Reader) -> Result<Self> {
         let skill_id = r.u32()?;
         let tl = r.u16()?;
-        let caster = BuffCaster::read(r)?;
-        let target = SkillTarget::read(r)?;
+        let raw_caster=SkillCasterData::read(r)?;
+        let raw_target=SkillTargetData::read(r)?;
+        let caster=raw_caster.projection();
+        let target=raw_target.projection();
         skip_skill_object(r)?;
         let delay = i32::from(r.i16()?);
         let channeling = i32::from(r.i16()?);
@@ -407,6 +418,8 @@ impl SkillFired {
             tl,
             caster,
             target,
+            raw_caster,
+            raw_target,
             delay_ms: (delay - 10) * 10,
             channeling_ms: (channeling - 10) * 10,
             fire_anim_id,
