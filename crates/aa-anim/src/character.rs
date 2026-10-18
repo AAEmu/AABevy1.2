@@ -167,6 +167,9 @@ pub struct PartAsset {
     pub material: Option<String>,
     /// Dye colour (sRGB) for dyeable costume materials.
     pub dye: Option<[u8; 3]>,
+    /// Original attachments declared by this part's CDF, for client assembly on shared bones.
+    /// Empty for a raw mesh. Paths/materials above still describe the unwrapped part model.
+    pub attachments: Vec<crate::cdf::Attachment>,
 }
 
 /// A [`CharacterDesc`] resolved to files.
@@ -214,7 +217,7 @@ impl CharacterDesc {
         let mut parts = Vec::new();
 
         // body (+ fur / skin variant materials)
-        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None, dye: None };
+        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None, dye: None, attachments: Vec::new() };
         body.material = skin_variant(&body_path, &skin);
         parts.push(body);
 
@@ -283,9 +286,9 @@ impl CharacterDesc {
 fn resolve_part(kind: PartKind, slot: &str, path: &str) -> Result<PartAsset> {
     if path.ends_with(".cdf") {
         let cdf = Cdf::load(path)?;
-        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material, dye: None })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material, dye: None, attachments: cdf.attachments })
     } else {
-        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None, dye: None })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None, dye: None, attachments: Vec::new() })
     }
 }
 
