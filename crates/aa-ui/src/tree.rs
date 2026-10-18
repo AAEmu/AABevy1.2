@@ -466,6 +466,8 @@ pub struct Widget {
     pub roadmap: Option<crate::lua::roadmap::RoadMapData>,
     /// `worldmap`: the registered maps, the shown one, the player's cursor (`crate::lua::worldmap`).
     pub worldmap: Option<crate::lua::worldmap::WorldMapData>,
+    /// Published native radar rows and their drawable pools (Map widgets only).
+    pub radar: Option<crate::lua::radar::View>,
     /// `EnableScroll(true)`: children are clipped to this widget's rectangle, and
     /// `ChangeChildAnchorByScrollValue` shifts the children anchored to it (`scroll`).
     pub clip: bool,
@@ -1237,6 +1239,7 @@ impl Widget {
             chat: None,
             roadmap: None,
             worldmap: None,
+            radar: None,
             clip: false,
             scroll: [0.0; 2],
             cooldown: None,

@@ -407,6 +407,10 @@ fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Option<Arc<Ve
 /// the roadmap window takes the mouse): the tooltip controller goes onto the marker and the map
 /// scripts get `SHOW_ROADMAP_TOOLTIP` / `HIDE_ROADMAP_TOOLTIP`.
 fn update_tooltip(lua: &Lua, id: Id) {
+    if super::radar::has_tooltip(lua, id) {
+        with(lua, id, |d| d.hover = None);
+        return;
+    }
     let d = data(lua, id);
     let hover = {
         let u = ui(lua);
@@ -585,6 +589,7 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
     sync_ping(lua, id, shown_map, r)?;
     sync_markers(lua, id, shown_map, markers);
     with(lua, id, |x| x.markers_version = version);
+    super::radar::update_map(lua, id);
     update_tooltip(lua, id);
     Ok(())
 }
