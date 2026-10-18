@@ -1168,6 +1168,15 @@ formals, but its third is nil. Removing a binding emits the same event without a
 Assigning an unchanged binding returns early without an event. Other modes can retain the
 same physical combination.
 
+Gameplay matching checks active modes in priority order, then normal mode, using exact
+modifiers. Native `393fc270` retries only after stripping Alt bits 0x44, preserving any
+Ctrl/Shift bits: Alt+W may fall back to W; Ctrl+W and Shift+W do not. Ctrl+Alt+W may fall
+back to Ctrl+W, not bare W. Press dispatcher `393ff880` latches record+0x108; release
+`393ff9a0` visits all five modes for that physical key and releases latched records without
+matching current Ctrl/Shift again. Modifier changes alone do not re-evaluate a held movement
+binding inside this manager. Explicit input resets/disable and any OS replay are separate
+boundaries; the audit does not infer their behavior.
+
 `IsValidActionName` matches the exact 104 native spellings at array `39ac8e68` through
 `393f8d20`; its import is `XlCompareString`, distinct from `XlCompareStringI`.
 `IsOverridableAction` (`393f8db0`) finds the action in an 18-entry (enum, mode) table
