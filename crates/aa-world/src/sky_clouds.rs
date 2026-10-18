@@ -216,9 +216,17 @@ pub struct CloudState {
     textures: HashMap<String, Option<Handle<Image>>>,
 }
 
+/// Production cloud material/shader without world streaming, for renderer controls.
+pub struct CloudMaterialPlugin;
+impl Plugin for CloudMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "clouds.wesl");
+        app.add_plugins(MaterialPlugin::<CloudMaterial>::default());
+    }
+}
+
 pub(crate) fn build(app: &mut App) {
-    embedded_asset!(app, "clouds.wesl");
-    app.add_plugins(MaterialPlugin::<CloudMaterial>::default())
+    app.add_plugins(CloudMaterialPlugin)
         .init_resource::<CloudState>()
         .init_resource::<CloudSettings>()
         .add_systems(

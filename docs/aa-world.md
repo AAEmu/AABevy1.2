@@ -2025,14 +2025,14 @@ A further bounded 20-cell survey also found an ordinary local-colour box in
 Proof exports are ignored `lights/fogvolume-global-colour.txt` and
 `lights/fog-global-hdr-asm.txt`. The existing global post fog remains independent.
 
-Water-half ordering is still explicitly open. Native **301121C0** classifies
+Fog-volume water-half ordering is still explicitly open. Native **301121C0** classifies
 normal-pass fog by `(cameraZ-oceanZ)*(.5-passId)*(centreZ-oceanZ)>0`;
 **3012B2E0**, called with a null point, returns the global ocean plane or
 -1000000, not a local pond's height. The current after-water path covers the
 above-ocean camera/volume case used here. Bevy's current transmissive pass copies
 scene colour before its sorted range, so merely moving the draw into that range
-would not include fog in water refraction; a dedicated before-water draw/copy
-boundary is needed. No local-water-height substitute or arbitrary extra copies
+would not include fog in water refraction. The sky/cloud early pass now supplies
+that boundary, but fog-material routing remains unimplemented. No local-water-height substitute or arbitrary extra copies
 were introduced. HDRDynamic nonzero, FlowGraph fades, view-distance fading,
 overlap priority and per-translucent-object fog tracing retain the limits above.
 
@@ -2260,7 +2260,8 @@ Thus the source-backed order is **stars → moons → additive atmosphere → al
 These draws precede water list 8. Distant cloud sprites are a separate boundary:
 **300B4410 / 300B4D07** calls **301121C0** with list 6 and a computed water-half flag;
 **380D6AF0** draws group 0 before water and group 1 after it. The current distant
-`CloudMaterial` remains after water; the native half split is not implemented.
+`CloudMaterial` now uses the ordinary-view classifier documented in **Cloud water
+halves** below; native recursive/reflection pass IDs remain unmapped.
 Proof exports: ignored `night/moon-native-order.txt`, `moon-blend-values.txt`,
 `moon-sky-batch.txt`, `moon-sky-flags.txt`, `moon-renderer-table.txt`,
 `moon-sky-relist.txt`, `moon-sky-drawphase.txt` and `moon-sky-submit-asm.txt`.
@@ -2351,8 +2352,8 @@ warning for `textures/cubemaps/fleettest.dds`. Captures are under
 shared builds: direct controls **230-318**, transmission **262-279**, dual view
 **184-227**, original day **185-215**, night **221-252**, visible Moons **191-262**,
 glass **222-246**, pond **117-144**. These are shared-load capture measurements, not
-an isolated performance comparison. The native cloud water-half split, native full
-atmospheric scattering and the existing water reflection/falloff approximations remain
+an isolated performance comparison. Native recursive cloud passes, full atmospheric
+scattering and the existing water reflection/falloff approximations remain
 outside this slice; no matching native-client camera capture was available for fitting.
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
@@ -2834,6 +2835,79 @@ disabled control still contains clouds baked into the original skybox: `e_clouds
 the separate distant nodes. The reference comparison retains the existing visibly bluer /
 less hazy sky and brighter-cloud calibration gap; no phase or pixel match can be asserted
 from its single still image and unknown elapsed cloud phase.
+
+**Cloud water halves** (`sky_material::composite::cloud_water`): the renderer now
+routes the supported native group-0 cloud draws through the existing sky pass before
+the water colour copy. Native **300B4D07** calls **301121C0** and submits list 6 with
+its boolean result; **380D6AF0** draws group 0 before water list 8, then group 1 after
+water. The normal-pass expression is the strict f32 predicate
+`((cameraZ-oceanZ)*.5)*(storedZ-oceanZ)>0`: true means after water. It uses the global
+ocean from **3012B2E0** called with a null point, rather than local pond/river height.
+
+The classification point is **not** the rendered camera-relative cloud centre.
+Engine **3012E8A0** initializes the zone-node record to Cry **(4000,4000,100)**:
+**3012EA69 / 3012EA7B** load original floats 4000 / 100 from 3025C7D4 / 30254840;
+**3012EB21 / 3012EB06** write record +0/+4/+8. Vtable 3025CC48 +300 resolves to
+**300B42A0**, which copies that record into node +60/+64/+68. **300B44BE / 300B44C1**
+save node +60, and **300B4CFB** supplies that stored pointer to the classifier, after
+the camera-relative vertices were calculated separately. Original `main_world/world.g`
+has `oceanLevel 100`, making the product exactly zero: its zone clouds therefore draw
+**before water**, even when both the camera and visible cloud are above the ocean.
+Using the visible `camera+height` point would incorrectly keep those draws late.
+Bounded original-PE disassembly and **36 executed x86/SSE cases** are retained in
+ignored `night/cloud-water-native-asm.txt` / `cloud-water-native-oracles.json` with
+`cloud_water_proof.py`; no original binary or IDB was changed. Nine supported normal
+pass results are committed as numeric goldens, including both ocean sides and equality.
+
+`CloudWaterPass` requires `NoAutomaticBatching` and is added only to authored
+`CloudSprite` nodes. The existing render adapter selects by `MainEntity`, preserving
+the prepared GPU ranges/offsets and relative sky/cloud order. It reads each ordinary
+unmirrored `Camera3d` view's height and one existing global `OceanPlane` transform;
+missing, ambiguous or nonfinite ocean input leaves the previous late path intact.
+Mirrored views remain late because a native recursive/reflection pass ID has not been
+mapped. A local `WaterQuery` result is never substituted. The three small identity/view
+sets retain their allocations across frames; work stays bounded by existing visible
+phase items and the active-zone cap of **128** cloud sprites. No extra meshes, materials,
+workers or texture copies are created in production. A per-view regression crosses the
+ocean in two opposite views, retires the ocean input, checks the stored-height equality,
+declines one mirrored view and removes the cloud marker while restoring late ranges.
+The existing focus-relative geometry/shading for secondary views remains unchanged;
+this adds per-view phase selection without claiming native portal/reflection rendering.
+
+`CloudMaterialPlugin` exposes the unchanged production cloud shader to the independent
+`cloud_water` example. It uses linear density bytes **0/64/192/255**, the original eight
+light taps, nontrivial alpha exponent 1.4 and opacity **0/.5/1**, then samples the real
+`ViewTransmissionTexture` through depth-writing receivers. CPU swatches use independent
+native formula inputs. The native ocean-100 case passes twelve RGB comparisons;
+`--ocean 80 --eye 90 --two-views` and `--ocean 120 --eye 130 --two-views` pass 24 each
+with opposite halves in the two physical viewports. `--late-control` proves omitted
+cloud contribution, while `--no-ocean` / `--ambiguous-ocean` verify declined inputs.
+`--lose-ocean` removes the producer at 12 seconds and retains the same twelve cloud
+materials; `--unload-check` instead releases all twelve entities/materials. Both assert
+their budgets after 16 seconds and their resulting copy pixels at 20 seconds. All
+**120** GPU/CPU cases pass, with no cloud RGB, UV, opacity or motion formula changes.
+Run the long checks with `--shot-after 20`; short controls need eight seconds.
+
+Validation (2026-10-18): all **199** crate tests passed, with nine existing ignored;
+the all-examples check and the three fixture builds passed. All 120 numeric GPU
+comparisons are within one display byte of the independent CPU swatches. Inspected
+captures under `shots/aa-world/cloud_water/` include native and forced-late copies,
+both dual-view controls, ocean loss, material unload, original day/night/off clouds,
+behind-origin glass and a real pond with screen-space transmission. The authored
+speed-0.1 cloud advanced **1.000122 degrees over 10.001 frame-seconds**. Environment
+teardown asserted four sprites becoming zero; pond teardown released its one cell
+mesh and water entity, retaining the existing shared style texture cache lifetime.
+The original-reference sky view still lacks the native scene's terrain/props and
+retains the documented haze/brightness difference; these captures do not establish
+full-scene pixel parity or close the water BRDF/reflection approximation.
+
+Last-four-sample FPS under shared machine load: native numeric control **407-417**,
+dual views **194-320**, day **257-317**, night **285-306**, clouds off **224-301**,
+glass **226-241**, reference sky **213-273**, and pond **175-207**. All sixteen
+numeric/original-scene runs exited normally, with no logged warnings or errors;
+all fixture windows closed. Logs and the source-oracle/GPU summary remain in ignored
+`night/cloud-water-*.log` / `cloud-water-final-results.json`. No calibrated sky,
+water, post or fly source was changed.
 
 ### Post (`post.rs`, `post.wesl`)
 

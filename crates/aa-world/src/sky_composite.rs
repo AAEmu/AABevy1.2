@@ -18,6 +18,9 @@ use bevy::shader::ShaderRef;
 use super::{SkyMaterial, SkyParams};
 use crate::sky::SkyDome;
 
+#[path = "sky_cloud_water.rs"]
+pub mod cloud_water;
+
 /// CPU sorting only, after catalogue/moons and before distant cloud sprites.
 pub const SKY_COMPOSITE_SORT_BIAS: f32 = crate::night_sky::SKY_SORT_BIAS + 75_000.0;
 
@@ -81,12 +84,12 @@ impl Material for SkyCompositeMaterial {
     }
 }
 
-/// One late draw using the source dome mesh/transform and borrowed sky texture handles.
+/// One composite draw using the source dome mesh/transform and borrowed sky textures.
 #[derive(Component)]
 pub struct SkyComposite;
 
 /// Celestial/atmosphere draw before the water colour copy. Distant cloud sprites
-/// retain their separate water-half boundary; ordinary transparent receivers stay late.
+/// use their own native per-view water-half classifier; foreground receivers stay late.
 #[derive(Component, Clone, Copy, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[require(NoAutomaticBatching)]
@@ -109,6 +112,7 @@ pub(super) fn build(app: &mut App) {
             PostUpdate,
             sync.before(bevy::transform::TransformSystems::Propagate),
         );
+    cloud_water::build(app);
     pass::build(app);
 }
 
@@ -185,6 +189,7 @@ fn sync(
 
 mod pass {
     use super::SkyPass;
+    use super::cloud_water::{CloudWaterPass, OceanLevel, after_water};
     use bevy::camera::{MainPassResolutionOverride, Viewport};
     use bevy::core_pipeline::{
         Core3dSystems,
@@ -201,8 +206,9 @@ mod pass {
         render_resource::{RenderPassDescriptor, StoreOp},
         renderer::{RenderContext, ViewQuery},
         sync_world::{MainEntity, MainEntityHashSet},
-        view::{ExtractedView, ViewDepthStencilTexture, ViewTarget},
+        view::{ExtractedView, RetainedViewEntity, ViewDepthStencilTexture, ViewTarget},
     };
+    use std::collections::HashSet;
 
     #[derive(Resource, Default)]
     struct SkyPhases(ViewSortedRenderPhases<Transparent3d>);
@@ -249,9 +255,19 @@ mod pass {
                 Without<SkyPass>,
             ),
         >,
+        clouds: Query<
+            Entity,
+            (
+                With<crate::sky_clouds::CloudSprite>,
+                Without<CloudWaterPass>,
+            ),
+        >,
     ) {
         for entity in &sky {
             commands.entity(entity).insert(SkyPass);
+        }
+        for entity in &clouds {
+            commands.entity(entity).insert(CloudWaterPass);
         }
     }
 
@@ -291,19 +307,39 @@ mod pass {
         mut sky: ResMut<SkyPhases>,
         mut late: ResMut<ViewSortedRenderPhases<Transparent3d>>,
         tagged: Query<&MainEntity, With<SkyPass>>,
+        clouds: Query<&MainEntity, With<CloudWaterPass>>,
+        views: Query<&ExtractedView, With<Camera3d>>,
+        ocean: Res<OceanLevel>,
         mut entities: Local<MainEntityHashSet>,
+        mut cloud_entities: Local<MainEntityHashSet>,
+        mut before_water: Local<HashSet<RetainedViewEntity>>,
     ) {
         // Bevy 0.20 PBR items use (PLACEHOLDER, MainEntity), rather than the
         // extracted render entity. Retain this small set's capacity across frames.
         entities.clear();
         entities.extend(tagged.iter().copied());
+        cloud_entities.clear();
+        cloud_entities.extend(clouds.iter().copied());
+        before_water.clear();
+        if let Some(level) = ocean.0 {
+            for view in &views {
+                let height = view.world_from_view.translation().y;
+                // Native recursive/reflection pass IDs have no port input. Decline
+                // mirrored views instead of guessing that their pass ID is zero.
+                if !view.invert_culling && height.is_finite() && !after_water(height, level) {
+                    before_water.insert(view.retained_view_entity);
+                }
+            }
+        }
         for (view, source) in late.iter_mut() {
             let target = sky
                 .0
                 .entry(*view)
                 .or_insert_with(SortedRenderPhase::default);
             for item in source.items.values_mut() {
-                if entities.contains(&item.entity.1) {
+                if entities.contains(&item.entity.1)
+                    || (before_water.contains(view) && cloud_entities.contains(&item.entity.1))
+                {
                     // SkyPass requires NoAutomaticBatching: a range cannot include a
                     // foreground receiver. Preserve the already-prepared GPU instance index.
                     debug_assert!(item.batch_range.len() <= 1, "batched sky draw");
@@ -381,6 +417,7 @@ mod pass {
         fn prepared_offsets_restore_across_frames_and_views_retire_without_leaking() {
             let mut app = App::new();
             app.init_resource::<SkyPhases>()
+                .init_resource::<OceanLevel>()
                 .init_resource::<ViewSortedRenderPhases<Transparent3d>>()
                 .add_systems(Update, (restore, prepare).chain());
             let sky = app.world_mut().spawn_empty().id();
@@ -458,6 +495,105 @@ mod pass {
                 .remove(&a);
             app.update();
             assert!(!app.world().resource::<SkyPhases>().0.contains_key(&a));
+        }
+
+        #[test]
+        fn cloud_halves_change_per_view_and_restore_on_crossing_or_ocean_loss() {
+            use bevy::render::render_resource::TextureFormat;
+            let mut app = App::new();
+            app.init_resource::<SkyPhases>()
+                .insert_resource(OceanLevel(Some(80.0)))
+                .init_resource::<ViewSortedRenderPhases<Transparent3d>>()
+                .add_systems(Update, (restore, prepare).chain());
+            let cloud = app.world_mut().spawn_empty().id();
+            let marker = app
+                .world_mut()
+                .spawn((CloudWaterPass, MainEntity::from(cloud)))
+                .id();
+            let a = RetainedViewEntity::new(app.world_mut().spawn_empty().id().into(), None, 0);
+            let b = RetainedViewEntity::new(app.world_mut().spawn_empty().id().into(), None, 0);
+            let view = |id, height| ExtractedView {
+                retained_view_entity: id,
+                clip_from_view: Mat4::IDENTITY,
+                world_from_view: GlobalTransform::from(Transform::from_xyz(0.0, height, 0.0)),
+                clip_from_world: None,
+                target_format: TextureFormat::Rgba8Unorm,
+                viewport: UVec4::new(0, 0, 128, 128),
+                color_grading: default(),
+                invert_culling: false,
+            };
+            let camera_a = app
+                .world_mut()
+                .spawn((Camera3d::default(), view(a, 90.0)))
+                .id();
+            let camera_b = app
+                .world_mut()
+                .spawn((Camera3d::default(), view(b, 70.0)))
+                .id();
+            let functions = DrawFunctions::<Transparent3d>::default();
+            let draw = functions.write().add(UnusedDraw);
+            for (key, start) in [(a, 41), (b, 81)] {
+                app.world_mut()
+                    .resource_mut::<ViewSortedRenderPhases<Transparent3d>>()
+                    .entry(key)
+                    .or_default()
+                    .add_retained(Transparent3d {
+                        sorting_info: TransparentSortingInfo3d::Sorted {
+                            mesh_center: Vec3::new(0.0, 550.0, 0.0),
+                            depth_bias: -900_000.0,
+                        },
+                        distance: 10.0,
+                        pipeline: CachedRenderPipelineId::INVALID,
+                        entity: (Entity::PLACEHOLDER, cloud.into()),
+                        draw_function: draw,
+                        batch_range: start..start + 1,
+                        extra_index: PhaseItemExtraIndex::DynamicOffset(1024),
+                        indexed: true,
+                    });
+            }
+            let early =
+                |app: &App, key| app.world().resource::<SkyPhases>().0[&key].items.len() == 1;
+            app.update();
+            assert!(!early(&app, a));
+            assert!(early(&app, b));
+            // A shared source cloud must change halves independently in each view.
+            app.world_mut()
+                .get_mut::<ExtractedView>(camera_a)
+                .unwrap()
+                .world_from_view = GlobalTransform::from(Transform::from_xyz(0.0, 70.0, 0.0));
+            app.world_mut()
+                .get_mut::<ExtractedView>(camera_b)
+                .unwrap()
+                .world_from_view = GlobalTransform::from(Transform::from_xyz(0.0, 90.0, 0.0));
+            app.update();
+            assert!(early(&app, a));
+            assert!(!early(&app, b));
+            app.world_mut().resource_mut::<OceanLevel>().0 = None;
+            app.update();
+            assert!(!early(&app, a) && !early(&app, b));
+            for (key, start) in [(a, 41), (b, 81)] {
+                let phases = app
+                    .world()
+                    .resource::<ViewSortedRenderPhases<Transparent3d>>();
+                assert_eq!(
+                    phases[&key].items[&(Entity::PLACEHOLDER, cloud.into())].batch_range,
+                    start..start + 1
+                );
+            }
+            app.world_mut().resource_mut::<OceanLevel>().0 = Some(100.0);
+            app.update();
+            assert!(early(&app, a) && early(&app, b));
+            app.world_mut()
+                .get_mut::<ExtractedView>(camera_a)
+                .unwrap()
+                .invert_culling = true;
+            app.update();
+            assert!(!early(&app, a) && early(&app, b));
+            app.world_mut()
+                .entity_mut(marker)
+                .remove::<CloudWaterPass>();
+            app.update();
+            assert!(!early(&app, a) && !early(&app, b));
         }
     }
 }
