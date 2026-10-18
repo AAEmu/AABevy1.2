@@ -119,25 +119,32 @@ local function buffList(unit, good)
   if good then return lists.good end
   return lists.bad
 end
-local function buffAt(unit, index, good)
+local function buffAt(unit, index, good, ...)
+  if type(unit) ~= "string" then return end
+  local n, all, description, mine, duration, timeLeft, stack = HUD.buff_fields(index, ...)
   local list = buffList(unit, good)
-  local b = list and list[index]
-  if b == nil then return nil end
-  -- the tooltip info (tipType "buff" / "debuff", the category line "Buff" above the name)
-  local info = {
-    buff_id = b.buff_id, name = b.name, path = b.path, stack = b.stack,
-    description = HUD.buff_text(b.buff_id, b.ab_level) or b.description,
-    tipType = good and "buff" or "debuff", category = good and "Buff" or "Debuff",
-  }
-  if b.ends ~= nil then
-    info.timeLeft = math.max(0, b.ends - HUD.now_ms())
+  local b = n and list and list[n]
+  if b == nil or not b.descriptor then return end
+  -- Native always formats the description; flags only select exposed keys.
+  local text = HUD.buff_text(b.buff_id, b.ab_level) or b.description
+  local info = {}
+  if description then info.description = text end
+  if all then
+    local tipType = b.buff_kind == 1 and "buff" or "debuff"
+    info.buff_id, info.name, info.path = b.buff_id, b.name, b.path
+    info.tipType = tipType
+    info.category = X2Locale:LocalizeUiText(33, tipType)
   end
+  if mine then info.mine = HUD.buff_mine(b.caster_character_id) end
+  if duration then info.duration = b.duration end
+  if timeLeft and b.ends ~= nil then info.timeLeft = HUD.buff_float(math.max(0, b.ends - HUD.now_ms())) end
+  if stack then info.stack = b.stack end
   return info
 end
 X2Unit.UnitBuffCount = function(self, unit) local l = buffList(unit, true); return l and #l or 0 end
 X2Unit.UnitDeBuffCount = function(self, unit) local l = buffList(unit, false); return l and #l or 0 end
-X2Unit.UnitBuff = function(self, unit, index, flags) return buffAt(unit, index, true) end
-X2Unit.UnitDeBuff = function(self, unit, index, flags) return buffAt(unit, index, false) end
+X2Unit.UnitBuff = function(self, unit, index, ...) return buffAt(unit, index, true, ...) end
+X2Unit.UnitDeBuff = function(self, unit, index, ...) return buffAt(unit, index, false, ...) end
 
 -- Experience: percent of the level, exp of the level, exp for the next level.
 X2Player.GetExpInfo = function(self) return S().exp_percent, S().exp_cur, S().exp_need end

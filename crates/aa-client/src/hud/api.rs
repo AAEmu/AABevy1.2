@@ -246,6 +246,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::dialog::install(lua, &hud, bridge)?;
     super::drag::install(lua, &hud)?;
     super::skillbook::install(lua, &hud, bridge)?;
+    super::buffs::query::install(lua, &hud, bridge)?;
     super::markers::install(lua, &hud)?;
     super::party::install(lua, &hud, bridge)?;
     super::friends::install(lua, bridge)?;
