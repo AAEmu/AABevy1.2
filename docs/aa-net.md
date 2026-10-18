@@ -2887,3 +2887,34 @@ session order without synthetic entry/unit/capacity/Lua events. No lane sockets 
 Validation: `cargo test -p aa-net --features bevy --quiet` passed 261 library tests and two
 loopback integration tests; nine lane-dependent tests stayed ignored.
 `cargo check -p aa-net --features bevy --examples --quiet` and `git diff --check` passed.
+
+### Received auto-use AA Points setting (2026-10-17)
+
+`Command::SetAutoUseAaPoint(bool)` sends native CS0x133 with exactly one byte.
+`Event::AutoUseAaPointRequested` is emitted only after a successful transport write;
+`AutoUseAaPointRequestRejected` covers inactive-character requests. Neither is an ACK.
+There is no matching handler registered in the current read-only bevy lane source, so
+server persistence/live acceptance remains unverified; no success is synthesized.
+
+`Inventory.auto_use_aa_point_raw` hydrates from the existing selected character's
+`character.auto_use_aa_point`. `auto_use_aa_point()` uses raw equality to one. Received
+`ItemTask::AutoUseAaPoint(u8)` (SC item action 18) preserves every byte and clears
+`pending_auto_use_aa_point`; repeats still return a changed/report notification. The app
+must fire the original `CHANGED_AUTO_USE_AAPOINT` from received actions, not the request.
+`can_set_auto_use_aa_point` implements the raw-value/single-pending UI guard. The command
+is transport-level and does not enforce this app guard. Failed/absent connections do
+not produce a requested event or latch pending. Selection resets pending and hydrates;
+left-world/disconnect clear both values, including inventories with no allocated slots.
+
+Original `D:/aa-re/client12/x2game_unpacked.dll` (image base 0x38ff0000): wrapper3944c8a0
+calls394e98d0. Guard394e96d0 compares raw inventory+C340 with requested integer, checks
+pending key3a5b9d38 in map3a5b9cd8, then marks it with397d2200(...,true). Rejection calls
+397d2200(...,false) and emits error0x14. Accepted construction sets vtable399e5f14,
+opcode0x133, ctor397acee0 stores the argument at packet+C, and39186810 sends it.
+Vtable serializer397bc8f0 reads/writes one byte at packet+C; getter397ccd50 returns true
+only when inventory+C340 equals one. Native action dispatch branch397d1222 clears its
++1A8 member with3924cd30 then calls397cd940 on action+8. That function calls its sink's
+virtual slot zero with global3a5e11d0 and then assigns the action raw dword into
+inventory+C340 at397cd95e. Exact sink-to-Lua callback timing remains under investigation;
+aa-net exposes the folded received snapshot before app dispatch, without claiming an
+optimistic setter or an independently proven native callback timing.
