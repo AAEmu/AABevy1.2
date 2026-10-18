@@ -212,3 +212,12 @@ same-batch/deferred breath correction, SHA256
 Its inspected `shots/hud/sol61-facial/world-select.png` shows the live Lane-bevy list;
 334-423FPS, zero script errors, automatic exit. Game-session validation remains constrained
 by the existing lane stall; no server process was restarted.
+
+The next verified playable copy after inventory sorting/capacity work is SHA256
+`1F9789094736416D34A5D866BB7F6132A871E4931FC755EABE084FA4EF5F4AD0`.
+`shots/hud/sol61-sorting/create-ferre-final.png` was inspected on the original Ferre-female
+step2 appearance UI, using login/world-list plus the existing `--create-offline` harness:
+149-185FPS before capture,140FPS during capture, zero script errors. It submitted no create
+request. The rebuilt actual stage/local-player facial fixture also retains authored body-clock
+alignment and blink weight1 with the new native bone controller implementation. Its image
+and exact shared-load FPS are recorded in aa-client-hud.md.
