@@ -1,0 +1,426 @@
+use super::*;
+
+/// Source of a mutable native timer. Every variant is grounded in an actual received packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeCooldownOrigin {
+    Snapshot,
+    CastingStopped { tl: u16 },
+    PlotStopped { tl: u16 },
+}
+
+/// Native manager row, separate from original SCCooldowns receipt history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeCooldown {
+    pub cooldown: Cooldown,
+    pub updated_at: Instant,
+    pub origin: NativeCooldownOrigin,
+    pub reset: bool,
+}
+impl NativeCooldown {
+    /// Native timers advance in integer milliseconds, including comparison before extension.
+    pub fn remaining_ms_at(&self, now: Instant) -> u32 {
+        if self.reset {
+            return 0;
+        }
+        let elapsed = now.saturating_duration_since(self.updated_at).as_millis().min(u128::from(u32::MAX)) as u32;
+        self.cooldown.remaining_ms.saturating_sub(elapsed)
+    }
+}
+impl Skills {
+    /// Catalog query: SELECT id,cooldown_tag_id FROM skills. Present zero means a direct timer;
+    /// missing entries remain unknown. Static catalog survives character/connection lifecycle.
+    pub fn set_cooldown_catalog(&mut self, catalog: HashMap<u32, u32>) {
+        self.cooldown_catalog = catalog;
+    }
+    pub fn native_cooldown(&self, skill_id: u32, tags: &[u32]) -> Option<(Duration, Duration)> {
+        self.native_cooldown_at(skill_id, tags, Instant::now())
+    }
+    /// Received-source timers only, including stop durations; no cast/database estimate.
+    pub fn native_cooldown_at(&self, skill_id: u32, tags: &[u32], now: Instant) -> Option<(Duration, Duration)> {
+        let candidates = tags
+            .iter()
+            .flat_map(|tag| self.native_tag_cooldowns.iter().filter(move |row| row.cooldown.id == *tag))
+            .chain(self.native_skill_cooldowns.iter().filter(|row| row.cooldown.id == skill_id));
+        let mut result = None;
+        for row in candidates {
+            let left = row.remaining_ms_at(now);
+            if left != 0 && result.is_none_or(|(best, _)| left > best) {
+                result = Some((left, row.cooldown.total_ms));
+            }
+        }
+        result.map(|(left, total)| (Duration::from_millis(u64::from(left)), Duration::from_millis(u64::from(total))))
+    }
+    pub(super) fn clear_received_state(&mut self) {
+        let catalog = std::mem::take(&mut self.cooldown_catalog);
+        *self = Self {
+            cooldown_catalog: catalog,
+            ..Self::default()
+        };
+    }
+    pub(super) fn seed_native_timers(&mut self, timers: &crate::skill::SkillCooldowns, now: Instant) -> bool {
+        fn append(rows: &mut Vec<NativeCooldown>, entries: &[Cooldown], now: Instant) -> bool {
+            let before = rows.len();
+            rows.extend(entries.iter().take(COOLDOWN_LIMIT.saturating_sub(before)).map(|&cooldown| NativeCooldown {
+                cooldown,
+                updated_at: now,
+                origin: NativeCooldownOrigin::Snapshot,
+                reset: false,
+            }));
+            rows.len() != before
+        }
+        let skills = append(&mut self.native_skill_cooldowns, &timers.skills, now);
+        let tags = append(&mut self.native_tag_cooldowns, &timers.tags, now);
+        skills || tags
+    }
+    pub(super) fn fold_stop_timer(&mut self, tl: u16, duration_ms: u32, plot: bool, now: Instant) -> bool {
+        if duration_ms == 0 || self.native_gm_mode1 != Some(0) || self.obj_id == 0 {
+            return false;
+        }
+        // Existing casting state is keyed by actor, not native timeline tree order. Refuse
+        // ambiguity instead of choosing whichever actor HashMap happens to visit first.
+        let mut matches = self.casting.iter().filter(|(_, cast)| cast.tl == tl);
+        let Some((&actor, cast)) = matches.next() else { return false };
+        if actor != self.obj_id || matches.next().is_some() {
+            return false;
+        }
+        let Some(&tag) = self.cooldown_catalog.get(&cast.skill_id) else {
+            return false;
+        };
+        let id = if tag == 0 { cast.skill_id } else { tag };
+        let rows = if tag == 0 {
+            &mut self.native_skill_cooldowns
+        } else {
+            &mut self.native_tag_cooldowns
+        };
+        let origin = if plot {
+            NativeCooldownOrigin::PlotStopped { tl }
+        } else {
+            NativeCooldownOrigin::CastingStopped { tl }
+        };
+        insert(rows, id, duration_ms, origin, now)
+    }
+    pub(super) fn reset_native_timer(&mut self, skill_id: u32, tag_id: u32) {
+        if let Some(row) = self.native_skill_cooldowns.iter_mut().find(|row| row.cooldown.id == skill_id) {
+            row.reset = true;
+        }
+        if let Some(row) = self.native_tag_cooldowns.iter_mut().find(|row| row.cooldown.id == tag_id) {
+            row.reset = true;
+        }
+    }
+}
+fn insert(rows: &mut Vec<NativeCooldown>, id: u32, duration_ms: u32, origin: NativeCooldownOrigin, now: Instant) -> bool {
+    if let Some(row) = rows.iter_mut().find(|row| row.cooldown.id == id) {
+        if duration_ms <= row.remaining_ms_at(now) {
+            return false;
+        }
+        *row = NativeCooldown {
+            cooldown: Cooldown {
+                id,
+                remaining_ms: duration_ms,
+                total_ms: duration_ms,
+            },
+            updated_at: now,
+            origin,
+            reset: false,
+        };
+        return true;
+    }
+    if rows.len() >= COOLDOWN_LIMIT {
+        rows.retain(|row| row.remaining_ms_at(now) > 0);
+    }
+    if rows.len() >= COOLDOWN_LIMIT {
+        return false;
+    }
+    rows.push(NativeCooldown {
+        cooldown: Cooldown {
+            id,
+            remaining_ms: duration_ms,
+            total_ms: duration_ms,
+        },
+        updated_at: now,
+        origin,
+        reset: false,
+    });
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        buff::BuffCaster,
+        session::PlayerSpawn,
+        skill::{SkillCooldowns, SkillStarted},
+        state::tests::unit,
+    };
+    fn row(id: u32, remaining_ms: u32, total_ms: u32, at: Instant) -> NativeCooldown {
+        NativeCooldown {
+            cooldown: Cooldown { id, remaining_ms, total_ms },
+            updated_at: at,
+            origin: NativeCooldownOrigin::Snapshot,
+            reset: false,
+        }
+    }
+    fn start(skill_id: u32, tl: u16, actor: u32) -> Event {
+        Event::SkillStarted(SkillStarted {
+            skill_id,
+            tl,
+            caster: BuffCaster { kind: 0, obj_id: actor },
+            target: SkillTarget::unit(9),
+            cast_ms: 100,
+            base_cast_ms: 100,
+            synergy: 0,
+            result: 0,
+            result_value: 0,
+        })
+    }
+    fn ready() -> Skills {
+        let mut state = Skills::default();
+        state.set_cooldown_catalog([(17, 0), (18, 77)].into());
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: Default::default(),
+            unit: unit(7),
+        })));
+        state
+    }
+    fn values(rows: &[NativeCooldown], at: Instant) -> Vec<[u32; 3]> {
+        rows.iter().map(|r| [r.cooldown.id, r.remaining_ms_at(at), r.cooldown.total_ms]).collect()
+    }
+    #[test]
+    fn original_x86_oracle_first_matching_row_extension_and_expired_reuse() {
+        // Executed original39899f90 outputs, UI native-cooldown-producer-oracle-20261018.json.
+        let at = Instant::now();
+        let origin = NativeCooldownOrigin::CastingStopped { tl: 3 };
+        let mut rows = vec![row(17, 5000, 10000, at), row(17, 9000, 11000, at)];
+        assert!(insert(&mut rows, 17, 7000, origin, at));
+        assert_eq!(values(&rows, at), vec![[17, 7000, 7000], [17, 9000, 11000]]);
+        rows = vec![row(17, 8000, 10000, at), row(17, 9000, 11000, at)];
+        assert!(!insert(&mut rows, 17, 7000, origin, at));
+        assert_eq!(values(&rows, at), vec![[17, 8000, 10000], [17, 9000, 11000]]);
+        rows = vec![row(17, 0, 10000, at), row(17, 9000, 11000, at)];
+        assert!(insert(&mut rows, 17, 250, origin, at));
+        assert_eq!(values(&rows, at), vec![[17, 250, 250], [17, 9000, 11000]]);
+        // Native compares whole milliseconds: submillisecond time must not create an extension.
+        assert!(!insert(&mut rows, 17, 250, origin, at + Duration::from_nanos(1)));
+    }
+    #[test]
+    fn original_x86_oracle_capacity_compaction_preserves_survivor_order() {
+        let at = Instant::now();
+        let origin = NativeCooldownOrigin::CastingStopped { tl: 3 };
+        let mut rows = (100..250)
+            .map(|id| row(id, if [100, 150, 200].contains(&id) { 1000 } else { 0 }, 2000, at))
+            .collect::<Vec<_>>();
+        assert!(insert(&mut rows, 17, 250, origin, at));
+        assert_eq!(values(&rows, at), vec![[100, 1000, 2000], [150, 1000, 2000], [200, 1000, 2000], [17, 250, 250]]);
+        rows = (100..250).map(|id| row(id, 1000, 2000, at)).collect();
+        let before = rows.clone();
+        assert!(!insert(&mut rows, 17, 250, origin, at));
+        assert_eq!(rows, before);
+        rows[0].reset = true;
+        assert!(insert(&mut rows, 17, 250, origin, at));
+        assert_eq!(rows.len(), 150);
+        assert_eq!(rows[0].cooldown.id, 101);
+        assert_eq!(rows[149].cooldown.id, 17);
+    }
+    #[test]
+    fn actual_cast_stop_inserts_before_cast_removal_and_preserves_raw_snapshot_history() {
+        let mut state = ready();
+        state.apply(&Event::Cooldowns(SkillCooldowns {
+            skills: vec![Cooldown {
+                id: 17,
+                remaining_ms: 0,
+                total_ms: 10000,
+            }],
+            tags: vec![],
+        }));
+        let raw = state.received_skill_cooldowns.clone();
+        state.apply(&start(17, 3, 7));
+        assert!(state.apply(&Event::CastingStopped { tl: 3, duration_ms: 7000 }));
+        assert!(state.casting.is_empty());
+        assert_eq!(state.received_skill_cooldowns, raw);
+        let timer = state.native_skill_cooldowns[0];
+        assert_eq!(timer.origin, NativeCooldownOrigin::CastingStopped { tl: 3 });
+        assert_eq!(
+            state.native_cooldown_at(17, &[], timer.updated_at),
+            Some((Duration::from_millis(7000), Duration::from_millis(7000)))
+        );
+        assert_eq!(state.received_cooldown_at(17, &[], timer.updated_at), None);
+        assert!(!state.apply(&Event::CastingStopped { tl: 3, duration_ms: 9000 }));
+        assert_eq!(state.native_skill_cooldowns[0], timer, "duplicate stop with no tracked timeline cannot extend");
+    }
+    #[test]
+    fn missing_ambiguous_foreign_unknown_catalog_and_suppressed_stops_never_invent_timers() {
+        for case in 0..6 {
+            let mut state = ready();
+            state.apply(&start(17, 3, 7));
+            match case {
+                0 => state.native_gm_mode1 = None,
+                1 => {
+                    state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged {
+                        obj_id: 7,
+                        mode: 1,
+                        value: 255,
+                    }));
+                }
+                2 => {
+                    state.apply(&start(18, 3, 8));
+                } // Duplicate TL is deliberately ambiguous.
+                3 => {
+                    state.casting.remove(&7);
+                    state.apply(&start(17, 3, 8));
+                }
+                4 => state.set_cooldown_catalog(HashMap::new()),
+                _ => {}
+            }
+            state.apply(&Event::CastingStopped {
+                tl: 3,
+                duration_ms: if case == 5 { 0 } else { 7000 },
+            });
+            assert!(state.native_skill_cooldowns.is_empty() && state.native_tag_cooldowns.is_empty(), "case{case}");
+            assert!(state.casting.is_empty(), "existing cast teardown remains compatible");
+        }
+    }
+    #[test]
+    fn plot_stop_routes_primary_tag_and_ordered_query_keeps_received_totals() {
+        let mut state = ready();
+        state.apply(&Event::PlotEvent(crate::skill::PlotEvent {
+            tl: 4,
+            event_id: 2,
+            skill_id: 18,
+            caster_obj_id: 7,
+            target_obj_id: 9,
+            caster_pos: None,
+            target_pos: None,
+            casting_ms: 10,
+        }));
+        state.apply(&Event::PlotStopped {
+            tl: 4,
+            duration_ms: 7000,
+            last_event: 255,
+            channeling: true,
+        });
+        assert!(state.native_skill_cooldowns.is_empty());
+        let timer = state.native_tag_cooldowns[0];
+        assert_eq!(timer.cooldown.id, 77);
+        assert_eq!(timer.origin, NativeCooldownOrigin::PlotStopped { tl: 4 });
+        state.native_tag_cooldowns.push(row(78, 7000, 9000, timer.updated_at));
+        state.native_skill_cooldowns.push(row(18, 7000, 10000, timer.updated_at));
+        assert_eq!(
+            state.native_cooldown_at(18, &[78, 77], timer.updated_at),
+            Some((Duration::from_millis(7000), Duration::from_millis(9000)))
+        );
+        assert_eq!(
+            state.native_cooldown_at(18, &[77, 78], timer.updated_at),
+            Some((Duration::from_millis(7000), Duration::from_millis(7000)))
+        );
+    }
+    #[test]
+    fn genuine_resets_target_first_runtime_duplicate_and_catalog_survives_lifecycle() {
+        let mut state = ready();
+        let at = Instant::now();
+        state.native_tag_cooldowns = vec![row(77, 7000, 8000, at), row(77, 9000, 11000, at)];
+        state.apply(&Event::SkillCooldownReset {
+            obj_id: 8,
+            skill_id: 0,
+            tag_id: 77,
+            gcd: false,
+        });
+        assert!(!state.native_tag_cooldowns[0].reset);
+        state.apply(&Event::SkillCooldownReset {
+            obj_id: 7,
+            skill_id: 0,
+            tag_id: 77,
+            gcd: false,
+        });
+        assert!(state.native_tag_cooldowns[0].reset && !state.native_tag_cooldowns[1].reset);
+        assert_eq!(
+            state.native_cooldown_at(18, &[77], at),
+            Some((Duration::from_millis(9000), Duration::from_millis(11000)))
+        );
+        for event in [
+            Event::CharacterSelected(Box::default()),
+            Event::LeftWorld { target: 0 },
+            Event::Disconnected { message: String::new() },
+            Event::Kicked {
+                reason: 0,
+                message: String::new(),
+            },
+        ] {
+            state.apply(&event);
+            assert_eq!(state.cooldown_catalog.get(&18), Some(&77));
+            assert!(state.native_tag_cooldowns.is_empty() && state.native_skill_cooldowns.is_empty());
+            assert_eq!(state.native_gm_mode1, None);
+        }
+        let mut spawn = unit(7);
+        spawn.gm_modes[1] = 2;
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: Default::default(),
+            unit: spawn,
+        })));
+        assert_eq!(state.native_gm_mode1, Some(2));
+        assert_eq!(state.cooldown_catalog.get(&17), Some(&0));
+    }
+    #[test]
+    fn snapshot_seeds_both_views_but_runtime_compaction_never_rewrites_raw_receipts() {
+        let mut state = ready();
+        let snapshot = SkillCooldowns {
+            skills: (100..250)
+                .map(|id| Cooldown {
+                    id,
+                    remaining_ms: 0,
+                    total_ms: 2000,
+                })
+                .collect(),
+            tags: vec![],
+        };
+        state.apply(&Event::Cooldowns(snapshot));
+        let raw = state.received_skill_cooldowns.clone();
+        assert_eq!(state.native_skill_cooldowns.len(), 150);
+        state.apply(&start(17, 3, 7));
+        state.apply(&Event::CastingStopped { tl: 3, duration_ms: 250 });
+        assert_eq!(state.native_skill_cooldowns.len(), 1);
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.id, 17);
+        assert_eq!(state.received_skill_cooldowns, raw);
+        // Raw history remains at capacity while the actual manager now has room for new snapshots.
+        state.apply(&Event::Cooldowns(SkillCooldowns {
+            skills: vec![Cooldown {
+                id: 8,
+                remaining_ms: 123,
+                total_ms: 456,
+            }],
+            tags: vec![],
+        }));
+        assert_eq!(state.received_skill_cooldowns, raw);
+        assert_eq!(state.native_skill_cooldowns.len(), 2);
+        assert_eq!(state.native_skill_cooldowns[1].origin, NativeCooldownOrigin::Snapshot);
+    }
+    #[test]
+    fn world_state_hydration_and_own_removal_guard_stop_flow_without_started_timer_estimates() {
+        let mut world = crate::state::WorldState::default();
+        world.skills.set_cooldown_catalog([(17, 0)].into());
+        world.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: Default::default(),
+            unit: unit(7),
+        })));
+        world.apply(&start(17, 3, 7));
+        assert!(world.skills.native_skill_cooldowns.is_empty());
+        world.apply(&Event::UnitsRemoved(vec![7]));
+        assert_eq!(world.skills.native_gm_mode1, None);
+        world.apply(&start(17, 4, 7));
+        world.apply(&Event::CastingStopped { tl: 4, duration_ms: 7000 });
+        assert!(world.skills.native_skill_cooldowns.is_empty());
+        world.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: Default::default(),
+            unit: unit(7),
+        })));
+        world.apply(&start(17, 5, 7));
+        world.apply(&Event::CastingStopped { tl: 5, duration_ms: 7000 });
+        let cloned = world.clone();
+        assert_eq!(cloned.skills.native_skill_cooldowns[0].cooldown.remaining_ms, 7000);
+        assert_eq!(cloned.skills.native_skill_cooldowns[0].origin, NativeCooldownOrigin::CastingStopped { tl: 5 });
+    }
+}

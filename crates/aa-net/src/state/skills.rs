@@ -7,6 +7,9 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+mod native_timers;
+pub use native_timers::{NativeCooldown, NativeCooldownOrigin};
+
 use crate::session::Event;
 use crate::skill::{Cooldown, SkillTarget, COOLDOWN_LIMIT};
 
@@ -100,6 +103,13 @@ resource! {
         /// Each list stops accepting entries at the native capacity of 150.
         pub received_skill_cooldowns: Vec<ReceivedCooldown>,
         pub received_tag_cooldowns: Vec<ReceivedCooldown>,
+        /// Ordered mutable native manager rows seeded/extended only by received reports.
+        pub native_skill_cooldowns: Vec<NativeCooldown>,
+        pub native_tag_cooldowns: Vec<NativeCooldown>,
+        /// Source-hydrated local GM mode byte1; absent until actual PlayerSpawn.
+        pub native_gm_mode1: Option<u8>,
+        /// Static skill?primary cooldown tag routing; prefer set_cooldown_catalog.
+        pub cooldown_catalog: HashMap<u32,u32>,
         /// The last refused skill (not enough mana, too far ...).
         pub last_failure: Option<SkillFailure>,
     }
@@ -244,7 +254,10 @@ impl Skills {
         let now = Instant::now();
         match e {
             Event::PlayerSpawn(s) => {
+                let catalog=std::mem::take(&mut self.cooldown_catalog);
                 *self = Self {
+                    cooldown_catalog:catalog,
+                    native_gm_mode1:Some(s.unit.gm_modes[1]),
                     obj_id: s.obj_id,
                     known: s.unit.skills.iter().map(|&(id, level)| KnownSkill { id, level }).collect(),
                     passive_buffs: s.unit.passive_buffs.clone(),
@@ -309,10 +322,18 @@ impl Skills {
                     }
                 }
             }
-            Event::SkillEnded { tl } | Event::CastingStopped { tl, .. } | Event::PlotEnded { tl } => {
+            Event::CastingStopped { tl,duration_ms } | Event::PlotStopped {tl,duration_ms,..} => {
+                let inserted=self.fold_stop_timer(*tl,*duration_ms,matches!(e,Event::PlotStopped{..}),now);
+                return self.end_cast(*tl) || inserted;
+            }
+            Event::UnitGmModeChanged(change) if self.is_own(change.obj_id) && change.mode==1 => {
+                let changed=self.native_gm_mode1!=Some(change.value);
+                self.native_gm_mode1=Some(change.value);
+                return changed;
+            }
+            Event::SkillEnded { tl } | Event::PlotEnded { tl } => {
                 return self.end_cast(*tl);
             }
-            Event::PlotStopped { tl, .. } => return self.end_cast(*tl),
             Event::SkillStopped { obj_id, skill_id } => {
                 if self.casting.get(obj_id).is_some_and(|c| c.skill_id == *skill_id) {
                     self.casting.remove(obj_id);
@@ -354,10 +375,11 @@ impl Skills {
             }
             Event::UnitsRemoved(ids) => {
                 let before = self.casting.len();
+                let lost_context = ids.contains(&self.obj_id) && self.native_gm_mode1.take().is_some();
                 for id in ids {
                     self.casting.remove(id);
                 }
-                return self.casting.len() != before;
+                return self.casting.len() != before || lost_context;
             }
             Event::Cooldowns(cooldowns) if self.obj_id != 0 => {
                 fn append(
@@ -381,7 +403,8 @@ impl Skills {
                 }
                 let skills = append(&mut self.received_skill_cooldowns, &cooldowns.skills, now);
                 let tags = append(&mut self.received_tag_cooldowns, &cooldowns.tags, now);
-                return skills || tags;
+                let runtime=self.seed_native_timers(cooldowns,now);
+                return skills || tags || runtime;
             }
             Event::SkillCooldownReset {
                 obj_id,
@@ -389,6 +412,7 @@ impl Skills {
                 tag_id,
                 gcd,
             } if self.is_own(*obj_id) => {
+                self.reset_native_timer(*skill_id,*tag_id);
                 // Native reset helpers stop at the first matching entry, even if it was reset
                 // already. Do not coalesce duplicates or turn this into a list-wide clear.
                 if let Some(entry) = self
@@ -426,11 +450,10 @@ impl Skills {
                 }
                 self.passive_buffs.push(*buff_id);
             }
-            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
-                if *self == Self::default() {
-                    return false;
-                }
-                *self = Self::default();
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => {
+                let previous = self.clone();
+                self.clear_received_state();
+                return *self != previous;
             }
             _ => return false,
         }
@@ -450,6 +473,10 @@ impl PartialEq for Skills {
             && self.reset_tags == o.reset_tags
             && self.received_skill_cooldowns == o.received_skill_cooldowns
             && self.received_tag_cooldowns == o.received_tag_cooldowns
+            && self.native_skill_cooldowns == o.native_skill_cooldowns
+            && self.native_tag_cooldowns == o.native_tag_cooldowns
+            && self.native_gm_mode1 == o.native_gm_mode1
+            && self.cooldown_catalog == o.cooldown_catalog
             && self.last_failure == o.last_failure
     }
 }

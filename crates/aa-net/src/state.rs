@@ -30,7 +30,7 @@ mod world;
 pub use gear::{ActionBar, Inventory};
 pub use loot::{Loot, LootFailure, item_index, item_owner, owner_type};
 pub use quests::Quests;
-pub use skills::{Casting, KnownSkill, ReceivedCooldown, SkillFailure, Skills};
+pub use skills::{Casting, KnownSkill, NativeCooldown, NativeCooldownOrigin, ReceivedCooldown, SkillFailure, Skills};
 pub use stats::{BuffEntry, Buffs, PlayerStats, LABOR_MAX, LABOR_MAX_PREMIUM};
 pub use world::{Chat, ChatChannel, Target, TimeOfDay, WorldInfo, CHAT_LOG_LIMIT};
 pub use crate::party::Party;
