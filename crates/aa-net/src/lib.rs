@@ -44,6 +44,7 @@ pub mod stream;
 pub mod trade;
 pub mod unit_msg;
 pub mod wire;
+pub mod world_msg;
 
 #[cfg(feature = "bevy")]
 pub mod plugin;
@@ -53,6 +54,8 @@ pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendI
 pub use game::LeaveTarget;
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
 pub use craft::CraftFailureNotice;
+pub use items::ItemLifespan;
+pub use world_msg::{BlinkUnit, InstanceLoad};
 pub use login::Secret;
 pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};

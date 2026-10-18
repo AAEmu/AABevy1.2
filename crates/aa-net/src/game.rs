@@ -401,6 +401,10 @@ pub enum ServerMsg {
     /// `SCLootItemFailed`: the server did not hand the item over (`error`: an `ErrorMessageType`).
     LootItemFailed { error: i32, item_index: u16, owner_type: u16, owner_obj_id: u32, template_id: u32 },
     Teleport { reason: u8, error: i16, pos: Pos },
+    /// Loading directive only; no inferred instance identity, completed load or automatic ACK.
+    LoadInstance(crate::world_msg::InstanceLoad),
+    /// Movement directive only; distinct from a completed transform or `SCTeleportUnit`.
+    BlinkUnit(crate::world_msg::BlinkUnit),
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
     ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
@@ -449,6 +453,7 @@ pub enum ServerMsg {
     InvenContents(InvenChunk),
     /// Item changes: loot, use, move, money ...
     ItemTasks(ItemTasks),
+    ItemLifespan(crate::items::ItemLifespan),
     /// Items of a unit's equipment slots changed (`None` = unequipped).
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots`.
@@ -606,6 +611,9 @@ impl ServerMsg {
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffLearned { .. } => "SCBuffLearned",
             Self::Teleport { .. } => "SCTeleportUnit",
+            Self::LoadInstance(_) => "SCLoadInstance",
+            Self::BlinkUnit(_) => "SCBlinkUnit",
+            Self::ItemLifespan(_) => "SCSyncItemLifespan",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
             Self::DoodadChanged { .. } => "SCDoodadChanged",
@@ -904,6 +912,9 @@ impl ServerMsg {
                 Self::TimeOfDay { hour, speed: Some(speed) }
             }
             sc::SCOnOffSnowPacket => Self::Snow(r.bool()?),
+            sc::SCLoadInstancePacket => Self::LoadInstance(crate::world_msg::InstanceLoad::read(r)?),
+            sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
+            sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,
                 sub_type: r.i16()?,

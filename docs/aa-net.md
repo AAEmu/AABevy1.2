@@ -2136,3 +2136,93 @@ Validation for the bounded SC1bf and slave control/position milestones: `cargo t
 passes all215 library tests and two scripted login tests; all nine live tests remain ignored.
 `cargo check -p aa-net --features bevy --examples` passes on the final production sources.
 Only aa-net and this document changed; the added session fixture uses ephemeral loopback only.
+
+
+## Lane-emitted receive boundary audit (2026-10-17)
+
+The next three small receive gaps were selected by comparing the lane's actual packet
+construction/send paths against `ServerMsg::decode_game`, rather than counting opcode declarations
+as implemented gameplay. Ranking here is by transition/inventory impact and a bounded, provable
+body, not measured traffic frequency:
+
+| Priority | Packet | Exact body bytes | Why this boundary matters |
+|---|---|---:|---|
+| 1 | `SCLoadInstance` `0x197` | 32 | Portal, dungeon, main-world return, instant-game and trial transitions. Portal source can follow it with `SCTeleportUnit`; that tail must remain readable. |
+| 2 | `SCBlinkUnit` `0x073` | 31 | Actual blink skills. NPC movement sends blink followed by regular unit movement, while player blink requires a separate client movement plan. |
+| 3 | `SCSyncItemLifespan` `0x098` | 21 | Initial bag/bank/equipment timers, timer changes and equipment unpack/charge. It can appear beside ordinary inventory state. |
+
+All three now have exact body consumption, typed `ServerMsg` and `session::Event` variants,
+and public plain data. None changes settled world, player, unit or inventory resources or sends an
+automatic response. Unknown opcodes still stop a DD04 batch: this is a focused coverage milestone,
+not a claim that all lane packets are decoded. Gimmick elevator/raft lifecycle `0x13c/0x13d/0x13e`
+is a larger remaining coordinated family. Login configuration/faction snapshots, expedition state,
+shipyard state, district/portal lists, duel/crime state and notices remain further audit candidates.
+`SCCooldowns 0x04a` and `SCBuffUpdated 0x0b9` have declarations, but the lane source audit found no
+writer or send sites for them; they were not ranked as currently emitted receive gaps.
+
+### Loading and blink directives
+
+`world_msg::InstanceLoad { raw_id: u32, zone_id: u32, pos: Pos, angles: [f32; 3] }` is exposed
+as `ServerMsg::LoadInstance` / `Event::LoadInstance`. Wire order is `u32 raw_id, u32 zone_id`,
+then six `f32`: XYZ and the three angles. The lane's `SCLoadInstancePacket` writer is in
+`systems/skills/packets_special.rs`. Senders in `systems/instances/{worlds,dungeon,instant_game}.rs`,
+`systems/npcs/portal/mod.rs` and `systems/social/trial.rs` use the first field inconsistently:
+main-world return and portal use a world template ID, whereas dungeon uses the selected runtime
+world's ID. Therefore `raw_id` is not substituted for `WorldInfo.instance_id`. Lane senders convert
+stored rotations to radians. The entire angle triple is retained, including pitch/roll and float
+bit patterns. No packet field reports loading completion. `CSInstanceLoaded` and transitions of
+scene/position/loading state still require a separate application flow; this receive handler does
+not send either that response or `CSTeleportEnded`.
+
+`world_msg::BlinkUnit { obj_id: u32, distance: f32, degree: f32, x: i64, y: i64, z: f32 }` is
+exposed as `ServerMsg::BlinkUnit` / `Event::BlinkUnit`. Wire order is BC object ID, distance,
+degree, two native fixed-point longs, and `f32` height. `position()` converts XY using the existing
+`long_to_coord`; the original longs retain even the low 32 bits. The degree value remains raw.
+`systems/skills/effects/special/movement.rs::blink` unmounts a player's mates and sends the
+computed endpoint without first settling the player's transform. Its NPC branch applies the
+position before sending blink and a normal movement report. Consequently this event alone neither
+teleports a unit nor represents completed player motion, and does not share the existing
+`SCTeleportUnit` automatic-reply path. The application owns the actual motion/instance planner.
+
+Bounded native audit of `D:/aa-re/client12/x2game_unpacked.dll`:
+
+- SC `0x197` constructor `391b43d0` sets opcode at `391b43eb`, vtable `399b5fe8`, serializer
+  `397afb40`: `iid` u32, `zoneId` i32 (retained as the same u32 bits), position Vec3 and angles Ang3.
+  `OnLoadInstance 391de970` forwards both IDs and both triples to `3936f1c0`.
+- SC `0x073` constructor `391acc20` sets opcode at `391acc3b`, vtable `399b333c`, serializer
+  `397c5d00`: BC `unitId` via `397b27d0`, two floats (`distance`, `degree`), then position helper
+  `3961e270` reading i64 X, i64 Y and f32 Z. `OnBlinkUnit` starts at `391d7050`.
+
+These native field layouts match the lane bodies. This audit establishes the receive contract,
+not the complete native loading or blink execution algorithm. Inbound float values are not silently
+sanitized, clamped or treated as validation errors by the body readers.
+
+### Item lifespan metadata
+
+`items::ItemLifespan { added: bool, item_id: u64, template_id: u32, raw_time: i64 }` is exposed
+as `ServerMsg::ItemLifespan` / `Event::ItemLifespan`; the type is also reexported from `aa_net`.
+Wire order is exactly the field order above. Both add and clear notifications preserve the exact
+item identity, template ID and signed time. No template-wide update or synthetic item is created.
+There is deliberately no inferred timer cache/countdown, item timestamp rewrite or item deletion.
+An actual item removal continues to require authoritative item tasks.
+
+Lane evidence: `systems/economy/item_packets.rs::SCSyncItemLifespanPacket` writes the 21-byte
+body. `item_timers.rs::initial_item_expiration_packets` sends an expiration endpoint for ordinary
+and online-minute timers. `models/container.rs` builds add/clear `ItemFx::Lifespan` notifications;
+`systems/economy/fx.rs` forwards them unchanged. In contrast,
+`systems/economy/item_handlers.rs` sends `item.unpack_time` (the charge start) for unpacked charged
+equipment. Treating every `raw_time` as an absolute expiry would be incorrect for this lane.
+
+Native SC `0x098` constructor `391a9240` sets opcode at `391a925b`, vtable `399b339c`, serializer
+`397aec40`: boolean `added`, nested item-time payload via `397d03b0` (u64 item ID, u32 template ID,
+i64 time). This matches the lane's byte layout. `OnSyncItemLifespan 391d35f0` calls manager
+`394ef9e0` on add and `394ea940` on clear; this receive slice does not claim to reconstruct that
+manager's timer categories or the charged-item UI.
+
+Validation includes independent little-endian body goldens, every truncation point for all three
+bodies and their DD01 dispatch, both lifespan flags and full-width signed values, raw blink XY and
+float bits, DD04 tails, and an ephemeral loopback session batch with all three directives followed
+by real HP/weather updates. The session test verifies wire order, unchanged settled world/player/
+unit/item state for the directives, and no automatic instance/teleport reply. No live lane traffic
+was used; end-to-end instance loading, physical blink motion and timer UI remain application/live
+QA work.
