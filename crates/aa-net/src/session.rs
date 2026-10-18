@@ -2140,11 +2140,16 @@ mod tests {
         let chunk = RadarEvent::TransferContacts { last: true, contacts: vec![] };
         session.game_msg(Ok(game::ServerMsg::Batch(vec![
             game::ServerMsg::Radar(toggle.clone()), game::ServerMsg::Radar(chunk.clone()),
-            game::ServerMsg::Radar(chunk.clone()), game::ServerMsg::Snow(true),
+            game::ServerMsg::Radar(chunk.clone()),
+            game::ServerMsg::Radar(RadarEvent::ShipToggled(RadarToggle { on: false, range: 15.0 })),
+            game::ServerMsg::Radar(RadarEvent::ShipContacts { last: true, contacts: vec![] }),
+            game::ServerMsg::Snow(true),
         ]))).await;
         for expected in [toggle, chunk.clone(), chunk] {
             assert!(matches!(events.try_recv(), Ok(Event::Radar(actual)) if actual == expected));
         }
+        assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::ShipToggled(RadarToggle { on: false, range: 15.0 })))));
+        assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::ShipContacts { last: true, contacts })) if contacts.is_empty()));
         assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
