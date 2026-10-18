@@ -56,6 +56,7 @@ mod expedition;
 mod friends;
 mod input;
 mod itemlinks;
+mod item_effects;
 mod items;
 mod loot;
 mod loot_roll;
@@ -149,6 +150,11 @@ pub(crate) fn sorting_fixture() {
 #[allow(dead_code)]
 pub(crate) fn repair_fixture() {
     repair::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn item_effects_fixture() {
+    item_effects::fixture::run();
 }
 
 #[allow(dead_code)]
@@ -421,6 +427,7 @@ impl Plugin for HudPlugin {
         trial::plugin(app);
         ranking::plugin(app);
         buffs::cancel::plugin(app);
+        item_effects::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
