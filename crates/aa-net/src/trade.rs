@@ -767,7 +767,7 @@ mod tests {
                     item_id: 500,
                     template_id: 100,
                 },
-                ItemTask::Add {
+                ItemTask::Add { raw_detail_block: None,
                     action: action::CHANGE_OWNER,
                     container: 2,
                     slot: 4,
