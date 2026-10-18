@@ -502,24 +502,80 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
     }
     // Native3921c0f9 manager/fade callbacks precede3921c13c visible-widget animation steps.
     animation::tick(&mut ui(lua), dt_ms);
-    animation::tick_widgets(lua, dt_ms);
+    tick_widgets(lua, dt_ms);
     drop(p_fades);
     damage::tick(lua);
-    // `OnEffect(self, dt)` is the per-frame effect tick (the clock bar refreshes the zone name
-    // and the sun there). Fade callbacks may have changed visibility/handlers.
-    let updates: Vec<(Id, &'static str)> = {
-        let u = ui(lua);
-        u.frame_handlers.iter().copied().filter(|&(id, _)| u.tree.visible(id)).collect()
-    };
-    let _p = scope("on_update");
-    for (id, h) in updates {
-        let t0 = crate::prof::handler_start();
-        call_handler(lua, id, h, vec![Value::Number(dt_ms as f64)]);
-        crate::prof::handler_done(t0, || format!("{h} {}", ui(lua).tree.get(id).name));
-    }
     statusbar::tick(lua, dt_ms);
     slot::update_constant_cooldowns(lua);
     widget::remove_hidden(lua);
+}
+
+/// Native392a9e40 copies one root layer at a time; callbacks can show a root in a
+/// later layer this frame, while additions to the current layer wait for the next.
+fn tick_widgets(lua: &Lua, dt_ms: f32) {
+    use crate::tree::Layer;
+    let _p = crate::prof::scope("on_update");
+    for layer in [
+        Layer::Background, Layer::Game, Layer::Normal, Layer::Hud,
+        Layer::QuestDirecting, Layer::Dialog, Layer::Tooltip, Layer::System,
+    ] {
+        let roots: Vec<_> = {
+            let u = ui(lua);
+            u.tree.top.iter().copied()
+                .filter(|&id| {
+                    let o = u.tree.get(id);
+                    o.alive && o.widget().is_some_and(|w| {
+                        w.layer == layer && (o.shown || w.fading)
+                    })
+                })
+                .collect()
+        };
+        for id in roots {
+            tick_widget_tree(lua, id, dt_ms);
+        }
+    }
+}
+
+fn tick_widget_tree(lua: &Lua, id: Id, dt_ms: f32) {
+    // An admitted native root does not recheck its own shown flag. A callback can
+    // hide it (or another root already in this layer's copy) without skipping it.
+    for handler in ["OnUpdate", "OnEffect"] {
+        let invoke = {
+            let u = ui(lua);
+            if !u.tree.get(id).alive {
+                return;
+            }
+            u.frame_handlers.contains(&(id, handler))
+        };
+        if invoke {
+            let t0 = crate::prof::handler_start();
+            call_handler(lua, id, handler, vec![Value::Number(dt_ms as f64)]);
+            crate::prof::handler_done(t0, || format!("{handler} {}", ui(lua).tree.get(id).name));
+        }
+    }
+    animation::tick_widget(lua, id, dt_ms);
+    // Native3927e1d8 reads the live child vector/end and checks each child's OWN
+    // shown flag. A hidden fading child is excluded, even under an admitted root.
+    let mut index = 0;
+    loop {
+        let child = {
+            let u = ui(lua);
+            if !u.tree.get(id).alive {
+                return;
+            }
+            u.tree.widget(id).and_then(|w| w.children.get(index)).copied()
+        };
+        let Some(child) = child else { break };
+        let admitted = {
+            let u = ui(lua);
+            let o = u.tree.get(child);
+            o.alive && o.shown && o.is_widget()
+        };
+        if admitted {
+            tick_widget_tree(lua, child, dt_ms);
+        }
+        index += 1;
+    }
 }
 
 /// Argument helpers for natives (`args[0]` is `self` for methods).
