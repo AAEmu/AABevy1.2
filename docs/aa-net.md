@@ -2941,3 +2941,25 @@ login loopbacks; nine lane-dependent tests remain ignored. Unlock tests cover ra
 keys, wrong kind/slot isolation, truncated payloads, following DD04 packet alignment,
 repeated notification ordering, getter immutability, and no-send rejection notifications.
 No lane transaction was attempted during the stalled game-session condition.
+
+### Crafting and proficiency request outcomes (2026-10-17)
+
+`ExecuteCraft` and `Actability` now report their existing local rejected events when no
+character is active or the transport write cannot occur. `CraftRequested` /
+`ActabilityEvent::Requested` still mean only a successful socket write. Proficiency
+requests are gated to `Phase::InWorld`, matching crafting; inactive requests cannot
+reach an available game socket. Callers can release a local pre-send queue latch on
+either requested or rejected notifications without fabricating a recipe result, earned
+points, a tier change, or expert capacity. Received tier/expand ACKs remain the only
+corresponding authoritative state changes. Generic server errors are still generic;
+no association with an arbitrary pending craft/proficiency request is invented.
+
+The local crafting loopback verifies invalid fields, inactive phase and missing
+connection all reject, while successful batches keep their exact native wire bytes and
+only report a local send. A proficiency loopback checks all three commands across idle,
+lobby and missing-transport phases, then verifies rejected lobby requests never enter
+the socket and successful requests preserve frame order and leave points/capacity unknown.
+
+Validation for this request-outcome followup: `cargo test -p aa-net --features bevy --lib`
+passes 268 tests. The preceding full crate run passed both login loopbacks, with nine
+lane-dependent tests ignored. No live crafting/proficiency transaction was attempted.
