@@ -5908,3 +5908,72 @@ different retained/replaced coefficients; the second shows final window art
 and buttons without overlap. Both report zero script errors/WARN/ERROR and
 self-close (PIDs44668/30676); the copied executable was removed. No original
 Lua script, font calibration, root API or ordinary-slot policy was changed.
+
+### Native widget-channel end callback continuations (2026-10-18)
+
+The per-widget channel pass now releases Ui borrows and delivers end handlers
+at their actual native positions. Alpha completion first writes its target and
+clears its active flag, calls OnAlphaAnimeEnd, then reads the scale flag. A
+scale enabled by that callback therefore receives the current frame's step.
+Restarted alpha is not stepped twice, and alpha enabled by scale-end waits for
+the next frame because its native phase has already passed.
+
+Scale completion3927e149 clears the flag while retaining old own-scale/displayed
+geometry through OnScaleAnimeEnd. Its old finishing target is captured before
+the callback. After the callback the native continuation writes that captured
+value with the live pivot/UI policy, settles geometry/fitting, and dispatches
+OnScale. New configuration, initial/current velocity and active flags survive;
+the backend does not restore a cached whole state over callback changes.
+Thus a native end callback sees old1.01/flagfalse, starts .5->1.25 and gets a
+nested OnScale(.5), then its old frame still emits OnScale(1.0) with the new
+flagtrue. The next step starts from raw1.0 with the new velocity. Likewise an
+alpha-end callback starting scale1.5->1 in.1s sees nested1.5 followed by the
+same frame's1.4 after20ms. Hidden live widgets finish their continuation before
+deferred retirement; application-retired subtrees are not dereferenced.
+
+Actual class callbacks3927bba0/3927bbb0 dispatch event39/40 through3927b8b0.
+They require a registered handler, an enabled script VM and a successful
+BeginCall. Argument helper39279ae0 retains/releases and pushes only the widget
+self table, with no extra end-handler arguments. Native event42 is OnScale.
+No extra constructor/type/time admission gate is inferred. Existing native
+method wrappers already call flush immediately after their closures, so their
+queued SetScale/SetStart/Inherit OnScale handlers already execute before the
+method returns to Lua, including inside another handler. Those wrappers were
+preserved; the initial idea of replacing their callback delivery was withdrawn
+after inspecting that complete existing call chain.
+
+widget_channel_callback_oracle.py executes **15 native callback groups**,
+including full WidgetUpdate, real class helpers, real admission/self arguments,
+actual configure/start/geometry and reentrant machine-code continuations. Only
+script VM interfaces are controlled endpoints; the trampoline's translation
+cache is invalidated when its code changes. Artifacts
+native-widget-channel-callback-oracle-20261018.json and
+native-widget-channel-callback-source-20261018.txt retain observations, the
+actual class vtable/event mapping and source. A separate four-group
+widget_channel_frame_oracle.py executes event9/10 and shown-child recursion for
+future frame-policy work. It is not evidence that this slice changes global
+OnUpdate/OnEffect timing, active-ID traversal or ancestor visibility clocks.
+
+The new original Achievement fixture retains its actual constructor, OnShow,
+OnScaleAnimeEnd, OnScale and category AdjustScale functions. A diagnostic
+observer delegates to the original AdjustScale and records old scale during
+the end handler, then final scale from the handler it installs. The original
+close button remains the strict transformed physical hit target and closes the
+window. No original handler or fixture extent was replaced to hide an ordering
+failure. Other temporal controls cover nested restart/captured target, same-
+frame cross-channel enable, no second alpha step, synchronous method return,
+handler release, hiding and deferred retirement.
+
+Crate check/example build and **132 selected checks pass**, with the existing
+optional font-metric test ignored: channel11, units24, inheritance8, animation10,
+fade12, scale/clip4, popup9, attachment5, scaled fitting8, chat alpha6/clip7,
+tooltips6 and slot selector6/mask8/completion7/state1. Both final aa-dev captures
+with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-widget-callback-achievement-720-20261018.png
+(1280x720/default0.85, **420.8-564.4 FPS**) and
+shots/aa-ui/native-widget-callback-achievement-1080-20261018.png
+(1920x1080/1.0, **517.0-597.6 FPS**). Each shows the original Achievement view
+with the observer reporting end0.990000 and final OnScale1.000000. Both report
+zero script errors/WARN/ERROR and self-close (PIDs5492/19444). The copied
+executable was removed; no root API, Lua asset, font or global frame policy was
+changed.

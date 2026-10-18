@@ -501,10 +501,8 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         }
     }
     // Native3921c0f9 manager/fade callbacks precede3921c13c visible-widget animation steps.
-    let animation_ended = animation::tick(&mut ui(lua), dt_ms);
-    for (id, h) in animation_ended {
-        call_handler(lua, id, h, vec![]);
-    }
+    animation::tick(&mut ui(lua), dt_ms);
+    animation::tick_widgets(lua, dt_ms);
     drop(p_fades);
     damage::tick(lua);
     // `OnEffect(self, dt)` is the per-frame effect tick (the clock bar refreshes the zone name

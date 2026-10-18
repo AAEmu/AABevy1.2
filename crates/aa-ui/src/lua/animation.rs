@@ -584,7 +584,7 @@ pub(super) fn frame_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
+pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
     let active = u.animations.active.iter().copied().collect::<Vec<_>>();
     let mut repaint = false;
     for id in active {
@@ -622,5 +622,8 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
     if repaint {
         u.tree.repaint();
     }
-    widgets::tick(u, dt_ms)
+}
+
+pub(super) fn tick_widgets(lua: &Lua, dt_ms: f32) {
+    widgets::tick(lua, dt_ms);
 }

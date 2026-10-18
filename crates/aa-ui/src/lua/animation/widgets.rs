@@ -482,63 +482,113 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
-    let ids = u
+pub(super) fn tick(lua: &Lua, dt_ms: f32) {
+    let ids = ui(lua)
         .animations
         .widgets
         .active
         .iter()
         .copied()
         .collect::<Vec<_>>();
-    let mut ended = Vec::new();
-    let mut repaint = false;
-    let mut scaled = Vec::new();
     for id in ids {
+        let alpha_ended = {
+            let mut u = ui(lua);
+            if !u.tree.get(id).alive {
+                u.animations.widgets.states.remove(&id);
+                u.animations.widgets.active.remove(&id);
+                continue;
+            }
+            let ui_scale = u.animations.widgets.ui_scale;
+            let state = u.animations.widgets.states.get_mut(&id).unwrap();
+            let before = state.sample(ui_scale);
+            if state.alpha.running {
+                state.visible_alpha = None;
+            }
+            let ended = state.alpha.tick(positive(dt_ms));
+            let changed = before != state.sample(ui_scale);
+            if changed && u.tree.visible(id) {
+                u.tree.repaint();
+            }
+            ended
+        };
+        if alpha_ended {
+            super::super::call_handler(lua, id, "OnAlphaAnimeEnd", vec![]);
+        }
+        // Native checks the scale flag AFTER alpha's callback, so a newly enabled
+        // scale gets this frame's step. Alpha itself is not stepped a second time.
+        let scale_step = {
+            let mut u = ui(lua);
+            if !u.tree.get(id).alive {
+                u.animations.widgets.states.remove(&id);
+                u.animations.widgets.active.remove(&id);
+                continue;
+            }
+            let ui_scale = u.animations.widgets.ui_scale;
+            let state = u.animations.widgets.states.get_mut(&id).unwrap();
+            if state.scale.running {
+                let raw = state.raw_scale(ui_scale);
+                state.explicit_scale = Some(raw);
+                state.scale.current = raw / state.baseline(ui_scale);
+                let ended = state.scale.tick(positive(dt_ms));
+                Some((state.scale.current, ended, state.is_root))
+            } else {
+                None
+            }
+        };
+        if let Some((current, ended, was_root)) = scale_step {
+            if ended {
+                // Native3927e149 clears the flag but retains OLD raw geometry
+                // through the callback. Its captured target survives reconfiguration.
+                super::super::call_handler(lua, id, "OnScaleAnimeEnd", vec![]);
+            }
+            let applied = {
+                let mut u = ui(lua);
+                if u.tree.get(id).alive {
+                    let ui_scale = u.animations.widgets.ui_scale;
+                    let rect = u.tree.rect(id);
+                    let state = u.animations.widgets.states.get_mut(&id).unwrap();
+                    let before = state.sample(ui_scale);
+                    let baseline = if was_root && state.apply_ui_scale {
+                        ui_scale
+                    } else {
+                        1.0
+                    };
+                    state.apply_scale(
+                        rect,
+                        current * baseline,
+                        state.pivot.unwrap_or(Point::Center),
+                        ui_scale,
+                    );
+                    let changed = before != state.sample(ui_scale);
+                    if changed && u.tree.visible(id) {
+                        u.tree.repaint();
+                    }
+                    super::super::auto_clip::changed(&mut u, id, true);
+                    true
+                } else {
+                    false
+                }
+            };
+            if applied {
+                super::super::call_handler(lua, id, "OnScale", vec![]);
+            }
+        }
+        let mut u = ui(lua);
         if !u.tree.get(id).alive {
             u.animations.widgets.states.remove(&id);
             u.animations.widgets.active.remove(&id);
-            continue;
-        }
-        let ui_scale = u.animations.widgets.ui_scale;
-        let rect = u.tree.rect(id);
-        let state = u.animations.widgets.states.get_mut(&id).unwrap();
-        let scale_running = state.scale.running;
-        if scale_running {
-            scaled.push(id);
-        }
-        let before = state.sample(ui_scale);
-        if state.alpha.running {
-            state.visible_alpha = None;
-        }
-        if state.alpha.tick(positive(dt_ms)) {
-            ended.push((id, "OnAlphaAnimeEnd"));
-        }
-        if scale_running {
-            let raw_before = state.raw_scale(ui_scale);
-            state.explicit_scale = Some(raw_before);
-            // Native3927e0c9 normalizes the copied OWN scale only at the next step.
-            state.scale.current = raw_before / state.baseline(ui_scale);
-            if state.scale.tick(positive(dt_ms)) {
-                ended.push((id, "OnScaleAnimeEnd"));
-            }
-            let raw = state.scale.current * state.baseline(ui_scale);
-            state.apply_scale(rect, raw, state.pivot.unwrap_or(Point::Center), ui_scale);
-            ended.push((id, "OnScale"));
-        }
-        if before != state.sample(ui_scale) {
-            repaint |= u.tree.visible(id);
-        }
-        if !state.running() {
+        } else if u
+            .animations
+            .widgets
+            .states
+            .get(&id)
+            .is_some_and(State::running)
+        {
+            u.animations.widgets.active.insert(id);
+        } else {
             u.animations.widgets.active.remove(&id);
         }
     }
-    if repaint {
-        u.tree.repaint();
-    }
-    for id in scaled {
-        super::super::auto_clip::changed(u, id, true);
-    }
-    ended
 }
 
 /// Apply each widget's scale from the innermost widget to the outermost ancestor.
