@@ -5145,3 +5145,84 @@ shows global without a caption, retained/excluded accessor snapshots with9s
 captions, and independent generic equipment. It reports **404.1-457.3 FPS**,
 zero script errors/WARN/ERROR, self-closes (PID48992), and its copied
 executable was removed. These fixture samples are not received game state.
+
+### Ordinary slot masks use the native texture fan (2026-10-18)
+
+Native ordinary-slot load `392c2f50` loads stock
+`ui/icon/cooldown_mask.dds`, retains it at+314, creates the separate+328 Image
+FROM that texture with pixel rectangle0/0/256/256, and anchors that image to
+the slot at top-left+1/+1 and bottom-right-1/-1. Its mask geometry is independent
+of the bound icon's texture, crop, color or later anchors. Image constructor
+`392907b0` copies white RGBA from `3921a930`/39d29254; UI initialization
+`3921e081..e0c8` writes four1.0 components there.
+
+Ordinary draw `392c3960` computes f32 progress `(total-remaining)/total`
+(default reverse flag+310 is false), then calls Image virtual+104
+`3928b3c0` -> `3928ace0`. The slot passes its stock texture as the mask, and
+that Image supplies the SAME stock texture as the base input. Thus the actual
+x2ui.cfx blend samples the original mask twice. Its RGB46 drives the final
+RGB to black, and alpha is the product of both sampled alphas, multiplied by
+UI alpha. The former flat RGB46/alpha199 overlay did not match this contract.
+The existing dual-texture material now serves ordinary slots as well as
+previously corrected generic buttons; no shader or app hook is added here.
+
+The fan advances linearly through eight equal perimeter time sectors. A
+40x40 image with1/16 elapsed starts the remaining edge at30/0 relative to
+its origin; a trigonometric angle produces a different point. Fractional
+rectangle coordinates are interpolated first and only then snapped by native
+add0.5/CVTT, retaining the original UVs. The slot uses full independent
+image/mask UV rectangles. The shared fan/submission helper preserves the
+existing generic Icon multi-layer UV behavior and packed-RGBA8 submission.
+
+Native drawing requires total>=200, a loaded mask, positive remaining and
+0<progress<=1. Zero/invalid progress clears both native UI draw timer fields
+BEFORE caption rendering, without changing either selector flag or emitting
+cooldown events. Explicit native-adapter snapshots implement this lifetime;
+a later genuine query sample restores their draw fields. Missing stock mask,
+zero remaining or a total below200 do not enter that reset branch. The legacy
+content-hook path still owns its estimated local clock, including initially
+equal remaining/total counts, and retains that compatibility clock/caption
+lifetime rather than erasing the estimate at first paint. Both paths now draw
+the native texture fan only for positive valid progress. Reverse+310 producer,
+rotating spinner and completion-child effects remain open; no guessed reverse
+method or replacement effect is introduced.
+
+`data/extract/aa-ui/slot_mask_oracle.py` and
+`native-slot-mask-oracle-20261018.json` execute **12 actual native groups**:
+stock load/UV/anchors and failed load, zero/half-sector/sector-boundary/half/
+0.2 progress, zero remaining, over-total reset, missing mask, controlled reverse
+flag and fractional rectangular geometry. Actual392c2f50 runs to313c; generic
+base initialization, texture loader/reference/dimensions, image creation and
+anchor endpoints are captured. Actual392c3960 ->3928b3c0 ->3928ace0 executes
+unchanged; its controlled draw rectangle, final submission and decorative
+effect delivery are explicit endpoints. Both texture identities, all triangle
+positions, image/mask UV streams, color and resulting timer fields are recorded.
+`native-slot-mask-source-20261018.txt` archives loader/draw/constructor paths.
+The controlled reverse case documents the branch without enabling its unknown
+producer in the toolkit.
+
+Fresh crate check and **42 selected tests pass**: ordinary-mask5, HUD6,
+selector6, caption6, generic-mask7, constant7, slot-state1 and scale/effect4.
+Coverage includes exact native sector/UV/texture goldens, fractional rectangle
+snapping, independent icon artwork, reset-without-callback lifetime, missing
+mask/minimum-total boundaries and compatibility countdown. Existing original
+provider/consumer order, caption options, physical original action-slot click,
+identity and completion tests remain passing. The earlier trigonometric
+10%-remaining area assertion is corrected from145.3 to native160 square px.
+
+The expanded aa-dev `native_slot_cooldown` fixture retains original action
+slots/equipment and adds1/16,1/5,1/2 elapsed plus rectangular mask examples.
+Both final captures were inspected:
+`shots/aa-ui/native-slot-mask-720-20261018.png` at1280x720/default0.85
+(**292.6-323.1 FPS**) and
+`shots/aa-ui/native-slot-mask-1080-20261018.png` at1920x1080/1.0
+(**257.2-306.5 FPS**). Both report zero script errors/WARN/ERROR and self-close
+(PIDs4340/50356); the copied executable was removed. The original combat
+reference `reference/ingame/combat_triple_slash/real_05.png` was also inspected
+for toolbar context; its live cooldown phase is not treated as a pixel golden.
+Six paired corresponding pixels across the two fixture resolutions match
+rounded black blending by `1-(199/255)^2` exactly in every RGB channel, e.g.
+85/38/9 masked versus217/97/22 uncovered. The unmodified captures and pixel
+coordinates/results are recorded in
+`data/extract/aa-ui/native-slot-mask-pixels-20261018.json`. No art or original
+Lua script is modified, and no reverse/GCD producer is guessed.
