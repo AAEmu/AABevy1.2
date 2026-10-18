@@ -277,6 +277,8 @@ pub struct CellObjects {
     pub animated_props: Vec<crate::entities::PlacedProp>,
     /// Native Light / SimpleLight slots, including authored inactive/hidden records.
     pub lights: Vec<crate::entities::PlacedLight>,
+    /// Authored FogVolume slots, including inactive/hidden and unsupported colour variants.
+    pub fog: Vec<crate::fog::FogVolume>,
     /// The active `ParticleEffect` entities of `entities.xml`.
     pub effects: Vec<PlacedEffect>,
     /// The sound entities of `entities.xml` (ambient, random, spots, reverb) and their areas.
@@ -580,6 +582,7 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.entity_props = crate::entities::parse_static_entities(&xml);
         objects.animated_props = crate::entities::parse_animated_entities(&xml);
         objects.lights = crate::entities::parse_lights(&xml);
+        objects.fog = crate::fog::parse(&xml);
         objects.sounds = crate::objects::sounds::parse(&xml);
     }
     objects
