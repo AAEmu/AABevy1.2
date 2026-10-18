@@ -39,6 +39,7 @@ pub mod model;
 pub mod net;
 pub mod opcodes;
 pub mod party;
+pub mod proxy;
 pub mod quest;
 pub mod repair;
 pub mod session;
