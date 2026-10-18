@@ -95,7 +95,7 @@ impl Repair {
                     .tasks
                     .iter()
                     .filter_map(|task| {
-                        let ItemTask::Update { container, slot, item_id, detail: ItemDetail::Equip(detail) } = task
+                        let ItemTask::Update { container, slot, item_id, detail: ItemDetail::Equip(detail), .. } = task
                         else {
                             return None;
                         };

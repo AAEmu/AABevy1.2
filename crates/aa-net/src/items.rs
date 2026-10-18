@@ -254,7 +254,7 @@ pub enum ItemTask {
     /// `ItemRemoveSlot` (seized).
     RemoveSlot { container: u8, slot: u8, item_id: u64 },
     /// New details (durability, gems ...) of an item.
-    Update { container: u8, slot: u8, item_id: u64, detail: ItemDetail },
+    Update { container: u8, slot: u8, item_id: u64, detail: ItemDetail, detail_payload: Option<Vec<u8>> },
     /// New flag bits (`ItemFlag`: secure, soulbound ...).
     Flags { container: u8, slot: u8, item_id: u64, bits: u8 },
 }
@@ -344,8 +344,8 @@ impl ItemTask {
                 let container = r.u8()?;
                 let slot = r.u8()?;
                 let item_id = r.u64()?;
-                let detail = read_padded_detail(r)?;
-                Self::Update { container, slot, item_id, detail }
+                let (detail, detail_payload) = read_padded_detail(r)?;
+                Self::Update { container, slot, item_id, detail, detail_payload }
             }
             action::SET_FLAGS_BITS => {
                 let t = Self::Flags { container: r.u8()?, slot: r.u8()?, item_id: r.u64()?, bits: r.u8()? };
@@ -363,15 +363,20 @@ impl ItemTask {
 }
 
 /// `i16` length (128) followed by the detail type, the details and zero padding.
-fn read_padded_detail(r: &mut Reader) -> Result<ItemDetail> {
+fn read_padded_detail(r: &mut Reader) -> Result<(ItemDetail, Option<Vec<u8>>)> {
     let len = r.i16()?.max(0) as usize;
     let block = r.bytes(len)?;
     if block.is_empty() {
-        return Ok(ItemDetail::None);
+        return Ok((ItemDetail::None, None));
     }
     let mut d = Reader::new(block);
     let detail_type = d.u8()?;
-    ItemDetail::read(&mut d, detail_type).or(Ok(ItemDetail::Other(detail_type)))
+    match ItemDetail::read(&mut d, detail_type) {
+        Ok(detail) => Ok((detail, Some(block[1..d.pos()].to_vec()))),
+        // Existing tolerant padded-block behavior: retain the tag, but do not claim a partial
+        // or unknown-size block is an exact payload. The outer block still preserves alignment.
+        Err(_) => Ok((ItemDetail::Other(detail_type), None)),
+    }
 }
 
 /// An item as `write_task_item_details` writes it: like `Item.Write`, but the detail block is
@@ -382,7 +387,7 @@ fn read_task_item(r: &mut Reader) -> Result<Item> {
     let grade = r.u8()?;
     let flags = r.u8()?;
     let count = r.i32()?;
-    let detail = read_padded_detail(r)?;
+    let (detail, detail_payload) = read_padded_detail(r)?;
     Ok(Item {
         template_id,
         id,
@@ -390,6 +395,7 @@ fn read_task_item(r: &mut Reader) -> Result<Item> {
         flags,
         count,
         detail,
+        detail_payload,
         create_time: r.i64()?,
         lifespan_mins: r.i32()?,
         made_unit_id: r.u32()?,
@@ -467,6 +473,28 @@ mod tests {
         w.u32(template).u64(id).u8(0).u8(0).i32(count);
         w.i16(128).raw(&[0u8; 128]); // detail type 0 + padding
         w.i64(10).i32(0).u32(0).u8(1).i64(0).i64(0);
+    }
+
+    #[test]
+    fn padded_add_and_update_keep_only_the_exact_detail_payload() {
+        let payload: Vec<u8> = (1..=55).collect(); // Nonzero equipment reserved bytes included.
+        let mut block = vec![0xee; 128];
+        block[0] = 1;
+        block[1..56].copy_from_slice(&payload);
+        let mut w = Writer::new();
+        w.u32(123).u64(456).u8(2).u8(3).i32(4).i16(128).raw(&block);
+        w.i64(10).i32(11).u32(12).u8(13).i64(14).i64(15);
+        let item = read_task_item(&mut Reader::new(&w.finish())).unwrap();
+        assert_eq!(item.detail_payload, Some(payload.clone()));
+        let mut w = Writer::new();
+        w.u8(action::UPDATE_DETAIL).u8(2).u8(3).u64(456).i16(128).raw(&block).u32(99);
+        let raw = w.finish();
+        let mut r = Reader::new(&raw);
+        let ItemTask::Update { detail_payload, .. } = ItemTask::read(&mut r).unwrap() else { panic!() };
+        assert_eq!(detail_payload, Some(payload));
+        assert_eq!(r.u32().unwrap(), 99);
+        // The established tolerant fixed-block decoder does not claim malformed data is exact.
+        assert_eq!(read_padded_detail(&mut Reader::new(&[2, 0, 1, 5])).unwrap(), (ItemDetail::Other(1), None));
     }
 
     #[test]

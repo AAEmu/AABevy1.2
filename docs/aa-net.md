@@ -1909,3 +1909,30 @@ library and 2 scripted-session tests, with 9 live tests ignored;
   echo our own movement back.
 * Reconnect after a dropped game connection is not attempted (the session reports `Disconnected` and
   returns to idle).
+
+
+### Exact item detail payloads (2026-10-17)
+
+`model::Item.detail_payload: Option<Vec<u8>>` retains the exact bytes after its detail tag,
+without fixed-block padding. `ItemDetail::kind()` returns that original tag, while the existing
+`None` / `Equip` / `Mate` / `Other(u8)` enum remains unchanged. Real decoded tag-zero items carry
+`Some(vec![])`; template-only / synthetic items have `None`. Equipment payloads include the two
+previously skipped reserved bytes after durability. Consumers can call the native item-link
+`ItemDetail::from_wire(item.detail.kind(), payload)` without inventing opaque union fields.
+
+Both ordinary `Item.Write` and padded task-created items preserve this payload. `ItemTask::Update`
+also carries `detail_payload`; the inventory reducer replaces parsed detail and raw payload together
+(including repair updates). A malformed or unknown-size padded block keeps its existing tolerant
+`Other(tag)` behavior with payload `None`; it does not advertise a guessed partial payload. Padding
+is never part of the retained payload. Native 3961edf0 proves payload widths 0/55/29/6/9/24/16/16/8/4
+for tags 0 through 9; tags 7 and 9 now preserve DD04 alignment as opaque details too.
+
+Lane discrepancy: `models/item.rs::write_details_to` encodes slave repair time as i32 zero when unset,
+but as i64 when set, producing tag-2 payloads of 29 or 33 bytes. The reader preserves whichever was
+actually received. The native item-link union reader expects 29 bytes; do not truncate or normalize
+an observed 33-byte lane payload into an apparently supported native record. Exact nonzero repair-time
+translation remains unresolved. The lane writer's normal 29-byte form maps directly.
+
+Offline tests cover every native fixed tag, both lane slave-time forms, all item truncation cuts,
+nonzero equipment reserved bytes, task padding exclusion and a DD04 loot notification followed by
+loot settlement and snow. No stalled-lane traffic was used.

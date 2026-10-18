@@ -142,7 +142,7 @@ pub enum ItemDetail {
     Equip(EquipDetail),
     /// Summoned mate: experience, dead flag, level.
     Mate { exp: i32, dead: u8, level: u8 },
-    /// A detail type this client does not interpret (its bytes were skipped).
+    /// A detail type this client does not interpret; `Item::detail_payload` retains its bytes.
     Other(u8),
 }
 
@@ -156,6 +156,9 @@ pub struct Item {
     pub flags: u8,
     pub count: i32,
     pub detail: ItemDetail,
+    /// Exact bytes after the detail tag, excluding fixed-block padding. Includes reserved bytes.
+    /// `None` for synthetic/template-only items or an undecodable padded detail block.
+    pub detail_payload: Option<Vec<u8>>,
     pub create_time: i64,
     pub lifespan_mins: i32,
     pub made_unit_id: u32,
@@ -184,6 +187,7 @@ impl Item {
         let flags = r.u8()?;
         let count = r.i32()?;
         let detail_type = r.u8()?;
+        let payload_start = r.rest();
         let detail = ItemDetail::read(r, detail_type)
             .map_err(|e| WireError::Invalid(format!("item {template_id}: {e}")))?;
         Ok(Some(Self {
@@ -193,6 +197,7 @@ impl Item {
             flags,
             count,
             detail,
+            detail_payload: Some(payload_start[..payload_start.len() - r.remaining()].to_vec()),
             create_time: r.i64()?,
             lifespan_mins: r.i32()?,
             made_unit_id: r.u32()?,
@@ -204,6 +209,16 @@ impl Item {
 }
 
 impl ItemDetail {
+    /// The original wire tag, without interpreting opaque union fields.
+    pub fn kind(&self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Equip(_) => 1,
+            Self::Mate { .. } => 3,
+            Self::Other(kind) => *kind,
+        }
+    }
+
     /// The detail block that follows the detail type byte of an item.
     pub fn read(r: &mut Reader, detail_type: u8) -> Result<Self> {
         Ok(match detail_type {
@@ -247,8 +262,10 @@ impl ItemDetail {
             // Fixed-size details we do not interpret: ucc, treasure map, big fish, music sheet.
             4 => skip_detail(r, 9, detail_type)?,
             5 => skip_detail(r, 24, detail_type)?,
-            6 => skip_detail(r, 16, detail_type)?,
+            // Native 3961edf0 also accepts tag 7 (16 bytes) and tag 9 (4 bytes).
+            6 | 7 => skip_detail(r, 16, detail_type)?,
             8 => skip_detail(r, 8, detail_type)?,
+            9 => skip_detail(r, 4, detail_type)?,
             other => return Err(WireError::Invalid(format!("unsupported item detail type {other}"))),
         })
     }
@@ -1540,6 +1557,33 @@ mod tests {
         let mut w = Writer::new();
         ModelParams::default_face().write(&mut w);
         assert_eq!(w.finish().len(), 1 + 4 + 8 + 16 + 4 + 32 + 16 + 20 + 2 + 128);
+    }
+
+    #[test]
+    fn exact_detail_payload_includes_reserved_and_all_native_fixed_tags() {
+        // Payload widths from native 3961edf0, independently of the parsed enum variants.
+        for (kind, size) in [(0, 0), (1, 55), (2, 29), (3, 6), (4, 9), (5, 24),
+                             (6, 16), (7, 16), (8, 8), (9, 4), (2, 33)] {
+            let mut payload: Vec<u8> = (0..size).map(|n| n as u8 + 1).collect();
+            if kind == 2 && size == 29 {
+                payload[5..9].fill(0); // Lane's unset repair timestamp is four bytes.
+            }
+            let mut w = Writer::new();
+            w.u32(123).u64(456).u8(2).u8(3).i32(4).u8(kind).raw(&payload);
+            w.i64(10).i32(11).u32(12).u8(13).i64(14).i64(15).u32(0xaabbccdd);
+            let bytes = w.finish();
+            let mut r = Reader::new(&bytes);
+            let item = Item::read(&mut r).unwrap().unwrap();
+            assert_eq!(item.detail.kind(), kind);
+            assert_eq!(item.detail_payload.as_deref(), Some(payload.as_slice()));
+            assert_eq!((item.create_time, item.unpack_time), (10, 15));
+            assert_eq!(r.u32().unwrap(), 0xaabbccdd);
+            assert!(r.is_empty());
+            for n in 4..bytes.len() - 4 {
+                assert!(Item::read(&mut Reader::new(&bytes[..n])).is_err(), "tag {kind} cut {n}");
+            }
+        }
+        assert_eq!(Item::template_only(1).unwrap().detail_payload, None);
     }
 
     fn equip_item(w: &mut Writer, template: u32, id: u64) {

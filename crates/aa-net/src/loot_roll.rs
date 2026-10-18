@@ -628,6 +628,7 @@ mod tests {
         };
         assert_eq!(*dice, -1);
         assert!(matches!(item.detail, crate::model::ItemDetail::Other(4)));
+        assert_eq!(item.detail_payload.as_deref(), Some(&[1, 2, 3, 4, 5, 6, 7, 8, 9][..]));
         assert!(matches!(
             messages[3],
             ServerMsg::LootItemTook {

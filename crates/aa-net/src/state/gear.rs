@@ -162,9 +162,10 @@ impl Inventory {
                 let Some(Some(item)) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
                 item.flags = *bits;
             }
-            ItemTask::Update { container, slot, item_id, detail } => {
+            ItemTask::Update { container, slot, item_id, detail, detail_payload } => {
                 let Some(Some(item)) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
                 item.detail = detail.clone();
+                item.detail_payload = detail_payload.clone();
             }
             ItemTask::Remove { container, slot, item_id, .. } | ItemTask::RemoveSlot { container, slot, item_id } => {
                 // Mail finalization has already moved the server item into escrow before
@@ -494,10 +495,12 @@ mod tests {
                 slot: slot::HEAD as u8,
                 item_id: 600,
                 detail: ItemDetail::Equip(Default::default()),
+                detail_payload: Some(vec![0; 55]),
             },
         ])));
         assert_eq!(inv.worn(slot::HEAD).unwrap().grade, 3);
         assert!(matches!(inv.worn(slot::HEAD).unwrap().detail, ItemDetail::Equip(_)));
+        assert_eq!(inv.worn(slot::HEAD).unwrap().detail_payload, Some(vec![0; 55]));
         // A remove whose slot is stale still finds the item by id.
         assert!(inv.apply(&tasks(1, vec![ItemTask::Remove { container: 1, slot: 9, item_id: 600, template_id: 1 }])));
         assert!(inv.worn(slot::HEAD).is_none());
