@@ -41,3 +41,13 @@ fn refraction_uv(pixel: vec2<f32>, bump: vec3<f32>, viewport: vec4<f32>, size: v
 fn refraction_behind(surface: f32, scene: f32) -> bool {
     return scene < surface;
 }
+
+// WaterSurfaceVS cached DXBC literals: 0x3ea3ad19 / 0x3e8f3776. Native Foam0
+// xy / wz are affine world-Cry XY projections with opposite signed time phase.
+// The sea and unqualified fallback retain the former rounded coefficients.
+fn foam_coordinates(xy: vec2<f32>, seconds: f32, speed: f32, native: bool) -> mat2x2<f32> {
+    let phase=fract(seconds*0.025*speed);
+    let a=select(0.3197,0.31968,native);
+    let b=select(0.2797,0.27972,native);
+    return mat2x2<f32>(xy*a-vec2<f32>(phase),xy.yx*b+vec2<f32>(phase));
+}
