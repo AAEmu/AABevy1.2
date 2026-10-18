@@ -96,7 +96,7 @@ pub struct SkyComposite;
 pub struct SkyPass;
 
 /// Existing diffuse overlays for native opaque deferred decals, before fog/water.
-/// Legacy forward decals do not carry this marker.
+/// Source-qualified forward decals have their own marker.
 #[derive(Component, Clone, Copy, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[require(NoAutomaticBatching)]
@@ -108,6 +108,12 @@ pub struct DeferredDecalPass;
 #[extract_app(RenderApp)]
 #[require(NoAutomaticBatching)]
 pub struct RoadSurfacePass;
+
+/// Native Illum+DECAL planar/static receiver overlays (list5), excluding terrain.
+#[derive(Component, Clone, Copy, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[require(NoAutomaticBatching)]
+pub struct ForwardDecalPass;
 
 struct Draw {
     parent: Entity,
@@ -202,7 +208,7 @@ fn sync(
 }
 
 mod pass {
-    use super::{DeferredDecalPass, RoadSurfacePass, SkyPass};
+    use super::{DeferredDecalPass, ForwardDecalPass, RoadSurfacePass, SkyPass};
     use super::cloud_water::{CloudWaterPass, OceanLevel, after_water};
     use crate::fog::FogWaterPass;
     use bevy::camera::{MainPassResolutionOverride, Viewport};
@@ -233,6 +239,7 @@ mod pass {
             ExtractComponentPlugin::<SkyPass>::default(),
             ExtractComponentPlugin::<DeferredDecalPass>::default(),
             ExtractComponentPlugin::<RoadSurfacePass>::default(),
+            ExtractComponentPlugin::<ForwardDecalPass>::default(),
         ))
             .add_systems(
                 PostUpdate,
@@ -328,8 +335,7 @@ mod pass {
         tagged: Query<&MainEntity, With<SkyPass>>,
         clouds: Query<&MainEntity, With<CloudWaterPass>>,
         fog: Query<(&MainEntity, &FogWaterPass)>,
-        decals: Query<&MainEntity, With<DeferredDecalPass>>,
-        roads: Query<&MainEntity, With<RoadSurfacePass>>,
+        decals: Query<&MainEntity, Or<(With<DeferredDecalPass>, With<RoadSurfacePass>, With<ForwardDecalPass>)>>,
         views: Query<&ExtractedView, With<Camera3d>>,
         ocean: Res<OceanLevel>,
         mut entities: Local<MainEntityHashSet>,
@@ -355,7 +361,6 @@ mod pass {
         normal_views.clear();
         decal_entities.clear();
         decal_entities.extend(decals.iter().copied());
-        decal_entities.extend(roads.iter().copied());
         for view in &views {
             let height = view.world_from_view.translation().y;
             // Native recursive/reflection pass IDs have no port input. Decline
@@ -725,7 +730,7 @@ mod pass {
         }
 
         #[test]
-        fn ordinary_roads_keep_prepared_offsets_and_exclude_legacy_and_mirror_views() {
+        fn native_roads_and_forward_decals_keep_offsets_and_exclude_terrain_and_mirrors() {
             use bevy::render::render_resource::TextureFormat;
             let mut app = App::new();
             app.init_resource::<SkyPhases>()
@@ -734,8 +739,11 @@ mod pass {
                 .add_systems(Update, (restore, prepare).chain());
             let road = app.world_mut().spawn_empty().id();
             let legacy = app.world_mut().spawn_empty().id();
+            let forward = app.world_mut().spawn_empty().id();
             let marker = app.world_mut().spawn((RoadSurfacePass, MainEntity::from(road))).id();
+            let forward_marker = app.world_mut().spawn((ForwardDecalPass, MainEntity::from(forward))).id();
             assert!(app.world().get::<NoAutomaticBatching>(marker).is_some());
+            assert!(app.world().get::<NoAutomaticBatching>(forward_marker).is_some());
             let functions = DrawFunctions::<Transparent3d>::default();
             let draw = functions.write().add(UnusedDraw);
             let views: Vec<_> = [false, true].into_iter().map(|mirror| {
@@ -748,7 +756,7 @@ mod pass {
                 }));
                 let mut phases = app.world_mut().resource_mut::<ViewSortedRenderPhases<Transparent3d>>();
                 let phase = phases.entry(key).or_default();
-                for (entity, start, bias) in [(road, 19, -600_000.0), (legacy, 24, 17.0)] {
+                for (entity, start, bias) in [(road, 19, -600_000.0), (forward, 21, -599_983.0), (legacy, 24, 17.0)] {
                     phase.add_retained(Transparent3d {
                         sorting_info: TransparentSortingInfo3d::Sorted { mesh_center: Vec3::ZERO, depth_bias: bias },
                         distance: bias, pipeline: CachedRenderPipelineId::INVALID,
@@ -767,17 +775,22 @@ mod pass {
                 assert_eq!(selected.batch_range, 19..20);
                 assert!(matches!(selected.extra_index, PhaseItemExtraIndex::DynamicOffset(768)));
                 assert_eq!(late[&views[0]].items[&key].batch_range, 19..19);
+                assert_eq!(early.0[&views[0]].items[&(Entity::PLACEHOLDER, forward.into())].batch_range, 21..22);
+                assert_eq!(late[&views[0]].items[&(Entity::PLACEHOLDER, forward.into())].batch_range, 21..21);
                 assert!(early.0[&views[1]].items.is_empty());
                 for view in &views {
                     assert_eq!(late[view].items[&(Entity::PLACEHOLDER, legacy.into())].batch_range,24..25);
                 }
             }
             app.world_mut().despawn(marker);
+            app.world_mut().despawn(forward_marker);
             app.update();
             for view in views {
                 assert!(app.world().resource::<SkyPhases>().0[&view].items.is_empty());
                 assert_eq!(app.world().resource::<ViewSortedRenderPhases<Transparent3d>>()[&view]
                     .items[&(Entity::PLACEHOLDER, road.into())].batch_range, 19..20);
+                assert_eq!(app.world().resource::<ViewSortedRenderPhases<Transparent3d>>()[&view]
+                    .items[&(Entity::PLACEHOLDER, forward.into())].batch_range, 21..22);
             }
         }
 

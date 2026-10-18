@@ -494,14 +494,14 @@ pub(crate) fn prepare_cell(
         let Some(projector) = Projector::new(decal) else {
             continue;
         };
-        let mut push = |mesh: Option<Mesh>, p: Projector, fade: bool| {
+        let mut push = |mesh: Option<Mesh>, p: Projector, fade: bool, forward_overlay: bool| {
             let Some(mesh) = mesh else { return };
             let attenuation = if fade {
                 cry_to_bevy(p.center + cell_origin(cell.0, cell.1)).extend(p.radius.recip())
             } else {
                 Vec4::ZERO
             };
-            if let Some(mesh) = assets.decal(
+            if let Some(mut mesh) = assets.decal(
                 loader,
                 path,
                 mesh,
@@ -510,19 +510,20 @@ pub(crate) fn prepare_cell(
                 decal.max_view_dist,
                 attenuation,
             ) {
+                mesh.forward_overlay = forward_overlay;
                 out.push(mesh)
             }
         };
         if decal.projection == 0 {
-            push(planar(projector), projector, false);
+            push(planar(projector), projector, false, true);
         }
         if matches!(decal.projection, 1 | 3) {
-            push(receiver_mesh(projector, &sources, loader, &mut models), projector, true);
+            push(receiver_mesh(projector, &sources, loader, &mut models), projector, true, true);
         }
         if matches!(decal.projection, 2 | 3)
             && let Some(p) = terrain_projector(projector, cell, terrain)
         {
-            push(terrain_mesh(p, cell, terrain), p, true);
+            push(terrain_mesh(p, cell, terrain), p, true, false);
         }
     }
     out
@@ -690,6 +691,10 @@ mod tests {
             "original wrapped spiderweb hits terrain and an opaque brush"
         );
         assert!(receivers.iter().all(|m| m.mesh.indices().unwrap().len() > 0));
+        let planar: Vec<_> = prepared.iter().filter(|m| m.forward_overlay && m.attenuation.w == 0.0).collect();
+        assert_eq!(planar.len(), 3, "three original planar Illum+DECAL overlays");
+        assert!(planar.iter().all(|m| m.early_forward_overlay()));
+        assert!(prepared.iter().filter(|m| m.deferred.is_some()).all(|m| !m.early_forward_overlay()));
     }
 
     #[test]
@@ -766,6 +771,9 @@ mod tests {
             &RoadAssets::default(),
         );
         assert_eq!(prepared.len(), 48, "43 terrain + five static receiver meshes");
+        assert_eq!(prepared.iter().filter(|m| m.early_forward_overlay()).count(), 5);
+        assert_eq!(prepared.iter().filter(|m| !m.forward_overlay).count(), 43,
+            "terrain portions of combined projections keep their native water-path boundary");
         assert!(prepared.iter().all(|m| m.attenuation.w > 0.0));
         println!(
             "real decal fixture: {} projected meshes, {receivers} static receivers",

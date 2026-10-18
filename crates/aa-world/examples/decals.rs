@@ -7,6 +7,7 @@
 
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::prelude::*;
+use aa_world::sky_material::composite::ForwardDecalPass;
 
 fn main() {
     let flag = |name: &str| std::env::args().any(|a| a == name);
@@ -122,16 +123,18 @@ fn main() {
                 ));
             },
         )
-        .add_systems(Update, (stats, stream_check, decal_control))
+        .add_systems(Update, (stats, stream_check, decal_control, late_control))
         .run();
 }
 
-fn decal_control(mut decals: Query<(&Name, &mut Visibility), Added<Name>>) {
-    if !std::env::args().any(|a| a == "--off") {
+fn decal_control(mut decals: Query<(&Name, &mut Visibility, Option<&ForwardDecalPass>), Added<Name>>) {
+    let all = std::env::args().any(|a| a == "--off");
+    let forward = std::env::args().any(|a| a == "--forward-off");
+    if !all && !forward {
         return;
     }
-    for (name, mut visibility) in &mut decals {
-        if matches!(
+    for (name, mut visibility, early) in &mut decals {
+        if (all || (forward && early.is_some())) && matches!(
             name.as_str(),
             "Terrain/object decal" | "Deferred terrain/object decal"
         ) {
@@ -140,22 +143,30 @@ fn decal_control(mut decals: Query<(&Name, &mut Visibility), Added<Name>>) {
     }
 }
 
+fn late_control(mut commands: Commands, sources: Query<Entity, Added<ForwardDecalPass>>) {
+    if std::env::args().any(|a| a == "--late-control") {
+        for entity in &sources { commands.entity(entity).remove::<ForwardDecalPass>(); }
+    }
+}
+
 fn stats(
     time: Res<Time>,
     objects: Res<aa_world::objects::ObjectState>,
     names: Query<&Name>,
+    forward: Query<(), With<ForwardDecalPass>>,
     mut elapsed: Local<f32>,
 ) {
     *elapsed += time.delta_secs();
     if *elapsed > 2.0 {
         *elapsed = 0.0;
         info!(
-            "decals={} deferred={} roads={} object_parts={} models_pending={} models_failed={} sectors={}",
+            "decals={} deferred={} forward_early={} roads={} object_parts={} models_pending={} models_failed={} sectors={}",
             objects.stats.decals,
             names
                 .iter()
                 .filter(|n| n.as_str() == "Deferred terrain/object decal")
                 .count(),
+            forward.iter().count(),
             objects.stats.roads,
             objects.stats.entities,
             objects.stats.models_pending,
@@ -170,6 +181,7 @@ fn stream_check(
     objects: Res<aa_world::objects::ObjectState>,
     collision: Res<aa_world::WorldCollision>,
     names: Query<&Name>,
+    forward: Query<(), With<ForwardDecalPass>>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     mut stage: Local<u8>,
 ) {
@@ -181,11 +193,15 @@ fn stream_check(
         && let Ok(mut transform) = camera.single_mut()
     {
         assert!(objects.stats.decals > 0, "load decals before leaving");
+        if std::env::args().any(|a| a == "--forward-check") {
+            assert!(!forward.is_empty(), "load native forward overlays before leaving");
+        }
         transform.translation = cry_to_bevy(Vec3::new(-100000.0, -100000.0, 1000.0));
         *stage = 1;
         info!("decal stream check: moved outside world");
     } else if *stage == 1 && time.elapsed_secs() > 14.0 {
         assert_eq!(objects.stats.decals, 0);
+        assert!(forward.is_empty(), "forward early markers must retire with their cells");
         assert_eq!(objects.stats.sectors, 0);
         assert_eq!(objects.stats.entities, 0);
         assert_eq!(objects.stats.models_pending, 0);

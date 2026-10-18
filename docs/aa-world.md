@@ -1475,8 +1475,9 @@ plus priority, and the existing zero raster depth bias. Fog sorts later at
 checks both view halves and restores every range on source/ocean/view changes.
 Deferred draws remain early without an ocean; mirrored views keep their prior path.
 No asset, geometry or per-frame material work is added. Ordinary Illum type13 roads
-also use their source-proved early path below. Legacy forward decals retain their
-separate late path; their water-half/opaque-overlay ordering remains open.
+also use their source-proved early path below. Qualified planar/static forward
+decals use the separate proven slice below; terrain/unsupported forward variants
+retain their late path and open water-half/opaque-overlay ordering.
 Normal/specular/MRT limits above are unchanged. Raw original
 pass-order disassembly is ignored `lights/fog-water-decal-order-asm.txt`.
 
@@ -1506,7 +1507,7 @@ the full-scene order.
 
 `RoadMesh` retains type13 provenance, separate from legacy/deferred decals sharing
 its material implementation. Only type13 + ordinary Illum receives
-`RoadSurfacePass`; custom shaders and forward decals retain their existing path.
+`RoadSurfacePass`; qualified forward decals have their own marker below.
 The material cache already separates type13 repeating textures from clamped
 decals. The marker requires `NoAutomaticBatching` and selects original
 `MainEntity` identities in ordinary, non-mirrored views, with or without ocean
@@ -1555,6 +1556,91 @@ at1920x1080; numeric two-view controls at1280x720 span **80.9-202.9** overall.
 Shared-box FPS varies substantially during concurrent builds; these are correctness checks, not a
 performance improvement claim. The five inherited calibration file hashes remain
 unchanged.
+
+#### Native Illum+DECAL planar/static forward pass
+
+The original `illum.ext` assigns **%DECAL = 0x02000000**. `illum.cfx` emits the
+`Decal` global declaration for that feature, parsed at **3823C43E** into
+shader+0x24 bit0x80. Only that authored feature on ordinary Illum qualifies the
+new forward slice. A matching material name or opacity alone does not qualify.
+
+Original **30058040** visits generated `CDecal` instances and computes native
+`IsAfterWater` **301121C0** from each instance's world position (+0x34), current
+camera and global water height before calling **30049750**. Its mesh receiver
+cases1/2 (dispatch table **3004ACCC**) allocate the same reset temp object and
+set object flags **0x10100C00** at **3004A56C**, including FOB_DECAL0x400.
+The **3004A887 / 3004A897** mesh vslot+0xF8 resolves to **381F1F50** through
+the original **38305AC0** vtable. **381F208B..381F20A2** forwards list2 and
+the separate after-water group to the ordinary queue; its decal classifier
+forces list5.
+
+The simple-quad alternative is separately closed, so this does not assume a
+native size-dependent mesh/quad selector. **301092E0** sets object flags0x100C00
+and submits through renderer+0x1FC (**3817AF20**), retaining the after-water
+group in dynamic-element byte+0x44. Flush **3817B726** calls the shader's
+vslot+0x1C: vtable **3830A2B8** resolves it to **382385C0**, whose actual body
+returns shader+0x24. Bit0x80 then selects list5 at **3817B7D7** and preserves
+the group bit. Both native list5 groups precede water, as proved above. Without
+that feature, the quad flush can select list7 based on alpha/resources; those
+materials are excluded rather than assigned the receiver-mesh pass by name.
+
+The placement worker marks only prepared planar and static-receiver portions
+of forward modes0/1/3. Terrain portions of mode3 retain a distinct provenance,
+as do mode2 and native deferred meshes. `RoadMesh::early_forward_overlay`
+requires this producer flag, Illum and the exact numeric feature mask.
+`ForwardDecalPass` requires `NoAutomaticBatching` and joins the existing
+ordinary-view before-transmission phase, even without ocean data. CPU priority
+and the zero raster-bias key follow the existing road/list5 slice. Meshes,
+transforms, UVs, masks, spherical attenuation, opacity and lighting are unchanged;
+there are no new textures, geometry tasks, copies or per-frame material changes.
+Clamped forward assets retain their separate cache from repeating road assets;
+per-projection uniforms still have unique material handles.
+
+Terrain remains explicitly excluded: **300496FE** conditionally sets object+0x64
+bit1, changing its ordinary queue from list5 to list7. Native type3 terrain versus
+type4 quad selection also depends on authored flags, radius, receiver and terrain
+holes (**3005408F..300541D8**). That producer boundary is not replaced with a
+camera/global-water guess. StringGenMask-only alternatives, custom shaders,
+recursive/mirrored pass identities and the existing native priority/PBR/MRT limits
+remain open.
+
+Ignored `roads/native_forward_order.py` executes the original static setup,
+mesh adapter, shader flag getter and dynamic-quad flush for **24 cases**:
+priorities0/17/255, both water groups, DECAL alpha0.723/1 and an unflagged
+zero-alpha control. Qualified cases select list5 in both groups; the unflagged
+quad control selects list7. The five-cell targeted material audit finds nine
+nonempty forward materials, all Illum+DECAL. Original cell(18,7) produces five
+qualified static receiver meshes and43 excluded terrain meshes; cell(23,10)
+produces three qualified planar meshes alongside separately handled projections.
+Rust regressions check exact feature/provenance/deferred exclusions and the
+actual source-identity phase offsets/restoration in ordinary/mirrored views.
+
+Verification: scoped library check, **211 passing / nine existing optional
+ignored** tests (3.66 s), and the changed `decals` / `fog_water` examples build.
+`fog_water --forward-control --two-views` exactly matches independent CPU pixels
+**[133,179,178] / [189,179,115]** through the real transmission copy;
+forced-late gives **[147,155,177] / [198,155,113]**, and no-ocean remains correct.
+`shots/aa-world/forward_order/planar_on.png` / `_off.png` clearly show the original
+floor stain, while `_glass.png` retains the foreground green pane. These are
+asset-backed controls; this location has no exact real-client reference image.
+
+The original receiver overview and a close view at authored centre
+**(18735.9575,8186.4329,192.2546)** load five qualifying static markers, but
+their on/off pictures do **not** establish a visible static-receiver modulation:
+the close pair has only two pixels differing by more than3 display values.
+The retained static support is backed by original mesh/quad queue execution,
+five actual clipped receiver meshes and the GPU phase controls, not a claimed
+native in-scene static shading comparison. No lighting or geometry was changed
+to make that comparison visible. `--stream-check --forward-check` loads five
+markers and verifies zero decals, forward markers, sectors, objects, water cells
+and collision cells/tasks after leaving the world.
+
+All eleven runs self-close without runtime/shader errors. Final six logged FPS
+samples at1920x1080: receiver overview **123.7-157.6** on / **132.7-150.0** off,
+close **146.5-191.6** / **163.2-197.5**, planar **124.7-142.4** / **135.7-149.1**,
+glass **126.6-140.5**; numeric controls at1280x720 **181.4-268.3**. These are
+shared-box correctness observations, not a speed comparison. All five inherited
+calibration hashes remain unchanged.
 
 Remaining decal limits: this is a diffuse/opacity overlay through the existing PBR shader,
 not native MRT albedo/normal/specular accumulation. In particular native square-root encoded
