@@ -13,7 +13,13 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite: 281 passed / 38 optional probes ignored in 57.26s.
+Latest full-client suite: 283 passed / 38 optional probes ignored in 62.57s.
+Native buff-count checks add twelve executed branch goldens and original
+charge/stack badges responding to signed SCBuffUpdated values without icon
+removal. All eight focused buff/catalog/control checks pass. Charge and live
+world-list captures are inspected, and the playable alias is refreshed with
+this count projection, ordinary-slot edge artwork, factual buff decode-loss
+invalidation and signed heightmap projection/normal frames.
 Five self-buff checks cover native folded Good-list icon order, real physical
 left/right input, valid received instance0, original system-buff warning,
 captured identity/lifetime, selection/disconnect guards and receipt-only removal.
@@ -67,7 +73,7 @@ UI regressions pass. The toolkit selector remains opt-in pending real producers.
 Network 541 tests pass, including native buff metadata/capacity/order/descriptor
 guards, SCBuffUpdated and factual decoder-loss uncertainty, bounded ranking receipts, bounty receipts/typed commands and initial trial tasks/commands, history/progress,
 automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
-World 220 tests / 9
+World 221 tests / 9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
 now reach the transmission copy in their source order. Fog/deferred decal water
@@ -79,7 +85,8 @@ retain exact evidence and limits. Native terrain holes/height packing/diagonal
 and 32-slot surface materials pass numeric regressions, all 64 GPU material
 controls, two original on/legacy pairs and unload checks. Independent diffuse/bump
 tiling and cell phase pass eight original ATI2 texel controls, original scene pairs
-and unload. Trial spatial strings/live validation, bounty asset
+and unload. Signed heightmap projection/frame adds 27 executed original controls,
+22 GPU controls and seven inspected original-scene/control/unload runs. Trial spatial strings/live validation, bounty asset
 compatibility and ranking live integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
 

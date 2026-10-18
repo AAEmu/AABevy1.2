@@ -53,6 +53,7 @@ fn setup() -> Result<(UiRuntime, Shared, Buffs, PlayerSpawn), Box<dyn std::error
                 desc: String::new(),
                 kind,
                 system,
+                stack_rule: 4,
             },
         );
         game.native_buffs
@@ -153,7 +154,7 @@ fn native_folded_display_and_captured_instance_survive_without_optimistic_remova
                 .iter()
                 .map(|buff| (buff.id, buff.instance_index, buff.stacks))
                 .collect::<Vec<_>>(),
-            [(77, 10, 2), (78, 11, 1)]
+            [(77, 10, Some(2.)), (78, 11, Some(1.))]
         );
     }
     rt.lua.load("X2Ability:CancelPlayerBuff(1)").exec()?;
@@ -303,6 +304,42 @@ fn original_good_icons_right_click_the_folded_instance_and_preserve_system_buffs
     rt.lua.load("assert(X2Unit:UnitBuffCount('player')==2);assert(BUFF_PLAYER_FRAME.buffWindow.button[1].t.buff_id==1029);assert(BUFF_PLAYER_FRAME.buffWindow.button[2].t.buff_id==1000);assert(not BUFF_PLAYER_FRAME.buffWindow.button[3]:IsVisible())").exec()?;
     fixture::right_click(&rt, "BUFF_PLAYER_FRAME.buffWindow.button[2]")?;
     assert_eq!(commands(&mut state.borrow_mut()), [(47, 100, 14)]);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn original_count_badges_use_charges_and_follow_received_signed_updates_without_removing_icons() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path, mut buffs, spawn) = fixture::runtime(1920., 1080.)?;
+    fixture::charges(&rt, &state, &mut buffs, &spawn)?;
+    let received = buffs.native.of(100).unwrap()[0].received;
+    for (index, stacks, charged) in [(21, 999, 0), (22, 3, -99), (23, 999, 999)] {
+        buffs.apply(&Event::BuffUpdated {
+            obj_id: 100,
+            index,
+            stacks,
+            charged,
+        });
+    }
+    assert_eq!(buffs.native.of(100).unwrap()[0].received, received);
+    fixture::present(&mut state.borrow_mut(), &buffs, &spawn);
+    api::push_changes(&rt, &state);
+    aa_ui::lua::tick(&rt.lua, 100.);
+    aa_ui::lua::flush(&rt.lua);
+    rt.lua.load("assert(X2Unit:UnitBuffCount('player')==3);assert(X2Unit:UnitBuff('player',1).stack==nil);assert(BUFF_PLAYER_FRAME.buffWindow.button[1].stack:GetText()=='');assert(X2Unit:UnitBuff('player',2).stack==3);assert(BUFF_PLAYER_FRAME.buffWindow.button[2].stack:GetText()=='x3');assert(X2Unit:UnitBuff('player',3).stack==1);assert(BUFF_PLAYER_FRAME.buffWindow.button[3].stack:GetText()=='')").exec()?;
+    buffs.apply(&Event::BuffUpdated {
+        obj_id: 100,
+        index: 22,
+        stacks: -3,
+        charged: 99,
+    });
+    fixture::present(&mut state.borrow_mut(), &buffs, &spawn);
+    api::push_changes(&rt, &state);
+    aa_ui::lua::tick(&rt.lua, 100.);
+    rt.lua.load("assert(X2Unit:UnitBuffCount('player')==3);assert(X2Unit:UnitBuff('player',2).stack==nil);assert(BUFF_PLAYER_FRAME.buffWindow.button[2].stack:GetText()=='')").exec()?;
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     if path.exists() {
         std::fs::remove_file(path)?;

@@ -66,7 +66,7 @@ pub struct BuffSnap {
     pub name: String,
     pub icon: String,
     pub desc: String,
-    pub stacks: i32,
+    pub stacks: Option<f64>,
     /// The ability level the buff was applied with (its description's numbers scale with it).
     pub ab_level: i16,
     /// When it ends (HUD clock, ms); `None` for a permanent buff.
@@ -224,7 +224,7 @@ pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::Buff
             name: info.map(|i| i.named.name.clone()).unwrap_or_default(),
             icon: info.map(|i| i.named.icon.clone()).unwrap_or_default(),
             desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
-            stacks: b.stacks.max(1),
+            stacks: info.and_then(|info| super::buffs::stack_count(info.stack_rule, b.stacks, b.charged)),
             ab_level: b.ability_level,
             ends_ms,
         };
@@ -386,7 +386,9 @@ fn buff_table(lua: &Lua, b: &BuffSnap) -> mlua::Result<Table> {
     t.raw_set("name", b.name.as_str())?;
     t.raw_set("path", b.icon.as_str())?;
     t.raw_set("description", b.desc.as_str())?;
-    t.raw_set("stack", i64::from(b.stacks))?;
+    if let Some(count) = b.stacks {
+        t.raw_set("stack", count)?;
+    }
     t.raw_set("ab_level", i64::from(b.ab_level))?;
     if let Some(end) = b.ends_ms {
         t.raw_set("ends", end as f64)?;
