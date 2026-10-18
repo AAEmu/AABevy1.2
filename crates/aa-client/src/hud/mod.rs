@@ -60,6 +60,7 @@ mod party;
 mod pets;
 mod plates;
 mod pvp;
+mod radar;
 mod repair;
 mod quests;
 mod ring;
@@ -142,6 +143,9 @@ pub(crate) fn stablehand_fixture() {
 
 #[allow(dead_code)]
 pub(crate) fn owned_pet_fixture() { pets::active_fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn radar_fixture() { radar::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -349,6 +353,7 @@ impl Plugin for HudPlugin {
         plates::plugin(app);
         combat::plugin(app);
         pvp::plugin(app);
+        radar::plugin(app);
         breath::plugin(app);
         expansion::plugin(app);
         repair::plugin(app);

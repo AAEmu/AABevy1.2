@@ -1443,3 +1443,30 @@ frame and bar both register SPAWN_PET. The previous implementation replaced the 
 repeated the second. Native listener order/release/mutation and empty unbound GetHotKey are now
 covered by original pet spawn/dismiss/respawn regressions. Full pet gear/stat controls, actual skill
 planning/auto-use, mount/dismiss eligibility and live world validation remain active work.
+
+### Received telescope maps (2026-10-18)
+
+`hud/radar.rs` hydrates ship, public-transport and fish radar from aa-net's received
+resources, then replays subsequent events in packet order. Incomplete snapshots never
+reach the maps. Publication precedes original AREA/REMOVE/UPDATE/CLEAR callbacks; toggles
+emit AREA before the observer, including duplicate reports. Removed object IDs are Lua
+numbers. Each channel clears independently. Loading does not replay historical packets.
+
+The aa-ui radar bridge consumes the same world/continent/zone/city rectangles used by
+the client's maps. Ship raw kind2 selects ship, every other value shipyard. Transfer
+templates resolve through models.name (airship/carriage_main/other valid model), and
+unknown templates are skipped. Transfer tooltip names are received strings; fish names
+are localized DoodadAlmighty names. Ship kinds use native slave_kind keys1..9, buff tests
+raw_tail==3554, and initial tooltip HP is min(current,max). The numeric health getter
+instead returns raw received HP/max through f32, or zero Lua values for a missing ID.
+Expedition names are omitted until received. Enemy classification currently uses the
+app's static faction relation; native expedition/custom relation inputs remain open.
+Range circles, fog/instance masks and actual live lane radar remain unverified.
+
+Three bridge tests and the final full163-test client suite passed (28 ignored,1.91s).
+The additional exact ignored original-stage probe passed1 test in1.82s: both maps show
+eight symbols and retain all four transport/fish symbols when ships clear. Example
+`received_radar` uses aa-dev and explicit synthetic receipts on the actual catalog;
+`shots/hud/sol61-radar/received-original-maps.png` was inspected, with193 startup and
+265-330 steady FPS, zero runtime errors and normal screenshot exit. Network fixtures
+are not evidence of a live server transaction.
