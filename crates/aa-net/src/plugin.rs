@@ -176,6 +176,7 @@ net_state! {
     auction: Auction,
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
+    families: crate::family::Families,
     server_clock: crate::clock::ServerClock,
     actabilities: Actabilities,
     mates: Mates,
@@ -255,6 +256,16 @@ mod equipment_flags_tests {
         assert_eq!(app.world().resource::<Battlefield>().phase,Some(BattlefieldPhase::Playing));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert_eq!(app.world().resource::<ServerClock>().mapped_now(),None);
+    }
+
+    #[test]
+    fn plugin_family_receipts_hydrate_and_reset_the_public_resource() {
+        use crate::family::{Families,FamilyEvent,FamilyRoster};
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Family(FamilyEvent::Described(FamilyRoster{family_id:7,members:vec![]})))).unwrap();
+        assert!(app.world().resource::<Families>().rosters.contains_key(&7));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert!(app.world().resource::<Families>().rosters.is_empty());
     }
 
     #[test]

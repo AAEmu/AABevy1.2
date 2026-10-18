@@ -524,6 +524,7 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
+    Family(crate::family::FamilyEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
     InitialConfig(crate::initial_config::InitialConfig),
@@ -1544,6 +1545,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
+            M::Family(e) => self.emit(Event::Family(e)),
             M::ScheduledEventStarted(e) => self.emit(Event::ScheduledEventStarted(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::InitialConfig(config) => self.emit(Event::InitialConfig(config)),
@@ -2324,6 +2326,21 @@ mod tests {
         assert!(matches!(events.try_recv(),Ok(Event::Pong(p)) if p==pong));
         assert!(session.server_clock.borrow().mapped_now().is_some());
         assert_eq!(*session.battlefield.borrow(),before);assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn family_receipts_forward_repeated_and_unknown_family_notices_without_local_success() {
+        use crate::family::{FamilyEvent,FamilyRoster};
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        let receipt=FamilyEvent::Described(FamilyRoster{family_id:7,members:vec![]});
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::Family(receipt.clone()))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::Family(actual)) if actual==receipt));
+        }
+        let notice=FamilyEvent::MemberOnline{family_id:99,character_id:7,online:true};
+        session.game_msg(Ok(game::ServerMsg::Family(notice.clone()))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Family(actual)) if actual==notice));
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
