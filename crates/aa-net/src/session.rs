@@ -672,6 +672,7 @@ struct Session {
     selected: u32,
     selected_state: Option<CharacterState>,
     self_obj: u32,
+    battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -719,6 +720,7 @@ impl Session {
             selected: 0,
             selected_state: None,
             self_obj: 0,
+            battlefield: Default::default(),
             waiting: None,
         }
     }
@@ -760,6 +762,7 @@ impl Session {
     }
 
     fn emit(&self, e: Event) {
+        self.battlefield.borrow_mut().apply(&e);
         let _ = self.evt.send(e);
     }
 
@@ -1038,7 +1041,8 @@ impl Session {
                 }
             }
             Command::Battlefield(command) => {
-                if let Err(message) = command.validate() {
+                let validation = self.battlefield.borrow().validate_command(command);
+                if let Err(message) = validation {
                     self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::RequestRejected { command, message: message.into() }));
                 } else if self.phase != Phase::InWorld {
                     self.emit(Event::Battlefield(crate::battlefield::BattlefieldEvent::RequestRejected { command, message: "battlefield request requires an active character".into() }));
@@ -2200,6 +2204,42 @@ mod tests {
         session.game_msg(Ok(game::ServerMsg::Batch(expected.iter().cloned().map(game::ServerMsg::Battlefield).collect()))).await;
         for e in expected {assert!(matches!(events.try_recv(),Ok(Event::Battlefield(actual)) if actual==e));}
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn battlefield_reply_is_checked_again_at_socket_write_and_does_not_invent_join() {
+        use crate::battlefield::{BattlefieldCommand as C, BattlefieldEvent as E, BattlefieldInvitation};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        let invite=BattlefieldInvitation {zone_id:8,instance_id:9,ruleset_id:10,corps:1,qualified_id:55};
+        let reply=C::RespondToInvitation {invitation:invite,accept:true};
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr=listener.local_addr().unwrap().to_string();
+        let (connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());
+        let (mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
+        session.command(Command::Battlefield(reply)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{..}))));
+        session.emit(Event::Battlefield(E::Requested(C::Apply{battlefield_id:7,corps:2})));
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::Applied{battlefield_id:7,corps:2,error:0}))).await;
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::Invited(invite)))).await;
+        while events.try_recv().is_ok() {}
+        // A UI-captured reply can become stale before it reaches the network task.
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::InviteTimedOut{zone_id:8,instance_id:9,ruleset_id:10,corps:1}))).await;
+        events.try_recv().unwrap();
+        session.command(Command::Battlefield(reply)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{..}))));
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::Invited(invite)))).await;
+        events.try_recv().unwrap();
+        session.command(Command::Battlefield(reply)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::Requested(c))) if c==reply));
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();
+        let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[6..],game::ClientMsg::Battlefield(reply).encode_body());
+        assert!(session.battlefield.borrow().joined.is_none());
+        session.command(Command::Battlefield(reply)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{..}))));
+        assert!(tokio::time::timeout(Duration::from_millis(30),peer.read_u8()).await.is_err());
     }
 
     #[tokio::test]

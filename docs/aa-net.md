@@ -4575,3 +4575,55 @@ and passes reason+10 to39355bd0?390b4000. The latter clears actor attachment+3af
 then390dca30 passes saved child model/seat/reason to parentModel virtual+280. Thus the
 existing UnitDetached child/reason event has sufficient wire data, but model/controller
 prerequisites and action finalization remain real local work, not synthetic completion.
+
+
+### Battlefield invitation response and joined snapshot
+
+`BattlefieldCommand::RespondToInvitation { invitation, accept }` retains the captured
+received BattlefieldInvitation identity. `Battlefield::respond_to_invitation` and
+`validate_command` require an exact current invitation with no prior response, pending
+cancel or joined snapshot. Session mirrors the same received/request/lifecycle fold and
+rechecks immediately before writing, preventing stale UI replies from reaching the lane.
+Successful writes set only response_pending; invitation remains a received snapshot.
+No acceptance is fabricated from a write. Rejected/inactive/failed sends use the existing
+RequestRejected event and permit retry while the invitation is still current.
+
+Native invitation object vtable399d0d1c callback+14=3936f890 forwards captured
+zone/instance/ruleset/corps/qualifiedID to3936f540. It requires state3, exact identities,
+requested/assigned corps compatibility, local actor and the same blocker predicate.
+Choice1 sends CSe3(true,qualifiedID), then localstate4; choice2 sends CSe3(false,0),
+then localstate2; choice3 invokes Cancel(true). Packet constructor397ac810 and serializer
+397b1090 prove bool then u64. Lane CSJoinInstantGamePacket reader matches, but
+player_invite_response ignores qualified_id, making the client identity guard essential.
+Lane decline withdraws/reapplies the same battlefield as corpsANY2; the resource clears
+reply/invitation only upon that matching genuine Applied response, not the local write.
+This is an explicit lane behavior difference from native localstate2 after choice2.
+
+SC190 Joined factory391b401c/vtable399b3de0 serializer397b6fd0 and lane packets.rs
+SCInstantGameJoinedPacket agree on fixed135bytes: zoneu32,instanceu32,corpsu8,
+victoryScorei32,victoryKillCountu16,victoryKillCorpsHeadu32,threei32 phase durations,
+twou32 factionIDs,24u32 killstreak skills. BattlefieldEvent::Joined preserves all raw
+fields. Resource hydration requires an accepted pending reply and matching zone/instance/
+assignedcorps, mirroring3936d890's state4 and identity gates. Native3936e0c0 emits0x157
+ENTERED_INSTANT_GAME_ZONE() only after a matching Joined is applied (name registration
+392157b7, string399bd688). Original dialog_handler.lua44..66 uses
+DLG_TASK_JOIN_BATTLE_FIELD with three buttons enter/next-room/reject and infoTable keys
+name/corpsName. Native fill3936d6b0 resolves ruleset?battlefield name and assigned corps
+faction localized name (ANY_CORPS for2). Invitation opens a dialog task; no invented
+INVITED Lua event is added. Accepted replies ignore old invitation timeout
+(state4); unaccepted matching timeout can clear invitation/reply. Selection/kick/leave/
+disconnect reset all received and local pending state. Wire carries no qualifiedID in
+Joined, so an old identical zone/instance/corps packet cannot be distinguished by one.
+Joined is a received snapshot, not a complete match-phase state machine: world-entry
+CSe4, start/end/scoreboard/leave packets and timers remain separate follow-up work.
+
+Root Lua/source boundaries: CancelInstanceGame39455dc0 calls3936d1b0(true) synchronously.
+For state<=4 it resets/defaults and emits INSTANT_GAME_JOIN_CANCEL() BEFORE sendinge2;
+state>4 is a no-op. Apply3936f780 sets localstate1 before send and does not roll back a
+failed send; repeats nonidle reporterror106. Blocker refusal resets/cancels state<=4.
+Native RequestInstanceGame39455e30 clamps signed values>2 to2 but leaves negative i32
+unchanged locally (eventual wire lowbyte); bounded typed command deliberately permits
+only0..2. Fractional/nonfinite generic Lua conversion has not been established here.
+Applied3936dfb0 only processes exact pending field/corps: nonzeroerror resets/defaults
+then reports39428370(error), with NO cancel Lua event; zeroerror changesstate1?2 with
+NO Lua event. UPDATE_INSTANT_GAME_STATE follows later genuine queue-state notification.

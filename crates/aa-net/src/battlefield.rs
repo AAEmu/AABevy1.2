@@ -6,16 +6,22 @@ use crate::{
     wire::{Reader, Result, WireError, Writer},
 };
 
+mod joined;
+pub use joined::BattlefieldJoined;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BattlefieldCommand {
     Apply { battlefield_id: u32, corps: u8 },
     Cancel,
+    /// Captured received invitation, checked again against current session state before send.
+    RespondToInvitation { invitation: BattlefieldInvitation, accept: bool },
 }
 impl BattlefieldCommand {
     pub fn validate(self) -> std::result::Result<(), &'static str> {
         match self {
             Self::Apply { battlefield_id: 0, .. } => Err("battlefield ID must be nonzero"),
             Self::Apply { corps: 3.., .. } => Err("battlefield corps must be 0, 1 or 2"),
+            Self::RespondToInvitation { invitation, .. } if invitation.corps > 1 => Err("invitation corps must be 0 or 1"),
             _ => Ok(()),
         }
     }
@@ -23,11 +29,14 @@ impl BattlefieldCommand {
         match self {
             Self::Apply { .. } => cs::CSApplyToInstantGamePacket,
             Self::Cancel => cs::CSCancelInstantGamePacket,
+            Self::RespondToInvitation { .. } => cs::CSJoinInstantGamePacket,
         }
     }
     pub fn write(self, w: &mut Writer) {
-        if let Self::Apply { battlefield_id, corps } = self {
-            w.u32(battlefield_id).u8(corps);
+        match self {
+            Self::Apply { battlefield_id, corps } => { w.u32(battlefield_id).u8(corps); }
+            Self::RespondToInvitation { invitation, accept } => { w.bool(accept).u64(if accept { invitation.qualified_id } else { 0 }); }
+            Self::Cancel => {}
         }
     }
 }
@@ -58,6 +67,7 @@ pub enum BattlefieldEvent {
     },
     QueueState(BattlefieldQueue),
     Invited(BattlefieldInvitation),
+    Joined(BattlefieldJoined),
     InviteTimedOut {
         zone_id: u32,
         instance_id: u32,
@@ -77,7 +87,7 @@ impl BattlefieldEvent {
         r.i16()
     }
     pub fn handles(op: u16) -> bool {
-        matches!(op, 0x18b..=0x18f)
+        matches!(op, 0x18b..=0x190)
     }
     pub fn name(&self) -> &'static str {
         match self {
@@ -85,6 +95,7 @@ impl BattlefieldEvent {
             Self::Cancelled { .. } => "SCCancelInstantGame",
             Self::QueueState(_) => "SCInstantGameState",
             Self::Invited(_) => "SCInviteToInstantGame",
+            Self::Joined(_) => "SCInstantGameJoined",
             Self::InviteTimedOut { .. } => "SCInstantGameInviteTimeout",
             Self::Requested(_) => "BattlefieldRequested",
             Self::RequestRejected { .. } => "BattlefieldRequestRejected",
@@ -110,6 +121,7 @@ impl BattlefieldEvent {
                 corps: r.u8()?,
                 qualified_id: r.u64()?,
             }),
+            sc::SCInstantGameJoinedPacket => Self::Joined(BattlefieldJoined::read(r)?),
             sc::SCInstantGameInviteTimeoutPacket => Self::InviteTimedOut {
                 zone_id: r.u32()?,
                 instance_id: r.u32()?,
@@ -130,10 +142,30 @@ pub struct Battlefield {
     pub queue: Option<BattlefieldQueue>,
     pub invitation: Option<BattlefieldInvitation>,
     pub cancel_pending: bool,
+    /// Successful local reply write, not a received join or queue transition.
+    pub response_pending: Option<(BattlefieldInvitation, bool)>,
+    /// Last matching genuine joined packet; later gameplay phases are outside this slice.
+    pub joined: Option<BattlefieldJoined>,
     pub last_error: Option<u16>,
     pub last_rejection: Option<String>,
 }
 impl Battlefield {
+    /// Recheck a captured invitation before writing a response. No local state is changed.
+    pub fn validate_command(&self, command: BattlefieldCommand) -> std::result::Result<(), &'static str> {
+        command.validate()?;
+        if let BattlefieldCommand::RespondToInvitation { invitation, .. } = command {
+            if self.invitation != Some(invitation) || self.response_pending.is_some() || self.cancel_pending || self.joined.is_some() {
+                return Err("battlefield invitation is stale or already answered");
+            }
+        }
+        Ok(())
+    }
+    pub fn respond_to_invitation(&self, invitation: BattlefieldInvitation, accept: bool) -> std::result::Result<BattlefieldCommand, &'static str> {
+        let command = BattlefieldCommand::RespondToInvitation { invitation, accept };
+        self.validate_command(command)?;
+        Ok(command)
+    }
+
     /// Capped received queue getter; constructor default is (0,0,-1).
     /// Pending requested corps stays in `requesting`, separate from received `applied`.
     pub fn joined_infos(&self) -> (u32, u32, i32) {
@@ -147,7 +179,7 @@ impl Battlefield {
                 )
             })
             .unwrap_or((0, 0));
-        (cur, max, self.applied.map_or(-1, |(_, c)| i32::from(c)))
+        (cur, max, self.joined.map_or_else(|| self.applied.map_or(-1, |(_, c)| i32::from(c)), |j| i32::from(j.corps)))
     }
     pub fn apply(&mut self, e: &Event) -> bool {
         let before = self.clone();
@@ -160,16 +192,24 @@ impl Battlefield {
                         self.requesting = Some((battlefield_id, corps));
                     }
                     BattlefieldCommand::Cancel => self.cancel_pending = true,
+                    BattlefieldCommand::RespondToInvitation { invitation, accept } => {
+                        if self.validate_command(*c).is_ok() { self.response_pending = Some((invitation, accept)); }
+                    }
                 }
             }
             Event::Battlefield(BattlefieldEvent::RequestRejected { message, .. }) => {
                 self.last_rejection = Some(message.clone());
             }
             Event::Battlefield(BattlefieldEvent::Applied { battlefield_id, corps, error })
-                if self.requesting == Some((*battlefield_id, *corps)) && !self.cancel_pending =>
+                if (self.requesting == Some((*battlefield_id, *corps))
+                    || (self.response_pending.is_some_and(|(_, accept)| !accept) && self.applied.is_some_and(|(id, _)| id == *battlefield_id) && *corps == 2))
+                    && !self.cancel_pending =>
             {
                 if *error == 0 {
-                    self.applied = self.requesting.take();
+                    self.applied = Some((*battlefield_id, *corps));
+                    self.requesting = None;
+                    self.response_pending = None;
+                    self.joined = None;
                     self.queue = None;
                     self.invitation = None;
                     self.last_error = None;
@@ -180,16 +220,24 @@ impl Battlefield {
             }
             Event::Battlefield(BattlefieldEvent::Cancelled { .. }) => *self = Self::default(),
             Event::Battlefield(BattlefieldEvent::QueueState(q))
-                if self.applied.is_some_and(|(id, _)| id == q.battlefield_id) && self.invitation.is_none() && !self.cancel_pending =>
+                if self.applied.is_some_and(|(id, _)| id == q.battlefield_id) && self.invitation.is_none() && self.joined.is_none() && !self.cancel_pending =>
             {
                 self.queue = Some(*q)
             }
             Event::Battlefield(BattlefieldEvent::Invited(i))
                 if self.applied.is_some_and(|(_, c)| (c <= 1 && c == i.corps) || (c == 2 && i.corps <= 1))
                     && self.invitation.is_none()
+                    && self.joined.is_none()
+                    && self.response_pending.is_none()
                     && !self.cancel_pending =>
             {
                 self.invitation = Some(*i)
+            }
+            Event::Battlefield(BattlefieldEvent::Joined(joined)) if !self.cancel_pending
+                && self.response_pending.is_some_and(|(i, accept)| accept && i.zone_id == joined.zone_id && i.instance_id == joined.instance_id && i.corps == joined.corps) => {
+                self.joined = Some(*joined);
+                self.response_pending = None;
+                self.invitation = None;
             }
             Event::Battlefield(BattlefieldEvent::InviteTimedOut {
                 zone_id,
@@ -199,9 +247,11 @@ impl Battlefield {
             }) if self
                 .invitation
                 .is_some_and(|i| i.zone_id == *zone_id && i.instance_id == *instance_id && i.ruleset_id == *ruleset_id && i.corps == *corps)
-                && !self.cancel_pending =>
+                && !self.cancel_pending
+                && !self.response_pending.is_some_and(|(_, accept)| accept) =>
             {
-                self.invitation = None
+                self.invitation = None;
+                self.response_pending = None;
             }
             _ => {}
         }
