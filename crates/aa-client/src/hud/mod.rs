@@ -34,6 +34,7 @@
 
 mod alerts;
 mod breath;
+mod buffs;
 pub(crate) mod api;
 mod cameras;
 mod cast;
@@ -388,6 +389,7 @@ impl Plugin for HudPlugin {
             .insert_resource(session::ScriptedSession::from_args())
             .insert_resource(cameras::DevFov::from_args())
             .insert_non_send(api::HudBridge::default())
+            .add_systems(First,buffs::bind_catalog)
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
             .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())

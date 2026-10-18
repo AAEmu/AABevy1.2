@@ -1505,3 +1505,29 @@ Confirm, unchanged certificate until its own receipt, and stale-character reject
 Example `proficiency -- --confirm` and `--expand` uses aa-dev. Inspected captures under
 `shots/hud/sol61-proficiency/` show the original upgrade dialog at302-339 FPS and the
 certificate1/1 capacity dialog at355-439 FPS, zero runtime errors and normal exit.
+
+## Native mate health and mana (2026-10-18)
+
+The owned-pet frame now calculates maxima with the original owner-5 UnitFormula and
+per-formula mate-kind coefficients, using actual received pet level, equipment and
+the native buff-history sidecar. Static buff rules bind in First when the background
+catalog is ready. Unknown history, unresolved mate kind, and unsupported conditional
+or active dynamic primary/pool modifiers retain received maxima instead of asserting
+that the missing inputs are zero. The legacy lane buff view remains separate.
+
+NPC, buff and eligible item/rune/gem modifiers aggregate into one flat/percentage pair.
+Native linear-level rounding, signed item levels, integer fast path, limits, broken
+gear, slot eligibility and first-zero gem termination are retained. Generated item
+primary stats have their own f64/f32 rounding stages; 18 results match executed
+original x86 arithmetic (static lookups mocked with actual DB rows; external pow
+uses Python libm), recorded under `data/extract/aa-net/mate-stats-native/`.
+UnitFormula results narrow to f32 before integer truncation, including the kind-3
+level-5 mana result309. Full pet UnitInfo, modifier colors, local model actions and
+equipment cursor planning are still open.
+
+Six focused checks pass. Full client suite:174 passed/29 ignored in2.24s.
+`owned_pet_hud -- --native-pools` asserts calculated1012/335 versus received1000/400
+and renders the original frame/bar. Inspected capture
+`shots/hud/sol61-native-pools/original-pet.png`:306-524 FPS after startup,
+zero runtime errors, screenshot-and-exit completed. This is an isolated received-state
+fixture; it does not claim a live lane pet transaction.
