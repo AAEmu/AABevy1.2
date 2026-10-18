@@ -168,6 +168,7 @@ net_state! {
     slaves: Slaves,
     gimmicks: Gimmicks,
     houses: Houses,
+    transfer_radar: crate::radar::TransferRadar,
     ui_data: UiData,
     game_config: GameConfig,
     combat_status: CombatStatus,
@@ -179,6 +180,20 @@ net_state! {
 mod equipment_flags_tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    #[test]
+    fn plugin_fold_publishes_received_transfer_radar_snapshot() {
+        use crate::radar::{RadarEvent, RadarToggle, TransferRadar};
+        let mut app = App::new();
+        init_state(&mut app);
+        for event in [
+            Event::Radar(RadarEvent::TransferToggled(RadarToggle { on: true, range: 50.0 })),
+            Event::Radar(RadarEvent::TransferContacts { last: true, contacts: vec![] }),
+        ] {
+            app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
+        }
+        assert_eq!(app.world().resource::<TransferRadar>().contacts, Some(vec![]));
+        assert!(app.world().resource::<Units>().by_id.is_empty());
+    }
     #[test]
     fn plugin_fold_updates_existing_owned_equipment_flags() {
         let mut app = App::new();

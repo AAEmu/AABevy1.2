@@ -3848,3 +3848,33 @@ SC128 refresh follow-up: containerfc dispatch394e0d70 to394e111d extracts slot
 via394e0240, adds one and emits event0xd5 with one numeric one-based slot.
 Registration39214ffb at39d2303c names it UNIT_NPC_EQUIPMENT_CHANGED
 (string399be0f8). This occurs after the received descriptor flags assignment.
+
+
+### Public transport telescope receive state (2026-10-18)
+
+`RadarEvent::TransferToggled(RadarToggle)` receives SC1b4 as bool on + raw f32 range.
+`TransferContacts { last, contacts }` receives SC1b5 as bool last, u8 count, then each
+BC object ID, u32 template ID, packed9-byte position and string name. Lane source is
+systems/services/radar.rs, used by the actual range-service producer. Its chunks are
+ten contacts, with last on the final chunk; an empty scan emits no packet. Silence
+therefore cannot clear old contacts or imply completion.
+
+Native factory391b5380/vtable399b3fb8/397afc80 matches the toggle. SC1b5 factory
+391b5410/vtable399b609c/397c4240 delegates entries to397bf320 (BC ID, u32 type,
+3961e2c0 position and string bounded1024). Native consumes min(count,10); the active
+lane decoder follows its writer's full advertised u8 count, preserving following
+DD04 alignment even for count11. No payload guessing or automatic native profile.
+
+Native toggle391df930?39366aa0 writes on/range and clears published and pending
+buffers on every toggle. List391df9b0?393691e0 ignores data while off, appends
+entries, and swaps pending into published when last is true. `TransferRadar` exposes
+unknown toggle and unknown completed snapshot as None, retains raw ordering and
+repeated IDs, and follows those received buffer rules. Character selection, leave,
+kick and disconnect reset it. It never creates Units, assigns ownership or moves
+existing world objects. WorldState and the Bevy plugin register the same resource.
+An unfinished snapshot is locally bounded at4096 contacts: overflow discards that
+whole in-progress snapshot through its last marker, retaining the prior completed
+snapshot. This is a memory safety bound, not a claimed native/server contact limit.
+Ship radar SC1b2/1b3 and fish contacts are separate formats and remain pending.
+
+Transfer radar validation: all 302 aa-net library tests passed, including session receive order and Bevy resource publication.
