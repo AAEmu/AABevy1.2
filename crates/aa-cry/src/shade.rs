@@ -35,14 +35,19 @@ mod ucc;
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
 pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, ucc_uv_square: bool) -> Option<StandardMaterial> {
     let mut out = to_standard_material(m, |path, srgb| prep.texture(path, srgb))?;
-    // `AlphaTest` is set on nearly every costume `Illum` material, whose diffuse maps have no
-    // alpha at all (BC1): testing them only costs a prepass and risks holes.
-    if matches!(out.alpha_mode, AlphaMode::Mask(_)) && !m.shader.to_ascii_lowercase().starts_with("veg") && !m.shader.eq_ignore_ascii_case("grass") {
+    // Remove a redundant test only when every authored mip proves full opacity. The smallest
+    // mip's mean can be opaque while the original fur/lace texels still contain cutouts.
+    if let AlphaMode::Mask(threshold) = out.alpha_mode
+        && threshold.is_finite()
+        && out.base_color.to_linear().alpha >= threshold
+        && !m.shader.to_ascii_lowercase().starts_with("veg")
+        && !m.shader.eq_ignore_ascii_case("grass")
+    {
         let opaque = m
             .texture(&TextureMap::Diffuse)
             .map(|t| t.pak_path())
-            .and_then(|p| prep.loader.mean_alpha(&p))
-            .is_some_and(|a| a >= 0.98);
+            .and_then(|p| prep.loader.alpha_is_opaque(&p))
+            == Some(true);
         if opaque {
             out.alpha_mode = AlphaMode::Opaque;
         }
