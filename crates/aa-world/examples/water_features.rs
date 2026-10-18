@@ -44,6 +44,7 @@ fn main() {
     let mut sample = TimeOfDay::default().sample(10.0, Lighting::default());
     sample.sun = SUN;
     sample.sky = SKY;
+    sample.native_sun_sky = SUN + SKY;
     sample.day = 1.0;
     App::new()
         .add_plugins((
@@ -185,8 +186,11 @@ fn prepare(
         } else {
             Vec3::ZERO
         };
+        let static_light = if source.params.motion.x >= 2.0 {
+            if c.mask & 0x2000 != 0 { SUN + SKY } else { Vec3::ONE }
+        } else { SUN + SKY };
         let foam_gain = if c.mask & 0x1000 != 0 {
-            (SUN + SKY) * c.foam
+            static_light * c.foam
         } else {
             Vec3::ZERO
         };
@@ -200,7 +204,7 @@ fn prepare(
         );
         let mut material = source.clone();
         let old_sun = SUN * c.sun;
-        let old_foam = (SUN + SKY) * c.foam;
+        let old_foam = static_light * c.foam;
         let gain = if c.term == 0 {
             if legacy { old_sun } else { sun }
         } else if legacy {
