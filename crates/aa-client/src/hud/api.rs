@@ -79,6 +79,7 @@ pub struct HudData {
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
     pub(super) pvp: super::pvp::View,
+    pub(super) radar: super::radar::View,
     pub(super) breath: super::breath::View,
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
@@ -131,6 +132,7 @@ impl Default for HudData {
             passive_buffs: Vec::new(),
             local_combat: false,
             pvp: Default::default(),
+            radar: Default::default(),
             breath: Default::default(),
             expansion: Default::default(),
             repair: Default::default(),
@@ -242,6 +244,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::loot_roll::install(lua)?;
     super::trade::install(lua, bridge)?;
     super::pvp::install(lua, bridge)?;
+    super::radar::install(lua, bridge)?;
     super::breath::install(lua, bridge)?;
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
@@ -494,6 +497,7 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let Some(spawn) = world.resource::<Player>().spawn.clone() else {
         bridge.borrow_mut().pvp = Default::default();
+        bridge.borrow_mut().radar = Default::default();
         bridge.borrow_mut().expansion.clear();
         bridge.borrow_mut().repair = Default::default();
         bridge.borrow_mut().crafting = Default::default();
@@ -523,6 +527,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
     super::pvp::refresh(world, &mut data, &spawn);
+    super::radar::refresh(world, &mut data, &spawn);
     data.character_id = spawn.character().id;
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
