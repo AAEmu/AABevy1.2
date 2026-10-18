@@ -163,6 +163,14 @@ pub struct BodyPart {
     pub hair_base: String,
 }
 
+/// One model-specific equipment visual, including the original packed appearance flags.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemVisual {
+    pub asset_id: u32,
+    pub path: String,
+    pub detail: u32,
+}
+
 /// Character-create preset (`total_character_customs`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preset {
@@ -331,16 +339,24 @@ impl GameDb {
 
     /// Meshes of an equipment item for a model (`item_armors` -> `item_armor_assets` -> `item_assets`).
     pub fn item_meshes(&self, item_id: u32, model_id: u32) -> Result<Vec<String>> {
+        Ok(self.item_visuals(item_id, model_id)?.into_iter().map(|visual| visual.path).collect())
+    }
+
+    /// Model-specific visuals and `item_assets.detail`; use the selected helmet visual's
+    /// detail with [`crate::hair::HeadgearVariants`] to select authored hair/beard meshes.
+    pub fn item_visuals(&self, item_id: u32, model_id: u32) -> Result<Vec<ItemVisual>> {
         let mut st = self
             .conn
             .prepare(
-                "SELECT ia.path FROM item_armors arm JOIN item_armor_assets iaa ON iaa.armor_asset_id = arm.asset_id \
+                "SELECT ia.id, ia.path, ia.detail FROM item_armors arm JOIN item_armor_assets iaa ON iaa.armor_asset_id = arm.asset_id \
                  JOIN item_assets ia ON ia.id = iaa.asset_id \
                  WHERE arm.item_id = ?1 AND ia.model_id = ?2 ORDER BY ia.id",
             )
             .map_err(db_err)?;
-        let rows = st.query_map(params![item_id, model_id], |r| r.get::<_, String>(0)).map_err(db_err)?;
-        Ok(rows.filter_map(|r| r.ok()).map(|p| norm(&p)).collect())
+        let rows = st.query_map(params![item_id, model_id], |r| Ok(ItemVisual {
+            asset_id: r.get(0)?, path: norm(&r.get::<_, String>(1)?), detail: r.get(2)?,
+        })).map_err(db_err)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     /// A face / hair body part by `item_body_parts.item_id`.

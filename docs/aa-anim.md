@@ -554,8 +554,7 @@ logs that missing idle and holds its bind pose. The inspected PC regression capt
 
 Current validation: **61 unit tests passed, 1 ignored**, including original NPC target
 identity, nonzero original speech evaluation, all eight PC library selections and CAL
-include/override semantics. Hat variants remain unresolved: the DB supplies four alternate
-hair assets, but the helmet-to-variant selection contract has not been proven.
+include/override semantics. Native helmet/hair selection is described below.
 
 The public loaded-head integration path is now:
 
@@ -599,6 +598,48 @@ data all leave mesh/image/material/bind-pose counts unchanged (regression tested
 allows the caller to attempt native head preparation with safe fallback to the plain model.
 The successful result still retains exactly its private prepared mesh handles. Validation
 after the guard refactor: **62 passed, 1 ignored**.
+
+### Native helmet hair/beard selectors
+
+`hair::HeadgearVariants::from_asset_detail` decodes the original packed appearance flags
+of the **selected visible helmet asset**, including a visual override when one is active.
+The original `x2game.dll` `CharacterCustomizer::AdjustHairAsset` at `39315820` first uses
+the override descriptor, then the ordinary helmet descriptor. Only descriptor detail types
+3 or 7 (`(detail >> 13) & 7`) select variants; other types/default absence keep normal hair
+and beard. Hair uses `(detail >> 10) & 7`, beard uses `(detail >> 7) & 7`:
+
+| Selector | Native result |
+|---|---|
+| 0 | normal `asset_id` |
+| 1 | no attachment |
+| 2–5 | `asset_1_id` through `asset_4_id` |
+| 6–7 | normal `asset_id` |
+
+A zero alternate ID falls back to the normal asset, not hidden hair. These rules are from
+`39315710` and `394E0D10`; `39571050` confirms the names default/none/type1/type2/type3/type4.
+The item-assets loader `396C89D0` copies SQL column 9 (`detail`) to descriptor offset `0x24`.
+The bounded assembler listings and original-byte Unicorn oracle are under
+`data/extract/aa-anim/hair-native/`. All **512** combinations of type/hair/beard fields,
+override precedence, absence defaults, normal/missing alternate lookups and the native zero
+sentinel were executed against the original unpacked 1.2 binary from read-only RE notes.
+
+`GameDb::item_visuals(item_id, model_id)` exposes asset ID, path and detail in the same order
+as `item_meshes`. The latter retains its existing path-only API. For the selected helmet
+visual, decode its detail; then `BodyPart::variant_asset_id` / `variant_path` selects the
+original hair or beard body-part row. `Hidden` returns `None`; otherwise callers replace
+the mesh path while retaining their style/colour setup. The character assembly path is
+unchanged: selecting the actual visible helmet/override and applying the result remains an
+integration task. Beard selector decoding is supported, but beard attachment assembly is
+not added. No names, material classes or guessed helmet hiding rules are used.
+
+`hair_variants` renders female hairstyle item 24024, normal asset 10175 and all four distinct
+original alternates 10292–10295, plus explicit none. Helmet item 22874/model 11 provides
+asset 10663/detail 28744 and selects Type3 hair/default beard. Tests verify those database
+rows, original pak paths, zero-ID fallback and native selector-table goldens. Latest
+`cargo test -p aa-anim --lib`: **64 passed, 1 ignored**. This diagnostic isolates the authored
+meshes without claiming a complete helmet-equipped appearance match.
+Inspected final capture `shots/aa-anim/hair_native_variants_final_20261018.png` shows all
+six choices with aligned labels at **321.2–405.4 FPS**, after the shared build lock cleared.
 
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
