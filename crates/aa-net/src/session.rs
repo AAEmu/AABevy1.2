@@ -530,6 +530,7 @@ pub enum Event {
     ItemLifespan(crate::items::ItemLifespan),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Radar(crate::radar::RadarEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
@@ -1513,6 +1514,7 @@ impl Session {
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
+            M::Radar(e) => self.emit(Event::Radar(e)),
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
             M::SetBreath { breath } => self.emit(Event::SetBreath { breath }),
@@ -2126,6 +2128,24 @@ mod tests {
         assert!(matches!(events.try_recv(),Ok(Event::UnitPosture{obj_id:99,kind:1,anim_action:0,activate:false})));
         assert!(matches!(events.try_recv(),Ok(Event::Housing(HousingEvent::UnitPosture{obj_id:99,posture:house})) if house == posture.house.unwrap()));
         assert!(matches!(events.try_recv(),Ok(Event::Snow(true))));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn transfer_radar_reports_forward_repeated_raw_chunks_without_creating_units() {
+        use crate::radar::{RadarEvent, RadarToggle};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let toggle = RadarEvent::TransferToggled(RadarToggle { on: true, range: 500.0 });
+        let chunk = RadarEvent::TransferContacts { last: true, contacts: vec![] };
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::Radar(toggle.clone()), game::ServerMsg::Radar(chunk.clone()),
+            game::ServerMsg::Radar(chunk.clone()), game::ServerMsg::Snow(true),
+        ]))).await;
+        for expected in [toggle, chunk.clone(), chunk] {
+            assert!(matches!(events.try_recv(), Ok(Event::Radar(actual)) if actual == expected));
+        }
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
 

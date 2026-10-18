@@ -426,6 +426,7 @@ pub enum ServerMsg {
     BlinkUnit(crate::world_msg::BlinkUnit),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Radar(crate::radar::RadarEvent),
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
     ExpChanged { obj_id: u32, delta: i32, add_ability_exp: bool },
@@ -641,6 +642,7 @@ impl ServerMsg {
             Self::BlinkUnit(_) => "SCBlinkUnit",
             Self::Gimmick(e) => e.name(),
             Self::Housing(e) => e.name(),
+            Self::Radar(e) => e.name(),
             Self::UiData(_) => "SCResponseUIData",
             Self::EnvDamage(_) => "SCEnvDamage",
             Self::SetBreath { .. } => "SCSetBreath",
@@ -960,6 +962,7 @@ impl ServerMsg {
             sc::SCConflictZoneStatePacket => Self::ConflictZoneState(crate::conflict::ConflictZoneState::read(r)?),
             sc::SCForceAttackSetPacket => Self::ForceAttackSet { obj_id: r.bc()?, on: r.bool()? },
             sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
+            opcode if crate::radar::RadarEvent::handles(opcode) => Self::Radar(crate::radar::RadarEvent::read(opcode, r)?),
             opcode if crate::housing::HousingEvent::handles(opcode) => Self::Housing(crate::housing::HousingEvent::read(opcode, r)?),
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
