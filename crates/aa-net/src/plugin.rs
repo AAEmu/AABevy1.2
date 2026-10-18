@@ -259,6 +259,15 @@ mod equipment_flags_tests {
     }
 
     #[test]
+    fn plugin_security_receipt_updates_flags_and_signed_times_without_creating_items() {
+        use crate::{items::{ItemTask,ItemTasks},model::Item};
+        let mut app=App::new();init_state(&mut app);
+        {let mut inv=app.world_mut().resource_mut::<Inventory>();inv.bag_slots=1;inv.bag=vec![Some(Item{id:55,template_id:99,..Default::default()})];}
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::ItemsChanged(ItemTasks{reason:114,tasks:vec![ItemTask::Security{container:2,slot:0,item_id:55,bits:0x11,is_unsecure_excess:0,is_unsecure_set:0,is_unpack:1,unsecure_time:-3,unpack_time:99}],..Default::default()}))).unwrap();
+        let inv=app.world().resource::<Inventory>();let item=inv.bag[0].as_ref().unwrap();assert_eq!((item.flags,item.unsecure_time,item.unpack_time),(0x11,-3,99));
+    }
+
+    #[test]
     fn plugin_family_receipts_hydrate_and_reset_the_public_resource() {
         use crate::family::{Families,FamilyEvent,FamilyRoster};
         let mut app=App::new();init_state(&mut app);

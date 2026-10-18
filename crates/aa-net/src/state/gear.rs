@@ -196,7 +196,18 @@ impl Inventory {
             }
             ItemTask::Flags { container, slot, item_id, bits } => {
                 let Some(Some(item)) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
-                item.flags = *bits;
+                // Native action10/397cdc90 sets bits; action11 is a separate full replacement.
+                item.flags |= *bits;
+            }
+            ItemTask::Security { container,slot,item_id,bits,unsecure_time,unpack_time,.. } => {
+                if *item_id==0 {return false}
+                let list: &mut [Option<Item>] = match *container {
+                    container::INVENTORY=>&mut self.bag,container::BANK=>&mut self.bank,
+                    container::EQUIPMENT=>&mut self.equipment.slots,_=>return false,
+                };
+                let Some(Some(item))=list.get_mut(usize::from(*slot)) else{return false};
+                if item.id!=*item_id {return false}
+                item.flags=*bits;item.unsecure_time=*unsecure_time;item.unpack_time=*unpack_time;
             }
             ItemTask::Update { container, slot, item_id, detail, detail_payload } => {
                 let Some(Some(item)) = self.locate(*container, usize::from(*slot), *item_id) else { return false };
@@ -327,7 +338,7 @@ impl Inventory {
                         ItemTask::Add { container, slot, .. } | ItemTask::Count { container, slot, .. }
                         | ItemTask::Grade { container, slot, .. } | ItemTask::Remove { container, slot, .. }
                         | ItemTask::RemoveSlot { container, slot, .. } | ItemTask::Update { container, slot, .. }
-                        | ItemTask::Flags { container, slot, .. } => unlocked.push((*container, *slot)),
+                        | ItemTask::Flags { container, slot, .. } | ItemTask::Security { container, slot, .. } => unlocked.push((*container, *slot)),
                         ItemTask::Move { from_container, from_slot, to_container, to_slot, .. } => {
                             unlocked.extend([(*from_container, *from_slot), (*to_container, *to_slot)]);
                         }
