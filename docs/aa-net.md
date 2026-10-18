@@ -2155,7 +2155,7 @@ All three now have exact body consumption, typed `ServerMsg` and `session::Event
 and public plain data. None changes settled world, player, unit or inventory resources or sends an
 automatic response. Unknown opcodes still stop a DD04 batch: this is a focused coverage milestone,
 not a claim that all lane packets are decoded. Gimmick elevator/raft lifecycle `0x13c/0x13d/0x13e`
-is a larger remaining coordinated family. Login configuration/faction snapshots, expedition state,
+was the next coordinated family and is covered below together with its required `0x13f` boundary. Login configuration/faction snapshots, expedition state,
 shipyard state, district/portal lists, duel/crime state and notices remain further audit candidates.
 `SCCooldowns 0x04a` and `SCBuffUpdated 0x0b9` have declarations, but the lane source audit found no
 writer or send sites for them; they were not ranked as currently emitted receive gaps.
@@ -2226,3 +2226,83 @@ by real HP/weather updates. The session test verifies wire order, unchanged sett
 unit/item state for the directives, and no automatic instance/teleport reply. No live lane traffic
 was used; end-to-end instance loading, physical blink motion and timer UI remain application/live
 QA work.
+
+
+## Gimmick elevator/raft receive family (2026-10-17)
+
+`gimmick` now decodes the coordinated gimmick announcements/motion family and the joints notice
+that the lane sends immediately after creation. All four route through `ServerMsg::Gimmick` and
+`Event::Gimmick(GimmickEvent)`. `GimmickSpawn`, `GimmickMovement`, `GimmickJoint`, `Gimmick`,
+`GimmickEvent` and the `Gimmicks` resource are reexported from `aa_net`.
+
+| Packet | Body and native bound |
+|---|---|
+| `SCGimmicksCreated 0x13c` | u8 raw count, then `min(count,30)` complete `GimmickSpawn` bodies |
+| `SCGimmicksRemoved 0x13d` | u16 raw count, then `min(count,500)` BC object IDs |
+| `SCGimmickMovement 0x13e` | 72 bytes: u32 object ID, u32 time, i64 XY, f32 Z, four rotation floats, three velocity floats, three angular-velocity floats, f32 scale |
+| `SCGimmickJointsBroken 0x13f` | u8 raw count, then `min(count,200)` triples of u32 object ID, i32 joint ID and i32 epicenter |
+
+`GimmickEvent::{Created { raw_count, gimmicks }, Removed { raw_count, obj_ids }, Moved(report),
+JointsBroken { raw_count, entries }}` retains original counts while consuming exactly the native
+bounded inline lists. IDs/duplicates/zero entries are not filtered or silently remapped. The lane's
+visibility batcher chunks creates by 30 and removals by 500. Its public writers themselves do not
+cap arbitrary oversize input; such an overlong body would differ from the native bounded contract.
+This decoder follows native consumption rather than treating excess bodies as extra native list
+members. The joints notice is currently always sent empty by lane visibility. Its unused nonempty
+writer fills both signed fields with zero; the receiver still preserves the complete native fields.
+`SCGimmickResetJoints 0x140` and `SCGimmickGrasped 0x141` have opcode declarations but no lane
+writers/send sites found, and remain deferred.
+
+`GimmickSpawn` has full u32 `obj_id` (not BC), `template_id`, raw i64 `entity_guid`, u32 `faction_id`,
+`spawner_obj_id`, `grasper_obj_id`, and `zone_id`, then a length-prefixed `model_path`, i64 X/Y,
+f32 Z, four rotation floats, f32 scale, velocity/angular velocity triples and f32 scale velocity.
+The fixed portion including the two-byte string length is 102 bytes. The i64 GUID preserves the
+same eight bytes as native's u64, and `zone_id` preserves native's signed i32 as u32 bits. Both spawn
+and movement have `position()` helpers; raw XY and all original float fields remain available.
+The four rotation values are retained in wire order without normalization or a component conversion.
+The lane writer uses quaternion X/Y/Z/W. No faction relationship, summoner ownership, local physics
+control, attachment or acknowledgement is inferred from the metadata IDs.
+
+Native's model-path reader has a 99-byte payload limit (`0x63` plus its terminator). This client
+rejects negative or over-99-byte lengths rather than guessing native overflow behavior. Valid UTF-8
+payloads are kept verbatim (including encoded NULs); invalid UTF-8 is rejected, without asset-path
+normalization or replacement characters. The lane
+writer accepts an arbitrary string, so that is an explicit compatibility bound; the read-only
+compact database has 76 gimmick templates and maximum model-path byte length 87 in this audit.
+No database or lane data was changed.
+
+`Gimmicks { by_id: HashMap<u32, Gimmick> }` is registered by `NetPlugin` and available as
+`WorldState.gimmicks`. Each `Gimmick` contains the original `spawn` and optional `last_movement`.
+Creation registers an announced ID; a duplicate registered ID leaves the original metadata/report
+unchanged, matching native's existing-object guard. Removal deletes matching entries. A new
+character selection, leaving the world or disconnect clears the table. Movement is retained only
+for an already announced ID, and is the last report in wire arrival order. Decreasing timestamps,
+midnight/wrap values and raw transforms are not interpreted as a new chronology. The spawn snapshot
+is not rewritten, and no ordinary `Unit`, player motion, loaded entity or physics transform is
+created or changed. Joints notices remain events without fabricated breakage/physics state.
+`LoadInstance` alone does not clear or settle this table: scene transition/reset planning remains
+application work, alongside asset loading, interpolation, riders/support transforms and rendering.
+
+Lane evidence: `models/gimmick.rs::Gimmick::write`, `packets/world_objects.rs`,
+`systems/npcs/gimmick/packets.rs`, and `world/{visibility,mod}.rs`. Individual and region visibility
+both send `0x13f` after `0x13c`; skipping that empty notification would still stop trailing DD04
+state. Actual movement packets are emitted by `systems/npcs/gimmick/manager.rs`.
+
+Native evidence (`x2game_unpacked.dll`): SC `0x13c` constructor `391b0fe0` sets opcode at `391b1020`,
+vtable `399b5eb0`, serializer `397c3660` caps the byte count to 30. Entry reader `397c1330` matches
+all lane fields and applies the `0x63` model-path limit. SC `0x13d` constructor `391b1120` sets
+opcode at `391b1140`, vtable `399b3a08`, serializer `397caa00` caps to 500 and reads BC IDs.
+SC `0x13e` constructor `391d0230` sets opcode at `391d024b`, vtable `399b7494`, serializer
+`397b5bc0` plus nested `397b24c0` matches the 72-byte report. SC `0x13f` opcode assignment
+`391b11ce`, vtable `399b3a14`, serializer `397b5bf0` establishes the 200-entry raw-triple cap.
+`OnGimmicksCreated 391db870` calls manager `39179910` (existing ID is ignored),
+`OnGimmicksRemoved 391db920` calls `39179a40` to delete a matching registered ID, and
+`OnGimmickMovement 391db9d0` calls `3917a1d0`, which looks up an existing object and queues motion
+for native processing. Reproducing that engine's asset-failure queues, locally controlled-object
+filter, smoothing and actual physics application is outside this metadata receive slice.
+
+Tests cover independent byte goldens/full-width IDs, every truncation point, native count boundaries
+and over-cap inline consumption, string byte limits, following DD04 entries for every message,
+duplicate/remove/recreate/reset behavior, no phantom units, and an ephemeral loopback session
+checking ordered events/resource updates, later HP/weather state and no automatic reply.
+Live elevator/raft visibility, riding and scene-transition QA remain pending while the lane is stalled.

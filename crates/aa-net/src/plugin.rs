@@ -20,6 +20,7 @@ use crate::session::{Client, Command, Event};
 use crate::actability::Actabilities;
 use crate::mate::Mates;
 use crate::slave::Slaves;
+use crate::gimmick::Gimmicks;
 use crate::state::{
     Auction, ActionBar, Buffs, Characters, Chat, Doodads, Friends, Inventory, Loot, LootRolls, Mailbox, Party, Player, PlayerStats, Quests, Repair, Shop,
     Skills, Status, Target, Trade, Units, WorldInfo, Worlds,
@@ -157,4 +158,5 @@ net_state! {
     actabilities: Actabilities,
     mates: Mates,
     slaves: Slaves,
+    gimmicks: Gimmicks,
 }
