@@ -765,6 +765,65 @@ of the spawn picture (rock, grass slope, far bank, left trees) are 6 to 20 displ
 at the left and 20 dark at the right, where the real pond has a pale sheet that looks like the sky's mirror image (the cube map reflection is dim at
 that angle). Not re-fitted: it is one picture, and the real client's own shade (AO, the engine's film curve) is not reproduced.
 
+**Native curves and defaults** (`env.rs`, `env_defaults.rs`): original 1.2 initialization
+**300A9450**, **300A8EE0** (Moon1-3) and **300A92B0** (character lights) define 147 variable
+slots. The catalog stores exact f32 bits: scalar default/minimum/maximum or RGB defaults.
+**300A8C30** creates CBezierSplineFloat / CBezierSplineVec3 and inserts constant default
+keys at 0 and 1. Missing variables retain these keys; a Variable's editor Value/Color
+attribute alone does not replace them. Unknown names are ignored, and the native slot-100
+alias `HDR blueshift` resolves to `Blueshift`. The two relic layers are allocated from
+defaults before loading (`crysystem` **365F2CE0**): a missing layer in a TimeOfDayList keeps
+defaults, while a standalone TimeOfDay block is loaded into both. This replaces the old
+zero-for-missing-variable and first-layer fallback behavior.
+
+Native **300ABDD0** (float) / **300AC0A0** (RGB) calculate cubic Bezier controls. At an
+interior key `i`, the automatic incoming control delta is
+`(value[i+1]-value[i-1])/3 * (time[i]-time[i-1])/(time[i+1]-time[i-1])`;
+the outgoing control uses the complementary time fraction. The first outgoing and last
+incoming controls are one third of their adjacent value difference; the unused outer
+controls are zero. Low flag bits 0..2 select incoming mode and bits 3..5 outgoing mode:
+0 automatic, 1 stored/free (zero after XML InsertKey), 2 flat, 3 step, 4 linear. Higher editor
+flags are retained and do not change tangents. Interior flat/step controls are zero; linear
+uses the corresponding adjacent difference / 3. Native endpoint rules run before the
+interior mode switch, including their treatment of flat endpoints. A left outgoing step
+returns the right value, while a right incoming step holds the left value.
+
+**300ABFA0** / **300AC540** evaluate Bezier `(A, A+outA, B-inB, B)` at the normalized
+segment time. Lookup **300AE830** / **3006C250** clamps outside the first/last key in the
+ToD spline's default range mode; it does not invent a periodic last-to-first segment.
+The world clock still wraps hours normally. aa-world uses binary key lookup and four
+neighboring keys at most, without per-frame allocations or rebuilding all curve controls.
+**300A4C10** clamps each evaluated scalar to its native catalog range (values below 1e-10
+in magnitude become zero) and each RGB channel to 0..1 before the zone blend. Native white
+Color balance defaults also remove the former black-to-white missing-value fallback.
+
+Numeric validation uses the original x86 bytes, not just a second formula transcription:
+the read-only client image was mapped into a bounded Unicorn emulator and its native
+tangent/evaluation routines executed for 35 scalar/RGB cases. Rust regressions retain the
+results for real zone-179 Sun/Sky/Fog/HDR curves and nonuniform automatic/free/flat/linear/
+step/editor flags, within 4e-6. Evidence/scripts and the 147-slot extraction are under ignored
+`data/extract/aa-world/environment/`. The `tod_curves --hour H` example fixes the original
+spawn camera plus its world-origin shift and forced zone 179; baseline linear and native
+curve executables are kept separately for controlled dawn/dusk captures.
+
+Validation: all 122 aa-world library tests pass (nine existing ignored tests), and all
+examples pass `cargo check`. The recovered engine and targeted original-pak DLL have the
+same SHA256 `34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de`.
+Inspected fixed-camera captures under `shots/aa-world/environment/` are
+`curves_linear_dawn.png`, `curves_native_dawn.png`, `curves_linear_dusk.png` and
+`curves_native_dusk.png`. Linear/native dawn logged 221–256 / 168–233 FPS; dusk logged
+266–295 / 234–293 FPS, with other shared-machine GPU activity during the native dawn run.
+Mean absolute RGB differences are 4.80 / 4.17 / 2.10 at dawn and 1.72 / 1.45 / 2.03 at
+dusk. These are controlled comparisons against the old sampler; no matching original-client
+dawn/dusk frame was available. Original native numeric outputs provide the correctness
+check, without fitting new exposure or color constants. All four windows exited normally.
+
+Limits: legacy XML's `sRGB != 1` color/HDR migration remains an adapter boundary; the real
+numeric curve fixtures use authored `sRGB="1"` data. XML contains no custom control values
+to restore for free tangents. Malformed/empty key lists retain initialized defaults rather
+than reproducing the native empty-spline undefined output. No subjective color/exposure
+calibration is part of the curve correction.
+
 **Spatial zone transitions** (`World::environment_weights`, `TimeOfDay::sample_blended`,
 `sky::TodCache`): the original 1.2 producer is recovered in `crysystem.dll`,
 `SeamlessSystem::UpdateTimeOfDay` at **365EEC20**. The read-only decompile is
@@ -788,8 +847,7 @@ moon `exp2(HDR dynamic power factor)` must operate on blended raw values. The ne
 does this without building per-frame spline maps. Sun and moon orbital directions still
 use the raw clock hour and world lighting configuration; curve lookup keeps the existing
 warped hour. Native **300A4C10** invokes each layer's spline evaluator at warped hour / 24.
-The existing linear spline evaluator is preserved here; exact native tangent/default-table
-parity is a separate boundary, not proved by this blend audit.
+Native Bezier evaluation and the exact default table are now implemented as described above.
 
 There is no native previous-frame interpolation in this path. The old frame-rate-dependent
 exponential filter / 0.02 minimum step has been removed; continuous movement now blends
@@ -801,8 +859,8 @@ dependent cloud/moon systems retire or hide their draws. Existing sky/ocean enti
 ownership remains with the world plugin; this is not an independent full-world teardown.
 
 Supported slice: the spatial blend of the selected `WorldClock.layer` (normal by default).
-Area-ToD priorities/weights, per-zone relic layer transitions, native spline tangent/default
-semantics and `env.xml` parameter blending are not implemented by this change. Skybox and
+Area-ToD priorities/weights, per-zone relic layer transitions and `env.xml` parameter
+blending remain unsupported. Skybox and
 cloud asset selection still follows the discrete owning zone; native skybox opacity and
 layer-transition fades from **365F0210** remain explicit gaps. No sky/cloud color calibration
 was changed. `environment_border` exercises the actual Solzreed 179 / Silent Sea 210 border
@@ -1521,7 +1579,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   `2 Color` 1.0 x 0.7, constant over the day) and `Char Light Multiplier`, so the capture's character is a clear brown while ours (shade only)
   is nearly black (aa-client / aa-anim materials).
 * The real client's time-of-day hour warp and spatial raw-curve zone blending are implemented (see Environment). Remaining transition gaps:
-  area-ToD overrides, per-zone relic layer weights, native spline tangent/default semantics and discrete skybox/cloud fades. The plateau of
+  area-ToD overrides, per-zone relic layer weights, legacy sRGB XML migration and discrete skybox/cloud fades. The plateau of
   12:00 to 19:05 (every hour reads as noon) and the compression of 19:00 to 22:00 into spline 12 to 18 come from the 1.2 code as read, not from a day sweep
   of the real client (`time set hour=H` captures at 2, 3, 5, 8, 12, 15, 19, 20, 21, 22, 23 would confirm it). The dusk colours of the pond at 21 to 22 h
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
