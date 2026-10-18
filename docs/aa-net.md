@@ -4964,3 +4964,63 @@ Goldens cover every field, high change bits, negative values/raw date bytes,
 all truncations, DD04 trailing-packet alignment, raw message bounds and lifecycle.
 WorldState/Bevy tests prove the complete record and ratio reach their resources.
 Source artifact: `data/extract/aa-net/battlefield-native/scheduled-event-20261018.txt`.
+
+
+### Ordinary SkillAccessor / battlefield slot244 planner boundary
+
+UI source has closed slot244 to raw SkillAccessor kind15, requiring tag204 and
+received first-matching skill enable. It invokes the ordinary path
+3920a220/3920a170?39209d80?393989e0; this is not a special direct packet sender.
+The ordinary display CanUse39209a70 is protected/obfuscated. No ready default or
+plain UseSkill/UseSkillAt replacement is established by slot enable alone.
+
+39209d80 requires the current actor at client39b02294+10c. It builds initial
+target-kind0/objectID from selected-target property4 at actor+1aa0, with a
+fallback kind4/raw ID from actor+5f90 when the former is the invalid sentinel.
+Input modifiers are masked with0x44; any remaining bit replaces the initial
+target with caster self/objectID and sets options byte+1. The mask is retained
+as raw source evidence; it is not renamed Alt/Shift without input-enum proof.
+Raw accessor kind18 has separate invocation guards, while battlefield kind15
+uses the normal branch. Accessor byte+17 can refuse invocation through39016c40;
+its complete producer meaning is not guessed from a visual enable state.
+
+393989e0 looks up the combat skill descriptor396f6390, copies the caller target,
+and unless options+1 forces it, dispatches descriptor.target_type_id:1 through
+393910e0,4 through39393a20,5 through39391090. The simple type5 helper only fills
+an invalid unit target with self when CVar3a1776c0 exists/GetIVal>0; it converts
+kind4 to an invalid kind0 before that fill. Type1 additionally checks the
+selected unit's raw relation mask through39028240, so not every selected unit
+survives unchanged. Hostile auto-selection uses the protected type4 helper and
+39391170; companion CVar3a1776c4 is named auto_enemy_targeting by static row
+39ac44d8/44dc. These are conditional planner steps, not blanket self/target casts.
+
+Next,393925c0 can replace the skill ID and caller caster metadata from an equipped
+item. Descriptor+e8 is skills.link_equip_slot_id and+e4 is link_backpack_type_id:
+SQL39a06a90 columns67/66, loader39731fc0..39731fdc. Index-1 bypasses that entire
+substitution. The current read-only compact tag204 catalog has36 skills, all
+link_equip_slot_id=-1;32 have target_type0, three have type6 (21010,12614,22527),
+and one has type4 (21558). This closes the item-link bypass for those catalog
+rows, but does not establish generic target planning or permission to cast.
+Native target_type+1b0 mapping remains separately proven by397327a6..397327bd.
+
+The final shared planner39396e20 returns a structured error/result, used by
+393989e0 for local error reporting39390900 and conditional model-action retry
+39393920 (including result0x0f with its additional CVar/controller gates).
+Knowing the initial target does not prove its final target/caster/skill-object
+or when it sends. The lane's existing CSStartSkill0x052 codec is distinct from
+this missing local planner. No new command, speculative packet route, movement
+retry, completion, or always-success callback is introduced by this audit.
+
+A bounded read-only live source check verified StandMode at399a08dc in original
+PID48924 before reading: entry stubs match the static DLL, but VM sections at
+3ac11fde/3ab63fb7/3a6775ec contain decrypted threaded x86 rather than static
+ciphertext. This is useful source evidence, not foreign-process execution.
+One local Unicorn attempt with copied source pages and a fake local packet
+buffer stopped at100000 instructions/69 pages in protector setup; it did not
+return or reach the trapped native sender and provides no constructor/packet
+route oracle. That boundary is explicit; unbounded VM exploration is deferred.
+
+Artifacts under `data/extract/aa-net/skill-planner-native/` include the exact
+entry map, read-only tag204 rows, module-verified runtime snippets and bounded
+local-attempt result/unique instruction record. No original process input,
+control, injection, write, network action or live lane transaction was performed.
