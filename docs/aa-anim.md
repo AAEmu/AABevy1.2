@@ -753,6 +753,29 @@ and `facial_bones_default_ferre_verified.png` still show the original open/blink
 eight seconds: Nuian 238.6-250.1 FPS after the first 311.2 sample (244.3 during capture), Ferre
 female 193.8-250.9 FPS (235.5 during capture). The three-frame startup refresh remains unchanged.
 
+### Opt-in helmet application for resolved characters
+
+`CharacterDesc::resolve_with_headgear(db, Option<detail>)` wraps the existing resolver in
+`hair.rs` without changing character calibration. `CharacterAssets::apply_headgear(db,
+detail)` applies the same native selection to already resolved assets and returns both
+hair/beard selectors. They alter only the hair mesh path or explicit hidden state, retain
+the selected style/colour and other parts, and restore the original hair after a hidden
+helmet by applying detail zero. A bald description stays bald. Normal `resolve` behavior
+is unchanged. The caller supplies the actual visible helmet's detail after equipment
+visibility and image-item overrides; these methods do not hide helmet meshes themselves
+or add beard geometry.
+
+`hair_variants --helmets` exercises this resolver using original Nuian female hairstyle
+24024, metal helmet item 22874 (Type3) and leather helmet item 18230 (None). Each visible
+helmet's detail comes from the same `item_visuals` row used for the actual costume model.
+The ordinary six-choice mode also uses the public resolver wrapper. Latest own tests:
+**67 passed, 1 ignored**. Regression checks original selected mesh/material, other-part
+preservation, actual hidden selection, restoration, no-helmet equivalence and a bald
+description.
+Inspected `shots/aa-anim/headgear_resolve_native_final_20261018.png` shows normal hair,
+the original metal helmet with Type3 hair and the original leather hood with hidden hair
+at **320.2–414.3 FPS**. This is an isolated mesh-selection diagnostic.
+
 ## Gaps
 
 * Skin shading: the engine's HumanSkin shader (SSS map, rim, `bright` / `middle` colours per light
@@ -761,9 +784,9 @@ female 193.8-250.9 FPS (235.5 during capture). The three-frame startup refresh r
   brown tint of the grey fur texture; the ferre eyes are grey where the capture is blue (the
   eyeball texel region), the face is a shade lighter than the capture.
 * Hair: the Kajiya-Kay streaks are a baked strand map, not a tangent highlight; no alpha-blend
-  sorting (alpha mask); hat variants
-  (`asset_1..3`) and beards are not implemented; preset hair colours come from the colour `.mtl` of
-  the chosen style (`hair_colors`).
+  sorting (alpha mask). Native hat variants (`asset_1..4`) are available through the opt-in
+  resolver above; full beard assembly remains a gap. Preset hair colours come from the
+  colour `.mtl` of the chosen style (`hair_colors`).
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
   texture).
 * `aa-client` selects locomotion and action clips; `Lmg` parsing and direction sampling are available.
