@@ -36,6 +36,17 @@ pub enum AttachmentKind {
     Other,
 }
 
+/// Native `AttachmentType` payload, separate from the CA_BONE/CA_SKIN attachment.
+/// Values match the original descriptor at +0x44, not inferred file extensions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BindingKind {
+    #[default]
+    Object = 1,
+    Entity = 3,
+    Effect = 5,
+}
+
 /// Original `AlignBoneAttachment` mode. `Bone` ignores XML Rotation/Position;
 /// `Model` uses a model-space default transform. `Skin` needs surface projection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,7 +61,9 @@ pub enum BoneAlignment {
 pub struct Attachment {
     pub name: String,
     pub kind: AttachmentKind,
-    /// Pak path of the attached `.chr` / `.cgf` / `.cdf`, empty when the slot is unused.
+    pub binding_kind: BindingKind,
+    /// Object pak path, effect library identifier or entity binding, according to
+    /// `binding_kind`. Non-object identifiers retain authored spelling/case.
     pub binding: String,
     pub material: Option<String>,
     /// Bone of a `CA_BONE` attachment.
@@ -99,6 +112,12 @@ impl Cdf {
                     Some("CA_BONE") => AttachmentKind::Bone,
                     _ => AttachmentKind::Other,
                 };
+                let binding_kind = match a.attribute("AttachmentType") {
+                    Some(value) if value.eq_ignore_ascii_case("effect") => BindingKind::Effect,
+                    Some(value) if value.eq_ignore_ascii_case("entity") => BindingKind::Entity,
+                    _ => BindingKind::Object,
+                };
+                let binding = a.attribute("Binding").unwrap_or("");
                 let rotation = a
                     .attribute("Rotation")
                     .and_then(|v| floats::<4>(v))
@@ -107,7 +126,8 @@ impl Cdf {
                 cdf.attachments.push(Attachment {
                     name: a.attribute("AName").unwrap_or("").to_string(),
                     kind,
-                    binding: norm(a.attribute("Binding").unwrap_or("")),
+                    binding_kind,
+                    binding: if binding_kind == BindingKind::Object { norm(binding) } else { binding.to_string() },
                     material: a.attribute("Material").map(norm).filter(|m| !m.is_empty()),
                     bone_name: a.attribute("BoneName").unwrap_or("").to_string(),
                     bone_alignment: match a.attribute("AlignBoneAttachment") {
@@ -149,6 +169,7 @@ impl Cdf {
         let Some(slot) = part.attachment_slot() else { return false };
         let Some(attachment) = self.attachments.iter_mut().find(|a| a.kind == AttachmentKind::Skin && a.name.eq_ignore_ascii_case(slot)) else { return false };
         attachment.binding = part.path.clone();
+        attachment.binding_kind = BindingKind::Object;
         attachment.material = None;
         // This is the effective visible binding, replacing an empty/hidden slot.
         attachment.flags &= !1;
@@ -205,6 +226,53 @@ mod tests {
  </AttachmentList>
  <ShapeDeformation COL0="0" COL1="0.5" COL2="0" COL3="0" COL4="0" COL5="0" COL6="0" COL7="0"/>
 </CharacterDefinition>"#;
+
+    #[test]
+    fn binding_payload_uses_native_explicit_type_and_preserves_identifiers() {
+        let cdf = Cdf::parse(r#"<CharacterDefinition><Model File="body.chr"/><AttachmentList>
+            <Attachment AName="object" Type="CA_BONE" Binding="GAME\Objects\Mesh.CGF"/>
+            <Attachment AName="unknown" Type="CA_BONE" AttachmentType="other" Binding="GAME\Objects\Mesh.CGF"/>
+            <Attachment AName="effect" Type="CA_BONE" AttachmentType="EfFeCt" Binding="Library.Group.MixedCase"/>
+            <Attachment AName="entity" Type="CA_BONE" AttachmentType="EnTiTy" Binding="AuthoredEntityName"/>
+            </AttachmentList></CharacterDefinition>"#).unwrap();
+        for name in ["object", "unknown"] {
+            let attachment = cdf.attachment(name).unwrap();
+            assert_eq!(attachment.binding_kind as u32, 1);
+            assert_eq!(attachment.binding, "objects/mesh.cgf");
+        }
+        let effect = cdf.attachment("effect").unwrap();
+        assert_eq!(effect.binding_kind as u32, 5);
+        assert_eq!(effect.binding, "Library.Group.MixedCase");
+        let entity = cdf.attachment("entity").unwrap();
+        assert_eq!(entity.binding_kind as u32, 3);
+        assert_eq!(entity.binding, "AuthoredEntityName");
+    }
+
+    #[test]
+    fn original_horse_and_costume_effects_keep_native_bone_transforms() {
+        if !aa_cry::pak_available() { return; }
+        let horse = Cdf::load("objects/characters/animals/horse/horse_lord.cdf").unwrap();
+        let skeleton = aa_cry::Skeleton::load(&horse.model).unwrap();
+        for (slot, suffix) in [("effect_foot_lf", "LF"), ("effect_foot_lr", "LR"), ("effect_foot_rf", "RF"), ("effect_foot_rr", "RR")] {
+            let effect = horse.attachment(slot).unwrap();
+            assert_eq!(effect.kind, AttachmentKind::Bone);
+            assert_eq!(effect.binding_kind, BindingKind::Effect);
+            assert_eq!(effect.binding, format!("abillity_skill_table_m.system_skill.lord_horse_foot_{suffix}"));
+            assert_eq!(effect.bone_alignment, BoneAlignment::Model);
+            let (bone, local) = effect.bone_binding(&skeleton).unwrap();
+            assert_eq!(skeleton.bones[bone].name, effect.bone_name);
+            let authored = Affine3A::from_rotation_translation(effect.rotation, effect.position);
+            assert!((skeleton.bones[bone].bind_model * local).abs_diff_eq(authored, 1e-4));
+        }
+        let costume = Cdf::load("objects/characters/elf/female/costume/el_f_sk_whiteday001/el_f_sk_whiteday001.cdf").unwrap();
+        let headring = costume.attachment("headring").unwrap();
+        assert_eq!(headring.binding_kind, BindingKind::Effect);
+        assert_eq!(headring.binding, "X2_EFFECTS.doodad_effect.whiteday_custume_head_elf");
+        let skeleton = aa_cry::Skeleton::load("objects/characters/elf/female/nude/el_f_base.chr").unwrap();
+        let (bone, local) = headring.bone_binding(&skeleton).unwrap();
+        assert_eq!(skeleton.bones[bone].name, "Bip01 Head");
+        assert!((skeleton.bones[bone].bind_model * local).abs_diff_eq(Affine3A::from_rotation_translation(headring.rotation, headring.position), 1e-4));
+    }
 
     #[test]
     fn parses_base_cdf() {
