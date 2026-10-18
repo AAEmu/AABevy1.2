@@ -3372,11 +3372,11 @@ ACTABILITY_MODIFIER_UPDATE234 for the current house. Faithful hydration requires
 received house/doodad decoration association plus the static decoration catalog; absent
 full state must not be represented as a proven zero modifier.
 
-The bounded constant audit found only reads of ten language-ID globals39acb624..648,
+The static constant audit found only reads of ten language-ID globals39acb624..648,
 excluded Enum group39ac99b8 and special count-exclusion39acb620. Their image contents are
-protected/nonplaintext; no direct static initializer assignment was found. Runtime or
-protected-data initialization tracing is still needed. Numeric IDs must not be guessed
-from catalog language names or enum ordering.
+protected/nonplaintext; no direct static initializer assignment was found. The later
+read-only runtime check below closes the language and count-exclusion IDs; the separate
+Enum exclusion39ac99b8 remains unresolved. No value is inferred from catalog names.
 
 ### Stablehand quote getter source audit (2026-10-18)
 
@@ -4068,3 +4068,65 @@ identify an owned request and remain uncorrelated. Existing expansion cost-sign 
 and ignored auto-AA wire flag remain lane limitations, not fabricated client fixes.
 
 Proficiency reconciliation validation: cargo check and all 312 aa-net library tests passed.
+
+
+### Proficiency eligibility, payment and runtime ID closure (2026-10-18)
+
+CanUpgradeExpert wraps native error-code predicate397a8e60 (zero means true).
+It compares received base points, without modifyPoint bonuses, against the current
+SHOW-visible expert row up_limit (missing row fallback10000), else error1fc. Current
+step must be below GetMaxGrade (visible row count minus1), else1fd. The next row's
+expert_limit0 succeeds without a capacity count. Otherwise the count of eligible
+professions at-or-above the next grade must be strictly less than next expert_limit
+plus the received expanded-expert byte, else1fe. This predicate does not check money,
+AA Points or certificates. Missing received entries are treated as point0/grade0 by
+the native lookup; an integration with an incomplete snapshot must retain unknown
+state instead of presenting that fallback as an authoritative received profession.
+
+CanDowngradeExpert397a8f90 requires an existing received entry with step>0; absent or
+step0 returns1ff. It checks neither points nor payment. GetActabilityCountByGrade
+3943b6f0 calls397a86b0 and counts EXACT equality (397a8700); upgrade capacity instead
+uses397a8760 and counts grade>=requested (397a87b0). Both require a resolved static
+group whose +0c flag is nonzero, and exclude globals3a5e112c,39acb620 plus all ten
+language IDs accepted by397a7c60. This is not a count of every received map entry.
+
+A bounded read-only runtime check closes those formerly protected ID values:
+original PID48924, verified module string StandMode at399a08dc, has3a5e112c=0,
+39acb620=19, and39acb624..39acb648 consecutively21..30. Thus these count predicates
+exclude IDs0,19,21..30. IsLanguageActability397a7c60 recognizes exactly21..30.
+Source artifact data/extract/aa-ui/native-proficiency-runtime-20261018.txt records
+PROCESS_VM_READ-only reads, with no writes or UI input. This does not resolve the
+separate Enum exclusion global39ac99b8; it must not be silently assigned19 too.
+
+CanExpandExpert3943b940 only tests whether397a9540 finds key(receivedCount+1), with
+native byte arithmetic. Neither funds nor certificates are checked. Expansion ends
+at the first missing next key, not at a row-count-derived cap. GetExpandExpertInfo
+3943ba20 uses the same offered row; requireLP is life_point, optional requireItemType
+and requireItemCount appear only for a non-sentinel item ID. remainExpandCnt counts
+consecutive rows AFTER the offered row. Current catalog keys1..14 therefore give
+count0: offered1/remain13, count13: offered14/remain0, count14: no offer. These are
+current data values, not protocol constants. Actual ExpandExpert3930c280 separately
+checks nonnegative life_point against character vocation points (+63c), error269,
+then physical certificate count via397ccda0, error1b, before sending CS101.
+
+GetGradeInfo3943b170 always adds received expansion count to expertLimit, even when
+the base is0; CanUpgradeExpert has its separate base0 unlimited shortcut. Native
+SHOW-filtered rows, ordered by up_limit, define the grade index and GetMaxGrade;
+current IDs1..7 yield grades0..6. Hidden rows8..31 remain relevant to the lane's
+unfiltered downgrade sequence, not the native visible grade map. Missing grade
+fallback397a8dd0 has upLimit10000 and other numeric defaults0 (currency-1 before the
+playerflag override). Colors use uppercase eight-digit hex. With playerflag1000,
+upCurrency/downCurrency are raw DB numbers and upPrice/downPrice decimal strings;
+without it, currencies are number0 and prices string"0". Prices are not Lua numbers.
+
+UpgradeExpert/DowngradeExpert action wrappers39438840/39438870 read the current
+inventory auto-AA getter (raw received value==1), then run their action predicates.
+When playerflag1000 is set, payment helper394f0eb0 uses the current grade row's cost:
+raw currency0 checks cash (397d0b60); raw3 checks AA Points (397d0be0, inventory+C330);
+raw4 checks cash first, then cash-plus-AA (397cf400) and the auto-AA/dialog path.
+The C330 storage is source-named AA Points by GetMyAAPointString394c9580 registration
+394c9dad. Raw4 can return a local confirmation/dialog result rather than send success;
+this must not become a fabricated ACK. Other currency IDs fall through this helper,
+which is not evidence of a complete general currency validator. Current visible
+expert rows have zero raw0 costs. Getter eligibility and action payment are separate
+contracts; received tier/expansion events remain the only authoritative settlement.
