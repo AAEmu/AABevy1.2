@@ -36,7 +36,8 @@ impl PlacedVoxel {
     }
     /// Native Terrain base pass of a compiled static voxel. Colours are the original
     /// linear baked RGB reconstructed from COLORS.r/b and COLORS2.b. Projected terrain
-    /// detail layers are not included; vertices requiring the cover-texture path are unsupported.
+    /// detail layers are not included. Colour alpha is the native per-vertex baked-colour flag;
+    /// zero requires the cell's terrain-cover texture, and it interpolates across mixed triangles.
     pub fn compiled_base_mesh(&self) -> Option<aa_cry::mesh::MeshData> {
         base_mesh(self)
     }
@@ -166,8 +167,8 @@ fn static_model(file: &ChunkFile<'_>) -> Option<aa_cry::Model> {
 
 // TerrainVS uses g >= 0.5, hence byte 128 is included. Native CRenderMesh's
 // 382051A0 puts COLORS2 byte 2 into Normal.w; TerrainVS assembles (Color.r,b,Normal.w).
-fn base_colour(colour: [u8; 4], extra: [u8; 4]) -> Option<[u8; 4]> {
-    (colour[1] >= 128).then_some([colour[0], colour[2], extra[2], 255])
+fn base_colour(colour: [u8; 4], extra: [u8; 4]) -> [u8; 4] {
+    [colour[0], colour[2], extra[2], if colour[1] >= 128 { 255 } else { 0 }]
 }
 
 fn base_mesh(voxel: &PlacedVoxel) -> Option<aa_cry::mesh::MeshData> {
@@ -202,19 +203,8 @@ fn base_mesh(voxel: &PlacedVoxel) -> Option<aa_cry::mesh::MeshData> {
         return None;
     }
     let colours = extra.data.get(24..24 + count * 4)?.as_chunks::<4>().0;
-    // Only referenced vertices affect the native base pass. Unflagged vertices need
-    // cover-texture projection, not a guessed palette tint or a detail-map substitute.
-    if mesh
-        .indices
-        .iter()
-        .any(|&i| mesh.colors.get(i as usize).is_none_or(|c| c[1] < 128))
-    {
-        return None;
-    }
     for (colour, &extra) in mesh.colors.iter_mut().zip(colours) {
-        if let Some(baked) = base_colour(*colour, extra) {
-            *colour = baked;
-        }
+        *colour = base_colour(*colour, extra);
     }
     Some(mesh)
 }
@@ -281,11 +271,11 @@ mod tests {
 
     #[test]
     fn native_base_colour_flag_threshold_preserves_linear_packed_channels() {
-        assert_eq!(base_colour([21, 127, 14, 255], [0, 0, 11, 0]), None);
+        assert_eq!(base_colour([21, 127, 14, 255], [0, 0, 11, 0]), [21, 14, 11, 0]);
         for g in [128, 140, 255] {
             assert_eq!(
                 base_colour([21, g, 14, 255], [0, 0, 11, 0]),
-                Some([21, 14, 11, 255])
+                [21, 14, 11, 255]
             );
         }
     }
@@ -318,12 +308,12 @@ mod tests {
         let mut control = voxel.clone();
         raw[g] = 127; // Native base pass would require the terrain cover projection.
         control.compiled = raw.into();
-        assert!(control.compiled_base_mesh().is_none());
+        assert_eq!(control.compiled_base_mesh().unwrap().colors[0], [21, 14, 11, 0]);
         // Two original exterior slots nearby mix baked-colour and cover-projection vertices.
-        // Keep the native cover branch unsupported instead of painting those vertices with IDs.
+        // Preserve those vertices' cover flag rather than painting them with the layer IDs.
         let exterior = crate::placement::load_cell_objects("main_world", 21, 8);
         assert_eq!(exterior.voxels.len(), 2);
-        assert!(exterior.voxels.iter().all(|v| v.compiled_base_mesh().is_none()));
+        assert!(exterior.voxels.iter().all(|v| v.compiled_base_mesh().unwrap().colors.iter().any(|c| c[3] == 0)));
     }
 
     #[test]

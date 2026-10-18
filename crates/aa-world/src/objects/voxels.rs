@@ -5,8 +5,13 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::VisibilityRange;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 use crate::placement::PlacedVoxel;
+
+mod cover;
+mod material;
+pub use material::{VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelParams};
 
 const MAX_CELL_DECODED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CELL_MESH_BYTES: usize = 32 * 1024 * 1024;
@@ -25,11 +30,13 @@ pub(crate) struct PreparedVoxel {
     slot: usize,
     triangles: usize,
     distance: f32,
+    cover: Option<cover::Node>,
 }
 
 #[derive(Default)]
 pub(crate) struct PreparedCell {
     meshes: Vec<PreparedVoxel>,
+    covers: HashMap<cover::Node, Image>,
     unsupported: usize,
 }
 
@@ -38,25 +45,37 @@ pub(crate) struct CellVoxels {
     pub triangles: usize,
     pub unsupported: usize,
     meshes: Vec<Handle<Mesh>>,
-    material: Option<Handle<StandardMaterial>>,
+    materials: Vec<Handle<VoxelMaterial>>,
+    images: Vec<Handle<Image>>,
 }
 
 impl CellVoxels {
-    pub fn release(self, commands: &mut Commands, cry: &mut CryAssets) {
+    pub fn release(
+        self,
+        commands: &mut Commands,
+        cry: &mut CryAssets,
+        materials: &mut Assets<VoxelMaterial>,
+    ) {
         for entity in self.entities {
             commands.entity(entity).despawn();
         }
         for mesh in self.meshes {
             cry.meshes.remove(mesh.id());
         }
-        if let Some(material) = self.material {
-            cry.materials.remove(material.id());
+        for material in self.materials {
+            materials.remove(material.id());
+        }
+        for image in self.images {
+            cry.images.remove(image.id());
         }
     }
 }
 
-fn mesh(voxel: &PlacedVoxel) -> Option<Mesh> {
-    let source = voxel.compiled_base_mesh()?;
+fn mesh(
+    voxel: &PlacedVoxel,
+    source: aa_cry::mesh::MeshData,
+    cover: Option<cover::Node>,
+) -> Option<Mesh> {
     let transform = voxel.mat4();
     let normal = Mat3::from_mat4(transform).inverse().transpose();
     let positions: Vec<_> = source
@@ -84,6 +103,11 @@ fn mesh(voxel: &PlacedVoxel) -> Option<Mesh> {
         .iter()
         .map(|c| c.map(|v| v as f32 / 255.0))
         .collect();
+    let uvs: Vec<_> = source
+        .positions
+        .iter()
+        .map(|p| cover.map_or(Vec2::ZERO, |c| c.uv(transform.transform_point3(*p))))
+        .collect();
     Some(
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -92,13 +116,17 @@ fn mesh(voxel: &PlacedVoxel) -> Option<Mesh> {
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colours)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
         .with_inserted_indices(Indices::U32(indices)),
     )
 }
 
-pub(crate) fn prepare_cell(voxels: &[PlacedVoxel]) -> PreparedCell {
+pub(crate) fn prepare_cell(world: &str, cell: (i32, i32), voxels: &[PlacedVoxel]) -> PreparedCell {
     let mut out = PreparedCell::default();
     let (mut decoded, mut bytes) = (0usize, 0usize);
+    // Read once on the bounded placement worker, only if a mesh actually needs cover.
+    let mut cover_bytes = None;
+    let mut cover_attempted = false;
     for (slot, voxel) in voxels.iter().enumerate() {
         let size = crate::placement::voxel_decoded_size(&voxel.compiled);
         if out.meshes.len() >= MAX_CELL_MESHES
@@ -108,12 +136,44 @@ pub(crate) fn prepare_cell(voxels: &[PlacedVoxel]) -> PreparedCell {
             continue;
         }
         decoded += size.unwrap();
-        let Some(mesh) = mesh(voxel) else {
+        let Some(source) = voxel.compiled_base_mesh() else {
+            out.unsupported += 1;
+            continue;
+        };
+        let cover = if source.colors.iter().any(|c| c[3] == 0) {
+            if !cover_attempted {
+                cover_attempted = true;
+                cover_bytes = aa_pak::Pak::global()
+                    .read(&format!(
+                        "game/worlds/{world}/cells/{:03}_{:03}/client/terrain/cover.ctc",
+                        cell.0, cell.1
+                    ))
+                    .ok();
+            }
+            let selected = cover_bytes
+                .as_deref()
+                .and_then(|bytes| crate::cover::Cover::parse(bytes).ok())
+                .and_then(|cover| {
+                    let node = cover::select(&cover, &voxel.bbox)?;
+                    if !out.covers.contains_key(&node) {
+                        out.covers.insert(node, cover::image(&cover, node)?);
+                    }
+                    Some(node)
+                });
+            let Some(node) = selected else {
+                out.unsupported += 1;
+                continue;
+            };
+            Some(node)
+        } else {
+            None
+        };
+        let Some(mesh) = mesh(voxel, source, cover) else {
             out.unsupported += 1;
             continue;
         };
         let indices = mesh.indices().unwrap().len();
-        let size = mesh.count_vertices() * 40 + indices * 4;
+        let size = mesh.count_vertices() * 48 + indices * 4;
         if size > MAX_CELL_MESH_BYTES.saturating_sub(bytes) {
             out.unsupported += 1;
             continue;
@@ -124,6 +184,7 @@ pub(crate) fn prepare_cell(voxels: &[PlacedVoxel]) -> PreparedCell {
             slot,
             triangles: indices / 3,
             distance: voxel.max_view_dist,
+            cover,
         });
     }
     out
@@ -132,22 +193,37 @@ pub(crate) fn prepare_cell(voxels: &[PlacedVoxel]) -> PreparedCell {
 pub(crate) fn spawn_cell(
     commands: &mut Commands,
     cry: &mut CryAssets,
+    materials: &mut Assets<VoxelMaterial>,
     cell: (i32, i32),
     prepared: PreparedCell,
     distance: f32,
 ) -> CellVoxels {
-    let material = (!prepared.meshes.is_empty()).then(|| {
-        cry.materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 1.0,
-            reflectance: 0.0,
-            ..default()
-        })
-    });
+    let mut material_by_cover = HashMap::new();
+    let mut images = Vec::new();
+    let mut covers = prepared.covers;
+    for mesh in &prepared.meshes {
+        material_by_cover.entry(mesh.cover).or_insert_with(|| {
+            let cover = mesh.cover.map(|key| {
+                let image = cry.images.add(covers.remove(&key).unwrap());
+                images.push(image.clone());
+                image
+            });
+            materials.add(VoxelMaterial {
+                base: StandardMaterial {
+                    base_color: Color::WHITE,
+                    perceptual_roughness: 1.0,
+                    reflectance: 0.0,
+                    ..default()
+                },
+                extension: VoxelExtension::new(cover),
+            })
+        });
+    }
     let mut out = CellVoxels {
         entities: Vec::new(),
         meshes: Vec::new(),
-        material,
+        materials: material_by_cover.values().cloned().collect(),
+        images,
         unsupported: prepared.unsupported,
         triangles: 0,
     };
@@ -161,14 +237,14 @@ pub(crate) fn spawn_cell(
         out.entities.push(
             commands
                 .spawn((
-                    Name::new("Native voxel baked-colour base"),
+                    Name::new("Native voxel Terrain base"),
                     VoxelSurface {
                         cell,
                         slot: prepared.slot,
                         triangles: prepared.triangles,
                     },
                     Mesh3d(mesh.clone()),
-                    MeshMaterial3d(out.material.as_ref().unwrap().clone()),
+                    MeshMaterial3d(material_by_cover[&prepared.cover].clone()),
                     Transform::from_translation(crate::cry_to_bevy(crate::coords::cell_origin(
                         cell.0, cell.1,
                     ))),
@@ -197,7 +273,7 @@ mod tests {
             return;
         }
         let objects = crate::placement::load_cell_objects("main_world", 20, 8);
-        let cell = prepare_cell(&objects.voxels);
+        let cell = prepare_cell("main_world", (20, 8), &objects.voxels);
         assert_eq!(cell.unsupported, 0);
         assert_eq!(cell.meshes.len(), 7);
         assert_eq!(
@@ -223,8 +299,64 @@ mod tests {
         );
         let repeated: Vec<_> =
             std::iter::repeat_n(objects.voxels[0].clone(), MAX_CELL_MESHES + 1).collect();
-        let bounded = prepare_cell(&repeated);
+        let bounded = prepare_cell("main_world", (20, 8), &repeated);
         assert_eq!(bounded.meshes.len(), MAX_CELL_MESHES);
         assert_eq!(bounded.unsupported, 1);
+    }
+
+    #[test]
+    fn original_mixed_cover_meshes_share_exact_tile_and_keep_interpolated_selector() {
+        if !crate::pak_available() {
+            return;
+        }
+        let objects = crate::placement::load_cell_objects("main_world", 21, 8);
+        let cell = prepare_cell("main_world", (21, 8), &objects.voxels);
+        assert_eq!(
+            (cell.meshes.len(), cell.unsupported, cell.covers.len()),
+            (2, 0, 1)
+        );
+        let cover = &cell.covers[&cover::Node {
+            level: 4,
+            x: 13,
+            y: 0,
+        }];
+        assert_eq!(
+            (
+                cover.width(),
+                cover.height(),
+                cover.texture_descriptor.mip_level_count
+            ),
+            (128, 128, 1)
+        );
+        assert_eq!(cover.data.as_ref().unwrap().len(), 8192);
+        assert_eq!(
+            cover.texture_descriptor.format,
+            bevy::render::render_resource::TextureFormat::Bc1RgbaUnorm
+        );
+        let Some(VertexAttributeValues::Float32x4(colours)) =
+            cell.meshes[0].mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!()
+        };
+        assert!(colours.iter().any(|c| c[3] == 0.0) && colours.iter().any(|c| c[3] == 1.0));
+        let Some(VertexAttributeValues::Float32x2(uvs)) =
+            cell.meshes[0].mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            panic!()
+        };
+        assert!(uvs.iter().all(|uv| {
+            uv.iter()
+                .all(|v| *v >= 0.5 / 128.0 - 0.001 && *v <= 127.5 / 128.0 + 0.001)
+        }));
+        // Missing source texture must not silently become a baked-colour or flat fallback.
+        let missing = prepare_cell("missing_voxel_fixture", (21, 8), &objects.voxels);
+        assert_eq!(
+            (
+                missing.meshes.len(),
+                missing.unsupported,
+                missing.covers.len()
+            ),
+            (0, 2, 0)
+        );
     }
 }

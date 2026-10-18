@@ -368,6 +368,7 @@ pub fn stream_objects(
     mut water_styles: ResMut<WaterStyles>,
     mut water_materials: ResMut<Assets<WaterMaterial>>,
     mut road_materials: ResMut<Assets<RoadMaterial>>,
+    mut voxel_materials: ResMut<Assets<voxels::VoxelMaterial>>,
     terrain: Res<crate::TerrainQuery>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
@@ -405,7 +406,7 @@ pub fn stream_objects(
     state.cells.retain(|c, _| loaded.contains(c));
     let gone: Vec<_> = state.voxels.keys().filter(|c| !loaded.contains(c)).copied().collect();
     for c in gone {
-        if let Some(voxels) = state.voxels.remove(&c) { voxels.release(&mut commands, &mut cry); }
+        if let Some(voxels) = state.voxels.remove(&c) { voxels.release(&mut commands, &mut cry, &mut voxel_materials); }
     }
     let gone: Vec<_> = state.water.keys().filter(|c| !loaded.contains(c)).copied().collect();
     for c in gone {
@@ -471,7 +472,7 @@ pub fn stream_objects(
             let water = water_meshes(&objects.water, &objects.materials);
             let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
             let decals = crate::decals::prepare_cell(&world, &objects, c, &terrain, &loader, &road_assets);
-            let voxels = voxels::prepare_cell(&objects.voxels);
+            let voxels = voxels::prepare_cell(&world, c, &objects.voxels);
             let data = CellObjectData::new(objects, threshold);
             let _ = tx.send((c, data, water, roads, decals, voxels));
         });
@@ -538,7 +539,7 @@ pub fn stream_objects(
         }
         if !entities.is_empty() { state.decals.insert(c, entities); }
         if !data.objects.voxels.is_empty() {
-            state.voxels.insert(c, voxels::spawn_cell(&mut commands, &mut cry, c, voxels, cfg.brush_distance));
+            state.voxels.insert(c, voxels::spawn_cell(&mut commands, &mut cry, &mut voxel_materials, c, voxels, cfg.brush_distance));
         }
         let placed = effects::spawn_cell(&mut commands, c, &data.objects.effects);
         if !placed.is_empty() {
