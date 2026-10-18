@@ -25,6 +25,10 @@
 //! `u8 angleX, angleY` @57, 58, `u8 bright` @59, `u8 angleZ` @60 (256 steps per turn), 61..63 colour/pad.
 //! brush.dat and object.dat carry the same brushes; object.dat additionally holds decals and roads
 //! and (in worlds without the dedicated files, e.g. login2) everything.
+//! `visareas.dat` has independent tables and interior octrees; its brushes are additional instances.
+
+mod visareas;
+pub use visareas::parse_visareas_dat;
 
 use bevy::math::{Mat4, Quat, Vec3};
 
@@ -529,6 +533,11 @@ pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
         objects.decals = o.decals;
         objects.roads = o.roads;
         objects.water = o.water;
+    }
+    // Interior brushes are not the exterior octree's duplicate export. Keep their own table
+    // indices until parsing succeeds, then remap once on this cell's existing placement worker.
+    if let Some(interior) = read("visareas.dat").and_then(|d| parse_visareas_dat(&d).ok()) {
+        visareas::append_brushes(&mut objects, interior);
     }
     if let Some(xml) = read("entities.xml") {
         let xml = String::from_utf8_lossy(&xml);
