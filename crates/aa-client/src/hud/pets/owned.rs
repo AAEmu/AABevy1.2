@@ -323,7 +323,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             info.set("learned", learned)?;
             info.set("skillUsable", i32::from(usable))?;
             info.set("needdiver", driver)?;
-            info.set("level", level)?;
+            info.set("learnLevel", level)?;
             Ok(Some(info))
         })?,
     )?;

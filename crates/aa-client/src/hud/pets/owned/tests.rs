@@ -112,6 +112,13 @@ fn local_modes_use_attackable_and_active_command_duplicate_guards() {
 #[ignore = "isolated original pet frame/bar, native getter types and physical controls"]
 fn original_pet_frame_passive_rename_and_stale_request_identity() -> Result<(), Box<dyn std::error::Error>> {
     let (rt, bridge, path, player, units, mates) = super::super::active_fixture::runtime(1920.0, 1080.0)?;
+    bridge.borrow_mut().pets.owned.current.as_mut().unwrap().level = 15;
+    super::push(&rt, &bridge);
+    rt.lua
+        .load("local s=X2Mate:GetMountSkill(1);assert(s.learned==false and s.learnLevel==20);SetPetBarSkillTooltip(1,PetActionButton1)")
+        .exec()?;
+    bridge.borrow_mut().pets.owned.current.as_mut().unwrap().level = 30;
+    super::push(&rt, &bridge);
     rt.lua
         .load(
             r#"
