@@ -122,6 +122,10 @@ macro_rules! net_state {
             }
             fn apply(&mut self, event: &Event) {
                 self.advance_battlefield_clock();
+                if let Some(id)=self.expeditions.admitted_dismissal(event) {
+                    if self.player.bypass_change_detection().clear_expedition(id) {self.player.set_changed();}
+                    if self.units.bypass_change_detection().clear_expedition(id) {self.units.set_changed();}
+                }
                 // `apply` reports whether anything changed, so change detection stays meaningful.
                 $(
                     if self.$field.apply_if_changed(event) {
@@ -306,6 +310,22 @@ mod equipment_flags_tests {
         assert!(app.world().resource::<crate::Expeditions>().factions.contains_key(&9));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert!(app.world().resource::<crate::Expeditions>().factions.is_empty());
+    }
+
+    #[test]
+    fn plugin_expedition_dismissal_admits_before_cache_delete_and_clears_player_and_units() {
+        let mut app=App::new();init_state(&mut app);
+        let mut unit=crate::state::tests::unit(77);unit.expedition_id=9;
+        let mut character=crate::model::CharacterState::default();character.character.expedition_id=9;
+        app.world_mut().resource_mut::<Player>().spawn=Some(crate::session::PlayerSpawn{obj_id:77,unit:unit.clone(),state:character});
+        app.world_mut().resource_mut::<Units>().by_id.insert(77,unit);
+        app.world_mut().resource_mut::<crate::Expeditions>().factions.insert(9,crate::ExpeditionFaction{id:9,mother_id:1,..Default::default()});
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Expedition(crate::ExpeditionEvent::Dismissed{expedition_id:9,success:0}))).unwrap();
+        assert_eq!(app.world().resource::<Units>().by_id[&77].expedition_id,9);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Expedition(crate::ExpeditionEvent::Dismissed{expedition_id:9,success:2}))).unwrap();
+        assert_eq!(app.world().resource::<Units>().by_id[&77].expedition_id,0);
+        assert_eq!(app.world().resource::<Player>().spawn.as_ref().unwrap().unit.expedition_id,0);
+        assert!(!app.world().resource::<crate::Expeditions>().factions.contains_key(&9));
     }
 
 }

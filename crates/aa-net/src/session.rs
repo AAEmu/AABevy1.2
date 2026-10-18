@@ -4318,7 +4318,12 @@ mod tests {
     async fn expedition_receipts_forward_empty_and_repeated_batches() {
         let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
         let receipt=crate::ExpeditionEvent::Members{total:21,expedition_id:9,members:vec![]};
-        for value in [receipt.clone(),receipt,crate::ExpeditionEvent::Policies(vec![])] {
+        for value in [receipt.clone(),receipt,crate::ExpeditionEvent::Policies(vec![]),
+            crate::ExpeditionEvent::RoleChanged{character_id:7,role:2,name:vec![255,0]},
+            crate::ExpeditionEvent::PolicyChanged{policy:crate::ExpeditionRolePolicy::default(),success:2},
+            crate::ExpeditionEvent::OwnerChanged{old_owner_id:7,new_owner_id:8,name:vec![0]},
+            crate::ExpeditionEvent::Dismissed{expedition_id:9,success:255},
+            crate::ExpeditionEvent::MembershipChanged{obj_id:77,character_id:7,kicker:vec![255],name:vec![0],old_expedition_id:9,new_expedition_id:0,expel:2}] {
             session.game_msg(Ok(game::ServerMsg::Expedition(value.clone()))).await;
             assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
         }

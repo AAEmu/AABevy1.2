@@ -837,6 +837,13 @@ pub struct Attachment {
 
 impl Unit {
     /// Apply only a known mode to this existing matching runtime object.
+    /// Received SC01c only; an existing matching Character identity is required.
+    pub fn apply_expedition(&mut self, event:&crate::ExpeditionEvent)->bool {
+        let crate::ExpeditionEvent::MembershipChanged{obj_id,character_id,new_expedition_id,..}=event else {return false};
+        if *character_id==0 || self.obj_id!=*obj_id || !matches!(self.kind,UnitKind::Character{char_id} if char_id==*character_id) {return false;}
+        if self.expedition_id==*new_expedition_id {return false;}
+        self.expedition_id=*new_expedition_id;true
+    }
     pub fn apply_gm_mode(&mut self, change: &crate::unit_msg::UnitGmModeChanged) -> bool {
         if self.obj_id != change.obj_id { return false; }
         let Ok(index) = usize::try_from(change.mode) else { return false };
