@@ -283,6 +283,7 @@ opcodes! {
         SCMateStatePacket = 0x1ac,
         SCSlaveStatePacket = 0x1ab,
         SCMateSpawnedPacket = 0x125,
+        SCMateEquipmentChangedPacket = 0x126,
         SCExpertLimitModifiedPacket = 0x1c0,
         SCExpertExpandedPacket = 0x1c1,
         SCAiAggroPacket = 0x1c4,

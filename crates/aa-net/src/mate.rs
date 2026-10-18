@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use crate::model::UnitKind;
+use crate::mate_equipment::MateEquipmentChange;
 use crate::opcodes::{cs, sc};
 use crate::session::Event;
 use crate::wire::{Reader, Result, WireError, Writer};
@@ -175,6 +176,7 @@ pub enum MateEvent {
         dynamic: DynamicUnitState,
     },
     SlaveState(SlaveState),
+    EquipmentChanged(MateEquipmentChange),
     /// Local socket write only; authoritative unit/skill events follow independently.
     Requested(MateCommand),
     RequestRejected {
@@ -200,7 +202,7 @@ impl MateEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket
+            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket | sc::SCMateEquipmentChangedPacket
         )
     }
 
@@ -209,6 +211,7 @@ impl MateEvent {
             Self::Spawned(_) => "SCMateSpawned",
             Self::State { .. } => "SCMateState",
             Self::SlaveState(_) => "SCSlaveState",
+            Self::EquipmentChanged(_) => "SCMateEquipmentChanged",
             Self::Requested(_) => "MateRequested",
             Self::RequestRejected { .. } => "MateRequestRejected",
             Self::SkillRequested { .. } => "MateSkillRequested",
@@ -218,6 +221,7 @@ impl MateEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCMateEquipmentChangedPacket => Self::EquipmentChanged(MateEquipmentChange::read(r)?),
             sc::SCMateSpawnedPacket => {
                 let mut spawn = MateSpawn {
                     tl_id: r.u16()?,
@@ -276,6 +280,9 @@ struct VisibleMate {
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Mates {
     pub own: Option<OwnedMate>,
+    /// Latest exact notification matching the selected character and active mate timeline.
+    /// The wire success flag does not establish inventory or equipment settlement.
+    pub last_equipment_change: Option<MateEquipmentChange>,
     character_id: u32,
     visible: HashMap<u32, VisibleMate>,
 }
@@ -316,7 +323,15 @@ impl Mates {
                     return false;
                 }
             }
+            Event::Mate(MateEvent::EquipmentChanged(change)) => {
+                if self.character_id == 0 || change.character_id != self.character_id
+                    || !self.own.as_ref().is_some_and(|own| own.spawn.tl_id == change.mate_tl_id) {
+                    return false;
+                }
+                self.last_equipment_change = Some(change.clone());
+            }
             Event::Mate(MateEvent::Spawned(spawn)) => {
+                self.last_equipment_change = None;
                 self.own = Some(OwnedMate {
                     spawn: spawn.clone(),
                     obj_id: None,
@@ -352,6 +367,7 @@ impl Mates {
                 });
                 if reused_owned_id {
                     self.own = None;
+                    self.last_equipment_change = None;
                 }
                 if let Some(next) = next {
                     self.visible.insert(unit.obj_id, next);
@@ -376,6 +392,7 @@ impl Mates {
                     .is_some_and(|own| own.obj_id.is_some_and(|id| ids.contains(&id)))
                 {
                     self.own = None;
+                    self.last_equipment_change = None;
                     changed = true;
                 }
                 for id in ids {
@@ -396,6 +413,9 @@ impl Mates {
         true
     }
 }
+
+#[cfg(test)]
+pub(crate) use tests::spawn_fixture as test_spawn_fixture;
 
 #[cfg(test)]
 mod tests {

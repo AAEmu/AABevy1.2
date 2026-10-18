@@ -121,7 +121,7 @@ pub mod slot {
 }
 
 /// Detail block of an equipment item (`detail type 1`, 55 bytes).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EquipDetail {
     /// Template whose look this item wears (look change), 0 for none.
     pub image_item_template_id: u32,
@@ -134,7 +134,7 @@ pub struct EquipDetail {
     pub temper_magical: u16,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ItemDetail {
     /// Body parts, NPC gear and items without details.
     #[default]
@@ -147,7 +147,7 @@ pub enum ItemDetail {
 }
 
 /// An item as it appears in equipment slots.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Item {
     pub template_id: u32,
     /// Database id; 0 for body parts.
