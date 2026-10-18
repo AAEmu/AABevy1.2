@@ -3182,15 +3182,17 @@ lane's `SCUnitGmModeChangedPacket`; serializer `397c7270` names its BC
 actual guard on local global/direct cooldown insertion. Other flag names
 are not inferred from their adjacent positions.
 
-Reset helper `398a1aa0` copies default word `3a5e136c` to raw actor `+3af8`;
-that default is zero in the verified original module. Hydration
-`398a218d..93` copies UnitState `+2020` to the same flags. These are not
-four extra snapshot bytes: serializer `397c9870..9890` decodes a four-integer
-PISH pack immediately after `raceGender`, storing its first decoded integer
-at `+2020`. The reverse path `397c9a81..ad8` emits those four integers as
-`pish`. Preserve the first integer's little-endian four bytes and apply
-explicit SC203 mode updates; do not reinterpret mounting identity or add
-an unobserved wire field.
+The later raw/interface-base audit corrects the original hydration inference:
+factory `3936b580` registers the raw actor, while `3936b11a` passes raw actor
+`+8` to hydrator `398a1f90`. Its `398a218d..93` write of UnitState `+2020`
+to destination `+3af8` therefore lands at raw actor `+3b00`, not the SC203
+array. The old claim that the first PISH integer hydrates these GM flags was
+wrong. That PISH pack remains a separate received field; it does not establish
+the initial cooldown suppression byte. Actual matching SC203 mode 1 writes raw
+`+3af9`, which is owner-interface `+3af1`; without that receipt the app must
+keep this guard unknown. See the executed actor-base oracle
+data/extract/aa-net/native-unit-actor-base-oracle.json. No UI widget API depends
+on this unproved initial actor state, and no extra wire bytes are introduced.
 
 Sources: `data/extract/aa-ui/native-cooldown-suppression-producer-20261018.txt`
 and `native-cooldown-suppression-default-readonly-20261018.txt`. This audit
@@ -5977,3 +5979,82 @@ with the observer reporting end0.990000 and final OnScale1.000000. Both report
 zero script errors/WARN/ERROR and self-close (PIDs5492/19444). The copied
 executable was removed; no root API, Lua asset, font or global frame policy was
 changed.
+
+### Native widget frame admission and handler/channel order (2026-10-18)
+
+The widget pass now follows manager392a9e40 and WidgetUpdate3927de60: for
+each admitted widget, call OnUpdate(self,dtMs), then resolve/call the live
+OnEffect handler, step that widget's alpha/scale channels with their immediate
+end continuations, and visit its live shown-child vector in order. An OnUpdate
+that starts a channel therefore advances it in the same frame. This corrects
+the prior globally batched handlers-after-channels pass and its alphabetic
+OnEffect-before-OnUpdate ordering. Handler replacement/release is observed at
+the actual invocation position.
+
+Retiring a subtree now clears its widget channel/current-scale/offset caches
+through the existing Animations::remove path, including paused configured
+channels. Those caches must not rely on a later all-active scan: the native
+admission traversal correctly never visits destroyed objects.
+
+Manager392a9e40 walks all eight native layers from bottom to top. Before each
+layer it copies that layer's current root list through392a9b70/392a93c0.
+Showing a root in the current layer during a callback defers its visit until
+the next frame; showing it in a later layer admits it this frame. A root moved
+to a later layer can run twice, as the native copied lists do. An already
+admitted root does not recheck its own shown flag after another callback hides
+it. Root Show/hide-fade manager membership is represented by shown-or-fading;
+actual hide completion392ab2be..339 removes the native root before the widget
+pass. Shown children of a hidden but still-admitted root continue updating.
+
+Children use a different gate:3927e1f2 checks only each child's own shown byte.
+A hidden fading child is excluded. The end pointer is read live, allowing a
+parent or earlier child to append another shown child for this frame. Alpha0,
+offscreen coordinates and drawing clips do not suppress this update clock.
+Application-retired objects are safely excluded before further Lua/tree access;
+this does not emulate dereferencing a destroyed native widget.
+
+widget_frame_manager_oracle.py executes **25 native manager/frame groups**,
+including real eight-layer copying, WidgetUpdate, script admission, actual
+Show3927e420/manager392aab40 and hide completion392ab0e0. Allocation, class/VM
+interfaces, profiling and manager identity are explicit endpoints; ordering,
+shown checks, channel arithmetic and manager membership changes execute native
+instructions. Dynamic child-vector changes are identified synthetic callback
+side effects. Artifacts native-widget-frame-manager-oracle-20261018.json and
+native-widget-frame-manager-source-20261018.txt preserve results/source.
+
+The original battlefield waiting_alarm.alb provides the concrete regression:
+its real alpha-end callback installs a ten-second OnUpdate hold; reaching that
+hold starts the original .5s fade. The same20ms frame now reaches alpha.96
+instead of leaving1 until the next frame. Its original subsequent alpha-end
+requests automatic results and hides the alarm. The fixture supplies a small
+received-data table and records that external scoreboard endpoint while keeping
+the constructor, artwork, configuration and all alarm handlers unchanged.
+The fixture observes/delegates registration while loading this one original
+asset to retain its actual INSTANT_GAME_END callback; the factory/helper are
+local upvalues, not globals supplied by a new toolkit API. It also checks that
+the handler installed by alpha-end does not consume that already-passed500ms
+frame: after the next9980ms the hold still has20ms remaining.
+
+Other per-class passes (chat/slot/statusbar etc.) and drawable timelines retain
+their existing scheduling. This slice does not claim to move every native
+class virtual+158 update into its exact per-widget position, nor change public
+frame-time sanitation, layout calibration or application cooldown producers.
+
+Crate check/example build and **193 selected checks pass**, with one existing
+optional font-metric test ignored: units24, frame10, channels11, animation10,
+inheritance8, fade12, attachment5, scaled fitting8, scale/clip4, chat alpha6/
+clip7/lifecycle9/lock7/method5/reset7, drag12, keyboard4, resizing4, popup9,
+HUD6, tooltip3 and slot completion7/mask8/selector6/state1. The tightened
+original hold-lifetime assertion also passed separately. This includes actual
+original Achievement, staggered buff reorder, physical chat controls, popup
+retirement, transformed window buttons and original tooltip-scale regressions.
+
+Both aa-dev captures with explicit `--shot-after 8` were inspected:
+shots/aa-ui/native-widget-frame-alarm-720-20261018.png
+(1280x720/default0.85, **349.8-468.3 FPS**) and
+shots/aa-ui/native-widget-frame-alarm-1080-20261018.png
+(1920x1080/1.0, **347.3-392.1 FPS**). The original Arena Ended artwork is in
+its active fade and the observer records same-frame alpha0.960000, without
+overlapping the report. Both log zero script errors/WARN/ERROR and self-close
+(PIDs28044/2104); the copied executable was removed. No original Lua asset,
+font calibration, root integration API or ordinary-slot policy was changed.

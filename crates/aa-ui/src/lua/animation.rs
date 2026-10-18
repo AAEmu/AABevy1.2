@@ -80,6 +80,7 @@ impl Animations {
         self.frames.remove(&id);
         self.active.remove(&id);
         self.samples.remove(&id);
+        self.widgets.remove(id);
     }
 
     pub fn widget_sample(&self, id: Id) -> widgets::WidgetSample {
@@ -624,6 +625,6 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) {
     }
 }
 
-pub(super) fn tick_widgets(lua: &Lua, dt_ms: f32) {
-    widgets::tick(lua, dt_ms);
+pub(super) fn tick_widget(lua: &Lua, id: Id, dt_ms: f32) {
+    widgets::tick(lua, id, dt_ms);
 }
