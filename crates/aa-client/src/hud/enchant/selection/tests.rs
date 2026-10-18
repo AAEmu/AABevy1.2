@@ -66,6 +66,66 @@ fn tables() -> Tables {
     Tables::load(&rusqlite::Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap())
         .unwrap()
 }
+
+#[test]
+fn startup_recharge_catalog_is_available_after_hud_lifecycle_rebuild() {
+    use aa_net::items::{ItemTask, ItemTasks};
+
+    let first = crate::hud::item_recharge_catalog().expect("readonly static catalog");
+    let again = crate::hud::item_recharge_catalog().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &again));
+    assert_eq!(first.get(&26390), Some(&4874));
+    let mut state = seeded();
+    for reset in [false, true] {
+        if reset {
+            state.receive(&Event::LeftWorld { target: 0 });
+            let spawn = crate::hud::expansion::fixture::spawn();
+            state.receive(&Event::CharacterSelected(Box::new(spawn.state.clone())));
+            state.receive(&Event::PlayerSpawn(Box::new(spawn)));
+            state.receive(&Event::InventoryInit {
+                bag_slots: 10,
+                bank_slots: 0,
+            });
+        }
+        let mut charged = item(26390, 123);
+        charged.detail = ItemDetail::Equip(EquipDetail {
+            charge_time: 102,
+            ..Default::default()
+        });
+        let mut payload = vec![0; 55];
+        payload[5] = 0xa5;
+        payload[11..19].copy_from_slice(&102i64.to_le_bytes());
+        charged.detail_payload = Some(payload);
+        let mut items = vec![Some(charged)];
+        items.resize(10, None);
+        state.receive(&Event::InventoryChunk(InvenChunk {
+            container: 2,
+            chunks: 1,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }));
+        state.receive(&Event::ItemsChanged(ItemTasks {
+            tasks: vec![ItemTask::Security {
+                container: 2,
+                slot: 0,
+                item_id: 999,
+                bits: 4,
+                is_unsecure_excess: 0,
+                is_unsecure_set: 0,
+                is_unpack: 255,
+                unsecure_time: -7,
+                unpack_time: -9,
+            }],
+            ..Default::default()
+        }));
+        let current = state.records.item(2, 0).expect("unpack keeps qualified native item known");
+        assert!(matches!(&current.detail, ItemDetail::Equip(e) if e.charge_time == -9));
+        let payload = current.detail_payload.as_ref().unwrap();
+        assert_eq!(&payload[11..19], &(-9i64).to_le_bytes());
+        assert_eq!(payload[5], 0xa5);
+    }
+}
 fn edit(state: &mut State, slot: u8, change: impl FnOnce(&mut Item)) {
     let start_chunk = slot / 10;
     let mut items: Vec<_> = (start_chunk * 10..start_chunk * 10 + 10)

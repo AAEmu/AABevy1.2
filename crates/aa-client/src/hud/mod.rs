@@ -46,6 +46,7 @@ mod cooldown;
 mod crafting;
 mod crime;
 mod data;
+pub(crate) use data::item_recharge_catalog;
 mod dialog;
 mod drag;
 mod enchant;

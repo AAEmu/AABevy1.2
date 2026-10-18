@@ -438,5 +438,53 @@ have no WARN/ERROR/panic: grade-working349.5-349.7 FPS and live world-select
 272.4-410.8 FPS. The original-script grade controls retain their selected data
 and visibly dim while working; Lane-bevy reports Up. These are fixture/live
 world-list smoke checks, not a live item transaction or native pixel pairing.
-The playable alias still points to the preceding B4D controller cut until the
-next accepted integration refresh.
+At17:07:58 local, the idle playable alias was refreshed from this inspected
+shared-records cut and hash-verified equal to2A4985D4...0CF9DE8 above.
+
+## Shared static recharge context
+
+The startup adapter reads items joined to their matching weapon/armor/accessory
+implementation from the readonly compact database once, respecting AA_DB. Only
+nonzero recharge buffs are retained; a successful complete query makes omitted
+templates known zero. Any open/schema/conversion failure leaves the whole
+catalog unavailable, preserving the native provider's unknown equipment-unpack
+behavior rather than treating a partial lookup as complete.
+
+One cached Arc is inserted in ClientOptions before either login/shortcut route
+constructs NetPlugin, and supplied to the HUD's default NativeItemRecords before
+the asynchronous full GameData becomes ready. Character/session rebuilds retain
+the same static context. The network Bevy bridge consumes those supplied options
+at Session construction; no new command or late repair of unknown rows is added.
+
+The actual items-driven query returns12 valid nonzero descriptors (two weapons,
+ten armors). The22 nonzero child rows include10 orphan/mismatched implementations
+and must not be used as22 template descriptors. Qualification covers complete
+empty catalogs versus missing schema, nullable/zero/missing child values,
+implementation mismatch/orphan exclusion and malformed nonzero-value failure.
+A HUD lifecycle regression uses actual26390->4874, qualified55-byte equipment
+metadata, physical Security11 unpack and preserved unrelated bytes. All three
+in-memory catalog checks pass; the actual HUD lifecycle check also passes in
+the frozen full suite:323 passed,38 existing optional probes ignored,72.11s
+(data/extract/aa-client/trial/recharge-full-tests.log).
+
+Main+enchant build passes in1m45s. The immutable main copy is
+target/debug/aa-client-20261018-recharge-clock-hdr.exe, SHA256
+A0901E12A50C66A82B0D4895BD5E3BC06DD9AF6F3DE84E7F499D64B97BAC7798;
+aa-enchant-recharge-clock-hdr-20261018.exe has SHA256
+454771C15FC86B2B01580A1AEB6195AA8A5E95DD0833E6A99493C46E9C873882.
+Production was held stable through the build and corresponds to networkf674b41,
+UI5194c1a (generic admitted-paint Effect clocks) and world3dc3010 (authored
+ordinary point HDR gain at native constructor-default base2). The copied test
+executable is target/debug/aa-client-recharge-tests-20261018.exe.
+At17:13:53 local, the idle target/debug/aa-client-play.exe alias was refreshed
+from this inspected main and hash-verified equal toA0901E12...BAC7798 above.
+
+All three1920x1080 shots/hud/recharge-clock-hdr/ captures are inspected,
+self-close and have no WARN/ERROR/panic: grade352.0-376.3 FPS,
+grade-working430.8-437.6 and live world-select315.9-409.3. Original item/source/
+support portraits are bright when idle and dim while working; the execution
+button follows that state, and Lane-bevy reports Up. UI's separate original
+zero-HP/manual re-show and hidden spinner captures and world's numeric/dock
+day/night/unload fixtures validate their owned changes (docs/aa-ui.md and
+docs/aa-world.md). These are shared-load observations and explicit fixtures,
+not live item settlement, native paired pixels or isolated performance.

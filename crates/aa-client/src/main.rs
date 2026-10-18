@@ -37,6 +37,10 @@ fn main() {
         .add_plugins(aa_fx::FxPlugin)
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .init_state::<Screen>()
+        .insert_resource(aa_net::ClientOptions {
+            item_recharge_catalog: hud::item_recharge_catalog(),
+            ..Default::default()
+        })
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
         // the game's threads before builds and other programs when the CPU is full (`priority`)
         .add_systems(Startup, priority::raise)

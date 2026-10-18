@@ -15,6 +15,9 @@ use rusqlite::{Connection, OpenFlags};
 use super::quests::QuestTables;
 use super::stats::StatTables;
 
+mod recharge;
+pub(crate) use recharge::item_recharge_catalog;
+
 /// Name and icon of a skill, item or buff (`ui/icon/<icon>`).
 #[derive(Clone, Debug, Default)]
 pub struct Named {
