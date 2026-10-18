@@ -5,7 +5,7 @@
 
 use mlua::{Lua, Table, Value};
 
-use super::{method, new_object_table, none, ret, ui};
+use super::{Args, method, new_object_table, none, ret, ui, value_id};
 use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +50,24 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut StatusBarData) -> R) -> Option
     Some(f(w.status.get_or_insert_with(StatusBarData::default)))
 }
 
+/// Native zero/minimum hides the image without changing its last extent.
+fn remember_extent(lua: &Lua, id: Id) {
+    let mut u = ui(lua);
+    let Some(s) = u.tree.widget(id).and_then(|w| w.status.as_ref()) else {
+        return;
+    };
+    let Some(bar) = s.bar.filter(|_| s.max > s.min && s.value > s.min) else {
+        return;
+    };
+    let r = u.tree.rect(bar);
+    let o = u.tree.get(bar);
+    if (o.width, o.height) != (r.w, r.h) {
+        let o = u.tree.get_mut(bar);
+        o.width = r.w;
+        o.height = r.h;
+    }
+}
+
 /// Push the bar state into its drawable (fill fraction, coordinates, colour).
 fn sync(lua: &Lua, id: Id) {
     let mut g = ui(lua);
@@ -58,15 +76,65 @@ fn sync(lua: &Lua, id: Id) {
         return;
     };
     let Some(bar) = s.bar else { return };
+    let visible = s.max > s.min && s.value > s.min;
     if let Some(d) = u.tree.drawable_mut(bar) {
-        d.fill = Some((s.fraction(), s.vertical));
+        if visible || d.fill.is_none() {
+            d.fill = Some((s.fraction(), s.vertical));
+        }
         d.coords = s.coords;
         d.color = s.color;
+    }
+    if visible {
+        // Native stretches across the bar, leaving the filled axis at its explicit extent.
+        for point in [
+            Point::TopLeft,
+            if s.vertical {
+                Point::TopRight
+            } else {
+                Point::BottomLeft
+            },
+        ] {
+            u.tree.add_anchor(
+                bar,
+                Anchor {
+                    point,
+                    target: id,
+                    rel: point,
+                    x: 0.0,
+                    y: 0.0,
+                },
+            );
+        }
+    }
+    if u.tree.get(bar).shown != visible {
+        u.tree.get_mut(bar).shown = visible;
     }
 }
 
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
+    def(
+        "AddAnchorChildToBar",
+        method(lua, |lua, id, a| {
+            let Some(bar) = ui(lua)
+                .tree
+                .widget(id)
+                .and_then(|w| w.status.as_ref())
+                .and_then(|s| s.bar)
+            else {
+                return none();
+            };
+            if let Value::Table(_) = a.v(1)
+                && let Some(child) = value_id(lua, &a.v(1))
+                && let Some(mut anchor) =
+                    super::widget::parse_anchor(lua, child, &Args(a.0[1..].to_vec()))
+            {
+                anchor.target = bar;
+                ui(lua).tree.add_anchor(child, anchor);
+            }
+            none()
+        })?,
+    )?;
     def(
         "SetBarTexture",
         method(lua, |lua, id, a| {
@@ -80,18 +148,6 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     let b = u
                         .tree
                         .create_drawable(id, DrawKind::Image, "drawable:image", layer);
-                    for point in [Point::TopLeft, Point::BottomRight] {
-                        u.tree.add_anchor(
-                            b,
-                            Anchor {
-                                point,
-                                target: id,
-                                rel: point,
-                                x: 0.0,
-                                y: 0.0,
-                            },
-                        );
-                    }
                     drop(u);
                     with(lua, id, |s| s.bar = Some(b));
                     b
@@ -127,6 +183,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetMinMaxValues",
         method(lua, |lua, id, a| {
             let (lo, hi) = (a.f(1), a.f(2));
+            remember_extent(lua, id);
             with(lua, id, |s| {
                 s.min = lo;
                 s.max = hi;
@@ -148,6 +205,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "SetValue",
         method(lua, |lua, id, a| {
             let v = a.f(1);
+            remember_extent(lua, id);
             with(lua, id, |s| {
                 s.value = v.clamp(s.min.min(s.max), s.max.max(s.min))
             });
