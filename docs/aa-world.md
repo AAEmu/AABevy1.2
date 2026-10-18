@@ -4041,6 +4041,81 @@ patch is staged; the inherited calibration additions/removals retain their exact
 payload and operation semantics. Full native scene-copy/pass/lighting ordering,
 underwater surface refraction and the other water limitations remain explicit.
 
+### Native authored foam and glint eligibility
+
+Original `watersurface.ext` defines SUN_SHINE **0x20**, FOAM **0x1000** and
+SUN_SHADING **0x2000**. `WaterSurfacePS`478-494 adds sun glint only for
+SUN_SHINE **or** SUN_SHADING; lines513-533 add foam only for FOAM. Previously the
+combined shader consumed each material's public multipliers unconditionally.
+For qualified authored WaterSurface/BUMP_MAP styles, absent native features now
+zero only their corresponding cached scalar. Enabled multipliers retain their
+exact signed values. Other style fields, UVs, normals, cube/refraction, depth,
+alpha, gains and radiometry are unchanged, as are sea/unqualified/unknown defaults.
+There is no new uniform, image, draw or per-frame lookup/allocation. The source
+style lookup added to `WaterStyles` is used once per fixture-cloned material.
+
+The bounded ocean-material audit reads131 original `.mtl` files through aa-pak:
+68 use WaterSurface, 22 omit FOAM and three omit both glint flags. **Mask radix
+depends on MtlFlags0x80000:** otherwise GenMask is legacy decimal. The initial
+raw Python survey incorrectly assumed hex; an original-asset regression caught
+this before the GPU milestone and the audit was corrected. In particular,
+legacy decimal12405 is **0x3075** and retains river2's foam.2. The initial ten sampled
+main-world cells contain766 qualifying placements and **no affected materials**;
+no affected-main-world count or visual change is claimed from those samples.
+
+A targeted eight single-cell-instance material-table search finds an actual
+affected `swamp_rescue` pond in `instance_hadir_farm`, cell0,0. Its decoded mask is
+**0x275**, public SunMultiplier.5 /FoamMultiplier.25: glint enabled, foam absent.
+The original type11 area has six outline points, bounds742.963..769.002 /
+668.066..690.382 and level136.13449. The controlled target(756,680) has original
+terrain136.06075424, water depth.07373576; the view is offset(0,-14,+10) from the
+target and asserts `WaterQuery`'s authored level. The three no-glint material
+placements remain unlocated; their real source assets are exercised numerically.
+The Farm captures are nearly uniform fog: its authored daytime global density
+peaks5, overwhelming this17 m view. No visible foam comparison is claimed there,
+and no fog/light value was changed to expose the effect. Actual streaming still
+checks four styles /36 vertices and releases all four mesh IDs/entities on movement.
+
+`water_features` creates the real cached material styles for lake_tank, legacy
+river2, swamp_rescue and water_plantation_cave, then isolates glint/foam against a
+fixed opaque background. Numeric factors -1/0/+1 commute with the binary source
+gate, exercising negative/zero/positive authored-gain behaviour without claiming
+negative multipliers in those original assets. Thin independent CPU swatches
+verify the other terms remain fixed. Unit regressions also compare every style
+field while checking signed gains, both glint flags, sea and missing defaults.
+`--legacy` restores only the prior unconditional gains; `water_motion --world
+--farm --features` / `--legacy-features` use the actual pond with frozen waves.
+All **48 native/legacy GPU checks pass within one byte**, **192-350 FPS**. Disabled
+glint/foam contributions remain exactly the background `[160,160,160]` for all
+three signed factors; enabled negative/positive controls subtract/add as expected.
+
+A bounded extra20 main-world material-table search (22.4 MB read, no retained
+payloads) finds an affected `lake_solzreed` in cell13,13: one nine-point type11
+area, level112.937988, mask0x275, FoamMultiplier.75. Original B-D terrain selects
+target(14168.5,14263.5) with ground112.78047, true depth.15752; the source-level
+asserted camera is target+(5,7,4). `--solzreed --features` and `--legacy-features`
+freeze waves and preserve all other shader terms. Both original captures in
+`shots/aa-world/water_features/` were inspected: the native gate removes the false
+white foam band along the submerged cliff. ROI [80,310,1160,690] mean absolute
+channel difference **33.769**, 42.51% pixels above three values, maximum219.
+Native logs **122-135 FPS**, legacy **155-183**; shared-machine runs establish
+behaviour, not a speed claim. Ten streamed styles /497 vertices, no pending/failed
+models. No original-client camera reference exists for this controlled lake view.
+
+All seven deliverable runs self-close without errors. Explicit existing warnings
+are retained: `swamp_rescue` authors a **2D** `probe_env04` environment source,
+so its existing cube-only loader logs the fallback in numeric/Farm runs; that
+material variant remains unsupported. Solzreed logs the existing deferred-decal
+receiver budget for neighbour(14,13) in both captures; the budget is unchanged.
+**225 library tests pass /9 existing ignored**; all examples check and both
+feature/motion examples build. The inherited material LOD patch payload and the
+other four calibration hashes remain exact; only the owned cached hunk is staged.
+
+Ignored `roads/water-flags-audit/` retains the corrected material/placement
+surveys, source notes and separate pre-edit calibration archive. Native high-
+quality foam selection and SUN_SHADING's unity-versus-sun+sky light conversion
+remain separate gaps; no new light conversion or brightness fitting is bundled.
+
 ### Native river endpoint opacity and counted outlines
 
 Exact `_LoadWaterVolume` **301F6AB0** reads byte40 bits2/4, equivalently

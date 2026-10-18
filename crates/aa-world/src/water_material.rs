@@ -118,7 +118,7 @@ impl Material for WaterMaterial {
 }
 
 /// The constants of a style (from its `.mtl` and the volume's fog); the environment part is added each frame.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct StyleBase {
     fog: Vec3,
     density: f32,
@@ -211,6 +211,7 @@ impl StyleBase {
         base.soft = param("SoftIntersectionFactor", base.soft);
         base.foam = param("FoamMultiplier", base.foam);
         base.foam_reach = param("FoamIntersectionFactor", base.foam_reach);
+        base.apply_surface_features(mtl.gen_mask);
         if let Some(t) = mtl.texture(&aa_cry::material::TextureMap::Bump) {
             let path = t.pak_path();
             if !path.is_empty() {
@@ -224,6 +225,14 @@ impl StyleBase {
             }
         }
         (base, normal_map)
+    }
+
+    fn apply_surface_features(&mut self, mask: u64) {
+        if !self.native_uv { return; }
+        // WaterSurfacePS478/513: shader feature eligibility is independent of
+        // authored multiplier sign/value. Preserve every other style parameter.
+        if mask & (0x20 | 0x2000) == 0 { self.sun_multiplier = 0.0; }
+        if mask & 0x1000 == 0 { self.foam = 0.0; }
     }
 
     fn motion_mode(&self) -> f32 {
@@ -330,6 +339,11 @@ impl WaterStyles {
     pub fn is_empty(&self) -> bool {
         self.bases.is_empty()
     }
+
+    /// Source style of a cached material, for bounded inspection/control fixtures.
+    pub fn style_for(&self, material: bevy::asset::AssetId<WaterMaterial>) -> Option<&WaterStyle> {
+        self.materials.iter().find_map(|(style, handle)| (handle.id() == material).then_some(style))
+    }
 }
 
 /// The water shader, also available to isolated native sampling fixtures.
@@ -413,6 +427,47 @@ pub fn update_water(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_surface_feature_flags_preserve_signed_gains_and_other_style_fields() {
+        let (template, _) = StyleBase::of(&WaterStyle::new(SEA,0,[0.1,0.2,0.3],0.4));
+        for native in [false, true] {
+            for sun in [-0.5_f32, 0.0, 1.5] {
+                for foam in [-2.0_f32, 0.0, 3.0] {
+                    for mask in [0,0x20,0x2000,0x1000,0x1020,0x3000] {
+                        let mut before=template.clone();
+                        before.native_uv=native; before.sun_multiplier=sun; before.foam=foam;
+                        let mut actual=before.clone(); actual.apply_surface_features(mask);
+                        let mut expected=before;
+                        if native && mask & 0x2020 == 0 {expected.sun_multiplier=0.0;}
+                        if native && mask & 0x1000 == 0 {expected.foam=0.0;}
+                        assert_eq!(actual,expected,"native{native} mask{mask:x} sun{sun} foam{foam}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn original_authored_water_feature_flags_override_nonzero_public_multipliers() {
+        if !crate::pak_available() {return}
+        for (path,sun,foam) in [
+            ("lake_tank",0.5,0.5),
+            ("valley_river_watervolume2",0.30000001,0.2), // Legacy decimal12405 == hex3075.
+            ("swamp_rescue",0.5,0.0),
+            ("water_plantation_cave",0.0,0.0),
+        ] {
+            let style=WaterStyle::new(&format!("materials/ocean/{path}"),3,[0.0;3],0.2);
+            let (base,_)=StyleBase::of(&style);
+            assert!(base.native_uv);
+            assert_eq!(base.sun_multiplier,sun); assert_eq!(base.foam,foam);
+        }
+        for path in [SEA,"materials/ocean/missing_water_feature_test"] {
+            let (before,_)=StyleBase::of(&WaterStyle::new(path,0,[0.0;3],0.0));
+            assert!(!before.native_uv); let mut after=before.clone();after.apply_surface_features(0);
+            assert_eq!(before,after,"unqualified/unknown material retains its original defaults");
+        }
+    }
 
     #[test]
     fn static_authored_cubes_require_flags_and_successful_source_load() {

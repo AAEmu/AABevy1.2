@@ -29,6 +29,10 @@ struct Fixture {
     old_cube: bool,
     refraction: bool,
     old_refraction: bool,
+    features: bool,
+    old_features: bool,
+    farm: bool,
+    solzreed: bool,
     grazing: bool,
     unload: bool,
     moved: bool,
@@ -46,7 +50,7 @@ fn main() {
         aa_dev::DevPlugin,
     ));
     if flag("--world") {
-        let mut config = aa_world::WorldConfig::new("main_world");
+        let mut config = aa_world::WorldConfig::new(if flag("--farm") {"instance_hadir_farm"} else {"main_world"});
         config.load_radius = 180.0;
         config.unload_radius = 300.0;
         config.water_distance = 300.0;
@@ -84,6 +88,10 @@ fn main() {
                 old_cube: flag("--legacy-cube"),
                 refraction: flag("--refraction") || flag("--legacy-refraction"),
                 old_refraction: flag("--legacy-refraction"),
+                features: flag("--features") || flag("--legacy-features"),
+                old_features: flag("--legacy-features"),
+                farm: flag("--farm"),
+                solzreed: flag("--solzreed"),
                 grazing: flag("--grazing"),
                 unload: flag("--unload-check"),
                 ..default()
@@ -259,7 +267,23 @@ fn world_camera(
     terrain: Res<aa_world::TerrainQuery>,
     water: Res<aa_world::WaterQuery>,
 ) {
-    let (p, t, fov) = if fixture.reference != 0 {
+    let (p, t, fov) = if fixture.solzreed {
+        // Original cell13,13 lake_solzreed: native polygon + B-D terrain selection.
+        let target=Vec3::new(14168.5,14263.5,112.93799);
+        let depth=target.z-terrain.height_at(target.x,target.y).unwrap();
+        assert!((0.1..0.3).contains(&depth));
+        assert!((water.water_at(target+Vec3::Z*0.1).unwrap().0-target.z).abs()<0.001);
+        let mut camera=target+Vec3::new(5.0,7.0,4.0);
+        camera.z=camera.z.max(terrain.height_at(camera.x,camera.y).unwrap()+2.5);
+        info!("native source lake_solzreed target={target:?} true depth={depth} camera={camera:?}");
+        (camera,target,55.0_f32.to_radians())
+    } else if fixture.farm {
+        // Original instance_hadir_farm type11 swamp_rescue six-point outline.
+        let level=136.13449;
+        let target=Vec3::new(756.0,680.0,level);
+        assert!((water.water_at(target+Vec3::Z*0.1).unwrap().0-level).abs()<0.001);
+        (target+Vec3::new(0.0,-14.0,10.0),target,55.0_f32.to_radians())
+    } else if fixture.reference != 0 {
         // Original reference/ingame/combat_{triple_slash,return}/camera.json before_key_press.
         let (p, yaw) = if fixture.reference == 5 {
             (
@@ -353,6 +377,10 @@ fn world_check(
     mut meshes: ResMut<Assets<Mesh>>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     objects: Res<aa_world::objects::ObjectState>,
+    styles: Res<aa_world::water_material::WaterStyles>,
+    environment: Res<aa_world::sky::Environment>,
+    tuning: Res<aa_world::sky::AtmosphereTuning>,
+    exposure: Query<Option<&bevy::camera::Exposure>,With<aa_world::post::PostUniform>>,
 ) {
     for (_, mesh, mut material) in &mut surfaces {
         if fixture.meshes.insert(mesh.id()) && fixture.opaque {
@@ -360,7 +388,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction || fixture.features)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -393,6 +421,19 @@ fn world_check(
                     assert!(control.params.motion.x>0.5);
                     control.params.motion.z=0.0;
                     control.params.motion.w=if fixture.old_refraction {-3.0} else {0.0};
+                }
+                if fixture.features {
+                    assert!(control.params.motion.x>0.5);
+                    control.params.motion.z=0.0;
+                    if fixture.old_features {
+                        let style=styles.style_for(material.id()).expect("cached source style");
+                        let mtl=CryMaterial::load(&format!("{}.mtl",style.material.trim_end_matches(".mtl"))).unwrap();
+                        let value=|name:&str,default:f32| mtl.public_param(name).and_then(|v|v.parse().ok()).unwrap_or(default);
+                        let cur=environment.sample.as_ref().unwrap();
+                        let rs=tuning.radiance*exposure.iter().next().flatten().map_or(bevy::camera::Exposure::BLENDER.exposure(),|e|e.exposure());
+                        control.params.sun=(cur.sun*rs*value("SunMultiplier",0.1)*tuning.water_sun).extend(control.params.sun.w);
+                        control.params.foam_col=((cur.sun+cur.sky)*rs*value("FoamMultiplier",0.75)*tuning.water_foam).extend(0.0);
+                    }
                 }
                 let original = material.id();
                 let handle = materials.add(control);
