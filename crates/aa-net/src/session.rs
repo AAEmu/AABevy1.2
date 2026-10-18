@@ -271,6 +271,8 @@ pub enum Command {
     /// Request only; getter changes on the received action 18 item task.
     SetAutoUseAaPoint(bool),
     UnpackItem(crate::unpack::UnpackItemRequest),
+    /// Captured persistent character identity is local-only, never part of the wire body.
+    Expedition { character_id: u32, command: crate::ExpeditionCommand },
     /// Captured persistent character identity is local-only, never part of the Family wire body.
     Family { character_id: u32, command: crate::FamilyCommand },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -530,6 +532,8 @@ pub enum Event {
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
+    ExpeditionRequested { character_id: u32, command: crate::ExpeditionCommand },
+    ExpeditionRequestRejected { character_id: u32, command: crate::ExpeditionCommand, message: String },
     FamilyRequested { character_id: u32, command: crate::FamilyCommand },
     FamilyRequestRejected { character_id: u32, command: crate::FamilyCommand, message: String },
     UnpackItemRequested(crate::unpack::UnpackItemRequest),
@@ -1018,6 +1022,18 @@ impl Session {
                     self.emit(Event::UiData(UiDataEvent::RequestRejected { command, message: message.into() }));
                 } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
                     self.emit(Event::UiData(UiDataEvent::Requested(command)));
+                }
+            }
+            Command::Expedition { character_id, command } => {
+                let invalid = if self.phase != Phase::InWorld || character_id == 0 || self.selected != character_id {
+                    Some("expedition request requires the same active selected character")
+                } else { command.validate().err() };
+                if let Some(message) = invalid {
+                    self.emit(Event::ExpeditionRequestRejected { character_id, command, message: message.into() });
+                } else if self.send_game(game::ClientMsg::Expedition(command.clone())).await {
+                    self.emit(Event::ExpeditionRequested { character_id, command });
+                } else {
+                    self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
                 }
             }
             Command::Family { character_id, command } => {
@@ -4247,6 +4263,44 @@ mod tests {
         while let Ok(event)=events.try_recv() {
             assert!(!matches!(event,Event::FamilyRequested {..}));
             rejected |= matches!(event,Event::FamilyRequestRejected {..});
+        }
+        assert!(rejected);
+    }
+
+    #[tokio::test]
+    async fn expedition_commands_recheck_captured_character_and_only_notify_actual_writes() {
+        use crate::ExpeditionCommand;
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let request = || Command::Expedition { character_id: 42, command: ExpeditionCommand::Leave };
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ExpeditionRequestRejected { character_id:42,.. })));
+        session.phase=Phase::InWorld; session.selected=42;
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ExpeditionRequestRejected { .. })));
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr=listener.local_addr().unwrap().to_string();
+        let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());
+        let(mut peer,_)=accepted.unwrap(); session.game=Some(connection.unwrap());
+        session.selected=43; // A queued request from the prior character cannot cross relogin.
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ExpeditionRequestRejected { .. })));
+        session.selected=42;
+        session.command(Command::Expedition { character_id:42,command:ExpeditionCommand::Kick { member_id:0 } }).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ExpeditionRequestRejected { .. })));
+        assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.command(request()).await;
+        assert!(matches!(events.try_recv(), Ok(Event::ExpeditionRequested {character_id:42,command:ExpeditionCommand::Leave})));
+        let mut length=[0;2]; peer.read_exact(&mut length).await.unwrap();
+        let mut frame=vec![0;u16::from_le_bytes(length) as usize]; peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..], &[0x0e,0]);
+        assert!(events.try_recv().is_err(), "sending never creates an Expedition receipt");
+        session.game.as_mut().unwrap().shutdown().await;
+        session.command(request()).await;
+        let mut rejected=false;
+        while let Ok(event)=events.try_recv() {
+            assert!(!matches!(event,Event::ExpeditionRequested {..}));
+            rejected |= matches!(event,Event::ExpeditionRequestRejected {..});
         }
         assert!(rejected);
     }

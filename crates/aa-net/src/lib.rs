@@ -108,6 +108,8 @@ pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, Battlef
 pub mod expedition;
 pub use expedition::{Expeditions, ExpeditionEvent, ExpeditionFaction, ExpeditionMember, ExpeditionRolePolicy};
 pub mod family;
+pub mod expedition_command;
+pub use expedition_command::ExpeditionCommand;
 pub mod family_command;
 pub use family_command::FamilyCommand;
 pub use family::{Families, FamilyEvent, FamilyInvitation, FamilyMember, FamilyRoster, FamilyTitle};
