@@ -1419,16 +1419,22 @@ own fields in a lengthless DD04 batch, so the next packet remains aligned.
 Original `x2ui/loot/loot_dice.lua` and native x2game12 contract:
 
 * `TRY_LOOT_DICE(key, timeStamp, itemLink)` creates `LootDiceWindow(%d)` with an opaque
-  local integer key. `itemLink` contains the complete offered item, for
-  `X2Item:InfoFromLink`; it must not be replaced with a template-only link.
+  local integer key. `itemLink` preserves the offered item's full details for
+  `X2Item:InfoFromLink`; it must not be replaced with a template-only link. Native
+  RequestNext394fad50 calls394f94d0, which passes the queued item at row+8 to the same
+  chat-link formatter394e4ef0 (call394f9502), then emits event0x85. This uses that formatter's
+  normalized id0/count1 representation; the raw offered item/key remain separate for
+  the network request and settlement.
 * `X2Loot:DoDiceAction(key, roll)` takes that local key, not the packed 64-bit corpse ID.
   True rolls; false passes. Roll, Give Up, close and the 60-second deadline all use this
   function. The Lua then schedules `X2Loot:RequestNextDiceItem()` after 500ms and animates
   away the prompt. RequestNextDiceItem is a local queue operation, with no CS packet.
 * `LootRolls.next_prompt_at(now)` / `next_prompt()` return and mark one unshown local
   prompt among the first `max_concurrent` queued rows. Default 3 matches native
-  manager 394fb250. `set_max_concurrent(i32)` clamps to at least 1, matching wrapper 3948a610;
-  the setter itself neither advances the queue nor sends a packet.
+  manager 394fb250. `set_max_concurrent(i32)` clamps to at least 1, matching wrapper 3948a610.
+  Its exact Lua name is `X2Loot:SetMaxConcurrentNotifyDiceItem(count)` (native registration
+  3948b130 links string399df518 to that wrapper). The setter itself neither advances the
+  queue nor sends a packet.
 * On `Offered`, call next_prompt and emit TRY_LOOT_DICE with its `ui_key`, full item link
   from the matching round and `prompt.ui_timestamp_ms(X2Time:GetUiMsec(), now)`.
   This preserves receipt time while using the application's UI clock origin.
@@ -1762,7 +1768,7 @@ an owned-slave resource or a Unit.
 The lane fills spawn skill slots with distinct `npc_mount_skills.mount_skill_id` in table
 order. These are `mount_skills.id`, **not combat skill IDs**: the matching compact database
 joins mount skill209 to skill21172, for example. Activation still needs the native slot,
-attachment and caster rules; this milestone sends no pet commands. The current compact
+attachment and caster rules; the receive layer makes no such choices. The current compact
 catalog has at most nine distinct entries for an NPC. The lane writer nevertheless emits
 every vector entry if there are more than ten, with no count; that unsupported overflow
 cannot be safely distinguished from a following DD04 opcode. The decoder follows the
@@ -1799,6 +1805,80 @@ session cleanup. `cargo test -p aa-net` passed 197 library and 2 scripted-sessio
 with 9 live tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 No live lane traffic was used; natural pet summon/ride/gear and vehicle QA remain pending
 while the lane is stalled.
+
+## Explicit mate controls and mount-caster skills
+
+`Command::Mate(MateCommand)` sends the proven controls below. Each validates a nonzero u16
+timeline. Mount/unmount accept the lane's mate seats 1 (driver) / 2 (passenger); reasons remain
+raw u8 values. The session sends valid commands only while InWorld.
+
+| MateCommand | Opcode | Exact body |
+|---|---|---|
+| `Dismiss { tl_id }` | 0a4 | u16 tl |
+| `Mount { tl_id, point, reason }` | 0a7 | u16 tl, u8 point, u8 reason |
+| `Unmount { tl_id, point, reason }` | 0a8 | u16 tl, u8 point, u8 reason |
+| `Target { tl_id, target_obj_id }` | 0a5 | u16 tl, bc target; 0 clears |
+| `UserState { tl_id, state }` | 0aa | u16 tl, u8 state; valid 0..3 |
+
+Target values above 0xffffff are rejected before a three-byte write. Native wrappers
+39069bb0 /39069ac0 /39069ca0 /39069d60 map stand/passive/protective/aggressive to 0/1/2/3
+and call 3933def0, which updates native local presentation and sends 0aa. The lane updates
+its stored mode with **no ACK**; `Mates.own.spawn.user_state` remains the last server spawn
+snapshot. aa-client may implement the native local mode presentation separately; no successful
+server state is invented here.
+
+`MateEvent::Requested(command)` is only a successful local socket write;
+`RequestRejected { command, message }` is local validation failure. Neither mutates Mates,
+attachments, target or ownership. Server `UnitAttached`, `UnitDetached`, `UnitsRemoved`,
+`TargetChanged` and errors continue independently. There is no invented separate mount or
+dismiss ACK, and no successful local-send event without an actual connection/write.
+
+Native mount/dismiss sequencing is distinct from the packet API. X2Mate:MountMate wrapper
+390697f0 selects the contextual mate then 393642f0 queues an action with driver 1 for an
+owned mate, passenger 2 otherwise. Action 3909b070 sends 0a7 with reason computed by 3909ae90
+from approach geometry/seat occupancy (return values 1..4). A fixed reason 0 is not claimed
+as the native planner. X2Mate:UnMountMate wrapper390697b0 invokes39361e80 with reason 9;
+it uses the actual current attach point. Dismiss 39362070 first attempts passenger removal,
+uses reason 10 to dismount the owner when mounted, and otherwise queues the remove action;
+final senders 3933b230 /3933f040 write 0a4. The lane's direct owner-authorized remove handler
+also detaches occupants before deleting the mate. The UI action/animation planner is not
+replicated by sending extra guessed packets.
+
+**KickPassenger is a lane gap:** native 390697d0 /39361fc0 sends Unmount with passenger
+point 2 and reason 11, but the lane's mates::unmount_mate accepts only a seat occupied by
+the requesting character. An owner trying to eject a different passenger is silently
+rejected. No functional kick method or fake successful detach is exposed by aa-net.
+
+`Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id }` sends the
+existing CSStartSkill 052 with explicit mount caster. `skill_id` and `mount_skill_id` must
+be nonzero; caster and target are explicit nonzero 24-bit unit IDs. No target 0 self alias,
+automatic target selection, learned-skill check or mount-slot resolution is imposed.
+For a pet self buff the caller explicitly supplies mate_obj_id as target. The exact
+17-byte body is u32 combatSkillId, u8 casterKind 3, bc mateObjId, u32 mountSkillId,
+u8 targetKind 0, bc targetObjId, u8 flag 0. The low-level
+`skill::StartCaster::Mount { obj_id, mount_skill_id }` is also available.
+The player's own object ID is not substituted into the mount caster.
+
+Local `MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }`
+and `SkillRejected { same fields, message }` do not create a cast or consume resources.
+Actual SkillStarted/Fired/Ended and costs remain authoritative. The lane's mount authority
+permits an unmounted owner or a passenger with a matching occupied seat, riding flag and
+parent relation; it does not impose a static learned-skill allowlist (temporary grants are
+supported). Its on_mount_skill_used separately resolves a linked rider skill by attach
+point; the client must not duplicate that server-side extra cast.
+
+Native pet action slots are established through `ISLOT_PET_ACTION` rather than a guessed
+X2Mate:StartMountSkill method. Static mount_skills/mount_attached_skills mapping, native
+slot eligibility, target planning, automatic-use toggles and per-pet cooldown presentation
+remain aa-client integration work; raw dynamic triples are not guessed cooldowns.
+
+Three new offline tests check every control's source-backed body/full frame, TL/point/state
+and target bounds, zero target clearing, raw reason preservation, unchanged owned state
+after requests/rejections, distinct combat/mount/actor IDs, and an ephemeral loopback
+session proving invalid/out-of-world requests send nothing and successful sends wait for
+real server errors / mount-caster SkillStarted. Full `cargo test -p aa-net` passed 200
+library and 2 scripted-session tests, with 9 live tests ignored;
+`cargo check -p aa-net --features bevy --examples` passed. No live lane traffic was used.
 
 ## Known gaps
 

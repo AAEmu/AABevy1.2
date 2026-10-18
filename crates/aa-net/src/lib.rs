@@ -51,7 +51,7 @@ pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEven
 pub use login::Secret;
 pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};
-pub use mate::{DynamicUnitState, MateEvent, MateSpawn, Mates, OwnedMate, SlaveState};
+pub use mate::{DynamicUnitState, MateCommand, MateEvent, MateSpawn, Mates, OwnedMate, SlaveState};
 pub use model::{Character, CreateCharacter, Doodad, Unit};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;

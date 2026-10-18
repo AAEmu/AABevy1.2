@@ -228,6 +228,10 @@ pub enum Command {
     /// `CraftRequested` only reports a local send, not batch acceptance/completion. Existing
     /// `StopCasting` cancels an active cast; the lane does not invalidate queued craft tasks.
     ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
+    /// Cast a resolved combat skill as a mate. Both the raw mount skill ID and combat skill ID
+    /// are explicit; target must be a real nonzero 24-bit unit ID (self buffs name the mate).
+    /// No local learned-skill gate or automatic target/slot/auto-use choice is imposed.
+    UseMateSkill { skill_id: u32, mate_obj_id: u32, mount_skill_id: u32, target_obj_id: u32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
     UseSkillAt { skill_id: u32, pos: Pos },
     /// Cancel the cast or channel of the player: `tl` is the timeline of a plain skill (`SkillStarted::tl`), `plot_tl` the one
@@ -265,6 +269,7 @@ pub enum Command {
     Party(crate::party::PartyCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
     Actability(crate::actability::ActabilityCommand),
+    Mate(crate::mate::MateCommand),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -961,6 +966,13 @@ impl Session {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::Requested(command)));
                 }
             }
+            Command::Mate(command) => {
+                if let Err(message) = command.validate() {
+                    self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: message.into() }));
+                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::Mate(command)).await {
+                    self.emit(Event::Mate(crate::mate::MateEvent::Requested(command)));
+                }
+            }
             Command::LootRoll(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::LootRoll(crate::loot_roll::LootRollEvent::RequestRejected { command, message: message.into() }));
@@ -1021,6 +1033,22 @@ impl Session {
                     self.emit(Event::CraftRejected { craft_id, doodad_obj_id, count, message: message.into() });
                 } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::ExecuteCraft { craft_id, doodad_obj_id, count }).await {
                     self.emit(Event::CraftRequested { craft_id, doodad_obj_id, count });
+                }
+            }
+            Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id } => {
+                let error = if skill_id == 0 || mount_skill_id == 0 {
+                    Some("combat skill and mount skill IDs must be nonzero")
+                } else if mate_obj_id == 0 || mate_obj_id > 0xffffff || target_obj_id == 0 || target_obj_id > 0xffffff {
+                    Some("mate caster and skill target must be nonzero 24-bit object IDs")
+                } else {
+                    None
+                };
+                if let Some(message) = error {
+                    self.emit(Event::Mate(crate::mate::MateEvent::SkillRejected { skill_id, mate_obj_id, mount_skill_id, target_obj_id, message: message.into() }));
+                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::StartSkill {
+                    skill_id, self_obj_id: self.self_obj, caster: StartCaster::Mount { obj_id: mate_obj_id, mount_skill_id }, target: SkillTarget::unit(target_obj_id),
+                }).await {
+                    self.emit(Event::Mate(crate::mate::MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }));
                 }
             }
             Command::StopCasting { tl, plot_tl } => {
@@ -1575,6 +1603,180 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn mate_controls_and_explicit_cast_wait_for_real_server_events() {
+        use crate::mate::{MateCommand, MateEvent};
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stub = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let requests = [
+                vec![0xdd, 1, 0, 0, 0xa7, 0, 2, 1, 1, 4],
+                vec![
+                    0xdd, 1, 0, 1, 0x52, 0, 0x21, 0x4e, 0, 0, 3, 0x66, 0x55, 0x44, 77, 0, 0, 0, 0,
+                    0x66, 0x55, 0x44, 0,
+                ],
+            ];
+            for (index, expected) in requests.into_iter().enumerate() {
+                let mut length = [0u8; 2];
+                tokio::time::timeout(Duration::from_secs(2), sock.read_exact(&mut length))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut request = vec![0u8; u16::from_le_bytes(length) as usize];
+                sock.read_exact(&mut request).await.unwrap();
+                assert_eq!(
+                    request, expected,
+                    "only the validated explicit control/cast may reach the socket"
+                );
+                let mut response = crate::wire::Writer::new();
+                response.raw(&[0xdd, 1, 0, 0]);
+                if index == 0 {
+                    response
+                        .u16(crate::opcodes::sc::SCErrorMsgPacket)
+                        .i16(95)
+                        .i16(95)
+                        .u32(0)
+                        .bool(false);
+                } else {
+                    response
+                        .u16(crate::opcodes::sc::SCSkillStartedPacket)
+                        .u32(20001)
+                        .u16(7)
+                        .u8(3)
+                        .bc(0x445566)
+                        .u32(77)
+                        .u8(0)
+                        .bc(0x445566)
+                        .u8(0)
+                        .u16(150)
+                        .u16(150)
+                        .u8(0)
+                        .u8(0);
+                }
+                let response = response.finish();
+                sock.write_all(&(response.len() as u16).to_le_bytes())
+                    .await
+                    .unwrap();
+                sock.write_all(&response).await.unwrap();
+            }
+        });
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        let mount = MateCommand::Mount {
+            tl_id: 0x102,
+            point: 1,
+            reason: 4,
+        };
+        session.command(Command::Mate(mount)).await;
+        assert!(
+            events.try_recv().is_err(),
+            "no connection means no local send notification"
+        );
+        session.game = Some(GameConn::connect(&addr).await.unwrap());
+        session.self_obj = 0x112233;
+        for command in [
+            MateCommand::Dismiss { tl_id: 0 },
+            MateCommand::UserState { tl_id: 1, state: 4 },
+            MateCommand::Target {
+                tl_id: 1,
+                target_obj_id: 0x1000000,
+            },
+        ] {
+            session.command(Command::Mate(command)).await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::Mate(MateEvent::RequestRejected { command: rejected, .. })) if rejected == command)
+            );
+        }
+        session.phase = Phase::CharacterSelect;
+        session.command(Command::Mate(mount)).await;
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        session.command(Command::Mate(mount)).await;
+        assert!(
+            matches!(events.try_recv(), Ok(Event::Mate(MateEvent::Requested(command))) if command == mount)
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "no invented UnitAttached or mode ACK"
+        );
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::ServerError { code: 95 })
+        ));
+        for (skill_id, mate_obj_id, mount_skill_id, target_obj_id) in [
+            (0, 1, 1, 1),
+            (1, 1, 0, 1),
+            (1, 0, 1, 1),
+            (1, 0x1000000, 1, 1),
+            (1, u32::MAX, 1, 1),
+            (1, 1, 1, 0),
+            (1, 1, 1, 0x1000000),
+            (1, 1, 1, u32::MAX),
+        ] {
+            session
+                .command(Command::UseMateSkill {
+                    skill_id,
+                    mate_obj_id,
+                    mount_skill_id,
+                    target_obj_id,
+                })
+                .await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::Mate(MateEvent::SkillRejected { skill_id: sid, mate_obj_id: mid, mount_skill_id: msid, target_obj_id: tid, .. })) if (sid,mid,msid,tid) == (skill_id,mate_obj_id,mount_skill_id,target_obj_id))
+            );
+        }
+        let command = Command::UseMateSkill {
+            skill_id: 20001,
+            mate_obj_id: 0x445566,
+            mount_skill_id: 77,
+            target_obj_id: 0x445566,
+        };
+        session.phase = Phase::CharacterSelect;
+        session.command(command.clone()).await;
+        assert!(events.try_recv().is_err());
+        session.phase = Phase::InWorld;
+        session.command(command).await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::Mate(MateEvent::SkillRequested {
+                skill_id: 20001,
+                mate_obj_id: 0x445566,
+                mount_skill_id: 77,
+                target_obj_id: 0x445566
+            }))
+        ));
+        assert!(
+            events.try_recv().is_err(),
+            "sending does not create a cast or charge the pet"
+        );
+        let mut state = crate::state::WorldState::default();
+        state.skills.obj_id = 0x112233;
+        assert!(
+            state.skills.known.is_empty(),
+            "pet casts do not require the player's learned list"
+        );
+        assert!(state.skills.casting_of(0x445566).is_none());
+        stub.await.unwrap();
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+        let event = events.try_recv().unwrap();
+        assert!(
+            matches!(&event, Event::SkillStarted(skill) if skill.skill_id == 20001 && skill.caster.obj_id == 0x445566 && skill.caster.kind == 3)
+        );
+        state.apply(&event);
+        assert_eq!(
+            state.skills.casting_of(0x445566).unwrap().target.obj_id,
+            0x445566
+        );
+        assert!(state.skills.casting_of(0x112233).is_none());
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn owned_mate_and_slave_metadata_reach_resources_before_following_points() {
