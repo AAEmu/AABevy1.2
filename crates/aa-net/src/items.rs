@@ -10,6 +10,28 @@
 use crate::model::{Item, ItemDetail};
 use crate::wire::{Reader, Result, WireError};
 
+/// `SCSyncItemLifespan` metadata for an exact item identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemLifespan {
+    pub added: bool,
+    pub item_id: u64,
+    pub template_id: u32,
+    /// Lane login sends an expiry endpoint; equipment unpack can send the charge start instead.
+    /// Keep the original signed seconds without inferring a countdown or removing an item.
+    pub raw_time: i64,
+}
+
+impl ItemLifespan {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            added: r.bool()?,
+            item_id: r.u64()?,
+            template_id: r.u32()?,
+            raw_time: r.i64()?,
+        })
+    }
+}
+
 /// `SlotType`: which container an item is in.
 pub mod container {
     pub const NONE: u8 = 0;
@@ -409,6 +431,100 @@ fn read_task_item(r: &mut Reader) -> Result<Item> {
 mod tests {
     use super::*;
     use crate::wire::Writer;
+
+    #[test]
+    fn lifespan_fixed_body_retains_both_flags_exact_ids_and_signed_time() {
+        // Independent LE golden for item_packets.rs's bool/u64/u32/i64 writer.
+        let raw = [
+            1, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x98, 0xba, 0xdc, 0xfe, 0xf9, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ];
+        let mut r = Reader::new(&raw);
+        assert_eq!(
+            ItemLifespan::read(&mut r).unwrap(),
+            ItemLifespan {
+                added: true,
+                item_id: 0x1122334455667788,
+                template_id: 0xfedcba98,
+                raw_time: -7,
+            }
+        );
+        assert!(r.is_empty());
+        for n in 0..raw.len() {
+            assert!(ItemLifespan::read(&mut Reader::new(&raw[..n])).is_err());
+            let mut frame = Writer::new();
+            frame.raw(&[0xdd, 1, 0, 0]).u16(0x098).raw(&raw[..n]);
+            assert!(crate::game::ServerMsg::decode(&frame.finish()).is_err());
+        }
+        for added in [false, true] {
+            for raw_time in [i64::MIN, -1, 0, i64::MAX] {
+                let mut w = Writer::new();
+                w.bool(added).u64(u64::MAX).u32(u32::MAX).i64(raw_time);
+                let raw = w.finish();
+                let mut r = Reader::new(&raw);
+                assert_eq!(
+                    ItemLifespan::read(&mut r).unwrap(),
+                    ItemLifespan {
+                        added,
+                        item_id: u64::MAX,
+                        template_id: u32::MAX,
+                        raw_time,
+                    }
+                );
+                assert!(r.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn lifespan_notifications_preserve_following_dd04_inventory_and_world_entries() {
+        use crate::game::ServerMsg;
+        let mut raw = Writer::new();
+        for added in [true, false] {
+            raw.u16(0).u16(0x098).bool(added).u64(7).u32(8).i64(9);
+        }
+        raw.u16(0)
+            .u16(crate::opcodes::sc::SCInvenExpandedPacket)
+            .u8(2)
+            .u8(60);
+        raw.u16(0)
+            .u16(crate::opcodes::sc::SCOnOffSnowPacket)
+            .bool(true);
+        let raw = raw.finish();
+        let len = raw.len() as u16;
+        let mut outer = Writer::new();
+        outer
+            .raw(&[0xdd, 4])
+            .u16(4)
+            .u8(1)
+            .u16(len)
+            .u16(!len)
+            .raw(&raw);
+        let expected = vec![
+            ServerMsg::ItemLifespan(ItemLifespan {
+                added: true,
+                item_id: 7,
+                template_id: 8,
+                raw_time: 9,
+            }),
+            ServerMsg::ItemLifespan(ItemLifespan {
+                added: false,
+                item_id: 7,
+                template_id: 8,
+                raw_time: 9,
+            }),
+            ServerMsg::InvenExpanded {
+                container: 2,
+                slots: 60,
+            },
+            ServerMsg::Snow(true),
+        ];
+        assert_eq!(expected[0].name(), "SCSyncItemLifespan");
+        assert_eq!(
+            ServerMsg::decode(&outer.finish()).unwrap(),
+            ServerMsg::Batch(expected)
+        );
+    }
 
     fn plain_item(w: &mut Writer, template: u32, id: u64, count: i32) {
         w.u32(template).u64(id).u8(1).u8(0).i32(count).u8(0); // detail type 0

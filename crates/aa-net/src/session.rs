@@ -500,6 +500,12 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
+    /// Raw loading directive; the app must plan the load/response separately.
+    LoadInstance(crate::world_msg::InstanceLoad),
+    /// Raw blink directive; does not by itself change a unit transform.
+    BlinkUnit(crate::world_msg::BlinkUnit),
+    /// Raw item timer metadata; does not change inventory contents or guess an expiry.
+    ItemLifespan(crate::items::ItemLifespan),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
     Auction(crate::auction::AuctionEvent),
@@ -1415,6 +1421,9 @@ impl Session {
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::CraftFailureNotice(e) => self.emit(Event::CraftFailureNotice(e)),
+            M::LoadInstance(e) => self.emit(Event::LoadInstance(e)),
+            M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
+            M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::Mate(e) => self.emit(Event::Mate(e)),
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
@@ -1617,6 +1626,160 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn raw_instance_blink_and_item_lifespan_keep_batch_order_without_ack_or_fake_state() {
+        use crate::items::ItemLifespan;
+        use crate::wire::Writer;
+        use crate::world_msg::{BlinkUnit, InstanceLoad};
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let load = InstanceLoad {
+            raw_id: 9001,
+            zone_id: 33,
+            pos: Pos::new(50.0, 60.0, 70.0),
+            angles: [1.0, 2.0, 3.0],
+        };
+        let blink = BlinkUnit {
+            obj_id: 8,
+            distance: 12.5,
+            degree: -45.0,
+            x: crate::wire::coord_to_long(100.0),
+            y: crate::wire::coord_to_long(200.0),
+            z: 300.0,
+        };
+        let timer = ItemLifespan {
+            added: true,
+            item_id: 55,
+            template_id: 123,
+            raw_time: -7,
+        };
+        let cleared = ItemLifespan {
+            added: false,
+            ..timer
+        };
+        let mut raw = Writer::new();
+        raw.u16(0)
+            .u16(0x197)
+            .u32(load.raw_id)
+            .u32(load.zone_id)
+            .f32(load.pos.x)
+            .f32(load.pos.y)
+            .f32(load.pos.z);
+        for angle in load.angles {
+            raw.f32(angle);
+        }
+        raw.u16(0)
+            .u16(0x073)
+            .bc(blink.obj_id)
+            .f32(blink.distance)
+            .f32(blink.degree)
+            .i64(blink.x)
+            .i64(blink.y)
+            .f32(blink.z);
+        for value in [timer, cleared] {
+            raw.u16(0)
+                .u16(0x098)
+                .bool(value.added)
+                .u64(value.item_id)
+                .u32(value.template_id)
+                .i64(value.raw_time);
+        }
+        raw.u16(0)
+            .u16(crate::opcodes::sc::SCUnitPointsPacket)
+            .bc(8)
+            .i32(12300)
+            .i32(45600);
+        raw.u16(0)
+            .u16(crate::opcodes::sc::SCOnOffSnowPacket)
+            .bool(true);
+        let raw = raw.finish();
+        let len = raw.len() as u16;
+        let mut frame = Writer::new();
+        frame
+            .raw(&[0xdd, 4])
+            .u16(6)
+            .u8(1)
+            .u16(len)
+            .u16(!len)
+            .raw(&raw);
+        let frame = frame.finish();
+        peer.write_all(&(frame.len() as u16).to_le_bytes())
+            .await
+            .unwrap();
+        peer.write_all(&frame).await.unwrap();
+        let response = session.game.as_mut().unwrap().recv().await;
+        session.game_msg(response).await;
+
+        let mut state = crate::state::WorldState::default();
+        let mut selected = CharacterState::default();
+        selected.character.id = 42;
+        selected.character.zone_id = 19;
+        selected.instance_id = 77;
+        state.apply(&Event::CharacterSelected(Box::new(selected.clone())));
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: selected,
+            unit: crate::state::tests::unit(7),
+        })));
+        state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(8))));
+        state.inventory.bag.push(Some(crate::model::Item {
+            id: 55,
+            template_id: 123,
+            count: 5,
+            unpack_time: 321,
+            lifespan_mins: 60,
+            ..Default::default()
+        }));
+        let before = state.clone();
+        for expected in 0..4 {
+            let event = events.try_recv().unwrap();
+            match expected {
+                0 => assert!(matches!(&event, Event::LoadInstance(got) if *got == load)),
+                1 => assert!(matches!(&event, Event::BlinkUnit(got) if *got == blink)),
+                2 => assert!(matches!(&event, Event::ItemLifespan(got) if *got == timer)),
+                _ => assert!(matches!(&event, Event::ItemLifespan(got) if *got == cleared)),
+            }
+            state.apply(&event);
+        }
+        assert_eq!(state.world, before.world);
+        assert_eq!(state.player.spawn, before.player.spawn);
+        assert_eq!(state.units.by_id, before.units.by_id);
+        assert_eq!(state.inventory.bag, before.inventory.bag);
+        let points = events.try_recv().unwrap();
+        assert!(matches!(
+            &points,
+            Event::UnitPoints {
+                obj_id: 8,
+                hp: 123,
+                mp: 456
+            }
+        ));
+        state.apply(&points);
+        let snow = events.try_recv().unwrap();
+        assert!(matches!(&snow, Event::Snow(true)));
+        state.apply(&snow);
+        assert_eq!(state.units.by_id[&8].hp, 123);
+        assert!(state.world.snow);
+        assert!(events.try_recv().is_err());
+        assert_eq!(session.phase, Phase::InWorld);
+        assert_eq!(session.self_obj, 7);
+        let mut extra = [0];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), peer.read(&mut extra))
+                .await
+                .is_err(),
+            "receive directives must not fabricate a teleport or instance-loaded response"
+        );
+    }
 
     #[tokio::test]
     async fn slave_controls_validate_and_emit_requests_without_authoritative_mutation() {
