@@ -104,7 +104,7 @@ fn show_character(
             warn!("character select: cannot describe {}", c.name);
             continue;
         };
-        let assets = match desc.resolve(&game) {
+        let assets = match appearance::resolve(&game, &desc, &c.equipment) {
             Ok(a) => a,
             Err(e) => {
                 warn!("character select: cannot resolve {}: {e}", c.name);

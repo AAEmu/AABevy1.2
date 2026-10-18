@@ -75,7 +75,7 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
                 // an NPC without armour data: the default outfit beats a naked body
                 desc.costume = Costume::Login;
             }
-            match desc.resolve(&game) {
+            match appearance::resolve(&game, &desc, &unit.equipment) {
                 Ok(a) => a,
                 Err(e) => return UnitBuild::None(format!("character assets of {race:?} {gender:?} (model {}): {e}", unit.model_id)),
             }
@@ -138,7 +138,7 @@ pub fn prepare_listed(db: &Db, loader: &CryLoader, c: &aa_net::model::Character)
     let assets = {
         let game = db.game.lock().unwrap_or_else(|e| e.into_inner());
         let desc = appearance::describe(&game, race, gender, &c.equipment, &c.model_params)?;
-        desc.resolve(&game).ok()?
+        appearance::resolve(&game, &desc, &c.equipment).ok()?
     };
     if let Err(e) = aa_anim::character::prewarm_character_face(&assets) {
         debug!("listed character {} face: {e}", c.name);

@@ -198,7 +198,7 @@ pub fn spawn_player(
         return;
     };
     debug!("player look: {desc:?}");
-    let assets = match desc.resolve(&game) {
+    let assets = match appearance::resolve(&game, &desc, equipment) {
         Ok(a) => a,
         Err(e) => {
             error!("cannot resolve the player character: {e}");
