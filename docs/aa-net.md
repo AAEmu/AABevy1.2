@@ -1682,8 +1682,8 @@ Like interaction casts, valid requests outside InWorld are ignored. The low-leve
 
 `Event::CraftRequested { craft_id, doodad_obj_id, count }` reports only a successful local
 socket write. `CraftRejected { craft_id, doodad_obj_id, count, message }` reports only
-local validation failure. No event is fabricated when there is no connection, no ACK or
-a generic server error. There is no new authoritative batch resource, completed-product
+local validation, inactive-character or missing/failed transport write failure. No ACK or
+completion event is fabricated for a generic server error or silence. There is no new authoritative batch resource, completed-product
 counter or optimistic material/labor mutation. Ordinary SkillStarted/Fired/Ended, errors,
 item tasks and LaborChanged continue to carry the real server observations.
 
@@ -3097,3 +3097,92 @@ and genuine received-state mutation only.
 Validation: `cargo test -p aa-net --features bevy --lib` passes276 tests for the final
 repair/bank/mate rejection followup; `git diff --check` is clean. No lane mutation or
 new wire/result semantics were introduced.
+
+### Native crafting manager and proficiency bridge audit (2026-10-18)
+
+Read-only source: client12 `x2game_unpacked.dll`, image base38ff0000. No new wire API or
+completion result was added. The existing ExecuteCraft request carries the entire batch
+count once: wrapper39460930 rejects count<=0, manager394d7650 refuses an already-working
+batch, stores recipe/count/doodad, registers craft-skill callbacks and invokes validator
+394d6dc0. Sender394d1340 builds CS0f8 with that complete count. Update394d32b0 only manages
+local readiness/waiting flags; it never sends the next craft. The material-warning
+confirmation394d6ab0 can send the same original full-count request after acceptance.
+
+Manager39affa18 stores remaining signed count at+8. IsWorking394d0bb0 is precisely
+count>0; GetLeftBatchCount394d0bc0 returns that count. Callback394d53e0 accepts only the
+local player's skill carrying CraftEffect kind0e, with matching skill/timeline guards.
+Started success emits CRAFT_STARTED(remaining) only for the first accepted start. Fired
+success latches completion. Ended decrements once only when Fired succeeded; positive
+remaining emits CRAFT_ENDED(remaining), exhausted/non-fired emits CRAFT_ENDED() with no
+argument. Non-fired/Stopped readiness resets the batch on the next update. Started
+failure resets immediately and emits CRAFT_ENDED(). Native event IDs are1ef/1f0.
+StopBatchCrafting39460870 calls manager394d1870(false), issuing existing stop-casting
+requests for active cast slots; it does not immediately decrement/reset or emit a
+separate cancel event. Do not resend ExecuteCraft in response to each CRAFT_ENDED.
+
+SC1bf handler391e0840 invokes394d2370: each resolvable item in its bounded20-entry list
+is independently formatted through394e4ef0 and emits CRAFT_FAILED(formattedString),
+event77, inside the loop. This is neither a joined item list nor a batch completion
+notification. The exact item-link markup produced by the formatter remains untraced.
+
+GetCraftMaterialInfo39462600 walks every material of a known recipe without a12-row
+cap or grade-alternative filter. Missing item descriptors are skipped. Each returned
+row has amount/count/mainGrade/item_info; required grade-1 accepts all grades, otherwise
+matching is exact. Counts sum physical eligible bag stacks. Predicate397cc350 excludes
+an item only when item flag04 and received feature bit45 (feature byte5 bit20) are both
+set. A representative matching item supplies item_info, otherwise the native getter
+constructs a synthesized item descriptor with count0. Catalog orphan craft_id0 rows
+are not children of any real recipe; the largest known valid recipe has8 materials.
+
+GetCraftBaseInfo39461860 reports ac_type from crafts.ac_id (recipe+4), independently
+of the skill's proficiency-group field+C. Labor uses skill consume_lp(+78), received
+proficiency points plus unit_attr_id bonus and equipped-state modifier3932a190, and
+received grade. Helper397a9420 selects current grade only when effective points reach
+that row's up_limit; otherwise it selects previous u8 grade. It computes native f32
+floor((1-f32(advantage)*0.01)*f32(baseLP)+0.5), minimum1, with zero only for the invalid
+group sentinel. Native x86 Unicorn execution (only exact static expert lookup and
+security-cookie check stubbed) confirms (baseLP,points,grade)->neededLP:
+(100,10000,1)->100; (100,19999,1)->100; (100,20000,1)->95;
+(10,20000,1)->10; (0,20000,1)->1; (100,30000,2)->90.
+The ignored reproducible helper is data/extract/aa-net/craft_lp_oracle.py.
+
+Expert loader395b45c0 queries expert_limits ORDER BY up_limit ASC. At395b475b it
+recognizes SHOW as T/t/1, skips hidden rows at395b4789, and assigns sequential u8 grade
+keys starting0 only to inserted visible rows. The current catalog IDs1..7 therefore
+map to grades0..6; hidden IDs8..31 are absent from this native map. GetMaxGrade397a7d00
+returns map count-1, so6 here. GetGradeInfo3943b170 keys are grade/name/expertLimit/
+upLimit/advantage/castAdvantage/colorString/gaugeColorString/upCurrency/upPrice/
+downCurrency/downPrice. expertLimit adds received expanded-expert count; colors use
+uppercase %08X. Playerflags1000 controls DB currencies/prices versus currency0/string0.
+Missing grade uses the native fallback record (upLimit10000, other numeric values0,
+currency-1) rather than nil; transport state may still legitimately be unknown.
+
+GetMyActabilityInfo3930c730 returns nil for an unknown static group. point is the
+received proficiency point; modifyPoint is the additional unit_attr_id bonus plus
+3932a190 equipped/current-state modifier, not another copy of received points. Native
+missing received map values default0, while aa-net deliberately retains loaded/None
+information for an integration to distinguish absent authoritative state.
+CanUpgrade397a8e60 requires the current row up_limit, a next visible grade, then checks
+next-grade expert_limit plus received expansion against a count of eligible groups
+whose received grade is >= the target. Count397a8760 excludes special groups through
+static IDs and descriptor flags; those encrypted static ID values remain unresolved.
+Do not substitute equality-at-grade or all-group counts. CanDowngrade397a8f90 requires
+an existing received entry with step>0. These getters do not acknowledge a request.
+GetExpandExpertInfo3943ba20 looks up expansion key received_count+1; missing yields
+nil/error1fd. It returns requireLP, optional requireItemType/requireItemCount, and
+remainExpandCnt by scanning subsequent consecutive entries; no affordability check.
+
+GetActabilityCategoryCraftTypesByTypes394612c0->394d84b0 sorts copied recipe IDs by
+visible_order ascending, then unsigned recipe ID ascending (comparator394d1380).
+Category comparator394d13c0 likewise sorts category visible_order then unsigned ID.
+The named EnumActabilityCategoryTypesFromCurrentDoodad and EnumCraftTypesFromCurrentDoodad
+exports are no-op wrappers39460830/39460850 in this build, returning no values. Their
+Get* counterparts have separate implementations; no enumeration behavior is inferred
+from the export names. Remaining audit boundaries: full current-doodad category
+population/filtering, special proficiency exclusion IDs, exact failure link markup.
+
+Failure-link followup: formatter394e4ef0 uses literal399e6134 `|i%d,%d,%s;`.
+Its arguments are copied descriptor item-type at+8, grade byte+C and the encoded
+192-byte item descriptor. Before native six-bit encoding394df700 it clears the first
+8 bytes and forces descriptor count+10 to1. The outer syntax is proven; faithful
+payload construction still depends on the complete native item-descriptor layout.
