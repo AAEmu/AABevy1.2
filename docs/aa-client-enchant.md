@@ -61,8 +61,8 @@ no matching native enchant capture is present in reference/, so paired pixel
 equivalence and natural live enchanting are not claimed. Fixture state and
 its black background are explicit; there is no game session or item operation.
 
-Latest inspected main: target/debug/aa-client-20261018-native-fades.exe. The idle
-target/debug/aa-client-play.exe alias is refreshed from it. Both SHA256:
+Earlier native-fades main: target/debug/aa-client-20261018-native-fades.exe. At that
+milestone the idle target/debug/aa-client-play.exe alias was refreshed from it. SHA256:
 C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
 The combined suite passes298 tests /38 optional probes ignored in55.55s with
 three test threads (data/extract/aa-client/trial/native-fades-full-tests.log).
@@ -191,5 +191,28 @@ actual Max Mana200 / Agility2 / Stamina3 effect lines are now visible. The
 rejected earlier socket captures are not accepted as validation. No matching
 native enchant reference exists, so these are original-script/asset checks,
 not a paired pixel-equivalence or live-operation claim. This repair binary
-cut precedes the latest frame-order/header-cap/cache integration; the playable
-alias remains the previously accepted native-fades build until combined QA.
+cut precedes the frame-order/header-cap/cache integration validated below.
+
+## Combined playable build
+
+The inspected main is target/debug/aa-client-20261018-enchant-frames.exe;
+the idle target/debug/aa-client-play.exe alias is refreshed from this exact
+copy. Both SHA256:
+347DDF0D98E758E49CCBF6E082048BA2894635637CBF7430D14EBD2F83A00327.
+Main and all three enchant/buffs/item_effects fixtures build in1m58s. This cut
+contains4591bc3's selected providers,8f5db9e's widget frame admission/update
+order and channel retirement,52dae4e's static2D water environment maps/cache
+admission fix and87c52d1's pure native task lookup. The full suite passes307
+tests /38 optional probes ignored in86.92s, and twelve focused checks pass
+in5.28s. New button-state colors, foam-literal precision and raw Update9
+retention are subsequent worker slices, outside this binary.
+
+All eight1920x1080 shots/hud/enchant-frames/ captures are inspected and pixel
+equal to the repaired selection captures: grade178.9-209.5 FPS,
+support263.1-276.1, socket186.2-229.1, unsocket198.8-256.5,
+gem223.4-232.0, buff tooltip152.8-189.3, grade result211.2-327.1 and
+real lane world select273.0-305.5. All eight self-close without
+WARN/ERROR/panic; shared-machine compilation remains active. These are
+original-script/asset regression checks, not natural live item transactions
+or paired original-client pixel comparisons. Request/planner/controller and
+full native inventory/tooltip limitations above remain explicit.

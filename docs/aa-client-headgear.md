@@ -41,10 +41,9 @@ override and invalid-image fallback matching rendered costume; and genuine
 cosplay14359/detail57344 retaining normal hair over the hidden-head descriptor,
 nonrendered equipment and explicit bald appearance. The expected asset path
 honors the original direct mesh versus .cdf formats. The combined full client
-suite now passes298 tests /38 optional probes ignored in55.55s with three test
-threads, including these resolver calls. The inspected main and playable alias
-are target/debug/aa-client-20261018-native-fades.exe and
-target/debug/aa-client-play.exe, both SHA256
+suite at this milestone passes298 tests /38 optional probes ignored in55.55s with three test
+threads, including these resolver calls. Its inspected main was
+target/debug/aa-client-20261018-native-fades.exe, SHA256
 C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
 
 The final headgear example builds and its1920x1080 capture
@@ -54,3 +53,11 @@ nu_f_hair001.chr, the metal's authored nu_f_hair001_hm_type3.chr, absent hood ha
 and that same Type3 asset for the received image override. This is a diagnostic
 selection/render check; source hair/armor clipping and full native-scene visual
 equivalence remain unclaimed.
+
+The later combined main target/debug/aa-client-20261018-enchant-frames.exe and
+idle target/debug/aa-client-play.exe alias now share SHA256
+347DDF0D98E758E49CCBF6E082048BA2894635637CBF7430D14EBD2F83A00327.
+Its full suite passes307 tests /38 optional probes ignored in86.92s, including
+the same headgear checks. Eight inspected original HUD/world-list captures
+validate that combined build (aa-client-enchant.md); they add no new headgear
+scene/reference claim.
