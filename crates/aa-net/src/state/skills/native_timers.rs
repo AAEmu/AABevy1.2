@@ -171,6 +171,8 @@ mod tests {
             tl,
             caster: BuffCaster { kind: 0, obj_id: actor },
             target: SkillTarget::unit(9),
+            raw_caster:crate::SkillCasterData::Unit(actor),
+            raw_target:crate::SkillTargetData::Unit(9),
             cast_ms: 100,
             base_cast_ms: 100,
             synergy: 0,

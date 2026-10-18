@@ -5784,3 +5784,49 @@ retained identity. Existing bounded stop timers and estimates are unchanged;
 no immediate replacement model or GCD/A74 approximation is claimed.
 
 Validation: cargo test -p aa-net --features bevy --lib: 435 passed, 0 failed, 0 ignored (2026-10-18).
+
+
+### Received skill caster/target identities (2026-10-18)
+
+`SkillStarted` and `SkillFired` now expose additive `raw_caster:SkillCasterData`
+and `raw_target:SkillTargetData`. Their existing `caster:BuffCaster` and
+`target:SkillTarget` projections retain their prior shapes and values. This is a
+received-data prerequisite, not a new cast/timer producer or retained-TL model.
+Other BuffCaster/SkillTarget consumers remain their existing compact projections;
+this milestone does not claim complete preservation of every SkillObject/Buff.
+
+Caster kinds0..4 preserve Unit, Unk1, Item, Mount and Doodad respectively. All
+carry the BC runtime ID; Item additionally retains u64 item ID, u32 template ID,
+u8 type1, u32 type2; Mount retains its u32 mount skill ID. Target kinds0..5 retain
+Unit, Position, Position2, Item, Doodad, Position3. Position retains raw i64 X/Y,
+f32 Z, f32 rotation and two BC object IDs; Position2 retains raw position plus
+three-f32 end and normal vectors; Item retains BC object, u64 item ID, u32 type1,
+u8 type2; Position3 retains raw position and f32 pitch. `SkillPosition` retains
+**all** fixed-point bits; `.projection()` performs only the preexisting display
+conversion. Unsupported discriminants are rejected, an explicit app framing guard
+rather than guessed extension lengths.
+
+Native397c85b0 and397bfa90 match the active lane's SkillCaster/SkillCastTarget
+read/write schemas field-for-field. Native helper39391da0 compares caster kind
+and object for0/1/3/4; Item compares item ID/template/owner object/type1, deliberately
+ignoring type2. Mount skill ID is also deliberately ignored by that identity
+comparison. Native39391e30 compares all retained target identity fields except
+Position.rotation. Position object IDs, Item identity/types, Position2 end/normal,
+and Position3 pitch are compared. All compared floats use exact equality with
+NaN rejection and +0==-0; raw X/Y compare exactly, including bits lost by the
+legacy f32 projection. `.native_eq()` implements these complete known-kind helpers;
+derived PartialEq instead compares full retained data, so the two intentionally
+differ for ignored fields. Neither helper establishes timeline ownership,
+recreation success, planner eligibility or a cooldown receipt.
+
+The original two x86 comparators were executed locally without hooks/mocks for
+75 kind/field/float fixtures. Inlined Rust tests contain those outputs, including
+ignored Itemcaster.type2, Mount.mount_skill_id, Position.rotation (even NaN),
+compared NaNs, signed zero and low raw-coordinate bits. Additional tests cover
+all five caster and six target wire layouts, unknown kinds, every truncated
+prefix, legacy projections, and every30 Started/Fired identity combination followed
+by a genuine Ended packet in DD04. No generated artifact is required at test time.
+Ignored source/oracle artifacts: `data/extract/aa-net/native-skill-identity-source-20261018.txt`,
+`native-skill-identity-oracle-20261018.json`, and `skill_identity_oracle.py`.
+
+Validation: cargo test -p aa-net --features bevy --lib passed all 438 tests (0 failures), including native identity goldens and DD04 alignment coverage. No timer production or retained-timeline policy changed in this slice.
