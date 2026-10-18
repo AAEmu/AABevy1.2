@@ -27,7 +27,7 @@
 //! ```lua
 //! X2Cursor:SetHeld({ kind = "bag", icon = "ui/icon/x.dds", frame = "ui/icon/item_grade_1common.dds", count = 3, ... })
 //! X2Cursor:GetHeld()                 -- the same table, or nil
-//! X2Cursor:GetCursorInfo()           -- its `kind`, or nil (the scripts only test for nil)
+//! X2Cursor:GetCursorInfo()           -- native Item / Item_Id / Spell / Macro, or nil
 //! X2Cursor:ClearCursor()
 //! X2Cursor:SetCursorImage(path, x, y)  -- an image cursor (the move cursor of a window being dragged); kind "image"
 //! X2Cursor:GetCursorPickedBagItemIndex() / GetCursorPickedBagItemAmount()  -- `slot` / `count` of a "bag" thing
@@ -147,6 +147,39 @@ pub fn holding(lua: &Lua) -> bool {
 /// Whether anything at all is held (the pointer draws it).
 pub fn held_kind(lua: &Lua) -> Option<String> {
     ui(lua).drag.held.as_ref().map(|h| h.kind.clone())
+}
+
+/// Native name table 39ac9974, queried by 394649d0. Internal hand kinds stay in GetHeld.
+/// Apps with an item definition supply cursorInfo: stackable items use Item; unique items
+/// use Item_Id. Count alone cannot distinguish a single remaining stackable item.
+pub fn cursor_info(lua: &Lua) -> Option<String> {
+    let held = ui(lua).drag.held.clone()?;
+    if held.kind == "image" {
+        return None;
+    }
+    if let Ok(Some(name)) = held.table.raw_get::<Option<String>>("cursorInfo") {
+        return matches!(name.as_str(), "Item" | "Item_Id" | "Spell" | "Macro").then_some(name);
+    }
+    let name = match held.kind.as_str() {
+        "bag" | "item" => "Item",
+        "equip" => "Item_Id",
+        "skill" => "Spell",
+        "macro" => "Macro",
+        "action" => match held
+            .table
+            .raw_get::<Option<String>>("what")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("item") => "Item",
+            Some("skill") => "Spell",
+            Some("macro") => "Macro",
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(name.to_string())
 }
 
 /// Let go of what is held.
@@ -306,7 +339,7 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     cursor.raw_set(
         "GetCursorInfo",
-        lua.create_function(|lua, _: MultiValue| Ok(held_kind(lua)))?,
+        lua.create_function(|lua, _: MultiValue| Ok(cursor_info(lua)))?,
     )?;
     cursor.raw_set(
         "GetCursorPickedBagItemIndex",

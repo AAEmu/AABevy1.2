@@ -319,6 +319,24 @@ data pick up and take drops natively through `AAUI.PickupSlot(info)` / `AAUI.Dro
 click on a bound slot while holding drops too). Rust side: `UiRuntime::holding()`,
 `clear_cursor()` and `drop_on_nothing(over_ui)` (the app calls the last for a click on the world).
 
+`X2Cursor:GetCursorInfo()` exposes native names rather than the internal `GetHeld().kind`:
+`Item`, `Item_Id`, `Spell`, `Macro`, or nil. The native name table is `39ac9974`, getter
+`394649d0`, with empty mode 0 handled by `39424540`. `SetHeld` accepts optional `cursorInfo`
+using those exact four names; unknown values return nil. Physical bag/equipment pickups
+(`3944d210` / `3946e830` -> `39429460` -> `394293b0`) choose `Item` when the definition's
+max-stack-size is above 1, otherwise `Item_Id`. Setters `394244b0` / `394292f0` store the
+template/grade versus complete UID respectively. The app must provide this field from its
+definition: a stackable item with count 1 still uses `Item`. Legacy bag/template hand data
+defaults to `Item`, equipped hand data to `Item_Id`, skills to `Spell`; action hand data uses
+its item/skill/macro subtype. Visual window cursors return nil. Internal kinds, UID strings,
+source slots and count stay unchanged in `GetHeld` and the app hooks.
+
+`tests/cursor_trade.rs` runs original `trade.alb` and `logic/trade.alb` handlers without
+replacing them: stackable bag drag reaches `PutupTradeItem(slot,count)` with exact held UID,
+unique `Item_Id` is accepted by the original item-slot click path, and locked trades reject
+drops. The original trade background `OnDragReceive` deliberately accepts only `Item`;
+per-item `OnClickProc` accepts `Item` and `Item_Id`.
+
 Native slots and widgets with only `OnDragReceive` take mouse input without an `OnClick` handler.
 Disabled controls cannot start or receive a drag. If an `OnClick` handler changes the held item,
 that consumes the native slot click: placing an item cannot also use it, and picking one up

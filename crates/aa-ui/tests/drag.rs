@@ -296,7 +296,7 @@ fn a_right_click_puts_the_held_thing_back_and_the_cursor_image_is_not_droppable(
         "log = {}; X2Cursor:SetHeld({ kind = 'bag', slot = 4, count = 7 })",
     )
     .unwrap();
-    assert_eq!(eval::<String>(&ui, "X2Cursor:GetCursorInfo()"), "bag");
+    assert_eq!(eval::<String>(&ui, "X2Cursor:GetCursorInfo()"), "Item");
     assert_eq!(
         eval::<i64>(&ui, "X2Cursor:GetCursorPickedBagItemIndex()"),
         4
@@ -330,7 +330,7 @@ fn a_right_click_puts_the_held_thing_back_and_the_cursor_image_is_not_droppable(
     .unwrap();
     p.press(&ui, 520.0, 520.0);
     p.at(&ui, 400.0, 480.0);
-    assert!(eval::<bool>(&ui, "X2Cursor:GetCursorInfo() == 'image'"));
+    assert!(eval::<bool>(&ui, "X2Cursor:GetCursorInfo() == nil"));
     assert!(!ui.holding());
     p.at(&ui, 220.0, 420.0);
     p.release(&ui, 220.0, 420.0);
