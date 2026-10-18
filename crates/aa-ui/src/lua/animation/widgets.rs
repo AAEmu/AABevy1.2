@@ -177,6 +177,14 @@ impl State {
 }
 
 impl Widgets {
+    pub(super) fn effective_scale(&self, tree: &Tree, id: Id) -> f32 {
+        let own = self.states.get(&id).map(|s| s.raw_scale(self.ui_scale));
+        match tree.get(id).parent {
+            Some(parent) => own.unwrap_or(1.0) * self.effective_scale(tree, parent),
+            None => own.unwrap_or(self.ui_scale),
+        }
+    }
+
     pub fn sample(&self, id: Id) -> WidgetSample {
         let mut sample = self.states
             .get(&id)
@@ -246,6 +254,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             }
             // Native SetScale dispatches event 42 (OnScale), even for an identical value.
             u.pending.push((id, "OnScale".into(), vec![]));
+            super::super::auto_clip::changed(&mut u, id, true);
             none()
         })?,
     )?;
@@ -297,6 +306,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let mut u = ui(lua);
             let ui_scale = u.animations.widgets.ui_scale;
             let state = state(&mut u, id);
+            let scale_callback = a.b(2, false) || state.scale.running;
             let before = state.sample(ui_scale);
             state.alpha.start(a.b(1, false));
             state.scale.start(a.b(2, false));
@@ -312,6 +322,9 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             }
             if scale_changed {
                 u.pending.push((id, "OnScale".into(), vec![]));
+            }
+            if scale_callback {
+                super::super::auto_clip::changed(&mut u, id, true);
             }
             none()
         })?,
@@ -343,6 +356,7 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
         .collect::<Vec<_>>();
     let mut ended = Vec::new();
     let mut repaint = false;
+    let mut scaled = Vec::new();
     for id in ids {
         if !u.tree.get(id).alive {
             u.animations.widgets.states.remove(&id);
@@ -351,6 +365,9 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
         }
         let ui_scale = u.animations.widgets.ui_scale;
         let state = u.animations.widgets.states.get_mut(&id).unwrap();
+        if state.scale.running {
+            scaled.push(id);
+        }
         let before = state.sample(ui_scale);
         if state.alpha.tick(positive(dt_ms) as f64) {
             ended.push((id, "OnAlphaAnimeEnd"));
@@ -370,6 +387,9 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
     }
     if repaint {
         u.tree.repaint();
+    }
+    for id in scaled {
+        super::super::auto_clip::changed(u, id, true);
     }
     ended
 }

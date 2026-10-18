@@ -612,6 +612,17 @@ impl FontLib {
         count
     }
 
+    pub(crate) fn is_image_font(&self, font: &str) -> bool {
+        self.image_fonts.contains_key(&font.to_ascii_lowercase())
+    }
+
+    /// 39275150 chooses the physical face size with an SSE +0.3 bias and truncate.
+    /// ImageText (kind2) deliberately requests its base size instead.
+    pub(crate) fn button_font_size(&self, font: &str, size: f32, scale: f32) -> f32 {
+        let base = size.trunc();
+        if self.is_image_font(font) { base } else { (base * scale + 0.3f32).trunc() }
+    }
+
     /// Lay out `text` from the top-left of its block: lines break at `\n` and, with
     /// `max_width`, at spaces (or anywhere for words longer than a line). Glyphs are rasterised
     /// into the atlas as needed.
@@ -1411,6 +1422,16 @@ fn group_thousands(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_button_physical_font_rounding_and_image_font_base_size() {
+        let lib = FontLib::new("en_us");
+        for (scale, physical) in [(0.8, 10.0), (0.85, 11.0), (0.93, 12.0), (1.0, 13.0), (1.25, 16.0), (1.5, 19.0)] {
+            assert_eq!(lib.button_font_size(DEFAULT_FONT, 13.0, scale), physical);
+            assert!(lib.is_image_font("actionBar"));
+            assert_eq!(lib.button_font_size("actionBar", 13.0, scale), 13.0);
+        }
+    }
 
     #[test]
     fn value_codes() {

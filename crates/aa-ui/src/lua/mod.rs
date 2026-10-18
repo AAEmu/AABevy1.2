@@ -75,6 +75,8 @@ pub struct Ui {
     pub damage: damage::Damage,
     pub time_ms: f64,
     pub frame_ms: f32,
+    /// Derived index of enabled native fitting caches, including hidden widgets.
+    pub(crate) auto_clip_widgets: std::collections::BTreeSet<Id>,
     /// Calls to stubbed (unimplemented) methods: name -> count.
     pub stub_calls: BTreeMap<String, u32>,
     /// Widget under the mouse, keyboard focus.

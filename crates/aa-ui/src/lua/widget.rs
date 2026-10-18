@@ -408,14 +408,15 @@ pub(crate) fn auto_size(lua: &Lua, id: Id) {
         }
         return;
     }
-    let w = u
-        .fonts
-        .layout_size(&t.style.font, t.style.size, &t.text, None, t.line_space)
-        .0
-        + t.inset[0]
-        + t.inset[2];
+    let w = if u.tree.widget(id).is_some_and(|w| w.ty.is_button_like()) {
+        (super::auto_clip::full_width(u, id, &t) + t.inset[0] as f64 + t.inset[2] as f64) as f32
+    } else {
+        u.fonts.layout_size(&t.style.font, t.style.size, &t.text, None, t.line_space).0
+            + t.inset[0] + t.inset[2]
+    };
     if u.tree.get(id).width != w {
         u.tree.get_mut(id).width = w;
+        super::auto_clip::changed(u, id, false);
     }
 }
 
@@ -449,7 +450,11 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "AddAnchor",
         method(lua, |lua, id, a| {
             match parse_anchor(lua, id, a) {
-                Some(an) => ui(lua).tree.add_anchor(id, an),
+                Some(an) => {
+                    let mut u = ui(lua);
+                    u.tree.add_anchor(id, an);
+                    super::auto_clip::changed(&mut u, id, false);
+                }
                 None => bevy::log::warn!(
                     "aa-ui: AddAnchor() failed on {}: bad arguments",
                     ui(lua).tree.get(id).name
@@ -475,7 +480,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             o.width = a.f(1);
             o.height = a.f(2);
             drop(u);
-            super::auto_clip::geometry(&mut ui(lua), id);
+            super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
             scale_event(lua, id);
             none()
@@ -485,7 +490,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetWidth",
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).width = a.f(1);
-            super::auto_clip::geometry(&mut ui(lua), id);
+            super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
             none()
         })?,
@@ -494,7 +499,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetHeight",
         method(lua, |lua, id, a| {
             ui(lua).tree.get_mut(id).height = a.f(1);
-            super::auto_clip::geometry(&mut ui(lua), id);
+            super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
             none()
         })?,
@@ -1854,7 +1859,16 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
                 return Ok(0.0);
             };
             let s = a.s(1).unwrap_or(text);
-            Ok(ui(lua).fonts.measure(&st.font, st.size, &s))
+            let owner = if let Value::Table(t) = a.v(0) {
+                reg(lua).styles.raw_get::<Option<i64>>(t)?.filter(|c| c % 4 == 0).map(|c| (c / 4) as Id)
+            } else { None };
+            let mut u = ui(lua);
+            if let Some(owner) = owner.filter(|&id| u.tree.widget(id).is_some_and(|w| w.ty.is_button_like())) {
+                let full = TextBlock { text: s, style: st, ..Default::default() };
+                Ok(super::auto_clip::full_width(&mut u, owner, &full) as f32)
+            } else {
+                Ok(u.fonts.measure(&st.font, st.size, &s))
+            }
         })?,
     )?;
     m.raw_set(

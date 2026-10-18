@@ -76,6 +76,10 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             if u.ui_scale != s {
                 u.ui_scale = s;
                 u.tree.repaint();
+                // Font/geometry propagation also reaches hidden native buttons.
+                // Opted-out roots retain their scale and therefore their cache.
+                let clipped: Vec<_> = u.auto_clip_widgets.iter().copied().collect();
+                for id in clipped { super::auto_clip::geometry(&mut u, id); }
             }
             none()
         })?,
