@@ -2318,11 +2318,114 @@ is the number of models in flight. A part is one entity with the node transform 
 them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` (its own `maxViewDist`, capped by `brush_distance` 1000 m /
 `vegetation_distance` 220 m / `tree_distance` 600 m); a sector is despawned when the camera is farther than that cap. Vegetation is split by its
 own view distance: instances up to 220 m are small plants (`Kind::Vegetation`), larger ones (trees, up to 1 km and more in the data) are
-`Kind::Trees` and are drawn up to 600 m. Level of detail: `_lodN` / `$lodN` by distance band (brush 140 / 380 m, vegetation 55 / 130 m, trees
-150 / 350 m, with hysteresis). Models that fail to load
+`Kind::Trees` and are drawn up to 600 m. Brushes now request `_lodN` / `$lodN` from the native normal-view formula below;
+static entity slots retain 140 / 380 m bands, vegetation 55 / 130 m and trees 150 / 350 m, with hysteresis. Models that fail to load
 are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environment"` cube maps as the base colour of 2D materials, which is
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
+
+#### Native ordinary brush requested LOD (2026-10-18)
+
+Compiled `SBrushChunk` byte37 is retained as `Brush::lod_ratio` for exterior,
+object-octree and interior visarea records. The original loader301F2CA0 copies it
+to CBrush+21 unchanged; 100 is unity. A bounded six-cell brush.dat survey contains
+7,687 records, including 722 nondefault ratios (40 through255); 16 instances have
+actual external LOD3 files. Independent visarea table remapping preserves the byte.
+The two synthetic Brush values in entity unit fixtures use100; entity rendering
+policy is unchanged.
+
+Native CBrush::GetLod vtable30260750+272 ->300FFC60 calls30112240 with normal-view
+camera-to-world-AABB distance, compiled maxViewDist, ratio*0.01, and the world's
+AABB half-diagonal radius. The world/cell/sector origins are each applied once.
+Normal-view30151BE0 uploads camera scale
+`((fovRadians * 57.295776 * 0.016666668) * 0.8) + 0.2`; multiply the AABB distance
+by that scale. With native constructor `e_lod_sync_view_dist=1`, maxViewDist>=.001,
+`q=distance/maxViewDist` and `u=(ratio*.01)*.39215687`, the request is
+`floor(4 * ((sqrt(q)-q*q)*u + q*q))`. The actual x86_64 implementation preserves
+native RSQRTSS plus its Newton step and non-fused float operation order, including
+processor approximation at integer thresholds. Non-x86_64 uses the mathematical
+sqrt shape and can differ immediately at a threshold. At distance0 native NaN
+converts to INT_MIN then resolves to LOD0; we select0 directly. Degenerate positive
+radius/maxViewDist takes the native alternate `trunc(ratioFloat^2*distance/(6*radius))`
+branch. Nonfinite/inverted bounds and unusable degenerate inputs retain the prior
+sector policy.
+
+Native defaults are proven by3000DEC0: LOD sync1, min0, max6, min-triangles300,
+LODs1 and ratio6. Original `option_view_dist_ratio.cfg` default4 agrees; other
+quality settings change these values. This slice requests0..6 through the existing
+aa-cry external/embedded/missing-level picker. Native 300-triangle usability,
+quality-dependent max-view recomputation/min/max overrides, per-pass reflection
+scaling and mesh dissolve remain open; this is not a complete native LOD renderer.
+
+Only exactly one active perspective Camera3d on the ordinary world layer drives
+these brush requests; cameras on portrait layers are excluded. Orthographic or
+multiple ordinary-world views retain the prior sector-band policy. Streaming
+focus remains independent: `WorldFocus` still determines loaded cells/sectors,
+while the actual qualified camera determines brush LOD. No camera fallback is
+used for source inputs beyond the explicit old-policy fallback above.
+
+Per-sector current/requested byte vectors grow only as the existing 3ms object
+spawner admits instances. Completed sectors are checked round-robin with at most
+512 brush checks per frame across all sectors, without parsing assets or allocating
+per instance in the update. After a complete changed scan, the requested levels
+are frozen and one replacement sector builds hidden under the same shared48-job
+and existing spawn/finish budgets. It cannot restart while hidden; old geometry
+remains until completion, then the roots swap atomically. Instance LOD metadata
+and both vectors retire with the sector/cell. Existing model caches remain shared;
+LOD keys are bounded to seven requests per model/material, without distance/time
+keys. This does not introduce global cache eviction. `BrushLodPart` records the
+request before missing-asset fallback; it does not claim the selected file has
+that exact embedded level. ObjectStats reports checks, tracked instances, rebuilds
+and cached models.
+
+Source/oracle artifacts are retained in ignored
+`data/extract/aa-world/roads/object-lod-audit/`: original engine method/formula/cvar/
+camera disassembly, six-cell asset survey, and two executed208-case oracles.
+Unicorn computes an exact reciprocal square root for RSQRTSS; the second oracle
+supplies the local CPU's actual RSQRTSS result at3011227B and executes every later
+original SSE instruction unchanged. No x87 operation or FPCW assumption is involved
+in30112240. Rust regressions cover all208 resulting integer requests, nondefault
+record retention, FOV/world-AABB origin, camera-layer qualification and bounded
+large-sector snapshots. The original MIN_TRIANGLES and stat-object policy remain
+separate limits above.
+
+`object_lod` uses original (9,12) ratio255 cliff_rock_a_small, and `--lod3` uses the
+actual ma_top_house01 instance in (21,8). BEFORE captures were made from an immutable
+old executable at the same fixed camera. The building view has foreground cliff
+occlusion; it is a streaming/source control, not a clear native visual comparison.
+`--asset --lod3 --level 0/3` isolates the unchanged original house geometry/material
+with the same diagnostic light and close camera, so the LOD3 asset can be inspected.
+`--transition-check` moves only the actual camera, keeping streaming focus fixed;
+`--unload-check` verifies all actual brush parts, roots and tracked vectors retire.
+These controls do not provide an original-client reference-camera comparison.
+
+Validation: full aa-world library suite241 passed /9 existing optional tests ignored
+(10.02s), all examples checked, and the final fixture built after its visibility
+refinement. Both original AFTER scenes assert the actual streamed target's request
+(rock1, house3), max512 checks and unchanged stationary caches276 /387. The source
+rock is320 triangles atLOD0 and168 at embeddedLOD1; its projected world-AABB ROI
+(852,449)-(1067,648) has1,653 pixels differing by>3 in the fixed-camera pair
+(max119, mean absolute RGB difference.57). Animated windmill/water timing elsewhere
+in the image is not a static comparison. The original house asset has6,158 drawn
+triangles atLOD0 and1,553 in its actual `_lod3.cgf`; both isolated controls preserve
+the same authored transform/material and diagnostic camera/light.
+
+The final camera-only transition uses a fixture-only600m cap to keep the far
+request inside the draw range, verifies actual ViewVisibility atLOD3, and settles
+back toLOD1 with streaming focus unchanged (1,756 tracked brushes, <=512 checks,
+192 completed sector replacements, stationary cache543). The unload control
+removes all actual brush parts, sector roots and tracked vectors; existing shared
+model cache276 remains. Ten screenshots, including the pre-change pair and smoke,
+are inspected under `shots/aa-world/object_lod/`; all processes self-close. The
+building pair retains the expected pre-existing WARN for non-cube
+`textures/cubemaps/fleettest.dds`. Both rock versions omit missing
+`objects/env/architecture/siege/prop/weathercock_a.cga` (one failed model, DEBUG),
+without new ERROR/panic. FPS ranges on this shared machine: rock BEFORE137-190 /
+AFTER166-213; building BEFORE148-221 /AFTER129-178; render-visible transition152-211;
+unload192-304; isolated house LOD0 259-295 / LOD3 246-348. These are smoke/per-scene
+observations, not an isolated performance benchmark. Logs, binary hashes,
+calibration hashes and metrics remain in the ignored audit folder. All five
+inherited calibration file hashes/payloads are unchanged.
 
 Static entity slots (`entities.rs`): `CellObjects::entity_props` reads the direct mission entities,
 separately from brush/vegetation and the already-supported particles and sounds. The source is the
