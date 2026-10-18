@@ -13,8 +13,21 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite: 295 passed / 38 optional probes ignored in132.31s
-with one test thread. Three mode checks cover the original bag enchant button,
+Latest full-client suite: 298 passed / 38 optional probes ignored in55.55s
+with three test threads. The copied suite and main include received-headgear
+hair selection and the toolkit's source-verified native fade manager. Seven
+1920x1080 captures under shots/hud/native-fades/ are inspected: buff tooltip
+385.0-447.9 FPS, charge badges477.5-544.4, grade result503.9-518.3,
+socket result417.1-478.8, grade controls365.4-484.7, unsocket controls354.2-508.5
+and real lane world select344.4-422.8. All processes self-close without
+WARN/ERROR/panic. Main and the three fixture examples build. The idle playable
+alias is refreshed from target/debug/aa-client-20261018-native-fades.exe,
+SHA256 C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
+This build also includes native qualified WaterSurface refraction and authored
+cube direction; aa-world records223 passing tests /9 optional probes ignored,
+84 exact refraction controls and eight composite/sea controls. Inheritance and
+additional material-feature gates remain ongoing worker slices.
+Three mode checks cover the original bag enchant button,
 physical grade/socket/unsocket/gem controls, native synchronous mode events,
 strict return arities, preserved picked items and received session retirement.
 Six mode/world-list captures are inspected and the playable alias is refreshed
@@ -25,7 +38,7 @@ Three further focused appearance checks pass for rendered helmet hair selection:
 native alternate/hidden hair, actual image overrides/fallback, cosplay priority,
 material/other-part retention and bald appearance. Character select, prewarming,
 local spawn and remote humanoid preparation now share this adapter. The full
-suite/playable baseline above predates this integration (aa-client-headgear.md).
+suite and playable baseline above include this integration (aa-client-headgear.md).
 Six item-effect checks cover receipt-ordered current versus inline items,
 equipment/BAG lookup priority including ID0, native callback/argument shapes,
 raw grade name/color lookups, deferred lifecycle and all five original grade

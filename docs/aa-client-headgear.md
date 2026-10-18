@@ -40,10 +40,12 @@ Type3 and hidden hair with other parts/materials preserved; received image
 override and invalid-image fallback matching rendered costume; and genuine
 cosplay14359/detail57344 retaining normal hair over the hidden-head descriptor,
 nonrendered equipment and explicit bald appearance. The expected asset path
-honors the original direct mesh versus .cdf formats. The previous full client
-baseline is295 passed /38 optional probes ignored, before this integration.
-The inspected playable alias described in aa-client-enchant.md predates these
-new resolver calls; another main build is required.
+honors the original direct mesh versus .cdf formats. The combined full client
+suite now passes298 tests /38 optional probes ignored in55.55s with three test
+threads, including these resolver calls. The inspected main and playable alias
+are target/debug/aa-client-20261018-native-fades.exe and
+target/debug/aa-client-play.exe, both SHA256
+C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
 
 The final headgear example builds and its1920x1080 capture
 shots/aa-client/headgear/received.png is inspected at288.1-416.2 FPS without

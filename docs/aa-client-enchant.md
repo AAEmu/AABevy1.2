@@ -59,11 +59,16 @@ no matching native enchant capture is present in reference/, so paired pixel
 equivalence and natural live enchanting are not claimed. Fixture state and
 its black background are explicit; there is no game session or item operation.
 
-Latest inspected main: target/debug/aa-client-20261018-enchant.exe. The idle
+Latest inspected main: target/debug/aa-client-20261018-native-fades.exe. The idle
 target/debug/aa-client-play.exe alias is refreshed from it. Both SHA256:
-5902A972FDC4B820A1115A7808E70393259391B6AA988ED138A122324FCC6C09.
-This includes NumberOnly labels, authored WaterSurface normals, the qualified
-authored-cube correction, typed052 transport and the preceding item-result/buff
-adapters. Cube numeric and source-gate checks pass in aa-world; its owning
-documentation tracks original-scene comparisons. Animation inheritance/fade
-work still in progress requires a later build.
+C236C8B021D8674370142878D8DA9B0E957A1E54B0768B89E2AC4E90E9E53510.
+The combined suite passes298 tests /38 optional probes ignored in55.55s with
+three test threads (data/extract/aa-client/trial/native-fades-full-tests.log).
+Seven inspected captures under shots/hud/native-fades/ include the original
+grade365.4-484.7 FPS and unsocket354.2-508.5 controls, grade/socket results,
+buff tooltip/charges and real lane world select344.4-422.8. All self-close
+without WARN/ERROR/panic. This build includes received-headgear hair selection,
+native widget fades, NumberOnly labels, native qualified WaterSurface refraction,
+authored cube direction, typed052 transport and preceding item-result/buff
+adapters. Inheritance remains in progress; original planner, selection and
+controller limits above remain unchanged by this combined validation.
