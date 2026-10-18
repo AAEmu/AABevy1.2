@@ -141,13 +141,14 @@ pub struct PlacedIcon {
 /// 1 px after the text and centred on the line (the honor medal hangs over the line's top:
 /// `reference/ingame/character_info`, Honor Points and Vocation Badges).
 pub const INLINE_ICON_TEXTURE: &str = "ui/common/money_window.dds";
-pub const INLINE_ICONS: [[f32; 4]; 6] = [
+pub const INLINE_ICONS: [[f32; 4]; 7] = [
     [0.0, 29.0, 16.0, 16.0],   // gold coin
     [16.0, 29.0, 16.0, 16.0],  // silver coin
     [32.0, 29.0, 16.0, 16.0],  // copper coin
     [206.0, 12.0, 16.0, 16.0], // loyalty token (BM mileage)
     [47.0, 31.0, 16.0, 20.0],  // honor points medal (`|h`)
     [189.0, 12.0, 17.0, 16.0], // vocation badge sprout (`|l`, living points)
+    [62.0, 30.0, 16.0, 20.0], // dishonor skull (`|d`, native formatted icon kind 4)
 ];
 /// First private-use code point standing for an inline icon in expanded text.
 const ICON_BASE: u32 = 0xE000;
@@ -1279,6 +1280,21 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                 i += 2;
                 continue;
             }
+            if matches!(k, 'd' | 'D') {
+                // Native 39274205/3926fbd0 consumes through ';' or EOF, including
+                // other bars/newlines in the numeric body. An empty body emits nothing.
+                let start = i + 2;
+                let end = (start..chars.len())
+                    .find(|&at| matches!(chars[at], ';' | '\0'))
+                    .unwrap_or(chars.len());
+                if end > start {
+                    out.push_str(&formatted_i64(&chars[start..end]).to_string());
+                    out.push(icon_char(6));
+                }
+                if end < chars.len() && chars[end] == '\0' { break; }
+                i = if end < chars.len() { end + 1 } else { end };
+                continue;
+            }
             let is_value =
                 k == ',' || (k.is_ascii_alphabetic() && !matches!(k, 'c' | 'C' | 'r' | 'R'));
             if is_value {
@@ -1348,6 +1364,29 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
         i += 1;
     }
     (out, links)
+}
+
+/// Native numeric token parser stores each decoded code point's low byte, then
+/// XlAtoI64 (3301ad10) parses radix 10 with wrapping integer arithmetic.
+fn formatted_i64(body: &[char]) -> i64 {
+    let mut bytes = body.iter().map(|&ch| ch as u32 as u8).peekable();
+    while matches!(bytes.peek(), Some(b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c)) {
+        bytes.next();
+    }
+    let negative = bytes.peek() == Some(&b'-');
+    if matches!(bytes.peek(), Some(b'-' | b'+')) { bytes.next(); }
+    let mut value = 0u64;
+    for byte in bytes {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            // Native MOVSX indexes before its digit table; all 128 preceding
+            // bytes are zero. Preserve this observed low-byte conversion quirk.
+            0x80..=0xff => 0,
+            _ => break,
+        };
+        value = value.wrapping_mul(10).wrapping_add(digit as u64);
+    }
+    if negative { value.wrapping_neg() as i64 } else { value as i64 }
 }
 
 pub(crate) fn parse_chat_link(kind: char, body: &str) -> Option<ChatLink> {

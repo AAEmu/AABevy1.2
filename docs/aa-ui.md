@@ -4416,3 +4416,63 @@ The bool-conversion correction passes all **15 focused locking/context/method
 tests**, including numeric zero, negative zero, negative nonzero and NaN, while
 strings/missing values retain the previous policy. Literal bool behavior and the
 inspected capture are unchanged.
+
+### Original dishonor numeric text token (2026-10-18)
+
+The original character panel's `CreateDishonorPointWindow` uses
+`string.format("|d%d", crimeRecord)` without a trailing semicolon. The toolkit
+now decodes **`|d`/`|D`** as the native signed integer plus dishonor skull, instead
+of displaying that raw control sequence. Full widget text getters remain
+unchanged, literal edit text stays literal, and existing color/link markup keeps
+its behavior. A `CRIME_REPORTED` event refreshes the unchanged original control.
+
+Native dispatch `39273e58..64 -> 39274205` calls numeric parser `3926fbd0`, then
+`39273190` with formatted icon kind 4. The parser consumes through semicolon or
+end of string, including embedded bars/newlines, and accepts either terminator.
+An empty body emits nothing; a nonempty invalid body becomes zero. `XlAtoI64`
+`3301bcd0 -> 3301ad10` accepts ASCII leading whitespace/sign, stops at the first
+non-digit and wraps 64-bit arithmetic. There is no saturation or floating-point
+round trip. Native code first narrows each decoded code point to its low byte.
+The signed MOVSX lookup at `3301ada0..a9` sees zero in all 128 preceding table
+bytes, so high bytes count as digit zero; for example `|d1é2;` formats 102.
+This behavior is preserved without Rust Unicode-number classification.
+
+The initialized native table `39ac6c68` holds Dishonor kind 4 at atlas rectangle
+**(62, 30, 16, 20)** in `ui/common/money_window.dds`. This was read from the
+existing original process with the read-only `runtime_native.py` helper, which
+verifies its module using the `StandMode` string and opens only PROCESS_VM_READ.
+The small raw/decoded captures are
+`native-formatted-text-icon-runtime-20261018.txt/.json` under
+`data/extract/aa-ui`. This is initialized runtime configuration evidence; the
+protected PE data bytes are not interpreted as default rectangles. Original
+China-provider Lua changes this rectangle through
+`SetTextureCoordsForFormattedText`, whose dynamic palette support remains open.
+
+`formatted_text_oracle.py` and `native-formatted-text-oracle-20261018.json`
+execute **43 native groups plus 255 leading-byte cases**, with the PE hash:
+the actual text parser loop, numeric parser, XlGetChar/XlAtoI64 and comma
+formatter. Allocation/memory primitives and final glyph/value layout are explicit
+endpoints; numeric arithmetic, token branches and consumption execute unchanged.
+Original `north_america.lua` calls `SetUseInsertComma(false)`; this slice uses
+that ungrouped numeric display. The generic comma-option binding remains open.
+Instructions are in `native-formatted-text-source-20261018.txt`.
+
+This bounded fix adds the dishonor token and source rectangle to the existing
+inline-icon renderer. Honor/vocation parsing, other token families, shared icon
+advance/scaling/centering and locale-dependent rectangle changes are separate
+parity boundaries; this milestone does not claim to have recalibrated them.
+
+All **42 selected tests** pass with one existing ignored font-metrics test,
+covering the new decoder/control, library text tests, direct drawable text,
+slot state and character/item/quest input links. The four new tests check native
+numeric goldens, overflow and low-byte behavior, full source retention,
+color/link/literal-edit behavior, and original `CRIME_REPORTED` refresh.
+
+The aa-dev `native_dishonor_text` example opens the unchanged full character
+panel with explicit fixture crime points 80 and crime record 1234. The inspected
+`shots/aa-ui/native-dishonor-character-20261018.png` shows **1234 plus the red
+skull** in its original Infamy Pts row at 1280x720/UI scale 0.85. The base panel
+was compared with `reference/ingame/character_info/real.png`, which has zero
+crime data and therefore lacks those extra rows. The example reports zero Lua
+errors, no runtime warnings/errors and **493.9-499.5 FPS**, and self-closes after
+the screenshot. Its build passes.
