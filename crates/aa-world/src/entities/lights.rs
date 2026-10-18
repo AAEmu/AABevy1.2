@@ -23,6 +23,7 @@ pub struct PlacedLight {
     pub shadow_slope_bias: f32,
     pub projector_texture: String,
     pub projector_fov: f32,
+    pub projector_near: f32,
     pub project_all_dirs: bool,
     pub negative: bool,
     pub fake: bool,
@@ -32,7 +33,8 @@ pub struct PlacedLight {
 }
 
 impl PlacedLight {
-    /// Projector/cubemap, negative and fake lights need a different rendering path.
+    /// Supports the point-light path. RGB projectors require the renderer's separate
+    /// cookie/GPU validation; cubemap, negative and fake lights need other paths.
     pub fn supported(&self) -> bool {
         self.projector_texture.is_empty() && !self.negative && !self.fake && !self.clip_bounds
     }
@@ -118,6 +120,7 @@ pub fn parse_lights(xml: &str) -> Vec<PlacedLight> {
                 .map(super::asset_path)
                 .unwrap_or_default(),
             projector_fov: number(projector, "fProjectorFov", 90.0),
+            projector_near: number(projector, "fProjectorNearPlane", 0.0),
             project_all_dirs: flag(projector, "bProjectInAllDirs", false),
             negative: flag(child("Test"), "bNegativeLight", false),
             fake: flag(options, "bFakeLight", false),
