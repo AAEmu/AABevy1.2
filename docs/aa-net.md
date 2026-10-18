@@ -3427,3 +3427,9 @@ entries,394daa10 inserts ALL static categories with empty recipe vectors into va
 groups, then394d8120 appends recipes to existing category vectors. Consequently
 GetActabilityCategoryTypesGroupType includes visible_ui categories with zero recipes;
 it must not filter them merely because the recipe list is empty.
+
+Pet quote mapping is item_summon_mates, not npcs.pet_item_id:396a6f00 reads DB map+3f34;
+loader396bec80 uses SQL39a01eec `SELECT item_id, npc_id FROM item_summon_mates`, storing
+item keys and NPC values. Quote requires a present mapping and noninvalid NPC value.
+This closes the static eligibility lookup needed alongside impl11, actual bag/bank mate
+details and explicit pending slots; capture-drop NPC pet_item_id is a separate field.
