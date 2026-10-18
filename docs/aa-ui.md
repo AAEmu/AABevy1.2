@@ -5535,3 +5535,50 @@ negative-remaining suppression. Both report zero script errors/WARN/ERROR and
 self-close (PIDs27116/50896); the copied executable was removed. Initial
 diagnostic captures omitted that original mask setup and are not visual mask
 evidence. Original source scripts/assets and app cooldown providers are unchanged.
+
+### Item cooldown query ordering and clock inputs (2026-10-18 source audit)
+
+Actual ItemAccessor39209460 first selects the template from native kind10/16's
+field or a resolved live instance, then calls394df5b0->39391a30->393919f0.
+SQL loader396cb3f0 selects items.impl_id at column21 into temporary+48
+(396cb6f5), and items.use_skill_id at column43 into temporary+98
+(396cb966); actual copy396ba730 preserves those fields at+48/+98. The ordinary
+query requires a successful combined use-skill result BEFORE its live-instance
+and implementation overrides. Missing base results zero the outputs and return
+false. A later missing instance returns false with prior outputs still present;
+the caller must honor the boolean. Direct kind16 remains false as established
+by the factory audit, even when its intermediate use-skill query succeeds.
+
+Generic Inventory394e2910 resolves its packed source first and applies the same
+implementation-specific overrides BEFORE falling back to the use-skill query.
+It therefore cannot stand in for the ordinary accessor query. Implementation8
+reads raw instance byte+1d: nonzero returns600000/600000. Otherwise it compares
+the separate seconds clock with raw instance u64+1e. At differences<=600 seconds,
+remaining is `u32(trunc_i64(600-difference))*1000` with wrapping multiplication,
+total600000. A difference>600 falls back. A timestamp one second in the future
+thus produces601000/600000; this is a real raw over-total input.
+
+The seconds interface is Cry Timer3660c060 virtual+6c->3656eac0: actual
+XlGetCurrentFileTime3301ca70 is time64 seconds, plus the separate timer offset
+set by virtual+68->3656ea90. XlDiffTime3301ca80 calls difftime64. The name
+FileTime here does not mean Win32 100ns FILETIME ticks. Implementation9 helper
+393a6d90 instead uses raw LOCAL timer0 milliseconds (virtual+10->3656f740,
+low32), without the TimeKeeper/server mapper. Its shared deadline3a17a950
+overrides outputs to(deadline-now,2000) only when the deadline is neither0 nor
+UINT_MAX and raw unsigned now<deadline. Otherwise it leaves outputs unchanged:
+inventory callers initialize0/0, while ordinary accessors retain their prior
+combined result. Native writes include393a95f8's UINT_MAX and393a8b04/0b's
+local-now+2000 or0; this audit does not infer a replacement producer from casts
+or received packets.
+
+`item_accessor_cooldown_oracle.py` /
+`native-item-accessor-cooldown-oracle-20261018.json` execute **32 actual groups**
+through both query paths and overrides, including failed base queries, absent
+instances/descriptors, elapsed -1/0/1/599/600/601, deadline0/MAX/equality/active/
+unsigned-wrap controls. Catalog/instance/combined-query and clock interfaces are
+explicit inputs. Actual XlDiffTime executes against host MSVCR100 difftime64;
+native x87 subtraction/truncation and u32 multiplication execute unchanged.
+The std numeric_limits endpoint uses host MSVCP100. Source is archived in
+`native-item-accessor-cooldown-source-20261018.txt`. Instance+1d/+1e receive
+serializer/semantic mapping and genuine placement-lifetime input remain open;
+no guessed summoned/last-despawn field or automatic selector activation is added.
