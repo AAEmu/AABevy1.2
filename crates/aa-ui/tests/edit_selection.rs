@@ -361,3 +361,62 @@ fn original_friend_and_mail_edits_use_selection_limits_and_literal_multiline() {
     );
     assert!(ui.stub_calls().iter().all(|(name, _)| !["UseSelectAllWhenFocused", "SetLimitWidth"].contains(&name.as_str())));
 }
+
+#[test]
+fn empty_digit_getter_materializes_init_value_without_a_text_change_event() {
+    let ui = setup(false);
+    ui.exec(
+        "@native_digit_getter",
+        r#"
+        edit:SetText(''); assert(edit:GetText()=='')
+        edit:SetDigit(true); edit:SetInitVal(17)
+        edit:SetText(''); assert(edit:GetText()=='17'); assert(edit:GetText()=='17')
+        edit:SetText('004'); assert(edit:GetText()=='004')
+        edit:SetPassword(true); edit:SetText(''); assert(edit:GetText()=='')
+        edit:SetPassword(false); edit:SetInitVal(-7); assert(edit:GetText()=='-7')
+        edit:SetDigit(false); edit:SetText(''); assert(edit:GetText()=='')
+        edit:SetDigit(true); edit:SetInitVal(0); edit:SetText('')
+    "#,
+    )
+    .unwrap();
+    let edit = id(&ui, "edit");
+    lua::ui(&ui.lua).tree.settle();
+    assert_eq!(eval::<String>(&ui, "edit:GetText()"), "0");
+    let u = lua::ui(&ui.lua);
+    assert_eq!(
+        u.tree.widget(edit).unwrap().text.as_ref().unwrap().text,
+        "0"
+    );
+    assert!(u.tree.changed());
+    drop(u);
+    assert_eq!(eval::<u32>(&ui, "changes"), 0);
+}
+
+#[test]
+fn original_write_mail_empty_money_edits_do_not_add_a_phantom_attachment_fee() {
+    let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
+    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+        .unwrap();
+    fake::install(&mut ui, "en_us", &fake::default_worlds());
+    fake::install_ingame(&mut ui);
+    ui.run_stage(aa_ui::Stage::World);
+    assert!(ui.errors.is_empty(), "{:?}", ui.errors);
+    ui.exec("@original_mail_cost",r#"
+        attachmentCount=1
+        X2Mail.GetMailItemCount=function() return attachmentCount end
+        mail=CreateWriteMailWindow('nativeMoneyMail',UIParent)
+        mail:Clear()
+        edits=mail.defaultFrame.moneyEditsWindow
+        local normal=mail.checks[2].moneyWindow.Update
+        local express=mail.checks[1].moneyWindow.Update
+        mail.checks[2].moneyWindow.Update=function(self,value) normalFee=tonumber(value); return normal(self,value) end
+        mail.checks[1].moneyWindow.Update=function(self,value) expressFee=tonumber(value); return express(self,value) end
+        mail:OnUpdate()
+        assert(edits.goldEdit:GetText()=='0' and edits.silverEdit:GetText()=='0' and edits.copperEdit:GetText()=='0')
+        assert(normalFee==50 and expressFee==100)
+        edits.goldEdit:SetText('1'); mail:OnUpdate()
+        assert(normalFee==80 and expressFee==180)
+        edits.goldEdit:SetText(''); attachmentCount=2; mail:OnUpdate()
+        assert(normalFee==80 and expressFee==180)
+    "#).unwrap();
+}

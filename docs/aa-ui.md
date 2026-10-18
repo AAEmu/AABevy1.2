@@ -537,6 +537,38 @@ cover no-detail, full equipment, mate and uninterpreted tag4 records; separate t
 nonzero equipment reserved bytes, opaque union contents and reject wrong wire lengths.
 All four native-record tests pass, in addition to the three earlier codec unit tests.
 
+Native mail money contract (read-only audit for application integration): incoming body
+serializer `398a5e60` reads the three i32 amounts in order into offsets `0x860`, `0x864`,
+`0x868` (`398a5fba`, `398a5fd2`, `398a5fea`). `GetCurrentMailMoneyStr` (`3948f100`)
+returns offset `0x860` through signed decimal conversion `394248b0`, without scaling.
+`GetCurrentMailAAPointStr` (`3948f4b0`) returns literal `"0"` when global feature bit
+`0x1000` is off; when on, it returns offset `0x868` by the same decimal conversion.
+Thus aa-net's `money_amount2` is the AA-point amount, while `billing_amount` is the
+second value. The gold-only UI's AA-point accessor may return zero while raw data is
+retained for attachment/lifecycle checks. The corresponding native currency accessor
+`3944fc30` returns `CURRENCY_GOLD` (0) with the bit off, `CURRENCY_GOLD_WITH_AA_POINT` (4)
+with it on; original `mailbox/mail/common.alb` creates an AA receipt only for non-gold
+bag currency. These string methods expose raw integer units, with no coin split or division.
+
+`GetCurrentMailBody`'s helper `3948e4c0` exposes `chargeMoney` as a Lua number from the
+second amount (`3948eb86` / `3948eba7`). `mail_id` is a decimal string from the header's
+i64 ID (`3948e501` / `3948e553`). `extra` is a decimal string from the header's i64
+`extra` at `0x2b8` (`3948ec27` / `3948ec4d`), not the body receiver. `receiver` is a
+separate string from body offset `0xc`; send/receive dates are structured date tables.
+
+Empty digit edits now follow native `GetText` (`392930c0`, vtable `399c7788` + `0x1ac`):
+when `SetDigit(true)` is active, password mode is off and the buffer is empty, the getter
+formats `SetInitVal` (signed i32, default zero) and writes it back into the edit buffer.
+The getter raises no `OnTextChanged`; literal programmatic `SetText('')` remains empty
+until that read. Non-digit/password edits keep their empty text, and nonempty digit text
+keeps its spelling. The write invalidates the toolkit's text layout/rendering normally.
+Native `SetInitVal` is `39292400`; the default is initialized at `3929261c`.
+Original `common_view.alb` enables digit mode on all three money edits. Consequently,
+the original write-mail `Clear`/`GetAttachCount`/`OnUpdate` path now displays 50c standard /
+100c express for one item and no coins, then 80c / 180c when coins add an attachment.
+Eleven edit tests pass, including a full original write-mail fee regression and explicit
+getter side-effect/event/password/init-value checks. No application normalization is needed.
+
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's
 channel (`/s`, `/local` say, `/shout` `/y` zone, `/p` `/party`, `/raid`, `/guild` `/g`, `/n`
