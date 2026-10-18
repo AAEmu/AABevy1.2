@@ -104,11 +104,21 @@ impl NativeBuffs {
                     list.push(BuffEntry { buff: new, received: now });
                 }
             }
+            Event::BuffUpdated { obj_id, index, stacks, charged } => {
+                let Some(list) = self.by_unit.get_mut(obj_id) else { return };
+                let Some(i) = first_index(list, *index) else { return };
+                if list[i].buff.kind == BuffKind::Unknown {
+                    self.by_unit.remove(obj_id);
+                } else if self.rules.contains_key(&list[i].buff.buff_id) {
+                    list[i].buff.stacks = *stacks;
+                    list[i].buff.charged = *charged;
+                } else if !self.catalog_loaded {
+                    self.by_unit.remove(obj_id);
+                }
+            }
             Event::BuffRemoved { obj_id, index } => {
                 let Some(list) = self.by_unit.get_mut(obj_id) else { return };
-                let first = list.iter().enumerate().filter(|(_, e)| e.buff.index == *index)
-                    .min_by_key(|(i, e)| (kind_order(e.buff.kind), *i)).map(|(i, _)| i);
-                let Some(i) = first else { return };
+                let Some(i) = first_index(list, *index) else { return };
                 if list[i].buff.kind == BuffKind::Unknown {
                     self.by_unit.remove(obj_id);
                 } else if self.rules.contains_key(&list[i].buff.buff_id) {
@@ -148,10 +158,19 @@ fn kind_order(kind: BuffKind) -> u8 {
     match kind { BuffKind::Good => 0, BuffKind::Bad => 1, BuffKind::Hidden => 2, BuffKind::Unknown => 3 }
 }
 
+fn first_index(list: &[BuffEntry], index: u32) -> Option<usize> {
+    list.iter().enumerate().filter(|(_, e)| e.buff.index == index)
+        .min_by_key(|(i, e)| (kind_order(e.buff.kind), *i)).map(|(i, _)| i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::buff::Buff;
+    fn assert_entry_eq(actual: &BuffEntry, expected: &BuffEntry) {
+        assert_eq!(actual.buff, expected.buff);
+        assert_eq!(actual.received, expected.received);
+    }
     fn created(index: u32, caster: u32, charge: i32) -> Event {
         Event::BuffCreated {
             obj_id: 9,
@@ -217,6 +236,41 @@ mod tests {
             assert_eq!(b.duration_ms, if rule == 5 { 2000 } else { 1000 });
         }
     }
+    #[test]
+    fn buff_updated_first_group_descriptor_guards_and_no_clamp() {
+        let mut v=view(4,false);let rule=v.rules[&77];let mut bad_rule=rule;bad_rule.kind=BuffKind::Bad;
+        v.set_catalog([(77,rule),(88,bad_rule)].into_iter().collect());
+        let good=Buff{index:7,buff_id:77,kind:BuffKind::Good,duration_ms:10000,elapsed_ms:500,tick_ms:100,raw_tick_index:Some(5),native_tick_index:Some(5),raw_cooldown_skill:Some(99),..Buff::default()};
+        let bad=Buff{buff_id:88,kind:BuffKind::Bad,..good.clone()};v.seed(9,&[bad,good]);
+        let old_bad=v.of(9).unwrap()[0].clone();let mut expected=v.of(9).unwrap()[1].clone();
+        for (stacks,charged) in [(i32::MAX,i32::MIN),(0,0),(-1,-2)] {
+            v.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks,charged});expected.buff.stacks=stacks;expected.buff.charged=charged;
+            assert_entry_eq(&v.of(9).unwrap()[0],&old_bad);assert_entry_eq(&v.of(9).unwrap()[1],&expected);
+        }
+        v.apply(&Event::BuffUpdated{obj_id:10,index:7,stacks:99,charged:99});assert!(v.of(10).is_none());
+        v.set_catalog(HashMap::new());v.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:99,charged:99});assert_entry_eq(&v.of(9).unwrap()[1],&expected);
+        let snapshot=expected.buff.clone();let mut unknown=NativeBuffs::default();unknown.seed(9,&[snapshot]);
+        unknown.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:99,charged:99});assert!(unknown.of(9).is_none());
+        unknown.seed(9,&[]);unknown.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:99,charged:99});assert!(unknown.of(9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn buff_updated_world_state_keeps_received_time_and_never_creates_rows() {
+        let mut world=crate::state::WorldState::default();world.buffs.native=view(4,false);
+        let buff=Buff{index:7,buff_id:77,kind:BuffKind::Good,duration_ms:10000,elapsed_ms:500,stacks:1,..Buff::default()};
+        world.buffs.native.seed(9,&[buff.clone()]);
+        let mut raw=BuffEntry{buff,received:Instant::now()-std::time::Duration::from_secs(1)};
+        world.buffs.by_unit.insert(9,vec![raw.clone()]);let mut native=world.buffs.native.of(9).unwrap()[0].clone();
+        world.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:-7,charged:99});
+        raw.buff.stacks=-7;raw.buff.charged=99;native.buff.stacks=-7;native.buff.charged=99;
+        assert_eq!(world.buffs.of(9).len(),1);assert_entry_eq(&world.buffs.of(9)[0],&raw);
+        assert_eq!(world.buffs.native.of(9).unwrap().len(),1);assert_entry_eq(&world.buffs.native.of(9).unwrap()[0],&native);
+        world.apply(&Event::BuffUpdated{obj_id:10,index:7,stacks:1,charged:1});assert!(world.buffs.of(10).is_empty());assert!(world.buffs.native.of(10).is_none());
+        world.buffs.by_unit.remove(&9);
+        assert!(world.buffs.apply(&Event::BuffUpdated{obj_id:9,index:7,stacks:77,charged:0}),"native-only change must remain observable");
+        assert_eq!(world.buffs.native.of(9).unwrap()[0].buff.stacks,77);assert!(world.buffs.of(9).is_empty());
+    }
+
     #[test]
     fn removal_descriptor_admission_distinguishes_missing_from_unloaded_catalog() {
         let snapshot=Buff{index:7,buff_id:99,kind:BuffKind::Good,..Buff::default()};

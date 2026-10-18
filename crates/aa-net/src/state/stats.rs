@@ -277,6 +277,13 @@ impl Buffs {
                     None => list.push(entry),
                 }
             }
+            Event::BuffUpdated { obj_id, index, stacks, charged } => {
+                if let Some(entry) = self.by_unit.get_mut(obj_id).and_then(|list| list.iter_mut().find(|e| e.buff.index == *index)) {
+                    entry.buff.stacks = *stacks;
+                    entry.buff.charged = *charged;
+                }
+                // Native history may have changed even if raw lane projection has no matching row.
+            }
             Event::BuffRemoved { obj_id, index } => {
                 let Some(list) = self.by_unit.get_mut(obj_id) else { return false };
                 let before = list.len();
