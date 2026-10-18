@@ -4931,3 +4931,103 @@ captions have advanced to53s/24h. Original provider-driven equipment remains
 visible. It reports **260.5-325.3 FPS**, zero script/runtime warnings/errors,
 and self-closes (PID9068); the copied executable was removed. The isolated
 panel and explicit sample values are fixture settings.
+
+### Generic cooldown mask texture, UV and selected art (2026-10-18)
+
+Generic cooldown constructors initialize texture+5b0 to null, and draw
+`39280ad0` returns immediately without it. A supplied timer alone is not a
+mask. Original `SetViewOfUpdateCooldown` in baselib/common_view sets
+`ui/icon/cooldown_mask.dds` and pixel coords0/0/256/256 explicitly.
+
+SetCoolDownMask wrapper `39232320` calls loader `3921ad70`. Failure leaves
+both old texture and UV intact. Success reaches `392815b0`: release the old
+reference, retain the new texture and reset its UV through a zero rectangle.
+That reset applies even when the same texture is selected again. Both setters
+return no Lua values. Texture coordinates are independent of the timer sample
+and survive SetCoolDown(0,0).
+
+SetCoolDownMaskCoords wrapper `392323a0` reaches `392809e0`: compute f32
+reciprocals of the texture dimensions, multiply x/y by those reciprocals and
+compute right/bottom from x+width/y+height. A zero width or height instead
+sets the corresponding normalized endpoint to exactly1. Negative extents
+remain reversed; no coordinate clamp is inserted. The native setter dereferences
+a missing texture, so the toolkit safely refuses coords-before-mask rather
+than claiming a native no-op contract for that invalid call order.
+
+`data/extract/aa-ui/cooldown_mask_oracle.py` and
+`native-cooldown-mask-oracle-20261018.json` execute **12 native groups**:
+actual wrapper, ownership switch, float normalization and rectangle copy.
+Script interface/return, loader, texture dimensions/reference functions are
+explicit endpoints. Cases cover fresh/no texture, default/full reset,
+subrectangles, zero/negative/fractional extents (including non-power-of-two
+provider dimensions), failed-load retention and same-image reset. Native float
+results are recorded as exact bit patterns. Disassembly is
+`native-cooldown-mask-source-20261018.txt`; no live process is modified.
+
+The original stock mask was extracted only through aa-pak (one87536-byte DDS):
+256x256, RGB46/46/46, with alpha199 on49479 pixels and200 on16057 pixels.
+`ButtonData.cooldown_mask` retains its resolved path and normalized UV.
+Native `39280ad0` obtains the selected button background and accepts only image
+or icon-image kinds2/3. Image virtual+104 is `3928b3c0`; Icon's is `3928ed10`.
+They call `3928ace0` with BOTH the original image texture/UV and mask texture/UV.
+Icons draw each retained texture layer, sharing the same object+d0 image UV.
+Original SetIconBackGround uses one-pixel anchors, so a42px equipment button
+has a40px mask. Missing/hidden/unsupported selected art yields no mask.
+
+The actual source `game/shaders/hwscripts/cryfx/x2ui.cfx` (2679 bytes, read
+through aa-pak) closes the blend. Image color is multiplied by vertex color;
+mask RGB becomes `mask.rgb * 2 - 1`; final RGB is the saturated sum of those
+values and final alpha is image-alpha times mask-alpha. This preserves the
+original image's transparency. It is not a flat mask overlay. The base sampler
+clamps and the D3D mask sampler wraps. A narrow Material2d pass implements
+those operations, converting Bevy's linear samples/colors to sRGB for the
+source UI arithmetic and returning linear output. Unit-square mesh UVs
+reconstruct both independent rectangles in the shader, including reversed or
+zero image-UV extents; clipping and transforms retain their association.
+
+Native `3928ace0` advances through eight equal time sectors along the image
+rectangle perimeter. It linearly interpolates the first remaining edge, then
+submits centre/end/start triangles with both UV streams through `39220920`.
+`cooldown_fan_oracle.py` / `native-cooldown-fan-oracle-20261018.json` execute
+**12 fan groups** with only the final submission endpoint captured. Actual native
+rectangle/midpoint/f32 sector/UV arithmetic runs unchanged: zero, half-sector,
+sector boundaries,0.2/0.33333334/0.999/1 progress, rectangular geometry and
+zero image-UV extents. Four further groups execute the actual downstream
+`39220920`/`3921f2a0` and capture the final batch: integer/fractional/negative
+positions prove add0.5/CVTT snapping after interpolation, and source color
+0.3/0.5/0.7/0.4 yields packed RGBA8 `0x66b27f4c`. The generic pass applies
+that packing and keeps the original fractional UVs through vertex snapping.
+`native-cooldown-raster-source-20261018.txt` archives
+the native path. Generic buttons now use that eight-sector fan. Ordinary slot
+tessellation/color and unresolved native GCD selection remain unchanged.
+The existing renderer's general pixel snapping/effect transform boundaries
+remain; this slice does not claim a wider animation renderer correction.
+
+Existing bare-widget tests now install actual mask/image state before
+expecting a sweep. New coverage checks missing-mask/load-failure retention,
+raw UV bits, selected art geometry, independent image/mask UV and color,
+Icon multi-layer UV reuse, unsupported NinePart art and executed fan goldens.
+
+Fresh `cargo check -p aa-ui` passes. All **38 selected regressions pass**:
+mask7, constant cooldown7, caption6, HUD6, slot state1, scale/effect clipping4
+and chat clipping7. These retain original provider/consumer callback ordering,
+action-slot physical click/identity, snapshot lifetime, caption toggles and
+ordinary-slot countdown/completion. Only the generic button's mask pass uses
+the new material; text, other artwork and ordinary slot rendering stay on the
+existing ColorMaterial path. Material views no longer in the current mesh
+list are retired, avoiding retention of every historical UV selection.
+
+The aa-dev `native_cooldown_mask` example builds and uses actual original action
+slots/equipment controls plus explicit texture/crop/transparent/no-mask fixture
+controls. Final inspected captures are
+`shots/aa-ui/native-cooldown-mask-final-720-20261018.png` at1280x720/default0.85
+(**274.7-329.0 FPS**) and
+`shots/aa-ui/native-cooldown-mask-final-1080-20261018.png` at1920x1080/1.0
+(**296.7-317.4 FPS**). Both have zero script errors, shader/runtime warnings or
+errors, and self-close (PIDs51428/1608); the copied executable was removed.
+The transparency diagnostic uses original `ui/icon/item_pick_cursor.dds`:
+32x32,946 alpha-zero pixels,77 alpha255 and one alpha254. Four corresponding
+transparent pixel samples at each resolution exactly retain the unmasked
+underlying artwork; `native-cooldown-mask-alpha-pixels-20261018.json` records
+those results. The initial diagnostic `slot_over.dds` was found to be fully
+opaque and was replaced before the final captures. No asset was edited.

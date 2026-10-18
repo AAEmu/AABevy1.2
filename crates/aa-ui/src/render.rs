@@ -7,12 +7,15 @@
 //! World units are physical pixels: the UI camera looks at `(W/2, -H/2)` so UI coordinate
 //! `(x, y)` (y down) is world `(x, -y)`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats, ImageSampler, ImageType};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
+use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 
 use crate::lua::Ui;
 use crate::text::ATLAS_SIZE;
@@ -27,6 +30,40 @@ pub enum Tex {
     Atlas,
     /// A pak texture (resolved path).
     Image(String),
+    /// The native image-plus-mask pass. UV rectangles are raw f32 bits; the mesh UVs
+    /// remain unit-square coordinates so both streams survive clipping and transforms.
+    MaskedImage {
+        image: String,
+        mask: String,
+        image_uv: [u32; 4],
+        mask_uv: [u32; 4],
+    },
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct MaskMaterial {
+    #[uniform(0)]
+    image_uv: Vec4,
+    #[uniform(1)]
+    mask_uv: Vec4,
+    #[texture(2)]
+    #[sampler(3)]
+    image: Handle<Image>,
+    #[texture(4)]
+    #[sampler(5)]
+    mask: Handle<Image>,
+}
+
+impl Material2d for MaskMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://aa_ui/cooldown_mask.wesl".into()
+    }
+    fn alpha_mode(&self) -> AlphaMode2d { AlphaMode2d::Blend }
+}
+
+pub(crate) fn install_material(app: &mut App) {
+    embedded_asset!(app, "cooldown_mask.wesl");
+    app.add_plugins(Material2dPlugin::<MaskMaterial>::default());
 }
 
 #[derive(Clone, Debug)]
@@ -122,7 +159,8 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             diagram_quads(u, id, dg, alpha, scale, &mut out);
         }
         if w.cooldown.is_some() {
-            crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, &mut out);
+            let background = w.button.as_ref().and_then(|b| b.bg[state_index(state)].or(b.bg[0])).map(|id| (id, state));
+            crate::lua::slot::cooldown_quads(u, id, &w, alpha, scale, background, &mut out);
         }
         if let Some(p) = w.picker.as_ref() {
             picker_quads(u, p, alpha, scale, &mut out);
@@ -879,6 +917,8 @@ pub struct UiRenderState {
     pub screen: (u32, u32),
     pub images: HashMap<String, Handle<Image>>,
     pub materials: HashMap<Tex, Handle<ColorMaterial>>,
+    pub mask_materials: HashMap<Tex, Handle<MaskMaterial>>,
+    pub mask_images: HashMap<String, Handle<Image>>,
     pub atlas: Option<Handle<Image>>,
     pub batches: Vec<Entity>,
     pub quads: usize,
@@ -947,6 +987,7 @@ pub fn sync_cursor(
     pointer: Option<Vec2>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
+    mask_materials: &mut Assets<MaskMaterial>,
     images: &mut Assets<Image>,
     formats: Option<&CompressedImageFormatSupport>,
     existing: &mut Query<(Entity, &mut Transform, &mut Visibility), (With<UiCursorBatch>, Without<UiCamera>)>,
@@ -961,7 +1002,7 @@ pub fn sync_cursor(
         if !quads.is_empty() {
             // Stack-count glyphs can be added here after the normal UI uploaded its atlas.
             sync_atlas(u, state, images);
-            spawn_batches(commands, state, &quads, 0, meshes, materials, images, formats, || UiCursorBatch, pointer.unwrap_or(Vec2::splat(-10_000.0)), 100.0);
+            spawn_batches(commands, state, &quads, 0, meshes, materials, mask_materials, images, formats, || UiCursorBatch, pointer.unwrap_or(Vec2::splat(-10_000.0)), 100.0);
         }
         return;
     }
@@ -1005,6 +1046,7 @@ pub fn sync_batches(
     background_quads: usize,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
+    mask_materials: &mut Assets<MaskMaterial>,
     images: &mut Assets<Image>,
     formats: Option<&CompressedImageFormatSupport>,
     existing: &Query<Entity, With<UiBatch>>,
@@ -1013,7 +1055,12 @@ pub fn sync_batches(
         commands.entity(e).despawn();
     }
     state.batches.clear();
-    let ids = spawn_batches(commands, state, quads, background_quads, meshes, materials, images, formats, || UiBatch, Vec2::ZERO, 0.0);
+    // UV setters can change a material view; retain only views still used by this mesh list.
+    let mask_views: HashSet<_> = quads.iter().filter_map(|q| {
+        matches!(q.tex, Tex::MaskedImage { .. }).then_some(&q.tex)
+    }).collect();
+    state.mask_materials.retain(|tex, _| mask_views.contains(tex));
+    let ids = spawn_batches(commands, state, quads, background_quads, meshes, materials, mask_materials, images, formats, || UiBatch, Vec2::ZERO, 0.0);
     state.draw_calls = ids.len();
     state.batches = ids;
     state.quads = quads.len();
@@ -1028,6 +1075,7 @@ fn spawn_batches<M: Component>(
     background_quads: usize,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
+    mask_materials: &mut Assets<MaskMaterial>,
     images: &mut Assets<Image>,
     formats: Option<&CompressedImageFormatSupport>,
     marker: impl Fn() -> M,
@@ -1047,28 +1095,39 @@ fn spawn_batches<M: Component>(
     }
     let mut spawned = Vec::with_capacity(batches.len());
     for (i, (tex, bg, qs)) in batches.iter().enumerate() {
-        let image = match tex {
-            Tex::Atlas => state.atlas.clone(),
-            Tex::Image(p) => {
-                if !state.images.contains_key(p) {
-                    let h = load_image(p, formats)
-                        .map(|img| images.add(img))
-                        .unwrap_or_default();
-                    state.images.insert(p.clone(), h);
-                }
-                state.images.get(p).cloned()
-            }
+        let image_path = match tex {
+            Tex::Atlas => None,
+            Tex::Image(p) | Tex::MaskedImage { image: p, .. } => Some(p),
         };
-        let mat = state
-            .materials
-            .entry(tex.clone())
-            .or_insert_with(|| {
-                materials.add(ColorMaterial {
-                    texture: image.clone(),
-                    ..default()
+        let image = if let Some(p) = image_path {
+            Some(state.images.entry(p.clone()).or_insert_with(|| {
+                load_image(p, formats).map(|img| images.add(img)).unwrap_or_default()
+            }).clone())
+        } else { state.atlas.clone() };
+        let masked = if let Tex::MaskedImage { mask, image_uv, mask_uv, .. } = tex {
+            let mask = state.mask_images.entry(mask.clone()).or_insert_with(|| {
+                load_image(mask, formats).map(|mut img| {
+                    img.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                        address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                        address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                        ..bevy::image::ImageSamplerDescriptor::linear()
+                    });
+                    images.add(img)
+                }).unwrap_or_default()
+            }).clone();
+            Some(state.mask_materials.entry(tex.clone()).or_insert_with(|| {
+                mask_materials.add(MaskMaterial {
+                    image_uv: Vec4::from_array(image_uv.map(f32::from_bits)),
+                    mask_uv: Vec4::from_array(mask_uv.map(f32::from_bits)),
+                    image: image.clone().unwrap_or_default(), mask,
                 })
-            })
-            .clone();
+            }).clone())
+        } else { None };
+        let mat = if masked.is_none() {
+            Some(state.materials.entry(tex.clone()).or_insert_with(|| {
+                materials.add(ColorMaterial { texture: image, ..default() })
+            }).clone())
+        } else { None };
         let mut pos = Vec::with_capacity(qs.len() * 4);
         let mut uv = Vec::with_capacity(qs.len() * 4);
         let mut col = Vec::with_capacity(qs.len() * 4);
@@ -1109,10 +1168,11 @@ fn spawn_batches<M: Component>(
         let mut e = commands.spawn((
             marker(),
             Mesh2d(meshes.add(mesh)),
-            MeshMaterial2d(mat),
             Transform::from_xyz(origin.x, -origin.y, z0 + i as f32 * 0.01),
             bevy::camera::visibility::NoFrustumCulling,
         ));
+        if let Some(mat) = masked { e.insert(MeshMaterial2d(mat)); }
+        else if let Some(mat) = mat { e.insert(MeshMaterial2d(mat)); }
         if let (true, Some(layer)) = (*bg, state.background_layer) {
             e.insert(bevy::camera::visibility::RenderLayers::layer(layer));
         }
