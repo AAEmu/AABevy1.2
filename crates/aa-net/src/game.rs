@@ -519,6 +519,8 @@ pub enum ServerMsg {
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// Native SC095 changes persistent IDs only, preserving other record fields.
     EquipmentIdsChanged { obj_id: u32, ids: [u64; 28] },
+    /// Raw native specialty sale ratio receipt; zero is an error/reset path.
+    SpecialtyRatio(i32),
     /// A container grew to `slots`.
     InvenExpanded { container: u8, slots: u8 },
     // -- quests
@@ -673,6 +675,7 @@ impl ServerMsg {
             Self::ItemTasks(_) => "SCItemTaskSuccess",
             Self::EquipmentChanged { .. } => "SCUnitEquipmentsChanged",
             Self::EquipmentIdsChanged { .. } => "SCUnitEquipmentIds",
+            Self::SpecialtyRatio(_) => "SCSpecialtyRatio",
             Self::InvenExpanded { .. } => "SCInvenExpanded",
             Self::Quests(_) => "SCQuests",
             Self::CompletedQuests(_) => "SCCompletedQuests",
@@ -1081,6 +1084,7 @@ impl ServerMsg {
                 }
                 Self::EquipmentChanged { obj_id, items }
             }
+            sc::SCSpecialtyRatioPacket => Self::SpecialtyRatio(r.i32()?),
             sc::SCUnitEquipmentIdsPacket => {
                 let obj_id=r.bc()?;
                 let mut ids=[0;28];
@@ -2226,6 +2230,19 @@ mod tests {
         for _ in 0..2 {batch.u16(0).u16(0x95).raw(&raw);}
         batch.u16(0).u16(0xa3).u16(7);
         assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::SkillEnded{tl:7}]);
+    }
+
+    #[test]
+    fn specialty_ratio_native_lane_signed_goldens_and_compressed_alignment() {
+        for (body,value) in [([0,0,0,0],0),([117,0,0,0],117),([255;4],-1),([0,0,0,128],i32::MIN),([255,255,255,127],i32::MAX)] {
+            assert_eq!(decode(0x99,&body),ServerMsg::SpecialtyRatio(value));
+            for n in 0..4 {assert!(ServerMsg::decode(&game_frame(0x99,&body[..n])).is_err());}
+        }
+        // Lane craft_store_tests literal117 matches native397aec70 scalar walk.
+        let mut inner=Writer::new();inner.u16(0).u16(0x99).raw(&[117,0,0,0]);
+        inner.u16(0).u16(0x99).raw(&[255;4]);inner.u16(0).u16(0xa3).u16(7);
+        let mut frame=Writer::new();frame.u8(0xdd).u8(LEVEL_COMPRESSED).u16(3).raw(&stored(&inner.finish(),true));
+        assert_eq!(ServerMsg::decode(&frame.finish()).unwrap(),ServerMsg::Batch(vec![ServerMsg::SpecialtyRatio(117),ServerMsg::SpecialtyRatio(-1),ServerMsg::SkillEnded{tl:7}]));
     }
 
 }
