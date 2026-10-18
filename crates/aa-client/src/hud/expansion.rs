@@ -42,6 +42,11 @@ pub(super) struct View {
     next: u32,
     quote: Option<(u32, ExpansionQuote)>,
     requests: Vec<(u32, ExpansionQuote, bool)>,
+    auto_request: Option<(u32, bool)>,
+    auto_waiting: Option<bool>,
+    auto_pending: Option<bool>,
+    auto_event: Option<u8>,
+    events_active: bool,
 }
 
 impl View {
@@ -59,6 +64,9 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     if let Some(inventory) = world.get_resource_ref::<Inventory>() {
         if data.expansion.received.is_none() || inventory.is_changed() {
             data.expansion.received = Some((*inventory).clone());
+            if !data.expansion.events_active {
+                data.expansion.auto_pending = inventory.pending_auto_use_aa_point;
+            }
         }
     }
 }
@@ -83,8 +91,30 @@ fn confirm(data: &mut HudData, token: u32, auto: bool) {
     }
 }
 
+fn request_auto(data: &mut HudData, value: bool) {
+    let view = &mut data.expansion;
+    if view.owner != 0 && view.auto_request.is_none() && view.auto_waiting.is_none()
+        && view.received.as_ref().is_some_and(|inventory| {
+            let pending = if view.events_active { view.auto_pending } else { inventory.pending_auto_use_aa_point };
+            pending.is_none() && view.auto_event.unwrap_or(inventory.auto_use_aa_point_raw) != u8::from(value)
+        })
+    {
+        view.auto_request = Some((view.owner, value));
+    }
+}
+
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let hud: Table = lua.globals().get("HUD")?;
+    let state = bridge.clone();
+    hud.set("auto_aa_point", lua.create_function(move |_, ()| {
+        let data = state.borrow();
+        Ok(data.expansion.auto_event.map_or_else(|| data.expansion.received.as_ref().is_some_and(Inventory::auto_use_aa_point), |raw| raw == 1))
+    })?)?;
+    let state = bridge.clone();
+    hud.set("set_auto_aa_point", lua.create_function(move |_, value: bool| {
+        request_auto(&mut state.borrow_mut(), value);
+        Ok(())
+    })?)?;
     let state = bridge.clone();
     hud.set(
         "expansion_max",
@@ -172,6 +202,43 @@ fn command(owner: u32, active: u32, quote: ExpansionQuote, auto: bool, inventory
     })
 }
 
+fn auto_event(rt: &UiRuntime, bridge: &Shared, event: &Event) {
+    match event {
+        Event::AutoUseAaPointRequested(value) => {
+            let mut data = bridge.borrow_mut();
+            data.expansion.auto_pending = Some(*value);
+            if data.expansion.auto_waiting == Some(*value) { data.expansion.auto_waiting = None; }
+        }
+        Event::AutoUseAaPointRequestRejected { value, message } => {
+            {
+                let mut data = bridge.borrow_mut();
+                if data.expansion.auto_waiting == Some(*value) { data.expansion.auto_waiting = None; }
+            }
+            rt.fire_event("SYSMSG", message.as_str());
+        }
+        Event::CraftItemUnlocked(unlock) if unlock.unlocks_auto_use_aa_point() => {
+            bridge.borrow_mut().expansion.auto_pending = None;
+        }
+        Event::ItemsChanged(tasks) => {
+            let mut changed = false;
+            for task in &tasks.tasks {
+                if let aa_net::items::ItemTask::AutoUseAaPoint(raw) = task {
+                    changed = true;
+                    // Native394e758c queries the just-written byte and calls Lua inline, before
+                    // the next action. Preserve that getter even though sync_hud saw the final
+                    // resource snapshot. The pending key remains locked through all callbacks.
+                    bridge.borrow_mut().expansion.auto_event = Some(*raw);
+                    rt.fire_event("CHANGED_AUTO_USE_AAPOINT", *raw == 1);
+                }
+            }
+            let mut data = bridge.borrow_mut();
+            data.expansion.auto_event = None;
+            if changed { data.expansion.auto_pending = None; }
+        }
+        _ => {}
+    }
+}
+
 fn update(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
@@ -185,7 +252,13 @@ fn update(
         events.clear();
         return;
     };
+    if !bridge.0.borrow().expansion.events_active {
+        // Initial queries use the hydrated snapshot; loading history must not replay changes.
+        bridge.0.borrow_mut().expansion.events_active = true;
+        events.clear();
+    }
     for NetEvent(event) in events.read() {
+        auto_event(&rt, &bridge.0, event);
         if let Event::InventoryExpanded { container, .. } = event {
             match container {
                 2 => rt.fire_event("BAG_EXPANDED", ()),
@@ -202,6 +275,13 @@ fn update(
         }
     }
     let active = player.spawn.as_ref().map_or(0, |s| s.character().id);
+    let auto_request = bridge.0.borrow_mut().expansion.auto_request.take();
+    if let Some((owner, value)) = auto_request {
+        if owner != 0 && owner == active && inventory.can_set_auto_use_aa_point(value) {
+            bridge.0.borrow_mut().expansion.auto_waiting = Some(value);
+            net.write(NetCommand(Command::SetAutoUseAaPoint(value)));
+        }
+    }
     let requests = std::mem::take(&mut bridge.0.borrow_mut().expansion.requests);
     for (owner, quote, auto) in requests {
         match command(owner, active, quote, auto, &inventory, stats.money) {
@@ -220,6 +300,71 @@ pub(super) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_aa_getter_hydrates_and_replays_each_received_action_before_batch_unlock() -> Result<(), Box<dyn std::error::Error>> {
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0)?;
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        super::super::api::install(&mut rt, &bridge)?;
+        let mut world = World::new();
+        let mut inventory = Inventory::default();
+        inventory.auto_use_aa_point_raw = 1;
+        world.insert_resource(inventory);
+        bridge.borrow_mut().character_id = 47;
+        refresh(&world, &mut bridge.borrow_mut());
+        rt.lua.load("assert(X2Bag:GetAutoUseAAPoint()); seen={}; UIParent:SetEventHandler('CHANGED_AUTO_USE_AAPOINT',function(on) seen[#seen+1]={on,X2Bag:GetAutoUseAAPoint()}; X2Bag:SetAutoUseAAPoint(not on) end)").exec()?;
+        bridge.borrow_mut().expansion.events_active = true;
+        bridge.borrow_mut().expansion.auto_waiting = Some(false);
+        auto_event(&rt, &bridge, &Event::AutoUseAaPointRequested(false));
+        assert!(bridge.borrow().expansion.auto_waiting.is_none());
+        assert_eq!(bridge.borrow().expansion.auto_pending, Some(false));
+        // sync_hud has already received the final byte, but each callback reads its own action.
+        world.resource_mut::<Inventory>().auto_use_aa_point_raw = 2;
+        refresh(&world, &mut bridge.borrow_mut());
+        auto_event(&rt, &bridge, &Event::ItemsChanged(aa_net::items::ItemTasks {
+            tasks: [0, 1, 1, 2].into_iter().map(aa_net::items::ItemTask::AutoUseAaPoint).collect(),
+            ..default()
+        }));
+        rt.lua.load("assert(#seen==4 and seen[1][1]==false and seen[2][1]==true and seen[3][1]==true and seen[4][1]==false); for _,v in ipairs(seen) do assert(v[1]==v[2]) end; assert(not X2Bag:GetAutoUseAAPoint())").exec()?;
+        assert!(bridge.borrow().expansion.auto_request.is_none(), "all callbacks run before the native pending key is released");
+        assert!(bridge.borrow().expansion.auto_pending.is_none());
+        // Raw2 reads false, but native compares the raw byte against requested0 rather than
+        // comparing two Lua booleans. It therefore permits this explicit false request.
+        rt.lua.load("X2Bag:SetAutoUseAAPoint(false)").exec()?;
+        assert_eq!(bridge.borrow_mut().expansion.auto_request.take(), Some((47, false)));
+        auto_event(&rt, &bridge, &Event::AutoUseAaPointRequested(false));
+        auto_event(&rt, &bridge, &Event::CraftItemUnlocked(aa_net::craft::CraftItemUnlock { kind: 0xf0, slot: 1 }));
+        assert_eq!(bridge.borrow().expansion.auto_pending, Some(false));
+        auto_event(&rt, &bridge, &Event::CraftItemUnlocked(aa_net::craft::CraftItemUnlock { kind: 0xf0, slot: 0 }));
+        assert!(bridge.borrow().expansion.auto_pending.is_none());
+        bridge.borrow_mut().expansion.auto_waiting = Some(true);
+        auto_event(&rt, &bridge, &Event::AutoUseAaPointRequestRejected { value: true, message: "No connection".into() });
+        assert!(bridge.borrow().expansion.auto_waiting.is_none());
+        rt.lua.load("assert(#seen==4 and not X2Bag:GetAutoUseAAPoint())").exec()?;
+        assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+        Ok(())
+    }
+
+    #[test]
+    fn auto_aa_requests_preserve_received_value_and_deduplicate_queued_and_pending_sends() {
+        let mut data = HudData::default();
+        data.expansion.owner = 47;
+        data.expansion.received = Some(Inventory::default());
+        request_auto(&mut data, false);
+        assert!(data.expansion.auto_request.is_none());
+        request_auto(&mut data, true);
+        request_auto(&mut data, true);
+        assert_eq!(data.expansion.auto_request, Some((47, true)));
+        assert!(!data.expansion.received.as_ref().unwrap().auto_use_aa_point());
+        data.expansion.auto_request = None;
+        data.expansion.auto_waiting = Some(true);
+        request_auto(&mut data, true);
+        assert!(data.expansion.auto_request.is_none());
+        data.expansion.clear();
+        assert!(data.expansion.auto_waiting.is_none() && data.expansion.auto_request.is_none());
+        request_auto(&mut data, true);
+        assert!(data.expansion.auto_request.is_none(), "no requests without the active character's inventory");
+    }
 
     #[test]
     fn expansion_confirmation_rechecks_owner_capacity_money_and_bag_certificates() {
@@ -330,7 +475,21 @@ mod tests {
         fixture::click(app.world().non_send::<UiRuntime>(), "EXPANSION_DIALOG.btnCancel")?;
         app.update();
         assert!(drain(&mut app).is_empty());
-        app.world().non_send::<UiRuntime>().lua.load("X2Bag:SetAutoUseAAPoint(true)").exec()?;
+        app.world().non_send::<UiRuntime>().lua.load("X2Bag:SetAutoUseAAPoint(true); X2Bag:SetAutoUseAAPoint(true); assert(not X2Bag:GetAutoUseAAPoint())").exec()?;
+        app.update();
+        assert!(matches!(drain(&mut app).as_slice(), [Command::SetAutoUseAaPoint(true)]));
+        app.world_mut().resource_mut::<Inventory>().apply(&Event::AutoUseAaPointRequested(true));
+        app.world_mut().write_message(NetEvent(Event::AutoUseAaPointRequested(true)));
+        let ack = Event::ItemsChanged(aa_net::items::ItemTasks {
+            tasks: vec![aa_net::items::ItemTask::AutoUseAaPoint(1)],
+            ..default()
+        });
+        app.world_mut().resource_mut::<Inventory>().apply(&ack);
+        bridge.borrow_mut().expansion.received = Some(app.world().resource::<Inventory>().clone());
+        app.world_mut().write_message(NetEvent(ack));
+        app.update();
+        assert!(drain(&mut app).is_empty());
+        app.world().non_send::<UiRuntime>().lua.load("assert(X2Bag:GetAutoUseAAPoint())").exec()?;
         fixture::click(app.world().non_send::<UiRuntime>(), "newbag.expandBtn")?;
         fixture::click(app.world().non_send::<UiRuntime>(), "EXPANSION_DIALOG.btnOk")?;
         app.update();
