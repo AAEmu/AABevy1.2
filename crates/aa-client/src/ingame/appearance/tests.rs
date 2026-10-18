@@ -1,0 +1,109 @@
+use super::*;
+use aa_anim::{Cdf, PartKind, hair::HairVariant};
+use aa_net::model::EquipDetail;
+
+fn item(template_id: u32) -> Item {
+    Item {
+        id: u64::from(template_id),
+        template_id,
+        count: 1,
+        ..default()
+    }
+}
+fn equipment(head: Option<u32>) -> Equipment {
+    let mut equipment = Equipment::default();
+    equipment.slots[slot::HAIR] = Some(item(24024));
+    equipment.slots[slot::HEAD] = head.map(item);
+    equipment
+}
+fn description(db: &GameDb, equipment: &Equipment) -> CharacterDesc {
+    describe(db, Race::Nuian, Gender::Female, equipment, &ModelParams::default()).unwrap()
+}
+fn hair(assets: &CharacterAssets) -> Option<&aa_anim::PartAsset> {
+    assets.parts.iter().find(|part| part.kind == PartKind::Hair)
+}
+fn model(path: &str) -> aa_anim::Result<String> {
+    if path.ends_with(".cdf") {
+        Ok(Cdf::load(path)?.model)
+    } else {
+        Ok(path.to_owned())
+    }
+}
+
+#[test]
+fn received_headgear_uses_authored_alternate_or_hidden_hair_without_changing_other_parts() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    let style = db.body_part(24024)?;
+    let expected_alternate = model(style.variant_path(HairVariant::Type3).unwrap())?;
+    for (head, detail) in [(None, None), (Some(22874), Some(28744)), (Some(18230), Some(25768))] {
+        let equipment = equipment(head);
+        let desc = description(&db, &equipment);
+        let ordinary = desc.resolve(&db)?;
+        let applied = resolve(&db, &desc, &equipment)?;
+        assert_eq!(headgear_detail(&db, &desc, &equipment), detail);
+        match head {
+            Some(22874) => assert_eq!(hair(&applied).unwrap().path, expected_alternate),
+            Some(18230) => assert!(hair(&applied).is_none()),
+            _ => assert_eq!(hair(&applied).unwrap().path, hair(&ordinary).unwrap().path),
+        }
+        if let Some(selected) = hair(&applied) {
+            assert_eq!(
+                selected.material,
+                hair(&ordinary).unwrap().material,
+                "retain actual style/color material"
+            );
+        }
+        let other = |assets: &CharacterAssets| {
+            assets
+                .parts
+                .iter()
+                .filter(|p| p.kind != PartKind::Hair)
+                .map(|p| (p.kind, p.slot.clone(), p.path.clone(), p.material.clone(), p.dye))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(other(&applied), other(&ordinary));
+    }
+    Ok(())
+}
+
+#[test]
+fn received_image_override_and_fallback_use_the_same_visual_as_the_rendered_helmet() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    let mut equipment = equipment(Some(18230));
+    equipment.slots[slot::HEAD].as_mut().unwrap().detail = ItemDetail::Equip(EquipDetail {
+        image_item_template_id: 22874,
+        ..default()
+    });
+    let desc = description(&db, &equipment);
+    assert!(matches!(&desc.costume, Costume::Items(ids) if ids == &[22874]));
+    assert_eq!(headgear_detail(&db, &desc, &equipment), Some(28744));
+    assert!(hair(&resolve(&db, &desc, &equipment)?).is_some());
+    equipment.slots[slot::HEAD].as_mut().unwrap().detail = ItemDetail::Equip(EquipDetail {
+        image_item_template_id: u32::MAX,
+        ..default()
+    });
+    let desc = description(&db, &equipment);
+    assert!(matches!(&desc.costume, Costume::Items(ids) if ids == &[18230]));
+    assert_eq!(headgear_detail(&db, &desc, &equipment), Some(25768));
+    assert!(hair(&resolve(&db, &desc, &equipment)?).is_none());
+    Ok(())
+}
+
+#[test]
+fn rendered_cosplay_default_precedes_hidden_head_and_nonrendered_equipment_does_not_hide_hair() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    let mut equipment = equipment(Some(18230));
+    equipment.slots[slot::COSPLAY] = Some(item(14359));
+    let mut desc = description(&db, &equipment);
+    assert_eq!(headgear_detail(&db, &desc, &equipment), Some(57344));
+    let normal = db.body_part(24024)?;
+    assert_eq!(hair(&resolve(&db, &desc, &equipment)?).unwrap().path, model(&normal.path)?);
+    equipment.slots[slot::COSPLAY] = None;
+    desc.costume = Costume::None;
+    assert_eq!(headgear_detail(&db, &desc, &equipment), None);
+    assert!(hair(&resolve(&db, &desc, &equipment)?).is_some());
+    desc.hair = None;
+    desc.hair_color = None;
+    assert!(hair(&resolve(&db, &desc, &equipment)?).is_none());
+    Ok(())
+}

@@ -21,6 +21,11 @@ Six mode/world-list captures are inspected and the playable alias is refreshed
 with NumberOnly labels, authored water normals and the qualified cube correction.
 Item eligibility, info/cost providers and request/planner/controller continuation
 remain open (aa-client-enchant.md).
+Three further focused appearance checks pass for rendered helmet hair selection:
+native alternate/hidden hair, actual image overrides/fallback, cosplay priority,
+material/other-part retention and bald appearance. Character select, prewarming,
+local spawn and remote humanoid preparation now share this adapter. The full
+suite/playable baseline above predates this integration (aa-client-headgear.md).
 Six item-effect checks cover receipt-ordered current versus inline items,
 equipment/BAG lookup priority including ID0, native callback/argument shapes,
 raw grade name/color lookups, deferred lifecycle and all five original grade
@@ -154,7 +159,7 @@ parity is unfinished.
 * UI agent: `aa-ui`, native listbox hierarchy/art/tooltips for original crafting/achievement, including visible/animated templates and white/grey state fallbacks; native48px icon rejection audited. Flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed. Read-only native repair API audit supports root's next integration.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
 * World agent: native Group14 polygon ToD geometry/blending/lifetime landed with native numeric oracles; gameplay subject qualification remains unhooked pending proof of bit0x20's producer. Native skybox/cloud spatial opacity and asset fades, curve tangents/defaults, spatial raw-curve zone blending, cloud motion/geometry/lifecycle, deferred/wrapped diffuse decals, native moons/coronas/orbit, sky order, static entity props, local lights, stars and rigid windmills landed.
-* Animation milestone: authored FSQ/FXL facial curves and exact expression overlays for all eight playable heads, including original blink sequences; local-player, preview and supported bound NPC CDF integration passed. Selected visible/awake remote Characters now opt in/out in place with bounded private mesh ownership; full-world target QA remains open. Original facial bone displacement/order/base-pose contracts and native helmet hair/beard selectors landed; root equip/appearance wiring and automatic voice lip sync remain open.
+* Animation milestone: authored FSQ/FXL facial curves and exact expression overlays for all eight playable heads, including original blink sequences; local-player, preview and supported bound NPC CDF integration passed. Selected visible/awake remote Characters now opt in/out in place with bounded private mesh ownership; full-world target QA remains open. Original facial bone displacement/order/base-pose contracts and native helmet hair/beard selectors landed. Rendered head/cosplay/image hair selection is now applied during local/list/remote assembly; later appearance-change rebuilding, beard geometry, visibility policy and automatic voice lip sync remain open.
 
 The shared checkout also contains inherited calibration/performance edits in other crates. Those
 are preserved; they are not counted as newly verified features until their owner or an assigned
