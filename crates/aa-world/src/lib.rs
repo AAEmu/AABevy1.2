@@ -3,6 +3,7 @@
 //! See `docs/aa-world.md` for the formats, coordinates, API and performance numbers.
 
 pub mod char_light;
+pub mod area_tod;
 pub mod cinema;
 pub mod collide;
 pub mod coords;
@@ -37,6 +38,7 @@ pub mod water_query;
 pub mod world;
 
 pub use collide::WorldCollision;
+pub use area_tod::{AreaToDState, AreaToDSubject};
 pub use coords::{CELL_SIZE, bevy_to_cry, cry_to_bevy};
 pub use sky::{AmbientCubes, WorldClock};
 pub use stream::{AaWorldPlugin, WorldConfig, WorldFocus, WorldTimings};
