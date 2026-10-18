@@ -28,7 +28,7 @@ pub fn install(ui: &mut UiRuntime) {
         FAKE.player.hp=FAKE.player.maxHp;effectPlayerFixture:UpdateAll()
         FAKE.player.hp=FAKE.player.maxHp/5;effectPlayerFixture:UpdateAll()
         effectStartPanel=CreateWindow('nativeEffectStartPanel',UIParent)
-        effectStartPanel:SetExtent(520,180);effectStartPanel:AddAnchor('CENTER',UIParent,0,0)
+        effectStartPanel:SetExtent(690,180);effectStartPanel:AddAnchor('CENTER',UIParent,0,0)
         effectStartPanel:SetTitle('Original HUD effect lifecycle');effectStartPanel:Show(true)
         local labels={'Auto attack active','Combo stopped','Toggle restarted'}
         effectStartSlots={}
@@ -45,15 +45,37 @@ pub fn install(ui: &mut UiRuntime) {
         effectStartSlots[2]:Anim_combo_aciton_for_me_effect(false)
         effectStartSlots[3]:AnimToggleSkill(true);effectStartSlots[3]:AnimToggleSkill(false)
         effectStartSlots[3]:AnimToggleSkill(true)
+        CreateLoadingTextureSet(effectStartPanel)
+        effectClockLoading=effectStartPanel.modalLoadingWindow
+        effectClockLoading:SetExtent(42,42);effectClockLoading:AddAnchor('TOPLEFT',effectStartPanel,575,65)
+        effectClockLoading.effect:SetStartEffect(true);effectClockLoading:Show(true)
+        effectClockLoadingLabel=effectStartPanel:CreateChildWidget('label','loadingCaption',0,true)
+        effectClockLoadingLabel:SetExtent(165,24)
+        effectClockLoadingLabel:AddAnchor('TOP',effectClockLoading,'BOTTOM',0,8)
+        effectClockLoadingLabel:SetText('Loading active');effectClockLoadingLabel:Show(true)
+        ApplyTextColor(effectClockLoadingLabel,FONT_COLOR.DEFAULT)
     "#,
     )
     .unwrap();
+    if std::env::args().any(|a| a == "--zero-health") {
+        // Actual low-health painting precedes the original healthy -> zero-HP manual re-show.
+        lua::tick(&ui.lua, 100.);
+        aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+        ui.exec("@zero_health_manual_show", r#"
+            FAKE.player.hp=FAKE.player.maxHp;effectPlayerFixture:UpdateAll()
+            FAKE.player.hp=0;effectPlayerFixture:UpdateAll()
+            effectStartPanel:SetTitle('Zero HP: original manual effect re-show')
+            assert(main_menu_bar.life_alert_effect:IsVisible())
+            assert(not main_menu_bar.life_alert_effect:IsRunning())
+        "#).unwrap();
+    }
     if std::env::args().any(|a| a == "--healthy") {
         ui.exec(
             "@healthy_effect_control",
             r#"
             FAKE.player.hp=FAKE.player.maxHp;effectPlayerFixture:UpdateAll()
             effectStartPanel:SetTitle('Recovered: health warning stopped')
+            effectClockLoading:Show(false);effectClockLoadingLabel:SetText('Loading paused')
         "#,
         )
         .unwrap();

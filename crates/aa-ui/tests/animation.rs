@@ -35,6 +35,11 @@ fn sample(ui: &UiRuntime, name: &str) -> lua::animation::Sample {
     lua::ui(&ui.lua).animations.sample(id)
 }
 
+fn frame(ui: &UiRuntime, ms: f32) -> Vec<aa_ui::render::Quad> {
+    lua::tick(&ui.lua, ms);
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None)
+}
+
 fn near(a: f32, b: f32) {
     assert!((a - b).abs() < 0.0001, "{a} != {b}");
 }
@@ -63,22 +68,23 @@ fn effects_interpolate_phases_repeat_and_stop_without_moving_layout() {
     let rect = lua::ui(&ui.lua).tree.rect(d);
     lua::ui(&ui.lua).tree.settle();
     let generation = lua::ui(&ui.lua).tree.generation;
-    lua::tick(&ui.lua, 250.0);
+    frame(&ui, 250.0);
     let s = sample(&ui, "effect");
     near(s.color.unwrap()[3], 0.3);
     near(s.scale[0], 0.65);
     near(s.rotation, std::f32::consts::FRAC_PI_2);
     assert_eq!(lua::ui(&ui.lua).tree.rect(d), rect);
     assert_eq!(lua::ui(&ui.lua).tree.generation, generation);
-    lua::tick(&ui.lua, 500.0);
-    near(sample(&ui, "effect").color.unwrap()[3], 0.4);
-    lua::tick(&ui.lua, 2500.0);
-    near(sample(&ui, "effect").color.unwrap()[3], 0.3);
+    frame(&ui, 500.0);
+    near(sample(&ui, "effect").color.unwrap()[3], 0.6);
+    frame(&ui, 2500.0);
+    // Native keeps the next phase's initial sample on the handoff frame.
+    near(sample(&ui, "effect").color.unwrap()[3], 0.6);
     ui.exec("@stop", "effect:SetStartEffect(false)").unwrap();
     let stopped = sample(&ui, "effect");
     lua::ui(&ui.lua).tree.settle();
     let content = lua::ui(&ui.lua).tree.content();
-    lua::tick(&ui.lua, 400.0);
+    frame(&ui, 400.0);
     assert_eq!(sample(&ui, "effect"), stopped);
     assert_eq!(lua::ui(&ui.lua).tree.settle(), content);
     assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
@@ -105,11 +111,14 @@ fn finite_effects_hold_then_finish_and_hidden_loops_do_not_repaint() {
     "#,
     )
     .unwrap();
-    near(sample(&ui, "effect").alpha, 0.0);
-    lua::tick(&ui.lua, 350.0);
+    near(sample(&ui, "effect").color.unwrap()[3], 0.0);
+    frame(&ui, 350.0);
     near(sample(&ui, "effect").color.unwrap()[3], 0.4);
-    assert!(eval::<bool>(&ui, "effect:IsRunning()"));
-    lua::tick(&ui.lua, 1000.0);
+    assert!(!eval::<bool>(&ui, "effect:IsRunning()")); // Empty native motion channel.
+    frame(&ui, 1000.0);
+    near(sample(&ui, "effect").color.unwrap()[3], 0.0);
+    frame(&ui, 0.0);
+    frame(&ui, 0.0);
     near(sample(&ui, "effect").color.unwrap()[3], 0.4);
     assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
     assert!(lua::ui(&ui.lua).tree.get(id(&ui, "effect")).shown);
@@ -118,14 +127,15 @@ fn finite_effects_hold_then_finish_and_hidden_loops_do_not_repaint() {
         "effect:SetRepeatCount(0); effect:SetStartEffect(true); window:Show(false)",
     )
     .unwrap();
-    lua::tick(&ui.lua, 0.0);
+    frame(&ui, 0.0);
     lua::ui(&ui.lua).tree.settle();
     let content = lua::ui(&ui.lua).tree.content();
-    lua::tick(&ui.lua, 200.0);
-    near(sample(&ui, "effect").color.unwrap()[3], 0.2);
+    frame(&ui, 200.0);
+    near(sample(&ui, "effect").color.unwrap()[3], 0.0);
     assert_eq!(lua::ui(&ui.lua).tree.settle(), content);
+    let retained = sample(&ui, "effect");
     ui.exec("@clear", "effect:ClearEffect()").unwrap();
-    assert_eq!(sample(&ui, "effect"), Default::default());
+    assert_eq!(sample(&ui, "effect"), retained);
     assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
 }
 
@@ -234,7 +244,7 @@ fn original_action_slot_bytecode_pulses_autoattack_and_combo_borders() {
             .unwrap()[3],
         0.4,
     );
-    lua::tick(&ui.lua, 250.0);
+    frame(&ui, 250.0);
     near(
         sample(&ui, "slot.auto_attack_effect_bg").color.unwrap()[3],
         0.3,
@@ -246,16 +256,16 @@ fn original_action_slot_bytecode_pulses_autoattack_and_combo_borders() {
     near(arrow.offset[0], 13.8564);
     near(arrow.offset[1], -8.0);
     near(arrow.rotation, std::f32::consts::FRAC_PI_3);
-    lua::tick(&ui.lua, 350.0);
+    frame(&ui, 350.0);
     near(
         sample(&ui, "slot.auto_attack_effect_bg").color.unwrap()[3],
-        0.52,
+        0.6,
     );
     near(
         sample(&ui, "slot.combo_action_for_me_effect")
             .color
             .unwrap()[3],
-        0.0,
+        1.0,
     );
     ui.exec("@reset", "slot:ResetAllAnimEffect()").unwrap();
     assert!(
@@ -341,28 +351,28 @@ fn motion_runs_independently_rotates_art_and_clears_a_finished_channel() {
     )
     .unwrap();
     near(sample(&ui, "effect").offset[1], -10.5);
-    lua::tick(&ui.lua, 250.0);
+    let quads = frame(&ui, 250.0);
     let s = sample(&ui, "effect");
     near(s.color.unwrap()[3], 1.0);
     near(s.offset[0], 21.0);
     near(s.offset[1], 0.0);
     near(s.rotation, std::f32::consts::FRAC_PI_2);
     assert!(eval::<bool>(&ui, "effect:IsRunning()"));
-    let quads = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
     assert_eq!(quads.len(), 1);
     near((quads[0].pos[0] + quads[0].pos[2]) * 0.5, 171.0);
     assert!(quads[0].corners.is_some());
-    lua::tick(&ui.lua, 750.0);
+    frame(&ui, 750.0);
+    frame(&ui, 0.0); // Finishing the motion phase and dropping its flag are distinct draws.
     assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
     near(sample(&ui, "effect").offset[1], -10.5);
+    let retained = sample(&ui, "effect");
     ui.exec("@clear_motion", "effect:ClearMoveEffect()")
         .unwrap();
-    near(sample(&ui, "effect").offset[1], 0.0);
-    near(sample(&ui, "effect").rotation, 0.0);
+    assert_eq!(sample(&ui, "effect"), retained);
     assert!(!eval::<bool>(&ui, "effect:IsVisible()"));
     ui.exec("@replay_color", "effect:SetStartEffect(true)")
         .unwrap();
-    lua::tick(&ui.lua, 100.0);
+    frame(&ui, 100.0);
     near(sample(&ui, "effect").color.unwrap()[3], 0.5);
     near(sample(&ui, "effect").offset[0], 0.0);
 }
@@ -385,20 +395,22 @@ fn edge_motion_has_extent_relative_positions_orientation_delay_and_hold() {
     )
     .unwrap();
     near(sample(&ui, "effect").offset[0], 0.0);
-    lua::tick(&ui.lua, 200.0);
+    frame(&ui, 200.0);
     near(sample(&ui, "effect").offset[0], 21.0);
     near(sample(&ui, "effect").offset[1], -10.5);
-    lua::tick(&ui.lua, 150.0);
+    frame(&ui, 150.0);
     near(sample(&ui, "effect").offset[0], 42.0);
-    lua::tick(&ui.lua, 150.0);
+    frame(&ui, 150.0);
     near(sample(&ui, "effect").offset[0], 21.0);
+    near(sample(&ui, "effect").offset[1], 0.0);
+    frame(&ui, 0.0); // Native initializes the new phase before sampling its carried time.
     near(sample(&ui, "effect").offset[1], 21.0);
     near(sample(&ui, "effect").rotation, std::f32::consts::FRAC_PI_2);
     ui.exec("@no_rotate", "effect:SetMoveRotate(false)")
         .unwrap();
-    lua::tick(&ui.lua, 10.0);
+    frame(&ui, 10.0);
     near(sample(&ui, "effect").rotation, 0.0);
-    lua::tick(&ui.lua, 200.0);
+    frame(&ui, 200.0);
     assert!(!eval::<bool>(&ui, "effect:IsRunning()"));
 }
 
