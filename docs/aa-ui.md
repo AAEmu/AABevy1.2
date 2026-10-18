@@ -4721,3 +4721,64 @@ Inspected final captures show the original Trial selector and physically typed
 Both report zero script errors, no runtime warnings/errors and self-close.
 The original chat/HUD artwork was compared with the character-info reference;
 the centered single-tab placement and test text are explicit fixture settings.
+
+### Native task admission and visual-failure audit (2026-10-18)
+
+`RequestTaskDialog` is an application compatibility helper, not an exported
+native Lua method. Native X2DialogManager exports RequestDefaultDialog and
+RequestNoticeDialog; their wrappers `3905ed20`/`3905edc0` return **one lowercase,
+unpadded hexadecimal string handle**, including **"0"** on failure, through
+`39424860`/XL conversion. The toolkit's widget-valued compatibility return is
+retained separately from that native handle contract.
+
+Generic task admission `3902d570` has distinct outcomes:
+
+* Raw environment flags +a8=true/+a9=false or an identical pending **task
+  pointer** return silently, without choice callback or destruction. This is
+  not a general duplicate-type, owner, modal-stack or active-dialog limit.
+* Derived CanStart virtual+10=false calls choice virtual+18 with
+  `buttonType == 1`, then destroys the incoming task. A notice therefore gets
+  true; OK/Cancel and custom get false. Derived type/creator rules remain
+  task-specific. Trial7's creator prechecks type7 before allocation; Trial6/8
+  reject newly allocated duplicates through their own CanStart.
+* Accepted type5 while Beautyshop is active calls custom virtual+14 with index2
+  and destroys the incoming task. CharacterCustomizer singleton `3931e2f0`
+  +480 is set/cleared by `3931ef40`/`3931f0a0`; both emit TOGGLE_BEAUTYSHOP
+  (event0x244) with that bool. Registry `3921657c..86` and FireUIEvent's
+  `39d22ce8` lookup close the event identity. This is not ordinary modal policy.
+* Otherwise `3902d400` attempts a visual, then the task is appended to the
+  pending list **even if visual creation failed**. Task+4 records visual
+  success. Update `3902d690` retries false rows without rerunning CanStart.
+
+Visual creation `3902d270` fails before widget allocation when raw global
+`3a5a4db8` is set or the default decorator is missing. A failed widget allocation
+or unreadable mandatory info also returns false. With a default decorator,
+absence of a type-specific decorator is allowed. Successful order is default
+decorator, optional specific decorator, Show, handle/task map insertion, then
+output handle. These raw engine gates are not assigned guessed app semantics.
+
+Removal `3902cef0` reaches `3902ce30` with skip-choice=false: invoke the same
+`buttonType == 1` choice while the task is still queued, close its visual,
+destroy the task, unlink/free the node and decrement count. `3902cf10` uses
+skip-choice=true. Native task cancellation is therefore not silent queue
+invalidation; visual creation failure is not admission rejection either.
+
+Read-only evidence is under `data/extract/aa-ui/`: `task_admission_oracle.py`
+and `native-task-admission-oracle-20261018.json` execute **21 native groups**
+across admission/list insertion, retry, actual removal and visual gates/order.
+Synthetic virtual providers, allocation/free, GUI/table/map primitives and
+delivery endpoints are captured explicitly. `task_handle_return_oracle.py`
+and its JSON execute **six** actual wrapper/XL conversion groups, capturing
+owner conversion, manager/create result and Lua return interface. The combined
+disassembly is `native-task-admission-source-20261018.txt`. No original or live
+client files/processes are modified.
+
+The compatibility helper now returns nil before allocating any widget when
+the default decorator is unavailable. Typed application task owners retain
+and retry the request rather than treating nil as a choice. The toolkit adds
+no inferred global/editor/type/modal gates or duplicate suppression. All
+**21 selected tests** pass across popup lifecycle (nine), attachment (five)
+and full chat reset (seven). The two new tests verify no allocation/callback
+before decoration is available, same-type and missing-specific acceptance,
+retry after actual original-stage registration and a strict physical click on
+the original invitation's Decline button (custom index3).
