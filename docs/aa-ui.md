@@ -4557,3 +4557,51 @@ old popup; it reports **241.2-297.6 FPS**. A separate inspected 1920x1080/scale 
 capture (`native-chat-reset-20261018.png`) reports **250.5-308.0 FPS**. Both log
 zero script errors and no runtime warnings/errors. No matching original reset
 reference screenshot is available; original-script geometry is preserved.
+
+### Honor and vocation numeric text tokens (2026-10-18)
+
+The original quest-context vocation reward (`questcontext/common.alb`,
+CreateQuestRewardLivingPointDisplay.UpdateValue) emits `|l%d` without a final
+semicolon. The previous decoder displayed that control sequence literally;
+its lowercase semicolon branch also copied numeric bodies without native
+canonicalization. `|h`/`|H` and `|l`/`|L` now share the source-closed numeric
+parser used by dishonor, accepting semicolon or EOF, canonical signed decimal,
+wrapping i64 arithmetic and the native UTF-8-codepoint-to-low-byte quirks.
+Full source getters, literal edit text, color runs and links remain intact.
+
+Native `39273e34..52` dispatches both cases of l/L to `392742a7`, and h/H to
+`39274250`. Both invoke `3926fbd0`, then `39273190` with icon kinds 6 and 3
+respectively. The initialized read-only native table capture already retained
+the corresponding `ui/common/money_window.dds` rectangles: honor
+**(48,31,14,21)** and vocation **(190,13,17,15)**. These replace the former atlas
+estimates. Shared icon advance, scaling/centering, other token families,
+dynamic locale-specific rectangle configuration and the generic comma option
+remain separate boundaries.
+
+`data/extract/aa-ui/honor_living_text_oracle.py` and
+`native-honor-living-text-oracle-20261018.json` execute **181 native groups**
+using the actual original parser, number helper, XlGetChar and XlAtoI64.
+Both cases of both tokens cover EOF/semicolon, empty and invalid bodies,
+canonical signs/zeros, wrapping limits, embedded bars/newlines/NUL, low-byte
+Unicode cases, surrounding text and escapes. Memory primitives and final
+glyph/value layout are captured endpoints; numeric and consumption behavior
+executes unchanged. Atlas evidence remains the separate initialized runtime
+capture `native-formatted-text-icon-runtime-20261018.json`.
+
+All **45 selected tests** pass (one existing ignored font-metrics test), covering
+the library, formatted numeric text, chat/item/quest links, literal chat input,
+direct drawable text and unusable-skill slot styling. The three added tests
+exercise native numeric goldens, source icon rectangles/color/link/edit behavior,
+and unchanged original character/quest controls with received-style point events.
+The fixture opens original quest content and aliases its actual reward widgets;
+the reward factory names in the decompiled survey are local closures.
+
+The aa-dev `native_honor_living_text` example builds. Its inspected
+`shots/aa-ui/native-honor-living-20261018.png` shows the unchanged original
+character panel at 1280x720/UI scale 0.85: fixture source values 001234 and
+000567 display as **1234 plus the honor medal** and **567 plus the vocation
+badge**. The panel/icon appearance was compared with
+`reference/ingame/character_info/real.png` (which has zero points). It reports
+zero script errors, no runtime warnings/errors and **229.0-262.1 FPS**, then
+self-closes. The quest reward's original missing-semicolon UpdateValue path is
+exercised separately in the same example before closing the quest window.

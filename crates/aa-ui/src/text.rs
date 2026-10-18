@@ -146,8 +146,8 @@ pub const INLINE_ICONS: [[f32; 4]; 7] = [
     [16.0, 29.0, 16.0, 16.0],  // silver coin
     [32.0, 29.0, 16.0, 16.0],  // copper coin
     [206.0, 12.0, 16.0, 16.0], // loyalty token (BM mileage)
-    [47.0, 31.0, 16.0, 20.0],  // honor points medal (`|h`)
-    [189.0, 12.0, 17.0, 16.0], // vocation badge sprout (`|l`, living points)
+    [48.0, 31.0, 14.0, 21.0],  // honor points medal (`|h`, native formatted kind 3)
+    [190.0, 13.0, 17.0, 15.0], // vocation badge sprout (`|l`, native formatted kind 6)
     [62.0, 30.0, 16.0, 20.0], // dishonor skull (`|d`, native formatted icon kind 4)
 ];
 /// First private-use code point standing for an inline icon in expanded text.
@@ -1280,8 +1280,8 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                 i += 2;
                 continue;
             }
-            if matches!(k, 'd' | 'D') {
-                // Native 39274205/3926fbd0 consumes through ';' or EOF, including
+            if matches!(k, 'd' | 'D' | 'h' | 'H' | 'l' | 'L') {
+                // Native 39274205/250/2a7 -> 3926fbd0 consumes through ';' or EOF, including
                 // other bars/newlines in the numeric body. An empty body emits nothing.
                 let start = i + 2;
                 let end = (start..chars.len())
@@ -1289,7 +1289,11 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                     .unwrap_or(chars.len());
                 if end > start {
                     out.push_str(&formatted_i64(&chars[start..end]).to_string());
-                    out.push(icon_char(6));
+                    out.push(icon_char(match k {
+                        'h' | 'H' => 4,
+                        'l' | 'L' => 5,
+                        _ => 6,
+                    }));
                 }
                 if end < chars.len() && chars[end] == '\0' { break; }
                 i = if end < chars.len() { end + 1 } else { end };
@@ -1345,13 +1349,9 @@ fn expand_with_links(text: &str, labels: Option<&LinkLabels>) -> (String, Vec<Li
                             }
                         }
                         'm' => out.push_str(&money_text(&body)),
-                        'b' | 'h' | 'l' => {
+                        'b' => {
                             out.push_str(&body);
-                            out.push(icon_char(match k {
-                                'b' => 3,
-                                'h' => 4,
-                                _ => 5,
-                            }));
+                            out.push(icon_char(3));
                         }
                         _ => out.push_str(&body),
                     }
