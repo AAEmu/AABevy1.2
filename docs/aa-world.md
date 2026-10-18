@@ -261,10 +261,8 @@ mesh assets after moving outside the map. All **10** runs self-close
 without errors. No corresponding original-client cave screenshot exists
 in `reference/`; original x86/math and actual assets are the reference here.
 
-Material boundary retained for the next slice: CPU surfaces now preserve
-IDs **16..30**, but the current heightmap detail shader still aliases them
-through its 16-slot material table. This milestone does not claim those
-native detail materials, native terrain geomorphing, or exact hole-edge
+The follow-up below restores native high-ID detail materials. This hole
+milestone does not claim native terrain geomorphing or exact hole-edge
 sphere collision; the existing sphere query remains a plane approximation.
 No calibrated sky/post/water/fly values were changed.
 
@@ -288,11 +286,73 @@ must therefore be a non-sRGB texture and the shader decodes it (`terrain_layers.
 
 `leveldata.xml` is Sandbox's level data. `<SurfaceTypes>` lists 21 `<SurfaceType Name, DetailMaterial, DetailScaleX, DetailScaleY, ProjAxis="Z",
 Id>` (optional `<VegetationGroup Id>` children). The five-bit surface ID of `heightmap.dat` is the **position** in this list (31 means a hole;
-the current detail renderer still aliases IDs above 15; unused slots repeat `__default__` = `beach_white_sand_dry`), `Id` is the global surface type number (up to about 900).
+unused slots repeat `__default__` = `beach_white_sand_dry`), `Id` is the global surface type number (up to about 900).
 Checked on the spawn: cell `015_015` nibble 4 (`tr_field_dirt_001c`) is exactly the flat dirt square of the spawn (`terrain_height` 126.2),
 nibble 1 / 3 (rock) have mean slopes of 37 / 45 degrees. Ocean cells are all nibble 0 (`tr_snow_field_ground_708a`, the seabed). 306 different
 `DetailMaterial`s are used by the 1205 cells (`materials/aa_terrain/{field,canyon,mix,wasteland,wet,...}`, a few `materials/terrain/`), all
 with the shader `Terrain.Layer`.
+
+Native **32-slot** closure (2026-10-18): named
+`CTerrain::LoadCellSurfaceTypesFromXML` **300C66F0** consumes XML children
+in file order. Its runtime path **300C6B84..300C6BBE** sends loop index
+ESI separately from XML `Id` into **300C6020**. Registration checks the
+local slot against **31** at **300C6027**, then indexes
+`((cellX*8+cellY)*32+slot)` in pointer table **302B6638**. The editor/setter
+**300C638C..300C63A3** uses the same bound/stride. Getter **300C14B0**
+accepts every slot 0..31 and returns zero for out-of-range cells/slots;
+**2,053** original-code controls pass across 64 cells, 32 slots and five
+invalid boundaries. Slot31 is the hole sentinel and stays unbound in our
+material library. The loader preserves existing shader/texture eligibility
+and array budgets, while the CPU uniform and WGSL now keep all five bits
+instead of aliasing high IDs into a 16-slot table.
+
+The five bounded original-cell fixtures each contain **21** XML entries.
+Counting owned leaf samples, high material IDs16..30 occur **80,083** times
+in **20,8**, **99,650** in **21,8**, **63,561** in **12,14**, **43,680** in
+Palace **13,10** and **zero** in spawn **15,15**. Examples formerly hidden
+by that alias: 20,8 slot16 `tr_field_grass_802a`, slot17
+`tr_mix_rc_gr_214a`, slot20 `tr_field_dirt_612a1`; forest12,14 slot19
+`tr_field_grass_005a`; Palace slot16 `tr_af_pavingstone_700a`.
+The source/oracles/asset counts are retained under ignored
+`data/extract/aa-world/roads/native-terrain-surface-*.txt`,
+`native-surface32-table-oracles.json` and `native-surface32-assets.json`.
+This adds a fixed 32-slot per-cell table and retains the existing five
+texture arrays, **255 layers per array**, shared once-per-world packing,
+per-cell material/surface-map lifetime and loading workers. No additional
+per-frame material work, texture copies or lighting calibration is added.
+
+Verification: new example check/build pass and the full world suite is
+**218 passed, 9 existing optional ignored** (5.16 s). Native high-slot
+material regressions cover 20,8 and 21,8 slots17/20, the former aliases,
+hole31 remaining unbound, and existing array caps. `terrain_surfaces`
+uses `aa_dev`; its controlled palette checks all32 slots and the former
+low-nibble alias independently through the real shader. All **64** GPU
+pixel cases pass at **1280×720**, **204.4–318.4 FPS**, including hole31
+cover-only **[129,129,129]** versus the alias control **[122,157,95]**.
+These palettes are numeric fixtures, not substitute production materials.
+
+Actual asset views use the original flat high-ID regions: default20,8
+target **21114,8574,377.5** (slot16 grass802a), and `--forest`12,14 target
+**12948,14896,190.68614** (slot19 grass005a). `--legacy` changes only the
+fixture's high-slot table entries to their former low-nibble aliases;
+geometry, authored source textures and environment are identical. The
+forest control previously selected slot3 white sand. At 1280×720,
+`shots/aa-world/terrain_surfaces/forest_on.png` / `forest_legacy.png`
+differ by >3 display values at **878,520 pixels**, mean maximum-channel
+delta **65.1**; `grass_on.png` / `grass_legacy.png` at **795,792 pixels**,
+mean **17.6**. Forest readings are **171.5–213.8 FPS native** /
+**198.1–214.9 alias**, grass **190.9–215.5 native** /
+**162.8–196.0 alias**, during shared client compilation; no isolated
+performance delta is claimed. The runtime library packs **324 material
+entries**, **192/54/1 diffuse** and **255/9 normal** array layers,
+**166 MB**, versus the prior315 entries/163 MB, inside the existing caps.
+
+`--world --unload-check --shot-after 20` verifies zero cells, pending
+cell tasks, terrain patches, per-cell materials, surface maps and captured
+mesh assets; the once-per-world texture arrays remain shared. All **seven**
+capture processes self-close without warnings/errors. Source/math and
+actual assets are the reference for these new cameras; no matching
+real-client screenshot was available, and brightness was not retuned.
 
 A layer `.mtl` is either one material (only the ground, z, projection exists) or **three sub-materials x, y, z** (84 of the 304: rock,
 cliffs; the same textures with a different `TexMod` tiling, e.g. 0.05 for x / y and 0.14 for z). Textures: `Diffuse` (BC1, 512 px, some 1024),

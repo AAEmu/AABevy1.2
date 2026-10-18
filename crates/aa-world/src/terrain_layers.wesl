@@ -23,7 +23,7 @@ struct TerrainParams {
     //   1: (uv offset u, uv offset v, detail strength, detail bump scale)
     //   2: (detail normal (like the normal), detail uv scale u, v, material colour r)
     //   3: (detail uv offset u, v, material colour g, b)
-    layers: array<vec4<f32>, 192>,
+    layers: array<vec4<f32>, 384>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> terrain: TerrainParams;
@@ -73,7 +73,7 @@ fn sample_normal(code: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec2
 }
 
 fn surface_at(p: vec2<i32>) -> u32 {
-    return textureLoad(surface_map, min(p, vec2<i32>(512, 512)), 0).r & 15u;
+    return textureLoad(surface_map, min(p, vec2<i32>(512, 512)), 0).r & 31u;
 }
 
 @fragment
