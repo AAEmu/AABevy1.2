@@ -6330,3 +6330,58 @@ shots/aa-ui/native-drawable-mask-hover-1080-20261018.png
 (1920x1080/default1.0, **298.0-373.3 FPS**). They show original normal/cooling,
 dimmed hovered/cooling and highlighted icons. Both report zero script errors/
 WARN/ERROR and self-close (PIDs52348/34640); the copied executable was removed.
+
+### Native button text palette and current style lifetime (2026-10-18)
+
+The original ingameshop/confirm_view.alb:231 applies FONT_COLOR.DEFAULT directly
+to details[i].textButton after CreateRadioButton has initialized its full button
+palette. The unchanged radio_button.alb creates that text control through
+CreateEmptyButton. Previously the renderer selected its palette again every
+draw, discarding the shop's direct style color. It now paints the current text
+style, with palette application at the actual native write points.
+
+Native39280680 stores one of four raw RGBA entries and updates the current font
+only when that entry equals the current button state. Native39282f70 reapplies
+the selected palette after artwork changes, even for a repeated state. Direct
+style:SetColor instead reaches3925b810/3925b1d0 and39274950, replacing only the
+current font color. Drawing, unrelated palette entries and ordinary text/extent
+changes preserve that override. A selected palette setter or a state/background
+write restores the corresponding palette; this also applies while disabled.
+The constructor loop392839a0..39283a3e initializes every entry white, without a
+normal-state fallback. Native state indices0/1/2/3 mean disabled/normal/highlight/
+pushed; the crate's existing palette order remains normal/highlight/pushed/disabled.
+
+All four text palette setters and style:SetColor require four actual numbers,
+narrow each to f32 and return no values. Missing, short, string/boolean/nil and
+failed-class arguments are inert. Extra arguments are ignored. Raw signed zero,
+negative values, NaN and infinity remain in current/palette storage. The existing
+style:GetColor helper is retained; its native return shape is not claimed here.
+
+button_text_color_oracle.py executes **47 actual native groups**, including the
+real constructor initialization loop, strict four-number parsers and Cry
+converters, all four bindings, palette/current-style storage, direct style
+binding and state application. Lua stack/host casts/results, script callbacks
+and unrelated drawable interfaces are controlled endpoints. No palette/color
+selection or copy algorithm is replaced. Source and raw-bit outputs are under
+native-button-text-color-source-20261018.txt and
+native-button-text-color-oracle-20261018.json in the ignored aa-ui extract.
+
+Crate check/example build and **178 checks pass**, with one existing optional
+font check ignored: five new palette/current-style tests,147 checks across23
+existing integration targets and26 library checks. Coverage includes the actual
+unchanged shop view constructor, its original radio callbacks and strict physical
+hover/press/release/choice/leave at1280/default0.85. The original direct color
+differs from its normal palette, and unvisited rows retain it. Other checks keep
+original button skins, disabled/checked art, masked/cooling item icons, chat tabs,
+tooltips, list controls, popups, scale/animation/fade and retirement behavior.
+
+Both aa-dev `--shot-after 8` captures were inspected:
+shots/aa-ui/native-button-text-direct-720-20261018.png
+(1280x720/default0.85, **346.2-411.4 FPS**) and
+shots/aa-ui/native-button-text-pressed-1080-20261018.png
+(1920x1080/default1.0, **364.7-461.6 FPS**). They use the original confirmation
+view/radio constructors with four populated option labels; this is a control
+fixture, not a purchase/network-flow implementation. The second uses an actual
+pointer press. Both report zero script errors/WARN/ERROR and self-close
+(PIDs45568/10092); the copied executable was removed. No icon/art color, timer,
+selector, application hook or original Lua asset changed.

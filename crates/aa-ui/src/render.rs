@@ -226,11 +226,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 std::borrow::Cow::Borrowed(t)
             };
             if !shown.text.is_empty() {
-                let color = w
-                    .button
-                    .as_ref()
-                    .and_then(|b| b.text_color[state_index(state)].or(b.text_color[0]))
-                    .unwrap_or(t.style.color);
+                let color = t.style.color;
                 if !edit {
                     if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
                         let start = out.len();

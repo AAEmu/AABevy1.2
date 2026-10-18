@@ -1531,9 +1531,18 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             def(
                 name,
                 method(lua, move |lua, id, a| {
-                    let c = [a.f(1), a.f(2), a.f(3), a.opt_f(4).unwrap_or(1.0)];
-                    if let Some(b) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
-                        b.text_color[state] = Some(c);
+                    if !(1..=4).all(|i| a.is_num(i)) { return none(); }
+                    let c = [a.f(1), a.f(2), a.f(3), a.f(4)];
+                    if let Some(w) = ui(lua).tree.widget_mut(id)
+                        && let Some(b) = w.button.as_mut()
+                    {
+                        b.text_color[state] = c;
+                        let current = match b.state { ButtonState::Normal => 0, ButtonState::Highlight => 1,
+                            ButtonState::Pushed => 2, ButtonState::Disabled => 3 };
+                        //39280680 updates the current font only for this selected entry.
+                        if state == current && let Some(text) = w.text.as_mut() {
+                            text.style.color = c;
+                        }
                     }
                     none()
                 })?,
@@ -1941,6 +1950,7 @@ pub(crate) fn apply_button_state(u: &mut super::Ui, id: Id, desired: ButtonState
     }
     let index = match state { ButtonState::Normal => 0, ButtonState::Highlight => 1,
                              ButtonState::Pushed => 2, ButtonState::Disabled => 3 };
+    let text_color = b.text_color[index];
     if let Some(d) = b.bg[index] { writes.push((d, true)); }
     writes.extend(w.drawables.iter().copied().filter(|&d| {
         u.tree.get(d).drawable().is_some_and(|d| d.state_only == Some(state))
@@ -1954,6 +1964,11 @@ pub(crate) fn apply_button_state(u: &mut super::Ui, id: Id, desired: ButtonState
         if u.tree.get(d).alive && u.tree.get(d).shown != shown { u.tree.get_mut(d).shown = shown; }
     }
     for d in mask_targets { highlight_mask(u, d, true); }
+    //39282f70 reasserts even the same state's palette after artwork writes.
+    // A direct style:SetColor override survives drawing, but not this state write.
+    if let Some(text) = u.tree.widget_mut(id).and_then(|w| w.text.as_mut()) {
+        text.style.color = text_color;
+    }
 }
 
 fn highlight_mask(u: &mut super::Ui, id: Id, visible: bool) {
@@ -2046,7 +2061,9 @@ pub(crate) fn style_methods(lua: &Lua) -> mlua::Result<Table> {
     sm("SetSnap", |t, a| t.style.snap = a.b(1, true))?;
     sm("SetEllipsis", |t, a| t.style.ellipsis = a.b(1, true))?;
     sm("SetColor", |t, a| {
-        t.style.color = [a.f(1), a.f(2), a.f(3), a.opt_f(4).unwrap_or(1.0)]
+        if (1..=4).all(|i| a.is_num(i)) {
+            t.style.color = [a.f(1), a.f(2), a.f(3), a.f(4)];
+        }
     })?;
     sm("SetLineSpace", |t, a| t.line_space = a.f(1))?;
     for name in [
