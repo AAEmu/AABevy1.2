@@ -22,7 +22,8 @@ fn sweep_quads(ui: &UiRuntime) -> usize {
     aa_ui::render::build_quads(&mut g, None)
         .iter()
         .filter(|q| {
-            q.corners.is_some() && q.tex == Tex::Atlas && (q.color[3] - 199.0 / 255.0).abs() < 0.01
+            q.corners.is_some() && ((q.tex == Tex::Atlas && (q.color[3] - 199.0 / 255.0).abs() < 0.01)
+                || matches!(&q.tex, Tex::MaskedImage { mask, .. } if mask.ends_with("cooldown_mask.dds")))
         })
         .count()
 }
@@ -98,6 +99,10 @@ fn generic_cooldown_button_has_no_time_label_at_any_duration() {
         btn:SetExtent(40, 40)
         btn:AddAnchor("TOPLEFT", "UIParent", 300, 300)
         btn:Show(true)
+        local image=btn:CreateImageDrawable('ui/icon/icon_skill_basic01.dds','artwork')
+        image:AddAnchor('TOPLEFT',btn,0,0);image:AddAnchor('BOTTOMRIGHT',btn,0,0)
+        btn:SetNormalBackground(image)
+        btn:SetCoolDownMask('ui/icon/cooldown_mask.dds')
         btn:SetCoolDown(700, 700)
         "#,
     )
@@ -125,14 +130,17 @@ fn cooldown_button_set_cooldown() {
         btn:SetExtent(40, 40)
         btn:AddAnchor("TOPLEFT", "UIParent", 300, 300)
         btn:Show(true)
+        local image=btn:CreateImageDrawable('ui/icon/icon_skill_basic01.dds','artwork')
+        image:AddAnchor('TOPLEFT',btn,0,0);image:AddAnchor('BOTTOMRIGHT',btn,0,0)
+        btn:SetNormalBackground(image)
         btn:SetCoolDownMask("ui/icon/cooldown_mask.dds")
         btn:SetCoolDownMaskCoords(0, 0, 256, 256)
         btn:SetCoolDown(10000, 10000)
         "#,
     )
     .unwrap();
-    // Everything left: the whole square is dark (5 triangles: the top edge is split at 12 o'clock).
-    assert_eq!(sweep_quads(&ui), 5);
+    // Everything left: native generic rendering uses all eight perimeter sectors.
+    assert_eq!(sweep_quads(&ui), 8);
     ui.exec("@clear", "btn:SetCoolDown(0, 0)").unwrap();
     assert_eq!(sweep_quads(&ui), 0);
 }

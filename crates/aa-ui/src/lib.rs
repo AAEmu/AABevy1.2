@@ -515,6 +515,7 @@ pub struct UiFrame;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        render::install_material(app);
         app.insert_resource(self.config.clone().unwrap_or_default())
             .init_resource::<cursor::CursorSource>()
             .init_resource::<UiRenderState>()
@@ -630,6 +631,7 @@ fn ui_cursor(
     mut state: ResMut<UiRenderState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut mask_materials: ResMut<Assets<render::MaskMaterial>>,
     mut images: ResMut<Assets<Image>>,
     formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
     mut batches: Query<(Entity, &mut Transform, &mut Visibility), (With<render::UiCursorBatch>, Without<UiCamera>)>,
@@ -646,7 +648,7 @@ fn ui_cursor(
         state.cursor_key = None;
         return;
     }
-    render::sync_cursor(&mut commands, &mut state, &mut g, pointer, &mut meshes, &mut materials, &mut images, formats.as_deref(), &mut batches);
+    render::sync_cursor(&mut commands, &mut state, &mut g, pointer, &mut meshes, &mut materials, &mut mask_materials, &mut images, formats.as_deref(), &mut batches);
 }
 
 /// Physical key edges -> generic capture or edit focus, preserving real release timing.
@@ -719,6 +721,7 @@ fn ui_frame(
     mut stats: ResMut<UiStats>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut mask_materials: ResMut<Assets<render::MaskMaterial>>,
     mut images: ResMut<Assets<Image>>,
     formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
     batches: Query<Entity, With<UiBatch>>,
@@ -815,6 +818,7 @@ fn ui_frame(
             background_quads,
             &mut meshes,
             &mut materials,
+            &mut mask_materials,
             &mut images,
             formats.as_deref(),
             &batches,

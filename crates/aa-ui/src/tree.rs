@@ -412,6 +412,8 @@ pub struct ButtonData {
     pub disabled_checked_bg: Option<Id>,
     /// `cooldownconstantbutton:SetSkill` observes timers without binding a clickable slot.
     pub cooldown_skill: Option<crate::lua::slot::ConstantSkillCooldown>,
+    /// Generic cooldown mask texture and normalized source rectangle, independent of its timer.
+    pub cooldown_mask: Option<crate::lua::slot::CooldownMask>,
 }
 
 /// Native list control state.

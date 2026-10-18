@@ -46,7 +46,9 @@
 //! `cooldowninventorybutton`: inventory, equipment and buff icons) get the same sweep from
 //! `button:SetCoolDown(remainMs, totalMs)` (the scripts call it from `OnContentUpdated(self,
 //! "item_cooldown" | "skill_cooldown", remain, total)`; `SetCoolDown(0, 0)` clears it);
-//! `SetCoolDownMask` / `SetCoolDownMaskCoords` (always the stock mask) are accepted and ignored.
+//! `SetCoolDownMask` loads its actual texture; `SetCoolDownMaskCoords` selects a pixel rectangle.
+//! A generic button without a loaded mask does not draw a sweep. It uses its selected image/icon
+//! background's rectangle, which is inset one pixel in the original equipped-item buttons.
 //! `cooldownconstantbutton:SetSkill(rawId)` observes `AAUI.SkillCooldown(rawId)`, which returns
 //! `(remaining_ms, total_ms)` for an existing descriptor, or nil for an unknown descriptor.
 //! This is independent of `SkillContent` and never replaces the item's icon or click action.
@@ -102,6 +104,13 @@ pub struct Cooldown {
 pub struct ConstantSkillCooldown {
     pub skill_type: u32,
     pub ready_notified: bool,
+}
+
+/// Generic cooldown mask (+5b0/+5b4), retained independently of the drawing sample.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CooldownMask {
+    pub texture: String,
+    pub uv: [f32; 4],
 }
 
 /// Widgets with a running cooldown, id -> true (so the per-frame update does not scan the whole
@@ -755,6 +764,22 @@ pub fn sweep_triangles(r: [f32; 4], frac: f32) -> Vec<[[f32; 2]; 3]> {
     out
 }
 
+/// Native3928ace0: eight equal time sectors along the rectangle perimeter.
+/// Unit positions also supply the two independent affine UV streams.
+pub fn mask_triangles(progress: f32) -> Vec<[[f32; 2]; 3]> {
+    let edge = [[0.5, 0.], [1., 0.], [1., 0.5], [1., 1.], [0.5, 1.],
+        [0., 1.], [0., 0.5], [0., 0.], [0.5, 0.]];
+    let mut out = Vec::new();
+    for i in 0..8 {
+        if progress >= (i + 1) as f32 * 0.125 { continue; }
+        let f = ((progress - i as f32 * 0.125) * 8.).max(0.);
+        let start = [edge[i][0] + (edge[i + 1][0] - edge[i][0]) * f,
+            edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f];
+        out.push([[0.5, 0.5], edge[i + 1], start]);
+    }
+    out
+}
+
 /// The quads of a widget's cooldown: the dark sweep over the icon (a slot's icon drawable, else
 /// the whole widget) and the time left in `cooltime_style`. Drawn by `render::build_quads` after
 /// the widget's background and artwork, before its overlay.
@@ -764,6 +789,7 @@ pub(crate) fn cooldown_quads(
     w: &Widget,
     alpha: f32,
     scale: f32,
+    background: Option<(Id, crate::tree::ButtonState)>,
     out: &mut Vec<Quad>,
 ) {
     let Some(cd) = w.cooldown.as_ref() else {
@@ -776,15 +802,45 @@ pub(crate) fn cooldown_quads(
     if w.slot.is_some() && cd.total_ms < LABEL_MIN_TOTAL_MS {
         return;
     }
-    let frac = (remain as f32 / cd.total_ms).clamp(0.0, 1.0);
     let widget_rect = u.tree.rect(id);
-    let area = w
-        .slot
-        .as_ref()
-        .and_then(|s| s.icon)
-        .map(|d| u.tree.rect(d))
-        .filter(|r| r.w > 0.0 && r.h > 0.0)
-        .unwrap_or(widget_rect);
+    if w.slot.is_none() {
+        let Some(mask) = w.button.as_ref().and_then(|b| b.cooldown_mask.as_ref()).cloned() else { return };
+        let Some((background, state)) = background else { return };
+        let Some(drawable) = u.tree.get(background).drawable() else { return };
+        if !matches!(drawable.kind, DrawKind::Image | DrawKind::Icon) { return; }
+        let icon = drawable.class == "drawable:iconimage";
+        let mut art = Vec::new();
+        crate::render::drawable_quads(u, background, alpha, state, scale, None, &mut art);
+        // Icon3928ed10 reuses object+d0 for every retained texture layer.
+        let icon_uv = if icon { art.first().map(|q| q.uv) } else { None };
+        let progress = (cd.total_ms - remain as f32) / cd.total_ms;
+        for image in art {
+            let Tex::Image(path) = image.tex else { continue };
+            let [x0, y0, x1, y1] = image.pos;
+            let corners = image.corners.unwrap_or([[x0,y0],[x1,y0],[x1,y1],[x0,y1]]);
+            for [a,b,c] in mask_triangles(progress) {
+                // Native39220920 snaps after interpolation, retaining the unsnapped UVs.
+                let point = |[x,y]: [f32;2]| [
+                    corners[0][0] + (corners[1][0] - corners[0][0]) * x + (corners[3][0] - corners[0][0]) * y,
+                    corners[0][1] + (corners[1][1] - corners[0][1]) * x + (corners[3][1] - corners[0][1]) * y,
+                ].map(|p| (p + 0.5).trunc());
+                out.push(Quad {
+                    tex: Tex::MaskedImage { image: path.clone(), mask: mask.texture.clone(),
+                        image_uv: icon_uv.unwrap_or(image.uv).map(f32::to_bits), mask_uv: mask.uv.map(f32::to_bits) },
+                    // Native3921f2a0 packs the multiplied source color as RGBA8.
+                    pos: [0.;4], uv: [0.,0.,1.,1.],
+                    color: image.color.map(|v| ((f64::from(v.clamp(0.,1.)) * 255.).trunc() / 255.) as f32),
+                    corners: Some([point(a),point(b),point(c),point(c)]),
+                    uvs: Some([a,b,c,c]), vcolors: None,
+                });
+            }
+        }
+        return;
+    }
+    let frac = (remain as f32 / cd.total_ms).clamp(0.0, 1.0);
+    let slot = w.slot.as_ref().unwrap();
+    let area = slot.icon.map(|d| u.tree.rect(d))
+        .filter(|r| r.w > 0.0 && r.h > 0.0).unwrap_or(widget_rect);
     let px = [
         (area.x * scale).round(),
         (area.y * scale).round(),
@@ -807,9 +863,6 @@ pub(crate) fn cooldown_quads(
             uvs: None,
             vcolors: None,
         });
-    }
-    if w.slot.is_none() {
-        return;
     }
     let Some(label) = label_of(cd, remain, &u.cooldown_captions) else {
         return;
@@ -916,7 +969,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
 }
 
 /// The cooldown buttons' natives: `SetCoolDown(remainMs, totalMs)` starts the sweep
-/// (`SetCoolDown(0, 0)` clears it); the mask setters take the stock mask and do nothing.
+/// (`SetCoolDown(0, 0)` clears it). Mask texture/UV state survives timer replacement.
 pub(crate) fn cooldown_button_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "SetCoolDown",
@@ -929,9 +982,35 @@ pub(crate) fn cooldown_button_methods(lua: &Lua, m: &Table) -> mlua::Result<()> 
             none()
         })?,
     )?;
-    for name in ["SetCoolDownMask", "SetCoolDownMaskCoords"] {
-        m.raw_set(name, method(lua, |_, _, _| none())?)?;
-    }
+    m.raw_set("SetCoolDownMask", method(lua, |lua, id, a| {
+        let mut u = ui(lua);
+        if let Some(path) = a.s(1)
+            && let Some(texture) = u.textures.resolve(&path)
+            && u.textures.size(&texture).is_some()
+            && let Some(button) = u.tree.widget_mut(id).and_then(|w| w.button.as_mut())
+        {
+            button.cooldown_mask = Some(CooldownMask { texture, uv: [0., 0., 1., 1.] });
+        }
+        none()
+    })?)?;
+    m.raw_set("SetCoolDownMaskCoords", method(lua, |lua, id, a| {
+        let mut u = ui(lua);
+        let mask = u.tree.widget(id).and_then(|w| w.button.as_ref()).and_then(|b| b.cooldown_mask.clone());
+        if let Some(mask) = mask
+            && let Some((width, height)) = u.textures.size(&mask.texture)
+        {
+            let rw = 1.0_f32 / width as f32;
+            let rh = 1.0_f32 / height as f32;
+            let (x, y, w, h) = (a.f(1), a.f(2), a.f(3), a.f(4));
+            let uv = [x * rw, y * rh,
+                if w == 0. { 1. } else { (x + w) * rw },
+                if h == 0. { 1. } else { (y + h) * rh }];
+            if let Some(mask) = u.tree.widget_mut(id).and_then(|w| w.button.as_mut()).and_then(|b| b.cooldown_mask.as_mut()) {
+                mask.uv = uv;
+            }
+        }
+        none()
+    })?)?;
     Ok(())
 }
 

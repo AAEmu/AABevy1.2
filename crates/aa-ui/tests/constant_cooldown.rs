@@ -188,6 +188,10 @@ fn generic_set_cooldown_is_a_snapshot_not_an_independent_clock() {
             r#"
             button=UIParent:CreateWidget(class,'snapshot','UIParent')
             button:SetExtent(42,42);button:Show(true);button:SetCoolDown(8000,12000)
+            local image=button:CreateImageDrawable('ui/icon/icon_skill_basic01.dds','artwork')
+            image:AddAnchor('TOPLEFT',button,1,1);image:AddAnchor('BOTTOMRIGHT',button,-1,-1)
+            button:SetNormalBackground(image)
+            button:SetCoolDownMask('ui/icon/cooldown_mask.dds')
         "#,
         );
         let id = lua::value_id(&ui.lua, &ui.lua.load("button").eval().unwrap()).unwrap();
