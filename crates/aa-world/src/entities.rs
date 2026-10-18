@@ -2,7 +2,8 @@
 //!
 //! `GeomEntity` uses `Geometry`; `BasicEntity` and `AnimObject` use
 //! `Properties.object_Model` (the original BasicEntity.lua calls `LoadObject(0, ...)`).
-//! Static CGFs / stopped CGAs and playing rigid CGAs have separate parsers and draw bins.
+//! Initial CGFs / stopped CGAs and playing rigid CGAs have separate parsers and draw bins.
+//! Sleeping RigidBodyEx CGFs retain their initial authored pose; their dynamic simulation is separate work.
 //! Character actors retain their own lifecycle. Hidden slots remain data and never enter bins.
 
 use std::collections::{HashMap, HashSet};
@@ -23,6 +24,9 @@ pub struct PlacedProp {
     pub matrix: Mat4,
     pub hidden: bool,
     pub cast_shadow: bool,
+    /// A RigidBodyEx slot with explicitly authored active, sleeping rigid physics.
+    /// Rendering its initial pose does not implement physics, wake, damage or flow events.
+    pub sleeping_rigid: bool,
     pub animation: Option<EntityAnimation>,
 }
 
@@ -91,7 +95,8 @@ pub(crate) fn transform(
     Some((parent_matrix * matrix, hidden || parent_hidden))
 }
 
-/// Parses native static slots, without creating editor boxes or loading animation actors.
+/// Parses native initial render slots, without creating editor boxes or loading animation actors.
+/// Includes the source-qualified initial sleeping RigidBodyEx CGF slot, not a static-body conversion.
 pub fn parse_static_entities(xml: &str) -> Vec<PlacedProp> {
     parse_entities(xml, false)
 }
@@ -118,9 +123,20 @@ fn parse_entities(xml: &str, animated: bool) -> Vec<PlacedProp> {
     for node in objects.children().filter(|n| n.has_tag_name("Entity")) {
         let class = node.attribute("EntityClass").unwrap_or("");
         let props = node.children().find(|n| n.has_tag_name("Properties"));
+        let sleeping_rigid = class == "RigidBodyEx";
+        if sleeping_rigid {
+            // RigidBodyEx.lua OnSpawn -> SetFromProperties -> LoadObject(0)/DrawSlot(0,1).
+            // Default.OnBeginState sleeps with AwakePhysics(1-bResting). Admit only the
+            // explicit authored initial sleeping subset; no inferred static/awake variant.
+            let physics = props.and_then(|p| p.children().find(|n| n.has_tag_name("Physics")));
+            if !["bPhysicalize", "bRigidBody", "bRigidBodyActive", "bResting"].into_iter()
+                .all(|flag| physics.and_then(|p| p.attribute(flag)) == Some("1")) {
+                continue;
+            }
+        }
         let model = match class {
             "GeomEntity" => node.attribute("Geometry"),
-            "BasicEntity" | "AnimObject" => props.and_then(|n| n.attribute("object_Model")),
+            "BasicEntity" | "AnimObject" | "RigidBodyEx" => props.and_then(|n| n.attribute("object_Model")),
             _ => continue,
         };
         let Some(model) = model.map(asset_path).filter(|s| !s.is_empty()) else {
@@ -128,7 +144,8 @@ fn parse_entities(xml: &str, animated: bool) -> Vec<PlacedProp> {
         };
         let anim = props.and_then(|n| n.children().find(|a| a.has_tag_name("Animation")));
         let playing = class == "AnimObject" && anim.and_then(|a| a.attribute("bPlaying")) == Some("1");
-        if playing != animated || !(model.ends_with(".cgf") || model.ends_with(".cga")) || (animated && !model.ends_with(".cga")) {
+        if playing != animated || !(model.ends_with(".cgf") || model.ends_with(".cga")) || (animated && !model.ends_with(".cga"))
+            || (sleeping_rigid && !model.ends_with(".cgf")) {
             continue;
         }
         let animation = if animated {
@@ -159,6 +176,7 @@ fn parse_entities(xml: &str, animated: bool) -> Vec<PlacedProp> {
             matrix,
             hidden,
             cast_shadow: node.attribute("CastShadow") != Some("0"),
+            sleeping_rigid,
             animation,
         });
     }
@@ -191,6 +209,72 @@ mod tests {
         assert!(!lamp.cast_shadow);
         assert_eq!(lamp.guid, 0xB);
         assert!(props[1].hidden);
+    }
+
+    #[test]
+    fn sleeping_rigid_slots_preserve_authored_identity_and_decline_other_states() {
+        let slot = |name: &str, flags: &str, model: &str, extra: &str| format!(
+            r#"<Entity EntityClass="RigidBodyEx" Name="{name}" EntityGuid="B" ParentGUID="A" Pos="1,2,3" Material="Game/Materials/Lamp" CastShadow="0" {extra}>
+              <Properties object_Model="{model}" object_ModelFrozen="objects/hidden_frozen.cgf"><Physics {flags}/></Properties>
+            </Entity>"#);
+        let flags = r#"bPhysicalize="1" bRigidBody="1" bRigidBodyActive="1" bResting="1""#;
+        let xml = format!(r#"<Mission><Objects>
+            <Entity EntityGuid="A" Pos="10,20,30" Scale="2,3,4"/>{}{}{}{}{}{}
+            </Objects></Mission>"#,
+            slot("sleeping", flags, "Game/Objects/Lamp.cgf", ""),
+            slot("awake", &flags.replace("bResting=\"1\"", "bResting=\"0\""), "awake.cgf", ""),
+            slot("inactive", &flags.replace("bRigidBodyActive=\"1\"", "bRigidBodyActive=\"0\""), "inactive.cgf", ""),
+            slot("nonphysical", &flags.replace("bPhysicalize=\"1\"", "bPhysicalize=\"0\""), "nonphysical.cgf", ""),
+            slot("unproved animation", flags, "animated.cga", ""),
+            slot("hidden", flags, "hidden.cgf", "HiddenInGame=\"1\""));
+        let props = parse_static_entities(&xml);
+        assert_eq!(props.len(), 2);
+        let p = &props[0];
+        assert!(p.sleeping_rigid && !p.hidden && !p.cast_shadow && p.animation.is_none());
+        assert_eq!(p.model, "objects/lamp.cgf");
+        assert_eq!(p.material.as_deref(), Some("materials/lamp.mtl"));
+        assert_eq!(p.guid, 0xB);
+        assert_eq!(p.translation(), Vec3::new(12.0, 26.0, 42.0));
+        assert!(props[1].sleeping_rigid && props[1].hidden);
+        assert!(parse_animated_entities(&xml).is_empty());
+
+        let mut objects = crate::placement::CellObjects::default();
+        objects.models.push(p.model.clone());
+        objects.materials.push("materials/lamp".into());
+        objects.brushes.push(crate::placement::Brush {
+            model: 0, material: 0, flags: 8, max_view_dist: 200.0, bbox: [0.0; 6],
+            matrix: [2.0, 0.0, 0.0, 12.0, 0.0, 3.0, 0.0, 26.0, 0.0, 0.0, 4.0, 42.0],
+        });
+        objects.entity_props = props;
+        let data = crate::objects::CellObjectData::new(objects, 200.0);
+        assert!(data.entity_bins.iter().all(Vec::is_empty), "hidden slot and identical physical export must not draw twice");
+    }
+
+    #[test]
+    fn original_sleeping_rigid_lamp_and_machine_slots_enter_existing_bins() {
+        if !crate::pak_available() { return; }
+        for (cell, count) in [((9, 12), 8), ((21, 8), 2), ((14, 13), 3)] {
+            let objects = crate::placement::load_cell_objects("main_world", cell.0, cell.1);
+            let rigid: Vec<_> = objects.entity_props.iter().enumerate().filter(|(_, p)| p.sleeping_rigid).collect();
+            assert_eq!(rigid.len(), count);
+            if cell == (9, 12) {
+                let p = rigid.iter().find(|(_, p)| p.guid == 0x4dca223e56291138).unwrap().1;
+                assert!(p.translation().abs_diff_eq(Vec3::new(347.57556, 784.5303, 203.06494), 0.001));
+                assert!((crate::coords::cell_origin(cell.0, cell.1) + p.translation())
+                    .abs_diff_eq(Vec3::new(9563.575, 13072.53, 203.06494), 0.002));
+            }
+            for (_, p) in &rigid {
+                assert!(!p.hidden && p.animation.is_none());
+                assert!(p.matrix.is_finite());
+                let model = aa_cry::Model::load(&p.model).expect("original sleeping rigid CGF");
+                assert!(model.meshes.iter().any(|m| !m.indices.is_empty()));
+            }
+            let indices: Vec<_> = rigid.iter().map(|(i, _)| *i as u32).collect();
+            let data = crate::objects::CellObjectData::new(objects, 200.0);
+            for i in indices {
+                assert_eq!(data.entity_bins.iter().flatten().filter(|&&index| index == i).count(), 1);
+            }
+        }
     }
 
     #[test]
