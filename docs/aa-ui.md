@@ -2665,3 +2665,68 @@ Source artifacts are ignored `data/extract/aa-ui/` files
 `PROCESS_VM_READ` in the already-running original client, with `StandMode` at
 `399a08dc` verified before each read; no input, writes or injection. This is a
 source audit, so it adds no new rendered scenario or performance claim.
+
+### Scoreboard member details, leave, and killstreak slots
+
+`GetMembersDetailInfo` binds `39456810` -> `3936ebb0`, admitting the same native
+states 5..8 as the other progress getters and returning zero Lua values outside
+them. It returns **two** values: a table with two numbered team tables, and a
+signed-i32-to-f32 own-member index. Each team retains received member order,
+including an empty table when its count is zero. Native received team storage
+holds at most 50 members. The second result starts at zero and is assigned the
+**zero-based** row index when a received character ID equals the local player's
+character ID; it is not a team number or an `isMe` row field.
+
+| Member key | Native value |
+|---|---|
+| `name` | received member name |
+| `memberScores`, `memberBonus` | `f32(received signed i32) * factor` |
+| `memberKillstreaks` | received u16 -> f32 |
+| `memberNPcKills`, `memberNPcKillAssists`, `memberNDeaths` | received u16 -> f32 |
+| `isWinner`, `noDeath`, `topPcKill`, `topNonPcKill`, `isLoser` | booleans from received bonus-set bits 0..4, respectively |
+
+There are no character-ID, player-stat or team-victory-derived additions to those
+12 keys. The factor is `f32(trunc(manager[3cd4]/100))` when the signed field is
+positive, otherwise `1f`; the integer division precedes conversion, so a
+positive value below 100 produces zero. Reset `3936d172` clears this field.
+Its later producer is `OnScheduledEventStarted` (`391e1e10`): received packet
+field `+4c` goes through setter `3936cec0`. It is separate from the battlefield
+result packet. Constructor/reset `endReason` (`+38`) is also zero, and Joined
+does not replace it with -1 or another fabricated reason.
+
+`AskLeaveInstantGame` (`39455de0`) returns zero Lua values regardless of whether
+the request is permitted. Native sender `3936d210` permits only state 8 (ENDED),
+then sends empty opcode `e5`. It leaves the displayed result/state intact until
+the actual load-instance path `3936f1c0` resets states 5..8 and raises
+`LEAVED_INSTANT_GAME_ZONE`. The app owns this already-typed network operation.
+
+The unchanged battlefield action bar constructs ten `ISLOT_INSTANT_KILL_STREAK`
+(244) slots. Native `EstablishSlot` (`392c6b90`, case `392c6c6c`) subtracts one
+from the Lua index and calls `392c64b0` -> `3936d080`: indices 0..23 select the
+24 received raw skill IDs; every other index returns invalid ID zero. This
+lookup itself has no battlefield-state gate.
+
+Binding resolves the ordinary skill descriptor through `392c5790`. For type
+244, that skill must carry native tag `39ac6f08` = 204, verified by a bounded
+module-checked read; compact `tags[204]` is `kill streak`, with membership in
+`tagged_skills`. The tag creates raw SkillAccessor kind 15. Type 244 has no
+fallback kind when the tag is absent, so that binding fails/clears. Kind 15
+reports `GetBindedType() == "skill"` (`3925689a`), uses its raw skill ID for
+ordinary tooltip content, and obtains its icon from the descriptor's icon ID
+(`39208f10`). It is not substituted with a learned-player skill or compacted
+learned-skill list.
+
+Can-use update `3920c663..3920c69c` combines the ordinary skill predicate with
+`3936d590`: state must be at least 5, then the **first matching raw skill ID**
+among all 24 supplies its received enable byte. Duplicate IDs consequently use
+that first row's enable, even when the displayed slot is a later duplicate.
+The complete ordinary predicate `39209a70` is protected and remains open.
+Clicks use raw SkillAccessor `3920a220` / `3920a170` -> `39209d80` -> ordinary
+actor skill planner `393989e0`, which includes target selection, forced-self
+modifiers and target-type-specific preparation. This audit does not justify a
+new direct killstreak packet or replacing that planner with a plain skill cast.
+
+Source excerpts are in
+`data/extract/aa-ui/native-battlefield-members-slots-source-20261018.txt` and
+`native-battlefield-slots-runtime-20261018.txt`. This is source-only work; the
+app owns original scoreboard/action-bar integration and its rendered checks.
