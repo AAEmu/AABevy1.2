@@ -51,6 +51,137 @@ pub(super) fn select(rt: &UiRuntime, mode: &str) -> Result<(), Box<dyn std::erro
     }
     Ok(())
 }
+pub(super) fn fill(rt: &UiRuntime, state: &Shared, mode: &str, support: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use aa_net::{
+        Event,
+        initial_config::InitialConfig,
+        items::InvenChunk,
+        model::{EquipDetail, Item, ItemDetail},
+        state::Inventory,
+    };
+    let mut items = vec![None; 50];
+    let make = |template_id, id, count| Item {
+        template_id,
+        id,
+        count,
+        ..Default::default()
+    };
+    let mut target = make(31432, 9_007_199_254_740_993, 1);
+    target.grade = 6;
+    let maximum = state
+        .borrow()
+        .game
+        .get()
+        .and_then(|g| g.tips.items.durability(31432, 6))
+        .map_or(100, |p| p.0);
+    target.detail = ItemDetail::Equip(EquipDetail {
+        durability: maximum,
+        gem_ids: if mode == "unsocket" { [31003, 0, 0, 0, 0, 0, 0] } else { [0; 7] },
+        ..Default::default()
+    });
+    items[0] = Some(target);
+    items[1] = Some(make(28299, 200, 3));
+    items[2] = Some(make(31974, 300, 2));
+    items[3] = Some(make(31003, 400, 3));
+    items[4] = Some(make(327, 500, 1));
+    items[5] = Some(make(24632, 600, 3));
+    items[6] = Some(make(28299, 700, 4));
+    let spawn = super::super::expansion::fixture::spawn();
+    let events = [
+        Event::InitialConfig(InitialConfig {
+            host: vec![],
+            feature_bytes: vec![0; 11],
+            raw_candidate_count: 0,
+            candidate_codes: vec![],
+            initial_lp: 0,
+            service_flags: [0; 7],
+            second_price_type: 0,
+            second_password_max_fail_count: 0,
+            idle_kick_time: 0,
+        }),
+        Event::CharacterSelected(Box::new(spawn.state.clone())),
+        Event::PlayerSpawn(Box::new(spawn)),
+        Event::InventoryInit {
+            bag_slots: 50,
+            bank_slots: 50,
+        },
+        Event::InventoryChunk(InvenChunk {
+            container: 2,
+            chunks: 5,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }),
+    ];
+    let mut inventory = Inventory::default();
+    {
+        let mut data = state.borrow_mut();
+        // Explicit fixture receipts only; preserve the original mode opened by the bag.
+        for event in &events {
+            inventory.apply(event);
+            data.enchant.selection.receive(event);
+        }
+        data.character_id = 47;
+        let mut world = World::new();
+        world.insert_resource(inventory);
+        data.panels = super::super::panels::refresh(&world, data.game.get(), 0, 100, data.start, &data.snapshot, Vec3::ZERO).0;
+        data.panels.actions_known = true;
+    }
+    super::super::api::push_changes(rt, state);
+    rt.fire_event("BAG_UPDATE", (-1i64, -1i64));
+    aa_ui::lua::tick(&rt.lua, 16.);
+    aa_ui::lua::flush(&rt.lua);
+    right_click(rt, 1)?;
+    let source = match mode {
+        "socket" => 4,
+        "unsocket" => 5,
+        "gem" => 6,
+        _ => 2,
+    };
+    right_click(rt, source)?;
+    if support {
+        right_click(rt, 3)?;
+    }
+    rt.lua
+        .load("assert(X2ItemEnchant:GetTargetItemInfo().itemType==31432);assert(X2ItemEnchant:GetEnchantItemInfo()~=nil)")
+        .exec()?;
+    Ok(())
+}
+fn right_click(rt: &UiRuntime, slot: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let object: Value = rt.lua.load(format!("newbag.slots.btns[{slot}]")).eval()?;
+    let id = aa_ui::lua::value_id(&rt.lua, &object).ok_or("original bag item button missing")?;
+    let rect = aa_ui::lua::ui(&rt.lua).tree.rect(id);
+    let point = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
+    assert_eq!(
+        aa_ui::input::pick(&rt.lua, point.0, point.1),
+        Some(id),
+        "original filled bag slot{slot} physical hit"
+    );
+    let mut mouse = aa_ui::input::MouseState::default();
+    aa_ui::input::update_buttons(
+        &rt.lua,
+        &mut mouse,
+        Some(point),
+        aa_ui::input::MouseButtons {
+            right_press: true,
+            ..Default::default()
+        },
+        0.,
+    );
+    aa_ui::input::update_buttons(
+        &rt.lua,
+        &mut mouse,
+        Some(point),
+        aa_ui::input::MouseButtons {
+            right_release: true,
+            ..Default::default()
+        },
+        0.,
+    );
+    aa_ui::lua::tick(&rt.lua, 16.);
+    aa_ui::lua::flush(&rt.lua);
+    Ok(())
+}
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
@@ -60,6 +191,9 @@ pub(in crate::hud) fn run() {
     // Grade is selected by the real bag button already.
     if mode != "grade" {
         select(&rt, mode).unwrap();
+    }
+    if std::env::args().any(|arg| arg == "--filled") {
+        fill(&rt, &state, mode, std::env::args().any(|arg| arg == "--support")).unwrap();
     }
     App::new()
         .add_plugins((

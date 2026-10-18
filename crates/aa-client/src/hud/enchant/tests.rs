@@ -9,7 +9,7 @@ fn native_mode_wrappers_preserve_picked_bag_ignore_arguments_and_emit_exact_sync
     install(&rt.lua, &state)?;
     rt.lua.load(r#"
       seen={};local w=UIParent:CreateWidget('emptywidget','enchantObserver','UIParent')
-      for _,event in ipairs({'ENTER_ENCHANT_ITEM_MODE','SWITCH_ENCHANT_ITEM_MODE','LEAVE_ENCHANT_ITEM_MODE','UPDATE_ENCHANT_ITEM_MODE'}) do w:RegisterEvent(event) end
+      for _,event in ipairs({'NPC_INTERACTION_END','ENTER_ENCHANT_ITEM_MODE','SWITCH_ENCHANT_ITEM_MODE','LEAVE_ENCHANT_ITEM_MODE','UPDATE_ENCHANT_ITEM_MODE'}) do w:RegisterEvent(event) end
       w:SetHandler('OnEvent',function(_,event,...)
         seen[#seen+1]={event=event,n=select('#',...),...}
         assert(X2Item:IsInEnchantMode()==(event~='LEAVE_ENCHANT_ITEM_MODE'))
@@ -22,18 +22,19 @@ fn native_mode_wrappers_preserve_picked_bag_ignore_arguments_and_emit_exact_sync
       hold();assert(select('#',X2ItemEnchant:LeaveItemEnchantMode(true,'x',{}))==0)
       assert(#seen==0 and X2Cursor:GetHeld().kind=='bag')
       hold();assert(select('#',X2ItemEnchant:EnterItemEnchantMode(nil,'socketing',false,{}))==0)
-      assert(#seen==1 and seen[1].event=='ENTER_ENCHANT_ITEM_MODE' and seen[1].n==1 and seen[1][1]=='grade')
-      hold();X2ItemEnchant:EnterItemEnchantMode();assert(#seen==1 and X2Cursor:GetHeld().kind=='bag')
+      assert(#seen==2 and seen[1].event=='NPC_INTERACTION_END' and seen[1].n==0)
+      assert(seen[2].event=='ENTER_ENCHANT_ITEM_MODE' and seen[2].n==1 and seen[2][1]=='grade')
+      hold();X2ItemEnchant:EnterItemEnchantMode();assert(#seen==2 and X2Cursor:GetHeld().kind=='bag')
       hold();X2ItemEnchant:SwitchItemEnchantSocketingMode('ignored')
       hold();X2ItemEnchant:SwitchItemEnchantUnsocketMode()
       hold();X2ItemEnchant:SwitchItemEnchantGemMode()
       hold();X2ItemEnchant:SwitchItemEnchantGradeMode()
-      assert(#seen==5)
+      assert(#seen==6)
       for i,mode in ipairs({'socketing','unsocket','gem','grade'})do
-        assert(seen[i+1].event=='SWITCH_ENCHANT_ITEM_MODE' and seen[i+1].n==1 and seen[i+1][1]==mode)
+        assert(seen[i+2].event=='SWITCH_ENCHANT_ITEM_MODE' and seen[i+2].n==1 and seen[i+2][1]==mode)
       end
       hold();assert(select('#',X2ItemEnchant:LeaveItemEnchantMode())==0)
-      assert(#seen==6 and seen[6].event=='LEAVE_ENCHANT_ITEM_MODE' and seen[6].n==0)
+      assert(#seen==7 and seen[7].event=='LEAVE_ENCHANT_ITEM_MODE' and seen[7].n==0)
       assert(X2Item:IsInEnchantMode()==false)
     "#).exec()?;
     assert_eq!(state.borrow().enchant.mode, Mode::Off);
@@ -92,6 +93,47 @@ fn received_lifecycle_retires_the_mode_in_the_actual_schedule() -> Result<(), Bo
     app.world_mut().write_message(NetEvent(Event::LeftWorld { target: 0 }));
     app.update();
     assert_eq!(state.borrow().enchant.mode, Mode::Off);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn original_filled_bag_right_clicks_admit_actual_items_in_all_four_enchant_modes() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime(1920., 1080.)?;
+    for mode in ["grade", "socket", "unsocket", "gem"] {
+        fixture::select(&rt, mode)?;
+        fixture::fill(&rt, &state, mode, mode == "grade")?;
+        // Event dispatch may isolate a script exception. Invoke the original
+        // full updater too, so a missing nested getter field cannot silently
+        // leave the later source portrait/controls stale while these APIs pass.
+        rt.lua.load("local p=GetEnchantWindow().tab.window[GetEnchantWindow().tab:GetSelectedTab()];p:SlotAllUpdate(true,false);assert(p.slotTargetItem.info.itemType==31432 and p.slotEnchantItem.info~=nil and p.leftButton:IsEnabled())").exec()?;
+        rt.lua
+            .load("assert(select('#',X2ItemEnchant:GetTargetItemInfo())==1);assert(select('#',X2ItemEnchant:GetEnchantItemInfo())==1)")
+            .exec()?;
+        if mode == "grade" {
+            rt.lua.load("local t=X2ItemEnchant:GetTargetItemInfo();assert(t.grade_enchant_cost==506607 and t.grade_enchant_currency==0);local r=X2ItemEnchant:GetRatioInfos();assert(r.success_var_ratio==50)").exec()?;
+        }
+        if mode == "unsocket" {
+            rt.lua.load("local s=X2ItemEnchant:GetTargetItemInfo().socketInfo;assert(s.maxSocket==4 and #s.socketItem==4 and s.socketItem[1]==31003 and s.socketItem[2]==0 and s.socketItem[4]==0);local m=X2Item:GetItemInfoByType(31003,0,1024).modifier;assert(#m==1 and m[1].name=='max_mana' and m[1].value==200)").exec()?;
+        }
+        if mode == "gem" {
+            rt.lua.load("local m=X2ItemEnchant:GetEnchantItemInfo().modifier;assert(#m==2 and m[1].name=='dex' and m[1].value==2 and m[2].name=='sta' and m[2].value==3)").exec()?;
+        }
+    }
+    rt.lua
+        .load(
+            r#"
+      assert(X2Item:GetItemInfoByType(31003,0).modifier~=nil)
+      for _,flags in ipairs({0,'1024',false,{},0/0,math.huge,2147483648})do assert(X2Item:GetItemInfoByType(31003,0,flags).modifier==nil)end
+      assert(X2Item:GetItemInfoByType(31003,0,nil).modifier==nil)
+      assert(X2Item:GetItemInfoByType(31003,0,1024.9).modifier~=nil)
+      assert(X2Item:GetItemInfoByType(24632,0,0).modifier~=nil)
+    "#,
+        )
+        .exec()?;
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     if path.exists() {
         std::fs::remove_file(path)?;
     }

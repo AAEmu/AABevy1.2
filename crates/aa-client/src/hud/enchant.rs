@@ -5,6 +5,9 @@ use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 
 use super::api::{HudBridge, Shared};
+mod catalog;
+mod selection;
+pub(super) use catalog::Tables;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Mode {
@@ -29,6 +32,7 @@ impl Mode {
 #[derive(Default)]
 pub(super) struct View {
     mode: Mode,
+    selection: selection::State,
 }
 
 fn switch(lua: &Lua, state: &Shared, mode: Mode) -> mlua::Result<()> {
@@ -41,6 +45,7 @@ fn switch(lua: &Lua, state: &Shared, mode: Mode) -> mlua::Result<()> {
             return Ok(());
         }
         data.enchant.mode = mode;
+        data.enchant.selection.clear();
         previous
     };
     let (event, args) = if mode == Mode::Off {
@@ -55,6 +60,13 @@ fn switch(lua: &Lua, state: &Shared, mode: Mode) -> mlua::Result<()> {
             vec![Value::String(lua.create_string(mode.name())?)],
         )
     };
+    //39046600 ->393be180(1): entering from Off retires the stored NPC
+    // interaction and unconditionally emits END before ENTER. A switch between
+    // active modes does not visit that helper. State/slots already reflect the
+    // new mode when either original Lua callback runs.
+    if previous == Mode::Off && mode != Mode::Off {
+        aa_ui::lua::fire_ui_event(lua, "NPC_INTERACTION_END", Vec::new());
+    }
     aa_ui::lua::fire_ui_event(lua, event, args);
     Ok(())
 }
@@ -82,11 +94,12 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         )?;
     }
     let item: Table = lua.globals().get("X2Item")?;
-    let state = state.clone();
+    let active_state = state.clone();
     item.raw_set(
         "IsInEnchantMode",
-        lua.create_function(move |_, _: MultiValue| Ok(state.borrow().enchant.mode != Mode::Off))?,
-    )
+        lua.create_function(move |_, _: MultiValue| Ok(active_state.borrow().enchant.mode != Mode::Off))?,
+    )?;
+    selection::install(lua, state)
 }
 
 fn retires(event: &Event) -> bool {
@@ -101,18 +114,39 @@ fn retires(event: &Event) -> bool {
             | Event::PhaseChanged(aa_net::Phase::Authenticating | aa_net::Phase::Connecting)
     )
 }
-fn track(mut events: MessageReader<NetEvent>, rt: Option<NonSend<UiRuntime>>, state: NonSend<HudBridge>, built: Res<super::HudBuilt>) {
+fn track(
+    mut events: MessageReader<NetEvent>,
+    rt: Option<NonSend<UiRuntime>>,
+    state: NonSend<HudBridge>,
+    built: Res<super::HudBuilt>,
+    inventory: Option<Res<aa_net::state::Inventory>>,
+) {
     for NetEvent(event) in events.read() {
-        if !retires(event) {
-            continue;
-        }
-        if let Some(rt) = rt.as_deref().filter(|_| built.up) {
-            if let Err(error) = switch(&rt.lua, &state.0, Mode::Off) {
-                warn!("enchant: retiring mode: {error}");
+        if retires(event) {
+            if let Some(rt) = rt.as_deref().filter(|_| built.up) {
+                if let Err(error) = switch(&rt.lua, &state.0, Mode::Off) {
+                    warn!("enchant: retiring mode: {error}");
+                }
+            } else {
+                let mut data = state.0.borrow_mut();
+                data.enchant.mode = Mode::Off;
+                data.enchant.selection.clear();
             }
-        } else {
-            state.0.borrow_mut().enchant = View::default();
         }
+        let cleared = {
+            let mut data = state.0.borrow_mut();
+            let before = data.enchant.selection.slots;
+            data.enchant.selection.receive(event);
+            before != data.enchant.selection.slots && data.enchant.mode != Mode::Off
+        };
+        if cleared {
+            if let Some(rt) = rt.as_deref().filter(|_| built.up) {
+                selection::update(&rt.lua, false);
+            }
+        }
+    }
+    if let Some(inventory) = inventory {
+        state.0.borrow_mut().enchant.selection.sync_pending(&inventory);
     }
 }
 pub(super) fn plugin(app: &mut App) {

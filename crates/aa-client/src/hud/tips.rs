@@ -59,28 +59,48 @@ pub(super) fn install_native_lookup(lua: &Lua, bridge: &super::api::Shared) -> m
     let state = bridge.clone();
     item.set(
         "GetItemInfoByType",
-        lua.create_function(move |lua, (owner, id, grade): (mlua::Value, u32, Option<u8>)| {
-            let data = state.borrow();
-            if let (Some(game), Some(grade)) = (data.game.get(), grade) {
-                let result = item_tip(
-                    lua,
-                    game,
-                    &data.tips,
-                    id,
-                    Some(i64::from(super::store::ui_grade(grade))),
-                    None,
-                    Instance::default(),
-                )?;
-                if let Some(info) = &result {
-                    info.set("itemGrade", grade)?;
-                    info.set("stack", mlua::Value::Nil)?;
+        lua.create_function(
+            move |lua, (owner, id, grade, flags): (mlua::Value, u32, Option<u8>, mlua::Variadic<mlua::Value>)| {
+                let data = state.borrow();
+                if let (Some(game), Some(grade)) = (data.game.get(), grade) {
+                    let result = item_tip(
+                        lua,
+                        game,
+                        &data.tips,
+                        id,
+                        Some(i64::from(super::store::ui_grade(grade))),
+                        None,
+                        Instance::default(),
+                    )?;
+                    if let Some(info) = &result {
+                        info.set("itemGrade", grade)?;
+                        info.set("stack", mlua::Value::Nil)?;
+                        //394224c6: impl15 always includes its modifier table;
+                        // impl21 requires IIK_SOCKET_MODIFIER (default flags=-1).
+                        //3947f318/39058d10: missing flags=-1; an explicitly supplied
+                        // wrong type (including nil) leaves initialized output zero.
+                        let flags = match flags.first() {
+                            None => -1.,
+                            Some(mlua::Value::Integer(n)) => *n as f32,
+                            Some(mlua::Value::Number(n)) => *n as f32,
+                            Some(_) => 0.,
+                        };
+                        let flags = if flags.is_finite() && (-2147483648.0..2147483648.0).contains(&flags) {
+                            flags as i32
+                        } else {
+                            i32::MIN
+                        };
+                        if game.items.get(&id).is_some_and(|i| i.impl_id == 21) && flags & 1024 == 0 {
+                            info.raw_set("modifier", mlua::Value::Nil)?;
+                        }
+                    }
+                    Ok(result)
+                } else {
+                    drop(data);
+                    prior.call::<Option<Table>>((owner, id, grade, flags))
                 }
-                Ok(result)
-            } else {
-                drop(data);
-                prior.call::<Option<Table>>((owner, id, grade))
-            }
-        })?,
+            },
+        )?,
     )
 }
 
@@ -186,6 +206,11 @@ pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Op
     t.raw_set("refund", game.stores.refund(info.refund, grade_id(grade).clamp(0,255) as u8))?;
     t.raw_set("sellable", info.sellable)?;
     equipment_stats(lua, game, state, &t, id, grade_id(grade), instance)?;
+    if matches!(info.impl_id, 15 | 21) {
+        if let Some(modifiers) = game.enchant.modifier_table(lua, id)? {
+            t.raw_set("modifier", modifiers)?;
+        }
+    }
     Ok(Some(t))
 }
 
