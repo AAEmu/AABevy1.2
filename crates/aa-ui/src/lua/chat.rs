@@ -115,6 +115,12 @@ pub struct ChatData {
     pub(crate) input_tab_id: i64,
     pub left_line: Id,
     pub right_line: Id,
+    pub lock_notify: Id,
+    /// Native drag policy; ordinary tab selection and context remain available.
+    pub allow_tab_switch: bool,
+    pub notify_remaining_ms: f32,
+    pub notify_blink_ms: f32,
+    pub notify_max_ms: f32,
     pub line_offset: [f32; 2],
     /// Local top/bottom anchor offsets of the native internal clipping area.
     tab_clip_vertical: [f32; 2],
@@ -134,6 +140,74 @@ fn with_msg<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut MessageData) -> R) -> Opti
 
 fn chat(lua: &Lua, id: Id) -> Option<ChatData> {
     ui(lua).tree.widget(id)?.chat.clone()
+}
+
+/// Apply native AllowTabSwitch. Enabling also cancels/hides the lock notification.
+/// This does not change resizing, selection, or an already captured move.
+pub fn set_allow_tab_switch(lua: &Lua, id: Id, allowed: bool) -> bool {
+    let mut u = ui(lua);
+    let Some(c) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) else {
+        return false;
+    };
+    c.allow_tab_switch = allowed;
+    let notify = c.lock_notify;
+    if allowed {
+        c.notify_remaining_ms = 0.0;
+        u.tree.get_mut(notify).shown = false;
+    }
+    true
+}
+
+/// Native tab construction registers LeftButton dragging independently of Lua.
+pub(crate) fn tab_drag_source(u: &super::Ui, id: Id) -> bool {
+    tab_owner(u, id).is_some()
+}
+
+fn tab_owner(u: &super::Ui, id: Id) -> Option<(Id, usize)> {
+    let window = u.tree.get(id).parent?;
+    let c = u.tree.widget(window)?.chat.as_ref()?;
+    let index = c.tabs.iter().position(|tab| tab.button == id)?;
+    Some((window, index))
+}
+
+/// ButtonWidget::OnDragStart delivers Lua first, then internal event 4.
+pub(crate) fn drag_started(lua: &Lua, button: Id) {
+    let window = {
+        let u = ui(lua);
+        tab_owner(&u, button)
+    };
+    let Some((window, index)) = window else { return };
+    let allowed = {
+        let mut u = ui(lua);
+        let c = u.tree.widget_mut(window).unwrap().chat.as_mut().unwrap();
+        if !c.allow_tab_switch {
+            c.notify_remaining_ms = c.notify_max_ms;
+        }
+        c.allow_tab_switch
+    };
+    if allowed && index == 0 {
+        // Native starts the entire window before checking raw-tab-zero split protection.
+        // Secondary-tab splitting and cross-window reparenting need the manager path.
+        super::drag::start_moving(lua, window);
+    }
+}
+
+fn notify_tick(u: &mut super::Ui, id: Id, dt_ms: f32) {
+    let Some(c) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) else { return };
+    if c.notify_remaining_ms > 0.0 {
+        c.notify_remaining_ms -= dt_ms;
+        let elapsed = c.notify_max_ms - c.notify_remaining_ms;
+        let phase = elapsed / c.notify_blink_ms;
+        // CVTTSS2SI returns integer-indefinite for NaN/overflow; its signed %2 is zero.
+        let phase = if phase >= -2147483648.0 && phase < 2147483648.0 {
+            phase as i32
+        } else { i32::MIN };
+        let shown = phase % 2 == 1 && c.notify_remaining_ms > 0.0;
+        let notify = c.lock_notify;
+        if u.tree.get(notify).shown != shown {
+            u.tree.get_mut(notify).shown = shown;
+        }
+    }
 }
 
 fn global_fn(lua: &Lua, name: &str) -> Option<Function> {
@@ -700,10 +774,13 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
         o.height = 1.0;
         o.shown = false;
     }
-    for f in ["lockNotify", "caret"] {
-        let (d, _) = native_drawable(lua, id, f)?;
-        ui(lua).tree.get_mut(d).shown = false;
-    }
+    let (lock_notify, _) = native_drawable(lua, id, "lockNotify")?;
+    let (caret, _) = native_drawable(lua, id, "caret")?;
+    ui(lua).tree.get_mut(lock_notify).shown = false;
+    ui(lua).tree.get_mut(lock_notify).anchors = vec![Anchor {
+        point: Point::BottomLeft, target: id, rel: Point::TopLeft, x: 0.0, y: 0.0,
+    }];
+    ui(lua).tree.get_mut(caret).shown = false;
     if let Some(w) = ui(lua).tree.widget_mut(id) {
         w.chat = Some(ChatData {
             active: false,
@@ -728,6 +805,11 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             input_tab_id: -1,
             left_line,
             right_line,
+            lock_notify,
+            allow_tab_switch: false,
+            notify_remaining_ms: 0.0,
+            notify_blink_ms: 500.0,
+            notify_max_ms: 2000.0,
             line_offset: [0.0; 2],
             tab_clip_vertical: [3.0, 20.0],
             hovered: None,
@@ -1037,7 +1119,7 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
 
 /// Per frame: tab button backgrounds show only while the cursor is over the chat window (the
 /// tab names stay), like the client's fading chat decorations.
-pub(crate) fn update(lua: &Lua) {
+pub(crate) fn update(lua: &Lua, dt_ms: f32) {
     let windows = ui(lua).tree.of_class("chatwindow");
     for id in windows {
         if chat(lua, id).is_some_and(|c| c.hydrated && c.tabs.is_empty()) {
@@ -1076,6 +1158,7 @@ pub(crate) fn update(lua: &Lua) {
         .filter(|&i| u.tree.widget(i).is_some_and(|w| w.chat.is_some()))
         .collect();
     for &id in &wins {
+        notify_tick(u, id, dt_ms);
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
         // Native395130e0 applies dynamic state every frame, including newly attached children.
         alpha::state(u, id, inside);
@@ -1520,12 +1603,29 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?)?;
     }
+    def("AllowTabSwitch", method(lua, |lua, id, a| {
+        if let Value::Boolean(allowed) = a.v(1) {
+            set_allow_tab_switch(lua, id, allowed);
+        }
+        none()
+    })?)?;
+    for (name, blink) in [("SetMaxNotifyTime", false), ("SetNotifyBlinkingFreq", true)] {
+        def(name, method(lua, move |lua, id, a| {
+            let value = match a.v(1) {
+                Value::Number(value) => value as f32,
+                Value::Integer(value) => value as f32,
+                _ => return none(),
+            };
+            if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+                if blink { c.notify_blink_ms = nonnegative(value); }
+                else { c.notify_max_ms = nonnegative(value); }
+            }
+            none()
+        })?)?;
+    }
     for name in [
         "SetCaretOffset",
-        "SetMaxNotifyTime",
-        "SetNotifyBlinkingFreq",
         "SetSlideTimeInDragging",
-        "AllowTabSwitch",
         "UseSlidingButton",
         "SetTabButtonAlpha",
     ] {

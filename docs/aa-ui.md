@@ -4336,3 +4336,74 @@ The inspected `shots/aa-ui/native-chat-method-restored-20261018.png` shows the
 restored party selector and editable text at 1280x720/UI scale 0.85. It reports
 zero Lua errors, no runtime warnings/errors and **517.4-566.5 FPS**, and its
 process self-closes after the screenshot.
+
+### Native chat drag locking and notification (2026-10-18)
+
+`AllowTabSwitch(bool)` now controls the native tab-drag policy. Ordinary left
+selection and right-click context remain available while locked. The optional
+application API `lua::chat::set_allow_tab_switch(&Lua, widget_id, allowed) -> bool`
+returns false for a non-chat widget; the application separately applies native
+resizing policy and saves its lock configuration. `ChatData` exposes the policy,
+notification drawable ID, remaining milliseconds, maximum duration and blink
+interval for inspection. No native Lua getter or application event is invented.
+
+The trigger is **drag start**, not mouse-down. Native tab construction
+`392cc19e..af` registers LeftButton dragging and subscribes the chat receiver.
+`ButtonWidget::OnDragStart` at `392820e0` invokes Lua event `0x14`, then constructs
+the source/button packet and sends internal event 4 at `39282211..27`.
+Receiver `392ccc80 -> 392cc600` reads the current lock flag after that callback.
+The toolkit reuses its existing drag threshold and source lifecycle in that
+order. A locked drag copies maximum duration to the remaining timer; it does not
+move, split or select the tab. A simple click does not arm the notification.
+
+Unlocked first-tab dragging calls ordinary `StartMoving` (`3927a510 ->
+39278a10(9)`) **before** checking whether raw tab zero permits splitting.
+The toolkit now captures this first-tab window movement. Enabling/disabling the
+policy does not cancel an existing generic move. Native secondary-tab splitting,
+cross-window drop/reparenting and the manager's transient split-drag state remain
+open; secondary tabs are not substituted with whole-window movement. The
+existing toolkit drag threshold and its LeftButton-only input boundary remain
+explicit rather than claiming new native threshold or right-drag coverage.
+
+Fresh constructor store blocks `392cb708..40` and `392cb8b4..392cba1c` establish
+locked, remaining zero, 500 ms interval and 2,000 ms maximum. Original
+`x2ui/chat/chat_window.alb` overrides duration/interval to 3,000/400 ms and supplies
+the HUD lock image. The constructor anchors that drawable's BOTTOMLEFT to the
+window TOPLEFT with zero offsets (`392cbe81..b1`; native point table `39ac6a5c`).
+`AllowTabSwitch(true)` (`392c9680`) clears the timer and hides the drawable;
+false retains both. Number adapters `39259c90` and bool adapter `39259d50` require
+their exact types: missing values, numeric strings and wrong types do nothing.
+Timer setters `392c96c0/392c96f0` clamp negative values to zero while preserving
+negative zero, NaN and positive infinity; they retain any running timer.
+
+Native frame block `392cb310..80` subtracts the actual f32 frame milliseconds,
+computes `(maximum - remaining) / interval` in f32, converts with CVTTSS2SI, and
+shows the image only for signed remainder 1 modulo 2 while remaining is positive.
+Expiry retains a possibly negative remainder. A nonpositive or NaN remaining
+value leaves visibility untouched; zero/NaN interval converts to integer-indefinite
+and hides the image. The toolkit preserves those operations and passes frame
+milliseconds directly into chat update.
+
+`data/extract/aa-ui/chat_lock_oracle.py` and
+`native-chat-lock-oracle-20261018.json` execute **40 native groups** with the PE
+hash: constructor stores/anchor, strict argument adapters, raw setters and f32
+edges, actual ButtonWidget drag producer/callback order, real tab/message lookup,
+raw-zero protection, secondary split boundary and frame blinking/expiry.
+Lua/audio/profile delivery, observer forwarding, generic move capture, secondary
+split and manager preparation are explicit endpoints; remaining instructions run
+unchanged. The oracle neither performs nor emulates splitting. Instructions are
+in `native-chat-lock-source-20261018.txt`.
+
+`cargo check -p aa-ui`, the example build and **37 selected tests** pass across
+locking, alpha, context, method persistence, ordinary dragging and resizing.
+Seven new tests exercise exact setter types/defaults, signed zero/NaN/infinity,
+simple clicks/context while locked, callback-before-policy ordering, physical
+movement and capture release, disabling during capture, retained timer state,
+expiry/zero interval, removal during the drag callback and the unchanged original
+chat script's artwork/timers. The aa-dev example `native_chat_lock` makes a real
+pointer drag attempt and retains the original script's notification geometry.
+
+The inspected `shots/aa-ui/native-chat-lock-20261018.png` shows the original lock
+above the chat tabs at 1280x720/UI scale 0.85. It reports zero Lua errors, no
+runtime warnings/errors and **224.1-283.8 FPS**; its copied process self-closes
+after the screenshot. No corresponding locked-chat reference capture is present.

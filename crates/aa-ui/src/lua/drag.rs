@@ -104,6 +104,18 @@ pub(crate) fn start_sizing(lua: &Lua, id: Id, point: Point) {
     });
 }
 
+pub(crate) fn start_moving(lua: &Lua, id: Id) {
+    let mut u = ui(lua);
+    if u.tree.widget(id).is_some_and(|w| w.enabled) {
+        u.drag.moving = Some(Moving {
+            id,
+            rect: u.tree.rect(id),
+            pointer: u.cursor,
+            sizing: None,
+        });
+    }
+}
+
 pub(crate) fn sizing(lua: &Lua) -> bool {
     ui(lua)
         .drag
@@ -250,15 +262,13 @@ pub fn set_held(lua: &Lua, table: Table) -> mlua::Result<()> {
 /// `id` or its nearest ancestor that was registered for dragging.
 pub fn source_of(lua: &Lua, id: Id) -> Option<Id> {
     let u = ui(lua);
-    if u.drag.registered.is_empty() {
-        return None;
-    }
     let mut t = Some(id);
     while let Some(i) = t {
         if u.tree.widget(i).is_some_and(|w| !w.enabled) {
             return None;
         }
-        if u.drag.registered.contains(&i) && u.tree.get(i).alive {
+        if (u.drag.registered.contains(&i) || super::chat::tab_drag_source(&u, i))
+            && u.tree.get(i).alive {
             return Some(i);
         }
         t = u.tree.get(i).parent;
@@ -275,6 +285,7 @@ pub fn start(lua: &Lua, src: Id) {
     } else {
         super::slot::drag_start(lua, src);
     }
+    super::chat::drag_started(lua, src);
 }
 
 /// The button was released after a drag of `src`, over `hover`.
@@ -409,15 +420,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "StartMoving",
         super::method(lua, |lua, id, _| {
-            let mut u = ui(lua);
-            if u.tree.widget(id).is_some_and(|w| w.enabled) {
-                u.drag.moving = Some(Moving {
-                    id,
-                    rect: u.tree.rect(id),
-                    pointer: u.cursor,
-                    sizing: None,
-                });
-            }
+            start_moving(lua, id);
             super::none()
         })?,
     )?;
