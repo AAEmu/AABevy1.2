@@ -283,6 +283,141 @@ fn selected_quotes_keep_native_zero_stacks_then_apply_id_removal_in_receipt_orde
 }
 
 #[test]
+fn typed_preparation_recaptures_all_four_modes_and_received_auto_setting_without_mutation() {
+    let tables = tables();
+    let skills = Skills::default();
+    for (mode, slot, skill, ready) in [
+        (Mode::Grade, 1, 22522, false),
+        (Mode::Socket, 3, 23728, false),
+        (Mode::Unsocket, 4, 23729, true),
+        (Mode::Gem, 5, 11285, false),
+    ] {
+        let mut state = seeded();
+        if mode == Mode::Unsocket {
+            edit(&mut state, 0, |item| {
+                let ItemDetail::Equip(detail) = &mut item.detail else {
+                    unreachable!()
+                };
+                detail.gem_ids[0] = 31003;
+            });
+        }
+        state.set(&tables, &skills, mode, 0, 0).unwrap();
+        state.set(&tables, &skills, mode, 1, slot).unwrap();
+        if mode == Mode::Grade {
+            state.set(&tables, &skills, mode, 2, 2).unwrap();
+        }
+        let before: Vec<_> = state.records.bag_items().map(|(slot, item)| (slot, item.clone())).collect();
+        let prepared = state.prepare(&tables, &skills, mode).unwrap();
+        assert_eq!(prepared.character_id, 47);
+        assert_eq!(prepared.request.skill_id(), skill);
+        assert_eq!(prepared.input_ready, ready);
+        assert_eq!(prepared.request.target().item.id, 9_007_199_254_740_993);
+        assert_eq!(prepared.request.source().slot, slot);
+        assert_eq!(prepared.request.support().is_some(), mode == Mode::Grade);
+        assert_eq!(
+            before,
+            state
+                .records
+                .bag_items()
+                .map(|(slot, item)| (slot, item.clone()))
+                .collect::<Vec<_>>()
+        );
+        if mode == Mode::Grade {
+            for raw in [0, 1, 2, 255] {
+                state.receive(&Event::ItemsChanged(aa_net::items::ItemTasks {
+                    tasks: vec![aa_net::items::ItemTask::AutoUseAaPoint(raw)],
+                    ..Default::default()
+                }));
+                assert_eq!(
+                    state.prepare(&tables, &skills, mode).unwrap().request.mode(),
+                    ItemEffectMode::Grade {
+                        auto_use_aa_point: raw == 1
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn typed_preparation_revalidates_changed_items_external_locks_and_nonpositive_records() {
+    let tables = tables();
+    let skills = Skills::default();
+    let mut state = seeded();
+    state.set(&tables, &skills, Mode::Grade, 0, 0).unwrap();
+    state.set(&tables, &skills, Mode::Grade, 1, 1).unwrap();
+    let mut pending = Inventory::default();
+    pending.mark_item_slot_pending(2, 1);
+    state.sync_pending(&pending);
+    assert!(state.prepare(&tables, &skills, Mode::Grade).is_err());
+    pending.clear_item_slot_pending(2, 1);
+    state.sync_pending(&pending);
+    for count in [0, -1, i32::MIN] {
+        edit(&mut state, 1, |item| item.count = count);
+        assert!(state.prepare(&tables, &skills, Mode::Grade).is_err());
+    }
+    edit(&mut state, 1, |item| {
+        item.count = 3;
+        item.template_id = 31003;
+    });
+    assert!(state.prepare(&tables, &skills, Mode::Grade).is_err());
+    assert_eq!(
+        state.slots,
+        [Some(0), Some(1), None],
+        "preparation failure does not clear the selected physical keys"
+    );
+}
+
+#[test]
+fn completion_restores_current_physical_slots_and_uses_fallback_only_for_missing_old_source() {
+    let tables = tables();
+    let skills = Skills::default();
+    let mut state = seeded();
+    state.set(&tables, &skills, Mode::Grade, 0, 0).unwrap();
+    state.set(&tables, &skills, Mode::Grade, 1, 1).unwrap();
+    state.set(&tables, &skills, Mode::Grade, 2, 2).unwrap();
+    let request = state.prepare(&tables, &skills, Mode::Grade).unwrap().request;
+    edit(&mut state, 0, |item| item.id += 2);
+    assert!(state.restore(&tables, &skills, Mode::Grade, &request, true));
+    assert_eq!(state.slots, [Some(0), Some(1), Some(2)]);
+    assert_eq!(
+        state.selected(0).unwrap().id,
+        9_007_199_254_740_995,
+        "target is restored by old physical slot, not old ID"
+    );
+    edit(&mut state, 1, |item| item.template_id = 31003);
+    assert!(!state.restore(&tables, &skills, Mode::Grade, &request, true));
+    assert_eq!(
+        state.slots,
+        [Some(0), None, None],
+        "valid wrong-class old source fails without trying duplicate slot6"
+    );
+    edit(&mut state, 1, |item| *item = Item::default());
+    assert!(state.restore(&tables, &skills, Mode::Grade, &request, true));
+    assert_eq!(state.slots, [Some(0), Some(6), Some(2)]);
+    edit(&mut state, 0, |item| *item = Item::default());
+    assert!(!state.restore(&tables, &skills, Mode::Grade, &request, true));
+    assert_eq!(state.slots, [None; 3], "missing target stops before restoring sources");
+}
+
+#[test]
+fn magical_receipt_latch_stops_after_target_restore_even_when_raw_result_was_failure() {
+    let tables = tables();
+    let skills = Skills::default();
+    let mut state = seeded();
+    state.set(&tables, &skills, Mode::Gem, 0, 0).unwrap();
+    state.set(&tables, &skills, Mode::Gem, 1, 5).unwrap();
+    let request = state.prepare(&tables, &skills, Mode::Gem).unwrap().request;
+    assert!(!state.restore(&tables, &skills, Mode::Gem, &request, true));
+    assert_eq!(state.slots, [Some(0), None, None]);
+    assert!(
+        state.restore(&tables, &skills, Mode::Gem, &request, false),
+        "native stop without receipt latch takes ordinary source restore path"
+    );
+    assert_eq!(state.slots, [Some(0), Some(5), None]);
+}
+
+#[test]
 fn lua_selection_numeric_arities_cursor_order_reentrant_updates_quotes_and_clear_contracts() -> Result<(), Box<dyn std::error::Error>> {
     let rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     rt.lua
@@ -324,7 +459,7 @@ fn lua_selection_numeric_arities_cursor_order_reentrant_updates_quotes_and_clear
       local source=X2ItemEnchant:GetEnchantItemInfo();assert(source.itemType==28299 and source.total==7)
       local ratio=X2ItemEnchant:GetRatioInfos();assert(ratio.success==true and ratio['break']==false and ratio.downgrade==true and ratio.success_var_ratio==nil)
       assert(X2ItemEnchant:SetItemSlotFromBag(3));ratio=X2ItemEnchant:GetRatioInfos();assert(ratio.success_var_ratio==50 and ratio.downgrade_var_ratio==0)
-      local before=#updates;assert(select('#',X2ItemEnchant:Execute())==0);assert(#updates==before and messages[#messages]=='Item enchanting is unavailable in this session.')
+      local before=#updates;assert(select('#',X2ItemEnchant:Execute())==0);assert(#updates==before+1 and updates[#updates][1]==false and updates[#updates][2]==true)
       assert(select('#',X2ItemEnchant:ClearSupportItemSlot())==0 and updates[#updates][1]==true)
       assert(select('#',X2ItemEnchant:ClearEnchantItemSlot())==0 and updates[#updates][1]==false and X2ItemEnchant:GetTargetItemInfo()~=nil)
       X2Cursor:SetHeld({kind='bag',slot=2});assert(X2ItemEnchant:SetEnchantItemSlotFromPick());assert(X2Cursor:GetHeld()==nil)
@@ -338,5 +473,11 @@ fn lua_selection_numeric_arities_cursor_order_reentrant_updates_quotes_and_clear
       X2ItemEnchant:SwitchItemEnchantSocketingMode();assert(select('#',X2ItemEnchant:GetTargetItemInfo())==0)
     "#).exec()?;
     assert_eq!(shared.borrow().enchant.selection.slots, [None; 3]);
+    let data = shared.borrow();
+    assert!(
+        matches!(&data.requests[..], [crate::hud::api::Request::ItemEffect { character_id: 47, request }]
+        if request.skill_id() == 22522 && request.target().item.id == 9_007_199_254_740_993
+        && request.source().slot == 1 && request.support().is_some_and(|item| item.slot == 2))
+    );
     Ok(())
 }

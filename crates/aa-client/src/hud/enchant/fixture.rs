@@ -195,6 +195,11 @@ pub(in crate::hud) fn run() {
     if std::env::args().any(|arg| arg == "--filled") {
         fill(&rt, &state, mode, std::env::args().any(|arg| arg == "--support")).unwrap();
     }
+    if std::env::args().any(|arg| arg == "--execute") {
+        // Explicit visual fixture only: the original API queues its captured
+        // request and working UPDATE. This example has no Session/transport.
+        rt.lua.load("X2ItemEnchant:Execute()").exec().unwrap();
+    }
     App::new()
         .add_plugins((
             aa_dev::default_plugins("aa-client: original enchant mode controls"),

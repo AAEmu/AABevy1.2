@@ -1,5 +1,12 @@
 # Original item-enchant controls
 
+Current source now wires the original Execute API to typed captured CS052
+requests, source-qualified result/input rendezvous and physical-slot restoration.
+One receipt pass supplies both selection and result-link lookups from native
+modeled records; no legacy post-batch Inventory value supplies these callbacks.
+The accepted playable binary is now the checked controller cut described below;
+the earlier records builds are retained as historical validation.
+
 The real bag's enchant button now calls the original window through the native
 mode event contract. Grade, socketing, unsocket and gem modes use the original
 tabs, submenu, slot layout and close handlers. The mode is updated before its
@@ -23,8 +30,7 @@ action-cursor provider and its mapped action cancellation remain open.
 Actual39046740/39046600 execution goldens cover six transitions, including
 same-mode retention and callback state/order. Native changed modes retire the
 three selected packed keys before callbacks. Mode changes do not directly
-reset operation active/input/result latches; this mode-only adapter does not
-create such latches or synthesize completion. The ordinary matching cast-stop
+reset operation active/input/result latches. The ordinary matching cast-stop
 branch on Leave remains a separate provider. The first-entry393be180(1) helper's
 unconditional NPC_INTERACTION_END is source-closed and delivered after the new
 mode and empty selected keys are visible. Native stored-interaction/effect cleanup
@@ -37,10 +43,10 @@ return, disconnect or kick, hiding the old original window while its HUD is
 still active. This is an explicit application lifecycle boundary.
 
 The selected-item and quote adapter described below now supplies the original
-window. Protected ordinary skill planning, operation-wide pending keys and
-result/skill rendezvous remain separate. No local settlement, item removal or
-payment is added. The typed aa-net CS052 request transport is already validated
-separately; this adapter does not send it prematurely.
+window. The protected ordinary skill planner, global operation pending/effect
+registration and Timeline-owned stop continuation remain separate. Execute uses
+an explicit stronger application preflight and typed transport recheck. No local
+settlement, item removal or payment is added.
 
 Three focused checks pass in4.44s: exact native mode argument/return/event
 contracts with reentrant callbacks and preserved picked BAG items; the original
@@ -261,7 +267,7 @@ receipt. Execute still refuses explicitly: typed request integration, shared
 operation pending/effects and controller callbacks are the next integration
 boundary. No request, ACK or item settlement is inferred from this provider.
 
-## Accepted records build
+## Previous accepted records build
 
 The inspected main target/debug/aa-client-20261018-enchant-records.exe and the
 idle-refreshed target/debug/aa-client-play.exe share SHA256
@@ -284,3 +290,106 @@ frames cut; the buff differs only in45 pixels at its advancing countdown digit.
 These remain original-script/asset regression checks, not paired original-client
 pixel parity or live enchant transactions. The controller/planner/transport
 integration limitations above remain open.
+
+## Typed request and ordered continuation integration
+
+Execute still returns zero Lua values. Missing primary selections produce the
+original invalid-slot UI error. With complete known BAG records and real catalog
+providers it revalidates target, source and optional support, captures full Items
+and physical slots, and queues the actual source skill: grade descriptor skill,
+socket23728, unsocket23729 or gem11285. Full64-bit IDs and maker fields stay in
+the typed request. Positive stacks/nonzero instance IDs, received feature/AA
+setting and known nonnegative grade cost are stronger application requirements.
+The protected native planner is not claimed implemented by these checks; its
+remaining permissions/resources/action state still need source-qualified work.
+
+The original accepted-helper UPDATE(false,true) shows working state. The app
+command writer forwards only the still-current capture/owner; the Session checks
+its received current owner, active world/actor, known snapshots, complete item
+equality and AA setting before writing052. ItemEffectRequested means successful
+socket write only; it is not an ACK, server acceptance, payment or item success.
+Only that matching written request arms the continuation. A matching typed local
+transport rejection clears the operation and restores ordinary UPDATE presence
+with its message; stale rejection/capture owners cannot clear a replacement.
+Native Execute has no active-operation guard and current captures may replace
+an older operation. Mode changes preserve operation capture/latches.
+
+Each SC090 row applies its PRE-resolved native projection, then checks the actual
+admitted output before another row applies. Reason40 and the captured source
+template admit the input latch; packet ID/template, final batch state and the
+force-remove tail do not. Grade uses the admitted inline result/link; socket and
+stone use an actual current equipment-first/BAG-only record and successful link
+formatting. Result Lua callbacks run first, then the receiver tests CURRENT mode.
+Either receipt/input order can complete. The latch means an admitted receipt,
+including raw failure; it never means success. The existing frontend refusal of
+noncanonical socket-install/stone-result bytes remains a stronger application
+limit rather than a universal native-wire boolean rule.
+
+Completion takes/resets the operation before selection setters or synchronous
+Lua callbacks. It retargets the captured old physical target slot using its
+current valid item. Missing target stops immediately; a failed target setter
+does not introduce a different search. Current Gem mode with a receipt latch
+restores target only. Otherwise valid old source/support slots are tried even
+after template changes, without fallback after setter refusal. Only a missing
+or invalid old slot permits the first unlocked BAG match of captured template
+and raw grade. UPDATE reports resulting primary presence and working=false.
+Global selection pending/effect registration remains incomplete; local selected
+pending keys are now distinct from selected pointers so an actual lock release
+does not remove the selected item.
+
+Typed SC093 copies only a qualified matching known BAG detail, preserving other
+metadata, then releases its key and emits BAG_LOCK_UPDATE(slot+1). Repeated
+absent-key releases still notify. SC0A0 signed nonzero item-operation errors
+report the error first, then release both received keys in order, preserving
+duplicates; zero error does nothing. Invalid sentinel/container4 keys produce
+no release. Only BAG/BANK keys emit their corresponding single-number LOCK
+callback. Neither receipt emits generic BAG_UPDATE, item consumption, controller
+completion or optimistic contents. Lua sees each released lock before its
+callback, including a selected pointer whose pending flag was removed.
+
+Ordinary SkillFired error bytes are deliberately not promoted to a native
+failure latch: its producer exits before internal15 on nonzero low-byte result.
+Started errors are a different event. Matching native stop admission requires
+the first retained Timeline record, resolved runtime actor and its qualified
+skill, not a raw stop receipt or assumed local caster. Complete Timeline
+reference/retirement/lifecycle ownership is still open; no fabricated stop or
+timeout is used to settle an operation. Shared native records do not expose
+every union/runtime byte, recharge context and other unsafe history remain
+explicit certainty boundaries. No live enchant transaction has been performed.
+
+Final32 focused enchant checks pass in5.82s. They include all four unchanged
+original-mode controls/typed command forwarding, full-width captures and
+transport rejection, both receipt/input orders with completion before the next
+row, a result Lua callback that changes CURRENT mode before receiver admission,
+native first-hit lookup, physical restoration and source-qualified093/A0 lock
+callbacks. The A0 check starts with an immediate first-frame error so its Lua
+message must see fresh locks before either release; a zero error and duplicate
+absent-key releases remain distinct. The complete frozen client suite passes
+328 tests /38 existing optional probes ignored in90.50s with three threads
+(data/extract/aa-client/trial/enchant-controller-full-tests.log). The earlier
+HUD-only run passes250 /25 optional ignores in55.23s.
+
+Main and the enchant/buffs/item_effects fixtures build in3m29s; the final refresh
+after the first-frame pending-cache correction builds in53.22s. The copied
+main target/debug/aa-client-20261018-enchant-controller.exe has SHA256
+B4D86DF88E2976114124E62A50BBA4EBD91443C1AF68DAFCE1DC328FF909B8D7.
+Original-script visual QA is complete. This cut includes UI ordinary art,
+drawable masks and current text-color lifetime through19def45/d79bb0f, network
+SC093/SC0A0 and qualified private guard through8efe78b/1c97bc6, and the world's
+stable sleeping-rigid and authored light-style changes. The later UI effect
+visibility and shared NativeItemRecords Session migration are outside this cut.
+The --execute aa-dev enchant fixture queues the original API's captured request
+and working UPDATE only; it has no Session or actual wire operation.
+
+All12 1920x1080 shots/hud/enchant-controller/ captures are inspected and
+self-close without script errors/WARN/ERROR/panic: grade319.2-343.7 FPS,
+support408.7-431.3, socket335.8-387.6, unsocket331.2-452.6, gem425.0-477.3;
+working grade438.4-457.5, socket449.2-474.1, unsocket379.3-467.9,
+gem306.2-432.3; buff tooltip330.9-381.8, grade result372.5-396.3 and live
+lane world select356.9-416.0. All four working controls visibly dim their
+portraits and execution buttons while retaining the selected data. These are
+original-script/asset fixtures and a live world-list smoke, not paired native
+pixel equivalence, a live item transaction or isolated performance measurements.
+The worker's light-style production is committed as2ddb7ee. At16:52:00 local,
+the idle target/debug/aa-client-play.exe alias was refreshed from this inspected
+copy and its SHA256 rechecked equal to B4D86DF8...909B8D7 above.

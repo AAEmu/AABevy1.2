@@ -7,26 +7,48 @@ use super::{
 use aa_net::{
     Event,
     initial_config::GameConfig,
+    item_effect::{CapturedBagItem, ItemEffectMode, ItemEffectRequest},
     model::{Item, ItemDetail},
     state::{Inventory, Skills},
 };
 use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
 use std::collections::HashSet;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct State {
     pub slots: [Option<u8>; 3], // target, source, support; physical zero-based BAG slots
     pub(super) records: Records,
     config: GameConfig,
     external_pending: HashSet<u8>,
+    selected_pending: HashSet<u8>,
     owner: Option<u32>,
     actor: u32,
     level: u8,
     active: bool,
+    auto_use_aa_point: Option<bool>,
+}
+
+pub(super) struct Prepared {
+    pub character_id: u32,
+    pub request: ItemEffectRequest,
+    pub input_ready: bool,
 }
 impl State {
     pub fn clear(&mut self) {
-        self.slots = [None; 3];
+        self.clear_from(0);
+    }
+    fn clear_from(&mut self, index: usize) {
+        for slot in &mut self.slots[index..] {
+            if let Some(slot) = slot.take() {
+                self.selected_pending.remove(&slot);
+            }
+        }
+    }
+    pub fn release_pending(&mut self, container: u8, slot: u8) {
+        if container == 2 {
+            self.selected_pending.remove(&slot);
+            self.external_pending.remove(&slot);
+        }
     }
     pub fn presence(&self) -> bool {
         self.slots[0].is_some() && self.slots[1].is_some()
@@ -41,9 +63,11 @@ impl State {
             .collect();
     }
     fn locked(&self, slot: u8) -> bool {
-        self.slots.contains(&Some(slot)) || self.external_pending.contains(&slot)
+        self.selected_pending.contains(&slot) || self.external_pending.contains(&slot)
     }
-    pub fn receive(&mut self, event: &Event) {
+    /// Snapshot/lifecycle observations, before individual item-row callbacks.
+    /// True only when a qualified detail receipt releases its physical pending key.
+    pub fn observe(&mut self, event: &Event) -> bool {
         self.config.apply(event);
         match event {
             Event::CharacterSelected(selected) => {
@@ -51,6 +75,7 @@ impl State {
                 *self = Self {
                     config,
                     owner: Some(selected.character.id),
+                    auto_use_aa_point: Some(selected.character.auto_use_aa_point),
                     ..Default::default()
                 };
             }
@@ -60,6 +85,7 @@ impl State {
                     *self = Self {
                         config,
                         owner: Some(spawn.character().id),
+                        auto_use_aa_point: Some(spawn.character().auto_use_aa_point),
                         ..Default::default()
                     };
                 }
@@ -79,7 +105,11 @@ impl State {
             {
                 self.clear();
             }
-            Event::GameDecodeFailed { .. } | Event::UnhandledGamePacket { level: 4, len: 1.., .. } => {
+            Event::GameDecodeFailed { .. }
+            | Event::UnhandledGamePacket { level: 4, len: 1.., .. }
+            | Event::UnhandledGamePacket {
+                opcode: 0x93, len: 1.., ..
+            } => {
                 self.clear();
             }
             Event::ItemsChanged(tasks) if tasks.truncated => {
@@ -99,14 +129,30 @@ impl State {
             _ => {}
         }
         self.records.observe(event);
+        let released_detail = match event {
+            Event::ItemDetailUpdated(update) => self.records.apply_detail(update),
+            _ => false,
+        };
+        released_detail
+    }
+    pub fn apply_row(&mut self, task: &aa_net::items::ItemTask) -> Option<super::records::RowOutput> {
+        if let aa_net::items::ItemTask::AutoUseAaPoint(raw) = task {
+            self.auto_use_aa_point = Some(*raw == 1);
+        }
+        self.records.apply_row(task)
+    }
+    /// Standalone fixture convenience; production dispatches between each row.
+    pub fn receive(&mut self, event: &Event) -> bool {
+        let released_detail = self.observe(event);
         if let Event::ItemsChanged(changes) = event {
             if !changes.truncated {
                 for task in &changes.tasks {
-                    self.records.apply_row(task);
+                    self.apply_row(task);
                 }
                 self.records.finish(changes);
             }
         }
+        released_detail
     }
     fn complete(&self) -> bool {
         // Original BAG storage has130 records. Refuse a whole-BAG quote whose
@@ -237,9 +283,10 @@ impl State {
     fn set(&mut self, tables: &Tables, skills: &Skills, mode: Mode, index: usize, slot: u8) -> Result<(), i16> {
         self.validate(tables, skills, mode, index, slot)?;
         if index < 2 {
-            self.slots[2] = None;
+            self.clear_from(2);
         }
         self.slots[index] = Some(slot);
+        self.selected_pending.insert(slot);
         Ok(())
     }
     fn enchantable(&self, tables: &Tables, skills: &Skills, mode: Mode, slot: u8) -> bool {
@@ -251,6 +298,83 @@ impl State {
             _ => false,
         }
     }
+    /// Revalidate the actual selected physical records, without treating this
+    /// view's own selection locks as a competing operation. This is a stronger
+    /// app preflight, not the protected ordinary native skill planner.
+    pub fn prepare(&self, tables: &Tables, skills: &Skills, mode: Mode) -> Result<Prepared, i16> {
+        if !self.presence() || !self.active || !self.complete() {
+            return Err(1);
+        }
+        let mut checked = self.clone();
+        checked.clear();
+        for (index, slot) in self.slots.iter().enumerate() {
+            if let Some(slot) = slot {
+                checked.set(tables, skills, mode, index, *slot)?;
+            }
+        }
+        let capture = |index: usize| -> Result<CapturedBagItem, i16> {
+            let slot = checked.slots[index].ok_or(1i16)?;
+            let item = checked.item(slot).ok_or(1i16)?;
+            // Stronger app policy: request only existing positive stacks. Native
+            // validators can still expose valid-template nonpositive records.
+            if item.id == 0 || item.count <= 0 {
+                return Err(0xb5);
+            }
+            Ok(CapturedBagItem { slot, item: item.clone() })
+        };
+        let source = capture(1)?;
+        let target = capture(0)?;
+        let support = self.slots[2].map(|_| capture(2)).transpose()?;
+        let descriptor = tables.items.get(&source.item.template_id).ok_or(1i16)?;
+        let transport_mode = match mode {
+            Mode::Grade => {
+                // Require the same real providers used by the target quote.
+                self.config.received.as_ref().and_then(|c| c.feature_bytes.get(5)).ok_or(1i16)?;
+                tables.cost(&target.item).filter(|cost| *cost >= 0).ok_or(1i16)?;
+                ItemEffectMode::Grade {
+                    auto_use_aa_point: self.auto_use_aa_point.ok_or(1i16)?,
+                }
+            }
+            Mode::Socket | Mode::Unsocket => ItemEffectMode::Socket,
+            Mode::Gem => ItemEffectMode::Gem,
+            Mode::Off => return Err(1),
+        };
+        let request = ItemEffectRequest::new(transport_mode, descriptor.skill, source, target, support).map_err(|_| 1i16)?;
+        Ok(Prepared {
+            character_id: self.owner.filter(|id| *id != 0).ok_or(1i16)?,
+            request,
+            input_ready: !descriptor.reagent,
+        })
+    }
+    ///39046020 after the caller has reset its active/captured operation. Restore
+    /// physical slots from current records; do not settle or resend anything.
+    pub fn restore(&mut self, tables: &Tables, skills: &Skills, mode: Mode, request: &ItemEffectRequest, result_seen: bool) -> bool {
+        self.clear();
+        // Stronger whole-BAG provider guard, also used by ordinary selection.
+        if !self.complete() || self.records.item(2, request.target().slot).is_none_or(|item| item.template_id == 0) {
+            return false;
+        }
+        let _ = self.set(tables, skills, mode, 0, request.target().slot);
+        if mode == Mode::Gem && result_seen {
+            return false;
+        }
+        for (index, captured) in [(1, Some(request.source())), (2, request.support())] {
+            let Some(captured) = captured else { continue };
+            if self.records.item(2, captured.slot).is_some_and(|item| item.template_id != 0) {
+                // A valid old slot is tried even if its item/template changed.
+                // A rejected setter does not permit a same-template fallback.
+                let _ = self.set(tables, skills, mode, index, captured.slot);
+                continue;
+            }
+            let fallback = self.records.bag_items().find_map(|(slot, item)| {
+                (item.template_id == captured.item.template_id && item.grade == captured.item.grade && !self.locked(slot)).then_some(slot)
+            });
+            if let Some(slot) = fallback {
+                let _ = self.set(tables, skills, mode, index, slot);
+            }
+        }
+        self.presence()
+    }
 }
 fn number(value: Option<&Value>) -> Option<i32> {
     let value = match value? {
@@ -261,10 +385,13 @@ fn number(value: Option<&Value>) -> Option<i32> {
     Some(catalog::cvtt(f64::from(value)))
 }
 pub(super) fn update(lua: &Lua, presence: bool) {
+    update_working(lua, presence, false);
+}
+pub(super) fn update_working(lua: &Lua, presence: bool, working: bool) {
     aa_ui::lua::fire_ui_event(
         lua,
         "UPDATE_ENCHANT_ITEM_MODE",
-        vec![Value::Boolean(presence), Value::Boolean(false)],
+        vec![Value::Boolean(presence), Value::Boolean(working)],
     );
 }
 fn set(data: &mut super::super::api::HudData, index: usize, slot: u8) -> Result<(), i16> {
@@ -272,7 +399,7 @@ fn set(data: &mut super::super::api::HudData, index: usize, slot: u8) -> Result<
     let tables = &data.game.get().ok_or(1i16)?.enchant;
     data.enchant.selection.set(tables, &data.cooldowns, mode, index, slot)
 }
-fn error(lua: &Lua, code: i16) -> mlua::Result<()> {
+pub(super) fn error(lua: &Lua, code: i16) -> mlua::Result<()> {
     if let Some(key) = super::super::alerts::error_name(code) {
         let locale: Table = lua.globals().get("X2Locale")?;
         let group: Value = lua.globals().get("ERROR_MSG")?;
@@ -471,9 +598,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             lua.create_function(move |lua, _: MultiValue| {
                 let presence = {
                     let mut data = s.borrow_mut();
-                    for slot in &mut data.enchant.selection.slots[index..] {
-                        *slot = None;
-                    }
+                    data.enchant.selection.clear_from(index);
                     index == 2 && data.enchant.selection.presence()
                 };
                 update(lua, presence);
@@ -523,15 +648,40 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     api.raw_set(
         "Execute",
         lua.create_function(move |lua, _: MultiValue| {
-            // Selection/quotes are implemented before the protected planner and
-            // controller rendezvous. Refuse explicitly instead of a permissive stub.
-            let present = s.borrow().enchant.selection.presence();
-            let (event, message) = if present {
-                ("SYSMSG", "Item enchanting is unavailable in this session.")
-            } else {
-                ("UI_ERROR_MESSAGE", "invalid item slot index")
+            let prepared = {
+                let data = s.borrow();
+                if !data.enchant.selection.presence() {
+                    drop(data);
+                    aa_ui::lua::fire_ui_event(
+                        lua,
+                        "UI_ERROR_MESSAGE",
+                        vec![Value::String(lua.create_string("invalid item slot index")?)],
+                    );
+                    return Ok(());
+                }
+                data.game
+                    .get()
+                    .ok_or(1i16)
+                    .and_then(|game| data.enchant.selection.prepare(&game.enchant, &data.cooldowns, data.enchant.mode))
             };
-            aa_ui::lua::fire_ui_event(lua, event, vec![Value::String(lua.create_string(message)?)]);
+            let prepared = match prepared {
+                Ok(prepared) => prepared,
+                Err(code) => {
+                    error(lua, code)?;
+                    return Ok(());
+                }
+            };
+            {
+                let mut data = s.borrow_mut();
+                data.requests.push(super::super::api::Request::ItemEffect {
+                    character_id: prepared.character_id,
+                    request: prepared.request.clone(),
+                });
+                data.enchant.operation = Some(super::controller::Operation::new(prepared));
+            }
+            // Native accepted-helper UPDATE means working, not payment or success.
+            // The explicit app write fence arms receipts only after Requested.
+            update_working(lua, false, true);
             Ok(())
         })?,
     )?;
