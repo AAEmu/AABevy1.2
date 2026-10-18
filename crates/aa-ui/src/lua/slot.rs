@@ -56,6 +56,9 @@
 //! obey option 82 through [`set_cooldown_numbers`]. Native explicit global/own slot selection
 //! (+311/+312) is not supplied by the current content hook; duration does not identify a global
 //! cooldown. The app must not infer that state from `SkillCooldown`'s combined winning timer.
+//! [`set_native_cooldown_mode`] explicitly enables the native selector adapter. Once enabled,
+//! the app supplies raw global counts, the native accessor kind and an on-demand query through
+//! [`update_native_slot_cooldown`]; the legacy content cooldown/countdown is bypassed for slots.
 //!
 //! [`refresh_slots`] asks again for every bound slot (the app calls it when bars change). The slot
 //! creates its icon drawable itself (`slot.icon`, also `slot.gradeIcon`, inset 1 like the
@@ -76,6 +79,21 @@ pub struct SlotData {
     /// `GetBindedType()`: "none", "skill", "item", ...
     pub binded: Option<String>,
     pub icon: Option<Id>,
+    /// Actual slot-frame selector flags +311/+312, present only for the explicit native adapter.
+    pub native_cooldown: Option<NativeCooldownState>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeCooldownState {
+    pub global: bool,
+    pub accessor_active: bool,
+}
+
+/// Raw unsigned native manager/accessor result, before the UI's f32 narrowing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CooldownSample {
+    pub remaining_ms: u32,
+    pub total_ms: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,11 +110,174 @@ pub struct Cooldown {
     /// UI time the slot cooldown ends at; for generic buttons, time of the sample plus remaining.
     pub end_ms: f64,
     pub total_ms: f32,
-    /// Generic buttons retain a draw snapshot until SetCoolDown is called again. Only slots
-    /// count down locally; the derived button providers notify their original Lua consumers.
+    /// Generic buttons and native-adapter slots retain the supplied snapshot. Compatibility
+    /// slots count down locally; button providers notify their original Lua consumers.
     pub sampled_ms: Option<f32>,
+    /// Native slot +311 suppresses captions; duration does not identify this state.
+    pub global: bool,
     /// What the last frame update saw (sweep step, label): the tree is touched when it changes.
     pub drawn: (i32, String),
+}
+
+const NATIVE_MODE: &str = "aa_ui_native_slot_cooldowns";
+fn native_mode(lua: &Lua) -> bool {
+    lua.named_registry_value(NATIVE_MODE).unwrap_or(false)
+}
+
+/// Opt in before original controls bind, only when the app can supply genuine native samples.
+/// Changing adapter mode clears UI samples/flags without changing any game cooldown manager.
+pub fn set_native_cooldown_mode(lua: &Lua, enabled: bool) {
+    if native_mode(lua) == enabled {
+        return;
+    }
+    let _ = lua.set_named_registry_value(NATIVE_MODE, enabled);
+    let ids: Vec<_> = {
+        let mut u = ui(lua);
+        u.tree
+            .objects
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(id, o)| {
+                let w = o.widget_mut()?;
+                let s = w.slot.as_mut()?;
+                s.native_cooldown = enabled.then(NativeCooldownState::default);
+                w.cooldown = None;
+                Some(id as Id)
+            })
+            .collect()
+    };
+    if let Ok(active) = active(lua) {
+        for id in ids {
+            let _ = active.raw_set(id, Value::Nil);
+        }
+    }
+    ui(lua).tree.touch();
+}
+
+fn native_state(lua: &Lua, id: Id) -> Option<NativeCooldownState> {
+    let u = ui(lua);
+    let o = u.tree.objects.get(id as usize)?;
+    o.alive.then_some(())?;
+    o.widget()?.slot.as_ref()?.native_cooldown
+}
+
+fn native_event(lua: &Lua, id: Id, name: &str, duration: Option<u32>) {
+    let mut args = vec![Value::String(lua.create_string(name).unwrap())];
+    if let Some(ms) = duration {
+        args.push(Value::Number(f64::from(ms as f32)));
+    }
+    super::call_handler(lua, id, "OnContentUpdated", args);
+}
+
+fn native_sample(lua: &Lua, id: Id, value: CooldownSample) {
+    let Some(flags) = native_state(lua, id) else {
+        return;
+    };
+    let mut u = ui(lua);
+    if u.tree
+        .widget(id)
+        .and_then(|w| w.cooldown.as_ref())
+        .is_some_and(|cd| {
+            cd.sampled_ms == Some(value.remaining_ms as f32)
+                && cd.total_ms == value.total_ms as f32
+                && cd.global == flags.global
+        })
+    {
+        return;
+    }
+    let now = u.time_ms;
+    let sample = Cooldown {
+        end_ms: now + f64::from(value.remaining_ms as f32),
+        total_ms: value.total_ms as f32,
+        sampled_ms: Some(value.remaining_ms as f32),
+        global: flags.global,
+        drawn: (-1, String::new()),
+    };
+    if let Some(w) = u.tree.widget_mut(id) {
+        w.cooldown = Some(sample);
+    }
+}
+
+/// Execute the source-closed cooldown selector of native392c7360. The caller must supply an
+/// actual accessor kind and raw global sample; skip absent accessors. Query executes only on
+/// the native accessor branch, after global_done (which can change the binding/data).
+pub fn update_native_slot_cooldown(
+    lua: &Lua,
+    id: Id,
+    accessor_kind: u32,
+    global: CooldownSample,
+    query: impl FnOnce(&Lua, Id) -> Option<CooldownSample>,
+) {
+    let Some(flags) = native_state(lua, id) else {
+        return;
+    };
+    if !flags.accessor_active && global.remaining_ms > 0 && !matches!(accessor_kind, 16 | 17 | 19) {
+        if !flags.global {
+            if let Some(s) = ui(lua)
+                .tree
+                .widget_mut(id)
+                .and_then(|w| w.slot.as_mut())
+                .and_then(|s| s.native_cooldown.as_mut())
+            {
+                s.global = true;
+            }
+            native_event(lua, id, "global_cooldown_start", Some(global.total_ms));
+        }
+        native_sample(lua, id, global);
+        return;
+    }
+    if flags.global {
+        if let Some(s) = ui(lua)
+            .tree
+            .widget_mut(id)
+            .and_then(|w| w.slot.as_mut())
+            .and_then(|s| s.native_cooldown.as_mut())
+        {
+            s.global = false;
+        }
+        native_event(lua, id, "global_cooldown_done", None);
+    }
+    if native_state(lua, id).is_none() {
+        return;
+    }
+    let value = query(lua, id);
+    let Some(flags) = native_state(lua, id) else {
+        return;
+    };
+    let Some(value) = value else {
+        if let Some(s) = ui(lua)
+            .tree
+            .widget_mut(id)
+            .and_then(|w| w.slot.as_mut())
+            .and_then(|s| s.native_cooldown.as_mut())
+        {
+            *s = NativeCooldownState::default();
+        }
+        native_sample(lua, id, CooldownSample::default());
+        return;
+    };
+    native_sample(lua, id, value);
+    let running = value.remaining_ms > 0;
+    if running != flags.accessor_active {
+        if let Some(s) = ui(lua)
+            .tree
+            .widget_mut(id)
+            .and_then(|w| w.slot.as_mut())
+            .and_then(|s| s.native_cooldown.as_mut())
+        {
+            s.accessor_active = running;
+        }
+        native_event(
+            lua,
+            id,
+            if running {
+                "skill_cooldown_start"
+            } else {
+                "skill_cooldown_done"
+            },
+            running.then_some(value.total_ms),
+        );
+    }
 }
 
 /// Native constant-button skill identity and its one-shot ready notification (+5cc/+5d0).
@@ -364,6 +545,7 @@ pub(crate) fn init(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
         if let Some(w) = u.tree.widget_mut(id) {
             w.slot = Some(SlotData {
                 icon: Some(d),
+                native_cooldown: native_mode(lua).then(NativeCooldownState::default),
                 ..Default::default()
             });
             w.aux_style = Some(cooltime_block());
@@ -441,9 +623,13 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         Some(c) => c.raw_get::<Option<bool>>("canUse")?.unwrap_or(true),
         None => false,
     };
-    let cooldown = match &content {
-        Some(c) => content_cooldown(c)?,
-        None => None,
+    let cooldown = if native_mode(lua) {
+        None
+    } else {
+        match &content {
+            Some(c) => content_cooldown(c)?,
+            None => None,
+        }
     };
     let hotkey = match (&source, hook(lua, "SlotHotKey")) {
         (Source::Slot(ty, idx), Some(f)) => f.call::<Option<String>>((*ty, *idx))?.is_some(),
@@ -504,6 +690,7 @@ fn set_cooldown(lua: &Lua, u: &mut Ui, id: Id, cd: Option<(f32, f32)>) {
         end_ms: now + remain as f64,
         total_ms: total,
         sampled_ms: (!clocked).then_some(remain),
+        global: false,
         drawn: (-1, String::new()),
     });
     if let Ok(a) = active(lua) {
@@ -628,7 +815,7 @@ fn caption(remain_ms: f32, texts: &[String; 3]) -> String {
 pub const LABEL_MIN_TOTAL_MS: f32 = 200.0;
 
 fn label_of(cd: &Cooldown, remain: f64, options: &CaptionOptions) -> Option<String> {
-    (cd.total_ms >= LABEL_MIN_TOTAL_MS && options.visible)
+    (!cd.global && cd.total_ms >= LABEL_MIN_TOTAL_MS && options.visible)
         .then(|| caption(remain as f32, &options.texts))
 }
 
@@ -937,7 +1124,20 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             ret(lua, content_field(lua, id, "levelRequirement")?)
         })?,
     )?;
-    def("ResetState", method(lua, |_, _, _| none())?)?;
+    def(
+        "ResetState",
+        method(lua, |lua, id, _| {
+            if let Some(w) = ui(lua).tree.widget_mut(id)
+                && let Some(flags) = w.slot.as_mut().and_then(|s| s.native_cooldown.as_mut())
+            {
+                *flags = NativeCooldownState::default();
+                if let Some(cd) = w.cooldown.as_mut() {
+                    cd.global = false;
+                }
+            }
+            none()
+        })?,
+    )?;
     // (slotType, slotIdx): the key bound to the slot, from `AAUI.SlotHotKey`.
     def(
         "GetHotKey",

@@ -5071,3 +5071,77 @@ registers TOGGLE_BOUNTY_BULLETIN. This evidence supports a broken nonempty
 asset path; it does not establish that the screen was unused. No toolkit
 globals, bytecode edits, replacement rows or optimistic bounty actions are
 introduced to conceal it. The client integration documents the boundary.
+
+### Native ordinary-slot global/accessor selection (2026-10-18)
+
+Native slot frame `392c7360` owns two independent flags: selected-global+311
+and prior successful accessor-remaining-nonzero+312. Constructor
+`392c79d5..79ec` zeros both flags and both f32 timer fields. The raw global
+getter `39209430` reads the local actor manager through `39899ce0`, copying
+its u32 remaining+8/total+c. This is separate from the accessor's combined
+winning timer. The received ActionSlot kind is a different domain from the
+native accessor field+4; the adapter requires the actual accessor kind.
+
+When prior accessor-active is false, raw global remaining is nonzero, and
+accessor kind is not16/17/19, the frame chooses global. It sets+311 before
+`global_cooldown_start(total)` and DOES NOT query the accessor. Repeated
+global frames do not repeat that event. On leaving this branch, it clears
++311 and emits `global_cooldown_done` BEFORE re-reading/querying the current
+accessor. Consequently that callback can change the subsequent binding/data.
+The accessor query receives false for its ignore-global argument; its result
+can itself include global cooldown. No duration comparison classifies it.
+
+A successful accessor query stores both counts narrowed individually to f32.
+The remaining-zero transition controls+312 and `skill_cooldown_start(total)` /
+`skill_cooldown_done`, with flags set before their callbacks. A false query
+silently zeros both timers/flags without a skill-done event. A previously
+active accessor bypasses the global selector even when a fresh raw global
+count exists. Native `ResetState` (`39256300` -> `392c2b40`) clears both flags
+while retaining timer fields, without cooldown events. Its native accessor
+cache reset and completion-child effect remain outside this plain UI adapter.
+
+The public app-only API is `aa_ui::lua::slot::{CooldownSample,
+set_native_cooldown_mode, update_native_slot_cooldown}`. Mode defaults off,
+retaining the existing content-hook countdown path. Explicitly enabling it
+before control binding bypasses content cooldown estimates for ordinary slots.
+The app then supplies raw u32 global counts and native accessor kind per live
+slot, plus an on-demand `FnOnce(&Lua,Id)->Option<CooldownSample>` accessor
+query. Some zero/zero is a successful ready result; None is native query
+failure. The caller skips absent accessors. The helper executes that query
+only after the selector and any global-done callback. Raw samples remain
+snapshots: advancing toolkit time alone cannot finish them. Changing adapter
+mode clears UI samples/flags without modifying game timers; repeated identical
+mode installation is a no-op. Generic cooldown buttons stay independent.
+
+A selected-global snapshot suppresses the ordinary slot caption using+311;
+option82 and existing caption formatting still control other snapshots.
+There is no new Lua game method/global. Production activation remains gated
+on an actual raw-GCD/accessor producer supplied by the app. The existing
+`AAUI.SkillCooldown` two-result combined winner cannot substitute for it.
+Raw manager insertion, A74/planner provenance and accessor16/17/19 class
+mapping are not inferred by this toolkit slice. Ordinary-slot tessellation
+and completion-effect rendering retain their existing boundaries.
+
+`data/extract/aa-ui/slot_gcd_selector_oracle.py` and
+`native-slot-gcd-selector-oracle-20261018.json` execute **14 native groups**
+through actual `392c7360` / `392c2b40`. Raw getter/manager reads, unsigned
+conversions, flag transitions and ordinary timer setter execute unchanged;
+accessor-frame/query and final script/effect delivery are explicit endpoints.
+Goldens cover query-skipping, repeated global, callback order, retained
+accessor state, both completion routes, false-query silence, all three
+excluded kinds, ResetState, u32-max narrowing and absent accessor retention.
+`native-slot-gcd-selection-source-20261018.txt` and
+`native-slot-gcd-manager-source-20261018.txt` archive the source paths.
+
+Fresh `cargo check -p aa-ui` passes; **27 selected tests pass**: native
+selector6, constant7, caption6, mask7 and slot-state1. They include a
+global-done handler that rebinds before the query, native snapshot/ResetState
+lifetime, explicit compatibility-mode transitions, original action-slot
+content events/captions and a strict physical click on the original control.
+The aa-dev `native_slot_cooldown` example uses the actual original action
+slots/equipment controls with explicitly fixed samples. Inspected capture
+`shots/aa-ui/native-slot-cooldown-720-20261018.png` at1280x720/default0.85
+shows global without a caption, retained/excluded accessor snapshots with9s
+captions, and independent generic equipment. It reports **404.1-457.3 FPS**,
+zero script errors/WARN/ERROR, self-closes (PID48992), and its copied
+executable was removed. These fixture samples are not received game state.
