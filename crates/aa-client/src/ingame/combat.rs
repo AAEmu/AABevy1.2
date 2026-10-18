@@ -289,23 +289,34 @@ fn slowmo() -> Option<f32> {
 /// * `T:start:TL:SKILL:CAST_MS`, `T:fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `T:plot:TL:EVENT:SKILL[:CASTING_MS]`
 /// * `T:hit:TL:SKILL:DAMAGE` (a blow of the player lands on the player), `T:end:TL`, `T:stop:TL` (casting stopped),
 ///   `T:plotend:TL`, `T:plotstop:TL` (channeling stopped)
+/// * an op may end in `@self` (`T:fire@self:...`): that event aims at the player even when `AA_COMBAT_FAKE_TARGET` names a unit
+/// * `T:buff:INDEX:BUFF_ID[:MS]`, `T:unbuff:INDEX`: a buff arrives on / leaves the target (its aura, pose and freeze: `combat/buffs.rs`)
 /// * `T:use:SKILL[:TARGET]`: the player asks the server for a skill (a `UseSkill` command, as the action bar sends it)
 ///
-/// The target is the player itself.
+/// The target is the player itself, or the unit `AA_COMBAT_FAKE_TARGET` names (an object id, `model=ID` or a part of the unit's name:
+/// `model=1290` is the training dummy; the events wait up to 20 s for it to be in view). The first step opens `aa_dev::RecordGate` (`--record-gate`).
 #[derive(Resource)]
 struct Fake {
-    steps: Vec<(f64, Vec<u32>, &'static str)>,
+    /// (time, arguments, op, aimed at the player itself)
+    steps: Vec<(f64, Vec<u32>, &'static str, bool)>,
     started: Option<f64>,
+    /// `AA_COMBAT_FAKE_TARGET`.
+    target: Option<String>,
 }
 
 impl Fake {
     fn from_env() -> Option<Fake> {
         let text = std::env::var("AA_COMBAT_FAKE").ok()?;
-        let mut steps: Vec<(f64, Vec<u32>, &'static str)> = Vec::new();
+        let mut steps: Vec<(f64, Vec<u32>, &'static str, bool)> = Vec::new();
         for step in text.split(';').filter(|s| !s.trim().is_empty()) {
             let mut parts = step.split(':');
             let at: f64 = parts.next()?.trim().parse().ok()?;
-            let op = match parts.next()?.trim() {
+            let raw = parts.next()?.trim();
+            let (raw, own) = match raw.strip_suffix("@self") {
+                Some(op) => (op, true),
+                None => (raw, false),
+            };
+            let op = match raw {
                 "start" => "start",
                 "fire" => "fire",
                 "plot" => "plot",
@@ -314,34 +325,36 @@ impl Fake {
                 "stop" => "stop",
                 "plotend" => "plotend",
                 "plotstop" => "plotstop",
+                "buff" => "buff",
+                "unbuff" => "unbuff",
                 "use" => "use",
                 other => {
                     warn!("combat: AA_COMBAT_FAKE: unknown step {other}");
                     continue;
                 }
             };
-            steps.push((at, parts.filter_map(|p| p.trim().parse().ok()).collect(), op));
+            steps.push((at, parts.filter_map(|p| p.trim().parse().ok()).collect(), op, own));
         }
         steps.sort_by(|a, b| b.0.total_cmp(&a.0));
-        Some(Fake { steps, started: None })
+        Some(Fake { steps, started: None, target: std::env::var("AA_COMBAT_FAKE_TARGET").ok().filter(|t| !t.is_empty()) })
     }
 
-    fn event(op: &str, a: &[u32], me: u32) -> Option<Event> {
+    fn event(op: &str, a: &[u32], me: u32, other: u32) -> Option<Event> {
         let arg = |i: usize| a.get(i).copied().unwrap_or(0);
         let caster = BuffCaster { kind: 0, obj_id: me };
-        let target = SkillTarget { kind: 0, obj_id: me, pos: None };
+        let target = SkillTarget { kind: 0, obj_id: other, pos: None };
         let raw_caster = aa_net::SkillCasterData::Unit(me);
-        let raw_target = aa_net::SkillTargetData::Unit(me);
+        let raw_target = aa_net::SkillTargetData::Unit(other);
         let tl = arg(0) as u16;
         Some(match op {
             "start" => Event::SkillStarted(SkillStarted { skill_id: arg(1), tl, caster, target, cast_ms: arg(2), base_cast_ms: arg(2), synergy: 0, result: 0, result_value: 0, raw_result: Default::default(), raw_caster, raw_target }),
             "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4), raw_final_flag: 0, result: Default::default(), raw_caster, raw_target }),
-            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: me, caster_pos: None, target_pos: None, casting_ms: arg(3) }),
+            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: other, caster_pos: None, target_pos: None, casting_ms: arg(3) }),
             "hit" => Event::UnitDamaged(UnitDamage {
                 action: CastAction { kind: 0, skill_id: arg(1), tl, buff_id: 0 },
                 caster,
                 caster_obj_id: me,
-                target_obj_id: me,
+                target_obj_id: other,
                 damage: arg(2) as i32,
                 absorbed: 0,
                 mana_burn: 0,
@@ -351,27 +364,73 @@ impl Fake {
             "stop" => Event::CastingStopped { tl, duration_ms: 0 },
             "plotend" => Event::PlotEnded { tl },
             "plotstop" => Event::PlotStopped { tl, duration_ms: 0, last_event: 0, channeling: true },
+            // `buff:INDEX:BUFF_ID[:DURATION_MS]`, `unbuff:INDEX`: a buff on the target (the unit's list in `Buffs` follows)
+            "buff" => Event::BuffCreated { obj_id: other, buff: aa_net::buff::Buff { index: arg(0), buff_id: arg(1), duration_ms: arg(2) as i32, caster, stacks: 1, ..Default::default() } },
+            "unbuff" => Event::BuffRemoved { obj_id: other, index: arg(0) },
             _ => return None,
         })
     }
 }
 
-fn fake_events(time: Res<Time>, mut fake: ResMut<Fake>, local: Query<&LocalPlayer>, mut out: MessageWriter<NetEvent>, mut commands: MessageWriter<NetCommand>) {
+fn fake_events(
+    time: Res<Time>,
+    mut fake: ResMut<Fake>,
+    local: Query<&LocalPlayer>,
+    units: Res<Units>,
+    mut gate: ResMut<aa_dev::RecordGate>,
+    mut buffs: Option<ResMut<aa_net::state::Buffs>>,
+    mut shot: Option<ResMut<DevShot>>,
+    mut out: MessageWriter<NetEvent>,
+    mut commands: MessageWriter<NetCommand>,
+) {
     let Ok(me) = local.single() else { return };
     let now = time.elapsed_secs_f64();
     let started = *fake.started.get_or_insert(now);
+    gate.open(started);
+    // the unit the events aim at: AA_COMBAT_FAKE_TARGET (an object id or a part of the name), else the player itself
+    let other = match &fake.target {
+        None => me.obj_id,
+        Some(t) => {
+            let wanted = t.to_lowercase();
+            let found = units
+                .by_id
+                .values()
+                .find(|u| {
+                    u.obj_id != me.obj_id
+                        && (u.obj_id.to_string() == wanted
+                            || wanted.strip_prefix("model=").is_some_and(|m| m == u.model_id.to_string())
+                            || u.name.to_lowercase().contains(&wanted))
+                })
+                .map(|u| u.obj_id);
+            match found {
+                Some(id) => id,
+                None if now - started < 20.0 => return,
+                None => {
+                    warn_once!("combat: AA_COMBAT_FAKE_TARGET {t} not in view: the player is the target");
+                    me.obj_id
+                }
+            }
+        }
+    };
     while fake.steps.last().is_some_and(|s| now - started >= s.0) {
-        let (_, args, op) = fake.steps.pop().unwrap();
+        let (_, args, op, own) = fake.steps.pop().unwrap();
         if op == "use" {
             // the player asks for a skill without the action bar (which refuses a press while a cast runs)
             commands.write(NetCommand(Command::UseSkill { skill_id: args.first().copied().unwrap_or(0), target_obj_id: args.get(1).copied().unwrap_or(0) }));
-        } else if let Some(event) = Fake::event(op, &args, me.obj_id) {
+        } else if let Some(event) = Fake::event(op, &args, me.obj_id, if own { me.obj_id } else { other }) {
+            // the buff list is the net state's: events written here do not reach it
+            if let (Some(buffs), Event::BuffCreated { .. } | Event::BuffRemoved { .. }) = (buffs.as_mut(), &event) {
+                buffs.apply(&event);
+            }
+            if let (Some(shot), Event::BuffCreated { .. }) = (shot.as_mut(), &event) {
+                shot.event("buff", now);
+            }
             out.write(NetEvent(event));
         }
     }
 }
 
-/// `AA_COMBAT_SHOT=<png>@<ask|start|fire|fire2|plot|hit|death>+<seconds>[,<seconds>...]`: screenshots that many game seconds after the first
+/// `AA_COMBAT_SHOT=<png>@<ask|start|fire|fire2|plot|hit|death|buff>+<seconds>[,<seconds>...]`: screenshots that many game seconds after the first
 /// such event (the local player asked for a skill (`ask`: the key), the local player's skill started, the local player fired (`fire2`: for the second time; `plot`: a step of the player's
 /// plot skill), a unit other than the player was hit, a unit died), then exit. Catches a flying arrow without guessing the network
 /// latency. With several times the files are `<name>_01.png`, `<name>_02.png`, ... (a series to line up with a capture of the real

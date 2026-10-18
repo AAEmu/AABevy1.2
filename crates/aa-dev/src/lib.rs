@@ -6,6 +6,9 @@
 //! * `--shot-after <s>`   seconds to wait before the screenshot (default 5; covers asset loading)
 //! * `--exit-after <s>`   exit after this many seconds (no screenshot)
 //! * `--size <WxH>`       window size (default 1920x1080, the real client's resolution)
+//! * `--record <dir>`     write one PNG per frame (`f_000001.png`, ...) at a fixed timestep, then exit: see [`record`]
+//!   (`--record-fps 30`, `--record-from S` game seconds before the first frame, `--record-secs N` length,
+//!   `--record-gate` count `--record-from` from [`RecordGate::open`] instead of from the start)
 //!
 //! FPS and frame time are logged every 2 s (`aa-dev: fps=… frame_ms=…`) so performance can be
 //! compared from the console. With `--shot` or `--exit-after` the app also runs uncapped when the
@@ -21,6 +24,9 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{PresentMode, WindowResolution};
 use bevy::winit::WinitSettings;
 
+mod record;
+pub use record::RecordGate;
+
 /// Parsed command line options.
 #[derive(Resource, Clone, Debug)]
 pub struct DevArgs {
@@ -28,6 +34,12 @@ pub struct DevArgs {
     pub shot_after: f32,
     pub exit_after: Option<f32>,
     pub size: (u32, u32),
+    /// `--record <dir>`: frame capture, see [`record`].
+    pub record: Option<String>,
+    pub record_fps: f32,
+    pub record_from: f32,
+    pub record_secs: Option<f32>,
+    pub record_gate: bool,
 }
 
 impl DevArgs {
@@ -47,6 +59,11 @@ impl DevArgs {
             shot_after: value("--shot-after").and_then(|s| s.parse().ok()).unwrap_or(5.0),
             exit_after: value("--exit-after").and_then(|s| s.parse().ok()),
             size,
+            record: value("--record"),
+            record_fps: value("--record-fps").and_then(|s| s.parse().ok()).unwrap_or(30.0),
+            record_from: value("--record-from").and_then(|s| s.parse().ok()).unwrap_or(0.0),
+            record_secs: value("--record-secs").and_then(|s| s.parse().ok()),
+            record_gate: args.iter().any(|a| a == "--record-gate"),
         }
     }
 }
@@ -77,7 +94,7 @@ impl Plugin for DevPlugin {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
         let args = DevArgs::from_env();
-        if args.shot.is_some() || args.exit_after.is_some() {
+        if args.shot.is_some() || args.exit_after.is_some() || args.record.is_some() {
             // Unattended runs usually have no focus; don't let Bevy cap them at 60 Hz, or the
             // logged FPS is meaningless.
             app.insert_resource(WinitSettings::continuous());
@@ -85,6 +102,7 @@ impl Plugin for DevPlugin {
         app.insert_resource(args)
             .init_resource::<DevState>()
             .add_systems(Update, (log_fps, shot_and_exit));
+        record::plugin(app);
     }
 }
 
@@ -117,6 +135,7 @@ fn shot_and_exit(
     time: Res<Time>,
     args: Res<DevArgs>,
     mut state: ResMut<DevState>,
+    recording: Res<record::Recorder>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let t = time.elapsed_secs();
@@ -136,7 +155,7 @@ fn shot_and_exit(
             }
         }
     }
-    if args.exit_after.is_some_and(|s| t >= s) {
+    if args.exit_after.is_some_and(|s| t >= s) && !recording.busy() {
         exit.write(AppExit::Success);
     }
 }
