@@ -34,7 +34,11 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
             skills: vec![],
             tags: [(655, 18_000, 30_000), (1004, 12_000, 300_000)]
                 .into_iter()
-                .map(|(id, remaining_ms, total_ms)| aa_net::Cooldown { id, remaining_ms, total_ms })
+                .map(|(id, remaining_ms, total_ms)| aa_net::Cooldown {
+                    id,
+                    remaining_ms,
+                    total_ms,
+                })
                 .collect(),
         }));
         let hud: Table = rt.lua.globals().get("HUD")?;
@@ -92,13 +96,17 @@ pub(crate) fn run() {
         }
     }
     App::new()
-        .add_plugins((aa_dev::default_plugins("aa-client: original equipment cooldowns"), aa_dev::DevPlugin))
+        .add_plugins((
+            aa_dev::default_plugins("aa-client: original equipment cooldowns"),
+            aa_dev::DevPlugin,
+        ))
         .add_plugins(aa_ui::UiPlugin {
             config: Some(crate::login::host::ui_config()),
         })
         .insert_non_send(rt)
         .insert_non_send(super::super::api::HudBridge(bridge))
         .add_systems(Startup, physical_pixels)
+        .add_systems(Update, advance_fixture.before(aa_ui::UiInput))
         .run();
     if path.exists() {
         std::fs::remove_file(path).unwrap();
@@ -111,4 +119,12 @@ fn physical_pixels(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
         window.resolution.set_scale_factor_override(Some(1.0));
         window.resolution.set_physical_resolution(width, height);
     }
+}
+
+fn advance_fixture(time: Res<Time<Real>>, bridge: NonSend<super::super::api::HudBridge>) {
+    bridge
+        .0
+        .borrow_mut()
+        .cooldowns
+        .advance_native_frame(time.elapsed().as_millis() as u32);
 }

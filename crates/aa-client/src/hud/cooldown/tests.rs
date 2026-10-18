@@ -26,7 +26,11 @@ fn game() -> GameData {
 
 fn entry(id: u32, remaining_ms: u32, total_ms: u32, at: Instant) -> NativeCooldown {
     NativeCooldown {
-        cooldown: aa_net::Cooldown { id, remaining_ms, total_ms },
+        cooldown: aa_net::Cooldown {
+            id,
+            remaining_ms,
+            total_ms,
+        },
         updated_at: at,
         origin: aa_net::state::NativeCooldownOrigin::Snapshot,
         reset: false,
@@ -42,7 +46,11 @@ fn every_tag_and_raw_skill_use_native_order_and_unsigned_strict_greater() {
         last_cast_skill: 8,
         ..Default::default()
     };
-    skills.native_tag_cooldowns = vec![entry(10, 5000, 11_000, now), entry(20, 5000, 22_000, now), entry(999, 60_000, 60_000, now)];
+    skills.native_tag_cooldowns = vec![
+        entry(10, 5000, 11_000, now),
+        entry(20, 5000, 22_000, now),
+        entry(999, 60_000, 60_000, now),
+    ];
     skills.native_skill_cooldowns.push(entry(7, 5000, 33_000, now));
     // Equal remaining preserves global before tags and raw IDs, regardless of total.
     assert_eq!(combined_at(&game, &skills, 7, now), Some((5000, 5000)));
@@ -61,6 +69,12 @@ fn every_tag_and_raw_skill_use_native_order_and_unsigned_strict_greater() {
         (0, 0),
         "the estimate must not query a nonmember tag"
     );
+    assert_eq!(
+        combined_at(&game, &skills, 7, now + Duration::from_secs(7)),
+        Some((6000, 11_000)),
+        "queries do not advance native frame timers"
+    );
+    skills.advance_native_frame(7000);
     assert_eq!(combined_at(&game, &skills, 7, now + Duration::from_secs(7)), Some((0, 0)));
 }
 
@@ -75,6 +89,12 @@ fn global_exemption_and_clock_sampling_preserve_the_winning_duration() {
     };
     skills.native_tag_cooldowns.push(entry(20, 4000, 17_000, now));
     let later = now + Duration::from_millis(1234);
+    assert_eq!(
+        combined_at(&game, &skills, 7, later),
+        Some((4000, 17_000)),
+        "native rows do not project from query Instant"
+    );
+    skills.advance_native_frame(1234);
     assert_eq!(combined_at(&game, &skills, 7, later), Some((3766, 5000)));
     game.skills.get_mut(&7).unwrap().ignore_gcd = true;
     assert_eq!(combined_at(&game, &skills, 7, later), Some((2766, 17_000)));
@@ -138,12 +158,23 @@ fn bound_descriptor_catalog_routes_real_stop_duration_and_supersedes_only_its_ol
         !skills.last_used.contains_key(&7),
         "an admitted stop supersedes the old app estimate at the actual state boundary"
     );
-    assert!(skills.received_tag_cooldowns.is_empty(), "a stop does not rewrite the snapshot receipt log");
+    assert!(
+        skills.received_tag_cooldowns.is_empty(),
+        "a stop does not rewrite the snapshot receipt log"
+    );
     let data = bridge.borrow();
     let game = data.game.get().unwrap();
     assert_eq!(combined_at(game, &skills, 7, timer.updated_at), Some((7000, 7000)));
     assert_eq!(display_at(game, &skills, 7, timer.updated_at), Some((7000, 7000)));
-    assert_eq!(display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(8)), Some((0, 0)));
+    assert_eq!(
+        display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(8)),
+        Some((7000, 7000))
+    );
+    skills.advance_native_frame(8000);
+    assert_eq!(
+        display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(8)),
+        Some((0, 0))
+    );
     skills.last_used.insert(7, timer.updated_at + Duration::from_secs(9));
     assert_eq!(
         display_at(game, &skills, 7, timer.updated_at + Duration::from_secs(9)),
@@ -171,7 +202,9 @@ fn lua_hook_distinguishes_missing_descriptor_from_ready_or_missing_actor() -> Re
         data.cooldowns.obj_id = 100;
         data.cooldowns.native_tag_cooldowns.push(entry(20, 8000, 12_000, Instant::now()));
     }
-    rt.lua.load("local a,b=AAUI.SkillCooldown(7);assert(a>7900 and a<=8000 and b==12000)").exec()?;
+    rt.lua
+        .load("local a,b=AAUI.SkillCooldown(7);assert(a>7900 and a<=8000 and b==12000)")
+        .exec()?;
     Ok(())
 }
 
@@ -182,12 +215,18 @@ fn original_equipment_handler_reads_received_cooldowns_without_changing_its_icon
     let id = aa_ui::lua::value_id(&rt.lua, &rt.lua.load("equippedItem.slot[7]").eval()?).unwrap();
     let before = aa_ui::lua::ui(&rt.lua).tree.widget(id).unwrap().clone();
     assert_eq!(before.button.as_ref().unwrap().cooldown_skill.as_ref().unwrap().skill_type, 13419);
-    assert!(before.slot.is_none(), "a cooldown-only equipment identity is not a clickable skill accessor");
+    assert!(
+        before.slot.is_none(),
+        "a cooldown-only equipment identity is not a clickable skill accessor"
+    );
     aa_ui::lua::tick(&rt.lua, 16.);
     {
         let ui = aa_ui::lua::ui(&rt.lua);
         let after = ui.tree.widget(id).unwrap();
-        let sweep = after.cooldown.as_ref().expect("original equipped-item handler starts the received sweep");
+        let sweep = after
+            .cooldown
+            .as_ref()
+            .expect("original equipped-item handler starts the received sweep");
         assert_eq!(sweep.total_ms, 30_000.);
         assert!((17_000. ..=18_000.).contains(&(sweep.end_ms - ui.time_ms)));
         assert_eq!(after.button.as_ref().unwrap().bg, before.button.as_ref().unwrap().bg);
@@ -221,4 +260,55 @@ fn original_equipment_handler_reads_received_cooldowns_without_changing_its_icon
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+#[test]
+fn queued_receipts_advance_on_the_authoritative_frame_before_hud_refresh() {
+    use bevy::prelude::*;
+    fn receipt(mut skills: ResMut<Skills>, mut done: Local<bool>) {
+        if *done {
+            return;
+        }
+        *done = true;
+        skills.apply(&aa_net::Event::Cooldowns(aa_net::skill::SkillCooldowns {
+            skills: vec![aa_net::Cooldown {
+                id: 7,
+                remaining_ms: 1000,
+                total_ms: 2000,
+            }],
+            tags: vec![],
+        }));
+    }
+    let mut time = Time::<Real>::default();
+    time.advance_by(Duration::from_millis(1000));
+    let mut app = App::new();
+    app.insert_resource(time)
+        .insert_resource(Skills {
+            obj_id: 100,
+            native_last_frame_ms: 900,
+            ..Default::default()
+        })
+        .add_systems(PreUpdate, receipt)
+        .add_systems(Update, advance_frame);
+    app.update();
+    let skills = app.world().resource::<Skills>();
+    assert_eq!(skills.native_last_frame_ms, 1000);
+    assert_eq!(skills.native_skill_cooldowns[0].cooldown.remaining_ms, 900);
+    assert_eq!(
+        skills.received_skill_cooldowns[0].cooldown.remaining_ms, 1000,
+        "frame update preserves raw receipt"
+    );
+    let query = skills.native_cooldown_at(7, &[], Instant::now() + Duration::from_secs(100));
+    assert_eq!(query, Some((Duration::from_millis(900), Duration::from_millis(2000))));
+    app.world_mut()
+        .resource_mut::<Skills>()
+        .apply(&aa_net::Event::Disconnected { message: String::new() });
+    assert_eq!(app.world().resource::<Skills>().native_last_frame_ms, 1000);
+    app.world_mut().resource_mut::<Time<Real>>().advance_by(Duration::from_millis(17));
+    app.update();
+    assert_eq!(
+        app.world().resource::<Skills>().native_last_frame_ms,
+        1017,
+        "clock advances without actor/HUD"
+    );
 }

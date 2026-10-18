@@ -270,6 +270,26 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
     inventory_order::install(lua, net, store)
 }
 
+/// Chat's native local store uses independent tab/extra/option keys per world and character.
+/// Resolve the Lua state's store on each call so isolated original-script fixtures stay isolated.
+pub(crate) fn chat_read(lua: &Lua, owner: &str, suffix: &str) -> Option<Json> {
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    let store = store.lock().unwrap_or_else(|e| e.into_inner());
+    store.data.get("chat")?.get(owner)?.get(suffix).cloned()
+}
+
+pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) {
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    let mut store = store.lock().unwrap_or_else(|e| e.into_inner());
+    let chat = store.data.entry("chat").or_insert_with(|| json!({}));
+    if !chat.is_object() { *chat = json!({}); }
+    let record = chat.as_object_mut().unwrap().entry(owner).or_insert_with(|| json!({}));
+    if !record.is_object() { *record = json!({}); }
+    record[suffix] = value;
+    store.dirty = true;
+    if let Err(e) = store.save() { bevy::log::warn!("settings: chat save: {e:#}"); }
+}
+
 pub fn install_hud(lua: &Lua) -> mlua::Result<()> {
     lua.load(include_str!("settings.lua"))
         .set_name("@settings.lua")
@@ -282,6 +302,12 @@ pub fn install_options(lua: &Lua) -> mlua::Result<()> {
     lua.load(include_str!("settings_options.lua"))
         .set_name("@settings_options.lua")
         .exec()
+}
+
+#[cfg(test)]
+pub(crate) fn reopen_fixture(rt: &aa_ui::UiRuntime, path: PathBuf) -> mlua::Result<()> {
+    let net: Table = rt.lua.globals().get("NET")?;
+    install_store(&rt.lua, &net, Arc::new(Mutex::new(Store::open(path))))
 }
 
 #[cfg(test)]
