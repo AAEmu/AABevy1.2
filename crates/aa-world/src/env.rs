@@ -13,52 +13,108 @@ use std::collections::HashMap;
 
 use bevy::math::{Mat3, Vec2, Vec3, Vec4};
 
+#[path = "env_defaults.rs"]
+mod defaults;
+
+/// One XML Bézier key. Low three flag bits select the incoming tangent, the next
+/// three the outgoing tangent. Higher bits are preserved editor flags.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SplineKey {
+    pub time: f32,
+    pub value: [f32; 3],
+    pub flags: u32,
+}
+
 /// A time of day spline (scalar or colour).
 #[derive(Clone, Debug, Default)]
 pub struct Spline {
-    /// `(time 0..1, value)`; scalars use `x`.
-    pub keys: Vec<(f32, [f32; 3])>,
+    /// Native keys may extend slightly beyond 0..1; scalar values use `x`.
+    pub keys: Vec<SplineKey>,
     pub is_color: bool,
-    /// The editor's current value (used when there are no keys).
+    /// The editor's current value. It does not replace initialized default keys.
     pub value: [f32; 3],
+    /// Native scalar metadata limits; RGB variables clamp to 0..1 after evaluation.
+    pub range: Option<[f32; 2]>,
 }
 
 impl Spline {
-    /// Linear interpolation over the (wrapping) day.
+    /// Native CBezierSplineFloat/Vec3 evaluation. Endpoint clamping, binary segment
+    /// lookup and at most four neighboring keys; no allocations or curve rebuild.
     pub fn eval(&self, t: f32) -> [f32; 3] {
-        let t = t.rem_euclid(1.0);
         let k = &self.keys;
-        match k.len() {
-            0 => self.value,
-            1 => k[0].1,
+        let Some(first) = k.first() else { return self.value };
+        if t < first.time || t.is_nan() {
+            return first.value;
+        }
+        let next = k.partition_point(|key| key.time <= t);
+        if next >= k.len() {
+            return k.last().unwrap().value;
+        }
+        let (a, b) = (&k[next - 1], &k[next]);
+        if (a.flags >> 3) & 7 == 3 {
+            return b.value;
+        }
+        if b.flags & 7 == 3 {
+            return a.value;
+        }
+        let u = (t - a.time) / (b.time - a.time);
+        let (u2, u3) = (u * u, u * u * u);
+        let b0 = 3.0 * u2 - u3 - 3.0 * u + 1.0;
+        let b1 = 3.0 * u3 - 6.0 * u2 + 3.0 * u;
+        let b2 = 3.0 * u2 - 3.0 * u3;
+        let outgoing = self.tangent(next - 1, false);
+        let incoming = self.tangent(next, true);
+        [0, 1, 2].map(|i| a.value[i] * b0 + (a.value[i] + outgoing[i]) * b1
+            + (b.value[i] - incoming[i]) * b2 + b.value[i] * u3)
+    }
+
+    // Exact 300ABDD0 / 300AC0A0 controls. XML serializes flags, not custom tangent
+    // values: free (1) retains the zero controls established by native InsertKey.
+    fn tangent(&self, i: usize, incoming: bool) -> [f32; 3] {
+        let k = &self.keys;
+        let mode = (k[i].flags >> if incoming { 0 } else { 3 }) & 7;
+        if mode == 1 || k.len() < 2 {
+            return [0.0; 3];
+        }
+        let delta = |a: usize, b: usize| [0, 1, 2].map(|c| (k[b].value[c] - k[a].value[c]) / 3.0);
+        // Native endpoint rules precede the interior tangent-mode switch.
+        if i == 0 {
+            return if incoming { [0.0; 3] } else { delta(0, 1) };
+        }
+        if i == k.len() - 1 {
+            return if incoming { delta(i - 1, i) } else { [0.0; 3] };
+        }
+        match mode {
+            2 | 3 => [0.0; 3],
+            4 => if incoming { delta(i - 1, i) } else { delta(i, i + 1) },
             _ => {
-                // find the segment [i, i+1] containing t, wrapping from the last key to the first
-                let next = k.iter().position(|(kt, _)| *kt > t);
-                let (a, b, span, local) = match next {
-                    Some(0) => {
-                        let (a, b) = (k.last().unwrap(), &k[0]);
-                        let span = b.0 + 1.0 - a.0;
-                        (a, b, span, t + 1.0 - a.0)
-                    }
-                    Some(i) => (&k[i - 1], &k[i], k[i].0 - k[i - 1].0, t - k[i - 1].0),
-                    None => {
-                        let (a, b) = (k.last().unwrap(), &k[0]);
-                        let span = b.0 + 1.0 - a.0;
-                        (a, b, span, t - a.0)
-                    }
-                };
-                let u = if span > 1e-6 { (local / span).clamp(0.0, 1.0) } else { 0.0 };
-                [0, 1, 2].map(|i| a.1[i] + (b.1[i] - a.1[i]) * u)
+                let span = k[i + 1].time - k[i - 1].time;
+                if span <= 0.0 { return [0.0; 3] }
+                let weight = (k[i].time - k[i - 1].time) / span;
+                delta(i - 1, i + 1).map(|v| v * if incoming { weight } else { 1.0 - weight })
             }
         }
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TimeOfDay {
     pub variables: HashMap<String, Spline>,
     /// `Time` attribute: the editor's current hour.
     pub default_hour: f32,
+}
+
+impl Default for TimeOfDay {
+    fn default() -> Self {
+        let variables = defaults::VARIABLES.iter().map(|(name, color, bits)| {
+            let v = bits.map(f32::from_bits);
+            let value = if *color { v } else { [v[0], 0.0, 0.0] };
+            let keys = [0.0, 1.0].map(|time| SplineKey { time, value, flags: 0 }).to_vec();
+            ((*name).to_string(), Spline { keys, is_color: *color, value,
+                range: (!*color).then_some([v[1], v[2]]) })
+        }).collect();
+        Self { variables, default_hour: 12.0 }
+    }
 }
 
 fn parse_floats(s: &str) -> Vec<f32> {
@@ -68,18 +124,19 @@ fn parse_floats(s: &str) -> Vec<f32> {
         .collect()
 }
 
-fn parse_spline(keys: &str, color: bool) -> Vec<(f32, [f32; 3])> {
+fn parse_spline(keys: &str, color: bool) -> Vec<SplineKey> {
     let mut out = Vec::new();
     // keys are separated by ',' but colour values contain ':' only, so split on ',' at depth 0
     for key in keys.split(',').filter(|k| !k.trim().is_empty()) {
         let v = parse_floats(key);
-        if color && v.len() >= 4 {
-            out.push((v[0], [v[1], v[2], v[3]]));
-        } else if !color && v.len() >= 2 {
-            out.push((v[0], [v[1], 0.0, 0.0]));
+        let count = if color { 4 } else { 2 };
+        if v.len() >= count && v[..count].iter().all(|v| v.is_finite()) {
+            let value = if color { [v[1], v[2], v[3]] } else { [v[1], 0.0, 0.0] };
+            let flags = if v.len() > count { key.rsplit(':').next().and_then(|s| s.trim().parse().ok()).unwrap_or(0) } else { 0 };
+            out.push(SplineKey { time: v[0], value, flags });
         }
     }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.sort_by(|a, b| a.time.total_cmp(&b.time));
     out
 }
 
@@ -89,44 +146,55 @@ impl TimeOfDay {
         Self::parse_layer(xml, 0)
     }
 
-    /// A zone file carries several `<TimeOfDay>` blocks (`relic_layer` 0 and 1); `layer` picks one, falling back to
-    /// the first block.
+    /// A zone list initializes two native default layers, then loads matching blocks.
+    /// An absent layer keeps its defaults. A standalone TimeOfDay block applies to both.
     pub fn parse_layer(xml: &str, layer: u32) -> Option<TimeOfDay> {
         let doc = roxmltree::Document::parse(xml).ok()?;
+        if layer > 1 { return None }
+        let mut tod = Self::default();
         let want = layer.to_string();
-        let block = doc
-            .descendants()
-            .filter(|n| n.has_tag_name("TimeOfDay"))
-            .find(|n| n.attribute("relic_layer").unwrap_or("0") == want && n.attribute("weather_layer").unwrap_or("0") == "0")
-            .or_else(|| doc.descendants().find(|n| n.has_tag_name("TimeOfDay")))?;
-        let default_hour = block.attribute("Time").and_then(|v| v.parse().ok()).unwrap_or(12.0);
-        let mut variables = HashMap::new();
+        let root = doc.root_element();
+        let block = if root.has_tag_name("TimeOfDay") { Some(root) } else if root.has_tag_name("TimeOfDayList") {
+            root.children().filter(|n| n.has_tag_name("TimeOfDay"))
+                .find(|n| n.attribute("relic_layer").unwrap_or("0") == want && n.attribute("weather_layer").unwrap_or("0") == "0")
+        } else { return None };
+        let Some(block) = block else { return Some(tod) };
+        tod.default_hour = block.attribute("Time").and_then(|v| v.parse().ok()).unwrap_or(12.0);
         for v in block.children().filter(|n| n.has_tag_name("Variable")) {
             let Some(name) = v.attribute("Name") else { continue };
-            let is_color = v.attribute("Color").is_some();
-            let value = if let Some(c) = v.attribute("Color") {
+            let name = if name == "HDR blueshift" { "Blueshift" } else { name };
+            let Some(spline) = tod.variables.get_mut(name) else { continue };
+            if spline.is_color && let Some(c) = v.attribute("Color") {
                 let f = parse_floats(c);
-                [f.first().copied().unwrap_or(0.0), f.get(1).copied().unwrap_or(0.0), f.get(2).copied().unwrap_or(0.0)]
-            } else {
-                [v.attribute("Value").and_then(|x| x.parse().ok()).unwrap_or(0.0), 0.0, 0.0]
-            };
-            let keys = v
+                if f.len() >= 3 { spline.value = [f[0], f[1], f[2]]; }
+            } else if !spline.is_color && let Some(value) = v.attribute("Value").and_then(|x| x.parse().ok()) {
+                spline.value[0] = value;
+            }
+            if let Some(keys) = v
                 .children()
                 .find(|n| n.has_tag_name("Spline"))
                 .and_then(|s| s.attribute("Keys"))
-                .map(|k| parse_spline(k, is_color))
-                .unwrap_or_default();
-            variables.insert(name.to_string(), Spline { keys, is_color, value });
+                .map(|k| parse_spline(k, spline.is_color))
+                && !keys.is_empty()
+            {
+                spline.keys = keys;
+            }
         }
-        Some(TimeOfDay { variables, default_hour })
+        Some(tod)
     }
 
     pub fn scalar(&self, name: &str, t: f32) -> f32 {
-        self.variables.get(name).map_or(0.0, |s| s.eval(t)[0])
+        let name = if name == "HDR blueshift" { "Blueshift" } else { name };
+        self.variables.get(name).map_or(0.0, |s| {
+            let mut value = s.eval(t)[0];
+            if let Some([min, max]) = s.range { value = value.clamp(min, max); }
+            if value.abs() < 1e-10 { 0.0 } else { value }
+        })
     }
 
     pub fn color(&self, name: &str, t: f32) -> Vec3 {
-        self.variables.get(name).map_or(Vec3::ZERO, |s| Vec3::from(s.eval(t)))
+        let name = if name == "HDR blueshift" { "Blueshift" } else { name };
+        self.variables.get(name).map_or(Vec3::ZERO, |s| Vec3::from(s.eval(t)).clamp(Vec3::ZERO, Vec3::ONE))
     }
 }
 
@@ -375,7 +443,8 @@ impl TimeOfDay {
     pub fn sample_blended(layers: &[(&TimeOfDay, f32)], hour: f32, lighting: Lighting) -> EnvSample {
         let total: f32 = layers.iter().filter(|(_, w)| w.is_finite() && *w > 0.0).map(|(_, w)| w).sum();
         if total <= 0.0 {
-            return Self::default().sample(hour, lighting);
+            static EMPTY: std::sync::OnceLock<TimeOfDay> = std::sync::OnceLock::new();
+            return EMPTY.get_or_init(Self::default).sample(hour, lighting);
         }
         let t = spline_hour(hour, lighting.dawn_hour) / 24.0;
         let scalar = |name: &str| layers.iter().filter(|(_, w)| w.is_finite() && *w > 0.0)
@@ -473,7 +542,7 @@ impl TimeOfDay {
             ),
             saturation: scalar("Saturation"),
             contrast: scalar("Contrast"),
-            color_balance: if balance == Vec3::ZERO { Vec3::ONE } else { balance },
+            color_balance: balance,
             levels_min: scalar("Levels: min input"),
             photofilter: Vec4::new(photo.x, photo.y, photo.z, scalar("Filters: photofilter density")),
             hdr_dynamic: scalar("HDR dynamic power factor"),
@@ -548,11 +617,96 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spline_eval_wraps() {
-        let s = Spline { keys: vec![(0.0, [1.0, 0.0, 0.0]), (0.5, [3.0, 0.0, 0.0]), (1.0, [1.0, 0.0, 0.0])], is_color: false, value: [0.0; 3] };
-        assert!((s.eval(0.25)[0] - 2.0).abs() < 1e-5);
-        assert!((s.eval(0.75)[0] - 2.0).abs() < 1e-5);
-        assert!((s.eval(1.25)[0] - 2.0).abs() < 1e-5);
+    fn native_spline_clamps_endpoints_and_uses_bezier_controls() {
+        let s = Spline { keys: parse_spline("0:1:0,0.5:3:0,1:1:0,", false), ..Default::default() };
+        assert!((s.eval(0.25)[0] - 2.25).abs() < 1e-5);
+        assert!((s.eval(0.75)[0] - 2.25).abs() < 1e-5);
+        assert_eq!(s.eval(-0.25)[0], 1.0);
+        assert_eq!(s.eval(1.25)[0], 1.0);
+    }
+
+    #[test]
+    fn native_x86_nonuniform_tangent_and_step_goldens() {
+        // Actual original x86 functions executed in bounded Unicorn: 300ABDD0 +
+        // 300AF720/300AE830, not a second implementation of the cubic formula.
+        for (flags, left, right) in [
+            (0, 1.15, 2.3648438), (1, 1.25, 2.3648438), (2, 1.25, 2.3648438),
+            (3, 0.0, 2.3648438), (4, 1.0, 2.3648438), (8, 1.15, 2.0585938),
+            (16, 1.15, 2.0585938), (24, 1.15, 4.0), (32, 1.15, 2.25),
+            (65536, 1.15, 2.3648438),
+        ] {
+            let s = Spline { keys: parse_spline(&format!("0:0:0,0.2:2:{flags},1:4:0,"), false), ..Default::default() };
+            assert!((s.eval(0.1)[0] - left).abs() < 2e-6, "incoming flags={flags}");
+            assert!((s.eval(0.3)[0] - right).abs() < 2e-6, "outgoing flags={flags}");
+            assert_eq!(s.keys[1].flags, flags);
+        }
+    }
+
+    #[test]
+    fn native_defaults_catalog_missing_layers_and_editor_values() {
+        let tod = TimeOfDay::default();
+        assert_eq!(tod.variables.len(), 147);
+        assert_eq!(tod.scalar("Saturation", 0.0), 1.0);
+        assert_eq!(tod.scalar("Film curve whitepoint", 0.0), 1.0);
+        assert_eq!(tod.scalar("Skybox multiplier", 0.0), 1.0);
+        assert_eq!(tod.scalar("Sun color multiplier", 0.0), 2.4);
+        assert_eq!(tod.scalar("InShadowIntensity", 0.0), 0.5);
+        assert_eq!(tod.scalar("Ocean fog density under water", 0.0), 0.04);
+        assert_eq!(tod.color("Sun color", 0.0).to_array().map(f32::to_bits), [0x3f57d7d9, 0x3f48c8ca, 0x3f2aaaab]);
+        assert_eq!(tod.color("HDR blueshift", 0.37), tod.color("Blueshift", 0.37));
+        // Native allocated defaults retain their initialized keys when XML has only
+        // an editor Value/Color attribute, with no serialized Spline child.
+        let xml = r#"<TimeOfDayList><TimeOfDay relic_layer="0">
+            <Variable Name="Saturation" Value="8"/>
+            <Variable Name="Sun color" Color="0,0,0"/>
+            <Variable Name="Not a native variable" Value="42"/>
+            </TimeOfDay></TimeOfDayList>"#;
+        let loaded = TimeOfDay::parse(xml).unwrap();
+        assert_eq!(loaded.variables["Saturation"].value[0], 8.0);
+        assert_eq!(loaded.scalar("Saturation", 0.37), tod.scalar("Saturation", 0.37));
+        assert_eq!(loaded.color("Sun color", 0.37), tod.color("Sun color", 0.37));
+        assert!(!loaded.variables.contains_key("Not a native variable"));
+        let absent = TimeOfDay::parse_layer(xml, 1).unwrap();
+        assert_eq!(absent.scalar("Sun color multiplier", 0.0), 2.4);
+        assert!(TimeOfDay::parse_layer(xml, 2).is_none());
+        let limited = TimeOfDay::parse(r#"<TimeOfDay>
+            <Variable Name="Saturation"><Spline Keys="0:99:0,1:99:0,"/></Variable>
+            <Variable Name="Sun color"><Spline Keys="0:(-1:2:0.5):0,1:(-1:2:0.5):0,"/></Variable>
+            <Variable Name="Color balance"><Spline Keys="0:(0:0:0):0,1:(0:0:0):0,"/></Variable>
+            </TimeOfDay>"#).unwrap();
+        assert_eq!(limited.scalar("Saturation", 0.2), 10.0);
+        assert_eq!(limited.color("Sun color", 0.2), Vec3::new(0.0, 1.0, 0.5));
+        assert_eq!(limited.sample(10.0, Lighting::default()).color_balance, Vec3::ZERO);
+    }
+
+    #[test]
+    fn real_solzreed_curves_match_original_x86() {
+        if !crate::pak_available() { return }
+        let xml = aa_pak::Pak::global().read_string("worlds/main_world/zone/179/time_of_day.xml").unwrap();
+        let tod = TimeOfDay::parse(&xml).unwrap();
+        // Direct native RGB tangent/evaluation results (300AC0A0, 300AF640).
+        for (name, t, expected) in [
+            ("Sun color", 0.26, [0.73387384, 0.6581154, 0.5029779]),
+            ("Sun color", 0.278, [0.9459861, 0.84307146, 0.598666]),
+            ("Sun color", 0.63, [0.9899174, 0.9050442, 0.7649168]),
+            ("Sun color", 0.72, [0.7406572, 0.18789124, 0.02058377]),
+            ("Sky color", 0.275, [0.30772263, 0.4202817, 0.49660057]),
+            ("Sky color", 0.4, [0.67518896, 0.79674417, 0.56262916]),
+            ("Sky color", 0.7, [0.66330814, 0.24146298, 0.10244907]),
+            ("Fog color", 0.25, [0.27412897, 0.2534206, 0.24647745]),
+            ("Fog color", 0.7, [0.4693937, 0.4673743, 0.6565209]),
+            ("Fog color", 0.75, [0.01540425, 0.03778355, 0.074057065]),
+        ] {
+            assert!((tod.color(name, t) - Vec3::from(expected)).abs().max_element() < 3e-6, "{name} at {t}");
+        }
+        for (name, t, expected) in [
+            ("Sun color multiplier", 0.137, 9.016159), ("Sun color multiplier", 0.26, 6.942363),
+            ("Sun color multiplier", 0.71, 6.460512), ("HDR dynamic power factor", 0.3, 0.45384666),
+            ("HDR dynamic power factor", 0.65, 0.36715248),
+        ] {
+            assert!((tod.scalar(name, t) - expected).abs() < 4e-6, "{name} at {t}");
+        }
+        assert!(tod.variables["Sun color"].keys.iter().any(|key| key.flags == 458752));
     }
 
     #[test]
@@ -615,11 +769,11 @@ mod tests {
         let tod = |color: f32, multiplier: f32, hdr: f32| {
             TimeOfDay::parse(&format!(
                 r#"<TimeOfDay>
-            <Variable Name="Sun color" Color="{color},{color},{color}"/>
-            <Variable Name="Sun color multiplier" Value="{multiplier}"/>
-            <Variable Name="Night sky: Moon color" Color="{color},{color},{color}"/>
-            <Variable Name="Night sky: Moon color multiplier" Value="{multiplier}"/>
-            <Variable Name="HDR dynamic power factor" Value="{hdr}"/>
+            <Variable Name="Sun color" Color="{color},{color},{color}"><Spline Keys="0:({color}:{color}:{color}):0,1:({color}:{color}:{color}):0,"/></Variable>
+            <Variable Name="Sun color multiplier" Value="{multiplier}"><Spline Keys="0:{multiplier}:0,1:{multiplier}:0,"/></Variable>
+            <Variable Name="Night sky: Moon color" Color="{color},{color},{color}"><Spline Keys="0:({color}:{color}:{color}):0,1:({color}:{color}:{color}):0,"/></Variable>
+            <Variable Name="Night sky: Moon color multiplier" Value="{multiplier}"><Spline Keys="0:{multiplier}:0,1:{multiplier}:0,"/></Variable>
+            <Variable Name="HDR dynamic power factor" Value="{hdr}"><Spline Keys="0:{hdr}:0,1:{hdr}:0,"/></Variable>
             </TimeOfDay>"#
             ))
             .unwrap()
@@ -644,9 +798,9 @@ mod tests {
     #[test]
     fn moon_raw_rgb_hdr_factor_and_zone_blending() {
         let xml = r#"<TimeOfDayList><TimeOfDay>
-            <Variable Name="Night sky: Moon color" Color="0.5,0.4,0.3"/>
-            <Variable Name="Night sky: Moon color multiplier" Value="3"/>
-            <Variable Name="HDR dynamic power factor" Value="1"/>
+            <Variable Name="Night sky: Moon color" Color="0.5,0.4,0.3"><Spline Keys="0:(0.5:0.4:0.3):0,1:(0.5:0.4:0.3):0,"/></Variable>
+            <Variable Name="Night sky: Moon color multiplier" Value="3"><Spline Keys="0:3:0,1:3:0,"/></Variable>
+            <Variable Name="HDR dynamic power factor" Value="1"><Spline Keys="0:1:0,1:1:0,"/></Variable>
             </TimeOfDay></TimeOfDayList>"#;
         let a = TimeOfDay::parse(xml).unwrap().sample(0.0, Lighting::default());
         assert!((a.moons[0].color - Vec3::new(3.0, 2.4, 1.8)).length() < 1e-6);
@@ -656,7 +810,7 @@ mod tests {
         b.moon_dir = Vec3::X;
         let middle = a.lerp(&b, 0.5);
         assert!((middle.moons[0].color - a.moons[0].color * 0.5).length() < 1e-6);
-        assert!((middle.moons[0].outer_size - 1.0).abs() < 1e-6);
+        assert!((middle.moons[0].outer_size - (a.moons[0].outer_size + 2.0) * 0.5).abs() < 1e-6);
         assert!((middle.moon_dir.length() - 1.0).abs() < 1e-6);
     }
 
@@ -708,11 +862,11 @@ mod tests {
     fn splines_are_read_at_the_warped_hour_but_the_sun_at_the_raw_one() {
         // a ramp over the day: the scalar at spline hour `h` is `h`
         let xml = r#"<TimeOfDayList><TimeOfDay>
-            <Variable Name="Sun color multiplier" Value="1"><Spline Keys="0:0:0,1:24:0,"/></Variable>
+            <Variable Name="Volumetric fog: Global density" Value="1"><Spline Keys="0:0:0,1:24:0,"/></Variable>
             </TimeOfDay></TimeOfDayList>"#;
         let t = TimeOfDay::parse(xml).unwrap();
         let main = Lighting::default();
-        let tt = |h: f32, l: Lighting| t.scalar("Sun color multiplier", spline_hour(h, l.dawn_hour) / 24.0);
+        let tt = |h: f32, l: Lighting| t.scalar("Volumetric fog: Global density", spline_hour(h, l.dawn_hour) / 24.0);
         assert!((tt(19.17, main) - 12.17).abs() < 0.03 && (tt(2.7, main) - 6.67).abs() < 0.03);
         let login = Lighting { dawn_hour: 6.0, ..main };
         assert!((tt(19.17, login) - 19.17).abs() < 1e-3);
