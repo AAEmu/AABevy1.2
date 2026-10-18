@@ -1734,3 +1734,193 @@ there is no supplied Achievement reference. The final capture logged 342–357 F
 errors and process exit 0 after closing itself. Reproduce with
 `native_listbox_templates --lua 'closed:SetVisible(false)' 1 --hover 230 418 1 --shot shots/aa-ui/native-listbox-templates.png --shot-after 4.4`.
 No application integration hook is required.
+
+## Native equipment repair contracts
+
+This read-only audit uses `D:/aa-re/client12/x2game_unpacked.dll` and original `.alb` scripts.
+The application owns the repair bridge; the independent OS cursor hook below is toolkit-owned.
+
+`X2Item:EnterRepairMode()` (`3947f1a0`) sets shared item mode 2 through `394df2c0`;
+`LeaveRepairMode()` (`3947f1c0`) sets normal mode 1. `IsInRepairMode()` (`39480290`) returns
+the boolean comparison with 2. Repeated mode assignments do nothing. Switching 1/2 emits no
+dedicated repair Lua event. The native bag-click interceptor (`391f2a70`) calls single repair
+with the physical packed location and shared auto-AA flag, then consumes the click even if
+repair preflight rejects it. This happens before ordinary item handling. Original equipped
+item Lua explicitly checks repair mode before either mouse-button action and calls
+`X2Equipment:ItemRepair(slot)`.
+The bag boundary is narrower: original `PreClickSlot` executes first. Only the subsequent
+`X2Bag:HandleClick` wrapper (`3944c760`, view virtual `+50`, vtable `399baa30`) enters
+`391ff2f0` and the repair interceptor at `391ff37f`. It does not preempt the Lua link/auction
+pre-handler. `HandleUse` (`3944c7f0`, virtual `+5c` -> `391ff3e0`) follows its normal use path
+through `391f48d0` / `394eb270`; it has no repair interception. The two other native
+`391f2a70` callers (`39200585`, `39200853`) are distinct bag/bank-context paths, not HandleUse.
+
+`X2Bag:ItemRepair` (`3944ccc0`, also `39452390`) converts its **physical one-based** Lua slot
+to an unsigned byte minus one, with native container 2. `X2Equipment:ItemRepair`
+(`3946ea70`) uses container 1 and the same conversion; Lua slot zero selects the native
+last-location sentinel. Both use `GetAutoUseAAPoint()`, not an extra Lua argument, and return
+no Lua values. Single repair (`394f14a0`) requires mode 2, a valid repair NPC interaction
+predicate (`394ed3d0`), an existing item, repairable maximum greater than current durability,
+and payment preflight. No independent distance constant or direct NPC blacksmith flag test
+appears in this wrapper; those checks must not be inferred from it.
+
+`RepairAllCost()` (`39481c70` → `394e82d0` → `394e7e80`) totals only the 28 **equipped**
+records, not the bag. It includes existing repairable items whose maximum exceeds current
+durability. `RepairAll()` (`3947f170` → `394f13e0` → `394e9a40`) gathers the same equipped
+set and uses the shared auto-AA flag. It does not require mode 2. Sender `394f10e0` returns
+without payment preflight or a packet for zero candidates; one candidate still uses the
+repair-all packet because this call forces the all path. Single/all packets remain the
+source-proved `0x03c` three bytes / `0x03d` one boolean documented by aa-net.
+
+`X2Bag:ItemDurability(physicalSlot, checkRepairable)` (`3944e2f0`) and
+`X2Equipment:ItemDurability(slot, checkRepairable)` (`3946f9b0`) return either nil or a table
+with numeric `current` and `max`. Helper `3941a040` obtains the unsigned-byte maximum through
+`397cf500` and the current unsigned byte from item `+1d`. Missing/unknown/non-durable items
+and zero maximum return nil. The optional second argument is a strict boolean, default true;
+false bypasses the repairable flags in the body/armor/mate definitions (`+28`/`+1c`/`+30`).
+It does not bypass zero maximum. Bag slots are physical one-based, and equipment slot zero
+uses the native last-location sentinel, as with repair itself.
+
+The original misspelled `X2Equipment:DameagedItems(maxCount, checkRepairable)` (`39470750`)
+requires its first numeric argument; signature `n` / wrapper `394709b0` returns nil when it
+is absent or cannot be read as a number. The maximum count is truncated to signed integer.
+With valid arguments it creates and returns three parallel one-based tables, even when empty:
+item template IDs, literal raw item-grade bytes, and physical equipment slots plus one.
+There is no grade-order conversion. `394e9ad0` scans the 28 equipment slots, retains nonzero
+maximums with `f32(current)/f32(max) <= 0.25`, and applies the default-true repairability test.
+`394efc90` / `394e9bc0` stable-sort by ascending float durability ratio before taking maxCount;
+equal ratios preserve ascending physical slot order. Zero/negative counts return empty tables.
+
+`UPDATE_DURABILITY_STATUS(added, removed)` is native event `0x1ac` (registration `39215c94`).
+Its UID tracker (`3a5ba0cc`, vtable `399e6340`) initializes from equipped and occupied bag items
+in `394f61f0`, using `397cf500(item, false)`: unrepairable durable items participate. It records
+unsigned-byte current/maximum by UID, independently of the equipment-only notifier list.
+Predicate `394df540` is nonzero maximum and float ratio <= 0.25. A successful insert
+(`394f6190`) writes both values and sets added when the new item is low, including duplicate-UID
+low inserts. Update (`394f5e30`) writes only current and uses the stored maximum: high-to-low
+sets added, low-to-high sets removed, staying on the same side does neither. Remove
+(`394f5ed0`) sets removed only for an existing low record. Missing-UID update/remove do nothing.
+Flags accumulate with OR, so both may be true in one batch.
+
+The tracker handles literal successful item action IDs 5/6 (insert), 7 (remove), and 9 (update)
+at notification `0x1c` in `394f5310`; it ignores 8/12/13/14/15 and other IDs. It does not filter
+for bag/equipment containers: successful bank-3 insertion snapshots can enter its map too,
+though initial seeding covers only equipment and bag. Native `397cda20` skips containers 4/5
+before copying an insertion snapshot. Batch-start notification `0x19` clears both flags;
+batch-end `0x1a` emits the Lua event only if either flag is set (`394f5392`). Initial seeding
+clears flags before listener registration. No separate threshold event for a trailing force-remove
+list was established by this bounded trace; do not infer one from final inventory differences.
+
+Native price function `397cea70` has this exact operation order; every assignment below is
+rounded to `f32`, with current/maximum unsigned bytes and price/refund signed integers:
+
+```text
+factor_scaled = factor * 0.01f32
+ratio = 1.0f32 - f32(current) / f32(maximum)
+lost_price = ratio * f32(price)
+base = factor_scaled * lost_price
+grade_scaled = f32(refund_multiplier) * 0.01f32
+raw_cost = base * grade_scaled
+cost_float = f32(ceil(f64(raw_cost)))
+```
+
+The result is checked against zero and the float-converted integer limits, then converted
+with x86 `CVTTSS2SI`. The exact upper-bound corner is unusual: price `i32::MAX`, refund 100,
+factor 100, current 0 / maximum 1 produces `i32::MIN`, because `i32::MAX` rounds to
+2147483648 as a float and that value passes the float upper-bound comparison. Normal
+database prices do not establish that corner as useful gameplay behavior. The total uses a
+checked signed-32-bit accumulator (`394e5fd0`); `RepairAllCost` then converts that total to a
+float ScriptAnyValue/Lua number, not a decimal string. Its displayed value may lose precision
+above 2^24 even though each underlying price was integral.
+
+The ignored `data/extract/aa-ui/repair_cost_oracle.py` executes the original x86 function in
+Unicorn, stubbing only database lookups and CRT `ceil`/integer-limit imports. Ten executions
+match the native expression, including these differences from the lane's arithmetic order:
+
+| Price | Refund | Factor | Current / max | Native copper | Lane copper |
+|---:|---:|---:|---:|---:|---:|
+| 1137792 | 150 | 75 | 97 / 151 | 457755 | 457754 |
+| 1132972 | 120 | 75 | 4 / 105 | 980830 | 980831 |
+| 1778503 | 300 | 33 | 125 / 184 | 564578 | 564579 |
+
+The native UI quote and authoritative server money can therefore differ by one copper.
+The CSV preserves all ten oracle inputs/results; no server charge was changed or synthesized.
+
+Payment helper `394f0eb0` receives amount, currency selector, auto-AA, deferred task and error
+code. The repair selector defaults to money (0); only player flag `0x1000` permits lookup of
+currency-config record 11 (`39744420`). Selector 0 checks money and emits error `0x1a` when
+insufficient. Selector 3 checks AA funds and offers dialog 39 when insufficient. Selector 4
+uses money directly when sufficient; otherwise auto-AA permits money plus AA if enough,
+offers dialog 39 if still short, or opens confirmation dialog 38 when auto-AA is disabled.
+Original handlers identify 38 as `DLG_TASK_ASK_USE_AA_POINT` (with auto-AA checkbox), and 39
+as `DLG_TASK_ASK_CHARGE_AA_POINT`. The helper returns 0 to proceed, 1 to reject/offer charge,
+or 2 for deferred confirmation. This does not prove that the current lane enables selectors
+3/4 or entitlement flag `0x1000`.
+
+Item tooltip generation (`394237b0` / `394e4b60`) supplies numeric `repairCost` only for a
+damaged repairable item, using that same native price function. Original tooltip Lua displays
+the repair-cost money line while repair mode is active; it displays the cannot-repair line
+for an explicitly unrepairable item with maximum durability.
+
+The auto-AA getter (`397ccd50`) compares raw inventory field `+c340` to 1. The setter
+(`3944c8a0` → `394e98d0`) requests packet `0x133` after same-value/pending checks and does not
+optimistically write the field. Received action 18 (`397d1030` / `397cd940`) first records
+packed key `0x0000f000` in a local sink, then writes the raw field. The sink vtable `399e6310`
+calls `394e8600`, which only inserts a map key. After the action returns, `394f007f` calls
+`394e7140`; action-18 branch `394e758c` reads the new getter and emits native event `0x24a`,
+`CHANGED_AUTO_USE_AAPOINT(new_bool)`. `39424240` → `3920fcf0` dispatches listeners inline,
+using BeginCall/argument push/EndCall before processing the next action. Coalesced actions
+therefore expose their own new getter values during callbacks. Only after the full action
+batch does `394f0225` → `397d22b0` clear pending keys, including `0xf000`, with
+`397d2200(key, false)`. Sink insertion never sets an inventory request lock: unsolicited
+action 18 does not acquire a pending lock before its callback. A separate unlock must not
+fabricate a changed-value callback.
+
+Repair mode selects native cursor enum 7 (`39434bb4` / `39434cca`). `3921e2bd`–`3921e2d2`
+loads normal group-cursor resource 141 from `archeage.exe`; the large theme loads 142 at
+`3921e3c5`–`3921e3e0`. Their original images are 32×32 and 64×64, both hotspot (0,0), with
+RT_CURSOR entries 19/20. Targeted ignored extracts preserve those bytes and show the authored
+hammer cursor. This is an OS cursor, independent of held-item state; reusing `SetCursorImage`
+would replace the held thing and does not establish native repair-cursor behavior.
+
+The toolkit's `cursor::set_repair_mode(&Lua, bool)` now selects that OS cursor through Bevy's
+`CustomCursorImage`; `cursor::set_large(&Lua, bool)` explicitly selects the separate large
+resource. Normal is the default. No DPI/UI-scale inference or enlargement of the normal
+image is used. `cursor::CursorSource(PathBuf)` is configurable and defaults to the read-only
+RE copy `D:/aa-re/client12/bin/archeage.exe`, whose bytes match the installed original.
+Only resource groups 141/142 are decoded at runtime; no artwork is committed. Normal is
+BGRA32 with authored alpha, large is BGR24 with its original AND mask, both bottom-up DIBs.
+The large resource's AND mask is entirely zero, so its white matte remains opaque;
+no guessed white-color transparency is applied.
+The prior OS cursor component is restored on leaving repair mode or removing the UI runtime;
+missing/unsupported resource files preserve it. Images are cached on first use, and ordinary
+frames do not rewrite cursor components. Held-item state and generation are untouched.
+
+Native NPC cancellation (`3947da90` → `393be180`) emits `NPC_INTERACTION_END` first, then
+resets mode to 1 on its resolved interaction-object cleanup path (`393be23b`). The general
+cancel/escape path `3921b1d5` also resets non-normal mode. Arbitrarily hiding the repair window
+is distinct: its original `OnHide` does not itself call `LeaveRepairMode`.
+
+Natural service routing remains unresolved. Original `npc_interaction.alb` proves
+`"blacksmith"` → `BLACK_SMITH` 7 → `ToggleRepairWindow`; the sole `REPAIRMAN_NPC` reference
+is the `"repairman"` branch, with no definition anywhere in the extracted original scripts.
+Native `SelectNpcInteraction` (`3947da30`) is a no-op. Native NPC choices are built by
+`393bd290` from authored world-interaction records; `3902ea31` / `397aa970` initializes their
+type-to-action map, and `397a9510` / `393b7eb0` resolves candidates before `393bd240` inserts
+them. This bounded trace does not prove skill 12086 maps to the gear-repair action or expose
+a blacksmith option beside a shop through the lane's precedence. No combined menu or
+repairman-to-blacksmith remapping is supported by this audit. The client must keep that
+natural-entry limitation separate from original-window fixtures and working repair APIs.
+
+`examples/native_repair_cursor.rs` loads the original World stage and repair window, supplies
+only fixture game responses, and clicks the original Single Repair button through real mouse
+dispatch. It asserts repair mode and an empty held cursor, then displays the decoded normal
+and large resources at their actual pixel dimensions. GPU screenshots omit the OS cursor,
+so these two previews explicitly expose its source pixels. The inspected final capture is
+`shots/aa-ui/native-repair-cursor-final.png`: 354–364 FPS, zero script errors, native exit 0
+and automatic window closure. Common parchment framing was compared with
+`reference/ingame/options_keybinds/real.png`; no supplied repair-window reference exists.
+Existing font differences remain unchanged. All 29 prior listbox/animation regressions passed.
+Three new cursor tests also passed: exact source pixels/mask and truncated-resource rejection,
+mode/size/leave transitions with unchanged held state, setters while Ui appdata is borrowed,
+missing-source fallback, runtime removal, caching, and preservation of an external OS cursor.
