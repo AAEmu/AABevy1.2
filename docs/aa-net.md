@@ -6594,3 +6594,34 @@ with only sender mocked:16 cases cover roles0/1, choice0/1/2/5/6/7/MAX/INTMIN,
 trial0 and negative seat; all cache bytes remain unchanged. Protocol tests retain
 raw choice byte, native admitted range, full frame, stale/unknown seat/context;
 loopback tests send duplicate valid requests and reject choice0 without optimism.
+
+
+### Native trial close and audience callback snapshots
+
+TrialNotice now additionally forwards AudienceJoined { name }, AudienceLeft { name },
+RulingClosed, Closed, and Canceled. Names preserve raw bytes; the Lua adapter applies
+native C-string first-NUL conversion. This necessarily makes TrialNotice Clone rather
+than Copy. Audience safe-cache admission still refuses names longer than128bytes while
+retaining the full raw Event and last_receipt; native oversized inline-buffer behavior
+is not defined as a safe contract.
+
+Original39080850 emits145 AUDIENCE_JOINED(name) before comparing actual local object
+and adopting a changed trial (23c Beautyshop callback). Original3907c940, for matching
+local object only, emits148 TRIAL_CLOSED before resetting if old trial!=0, then reset
+23c, then146 AUDIENCE_LEFT(name). Nonlocal receipts emit only the named callback;
+local trial0 still resets/emits23c but no148. Missing-local sentinel0 behavior is
+unchanged from the received cache slice.
+
+Original3907bb90 resets before23c, closes native tasks6/7, then emits140 RULING_CLOSED
+and148 TRIAL_CLOSED.3907bc30 resets before23c/tasks and emits148 then14a TRIAL_CANCELED;
+it ignores the packet trial ID and does not require active role or nonzero context.
+These notices add no task operations or clock implementation. apply_with_dispatch
+captures the old context at pre-reset callbacks and reset context afterward; ordinary
+apply/apply_with_notices share the same fold without extra snapshot copies.
+
+trial_close_audience_oracle.py/native-trial-close-audience-oracle-20261018.json execute
+those four original bodies and actual reset/adopt helpers locally across16 local/nonlocal
+and zero/nonzero-context cases. Only Lua dispatch, task lookup/close/removal, and current
+Unix clock are mocked; no network/process execution. Tests verify callback order,
+getter evidence/context at every boundary, nonlocal repeated notices, unconditional
+wrong-ID cancellation, and preserved oversized raw receipts.

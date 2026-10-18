@@ -1,5 +1,5 @@
 //! Received trial wait cache and every received producer of its defendant callback gate.
-//! Does not implement elapsed trial clocks or verdict votes. Session owns the automatic CS072 reply.
+//! Does not implement elapsed trial clocks. Session owns outgoing controls and the automatic CS072 reply.
 mod data;
 mod commands;
 pub use commands::TrialCommand;
@@ -74,8 +74,18 @@ impl TrialEvent {
         })
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialNotice {
+    /// AUDIENCE_JOINED(name), before local object/context admission. Raw bytes; Lua uses first NUL.
+    AudienceJoined { name:Vec<u8> },
+    /// AUDIENCE_LEFT(name), after any local close/reset callbacks.
+    AudienceLeft { name:Vec<u8> },
+    /// RULING_CLOSED(), after role reset.
+    RulingClosed,
+    /// TRIAL_CLOSED(), before local audience reset but after ruling/cancel reset.
+    Closed,
+    /// TRIAL_CANCELED(), after reset and TRIAL_CLOSED; packet trial ID is ignored natively.
+    Canceled,
     /// JURY_OK_COUNT(count,total), both signed numericf32.
     JuryOkCount{count:i32,total:i32},
     /// VERDICT_COUNT(count,total), both signed numericf32.
@@ -217,7 +227,12 @@ impl Trials {
                     TrialEvent::SummonJury { trial_id,court,jury_number } => {
                         self.adopt_trial(*trial_id,emit);self.jury_court=Some(*court);self.jury_number=Some(*jury_number);self.defendant_context=None;self.is_jury=true;
                     }
-                    TrialEvent::RulingClosed | TrialEvent::Canceled { .. } => self.reset_role(emit),
+                    TrialEvent::RulingClosed => {
+                        self.reset_role(emit);emit(TrialNotice::RulingClosed,self);emit(TrialNotice::Closed,self);
+                    }
+                    TrialEvent::Canceled { .. } => {
+                        self.reset_role(emit);emit(TrialNotice::Closed,self);emit(TrialNotice::Canceled,self);
+                    }
                     TrialEvent::DefendantData(data) => {
                         if data.name.len()<=128 {
                             self.defendant=Some(data.clone());self.sentence_time_ms=Some(data.sentence_time_ms);
@@ -264,15 +279,20 @@ impl Trials {
                         }
                     }
                     TrialEvent::AudienceJoined { trial_id, obj_id, name } => {
+                        if name.len()>128 {return *self!=before}
+                        emit(TrialNotice::AudienceJoined{name:name.clone()},self);
                         // Native fallback39ade6a8 is0 when client has no local actor.
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
                             self.adopt_trial(*trial_id,emit);
                         }
                     }
                     TrialEvent::AudienceLeft { obj_id, name } => {
+                        if name.len()>128 {return *self!=before}
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
+                            if self.trial_id!=0 {emit(TrialNotice::Closed,self);}
                             self.reset_role(emit)
                         }
+                        emit(TrialNotice::AudienceLeft{name:name.clone()},self);
                     }
                 }
             }
