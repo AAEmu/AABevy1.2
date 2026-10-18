@@ -106,7 +106,8 @@ resource! {
         /// Ordered mutable native manager rows seeded/extended only by received reports.
         pub native_skill_cooldowns: Vec<NativeCooldown>,
         pub native_tag_cooldowns: Vec<NativeCooldown>,
-        /// Source-hydrated local GM mode byte1; absent until actual PlayerSpawn.
+        /// Local GM mode byte1 established by matching SC203 only. The spawn's
+        /// legacy PISH projection is not proof of the effective native actor byte.
         pub native_gm_mode1: Option<u8>,
         /// Native process frame timer; survives actor and connection resets.
         pub native_last_frame_ms: u32,
@@ -261,7 +262,7 @@ impl Skills {
                 *self = Self {
                     cooldown_catalog:catalog,
                     native_last_frame_ms:last_frame_ms,
-                    native_gm_mode1:Some(s.unit.gm_modes[1]),
+                    native_gm_mode1:None,
                     obj_id: s.obj_id,
                     known: s.unit.skills.iter().map(|&(id, level)| KnownSkill { id, level }).collect(),
                     passive_buffs: s.unit.passive_buffs.clone(),
@@ -379,7 +380,11 @@ impl Skills {
             }
             Event::UnitsRemoved(ids) => {
                 let before = self.casting.len();
-                let lost_context = ids.contains(&self.obj_id) && self.native_gm_mode1.take().is_some();
+                let lost_context = self.obj_id != 0 && ids.contains(&self.obj_id);
+                if lost_context {
+                    self.native_gm_mode1 = None;
+                    self.obj_id = 0;
+                }
                 for id in ids {
                     self.casting.remove(id);
                 }

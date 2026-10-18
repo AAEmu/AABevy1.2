@@ -205,6 +205,11 @@ mod tests {
             state: Default::default(),
             unit: unit(7),
         })));
+        state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged {
+            obj_id: 7,
+            mode: 1,
+            value: 0,
+        }));
         state
     }
     fn values(rows: &[NativeCooldown], at: Instant) -> Vec<[u32; 3]> {
@@ -442,6 +447,8 @@ mod tests {
             state: Default::default(),
             unit: spawn,
         })));
+        assert_eq!(state.native_gm_mode1, None, "the legacy PISH word is not effective GM hydration");
+        state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 1, value: 2 }));
         assert_eq!(state.native_gm_mode1, Some(2));
         assert_eq!(state.cooldown_catalog.get(&17), Some(&0));
     }
@@ -501,6 +508,7 @@ mod tests {
             unit: unit(7),
         })));
         world.apply(&start(17, 5, 7));
+        world.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 1, value: 0 }));
         world.apply(&Event::CastingStopped { tl: 5, duration_ms: 7000 });
         let cloned = world.clone();
         assert_eq!(cloned.skills.native_skill_cooldowns[0].cooldown.remaining_ms, 7000);
@@ -540,6 +548,54 @@ mod tests {
         state.set_cooldown_catalog([(17,0),(18,77)].into());
         assert!(!std::sync::Arc::ptr_eq(&state.cooldown_catalog,&snapshot.cooldown_catalog));
         assert_eq!(state.cooldown_catalog,snapshot.cooldown_catalog,"value equality does not require pointer identity");
+    }
+
+    #[test]
+    fn spawn_pish_bytes_never_admit_stop_without_matching_effective_mode_receipt() {
+        // Executed original hydration + SC203 with distinct actor/subobject bases:
+        // native-unit-actor-base-oracle.json. PISH word lands at raw actor+3b00;
+        // SC203 mode1 and the cooldown guard address raw actor+3af9 instead.
+        for raw in [0, 2, 255] {
+            let mut state = ready();
+            let mut spawn = unit(7);
+            spawn.gm_modes[1] = raw;
+            state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn { obj_id: 7, state: Default::default(), unit: spawn })));
+            assert_eq!(state.native_gm_mode1, None);
+            state.apply(&start(17, 3, 7));
+            state.apply(&Event::CastingStopped { tl: 3, duration_ms: 1000 });
+            assert!(state.native_skill_cooldowns.is_empty());
+            assert!(state.last_used.contains_key(&17), "unadmitted stop does not invalidate estimates");
+            for change in [
+                crate::unit_msg::UnitGmModeChanged { obj_id: 8, mode: 1, value: 0 },
+                crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 0, value: 0 },
+            ] {
+                state.apply(&Event::UnitGmModeChanged(change));
+            }
+            assert_eq!(state.native_gm_mode1, None);
+            state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 1, value: 0 }));
+            state.apply(&start(17, 4, 7));
+            state.apply(&Event::CastingStopped { tl: 4, duration_ms: 1000 });
+            assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms, 1000);
+            assert!(!state.last_used.contains_key(&17));
+        }
+    }
+
+    #[test]
+    fn removed_actor_rejects_late_mode_until_genuine_fresh_spawn() {
+        let mut state = ready();
+        assert!(state.apply(&Event::UnitsRemoved(vec![7])));
+        assert_eq!(state.native_gm_mode1, None);
+        assert!(!state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 1, value: 0 })));
+        assert_eq!(state.native_gm_mode1, None);
+        state.apply(&start(17, 3, 7));
+        state.apply(&Event::CastingStopped { tl: 3, duration_ms: 1000 });
+        assert!(state.native_skill_cooldowns.is_empty());
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn { obj_id: 7, state: Default::default(), unit: unit(7) })));
+        assert_eq!(state.native_gm_mode1, None);
+        state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged { obj_id: 7, mode: 1, value: 0 }));
+        state.apply(&start(17, 4, 7));
+        state.apply(&Event::CastingStopped { tl: 4, duration_ms: 1000 });
+        assert_eq!(state.native_skill_cooldowns[0].cooldown.remaining_ms, 1000);
     }
 
 }
