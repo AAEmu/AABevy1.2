@@ -312,3 +312,57 @@ fn queued_receipts_advance_on_the_authoritative_frame_before_hud_refresh() {
         "clock advances without actor/HUD"
     );
 }
+
+#[test]
+fn account_option_82_changes_real_slot_captions_without_rebinding_or_restarting_the_sweep() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let state = Rc::new(RefCell::new(super::super::api::HudData::default()));
+    super::super::api::install(&mut rt, &state)?;
+    let path = crate::settings::isolated_bindings(&rt)?;
+    rt.lua
+        .load(
+            r#"
+        X2Option:SetItemFloatValue(OPTION_ITEM_SLOT_COOLDOWN_VISIBLE,1)
+        AAUI.SkillContent=function() return {type='skill',id=1,cooldown={remain=1200,total=1500}} end
+        optionSlot=UIParent:CreateWidget('slot','optionSlot','UIParent')
+        optionSlot:SetExtent(42,42);optionSlot:AddAnchor('CENTER',UIParent,0,0)
+        updates=0;optionSlot:SetHandler('OnContentUpdated',function() updates=updates+1 end)
+        optionSlot:EstablishSkill(1);optionSlot:Show(true)
+    "#,
+        )
+        .exec()?;
+    aa_ui::lua::flush(&rt.lua);
+    let id = aa_ui::lua::value_id(&rt.lua, &rt.lua.load("optionSlot").eval()?).unwrap();
+    let before = aa_ui::lua::ui(&rt.lua).tree.widget(id).unwrap().cooldown.clone().unwrap();
+    let updates: usize = rt.lua.load("return updates").eval()?;
+    let counts = || {
+        let draws = aa_ui::render::build_quads(&mut aa_ui::lua::ui(&rt.lua), None);
+        (
+            draws.iter().filter(|quad| quad.corners.is_some()).count(),
+            draws
+                .iter()
+                .filter(|quad| quad.corners.is_none() && quad.tex == aa_ui::render::Tex::Atlas)
+                .count(),
+        )
+    };
+    caption_option(&rt.lua);
+    let on = counts();
+    assert!(on.0 > 0 && on.1 > 0);
+    rt.lua
+        .load("X2Option:SetItemFloatValue(OPTION_ITEM_SLOT_COOLDOWN_VISIBLE,0)")
+        .exec()?;
+    caption_option(&rt.lua);
+    assert_eq!(counts(), (on.0, 0));
+    rt.lua
+        .load("X2Option:SetItemFloatValue(OPTION_ITEM_SLOT_COOLDOWN_VISIBLE,1)")
+        .exec()?;
+    caption_option(&rt.lua);
+    assert_eq!(counts(), on);
+    let after = aa_ui::lua::ui(&rt.lua).tree.widget(id).unwrap().cooldown.clone().unwrap();
+    assert_eq!((after.end_ms, after.total_ms), (before.end_ms, before.total_ms));
+    assert_eq!(rt.lua.load("return updates").eval::<usize>()?, updates);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}

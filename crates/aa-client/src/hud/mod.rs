@@ -429,6 +429,7 @@ impl Plugin for HudPlugin {
             .insert_non_send(api::HudBridge::default())
             .add_systems(First,(buffs::bind_catalog,cooldown::bind_catalog))
             .add_systems(Update,cooldown::advance_frame.before(aa_ui::UiInput).before(prebuild_hud).before(build_hud).before(sync_hud))
+            .add_systems(Update,cooldown::sync_caption_option.after(aa_ui::UiInput).before(aa_ui::UiFrame))
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
             .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())
