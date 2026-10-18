@@ -98,6 +98,8 @@ pub struct ChatData {
     pub left_line: Id,
     pub right_line: Id,
     pub line_offset: [f32; 2],
+    /// Local top/bottom anchor offsets of the native internal clipping area.
+    tab_clip_vertical: [f32; 2],
     /// Cursor over the window at the last update.
     pub hovered: Option<bool>,
     /// Last resolved local extent passed through the native geometry callback.
@@ -692,6 +694,7 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             left_line,
             right_line,
             line_offset: [0.0; 2],
+            tab_clip_vertical: [3.0, 20.0],
             hovered: None,
             layout_extent: [0.0; 2],
         });
@@ -719,6 +722,9 @@ fn layout(lua: &Lua, id: Id) {
     // 392c97e0 returns before inspecting or changing child controls when empty.
     if c.tabs.is_empty() {
         return;
+    }
+    if let Some(c) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+        c.tab_clip_vertical = [0.0, c.tab_area_height];
     }
     let n = c.tabs.len() as f32;
     let add_w = if c.use_add_button {
@@ -818,6 +824,37 @@ fn layout_lines(u: &mut super::Ui, id: Id, c: &ChatData) {
     if tab.message != crate::tree::ROOT && u.tree.get(tab.message).alive {
         u.tree.get_mut(tab.message).shown = true;
     }
+}
+
+/// Actual painter push 3921f480: no clamping of disjoint rectangles; compare
+/// order also preserves the prior edge on equal values (including signed zero).
+pub(crate) fn intersect_clip(next: [f32; 4], previous: [f32; 4]) -> [f32; 4] {
+    std::array::from_fn(|i| if i < 2 {
+        if next[i] > previous[i] { next[i] } else { previous[i] }
+    } else if previous[i] > next[i] { next[i] } else { previous[i] })
+}
+
+/// Physical f32 clipping rectangle for native tab-area members and descendants.
+/// Messages, edit, caret and lock notifier remain outside this internal area.
+/// Keep public parent identity intact; this models the native render membership.
+pub(crate) fn tab_clip(u: &super::Ui, mut id: Id) -> Option<[f32; 4]> {
+    let mut result = None;
+    while let Some(parent) = u.tree.get(id).parent {
+        if let Some(c) = u.tree.widget(parent).and_then(|w| w.chat.as_ref())
+            && (id == c.add_button || id == c.left_line || id == c.right_line
+                || c.tabs.iter().any(|tab| tab.button == id))
+        {
+            let view = u.animations.widget_rect(&u.tree, parent);
+            let scale = u.animations.widget_scale(&u.tree, parent);
+            let x = view.x * u.ui_scale;
+            let y = view.y * u.ui_scale;
+            let bounds = [x, y + c.tab_clip_vertical[0] * scale,
+                x + u.tree.rect(parent).w * scale, y + c.tab_clip_vertical[1] * scale];
+            result = Some(result.map_or(bounds, |old| intersect_clip(old, bounds)));
+        }
+        id = parent;
+    }
+    result
 }
 
 /// Native 392ca610 runs on SetContentOffset and tab insertion, separately from
