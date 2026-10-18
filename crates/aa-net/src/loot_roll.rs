@@ -651,7 +651,7 @@ mod tests {
             w.u64(key(1).item_id()).i32(2).u32(12).i8(1).u32(12).i8(2);
         });
         assert!(LootRollEvent::read(0xfd, &mut Reader::new(&raw)).is_err());
-        assert!(batch(&[(0xfd, raw)]).unwrap().is_empty());
+        assert!(matches!(batch(&[(0xfd, raw)]).unwrap().as_slice(),[crate::game::ServerMsg::DecodeFailed{..}]));
         assert!(LootRollEvent::read(0xfb, &mut Reader::new(&[0; 4])).is_err());
         assert!(LootRollEvent::read(0xfb, &mut Reader::new(&item_wire(key(0), 0))).is_err());
         let raw = bytes(|w| {

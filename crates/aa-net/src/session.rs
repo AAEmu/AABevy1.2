@@ -529,6 +529,11 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
+    Dominion(crate::DominionEvent),
+    /// Actual decoder metadata, including compressed batches whose remaining tail was abandoned.
+    UnhandledGamePacket { level:u8, opcode:u16, len:usize },
+    /// Actual wire decode failure; no complete event can be reconstructed from this receipt.
+    GameDecodeFailed { message:String },
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
@@ -1408,6 +1413,7 @@ impl Session {
             Ok(m) => m,
             Err(NetError::Wire(e)) => {
                 tracing::warn!("undecodable game packet: {e}");
+                self.emit(Event::GameDecodeFailed{message:e.to_string()});
                 return;
             }
             Err(e) => return self.game_lost(e),
@@ -1593,6 +1599,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
+            M::Dominion(value) => self.emit(Event::Dominion(value)),
             M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
             M::UnitGmModeChanged(e) => self.emit(Event::UnitGmModeChanged(e)),
@@ -1672,8 +1679,10 @@ impl Session {
                 self.emit(Event::Pong(pong));
             },
             M::SlotCount(_) | M::AccountInfo { .. } => {}
+            M::DecodeFailed {message} => self.emit(Event::GameDecodeFailed{message}),
             M::Unhandled { level, opcode, len } => {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");
+                self.emit(Event::UnhandledGamePacket {level,opcode,len});
             }
         }
     }
@@ -3866,6 +3875,7 @@ mod tests {
         frame.extend_from_slice(include_bytes!("../tests/fixtures/deflate/fixed.deflate"));
         frame.push(0); // Trailing data invalidates the complete stream, including its prefix.
         session.game_msg(game::ServerMsg::decode(&frame).map_err(Into::into)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::GameDecodeFailed{..})));
         assert!(events.try_recv().is_err());
         frame.pop();
         session.game_msg(game::ServerMsg::decode(&frame).map_err(Into::into)).await;
@@ -4327,6 +4337,27 @@ mod tests {
             session.game_msg(Ok(game::ServerMsg::Expedition(value.clone()))).await;
             assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
         }
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn dominion_receipts_and_unhandled_tail_metadata_reach_consumers_in_order() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let receipt=crate::DominionEvent::Deleted{id:25};
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::Dominion(receipt.clone()),
+            game::ServerMsg::Unhandled{level:game::LEVEL_COMPRESSED,opcode:0x3ff,len:42},game::ServerMsg::Dominion(receipt.clone())]))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Dominion(value)) if value==receipt));
+        assert!(matches!(events.try_recv(),Ok(Event::UnhandledGamePacket{level:4,opcode:0x3ff,len:42})));
+        assert!(matches!(events.try_recv(),Ok(Event::Dominion(value)) if value==receipt));assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn actual_game_decode_failures_are_visible_instead_of_silent_coverage_loss() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        session.game_msg(Err(NetError::Wire(crate::wire::WireError::Invalid("truncated".into())))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::GameDecodeFailed{message}) if message.contains("truncated")));
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::DecodeFailed{message:"bad compressed tail".into()}]))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::GameDecodeFailed{message}) if message=="bad compressed tail"));
         assert!(events.try_recv().is_err());
     }
 

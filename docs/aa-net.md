@@ -5539,3 +5539,78 @@ A typed full Dominion received cache/snapshot-completeness contract is still
 needed before the client can safely return a negative blocker result; no
 DB-only or missing-receipt 'no siege' context is substituted. Continued source:
 `data/extract/aa-net/native-expedition-owner-dominion-20261018.txt`.
+
+
+### Dominion received owner-eligibility state and observable parser gaps (2026-10-18)
+
+`aa_net::Dominion` (singular) is a plain Clone/Default Bevy resource, also
+`WorldState.dominion`. `.apply(&Event)` folds genuine `Event::Dominion` receipts;
+`.owner_change_blocked(expedition_id) -> Option<bool>` reproduces the original
+392f4ec0/39839600 gate from received rows. It checks exactly siege_period4 and
+either defender/offense expedition ID. Zero is the verified invalid participant
+sentinel and returns Some(false). Static constructor3998fa10 creates an empty
+sentinel tree, so an empty cache legitimately returns Some(false), rather than
+inventing a territory/phase. Coverage gaps return None for nonzero identities.
+
+The five gate-mutating opcodes are source-closed against the native serializer
+and the active lane social writers:
+
+* SC01d Data: complete DominionData, u8 newly_declared, u8 final_data_by_request.
+  Factory391ce1ca/vtable399b7524?397afd00?3983a470. Callback392f7890
+  unconditionally upserts via3983a820; both flags control side effects. Neither
+  flag clears rows nor proves a complete snapshot or repairs lost coverage.
+* SC01e Deleted: u16 ID, removes that keyed row (392f7a10).
+* SC01f OwnerChanged: u16 ID,u32 expedition,i64 reign timestamp,u8 bestowed.
+  Existing-row helper392f7940 changes owner AND defender expedition ID, reign
+  time, national tax rate500 and both tax-rate-change timestamps0. No new row.
+* SC0e9 SiegeState: u16 ID, complete territory/timers,u32 new_owner, then ONLY
+  if new_owner!=0 an i64 reign timestamp (397b4840). Existing-row callback
+  392f7db0 runs owner helper only if the previous received phase==4 and new owner
+  is nonzero, then replaces territory and timers. Missing rows are ignored.
+* SC0ea SiegeDeclared: u16 ID, complete offense participant.392f7cc0 replaces
+  the existing row's offense; it does not create a row or advance phase.
+
+All complete raw fields are typed and retained: fixed XY i64 and Z f32; integer
+Unix timestamps; five duration i32s; raw signed-byte-compatible siege_period;
+participant object ID/position/ni/nr/limit and ordered duplicate member IDs;
+territory dimensions; tax/national-monument/non-PvP metadata; both Data flags.
+There is one bounded last_receipt, not a receipt history. Native timers
+39839f40 place phase at row+d8 and participant structs at row+e0/+298. Participant
+39839c10 reads a count byte and that many IDs with no capacity guard; native
+inline storage has100 IDs. The safe lane reader consumes all declared rows;
+>100 preserves raw data but poisons native gate certainty rather than emulating
+native memory corruption. No clock estimate synthesizes phase changes.
+
+Non-gate deltas (tax/member-limit/member-list/alerts) remain outside this slice;
+rows expose the last explicitly provided fields for that metadata. Native SC0eb
+392f3670 only changes defender member limit; SC0ec392f5f60 only edits participant
+member lists; SC0ed391d955a emits an alert. These do not write phase or participant
+expedition IDs. Normal SC024/025 remain conservatively unintegrated and invalidate
+gate certainty. Known five mutators never fabricate metadata or success notices.
+
+The existing decoder cannot find the next inner DD04 packet after an unknown
+opcode because inner records have no body lengths. It abandons that tail.
+Session now forwards factual `UnhandledGamePacket { level, opcode, len }` for
+previously trace-only unknown packets. Dominion poisons coverage for ANY abandoned
+DD04 tail, which may conceal a later gate mutation, and for unsupported relevant
+normal-game opcodes; an unrelated proxy opcode does not poison it.
+
+A malformed inner packet similarly used to log and silently abandon its tail;
+`ServerMsg::DecodeFailed` now survives as `Event::GameDecodeFailed { message }`.
+Top-level game wire-decode failures also emit that event instead of only logging.
+Dominion treats either failure as sticky loss of certainty. Neither malformed
+nor unknown packets create partial territory state or invented receipts. This
+makes the existing general compressed-tail coverage gap observable; extending
+actual packet parsers is still required for wider parity.
+
+CharacterSelected/LeftWorld/Kicked/Disconnected clear received Dominion state
+and coverage flags as explicit app session isolation. This is not a claim that
+native static territory managers are recreated on every corresponding callback.
+No Data flag or later partial row clears a coverage gap. The resource and plugin
+use the same reducer; clone into a HUD view, then apply each event once.
+
+Goldens exercise all five layouts, every byte truncation, conditional owner time,
+raw values/duplicate IDs, following DD04 alignment, all five gate transitions,
+missing-row behavior, constructor/invalid-ID values, sticky decode/unknown gaps,
+inline-overflow handling, plugin and Session forwarding. Native source artifact:
+`data/extract/aa-net/native-dominion-received-20261018.txt` (ignored).

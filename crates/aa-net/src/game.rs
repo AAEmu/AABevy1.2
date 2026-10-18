@@ -551,6 +551,7 @@ pub enum ServerMsg {
     LootRoll(crate::loot_roll::LootRollEvent),
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
+    Dominion(crate::DominionEvent),
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
@@ -564,6 +565,7 @@ pub enum ServerMsg {
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
     Friend(crate::friend::FriendEvent),
+    DecodeFailed { message:String },
     Unhandled { level: u8, opcode: u16, len: usize },
 }
 
@@ -687,6 +689,7 @@ impl ServerMsg {
             Self::LootRoll(e) => e.name(),
             Self::Battlefield(e) => e.name(),
             Self::ScheduledEventStarted(_) => "SCScheduledEventStarted",
+            Self::Dominion(_) => "SCDominion",
             Self::Expedition(_) => "SCExpedition",
             Self::Family(_) => "SCFamily",
             Self::UnitGmModeChanged(_) => "SCUnitGmModeChanged",
@@ -700,6 +703,7 @@ impl ServerMsg {
             Self::Trade(e) => e.name(),
             Self::Mail(e) => e.name(),
             Self::Friend(e) => e.name(),
+            Self::DecodeFailed { .. } => "decode failed",
             Self::Unhandled { .. } => "unhandled",
         }
     }
@@ -754,6 +758,7 @@ impl ServerMsg {
                 Ok(m) => out.push(m),
                 Err(e) => {
                     tracing::warn!("undecodable packet in a batch of {count}: {e}");
+                    out.push(Self::DecodeFailed{message:e.to_string()});
                     break;
                 }
             }
@@ -1131,6 +1136,7 @@ impl ServerMsg {
             sc::SCCraftItemUnlockPacket => Self::CraftItemUnlocked(crate::craft::CraftItemUnlock::read(r)?),
             sc::SCCraftFailedPacket => Self::CraftFailureNotice(crate::craft::CraftFailureNotice::read(r)?),
             sc::SCUnitGmModeChangedPacket => Self::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged::read(r)?),
+            opcode if crate::DominionEvent::handles(opcode) => Self::Dominion(crate::DominionEvent::read_lane(opcode,r)?),
             opcode if crate::expedition::ExpeditionEvent::handles(opcode) => Self::Expedition(crate::expedition::ExpeditionEvent::read_lane(opcode,r)?),
             0x02d..=0x037 => Self::Family(crate::family::FamilyEvent::read_lane(opcode,r)?),
             sc::SCScheduledEventStartedPacket => Self::ScheduledEventStarted(crate::scheduled::ScheduledEventStarted::read_native(r)?),
@@ -2027,10 +2033,8 @@ mod tests {
         batch.u16(0).u16(sc::SCSetBreathPacket).u32(7);
         batch.u16(0).u16(sc::SCCooldownsPacket).i32(-1).i32(0);
         batch.u16(0).u16(sc::SCSetBreathPacket).u32(8);
-        assert_eq!(
-            ServerMsg::decode_batch(&batch.finish(), 3),
-            vec![ServerMsg::SetBreath { breath: 7 }]
-        );
+        assert!(matches!(ServerMsg::decode_batch(&batch.finish(),3).as_slice(),
+            [ServerMsg::SetBreath{breath:7},ServerMsg::DecodeFailed{..}]));
     }
 
 }

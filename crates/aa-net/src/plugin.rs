@@ -180,6 +180,7 @@ net_state! {
     auction: Auction,
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
+    dominion: crate::Dominion,
     expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
     server_clock: crate::clock::ServerClock,
@@ -326,6 +327,19 @@ mod equipment_flags_tests {
         assert_eq!(app.world().resource::<Units>().by_id[&77].expedition_id,0);
         assert_eq!(app.world().resource::<Player>().spawn.as_ref().unwrap().unit.expedition_id,0);
         assert!(!app.world().resource::<crate::Expeditions>().factions.contains_key(&9));
+    }
+
+    #[test]
+    fn plugin_dominion_fold_keeps_real_gate_and_coverage_loss_then_resets() {
+        let mut app=App::new();init_state(&mut app);
+        assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),Some(false));
+        let mut data=crate::DominionData{zone_group_id:25,..Default::default()};data.siege_timers.siege_period=4;data.siege_timers.offense.expedition_id=77;
+        app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::Dominion(crate::DominionEvent::Data{data:data.clone(),newly_declared:0,final_data_by_request:1}))).unwrap();
+        assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),Some(true));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::UnhandledGamePacket{level:4,opcode:0x3ff,len:0})).unwrap();
+        assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),None);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::LeftWorld{target:0})).unwrap();
+        assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),Some(false));
     }
 
 }
