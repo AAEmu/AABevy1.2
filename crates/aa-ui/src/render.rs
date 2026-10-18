@@ -92,7 +92,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             .copied()
             .filter(|&d| {
                 let o = u.tree.get(d);
-                o.alive && o.shown
+                o.alive && o.shown && o.drawable().is_none_or(|dr| !dr.row_template)
             })
             .collect();
         ds.sort_by_key(|&d| {
@@ -109,7 +109,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 .is_some_and(|x| x.layer != crate::tree::DrawLayer::Overlay)
         });
         for d in below {
-            drawable_quads(u, d, alpha, state, scale, &mut out);
+            drawable_quads(u, d, alpha, state, scale, None, &mut out);
         }
         if let Some(dg) = w.diagram.as_ref() {
             diagram_quads(u, id, dg, alpha, scale, &mut out);
@@ -203,7 +203,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             text_quads(u, t, rect, t.style.color, alpha, scale, &mut out);
         }
         for d in above {
-            drawable_quads(u, d, alpha, state, scale, &mut out);
+            drawable_quads(u, d, alpha, state, scale, None, &mut out);
         }
         // A widget's scale animation carries its text, art and descendants together.
         let mut owner = Some(id);
@@ -334,24 +334,33 @@ pub fn state_visible(u: &Ui, d: Id, state: ButtonState) -> bool {
     dr.state_only.is_none_or(|st| st == state)
 }
 
-fn drawable_quads(
+pub(crate) fn drawable_quads(
     u: &mut Ui,
     d: Id,
     alpha: f32,
     state: ButtonState,
     scale: f32,
+    base: Option<Rect>,
     out: &mut Vec<Quad>,
 ) {
     if !state_visible(u, d, state) {
         return;
     }
     let o = u.tree.get(d).clone();
+    if !o.alive || !o.shown { return; }
     let Kind::Drawable(dr) = &o.kind else { return };
     if dr.effect == Some(false) {
         return;
     }
+    // Native listbox templates are placed at fractional row centres. Keep their explicit
+    // rectangle intact; the ordinary drawable pass retains its existing pixel snapping.
+    let at_row = base.is_some();
+    let pixels = |r: Rect| if at_row {
+        [r.x * scale, r.y * scale, r.right() * scale, r.bottom() * scale]
+    } else { px(r, scale) };
     let animation = u.animations.sample(d);
-    let mut rect = animation.rect(u.tree.rect(d));
+    let base = base.unwrap_or_else(|| u.tree.rect(d));
+    let mut rect = animation.rect(base);
     // Status bar fill: crop the rect and the texture rectangle alike.
     let mut coords = animation.coords.or(dr.coords);
     if let Some((f, vertical)) = dr.fill {
@@ -381,7 +390,7 @@ fn drawable_quads(
     match dr.kind {
         DrawKind::Color => out.push(Quad {
             tex: Tex::Atlas,
-            pos: px(rect, scale),
+            pos: pixels(rect),
             uv: white_uv(),
             color,
             corners: None,
@@ -442,7 +451,7 @@ fn drawable_quads(
                             };
                             out.push(Quad {
                                 tex: tex.clone(),
-                                pos: px(r, scale),
+                                pos: pixels(r),
                                 uv: [sx[i] / tw, sy[j] / th, sx[i + 1] / tw, sy[j + 1] / th],
                                 color,
                                 corners: None,
@@ -455,7 +464,7 @@ fn drawable_quads(
                 _ => {
                     out.push(Quad {
                         tex,
-                        pos: px(rect, scale),
+                        pos: pixels(rect),
                         uv: [c[0] / tw, c[1] / th, (c[0] + c[2]) / tw, (c[1] + c[3]) / th],
                         color,
                         corners: None,
@@ -467,7 +476,7 @@ fn drawable_quads(
                         if let Some(r) = u.textures.resolve(extra) {
                             out.push(Quad {
                                 tex: Tex::Image(r),
-                                pos: px(rect, scale),
+                                pos: pixels(rect),
                                 uv: [0.0, 0.0, 1.0, 1.0],
                                 color,
                                 corners: None,
@@ -482,7 +491,7 @@ fn drawable_quads(
     }
     let angle = dr.rotation + animation.rotation;
     if angle != 0.0 {
-        let p = px(rect, scale);
+        let p = pixels(rect);
         let center = [
             p[0] + (p[2] - p[0]) * animation.pivot.fx(),
             p[1] + (p[3] - p[1]) * animation.pivot.fy(),
@@ -500,7 +509,7 @@ fn drawable_quads(
     if animation.clip {
         // Native 3928f877 saves this base rectangle before effect scale/rotation/movement;
         // 3928fab9 clips to it for this phase, independently of ancestor scroll clipping.
-        clip::quads(out, first_quad, px(u.tree.rect(d), scale));
+        clip::quads(out, first_quad, pixels(base));
     }
 }
 

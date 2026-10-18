@@ -99,6 +99,7 @@ pub(super) fn quad(
 }
 
 pub(super) fn state(
+    u: &mut Ui,
     d: &ListBoxData,
     state: usize,
     base: Rect,
@@ -109,9 +110,23 @@ pub(super) fn state(
     let [l, t, r, b] = d.state_inset;
     let mut color = d.colors[state];
     color[3] *= alpha;
+    if color[3] <= 0.0 {
+        return;
+    }
     let (tex, uv) = match d.state_texture.as_ref() {
         Some(path) => (Tex::Image(path.clone()), d.state_coords[state]),
-        None => (Tex::Atlas, crate::render::white_uv()),
+        None => {
+            // Native 392a0a2d/0a96/0aec: white for selected/default, grey for hover.
+            let path = if state == 1 {
+                "textures/defaults/grey.dds"
+            } else {
+                "textures/defaults/white.dds"
+            };
+            match u.textures.resolve(path) {
+                Some(path) => (Tex::Image(path), [0., 0., 1., 1.]),
+                None => (Tex::Atlas, crate::render::white_uv()),
+            }
+        }
     };
     quad(
         tex,

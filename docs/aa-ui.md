@@ -1686,3 +1686,51 @@ and its complete text in the original dark tooltip skin. Tooltip art was compare
 `reference/ingame/tooltip_hud/real.png`; there is no dedicated supplied listbox-tooltip
 reference. The capture logged 180–237 FPS, zero script errors and closed itself. Template
 visibility/animation and line-border variants remain separate pending work.
+
+## Independent listbox image templates and fallback states
+
+Opened/closed branch images and separators now retain their real `SetVisible` state. They
+start visible like ordinary image drawables; they are excluded only from the owner's
+standalone drawable pass. Native listbox row rendering (`392a0cc3`, `392a0d67`, `392a0e90`)
+calls the same image virtual renderer as ordinary drawables. `Image::Render` (`3928b420`)
+checks its own shown flag at `+98` before rendering, and samples frame animation at `+11d`.
+The toolkit therefore uses the existing image pipeline at each authored row rectangle,
+including frame coordinates, movement, alpha, scale, rotation and clipping. It does not
+rewrite the template's anchors or allocate objects per row. Existing active-only animation
+timing, finite completion hiding and cleanup apply to these images as well.
+Per-row rectangles retain their authored fractional coordinates; the normal standalone
+drawable pass keeps its existing pixel snapping. Prior branch position/width assertions
+are unchanged; their icon count now filters the authored grid sheet, since selected state
+fallbacks are also image quads.
+
+Native state fallback uses `Textures/Defaults/white.dds` for selected/default rows
+(`392a0a2d`, `392a0aec`) and `Textures/Defaults/grey.dds` for hovered rows (`392a0a96`).
+The original pak assets are a 4-by-4 opaque white image and a 1-by-1 opaque RGB 128 grey
+image respectively. The toolkit now resolves those actual assets with full-image UVs and
+the authored state color. An explicit state texture continues to replace both fallbacks.
+This fixes the previous all-white hover fallback without changing fonts or row geometry.
+
+Line-border methods remain pending. The native Lua wrapper exposes `SetBorder` and
+`SetLineColor`, but a search of the complete extracted original `.alb` tree finds these names
+only in that forwarding wrapper. Native `3929f540` writes line height at `+320` (initially zero), while
+`3929f560` sets RGBA at `+324`. The constructor does not initialize that color. No guessed
+default color or negative-height normalization has been added.
+
+`tests/listbox_templates.rs` checks independent branch/separator visibility, authored
+placement without anchor writes, shared UV/scale/alpha frame sampling, finite completion,
+loop restart and removal cleanup. Its original Achievement fixture observes image handles
+returned by the original constructor, then exercises ordinary image APIs and real mouse
+category expansion. The original slider-list fixture checks selected white / hovered grey
+fallbacks and explicit-texture replacement. All 19 listbox tests and 10 animation tests
+passed, including existing dropdown/crafting/art regressions and the 511-byte tooltip limit.
+
+`examples/native_listbox_templates.rs` uses `aa_dev`. The inspected final capture
+`shots/aa-ui/native-listbox-templates.png` shows General expanded through the original mouse
+handler, animated opened art, independently hidden closed art, authored separators and the
+two fallback state tones in the Alchemy list. The fixture applies frame animation explicitly
+to exercise the normal image API; the original Achievement Lua does not request that loop.
+Shared window art/scale were compared with `reference/ingame/options_keybinds/real.png`;
+there is no supplied Achievement reference. The final capture logged 342–357 FPS, zero script
+errors and process exit 0 after closing itself. Reproduce with
+`native_listbox_templates --lua 'closed:SetVisible(false)' 1 --hover 230 418 1 --shot shots/aa-ui/native-listbox-templates.png --shot-after 4.4`.
+No application integration hook is required.
