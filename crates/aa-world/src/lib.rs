@@ -29,6 +29,7 @@ pub mod sky_clouds;
 pub mod sky_material;
 pub mod sky_transition;
 pub mod stream;
+pub mod subzone;
 pub mod terrain;
 pub mod terrain_layers;
 pub mod terrain_query;
