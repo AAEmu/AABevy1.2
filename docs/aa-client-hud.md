@@ -1431,6 +1431,13 @@ three values(0,0,-1), with IsInInstantGame=false for initial state0. This is the
 default, not a received queue report. The original-stage fixture now requires no entrance alarm.
 Actual battlefield queue requests/receipts and state changes are being implemented separately.
 
+The follow-up native-frame-bar-no-queue.png was inspected at454-487 FPS, with no warnings,
+Lua/runtime errors or leftover window. A fresh exact original probe also hovers an unlearned
+level20 skill at pet level15 through SetPetBarSkillTooltip: required learnLevel is numeric,
+learned is false and the original red requirement text builds successfully (2.99s). The twelve
+other original HUD probes were rerun individually and all passed. Their final-* logs and the
+new no-queue.log/.err are in the same capture directory.
+
 This integration exposed and depends on aa-ui's additive global event registration: the original
 frame and bar both register SPAWN_PET. The previous implementation replaced the first callback and
 repeated the second. Native listener order/release/mutation and empty unbound GetHotKey are now
