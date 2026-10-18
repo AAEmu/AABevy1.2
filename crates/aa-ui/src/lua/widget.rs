@@ -1235,6 +1235,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     let set_title: mlua::Function = m.raw_get("SetTitle")?;
     def("SetTitleText", set_title)?;
     super::drag::methods(lua, &m)?;
+    super::resize::methods(lua, &m)?;
     if matches!(ty, "editbox" | "editboxmultiline") {
         super::edit::methods(lua, &m)?;
     }

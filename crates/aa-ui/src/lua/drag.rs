@@ -78,6 +78,7 @@ pub struct DragState {
     pub held_gen: u64,
     /// Window moved by `StartMoving` (the original title bars call it on mouse down).
     moving: Option<Moving>,
+    pub(crate) resize_hover: Option<Id>,
 }
 
 struct Moving {
@@ -85,6 +86,35 @@ struct Moving {
     /// Initial top-left and size, plus the pointer at the start, in UI units.
     rect: crate::tree::Rect,
     pointer: (f32, f32),
+    sizing: Option<Point>,
+}
+
+pub(crate) fn start_sizing(lua: &Lua, id: Id, point: Point) {
+    let mut u = ui(lua);
+    if u.tree.widget(id).is_none() {
+        return;
+    }
+    let rect = u.tree.rect(id);
+    super::resize::place(&mut u, id, rect);
+    u.drag.moving = Some(Moving {
+        id,
+        rect,
+        pointer: u.cursor,
+        sizing: Some(point),
+    });
+}
+
+pub(crate) fn sizing(lua: &Lua) -> bool {
+    ui(lua)
+        .drag
+        .moving
+        .as_ref()
+        .is_some_and(|m| m.sizing.is_some())
+}
+
+pub(crate) fn resize_capture(u: &super::Ui) -> Option<(Id, Point)> {
+    let m = u.drag.moving.as_ref()?;
+    m.sizing.map(|p| (m.id, p))
 }
 
 /// Move a captured window with the pointer before hit testing its title bar again.
@@ -93,7 +123,16 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
     let Some(m) = u.drag.moving.as_ref() else {
         return;
     };
-    let (id, r, start) = (m.id, m.rect, m.pointer);
+    let (id, r, start, sizing) = (m.id, m.rect, m.pointer, m.sizing);
+    if let Some(point) = sizing {
+        if !u.tree.visible(id) {
+            u.drag.moving = None;
+            return;
+        }
+        u.drag.moving.as_mut().unwrap().pointer = pointer;
+        super::resize::motion(&mut u, id, point, start, pointer);
+        return;
+    }
     let (dx, dy) = (pointer.0 - start.0, pointer.1 - start.1);
     let current = u.tree.rect(id);
     let (x, y) = (r.x + dx, r.y + dy);
@@ -376,6 +415,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     id,
                     rect: u.tree.rect(id),
                     pointer: u.cursor,
+                    sizing: None,
                 });
             }
             super::none()

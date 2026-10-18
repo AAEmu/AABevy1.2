@@ -2292,6 +2292,13 @@ request path `39455e00` supplies the actual NPC type, while server-driven caller
 a player. Original entrance Lua separately prefers a nearby target NPC only when
 its type differs from this stored value and its distance is below 2.5.
 
+The adjacent `X2Unit:GetNpcTypeIndex(unit)` binding `394c0f40` is deliberately
+narrower than unit display-name grouping: resolver `3945fcd0` must return actor
+category 1 and the raw unit kind at `+0x410` must equal NPC kind 1. It returns
+that unit's numeric template ID at `+0x41c`. Unresolved units, characters, Mates,
+Slaves, housing and shipyards return zero Lua values. A Mate's NPC-backed
+template does not make it eligible for this interaction getter.
+
 Source and bounded read-only runtime excerpts are in ignored
 `data/extract/aa-ui/native-battlefield-entrance-source-20261018.txt` and
 `native-battlefield-entrance-runtime-20261018.txt`. This audit changes no UI
@@ -2434,3 +2441,64 @@ Disassembly is retained in ignored `data/extract/aa-ui/` artifacts
 `native-pet-attribute-components-20261018.txt`. The app owns real actor, formula,
 equipment and buff integration. This source-only audit changes no Lua toolkit
 code or visual output, so it adds no screenshot or performance claim.
+
+## Original widget edge resizing (2026-10-18)
+
+`UseResizing`, `SetResizingBorderSize`, `SetMinResizingExtent`,
+`SetMaxResizingExtent`, and `StartSizing` now implement the native resize path.
+The unchanged quest tracker enables its authored bottom-only 10-pixel border,
+sets limits from its content/screen size, and can be resized with the pointer.
+Original chat also calls these setters; no application hook is required.
+
+Bindings `39265450`, `392659b0`, `39265a70`, `39265b00` and `39265130` lead to
+widget properties `+0x244..0x264`, motion capture `39278a10`, and incremental
+motion `3927a110`. Generic defaults are zero borders/min/max and resizing off.
+The setters clamp negative values to zero. Setting limits itself does not resize
+the widget. `StartSizing(point)` explicitly captures independently of the
+automatic enable flag; `StopMovingOrSizing` and button release end capture.
+
+Native `39277580` uses strict interior left/top/right/bottom strips in **physical
+pixels**, with the mask table `399c533c` selecting eight edges/corners. Border
+thickness does not grow with widget/UI scale. Automatic left-button border hits
+consume before that widget's `OnMouseDown` and suppress the release click. Motion
+uses current pointer deltas and `39277650`'s direction/re-entry gates; dragging
+beyond a limit and reversing outside the edge does not immediately shrink it.
+Left/top retain the opposite edge when clamped; right/bottom retain the origin.
+Min/max extents use widget units, transformed by its effective scale. The toolkit
+inverts the current widget/ancestor transform when applying the new logical
+rectangle, preserving scaled placement and updating ordinary anchored children.
+
+`UseResizing(true)` creates the original `ui/hud/chat_guide.dds` nine-part guide:
+coords `(0,0,16,16)`, insets `(7,7,8,8)`, top-left `(-3,-1)`, bottom-right `(2,5)`.
+It starts hidden and appears on a resize edge. Disabling removes the guide.
+Settled hover does not rewrite the anchor tree or allocate drawable objects.
+
+Resize cursors use the existing independent OS-cursor hook. `39277fc0` requests
+native enums 8/9/10/11 for the two diagonals, horizontal and vertical; handle
+selection `3921aa80` indexes `39ac694c`, adding 14 for the large theme. Loader
+`3921e2cc..3921e31b` / `3921e3da..3921e429` supplies normal resource groups
+161/163/165/167 and large groups 162/164/166/168. All eight original resources
+are 32x32 BGRA, hotspot `(16,16)`; large resize artwork is not stretched to 64.
+The cache reads these authored resources only when requested. Resize overrides
+the repair request, which resumes afterward, and the prior OS component is
+restored when neither is active. Held item/image state is unchanged.
+
+Source excerpts are in ignored
+`data/extract/aa-ui/native-widget-resizing-source-20261018.txt`. This milestone
+does not broaden generic mouse-event bubbling or invent additional movement
+notifications; existing `OnBoundChanged` layout delivery updates dependants.
+
+Validation: the library plus resizing, drag, popup lifecycle, screen bounds,
+scale/clip and grid/bounds suites passed 54 tests (one existing font-metrics
+test ignored). Four new interaction regressions cover all eight edges/corners,
+click consumption, limit re-entry, explicit capture, UI/widget scale and the
+unchanged original quest tracker. Two cursor regressions verify all eight
+authored resources and resize -> repair -> prior OS cursor restoration.
+
+`examples/native_resizing.rs` uses aa-dev default plugins and `DevPlugin`.
+The unique `--shot` capture `shots/aa-ui/native-resizing-final-20261018.png` was
+inspected: original three-quest tracker, physical bottom drag from 300 to 430
+units, original guide, zero script errors, 360-408 FPS, automatic closure and
+exit 0. Shared HUD/map framing was compared with `reference/ingame/spawn/real.png`;
+that reference has an empty tracker and no resizing gesture. This fixture omits
+the 3D world and changes no font, authored content layout or UI calibration.
