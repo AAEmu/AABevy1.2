@@ -293,6 +293,23 @@ pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) -> bo
     }
 }
 
+/// Reset only the native four records; retain other characters, settings and pending edits.
+pub(crate) fn chat_reset(lua: &Lua, owner: &str) -> bool {
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    let mut store = store.lock().unwrap_or_else(|e| e.into_inner());
+    let mut changed = false;
+    if let Some(record) = store.data.get_mut("chat").and_then(|chat| chat.get_mut(owner)).and_then(Json::as_object_mut) {
+        for key in ["tabs", "extra", "locks", "options"] {
+            changed |= record.remove(key).is_some();
+        }
+    }
+    store.dirty |= changed;
+    match store.save() {
+        Ok(()) => true,
+        Err(e) => { bevy::log::warn!("settings: chat reset: {e:#}"); false }
+    }
+}
+
 pub fn install_hud(lua: &Lua) -> mlua::Result<()> {
     lua.load(include_str!("settings.lua"))
         .set_name("@settings.lua")

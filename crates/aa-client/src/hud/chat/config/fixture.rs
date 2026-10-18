@@ -30,7 +30,10 @@ pub(in crate::hud) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Sha
 }
 
 pub(in crate::hud) fn show_options(rt: &UiRuntime) -> mlua::Result<()> {
-    rt.lua.load("ShowChatOptionWindow(3)").exec()?;
+    show_options_for(rt, 3)
+}
+pub(super) fn show_options_for(rt: &UiRuntime, raw_id: i32) -> mlua::Result<()> {
+    rt.lua.globals().get::<mlua::Function>("ShowChatOptionWindow")?.call::<()>(raw_id)?;
     aa_ui::lua::flush(&rt.lua);
     // Finish opening and retire the previous hidden instance before resolving its reused name.
     aa_ui::lua::tick(&rt.lua, 600.);
@@ -45,13 +48,24 @@ pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
     let locked = std::env::args().any(|a| a == "--locked");
+    let reset = std::env::args().any(|a| a == "--reset");
     if locked {
         context_action(&rt).unwrap();
     }
-    if !locked && !std::env::args().any(|a| a == "--chat") {
+    if reset {
+        show_options_for(&rt, 0).unwrap();
+        crate::hud::expansion::fixture::click(&rt, "CHAT_OPTIONS_FIXTURE.chatResetButton").unwrap();
+        aa_ui::lua::tick(&rt.lua, 600.);
+        for (who, text) in [
+            ("Sailor", "Chat reset restored the original All, Party and Trade tabs."),
+            ("Quartermaster", "Previous history, custom styles and window locks were cleared."),
+        ] {
+            rt.fire_event("CHAT_MESSAGE", (0, "200", false, who, text, false, None::<String>));
+        }
+    } else if !locked && !std::env::args().any(|a| a == "--chat") {
         show_options(&rt).unwrap();
     }
-    if std::env::args().any(|a| a == "--style") {
+    if !reset && std::env::args().any(|a| a == "--style") {
         rt.lua
             .load("CHAT_OPTIONS_FIXTURE.menuListWindow.menu[4]:OnClick('LeftButton')")
             .exec()

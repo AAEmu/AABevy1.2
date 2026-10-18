@@ -13,21 +13,27 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest checked milestone: client251 passed/38 optional probes ignored. All nine
-chat-configuration checks pass, including original Save/Cancel/Reset, physical
-context Lock/Unlock, blocked dragging, warning timing and fresh-stage persistence.
+Latest checked milestone: client255 passed/38 optional probes ignored in46.56s.
+All12 chat-configuration checks pass, including original Save/Cancel/Reset,
+physical context Lock/Unlock, blocked dragging, warning timing, full Reset Chat,
+independent selection/method loading without saved tabs, and fresh-stage persistence.
 Native tab metadata, selection, method, opacity and eight owner-window locks
-persist per world/character. Five latest chat-lock/crime/world-list captures are
-inspected. The native dishonor token now displays its red skull; the original
+persist per world/character. The full reset retires windows/history, deletes only
+four owner keys and calls original zero-argument recreation. Three latest reset
+and live-world-list captures are inspected; the tested playable alias is refreshed.
+The shared period helper matches18 executed original cases, including360-day years.
+The native dishonor token now displays its red skull; the original
 jury waiting tooltip and the earlier separate physical probe pass. Received
 cooldowns advance once per frame before HUD reads; queries remain side-effect free.
 Earlier achievement tracing/detail/persistence and list-geometry checks remain passed.
-Network485 tests pass, including trial history/progress, automatic native CS072,
-Confirm/Cancel/Verdict requests and callback-stage snapshots. World199 tests/9
+Network495 tests pass, including initial trial tasks/commands, history/progress,
+automatic native CS072, Confirm/Cancel/Verdict and callback-stage snapshots.
+World201 tests/9
 existing probes ignored,120 cloud/transmission GPU comparisons,36 native water-half
 oracles and eight original scene/unload runs pass. Sky and native pre-water clouds
-now reach the transmission copy in their source order. Owning docs retain exact
-evidence and limits. Native full chat reset, trial HUD integration, remaining
+now reach the transmission copy in their source order. Fog/deferred decal water
+ordering adds32 GPU comparisons and nine original scene/unload runs. Owning docs
+retain exact evidence and limits. Trial HUD integration, remaining
 cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
 
@@ -46,7 +52,7 @@ parity is unfinished.
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions | Natural repair service routing/live repair and expansion, native premium repair payment, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original stablehand quote/confirmation over received Bag+Bank summon details; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
-| Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method, hover/idle opacity and owner-window locks persist per world/character; original settings Save/Cancel/Reset, context Lock/Unlock, blocked drag warning and first-tab window movement | Native send-size overflow policy, window position persistence, other-tab splitting/reparenting and full reset, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |
+| Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method, hover/idle opacity and owner-window locks persist per world/character; original settings Save/Cancel/Reset, context Lock/Unlock, blocked drag warning, first-tab window movement and full Reset Chat with independent extras reload | Native send-size overflow policy, window position persistence, other-tab splitting/reparenting, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |

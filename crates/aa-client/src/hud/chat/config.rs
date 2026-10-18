@@ -11,8 +11,9 @@ use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
 use serde_json::json;
 #[allow(dead_code)]
 pub(in crate::hud) mod fixture;
-mod model;
 mod locks;
+mod model;
+mod reset;
 mod table;
 #[cfg(test)]
 mod tests;
@@ -101,10 +102,11 @@ fn ensure(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let key = view.key();
     let loaded = key.as_deref().and_then(|key| {
         let tabs = crate::settings::chat_read(lua, key, "tabs")?;
-        let extra = crate::settings::chat_read(lua, key, "extra");
-        Model::load(&tabs, extra.as_ref())
+        Model::load(&tabs, None)
     });
     view.model = loaded.unwrap_or_else(|| Model::defaults(names, view.font));
+    let extra = key.as_deref().and_then(|key| crate::settings::chat_read(lua, key, "extra"));
+    view.model.load_extra(extra.as_ref());
     view.options = key
         .as_deref()
         .and_then(|key| crate::settings::chat_read(lua, key, "options"))
@@ -112,7 +114,8 @@ fn ensure(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         .map(|v| v.map(f32::from_bits))
         .unwrap_or([0.7, 0.5]);
     view.loaded = true;
-    view.locks = key.as_deref()
+    view.locks = key
+        .as_deref()
         .and_then(|key| crate::settings::chat_read(lua, key, "locks"))
         .and_then(|value| serde_json::from_value(value).ok())
         .unwrap_or([false; 8]);
@@ -146,6 +149,7 @@ fn live_window(lua: &Lua, window: i32) -> Option<Id> {
 
 pub(in crate::hud) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     locks::install(lua, state)?;
+    reset::install(lua, state)?;
     let api: Table = lua.globals().get("X2Chat")?;
     let hooks: Table = lua.globals().get("AAUI")?;
     let s = state.clone();
@@ -184,7 +188,9 @@ pub(in crate::hud) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             ensure(lua, &s)?;
             let mut data = s.borrow_mut();
             let model = &mut data.chat_config.model;
-            let Some(window) = model.tabs.get(&raw_id).map(|tab| tab.window) else { return Ok(()) };
+            let Some(window) = model.tabs.get(&raw_id).map(|tab| tab.window) else {
+                return Ok(());
+            };
             model.extra.entry(window).or_default().method = method;
             drop(data);
             save(lua, &s, "extra");
@@ -415,5 +421,12 @@ pub(in crate::hud) fn plugin(app: &mut App) {
             .before(super::super::sync_hud)
             .before(super::super::prebuild_hud)
             .before(super::super::build_hud),
-    ).add_systems(Update, locks::sync.after(super::super::sync_hud).after(super::super::build_hud).before(aa_ui::UiFrame));
+    )
+    .add_systems(
+        Update,
+        locks::sync
+            .after(super::super::sync_hud)
+            .after(super::super::build_hud)
+            .before(aa_ui::UiFrame),
+    );
 }
