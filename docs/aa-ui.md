@@ -5740,3 +5740,90 @@ The copied executable was removed. Early fixture runs used an unavailable
 CreateEmptyWindow-only helper or the default5s shot before transition; those
 diagnostics are not final visual evidence. InheritAnimationData implementation
 follows separately over these now-correct alpha/fade prerequisites.
+
+### Native InheritAnimationData and widget scale lifetime (2026-10-18)
+
+InheritAnimationData is now implemented over its actual typed thunk39267bf0,
+parser39267400, binding39267120 and helper3927dd30. The native table parameter
+resolves its widget host through `__this`; invalid/missing/wrong-class inputs
+return zero results without copying. The toolkit accepts its registered live
+widget tables, including hidden sources; it does not manufacture native foreign
+userdata. No source visibility, parent, root or self exclusion is inferred.
+
+The helper copies alpha endpoints/current/velocity/initial velocity/acceleration
+at+280..294 and flag+298. Only an active copied alpha channel writes current+288
+to visible+d8; an inactive channel preserves the destination's current visible
+alpha while still replacing its configuration. Thus a source's direct SetAlpha
+override is not copied in place of its active internal current. Old destination
+channels stop silently; the copy does not restart them or emit end events.
+
+Scale copies the five fields+29c..2ac, configured pivot+2b0 and flag+2b4. An
+active copy writes the source's own raw+64 exactly, then settles the destination
+geometry/anchors and dispatches OnScale42, even for self or unchanged raw scale.
+It does not copy an effective ancestor scale, divide by the destination's UI
+baseline during copying, or overwrite destination root/ApplyUIScale policy.
+An inactive copy retains the destination's own scale and displayed geometry.
+No elapsed/duration clock is copied: these native channels retain their current
+velocity and current value, not an elapsed-time evaluator.
+
+Configured and displayed pivots are now distinct. A scale configuration change
+alone does not reinterpret current geometry. Actual3927b2f0 retains the chosen
+point of the current rectangle; local scale-origin compensation expresses that
+in the toolkit without changing authored anchors or copying motion/damage
+offsets. Native geometry controls execute full pivot/extent arithmetic with no
+authored anchor targets; general native anchor-provider calibration is not
+broadened by this change. Original ordinary SetScale uses CENTER4, and the same
+local settlement keeps existing center behavior while retaining copied pivots.
+
+The next active scale step3927e0c9 normalizes current raw scale by the destination
+root/UI baseline before integrating and multiplying back. This is deliberately
+later than the copy. An executed edge copies1.700007677078247 as bits3fd999da;
+the next root/UI0.85 tick0 becomes3fd999db. Both exact raw snapshots and an
+independent `[7,-3]` damage/motion offset are checked through the Lua API and
+the native-scale consumer. Existing general kinematic coefficient precision
+remains separate; this slice copies the existing channel state rather than
+replacing all animation timing formulas.
+
+Full SetStart3927db80 controls also close a prior scale-stop error. Alpha stop
+snaps an active channel to its target. Scale stop clears its flag at3927dbce
+before the later scale branch, leaving own scale/geometry in place without
+OnScale or completion events. Starting scale still settles geometry and emits
+OnScale, including equal-scale starts. Ordinary constructor3927ac1e sets base
+alpha/own scale1 before initializing endpoints1, coefficients0, flagsfalse and
+pivotCENTER. A source with no animation state therefore retains that default
+configuration even after a later visible-alpha override. The native prototype
+constructor instead uses its prototype's current visible/raw values and resets
+active flags; no prototype widget API was added.
+
+Read-only offline artifacts under `data/extract/aa-ui/` execute **90 native
+inheritance/start/update groups**: `widget_inherit_oracle.py`12 field/flag/self
+cases, `widget_inherit_wrapper_oracle.py`11 full-wrapper cases,
+`widget_inherit_geometry_oracle.py`13 full geometry cases and
+`widget_start_inherit_oracle.py`54 constructor/start/copy/full-WidgetUpdate cases.
+The matching `native-widget-*-oracle-20261018.json` files retain values and
+`native-widget-inherit-source-20261018.txt` archives disassembly. Lua primitives,
+class/script callbacks, root identity and profiling are explicit interface
+endpoints; channel copy/flags, scale normalization and geometry arithmetic run
+unchanged. Root-parent, unequal scale, active/inactive and self cases are covered.
+
+Crate check and final example build pass. **120 selected checks pass**, with
+one pre-existing optional font-metric test ignored: inheritance8, units23,
+animation10, fade12, scale/clip4, attachment5, popup9, scaled fitting8, chat
+alpha6/clip7, tooltips6, native selector6/mask8/completion7/state1. Original
+BuffUpdate first starts ID11, starts ID22 forty milliseconds later, then removes
+ID11 after another twenty milliseconds. The newer second button's different
+alpha/scale is copied into the first button and continues instead of restarting;
+the actual transformed icon remains the physical hit target. Other checks cover
+strict arguments/casts/arity, inactive visible/config state, self callbacks,
+raw-scale bits, constructor defaults, changed configured pivots and scale stop.
+
+Final aa-dev shots with explicit `--shot-after 8` were inspected:
+`shots/aa-ui/native-buff-inherit-active-final-720-20261018.png`
+(1280x720/default0.85, **281.0-563.2 FPS**) and
+`shots/aa-ui/native-buff-inherit-complete-final-1080-20261018.png`
+(1920x1080/1.0, **501.4-618.0 FPS**). They use unchanged original buff-window,
+item-icon and remaining-time scripts/assets, with a diagnostic parent scale3
+to make the short animation visible. Both report zero script errors/WARN/ERROR
+and self-close (PIDs36492/20432); the copied executable was removed. Initial
+diagnostics overlapped the fixture status label at active scale; the final
+board provides space without changing original widget extents or animation.
