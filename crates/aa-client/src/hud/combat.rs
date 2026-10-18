@@ -52,6 +52,24 @@ fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, 
     }
 }
 
+/// Native39391720 ->3940a3e0. Presentation is separate from the authoritative points packet.
+pub(super) fn environment(rt: &aa_ui::UiRuntime, damage: &aa_net::EnvironmentDamage, name: &str) {
+    let source = match damage.source {
+        0 => "FALLING",
+        2 => "DROWNING",
+        _ => return,
+    };
+    if damage.amount == 0 { return; }
+    let name = if name.is_empty() { "unknown" } else { name };
+    // Native3940a9dd uses CVTSI2SS on the raw dword, so this presentation path deliberately
+    // sign-interprets and rounds to f32. The aa-net report retains the original unsigned value.
+    let amount = f64::from(damage.amount as i32 as f32);
+    rt.fire_event("COMBAT_MSG", (
+        damage.target_obj_id.to_string(), "ENVIRONMENTAL_DAMAGE", name, name, source, amount,
+        "HEALTH", "HIT", 0i64, "idle", 0i64, false,
+    ));
+}
+
 /// aa-net's combat events as the scripts' events (after `sync_hud` pushed this frame's state).
 #[allow(clippy::too_many_arguments)]
 pub fn route_combat(
@@ -82,6 +100,10 @@ pub fn route_combat(
     let id = |obj: u32| obj.to_string();
     for aa_net::NetEvent(event) in events.read() {
         match event {
+            Event::EnvDamage(damage) => {
+                let name = unit_name(&units, game, &player, damage.target_obj_id);
+                environment(&rt, damage, &name);
+            }
             Event::UnitDamaged(d) => {
                 if d.caster_obj_id != own && d.target_obj_id != own {
                     continue;
@@ -190,5 +212,29 @@ mod tests {
         assert_eq!(hit_name(hit_type::SPELL_CRITICAL), "CRITICAL");
         assert_eq!(hit_name(hit_type::RANGED_DODGE), "DODGE");
         assert_eq!(hit_name(hit_type::SPELL_RESIST), "RESIST");
+    }
+
+    #[test]
+    fn environment_reports_keep_native_arguments_and_numeric_conversion() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0)?;
+        rt.lua.load(r#"
+            received={}; text_count=0
+            UIParent:SetEventHandler('COMBAT_TEXT',function() text_count=text_count+1 end)
+            UIParent:SetEventHandler('COMBAT_MSG',function(...) received[#received+1]={n=select('#',...),...} end)
+        "#).exec()?;
+        for (source,amount,name) in [(0,17,"Faller"),(2,16_777_217,""),(0,u32::MAX,"High"),(0,0,"Zero"),(1,7,"Gimmick"),(3,9,"Ship"),(255,9,"Other")] {
+            environment(&rt, &aa_net::EnvironmentDamage { source,target_obj_id:100,amount,gimmick_id:(source==1).then_some(8) }, name);
+        }
+        rt.lua.load(r#"
+            assert(#received==3 and text_count==0)
+            for _,v in ipairs(received) do
+              assert(v.n==12 and v[1]=='100' and v[2]=='ENVIRONMENTAL_DAMAGE' and v[3]==v[4])
+              assert(v[7]=='HEALTH' and v[8]=='HIT' and v[9]==0 and v[10]=='idle' and v[11]==0 and v[12]==false)
+            end
+            assert(received[1][3]=='Faller' and received[1][5]=='FALLING' and received[1][6]==17)
+            assert(received[2][3]=='unknown' and received[2][5]=='DROWNING' and received[2][6]==16777216)
+            assert(received[3][6]==-1)
+        "#).exec()?;
+        Ok(())
     }
 }

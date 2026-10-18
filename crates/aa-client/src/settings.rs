@@ -16,6 +16,10 @@ pub(crate) fn bindings_fixture(rt: aa_ui::UiRuntime) {
     bindings::fixture::run(rt);
 }
 
+pub(crate) fn isolated_bindings(rt: &aa_ui::UiRuntime) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    bindings::fixture::isolated(rt)
+}
+
 #[derive(Default)]
 struct Store {
     path: PathBuf,

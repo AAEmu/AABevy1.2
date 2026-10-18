@@ -945,3 +945,61 @@ reference; shared font alias/fallback calibration remains open. The inspected wo
 smoke in the same folder shows the live Lane-bevy list, zero script errors and292-405FPS.
 Both root QA windows exited. The playable copy `target/debug/aa-client-play.exe` is refreshed,
 SHA256 `A9523DFD34F89BC4F772104D8D78AE2295555A620F6D9A5EAA1352CC26B123C4`.
+
+## Native force-attack state and environmental combat reports (2026-10-17)
+
+`pvp.rs` replaces the fallback UnitIsForceAttack query and consumes the configured
+toggle_force_attack action. Native394bd710 returns boolean false for missing/unresolved units
+and non-characters; characters read the received force byte. Initial state comes from native
+SCUnitState bit3 (397c992b ->398a222a ->unit+3bbc), with later SC043 acknowledgments replacing it.
+The lane currently writes zero for that character spawn bit even if its runtime mode was on;
+this server snapshot limitation is not hidden by persisting a local sticky flag.
+
+During loading the view hydrates from actual units and CombatStatus before original
+ENTERED_WORLD/UpdatePVPIcon handlers run. Once active it replays known-object announcements,
+removals and acknowledgments in order. Native391d3c60 emits FORCE_ATTACK_CHANGED(stringId,on),
+including duplicate explicit reports; each Lua handler can query the corresponding state even
+when opposite changes arrived in one frame. Original player/target/party handlers own the
+icons, and the original center-message handler owns the Bloodlust on/off message. Announcements
+and local send notifications do not synthesize that event. Removal, identity reuse, logout and
+character changes cannot retain a stale flag.
+
+The toggle follows native39390ec0: invert the currently acknowledged own-character byte and
+send Command::SetForceAttack. A request does not change the icon, buff, combat relationship or
+HP. Repeated presses before an acknowledgment consequently send the same inverse value.
+Local transport/phase rejection raises a system notice. Full protected-zone/team/retribution
+eligibility and force-mode skill/target preflight remain a separate source audit; the existing
+friendly-target skill gate has not been replaced with an unconditional friendly-fire bypass.
+Invisibility and breath reports also do not become guessed visibility or breathing models.
+
+`combat.rs` now translates SCEnvDamage through the exact native39391720/3940a3e0 path.
+Only nonzero sources0/2 produce COMBAT_MSG with12 arguments: target ID, ENVIRONMENTAL_DAMAGE,
+target name twice, FALLING/DROWNING, amount, HEALTH, HIT,0,idle,0,false. Missing names use literal
+unknown. Native3940a9dd interprets the raw dword as signed i32 and converts it to f32; presentation
+preserves that conversion/rounding, while aa-net keeps the original u32 report. The original
+combat-text script creates its local damage text from this message. No extra COMBAT_TEXT,
+health subtraction, combat engagement or death is invented. Gimmick/ship/unknown sources retain
+raw metadata without an unsupported presentation event.
+
+The current full client suite passes131 tests with19 intentional probes ignored. Focused
+tests cover missing/non-character getter behavior, per-event acknowledgment queries, duplicate
+reports, removal/reuse and exact environmental arguments, filtering and numeric conversion.
+The original-stage icon/environment/physical-toggle fixture passed in2.01s: initial own state,
+acknowledged player/target icons, original falling/drowning text, and repeated physical Ctrl-F
+sends before/after an acknowledgment. Original Options, mail and trade compatibility probes
+also passed after the toolkit listbox/layer changes (3.97s,3.35s,3.34s). These fixtures do not
+replace natural live combat checks while the lane game connection is stalled.
+
+Native394c0d80 also distinguishes unresolved combat relationship (numeric0) from missing unit
+(nil), while known base relations return hostile/neutral/friendly. The real-data Lua getter
+now preserves those shapes. The relation string is not an attack-permission bit: native39838880
+tracks permission separately and checks ownership, team and protected low-level zones before
+the force override. Those complete permission rules remain an explicit preflight gap.
+
+The inspected `shots/hud/sol61-pvp/native.png` shows both original parent frames and their red
+Bloodlust icons, using explicit fixture reports. It measured452-461FPS at1920x1080 with zero
+script errors. The fixture's character target uses the original broad TARGET_CHANGED category
+npc, as target.lua requires; it asserts both parent frames are shown. The inspected live
+world-select smoke in the same folder has zero script errors and300-370FPS. All root QA
+windows exited. The playable copy `target/debug/aa-client-play.exe` is refreshed, SHA256
+`42E330CBCA7C38C059D5B011A055AD394864945BB5B07CD90D41609536F8076C`.
