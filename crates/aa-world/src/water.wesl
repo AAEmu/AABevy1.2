@@ -1,4 +1,4 @@
-import aa_world::water_motion::coordinates;
+import aa_world::water_motion::{coordinates,endpoint_weights};
 // Water volumes and the sea, see `water_material.rs`.
 //
 // Rendered in the transmissive phase: the opaque scene of the frame is available as `view_transmission_texture`
@@ -13,7 +13,9 @@ import aa_world::water_motion::coordinates;
 //                optionally the scene where a screen space ray march finds it
 
 import bevy_pbr::render::{
-    forward_io::VertexOutput,
+    forward_io::{Vertex,VertexOutput,decompress_vertex},
+    mesh_functions,
+    view_transformations::position_world_to_clip,
     mesh_view_bindings::{view, globals},
     view_transformations::depth_ndc_to_view_z,
 };
@@ -46,7 +48,7 @@ struct WaterParams {
     // rgb: the engine's `sun + sky` colour (pre-exposed), a: 1 = the reflection is the environment cube map times it
     // (ponds, lakes, rivers), 0 = the analytic sky (the sea)
     env_lit: vec4<f32>,
-    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output
+    // authored mesh UV / NO_FLOW / diagnostic time (-1 live) / diagnostic output (1 normal, 2 alpha)
     motion: vec4<f32>,
 }
 
@@ -57,6 +59,31 @@ struct WaterParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var foam_map_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(5) var env_map: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(6) var env_map_sampler: sampler;
+
+// Static authored water and ocean meshes use the standard Bevy world transform.
+// Native WaterSurfaceVS carries endpoint alpha twice: RGB untouched and A near-faded.
+@vertex
+fn vertex(input: Vertex) -> VertexOutput {
+    let vertex=decompress_vertex(input,input.instance_index);
+    let matrix=mesh_functions::get_world_from_local(input.instance_index);
+    var out: VertexOutput;
+    out.world_position=mesh_functions::mesh_position_local_to_world(matrix,vec4<f32>(vertex.position,1.0));
+    out.position=position_world_to_clip(out.world_position.xyz);
+    out.world_normal=mesh_functions::mesh_normal_local_to_world(vertex.normal,input.instance_index);
+    @if(VERTEX_UVS_A) {out.uv=vertex.uv;}
+    @if(VERTEX_UVS_B) {out.uv_b=vertex.uv_b;}
+    @if(VERTEX_TANGENTS) {out.world_tangent=mesh_functions::mesh_tangent_local_to_world(matrix,vertex.tangent,input.instance_index);}
+    @if(VERTEX_COLORS) {
+        out.color=vertex.color;
+        if water.motion.x > 0.5 {
+            let a=vertex.color.a;
+            out.color=vec4<f32>(a,a,a,a*(1.0-clamp(1.0/out.position.w,0.0,1.0)));
+        }
+    }
+    @if(VERTEX_OUTPUT_INSTANCE_INDEX) {out.instance_index=input.instance_index;}
+    @if(VISIBILITY_RANGE_DITHER) {out.visibility_range_dither=mesh_functions::get_visibility_range_dither_level(input.instance_index,matrix[3]);}
+    return out;
+}
 
 // Depth of the opaque scene at a pixel (reverse z, 0 = far / nothing drawn); 0 without a depth prepass.
 @if(DEPTH_PREPASS)
@@ -157,6 +184,13 @@ fn trace(p: vec3<f32>, dir: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.world_position.xyz;
+    var endpoints=vec2<f32>(1.0);
+    @if(VERTEX_COLORS) {
+        if water.motion.x > 0.5 {endpoints=endpoint_weights(in.color);}
+    }
+    if water.motion.w > 1.5 {
+        return vec4<f32>(endpoints,0.0,1.0);
+    }
     if water.motion.w > 0.5 {
         return vec4<f32>(wave_normal(p.xz,in.uv,globals.time)*0.5+0.5,1.0);
     }
@@ -204,7 +238,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         uv = shifted;
     }
     let refracted = scene_color(uv);
-    let transmit = exp(-water.body.a * thickness);
+    // WaterVolumeInto uses 1-a+T*a, independently of the surface's nonlinear fade.
+    let transmit = 1.0-endpoints.x+exp(-water.body.a*thickness)*endpoints.x;
+    let fogged_background=mix(water.body.rgb,scene_color(pixel/size),transmit);
     var colour = mix(water.body.rgb, refracted, transmit);
 
     // ---- reflection: the scene where the ray hits it, the sky elsewhere (two rays spread vertically: the surface is rough) ----
@@ -249,5 +285,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     foam = foam * smoothstep(0.2, 0.7, soft * foam);
     colour = colour + water.foam_col.rgb * foam * foam_lum * soft;
 
-    return vec4<f32>(colour, 1.0);
+    // Native surface SRC_ALPHA blending, folded into the combined fog/surface pass.
+    // Keep the existing shading/soft-intersection approximation within that surface.
+    return vec4<f32>(mix(fogged_background,colour,endpoints.y),1.0);
 }

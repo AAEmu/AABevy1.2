@@ -129,13 +129,14 @@ pub(crate) fn ring(points: &[Vec3]) -> Vec<Vec2> {
     ring_order(&pts).into_iter().map(|i| pts[i]).collect()
 }
 
-fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>, indices: &mut Vec<u32>) {
+fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>, colors: &mut Vec<[f32;4]>, indices: &mut Vec<u32>) {
     let base = positions.len() as u32;
     if w.kind & 3 == 3 {
         let Some((points,coordinates))=authored::river(w) else {return};
-        for (point,uv) in points.iter().zip(coordinates) {
+        for ((point,uv),alpha) in points.iter().zip(coordinates).zip(authored::river_alpha(w.kind)) {
             positions.push([point.x,w.surface,-point.y]);
             uvs.push(uv.to_array());
+            colors.push([1.0,1.0,1.0,alpha]);
         }
         // Native centre fan: all four bank segments retain their own UV interpolation.
         indices.extend([0,1,4,1,3,4,3,2,4,0,4,2].map(|i|base+i));
@@ -145,6 +146,7 @@ fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>
         if !w.uv_scale.iter().all(|v|v.is_finite()) {return}
         for q in &ring {
             positions.push([q.x,w.surface,-q.y]);
+            colors.push([1.0;4]);
             // Native CreateArea anchors both independent scales at its first outline vertex.
             uvs.push([(q.x-origin.x)*w.uv_scale[0],(q.y-origin.y)*w.uv_scale[1]]);
         }
@@ -152,7 +154,7 @@ fn push_volume(w: &Water, positions: &mut Vec<[f32; 3]>, uvs: &mut Vec<[f32; 2]>
     }
 }
 
-fn build_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, indices: Vec<u32>) -> Option<Mesh> {
+fn build_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, colors: Vec<[f32;4]>, indices: Vec<u32>) -> Option<Mesh> {
     if indices.is_empty() {
         return None;
     }
@@ -161,6 +163,7 @@ fn build_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, indices: Vec<u32>) -
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; n]);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     Some(mesh)
 }
@@ -168,11 +171,11 @@ fn build_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, indices: Vec<u32>) -
 /// One mesh with all volumes of a cell, in bevy space relative to the cell origin
 /// (`cry (x, y, z) -> bevy (x, z, -y)`).
 pub fn water_mesh(waters: &[Water]) -> Option<Mesh> {
-    let (mut positions, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut positions, mut uvs, mut colors, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for w in waters {
-        push_volume(w, &mut positions, &mut uvs, &mut indices);
+        push_volume(w, &mut positions, &mut uvs, &mut colors, &mut indices);
     }
-    build_mesh(positions, uvs, indices)
+    build_mesh(positions, uvs, colors, indices)
 }
 
 /// The volumes of a cell grouped by [`WaterStyle`]: one mesh per style (same space as [`water_mesh`]).
@@ -188,11 +191,11 @@ pub fn water_meshes(waters: &[Water], materials: &[String]) -> Vec<(WaterStyle, 
     groups
         .into_iter()
         .filter_map(|(style, list)| {
-            let (mut positions, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new());
+            let (mut positions, mut uvs, mut colors, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             for w in list {
-                push_volume(w, &mut positions, &mut uvs, &mut indices);
+                push_volume(w, &mut positions, &mut uvs, &mut colors, &mut indices);
             }
-            build_mesh(positions, uvs, indices).map(|m| (style, m))
+            build_mesh(positions, uvs, colors, indices).map(|m| (style, m))
         })
         .collect()
 }

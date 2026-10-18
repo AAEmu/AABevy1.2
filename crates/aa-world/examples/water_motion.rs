@@ -18,6 +18,8 @@ struct Fixture {
     reference: u8,
     pond: bool,
     legacy: bool,
+    endpoint: bool,
+    opaque: bool,
     unload: bool,
     moved: bool,
     done: bool,
@@ -62,6 +64,8 @@ fn main() {
                 },
                 pond: flag("--pond"),
                 legacy: flag("--legacy"),
+                endpoint: flag("--endpoint"),
+                opaque: flag("--opaque"),
                 unload: flag("--unload-check"),
                 ..default()
             })
@@ -70,7 +74,14 @@ fn main() {
     } else {
         app.add_plugins(WaterMaterialPlugin)
             .insert_resource(ClearColor(Color::BLACK))
-            .add_systems(Startup, numeric)
+            .add_systems(
+                Startup,
+                numeric.run_if(|| !std::env::args().any(|a| a == "--endpoints")),
+            )
+            .add_systems(
+                Startup,
+                endpoint_numeric.run_if(|| std::env::args().any(|a| a == "--endpoints")),
+            )
             .add_observer(pixels);
     }
     app.run();
@@ -190,6 +201,7 @@ fn numeric(
     commands.insert_resource(Controls(expected));
     commands.spawn((
         Camera3d::default(),
+        bevy::pbr::ScreenSpaceTransmission::default(),
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: bevy::camera::ScalingMode::FixedVertical {
                 viewport_height: 6.0,
@@ -244,6 +256,12 @@ fn world_camera(mut commands: Commands, fixture: Res<Fixture>) {
             Vec3::new(15580.0, 15375.0, 127.0),
             60.0_f32.to_radians(),
         )
+    } else if fixture.endpoint {
+        (
+            Vec3::new(9268.0, 12755.0, 205.0),
+            Vec3::new(9239.0, 12785.0, 189.4),
+            45.0_f32.to_radians(),
+        )
     } else {
         (
             Vec3::new(9245.0, 12815.0, 211.0),
@@ -253,6 +271,7 @@ fn world_camera(mut commands: Commands, fixture: Res<Fixture>) {
     };
     commands.spawn((
         Camera3d::default(),
+        bevy::pbr::ScreenSpaceTransmission::default(),
         Projection::Perspective(PerspectiveProjection { fov, ..default() }),
         Transform::from_translation(aa_world::cry_to_bevy(p))
             .looking_at(aa_world::cry_to_bevy(t), Vec3::Y),
@@ -268,12 +287,16 @@ fn world_check(
         &mut MeshMaterial3d<WaterMaterial>,
     )>,
     mut materials: ResMut<Assets<WaterMaterial>>,
-    meshes: Res<Assets<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     objects: Res<aa_world::objects::ObjectState>,
 ) {
     for (_, mesh, mut material) in &mut surfaces {
-        fixture.meshes.insert(mesh.id());
+        if fixture.meshes.insert(mesh.id()) && fixture.opaque {
+            let mut mesh = meshes.get_mut(mesh.id()).unwrap();
+            let count = mesh.count_vertices();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
+        }
         if fixture.legacy
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
@@ -322,4 +345,110 @@ fn world_check(
         );
         fixture.done = true;
     }
+}
+
+// Isolated controls for the two independently interpolated native alpha channels.
+// --composite also exercises original fog + reflection compositing through depth/scene buffers.
+fn endpoint_numeric(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<WaterMaterial>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
+) {
+    let composite = std::env::args().any(|a| a == "--composite");
+    let near = std::env::args().any(|a| a == "--near");
+    assert!(!composite || !near);
+    let blue = Vec3::new(0.05, 0.1, 0.2);
+    let fog = Vec3::new(0.6, 0.15, 0.05);
+    let reflection = Vec3::new(0.1, 0.7, 0.3);
+    let mut expected = [[0; 3]; 4];
+    for (i, a) in [0.0_f32, 0.25, 0.5, 1.0].into_iter().enumerate() {
+        let a = if near { 1.0 } else { a };
+        let clip_w = if near {
+            [0.5_f32, 1.0, 2.0, 8.0][i]
+        } else {
+            8.0
+        };
+        let surface = a * (a * (1.0 - (1.0 / clip_w).clamp(0.0, 1.0))).sqrt();
+        let color = if composite {
+            let transmission = 1.0 - a + a * 0.25;
+            fog.lerp(blue, transmission).lerp(reflection, surface)
+        } else {
+            Vec3::new(a, surface, 0.0)
+        };
+        expected[i] = color.to_array().map(|v| {
+            ((if v <= 0.0031308 {
+                v * 12.92
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }) * 255.0)
+                .round() as u8
+        });
+        let mut mesh = Mesh::from(Rectangle::new(1.5, 1.5));
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0, 1.0, 1.0, a]; 4]);
+        let params = WaterParams {
+            body: fog.extend(4.0_f32.ln() / 4.0),
+            refl: Vec4::new(1.0, 1.0, 0.0, 1.0),
+            sun: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            sky_h: reflection.extend(1.0),
+            sky_z: reflection.extend(0.0),
+            misc: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            motion: Vec4::new(1.0, 0.0, 0.0, if composite { 0.0 } else { 2.0 }),
+            ..default()
+        };
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(WaterMaterial {
+                params,
+                normal_map: None,
+                foam_map: None,
+                env_map: None,
+            })),
+            Transform::from_xyz(
+                (i as f32 * 2.0 - 3.0) * clip_w / 8.0,
+                8.0 - clip_w,
+                -clip_w / 8.0,
+            )
+            .with_scale(Vec3::splat(clip_w / 8.0))
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ));
+        commands.spawn((
+            Mesh3d(meshes.add(Rectangle::new(1.5, 1.5))),
+            MeshMaterial3d(standard.add(StandardMaterial {
+                base_color: Color::linear_rgb(color.x, color.y, color.z),
+                unlit: true,
+                ..default()
+            })),
+            Transform::from_xyz(i as f32 * 2.0 - 3.0, 0.0, 1.0)
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ));
+        info!(
+            "native endpoint GPU case{i}: authored={a} clipW={clip_w} surface={surface} composite={composite} expected={:?}",
+            expected[i]
+        );
+    }
+    commands.insert_resource(Controls(expected));
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(100.0, 100.0))),
+        MeshMaterial3d(standard.add(StandardMaterial {
+            base_color: Color::linear_rgb(blue.x, blue.y, blue.z),
+            unlit: true,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -4.0, 0.0),
+    ));
+    commands.spawn((
+        Camera3d::default(),
+        bevy::pbr::ScreenSpaceTransmission::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: 2.0 * (3.0_f32 / 8.0).atan(),
+            ..default()
+        }),
+        bevy::core_pipeline::prepass::DepthPrepass,
+        Tonemapping::None,
+        DebandDither::Disabled,
+        Msaa::Off,
+        Transform::from_xyz(0.0, 8.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z),
+    ));
+    commands.spawn((Text::new(format!("Native river endpoint alpha: 0 / 0.25 / 0.5 / 1; clip W=8 (or --near: .5 / 1 / 2 / 8)\nTop production shader, bottom independent CPU reference; composite={composite}\nFog: 1-a+T*a; surface: a*sqrt(a*(1-1/W))")),TextFont {font_size:FontSize::Px(20.0),..default()},TextColor(Color::WHITE),Node {position_type:PositionType::Absolute,top:px(12.0),left:px(24.0),..default()}));
 }
