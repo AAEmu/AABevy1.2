@@ -5297,3 +5297,57 @@ final bool are recorded separately. `native-slot-accessor-source-20261018.txt`
 archives these paths, registrations, SQL and descriptor field copies. There
 are no production edits, new Lua hooks, network assumptions or mode activation
 in this source-only follow-up.
+
+### Native action configuration and reverse-writer follow-up (2026-10-18)
+
+The same accessor oracle now executes **35 groups**, adding actual action
+factory392c61e0 with native configuration getter endpoints. These configuration
+values are a THIRD domain, distinct from UI ISLOT values and accessor+4. This
+audit does not establish a conversion from the received wire ActionKind enum.
+
+| Native configuration kind | Getter/value | Resulting accessor kind |
+|---|---|---:|
+| 1 | 390898d0, item template | ItemAccessor10 |
+| 2 | 39089930, skill ID | SkillAccessor12; matching tag204 selects15 |
+| 4 | 39089900, item DBID | ItemAccessor14 if39209380 finds the instance, otherwise11 |
+| 5 | 39089960, mate skill ID | MateSkillAccessor13 |
+| 0 or3 | no supported branch | no allocation |
+
+The actual native switch and constructors execute unchanged. Configuration
+getters, allocation/catalog endpoints, alternate-bar CVar value0 and the
+special-mode predicate false are controlled inputs. Every added case asserts
+that the switch consumed its configured kind and reached the expected native
+constructor continuation; a zero-initialized result alone is not treated as
+proof of dispatch. Alternate-bar indexing and special-mode item restrictions
+are outside these goldens. Pet-action UI248 separately uses MateSkillAccessor6;
+neither that UI value nor the action configuration kind proves its cooldown
+query semantics. The source archive now includes the native action factory.
+
+The existing app-only selector API needs no additional Lua hook for these
+identities. Its caller still needs genuine raw GCD counts, the actual bound
+accessor class and a source-matching query. The query closure must reread the
+current binding AFTER global_cooldown_done, because the callback can replace
+it. Missing actor/global-manager input requires skipping the update, rather
+than fabricating ready0/0. Live item accessors require their instance and
+implementation-specific overrides; a combined use-skill timer alone is
+insufficient. Direct item16 returns failure, while callback17/Buff19 return
+successful zero outputs as documented above. None of this activates native
+mode in production or replaces unresolved raw GCD/timeline producers.
+
+`slot_reverse_writer_audit.py` and
+`native-slot-reverse-writer-audit-20261018.json` record a bounded follow-up:
+11 direct-displacement MOV store candidates for+310, four reverse-like ASCII
+strings, and three actual native slot cast-thunk executions. The apparent Lua
+writers39247030 and3926ac90 belong to SetUseDoubleClick and SetStickedHeight.
+Their required virtual casts+40/+70 execute on the actual slot vtable and
+return null; the slot's own cast+a4 returns its receiver. They therefore do
+not establish slot reverse setters. Constructor392c79e5's zero word store
+and mask draw392c398c's read remain the identified slot writes/read contract.
+
+This is an immediate-displacement store/name scan, not alias analysis or proof
+that no runtime writer exists. Alias stores, copies or an external producer
+remain possible. No runtime setter has been identified, and no guessed Lua
+reverse method is exposed. `native-slot-reverse-writer-source-20261018.txt`
+archives the candidate setter registrations, casts, constructor and draw read.
+Both source-only scripts were rerun successfully; no Cargo build, visual
+change, app adapter or production mode change is part of this follow-up.
