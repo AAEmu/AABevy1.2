@@ -54,6 +54,7 @@ mod markers;
 mod panels;
 mod party;
 mod plates;
+mod pvp;
 mod quests;
 mod ring;
 mod session;
@@ -96,6 +97,11 @@ pub(crate) fn keybindings_runtime(width: f32, height: f32) -> Result<UiRuntime, 
 pub(crate) fn keybindings_fixture() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     crate::settings::bindings_fixture(keybindings_runtime(width as f32, height as f32).unwrap());
+}
+
+#[allow(dead_code)]
+pub(crate) fn pvp_fixture() {
+    pvp::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -303,6 +309,7 @@ impl Plugin for HudPlugin {
         }
         plates::plugin(app);
         combat::plugin(app);
+        pvp::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);

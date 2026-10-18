@@ -78,6 +78,7 @@ pub struct HudData {
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
+    pub(super) pvp: super::pvp::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
@@ -124,6 +125,7 @@ impl Default for HudData {
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
             local_combat: false,
+            pvp: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
@@ -228,6 +230,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::itemlinks::install(lua, bridge)?;
     super::loot_roll::install(lua)?;
     super::trade::install(lua, bridge)?;
+    super::pvp::install(lua, bridge)?;
     crate::settings::install_hud(lua)
 }
 
@@ -472,7 +475,10 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 
 /// Recompute the snapshot from the Bevy world.
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
-    let Some(spawn) = world.resource::<Player>().spawn.clone() else { return };
+    let Some(spawn) = world.resource::<Player>().spawn.clone() else {
+        bridge.borrow_mut().pvp = Default::default();
+        return;
+    };
     // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
     // clock shows the time the world is at), else the server's (extrapolated from its last packet)
     let net_world = world.get_resource::<aa_net::state::WorldInfo>();
@@ -495,6 +501,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     // the zone under the player (the world's sector map), else the zone channel's group, else the spawn's
     let zone_key = world.get_resource::<aa_world::stream::WorldInfo>().and_then(|w| w.0.zone_at(pos)).map(u32::from);
     let mut data = bridge.borrow_mut();
+    super::pvp::refresh(world, &mut data, &spawn);
     data.character_id = spawn.character().id;
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }

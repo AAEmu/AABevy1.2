@@ -10,13 +10,18 @@ use bevy::window::PrimaryWindow;
 use mlua::Table;
 
 pub(super) fn prepare(rt: &UiRuntime) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let path = isolated(rt)?;
+    open(rt)?;
+    Ok(path)
+}
+
+pub(crate) fn isolated(rt: &UiRuntime) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
     let path = std::env::temp_dir().join(format!("aa-bindings-fixture-{}-{unique}.json", std::process::id()));
     let store = Arc::new(Mutex::new(super::super::Store::open(path.clone())));
     let net: Table = rt.lua.globals().get("NET")?;
     super::super::install_store(&rt.lua, &net, store.clone())?;
     super::install(&rt.lua, store)?;
-    open(rt)?;
     Ok(path)
 }
 
