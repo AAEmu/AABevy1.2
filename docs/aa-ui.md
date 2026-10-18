@@ -875,7 +875,7 @@ App::new()
 
   | hook | used by | returns |
   |---|---|---|
-  | `AAUI.SlotContent(slotType, slotIdx)` | `slot:EstablishSlot` (action bars: `ISLOT_ACTION`, 1..) | nil, or `{ type = "skill"\|"item"\|..., id, icon = "ui/icon/x.dds", stack, grade, canUse, tooltip, extraInfo, cooldown = { remain = ms, total = ms } }` (`cooldown` optional: the sweep and the time left, counted down natively, no time label when `total` is 1500 ms or less: the global cooldown only dims; `refresh_slots` restarts it from `remain`, a result without it clears it) |
+  | `AAUI.SlotContent(slotType, slotIdx)` | `slot:EstablishSlot` (action bars: `ISLOT_ACTION`, 1..) | nil, or `{ type = "skill"\|"item"\|..., id, icon = "ui/icon/x.dds", stack, grade, canUse, tooltip, extraInfo, cooldown = { remain = ms, total = ms } }` (`cooldown` optional: sweep and native f32 seconds/minutes/hours caption, counted down locally; slot totals below 200 ms skip drawing; actual option82 controls captions through `lua::slot::set_cooldown_numbers`; `refresh_slots` restarts from `remain`, absence clears it; explicit native global/own selection remains open) |
   | `AAUI.SkillContent(skillType)`, `AAUI.ItemContent(itemType, grade)` | `slot:EstablishSkill` / `EstablishItem` (the skill window) | the same, plus for skills `learned` (default true), `canLearn`, `reqPoints`, `skillLevel` (sent as `OnContentUpdated` states) |
   | `AAUI.SlotHotKey(slotType, slotIdx)` | `slot:GetHotKey` (keybinding labels) | `"1"`, `"SHIFT-1"`, `"MINUS"`, ... or nil |
   | `AAUI.WorldMap()` | the `worldmap` window (every frame while shown) | nil, or `{ level = 2\|3, zone = <zone_groups id>, player = { u, v, angle }, maps = { { level = 1, id = 3, u, v }, { level = 0, id = 2, u, v } } }`: the place on the zone (or city) map image and, optional, on the maps above (`world_groups` ids: 3 west, 4 east, 5 origin continent, 2 world); `u = (x - X) / W`, `v = 1 - (y - Y) / H` from the global position and the map's `zone_groups` / `world_groups` rectangle, exact against `reference/ingame/worldmap_*`; without `maps` the upper maps' place is estimated from the masks, without the hook the `RoadMap` result is used; `markers = { { level, id, u, v, kind, icon, coords, tooltip }, ... }` are the icons on the map `(level, id)` (the fraction of that map; only the shown map's are drawn, 24 px at every zoom, the tooltip is raised as `SHOW_WORLDMAP_TOOLTIP` / `HIDE_WORLDMAP_TOOLTIP` through `GetTooltipController`), `markers_version` (an integer) makes an unchanged list cost nothing |
@@ -995,7 +995,7 @@ App::new()
 | fonts named in `ui/image_text.g` (`characterInfo`, `actionBar`, `combat`, `arrest`) are bitmap fonts | `text.rs` |
 | `SetPrefixText` / `SetPrefixInset` draw a prefix before an edit's text; the chat input handles slash commands and sends through `AAUI.ChatSend` | `lua/edit.rs`, `lua/chat_input.rs` |
 | a click on a bound slot uses it (`AAUI.UseSlot` / `UseSkill` / `UseItem`); a right click on a bag item too (`X2Bag:HandleUse` in `fake_bag.lua`) | `lua/slot.rs`, `input.rs` |
-| cooldowns of 1.5 s or less (the global cooldown) draw the sweep without the time label | `lua/slot.rs` |
+| generic cooldown buttons draw a sweep without a caption; slots use native f32 localized `s`/`m`/`h` captions and option82, without classifying GCD by duration | `lua/slot.rs` |
 | `UIParent:GetEntityByName(name)` asks `AAUI.Entity(name)` | `globals.rs` |
 | `worldmap:SetPlayerDrawable` leaves the drawable shown (the scripts copy its visibility to the cursor effect); `GetClimateInfo` asks `AAUI.MapClimate` | `lua/worldmap.rs` |
 | `grid:SetItem(widget, row, col, makeIfNotExist, value, withoutExtent)` puts (and shows) a widget in a cell, sized to it unless `withoutExtent`; rows grow with their tallest widget; `SetRowHeight(height, row)`, `GetAdjustRowHeight()` the summed heights; `RemoveAllItems` hides the widgets (the scripts pool them) | `lua/grid.rs` |
@@ -1019,11 +1019,12 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   Persistent widget `SetScale` and `ApplyUIScale` work with rendering, picking, clips and
   effective geometry. The richer `damagedisplay:SetAnimFrameInfo` combat timeline remains a gap.
 * In-game HUD: what the 3D engine draws is not here (name plates over units, the world, the
-  player model between the equipment slot columns). Cooldown sweeps: the direction and the
-  time label format (`8`, `5m`, `2h`, `6d`) are guesses; no label on cooldowns of 1.5 s or less
-  (the global cooldown, which the client only dims; the client also tells the scripts
-  `global_cooldown_start` instead of `skill_cooldown_start`, here every cooldown is a skill
-  cooldown, which the action slot script treats the same).
+  player model between the equipment slot columns). Cooldown sweep tessellation remains
+  approximate. Slot captions now follow executed native float/localization arithmetic;
+  generic cooldown buttons have no native caption. The current content hook still lacks
+  the native slot's separate global/own selection and +311/+312 state. It raises skill
+  cooldown events for supplied timers; it must not infer global state or events from
+  duration or the combined winning timer.
   Roadmap markers come only from the `RoadMap` hook (the natives that feed quest / NPC data,
   `AddGivenQuestInfo`, `UpdateNpcInfo`, ..., are stubs), at 24 px at every map size. Chat
   scrolls by messages, not wrapped lines (`GetMessageLines`, `SetScrollPos` are stubs). The idle
@@ -4782,3 +4783,100 @@ and full chat reset (seven). The two new tests verify no allocation/callback
 before decoration is available, same-type and missing-specific acceptance,
 retry after actual original-stage registration and a strict physical click on
 the original invitation's Decline button (custom index3).
+
+### Native cooldown-button and slot captions (2026-10-18)
+
+Generic cooldown buttons do not have the slot's time caption. Native
+SetCoolDown wrapper `392322d0` reaches `392809b0`, storing total/remain at
++5a8/+5ac. Drawing `392815f0` calls mask `39280ad0` and ordinary button text
+`39280de0`; it never calls slot caption `392c50f0`. Factory cases20..23 at
+`392a614c..61fe` construct the four cooldown button variants. Their constructors
+install vtables `399c5fb0`, `399c6170`, `399c6330`, `399c64f0`; each +154 points
+to `392815f0`. The toolkit therefore removes generated numbers from all four
+classes while retaining their masks, ordinary text, callbacks, icon identity
+and clicks. This includes original equipped-item constant buttons.
+
+Ordinary slot draw `392c67e0` skips mask and caption when total is below
+**200f32 ms**; equality is included. Caption `392c50f0` skips explicit native
++311 global state, respects CVar `slot_cooldown_visible` (`39d3152c`), and permits
+captions if that CVar pointer is absent. Zero CVar value hides numbers.
+`aa_ui::lua::slot::set_cooldown_numbers(&Lua, bool)` supplies actual option82
+(`OPTION_ITEM_SLOT_COOLDOWN_VISIBLE`) without rebinding contents, restarting
+timers or invoking content callbacks. The native CVar registration default
+is not inferred from this null-pointer fallback.
+
+The formatter multiplies f32 remaining milliseconds by `0.001f32`. Above
+3600 seconds it uses `1 - CVTTSS2SI(seconds * -1/3600f32)` hours; above60 it
+uses the analogous minutes operation; otherwise it uses truncation plus1
+seconds, with native i32 wrapping and CVTT indefinite integer behavior.
+There is no day branch. Examples from executed native code:
+
+| Remaining milliseconds | Caption |
+|---|---|
+| 999 | `1s` |
+| 1000 | `2s` |
+| 59999.99609375 | `61s` |
+| 60000 | `2m` |
+| 3599999.75 | `61m` |
+| 3600000 | `2h` |
+| 86400000 | `25h` |
+
+Category98 `second_initial`, `minute_initial`, `hour_initial` templates are
+hydrated through existing `UiRuntime::set_ui_texts`. The unloaded en_us fixture
+fallbacks are `$1s`, `$1m`, `$1h`. Native formatting and `$1` replacement
+`39426f40` have an eight-byte destination including NUL. Executing the
+subsequent text assignment `3922b830`/actual XlMultiToWide confirms that a
+partial final UTF-8 character is dropped: controlled `$1éé€` with value9
+produces bytes `39c3a9c3a9e282`, then displayed UTF-32 `9éé`. The renderer
+preserves that complete-character prefix.
+
+`data/extract/aa-ui/cooldown_label_oracle.py` and
+`native-cooldown-label-oracle-20261018.json` execute **37 native groups**:
+actual slot draw gate/caption, XL integer formatting, `$1` substitution,
+generic mask/ordinary-text path, CVar and explicit-global gates, f32 boundaries,
+ASCII byte limits and localized UTF-8 conversion. External memory allocation/
+copy, localizer/CVar providers and final mask/font delivery are captured;
+no native arithmetic or formatting is replaced. Controlled localization rows
+are explicit fixtures; the three stock en_us templates come from read-only
+compact.sqlite3. Disassembly is in
+`native-cooldown-caption-source-20261018.txt`. No original/live process is
+modified.
+
+**Remaining global/own selection boundary:** native slot frame
+`392c74ba..77ab` reads the actor manager's separate raw global timer via
+`39209430`/`39899ce0`. It chooses that branch only when previous own-active
++312 is false, remaining is nonzero, and accessor kind is not16/17/19. Branch
+entry/exit changes +311 and emits global_cooldown_start/done. Otherwise it
+calls accessor virtual+18 with final bool0. SkillAccessor `399bb0a0` +18 is
+`39209810`: bool0 calls descriptor-aware combined query `3989a3e0`, while
+bool1 forces ignoring global via `3989a290`. Thus even the second branch is
+not an own-only query. The content adapter still does not expose these
+separate inputs/state/events. Duration or the combined winning timer cannot
+establish +311, and no third SkillCooldown return or heuristic is introduced.
+Mask tessellation, raw setter normalization and that selection lifecycle
+remain separate open boundaries.
+
+QA: **18 selected tests pass** across cooldown captions (six), constant-button
+lifecycle (five), HUD widgets (six) and original slot state (one). The six
+caption tests pass again after the final fixture isolation change. Coverage
+includes native float goldens, total200 equality, short ordinary timers,
+option changes while active/rebinding, exactly-once expiry, current template
+replacement/UTF-8 byte limits, all four generic classes with retained ordinary
+button text, strict physical original action-slot use and unchanged original
+equipment identity/callbacks. The aa-dev example builds.
+
+Inspected unique final captures at 1280x720/default scale0.85:
+
+* `shots/aa-ui/native-cooldown-caption-on-final-720-20261018.png`:
+  original action slots `2s`/`2m`/`25h`, original equipment masks without
+  generated numbers, **367.4-410.5 FPS**.
+* `shots/aa-ui/native-cooldown-caption-off-final-720-20261018.png`:
+  identical icons/masks with slot numbers disabled, **388.9-424.3 FPS**.
+
+Both have zero script/runtime warnings/errors and self-close (PIDs22520/14552).
+The copied executable was removed. The original equipment artwork was compared
+with the earlier native constant-button capture and HUD reference. This is an
+isolated explicit timer fixture, not a claim that native +311 selection is
+implemented. Initial diagnostic captures mistakenly rebound every hidden HUD
+slot each frame; the final example updates only its three demonstrated slots
+and hides unrelated roots after original initialization settles.
