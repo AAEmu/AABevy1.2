@@ -85,6 +85,98 @@ fn hydrate_and_append_match_native_callback_order_and_same_id_is_noop() {
 }
 
 #[test]
+fn selection_persists_before_original_callbacks_and_skips_nonselection_mutations() {
+    let ui = setup();
+    let window = id(&ui, "window");
+    run(
+        &ui,
+        r#"
+        persistedMethod=4;persistCount=0
+        AAUI={ChatSelection=function(windowId,index)
+            assert(windowId==0);persistCount=persistCount+1;persistedIndex=index
+            table.insert(log,'save:'..index)
+        end}
+        originalSelected=OnSelectedChatTab
+        OnSelectedChatTab=function(button,on)
+            assert(persistedIndex~=nil and persistedMethod==4)
+            originalSelected(button,on)
+        end
+    "#,
+    );
+    hydrate_window(
+        &ui.lua,
+        window,
+        &ChatWindowInfo {
+            tabs: vec![tab(0, "All"), tab(2, "Trade")],
+            selected: 1,
+            method: 4,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        log(&ui),
+        "message,button:All,id:0,message,button:Trade,id:2,save:1,selected:All:false,selected:Trade:true"
+    );
+    run(&ui, "log={}");
+    append_tab(&ui.lua, window, &tab(5, "Friends")).unwrap();
+    assert_eq!(
+        log(&ui),
+        "message,button:Friends,save:2,selected:All:false,selected:Trade:false,selected:Friends:true,id:5"
+    );
+    run(&ui, "log={}");
+    update_tab(&ui.lua, 5, &tab(5, "Neighbors")).unwrap();
+    remove_tab(&ui.lua, 0).unwrap(); // current numeric2 clamps to1 without persisting.
+    run(
+        &ui,
+        "assert(persistCount==2 and persistedIndex==2 and persistedMethod==4)",
+    );
+    assert_eq!(data(&ui).selected, 1);
+    assert!(log(&ui).is_empty());
+    click(&ui, data(&ui).tabs[1].button);
+    assert!(log(&ui).is_empty());
+    click(&ui, data(&ui).tabs[0].button);
+    assert_eq!(
+        log(&ui),
+        "save:0,selected:Trade:true,selected:Neighbors:false"
+    );
+    run(
+        &ui,
+        "assert(persistCount==3 and persistedIndex==0 and persistedMethod==4)",
+    );
+    run(&ui, "log={};window:SetChatWindowId(0)");
+    assert!(log(&ui).is_empty());
+}
+
+#[test]
+fn failed_selection_save_keeps_new_selection_and_continues_button_callbacks() {
+    let ui = setup();
+    let window = id(&ui, "window");
+    run(
+        &ui,
+        "AAUI={ChatSelection=function() table.insert(log,'save_failed');error('read-only save failure probe') end}",
+    );
+    hydrate_window(
+        &ui.lua,
+        window,
+        &ChatWindowInfo {
+            tabs: vec![tab(0, "All"), tab(2, "Trade")],
+            selected: -1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(!log(&ui).contains("save_failed"));
+    run(&ui, "log={}");
+    click(&ui, data(&ui).tabs[1].button);
+    assert_eq!(data(&ui).selected, 1);
+    assert_eq!(
+        log(&ui),
+        "save_failed,selected:All:false,selected:Trade:true"
+    );
+}
+
+#[test]
 fn invalid_stored_indices_leave_no_selected_row_and_empty_hydration_has_no_fallback() {
     for selected in [-1, 3, i32::MAX] {
         let ui = setup();
@@ -428,7 +520,10 @@ fn original_chat_add_update_remove_keeps_script_handlers_tooltip_and_physical_se
     assert_eq!(c.tabs.len(), 2);
     assert_eq!(c.tabs[1].id, 5);
     assert_eq!(c.selected, 1);
-    run(&ui,"oldTooltip=SetTooltip;SetTooltip=function(text,owner) capturedTip=text;return oldTooltip(text,owner) end");
+    run(
+        &ui,
+        "oldTooltip=SetTooltip;SetTooltip=function(text,owner) capturedTip=text;return oldTooltip(text,owner) end",
+    );
     click(&ui, c.tabs[0].button);
     assert_eq!(
         lua::ui(&ui.lua)
@@ -442,15 +537,29 @@ fn original_chat_add_update_remove_keeps_script_handlers_tooltip_and_physical_se
         0
     );
     click(&ui, c.tabs[1].button);
-    run(&ui,"assert(capturedTip=='Harbor');HideTooltip();nativeChatNames[5]='Neighbors'");
-    let updated=ChatTabInfo {id:5,name:"Neighbors".into(),filters:Some(vec![2,4]),..Default::default()};
-    assert!(update_tab(&ui.lua,5,&updated).unwrap());
+    run(
+        &ui,
+        "assert(capturedTip=='Harbor');HideTooltip();nativeChatNames[5]='Neighbors'",
+    );
+    let updated = ChatTabInfo {
+        id: 5,
+        name: "Neighbors".into(),
+        filters: Some(vec![2, 4]),
+        ..Default::default()
+    };
+    assert!(update_tab(&ui.lua, 5, &updated).unwrap());
     render::build_quads(&mut lua::ui(&ui.lua), None);
-    let text=lua::ui(&ui.lua).tree.get(c.tabs[1].button).text().unwrap().clone();
-    assert_eq!(text.text,"Neighbors");
-    assert_eq!(text.auto_clip.count,9);
-    click(&ui,c.tabs[0].button);click(&ui,c.tabs[1].button);
-    run(&ui,"assert(capturedTip=='Neighbors')");
+    let text = lua::ui(&ui.lua)
+        .tree
+        .get(c.tabs[1].button)
+        .text()
+        .unwrap()
+        .clone();
+    assert_eq!(text.text, "Neighbors");
+    assert_eq!(text.auto_clip.count, 9);
+    click(&ui, c.tabs[0].button);
+    click(&ui, c.tabs[1].button);
+    run(&ui, "assert(capturedTip=='Neighbors')");
     run(&ui, "HideTooltip()");
     render::build_quads(&mut lua::ui(&ui.lua), None);
     assert!(ui.errors.is_empty(), "{:?}", ui.errors);

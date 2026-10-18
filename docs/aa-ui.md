@@ -4002,3 +4002,41 @@ and removal of Trade (**317.9–411.5 FPS**). An initial inspected 1920x1080
 capture, `native-chat-before-20261018.png`, logged **154.3–166.9 FPS** and
 also self-closed. The differing host load prevents treating these ranges as
 a before/after performance comparison.
+
+### Chat selected-index persistence before original callbacks (2026-10-18)
+
+`AAUI.ChatSelection(windowId, zeroBasedIndex)` is an optional application hook,
+not a native Lua method/event. Native selected-frame callback `395138b0`
+reads the existing 12-byte window-extra row through `39503cd0`, replaces its
+selected index at `+4`, writes it through `39505030`, and calls
+`SaveWindowExtra` (`395044d0`) at `395139bb`. Only afterward does the original
+loop invoke `OnSelectedChatTab` for each button in index order. The toolkit
+now calls the app hook at that same point, after storing selection/visibility
+and before the original button callbacks.
+
+Valid forced hydration and live append both persist selection. Unchanged
+unforced clicks, invalid stored indices, same-window-ID assignment, metadata
+refresh, and row removal/index clamping do not. A hook error logs a warning
+and continues the original callbacks with the new selection intact, matching
+the native ignored save-result behavior. The hook intentionally carries only
+the selected index: hydration restores the input method after selection, so
+passing the widget's constructor-time method would overwrite the saved method.
+The app preserves its other window-extra values and chooses its storage.
+
+`data/extract/aa-ui/chat_selection_oracle.py` and
+`native-chat-selection-oracle-20261018.json` execute **seven groups** through
+actual `392cad00 -> 395138b0`, native existing-row RB lookup/update, raw
+12-byte copies and the complete per-button callback loop. Only visibility,
+drawable/input endpoints, LevelDB save entry and Lua callback delivery are
+captured. Both save success/failure leave the new index in the row before all
+three callbacks, preserving input methods `4` and `-6`. Same, forced, negative
+and out-of-range selection cases retain their native gating.
+
+All **nine focused lifecycle tests** pass, including physical selection with
+the hook, persistence before skin callbacks, method preservation, no callback
+on metadata/remove/clamp, and warning/continuation on a failed save. The
+existing original-script capture remains applicable because an absent hook
+changes no rendering. Save-key scope source also identifies session `+28`
+as the account ID: `393cfbb0` stores its first argument there at `393cfc0f`
+and writes it to `cl_account_id` at `393cfc34..3f`; that account field is used
+by the separate generic Data manager and is not part of chat's two-number key.
