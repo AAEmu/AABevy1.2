@@ -26,7 +26,8 @@
 //!   for the maps of that size, 2048 px for the few that big: a third array each), BC5 normal and detail
 //!   normal maps at 512 px (the 256 px ones stored as 2 x 2 copies) and a second normal array for what does
 //!   not fit the first; each with its mip chain down to 4 px and at most 255 layers (the limit of a wgpu
-//!   texture array is 256). The BC1 (`NORMAL_DXT1`) normal maps are transcoded to BC5.
+//!   texture array is 256). BC1 (`NORMAL_DXT1`) normal maps retain XYZ in spare slots of the
+//!   non-sRGB 512 px diffuse array, after diffuse admission.
 //! * per cell: an `R8Uint` image of the five-bit surface type of every 2 m sample (`heightmap.dat`) and a
 //!   uniform table (`TerrainParams`) with, for each of the 32 surface slots and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
@@ -90,7 +91,8 @@ pub struct TerrainParams {
     /// `(uv offset u, v, DetailTextureStrength, DetailBumpScale)`,
     /// `(detail normal, detail uv scale u, v, material colour r)` and
     /// `(detail uv offset u, v, material colour g, b)`;
-    /// a slot `< 0` means none.
+    /// Normal flags: bit0 copied 256px input, bit1 overflow BC5 array, bit2 ATI2 source order,
+    /// bit3 original BC1 RGB in the first (non-sRGB) diffuse array. A slot `< 0` means none.
     pub layers: [Vec4; SURFACE_TYPES * PROJECTIONS * ENTRY],
     /// Per projection: normal UV relative scale xy and phase correction zw.
     /// Identity preserves callers that author controlled `layers` directly.
@@ -124,7 +126,7 @@ impl Default for TerrainParams {
 pub struct TerrainExt {
     #[uniform(100)]
     pub params: TerrainParams,
-    /// Diffuse maps, BC1 512 px.
+    /// Diffuse maps and admitted raw RGB normal maps, BC1 512 px (non-sRGB).
     #[texture(101, dimension = "2d_array")]
     #[sampler(102)]
     pub diffuse: Handle<Image>,
@@ -392,6 +394,9 @@ impl LayerLibrary {
                 // Normal arrays retain semantic XY for the base sampler. Native
                 // detailMapSampler reads raw ATI2 XY instead (FragLib.cfi514).
                 if layer.ati2_swapped { tex.flags |= 4; }
+                // BC1 GetNormalMap retains all three authored components; its blocks share the
+                // existing non-sRGB BC1 array after diffuse slots have already been admitted.
+                if layer.bc1_normal { tex.flags |= 8; }
                 slots[set].insert(path, tex);
                 data[kind as usize].extend_from_slice(&layer.data);
             }
@@ -627,6 +632,8 @@ struct Layer {
     copies: bool,
     /// ATI2 blocks were swapped into semantic XY; native detail reads original raw XY.
     ati2_swapped: bool,
+    /// Original RGB normal blocks, stored in spare slots of the first diffuse array.
+    bc1_normal: bool,
     /// `kind.layer_bytes()` of blocks.
     data: Vec<u8>,
 }
@@ -638,10 +645,15 @@ struct Layer {
 fn load_layer(path: &str, normal: bool) -> Option<Layer> {
     let bytes = aa_cry::read(path).ok()?;
     let dds = Dds::parse(&bytes).ok()?;
+    prepare_layer(&dds, normal)
+}
+
+fn prepare_layer(dds: &Dds<'_>, normal: bool) -> Option<Layer> {
     if dds.faces != 1 || dds.depth != 1 || dds.width != dds.height || !dds.width.is_power_of_two() {
         return None;
     }
     let kind = match (normal, dds.width) {
+        (true, _) if dds.format == DdsFormat::Bc1 => Kind::Diffuse,
         (true, _) => Kind::Normal,
         (false, w) if w >= Kind::Huge.px() => Kind::Huge,
         (false, w) if w >= Kind::Large.px() => Kind::Large,
@@ -678,7 +690,8 @@ fn load_layer(path: &str, normal: bool) -> Option<Layer> {
         data.extend_from_slice(&level);
     }
     debug_assert_eq!(data.len(), kind.layer_bytes());
-    Some(Layer { kind, copies, ati2_swapped: normal && dds.format == DdsFormat::Bc5 && dds.swapped_rg, data })
+    Some(Layer { kind, copies, ati2_swapped: normal && dds.format == DdsFormat::Bc5 && dds.swapped_rg,
+        bc1_normal: normal && dds.format == DdsFormat::Bc1, data })
 }
 
 /// The blocks of one mip level as the array of `kind` wants them: BC1, or BC5 with x in red.
@@ -945,10 +958,10 @@ mod tests {
         if !crate::pak_available() {
             return;
         }
-        // a DXT1 normal map is transcoded to BC5, a 1024 px one is read from its 512 px mip
+        // A DXT1 normal map retains raw RGB blocks; a 1024 px one uses its 512 px mip.
         for path in ["wasteland/w_forest_white_sand_a_ddn", "field/tr_field_dirt_241a_ddn"] {
             let n = load_layer(&format!("game/textures/aa_terrain/{path}.dds"), true).unwrap();
-            assert_eq!((n.kind, n.copies, n.data.len()), (Kind::Normal, false, Kind::Normal.layer_bytes()), "{path}");
+            assert_eq!((n.kind, n.copies, n.bc1_normal, n.data.len()), (Kind::Diffuse, false, true, Kind::Diffuse.layer_bytes()), "{path}");
         }
         // a 256 px normal map is stored as 2 x 2 copies: the first row of blocks is the source's row twice
         let small = "game/textures/aa_terrain/canyon/cliff_rock_b_ddn.dds";
@@ -994,6 +1007,46 @@ mod tests {
         assert_eq!(((params.layers[entry+2].x / FLAG).floor() as u32) & 4, 4);
         assert_eq!(params.layers[entry+1].w, 1.0);
         assert_eq!(params.inspect_normal, 0);
+    }
+
+    #[test]
+    fn bc1_xyz_blocks_and_normal_flags_follow_diffuse_admission() {
+        if !crate::pak_available() { return; }
+        let path = "textures/aa_terrain/field/tr_field_dirt_001b_ddn.dds";
+        let bytes = aa_cry::read(path).unwrap();
+        let dds = Dds::parse(&bytes).unwrap();
+        let layer = prepare_layer(&dds, true).unwrap();
+        assert!(layer.bc1_normal && !layer.ati2_swapped && !layer.copies);
+        assert_eq!(layer.data, dds.data[..Kind::Diffuse.layer_bytes()]);
+        // Use the original 256 px mip as an unchanged small DDS input: duplicate raw blocks.
+        let mut small = dds.clone();
+        small.data = &dds.data[dds.surface_range(0,1).start..];
+        small.width = 256; small.height = 256; small.mips -= 1;
+        let copied = prepare_layer(&small, true).unwrap();
+        assert!(copied.bc1_normal && copied.copies);
+        let row = 64 * 8;
+        assert_eq!(&copied.data[..row], &small.data[..row]);
+        assert_eq!(&copied.data[row..2*row], &small.data[..row]);
+        let built = LayerLibrary::build("main_world", [(13,10),(12,14)].into_iter()).unwrap();
+        let last_diffuse = built.library.mats.iter().flat_map(|m|m.proj.iter().flatten())
+            .filter_map(|p|p.diffuse).filter(|t|t.flags==0).map(|t|t.slot).max().unwrap();
+        for projection in built.library.mats.iter().flat_map(|m|m.proj.iter().flatten()) {
+            for normal in [projection.normal,projection.detail].into_iter().flatten().filter(|t|t.flags&8!=0) {
+                assert!(normal.slot>last_diffuse, "normal must never displace a diffuse slot");
+                assert_eq!(normal.flags&6,0, "raw BC1 never uses ATI2/overflow flags");
+            }
+        }
+        let params = built.library.params((13,10),Vec3::ONE).unwrap();
+        let code = params.layers[(8*3+2)*ENTRY].y;
+        assert_eq!((code/FLAG).floor() as u32,8);
+        let slot = code as usize%1000;
+        let data = built.images[0].data.as_ref().unwrap();
+        assert_eq!(&data[slot*layer.data.len()..(slot+1)*layer.data.len()], &layer.data);
+        let mut counts=[0;LAYER_ARRAYS];counts[0]=MAX_LAYERS;
+        assert!(place(&mut counts,layer.kind,false).is_none());
+        counts[0]-=1;
+        let (_,mut code)=place(&mut counts,copied.kind,true).unwrap();code.flags|=8;
+        assert_eq!(code.flags,9);
     }
 
     /// Diffuse maps go to the array of their size: the 2048 px ground of Austera to the huge one, 1024 px maps to
