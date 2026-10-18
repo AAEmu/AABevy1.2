@@ -27,6 +27,8 @@ struct Fixture {
     old_normals: bool,
     cubes: bool,
     old_cube: bool,
+    refraction: bool,
+    old_refraction: bool,
     grazing: bool,
     unload: bool,
     moved: bool,
@@ -80,6 +82,8 @@ fn main() {
                 old_normals: flag("--legacy-normals"),
                 cubes: flag("--cube") || flag("--legacy-cube"),
                 old_cube: flag("--legacy-cube"),
+                refraction: flag("--refraction") || flag("--legacy-refraction"),
+                old_refraction: flag("--legacy-refraction"),
                 grazing: flag("--grazing"),
                 unload: flag("--unload-check"),
                 ..default()
@@ -356,7 +360,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes || fixture.refraction)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -384,6 +388,11 @@ fn world_check(
                     if fixture.old_cube {
                         control.params.motion.x = aa_world::water_material::AUTHORED_WATER_UV;
                     }
+                }
+                if fixture.refraction {
+                    assert!(control.params.motion.x>0.5);
+                    control.params.motion.z=0.0;
+                    control.params.motion.w=if fixture.old_refraction {-3.0} else {0.0};
                 }
                 let original = material.id();
                 let handle = materials.add(control);
