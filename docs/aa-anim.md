@@ -528,6 +528,35 @@ native modern/legacy ordering, negative offsets, sentence/word/phoneme preservat
 non-finite offset rejection and the complete original catalog's seven empty sentences and
 absent WAV references. No rendering behavior changed in this metadata milestone.
 
+### Native NPC heads and head CAL library selection
+
+`Cal::face_library` retains `$facelib` as a pak-relative path, including assignments from
+included CALs. Facial preparation now reads the rendered head's sibling `.cal` instead of
+unconditionally selecting the PC library; absent declarations retain the previous PC
+fallback. All eight playable heads still select the same cached `pc_expressions.fxl`.
+
+NPC chef `objects/characters/people/npc_chef01/face/npc_chef01_face01.chr` has its own **23**
+authored speech/lid targets and no `face00` companion. Facial preparation now accepts such
+native heads directly when both `m_a` and `eye_close_l` exist, after the same original
+internal/external vertex-record validation used for overlays. Its target names and deltas
+remain exactly equal to its original `MorphSet`; PC slider-only heads keep the proven
+companion mapping. This supports native NPC expression data through the existing
+`spawn_character_with_facial` API; it does not wire the client's separate NPC spawn path.
+
+`facial --chef` uses the original chef `fist_ac_talk_11.fsq` at 0 / 1.7218 / 3 seconds.
+Inspected `shots/aa-anim/facial_npc_chef_native_20261018.png` shows neutral, authored A and
+return poses at **272.0–295.0 FPS**. This isolated-head diagnostic omits the CDF's separate
+eye/hair/clothing attachments and uses the existing showroom shading; it is a morph check,
+not a complete NPC appearance comparison. The chef has no stage-idle CAF, so the diagnostic
+logs that missing idle and holds its bind pose. The inspected PC regression capture
+`shots/aa-anim/facial_pc_headcal_regression_20261018.png` retains open/blink/speech at
+**228.4–252.7 FPS**. Both screenshots exit after eight seconds.
+
+Current validation: **61 unit tests passed, 1 ignored**, including original NPC target
+identity, nonzero original speech evaluation, all eight PC library selections and CAL
+include/override semantics. Hat variants remain unresolved: the DB supplies four alternate
+hair assets, but the helmet-to-variant selection contract has not been proven.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/
