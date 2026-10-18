@@ -56,6 +56,20 @@ fn main() {
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
+    let packet = std::env::args().any(|a| a == "--packet");
+    let actor = "objects/characters/people/npc_chef01/nude/npc_chef01.cdf";
+    let cdf = packet.then(|| {
+        let db = aa_anim::GameDb::open().unwrap();
+        let mut equipment = aa_net::model::Equipment::default();
+        for (slot, template_id) in [
+            (aa_net::model::slot::FACE, 14478),
+            (aa_net::model::slot::HAIR, 14475),
+            (aa_net::model::slot::BODY, 14479),
+        ] {
+            equipment.slots[slot] = Some(aa_net::model::Item { template_id, ..default() });
+        }
+        ingame::creature::configured_cdf(&db, actor, 631, &equipment).unwrap()
+    });
     for (i, (label, time)) in [("NPC / NEUTRAL", 0.0), ("NPC / AUTHORED A", 1.7218), ("NPC / RETURN", 3.0)]
         .into_iter()
         .enumerate()
@@ -65,7 +79,12 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
             &mut commands,
             &mut cry,
             &clips,
-            "objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf",
+            if packet {
+                actor
+            } else {
+                "objects/characters/people/npc_chef01/nude/npc_chef01_base.cdf"
+            },
+            cdf.as_ref(),
             Transform::from_xyz((i as f32 - 1.0) * 0.52, 0.0, 0.0).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
         )
         .expect("actual creature CDF spawn");
@@ -195,7 +214,10 @@ fn verify(
                 _ => panic!("unexpected copied morph state"),
             }
         }
-        assert!(bound > 0 && plain > 0, "head subsets must bind while body/clothing/hair remain plain");
+        assert!(
+            bound > 0 && plain >= 5,
+            "head subsets must bind while body/clothing/hair and both rigid eyes remain plain"
+        );
         info!(
             "facial-creature: {} face_time={} peak={} facial_subsets={} plain_subsets={}",
             sample.label, face.time, peak, bound, plain

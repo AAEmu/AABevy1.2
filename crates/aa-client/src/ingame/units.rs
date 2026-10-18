@@ -435,12 +435,12 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             }
             root
         }
-        UnitBuild::Creature { file, models } => {
+        UnitBuild::Creature { file, cdf, models } => {
             for m in models {
                 cry.finish_model(m);
             }
             let _t = aa_cry::prof::scope("unit.spawn_creature");
-            creature::spawn(commands, cry, clips, &file, transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
+            creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
         }
         UnitBuild::None(why) => return Err(why),
     };
