@@ -1,7 +1,7 @@
 //! Widget alpha/scale channels: native 392771c0/39277230, 3927db80 and 3927e017.
 //! The two SetStartAnimation booleans enable alpha and scale independently.
 
-use super::{Timing, positive};
+use super::positive;
 use crate::lua::{Ui, method, none, ret, ui};
 use crate::tree::{Id, Point, Rect, Tree};
 use mlua::{Lua, Table, Value};
@@ -86,10 +86,10 @@ impl Default for State {
 struct Channel {
     from: f32,
     to: f32,
-    timing: Timing,
     current: f32,
-    velocity: f64,
-    acceleration: f64,
+    velocity: f32,
+    initial_velocity: f32,
+    acceleration: f32,
     started: bool,
     running: bool,
 }
@@ -99,9 +99,9 @@ impl Default for Channel {
         Self {
             from: 1.0,
             to: 1.0,
-            timing: Timing::default(),
             current: 1.0,
             velocity: 0.0,
+            initial_velocity: 0.0,
             acceleration: 0.0,
             started: false,
             running: false,
@@ -110,19 +110,24 @@ impl Default for Channel {
 }
 
 impl Channel {
-    fn configure(&mut self, from: f32, to: f32, timing: Timing) {
+    fn configure(&mut self, from: f32, to: f32, velocity_time: f32, acceleration_time: f32) {
         self.from = from;
         self.to = to;
-        self.timing = timing;
+        let delta = to - from;
+        self.velocity = delta / velocity_time;
+        self.initial_velocity = self.velocity;
+        // Native392771c0/39277230 retain the previous acceleration only for +/-0.
+        // Reconfiguration writes velocity immediately without changing current/flags.
+        if acceleration_time != 0.0 {
+            self.acceleration = ((delta - self.velocity * acceleration_time) * 2.0)
+                / (acceleration_time * acceleration_time);
+        }
     }
 
     fn start(&mut self, on: bool) {
         if on {
-            let (v, a) = self.timing.coefficients();
-            let delta = (self.to - self.from) as f64;
             self.current = self.from;
-            self.velocity = delta * v;
-            self.acceleration = delta * a;
+            self.velocity = self.initial_velocity;
             self.started = true;
         } else if self.running {
             self.current = self.to;
@@ -130,20 +135,17 @@ impl Channel {
         self.running = on && self.started;
     }
 
-    fn tick(&mut self, dt: f64) -> bool {
+    fn tick(&mut self, dt_ms: f32) -> bool {
         if !self.running {
             return false;
         }
         // The widget channel updates velocity first, then position; effects use the
         // analytic evaluator in timing.rs instead. This difference is in the native code.
+        let dt = dt_ms * 0.001;
         self.velocity += self.acceleration * dt;
-        self.current += (self.velocity * dt) as f32;
-        let ended = self.timing.duration() <= 0.0
-            || if self.to >= self.from {
-                self.current >= self.to
-            } else {
-                self.current <= self.to
-            };
+        self.current += self.velocity * dt;
+        let ended = (self.to >= self.from && self.current >= self.to)
+            || (self.from >= self.to && self.to >= self.current);
         if ended {
             self.current = self.to;
             self.running = false;
@@ -395,17 +397,27 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         m.set(
             name,
             method(lua, move |lua, id, a| {
+                if !(1..=4).all(|i| a.is_num(i)) || (scale && !matches!(a.v(5), Value::String(_))) {
+                    return none();
+                }
                 let mut u = ui(lua);
+                if u.tree.widget(id).is_none() {
+                    return none();
+                }
                 let state = state(&mut u, id);
-                let timing = Timing {
-                    velocity: positive(a.f(3)) * 1000.0,
-                    acceleration: positive(a.f(4)) * 1000.0,
-                };
                 if scale {
-                    state.scale.configure(a.f(1), a.f(2), timing);
-                    state.pivot = a.s(5).and_then(|s| Point::parse(&s));
+                    state.scale.configure(a.f(1), a.f(2), a.f(3), a.f(4));
+                    // XlCompareString is case-sensitive; native unknown enum9 has
+                    // the same zero origin fractions as TOPLEFT in392772b0.
+                    let name = a.s(5).unwrap();
+                    let name = name.split('\0').next().unwrap();
+                    state.pivot = Some(
+                        Point::parse(name)
+                            .filter(|p| p.name() == name)
+                            .unwrap_or(Point::TopLeft),
+                    );
                 } else {
-                    state.alpha.configure(a.f(1), a.f(2), timing);
+                    state.alpha.configure(a.f(1), a.f(2), a.f(3), a.f(4));
                 }
                 none()
             })?,
@@ -498,7 +510,7 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
         if state.alpha.running {
             state.visible_alpha = None;
         }
-        if state.alpha.tick(positive(dt_ms) as f64) {
+        if state.alpha.tick(positive(dt_ms)) {
             ended.push((id, "OnAlphaAnimeEnd"));
         }
         if scale_running {
@@ -506,7 +518,7 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
             state.explicit_scale = Some(raw_before);
             // Native3927e0c9 normalizes the copied OWN scale only at the next step.
             state.scale.current = raw_before / state.baseline(ui_scale);
-            if state.scale.tick(positive(dt_ms) as f64) {
+            if state.scale.tick(positive(dt_ms)) {
                 ended.push((id, "OnScaleAnimeEnd"));
             }
             let raw = state.scale.current * state.baseline(ui_scale);
