@@ -90,7 +90,7 @@ impl Repair {
                 self.last_error = None;
             }
             Event::Repair(RepairEvent::RequestRejected { message, .. }) => self.last_error = Some(message.clone()),
-            Event::ItemsChanged(tasks) if tasks.reason == REPAIR_TASK => {
+            Event::ItemsChanged(tasks) if tasks.reason == REPAIR_TASK && !tasks.truncated => {
                 let items = tasks
                     .tasks
                     .iter()
@@ -226,4 +226,47 @@ mod tests {
         repair.apply(&Event::Disconnected { message: "test".into() });
         assert_eq!(repair, Repair::default());
     }
+
+    #[test]
+    fn only_complete_repair_reports_finish_requests_and_every_empty_ack_cut_fails() {
+        let mut repair = Repair::default();
+        let command = RepairCommand::Single {
+            container: 2,
+            slot: 7,
+            auto_use_aa_point: false,
+        };
+        repair.apply(&Event::Repair(RepairEvent::Requested(command)));
+        assert!(!repair.apply(&Event::ItemsChanged(ItemTasks {
+            reason: REPAIR_TASK,
+            truncated: true,
+            ..Default::default()
+        })));
+        assert_eq!(repair.pending, vec![command]);
+        assert!(repair.last_report.is_none());
+        let body = [REPAIR_TASK, 0, 0, 0, 0, 0, 0]; // reason, tasks, forced IDs, final u32 type
+        for n in 0..body.len() {
+            let mut frame = Writer::new();
+            frame
+                .raw(&[0xdd, 1, 0, 0])
+                .u16(sc::SCItemTaskSuccessPacket)
+                .raw(&body[..n]);
+            assert!(
+                ServerMsg::decode(&frame.finish()).is_err(),
+                "empty repair ack cut {n}"
+            );
+        }
+        let mut frame = Writer::new();
+        frame
+            .raw(&[0xdd, 1, 0, 0])
+            .u16(sc::SCItemTaskSuccessPacket)
+            .raw(&body);
+        let ServerMsg::ItemTasks(tasks) = ServerMsg::decode(&frame.finish()).unwrap() else {
+            panic!()
+        };
+        assert!(!tasks.truncated);
+        assert!(repair.apply(&Event::ItemsChanged(tasks)));
+        assert!(repair.pending.is_empty());
+        assert_eq!(repair.last_report, Some(RepairReport { items: vec![] }));
+    }
+
 }
