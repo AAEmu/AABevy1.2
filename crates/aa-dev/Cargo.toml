@@ -7,3 +7,4 @@ description = "Shared dev harness: standard window, FPS logging, screenshot-and-
 
 [dependencies]
 bevy.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
