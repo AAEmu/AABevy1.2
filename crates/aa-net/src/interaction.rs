@@ -81,9 +81,45 @@ impl Interact {
     }
 }
 
+/// Native SCWorldInteractionSkillList payload. Names for the two outer IDs remain
+/// deliberately neutral: OnInteractionSkillList ignores them and forwards the inner context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldInteractionSkillList {
+    pub outer_obj_ids: [u32; 2],
+    pub context_obj_id: u32,
+    pub doodad_obj_id: u32,
+    pub interaction_type: u32,
+    pub pick_obj_id: u32,
+    /// The serializer transfers at most ten IDs, preserving an out-of-range announced count.
+    pub raw_count: i32,
+    pub extra_info: i32,
+    pub skills: Vec<u32>,
+    pub mouse_button: u8,
+    pub modifier_keys: i32,
+}
+
+impl WorldInteractionSkillList {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let outer_obj_ids = [r.bc()?, r.bc()?];
+        let context_obj_id = r.bc()?;
+        let doodad_obj_id = r.bc()?;
+        let interaction_type = r.u32()?;
+        let pick_obj_id = r.bc()?;
+        let raw_count = r.i32()?;
+        let extra_info = r.i32()?;
+        let mut skills = Vec::with_capacity(raw_count.clamp(0, 10) as usize);
+        for _ in 0..raw_count.clamp(0, 10) { skills.push(r.u32()?); }
+        Ok(Self { outer_obj_ids, context_obj_id, doodad_obj_id, interaction_type, pick_obj_id, raw_count, extra_info, skills,
+            mouse_button: r.u8()?, modifier_keys: r.i32()? })
+    }
+}
+
 /// What the server says about NPCs and quests besides the quest state (`Event::Interaction`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InteractEvent {
+    WorldSkillList(WorldInteractionSkillList),
+    /// Native cancellation uses BC unit ID followed by FULL u32 doodad ID.
+    WorldCanceled { unit_obj_id: u32, doodad_obj_id: u32 },
     /// `SCNpcInteractionSkillList`, the answer to [`Interact::Start`]: the skills that use the NPC's
     /// function (`skills.id`: 12087 use store, 13238 warehouse, 12086 repair ...; 0 = none).
     SkillList { npc_obj_id: u32, obj_id: u32, extra_info: i32, pick_id: i32, mouse_button: u8, skills: Vec<u32>, interactable: bool, modifier_keys: i32 },
@@ -99,11 +135,13 @@ pub enum InteractEvent {
 impl InteractEvent {
     /// Whether `opcode` is one of the packets this module reads.
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, sc::SCNpcInteractionSkillListPacket | sc::SCDoodadQuestAcceptPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
+        matches!(opcode, sc::SCWorldInteractionSkillListPacket | sc::SCWorldInteractionCanceledPacket | sc::SCNpcInteractionSkillListPacket | sc::SCDoodadQuestAcceptPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
     }
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::WorldSkillList(_) => "SCWorldInteractionSkillList",
+            Self::WorldCanceled { .. } => "SCWorldInteractionCanceled",
             Self::SkillList { .. } => "SCNpcInteractionSkillList",
             Self::DoodadQuestAccept { .. } => "SCDoodadQuestAccept",
             Self::RewardedByMail { .. } => "SCQuestRewardedByMail",
@@ -114,6 +152,8 @@ impl InteractEvent {
     /// Reads the body of `opcode` (one of [`Self::handles`]).
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCWorldInteractionSkillListPacket => Self::WorldSkillList(WorldInteractionSkillList::read(r)?),
+            sc::SCWorldInteractionCanceledPacket => Self::WorldCanceled { unit_obj_id: r.bc()?, doodad_obj_id: r.u32()? },
             sc::SCNpcInteractionSkillListPacket => {
                 let (npc_obj_id, obj_id, extra_info, pick_id, mouse_button) = (r.bc()?, r.bc()?, r.i32()?, r.i32()?, r.u8()?);
                 let n = r.i32()?.max(0) as usize;
@@ -205,4 +245,49 @@ mod tests {
         assert_eq!(e, InteractEvent::RewardedByMail { quests: vec![1, 2] });
         assert!(InteractEvent::handles(0x07b) && !InteractEvent::handles(0x147));
     }
+    fn hex(raw: &str) -> Vec<u8> {
+        raw.split_whitespace().flat_map(|word| (0..word.len()).step_by(2).map(move |i| u8::from_str_radix(&word[i..i+2],16).unwrap())).collect()
+    }
+
+    fn with_world_tail(opcode: u16, body: &[u8], expected: InteractEvent) {
+        use crate::game::ServerMsg;
+        let mut reader=Reader::new(body);
+        assert_eq!(InteractEvent::read(opcode,&mut reader).unwrap(),expected);
+        assert!(reader.is_empty());
+        let mut plain=Writer::new();plain.raw(&[0xdd,1,0,1]).u16(opcode).raw(body);
+        let expected=ServerMsg::Interaction(expected);
+        assert_eq!(ServerMsg::decode(&plain.finish()).unwrap(),expected);
+        let mut inner=Writer::new();inner.u16(0).u16(opcode).raw(body).u16(0).u16(sc::SCOnOffSnowPacket).bool(true);
+        let raw=inner.finish();let len=raw.len() as u16;
+        let mut frame=Writer::new();frame.raw(&[0xdd,4]).u16(2).u8(1).u16(len).u16(!len).raw(&raw);
+        assert_eq!(ServerMsg::decode(&frame.finish()).unwrap(),ServerMsg::Batch(vec![expected,ServerMsg::Snow(true)]));
+        for cut in 0..body.len() { assert!(InteractEvent::read(opcode,&mut Reader::new(&body[..cut])).is_err(),"opcode {opcode:x} cut {cut}"); }
+    }
+
+    #[test]
+    fn native_world_interaction_list_and_cancel_preserve_distinct_fields_and_dd04_alignment() {
+        let body=hex("030201 c0b0a0 332211 665544 ffffffff 998877 02000000 feffffff 00000000 674523f1 fe 01000080");
+        with_world_tail(sc::SCWorldInteractionSkillListPacket,&body,InteractEvent::WorldSkillList(WorldInteractionSkillList {
+            outer_obj_ids:[0x010203,0xa0b0c0], context_obj_id:0x112233,doodad_obj_id:0x445566,
+            interaction_type:u32::MAX,pick_obj_id:0x778899,raw_count:2,extra_info:-2,skills:vec![0,0xf1234567],mouse_button:254,modifier_keys:0x80000001u32 as i32,
+        }));
+        with_world_tail(sc::SCWorldInteractionCanceledPacket,&hex("563412 98badcfe"),InteractEvent::WorldCanceled{unit_obj_id:0x123456,doodad_obj_id:0xfedcba98});
+    }
+
+    #[test]
+    fn native_world_list_transfers_at_most_ten_skills_but_preserves_raw_count() {
+        for raw_count in [i32::MIN,-1,0,1,10,11,i32::MAX] {
+            let count=raw_count.clamp(0,10);
+            let mut w=Writer::new();
+            w.bc(1).bc(2).bc(3).bc(4).u32(5).bc(6).i32(raw_count).i32(7);
+            let skills:Vec<_>=(0..count as u32).collect();
+            for skill in &skills { w.u32(*skill); }
+            w.u8(2).i32(-3);
+            let raw=w.finish();
+            let list=WorldInteractionSkillList::read(&mut Reader::new(&raw)).unwrap();
+            assert_eq!(list.raw_count,raw_count);assert_eq!(list.skills,skills);
+            with_world_tail(sc::SCWorldInteractionSkillListPacket,&raw,InteractEvent::WorldSkillList(list));
+        }
+    }
+
 }

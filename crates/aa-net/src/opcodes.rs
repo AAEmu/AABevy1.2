@@ -221,6 +221,8 @@ opcodes! {
         SCUnitAttachedPacket = 0x076,
         SCUnitDetachedPacket = 0x077,
         SCNpcInteractionSkillListPacket = 0x07b,
+        SCWorldInteractionSkillListPacket = 0x07e,
+        SCWorldInteractionCanceledPacket = 0x07f,
         SCTargetChangedPacket = 0x084,
         SCCombatEngagedPacket = 0x085,
         SCCombatClearedPacket = 0x086,

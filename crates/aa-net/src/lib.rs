@@ -66,6 +66,7 @@ pub use craft::{CraftFailureNotice, CraftItemUnlock};
 pub use combat_status::{CombatStatus, EnvironmentDamage, UnitCombatFlags};
 pub use conflict::{ConflictZones, ConflictZoneState};
 pub use items::ItemLifespan;
+pub use interaction::WorldInteractionSkillList;
 pub use initial_config::{GameConfig, InitialConfig};
 pub use world_msg::{BlinkUnit, InstanceLoad};
 pub use login::Secret;

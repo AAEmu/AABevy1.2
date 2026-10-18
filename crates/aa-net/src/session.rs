@@ -2086,6 +2086,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn world_interaction_reports_forward_without_opening_or_casting() {
+        use crate::interaction::{InteractEvent,WorldInteractionSkillList};
+        let list=InteractEvent::WorldSkillList(WorldInteractionSkillList {
+            outer_obj_ids:[1,2],context_obj_id:3,doodad_obj_id:4,interaction_type:5,pick_obj_id:6,
+            raw_count:1,extra_info:7,skills:vec![22678],mouse_button:1,modifier_keys:0,
+        });
+        let cancel=InteractEvent::WorldCanceled{unit_obj_id:0,doodad_obj_id:4};
+        let (evt,mut events)=unbounded_channel();
+        let mut session=Session::new(evt,ClientOptions::default());
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::Interaction(list.clone()),game::ServerMsg::Interaction(list.clone()),game::ServerMsg::Interaction(cancel.clone()),game::ServerMsg::Snow(true)]))).await;
+        for expected in [list.clone(),list,cancel] { assert!(matches!(events.try_recv(),Ok(Event::Interaction(actual)) if actual==expected)); }
+        assert!(matches!(events.try_recv(),Ok(Event::Snow(true))));assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn native_house_posture_reports_preserve_the_old_event_and_raw_housing_event() {
         use crate::unit_msg::Posture;
         use crate::housing::HousingEvent;
