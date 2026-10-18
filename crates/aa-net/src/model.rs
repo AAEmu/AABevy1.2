@@ -1342,6 +1342,7 @@ pub struct Doodad {
     pub ucc_id: u64,
     pub item_template_id: u32,
     pub type2: u32,
+    /// Milliseconds remaining as last announced; the reducer does not invent a growth countdown.
     pub time_left: u32,
     pub plant_time: i64,
     pub quest_glow: u32,

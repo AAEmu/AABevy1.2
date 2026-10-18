@@ -149,6 +149,14 @@ impl SkillTarget {
         Self { kind: target_kind::UNIT, obj_id, pos: None }
     }
 
+    /// A real nonzero 24-bit doodad ID; invalid IDs must not be truncated or changed to self.
+    pub fn doodad(obj_id: u32) -> std::result::Result<Self, &'static str> {
+        if obj_id == 0 || obj_id > 0xff_ffff {
+            return Err("doodad object ID must be nonzero and fit 24 bits");
+        }
+        Ok(Self { kind: target_kind::DOODAD, obj_id, pos: None })
+    }
+
     pub fn position(pos: Pos) -> Self {
         Self { kind: target_kind::POSITION, obj_id: 0, pos: Some(pos) }
     }
@@ -518,6 +526,38 @@ mod tests {
         assert_eq!(SkillTarget::read(&mut r).unwrap(), SkillTarget::unit(7));
         assert_eq!(r.u8().unwrap(), 0);
         assert!(r.is_empty());
+    }
+
+    #[test]
+    fn doodad_skill_target_is_kind_four_with_exact_nonzero_24_bit_identity() {
+        let target = SkillTarget::doodad(0x445566).unwrap();
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 18132, 0x112233, StartCaster::Unit, &target);
+        let body = w.finish();
+        assert_eq!(
+            body,
+            [
+                0xd4, 0x46, 0, 0, 0, 0x33, 0x22, 0x11, 4, 0x66, 0x55, 0x44, 0
+            ]
+        );
+        let mut r = Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 18132);
+        assert_eq!(
+            BuffCaster::read(&mut r).unwrap(),
+            BuffCaster {
+                kind: 0,
+                obj_id: 0x112233
+            }
+        );
+        assert_eq!(SkillTarget::read(&mut r).unwrap(), target);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+        for id in [1, 0xff_ffff] {
+            assert_eq!(SkillTarget::doodad(id).unwrap().obj_id, id);
+        }
+        for id in [0, 0x100_0000, u32::MAX] {
+            assert!(SkillTarget::doodad(id).is_err());
+        }
     }
 
     #[test]
