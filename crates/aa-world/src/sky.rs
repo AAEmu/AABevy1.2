@@ -446,6 +446,11 @@ fn luminance(c: Vec3) -> f32 {
     c.dot(Vec3::new(0.2126, 0.7152, 0.0722))
 }
 
+// Client 300A5DD0 selects the moon vector for SetSunDir when the sun is at/below zero.
+fn directional_light_dir(sample: &EnvSample) -> Vec3 {
+    if sample.sun_dir.z > 0.0 { sample.sun_dir } else { sample.moon_dir }
+}
+
 /// Exposure of the (first) post processed camera, else Bevy's default.
 pub(crate) fn view_exposure(cameras: &Query<Option<&Exposure>, With<PostUniform>>) -> f32 {
     cameras.iter().next().flatten().map_or(Exposure::BLENDER.exposure(), |e| e.exposure())
@@ -509,7 +514,7 @@ pub fn update_environment(
 
     // --- sun / moon ---
     let elev = cur.sun_dir.z;
-    let light_dir_cry = if elev >= -0.02 { cur.sun_dir } else { -cur.sun_dir };
+    let light_dir_cry = directional_light_dir(&cur);
     let to_light = cry_to_bevy(light_dir_cry).normalize();
     // fade through the horizon so the light does not flip abruptly
     let horizon_fade = ((elev.abs() + 0.02) / 0.12).clamp(0.12, 1.0);
@@ -843,5 +848,23 @@ fn follow_camera(
         // snap so the plane does not swim relative to the world
         t.translation.x = (p.x / 64.0).round() * 64.0;
         t.translation.z = (p.z / 64.0).round() * 64.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_directional_light_switches_at_the_horizon() {
+        let mut sample = TimeOfDay::default().sample(0.0, Lighting::default());
+        assert_eq!(directional_light_dir(&sample), sample.moon_dir);
+        assert!((directional_light_dir(&sample) + sample.sun_dir).length() > 0.7);
+        for elevation in [-f32::EPSILON, 0.0, f32::EPSILON] {
+            sample.sun_dir = Vec3::new(1.0, 0.0, elevation).normalize();
+            assert_eq!(directional_light_dir(&sample), if elevation > 0.0 { sample.sun_dir } else { sample.moon_dir });
+        }
+        let noon = TimeOfDay::default().sample(12.0, Lighting::default());
+        assert_eq!(directional_light_dir(&noon), noon.sun_dir);
     }
 }

@@ -608,6 +608,13 @@ moon directions authored at default `r_stars_rotate=0`. The client's `CTimeOfDay
 offset; negating the sun is incorrect when that offset is nonzero. Main-world secondary latitude 140 / longitude 35 gives
 Cry direction `(.627507,-.526541,.573576)`. Its own colour spline leaves it visible at noon, while primary disc colour is zero.
 
+The same native update retains the sun vector for the sky (`301238C0`) but switches the global directional-light vector
+to that moon orbit when **sun.z <= 0**: its `v244`/`v237` selection feeds vtable +632, resolved through the original
+C3DEngine vtable at `30263718` to setter `30126C30`. That setter normalizes the vector and stores the 7500-unit light
+position. `sky::directional_light_dir` now uses this exact threshold and orbit, with the existing calibrated horizon fade,
+colour and intensity retained. A focused boundary check covers negative/zero/positive sun elevation, midnight and noon,
+including the main world's nonzero planet-axis offset. Evidence: `night/moon-tod.txt` and `night/moon-light-setter.txt`.
+
 Client `UpdateEngineMoonParameters` (`300A5380`) passes sampled float RGB directly times colour multiplier times
 `2^(HDR dynamic power factor)`; `SetGlobalParameter` (`30128050`, cases 30/32/34) copies that RGB unchanged. HDR base getter
 `30121B70` returns the value initialized to 2 by `30131C74`. These moon parameters therefore omit an extra sRGB-to-linear
@@ -640,7 +647,7 @@ daylight secondary, disable / world-change cleanup); the 12 environment regressi
 transformed by the result: `Ry(rotation) Rx(90 - latitude) Rz(-angle) (0, 1, sin axis)`, as (x, up, z south). The sun turns 15 degrees an hour,
 highest at 12:00. With the main world's 188 / 154 / 25: rises at 2:00 in the north-east (`DawnTime` 119 min), azimuth 172 / elevation 49 at 12:00,
 sets at 22:00 in the north-west (`DuskTime` 599 min + 12 h); with login2's 260 / 40 / 0 it is a great circle, 40 degrees up in the west at noon.
-Below the horizon the light is the moon (opposite direction here). **Cross-check with the real client**: its capture of the Royal Palace
+At/below the horizon the light uses the moon's separate half-day orbit. **Cross-check with the real client**: its capture of the Royal Palace
 (`reference/ingame/royal_palace/real*.png`, zone 186, game time 9.56 h and 10.0 h) has one patch of sunlight on the floor of the court yard.
 Rendering the yard with the sun at every azimuth / elevation (`sun_az` / `sun_el`, 1 to 5 degree steps) and comparing the lit area (floor
 pixels brighter than luma 55 in a box, intersection over union) gave the best matches azimuth 123 / elevation 42 at 9.56 h (IoU 0.45) and 132 / 44

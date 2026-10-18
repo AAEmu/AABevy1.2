@@ -500,7 +500,7 @@ pub fn spline_hour(hour: f32, dawn: f32) -> f32 {
 /// `(hour + 12) / 24` of a turn, so the sun is highest at 12:00 and turns 15 degrees an hour. With the main world's 188 / 154 / 25
 /// the sun rises at 2:00 in the north-east, is at its highest at 12:00 (azimuth 172, elevation 49), and sets at 22:00 in the
 /// north-west (`DawnTime` 119 and `DuskTime` 599 of the file say the same). The time of day data's own colours make the dawn
-/// and dusk; below the horizon the light is the moon (the opposite direction here).
+/// and dusk; at/below the horizon the directional light follows the separate half-day moon orbit.
 ///
 /// Cross-checked against the real client: at game time 9.56 h and 10.0 h the court yard of the Royal Palace (zone 186) has one
 /// patch of sun on its floor, which is where the sun shines through a gap of the buildings from azimuth 123 / elevation 42 and
