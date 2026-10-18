@@ -3,6 +3,8 @@ use crate::{
     session::{Event, Phase},
     wire::{Reader, Result, WireError},
 };
+mod commands;
+pub use commands::BountyCommand;
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BountyRow {

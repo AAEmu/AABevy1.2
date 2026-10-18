@@ -131,6 +131,7 @@ pub enum ClientMsg {
     /// Native automatic response to a genuine server SummonJury; not a user invitation choice.
     JurySummoned { trial_id:u32,court:i32,jury_number:i32 },
     Trial(crate::trial::TrialCommand),
+    Bounty(crate::BountyCommand),
     RequestJuryWaitingNumber,
     LootRoll(crate::loot_roll::LootRollCommand),
     Battlefield(crate::battlefield::BattlefieldCommand),
@@ -200,6 +201,7 @@ impl ClientMsg {
             Self::Family(command) => command.opcode(),
             Self::JurySummoned{..} => cs::CSJurySummonedPacket,
             Self::Trial(command) => command.opcode(),
+            Self::Bounty(command) => command.opcode(),
             Self::RequestJuryWaitingNumber => cs::CSRequestJuryWaitingNumberPacket,
             Self::LootRoll(m) => m.opcode(),
             Self::Battlefield(m) => m.opcode(),
@@ -311,6 +313,7 @@ impl ClientMsg {
             Self::Family(command) => command.write(&mut w),
             Self::JurySummoned{trial_id,court,jury_number} => {w.u32(*trial_id).i32(*court).i32(*jury_number);},
             Self::Trial(command) => command.write(&mut w),
+            Self::Bounty(command) => command.write(&mut w),
             Self::RequestJuryWaitingNumber => {},
             Self::LootRoll(m) => m.write(&mut w),
             Self::Battlefield(m) => m.write(&mut w),

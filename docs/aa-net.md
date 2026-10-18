@@ -6835,3 +6835,41 @@ bodies, every truncated prefix, DD04 following-packet alignment, duplicate order
 receipts, malformed-cap refusal, transport isolation versus world-leave retention,
 existing/local actor guards, reused actor IDs, unchanged selected header, Bevy folding,
 and duplicate Session forwarding without automatic payments.
+
+
+### Explicit original bounty request transport (2026-10-18)
+
+`BountyCommand::RequestSetMoney{name}` writes CS11f blob(name), original
+RequestSetBountyMoney39078470?3907cce0, ctor397accb0, serializer397b13a0.
+`BountyCommand::Update{kind,name,money:i32}` writes CS120 u32/blob/i32, original
+SendBountyUpdate390784b0?3907cd30, ctor397accd0, serializer397bc6b0. Native money
+is signed32 here, despite signed64 received settlement amounts. Native wrappers return
+zero Lua results and perform no role, trial, phase, cash, or pending prechecks before
+sending. Strict adapters39078b60/39078960 require actual string/numeric types;
+39058d10 converts money using CVTTSS2SI, as for kind (then u32 bitcast). The
+`update_from_lua` numeric adapter mirrors NaN/out-of-range?INTMIN and truncation,
+not Rust's saturating float cast. The caller still validates actual Lua argument types.
+Names use first-NUL C-string semantics, preserve arbitrary bytes, and are safely refused
+above128 prefix bytes as an explicit app guard around the native129-byte copy buffer.
+
+`Command::Bounty{character_id,command}` additionally requires InWorld, nonzero captured
+persistent identity, matching selected ID, and a genuine matching selected header.
+Missing/failed sends emit local BountyRequestRejected; a successful transport write
+emits local BountyRequested only. Neither is a native Lua event, server ACK, permission,
+wallet update, or settlement. No command is automatically invoked from received data.
+The current bevy lane has no CS11f/120 registration/handler: these source-backed requests
+will not complete there until that separate server gap is addressed. CS0ea navigation
+exists but currently returns only an empty bulletin. No server change or live payment
+was used for validation.
+
+Ignored `native-bounty-outgoing-source-20261018.txt` records the exact native bodies;
+`bounty_outgoing_oracle.py` / `native-bounty-outgoing-oracle-20261018.json` execute
+original send helpers and constructors locally (six cases). Imported bounded C-string
+copy and socket sender are explicitly mocked; there is no process injection. They
+confirm first-NUL and non-UTF8 names and untouched kindMAX/moneyINTMIN bits. Wire
+serialization goldens and local TCP loopback cover transport only, not lane success.
+
+QA: cargo check passes; nine focused bounty tests and all504 Bevy library tests pass
+(0failed/0ignored). Loopback requests use only an ephemeral local TCP peer and verify
+both exact bodies, stale captured/header identity, phase/name refusal, missing/failed
+writes, and absence of synthesized bounty receipts or selected-header changes.
