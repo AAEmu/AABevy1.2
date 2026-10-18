@@ -459,8 +459,8 @@ six-bit groups and alphabet `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno
 without padding: 192 bytes become 256 characters. The formatter (`394e4ef0`) clears
 instance ID bytes `0..8`, sets count bytes `16..20` to little-endian one, and reads the
 header item type from little-endian bytes `8..12` and grade from byte `12`.
-Every other supplied byte survives unchanged. This is not a serializer for aa-net's
-Rust `Item`: remaining native field mappings must be established before packing real items.
+Every other supplied byte survives unchanged. This byte transport remains independent of
+aa-net's Rust `Item`; the source-backed semantic packer below handles proven native fields.
 The original loot debug constants contain older 235-character/176-byte payloads; the
 current 192-byte decoder rejects them rather than filling unknown tail bytes.
 
@@ -481,6 +481,61 @@ chat bounds and textures were checked against `reference/ingame/bag/real.png`; t
 no item/quest chat-tooltip capture in the supplied reference set. The `aa_dev` run logged
 478-518 FPS, zero script errors, and exited. The full suite passes 128 runtime tests and
 both doc tests, with one existing font metrics test ignored.
+
+Native item records can now be built/read with `item_link::{ItemRecord, ItemDetail,
+EquipDetail, pack, unpack}`. All common fields are established by native packet serializer
+`3961f500`, reached by the item-bearing packet vtables (for example `399b5c58` ->
+`397c2070` -> `3961f500`):
+
+| Native byte offset | Field | Native representation |
+|---|---|---|
+| 0 | `id` | u64 little endian |
+| 8 | `item_type` (`aa_net::Item.template_id`) | u32 little endian |
+| 12, 13 | `grade`, `flags` | u8 each, unchanged wire values |
+| 16 | `count` | i32 little endian |
+| 20 | `made_unit_id` | u32 little endian |
+| 24 | detail tag + payload | 128-byte union |
+| 152 | `create_time` | i64 little endian |
+| 160 | `lifespan_mins` | i32 little endian |
+| 168 | `world_id` | u8 |
+| 176, 184 | `unsecure_time`, `unpack_time` | i64 little endian each |
+
+`pack` preserves the supplied ID/count; `format(&pack(&record))` applies native chat
+normalization afterward. The detail reader `3961edf0` copies payload bytes directly after
+the tag. `ItemDetail::from_wire(kind, payload)` accepts exactly the native payload size:
+tag 0 = 0 bytes, 1 = 55, 2 = 29, 3 = 6, 4 = 9, 5 = 24, 6/7 = 16, 8 = 8, 9 = 4.
+Unknown tags and short/extra payloads return `None`. Unused union bytes are constructor-zeroed.
+Tags 0, 1 and 3 become typed `None`, `Equip` and `Mate`; the others remain
+`Opaque {kind, payload:[u8;127]}`, preserving uninterpreted native bytes.
+
+Equipment payload offsets (relative to the full record) are: look/template 25 (u32),
+durability 29 (u8), explicit reserved bytes 30..32, rune 32 (u32), charge time 36 (i64),
+dye 44 (u32), seven gem IDs 48..76 (u32 each), physical/magical temper 76/78 (u16 each).
+The lane server's `models/item.rs::Item::write_details` writes the reserved i16 as zero;
+aa-net skips it. The native decoder preserves those two bytes if another record supplies
+different values. Mate payload has experience at 25 (i32), dead flag 29 (u8), level 30 (u8).
+The application can adapt aa-net `None`/`Equip`/`Mate` without guessing data. Its
+`ItemDetail::Other` discarded the raw payload, so it cannot construct an opaque link from
+that variant until the network layer retains the bytes. Native slave payloads are fixed at
+29 bytes; a server payload with an extra four-byte repair-time expansion must not be accepted
+as if it matched that native layout.
+
+Constructor `3901cb10` zeroes the complete detail union and common time fields. Its qword
+at 160 also zeroes padding 164..168. Actual alignment gaps 14..16 and 169..176 are left
+uninitialized and ignored by copy constructor `3901cba0` and network serialization.
+The application packer explicitly chooses zero for those gaps; it does not claim the native
+constructor initialized them. `unpack` is a semantic field view, while `decode_payload`
+preserves the exact 192 input bytes if unused union/padding bytes must also survive.
+
+`tests/item_link.rs` compares supported pack/unpack fields and encoded payloads byte-for-byte
+against fixtures produced by executing the actual x86 constructor, item reader and encoder
+offline. The reproducible generator `tests/fixtures/item_record_native.py` requires
+`pefile`/`unicorn` only when regenerating fixtures; Cargo tests need neither. It intercepts
+only the serializer's primitive reads, feeds explicit test-vector wire data, asserts complete
+input consumption and proves the initialized/uninitialized padding distinction. Fixtures
+cover no-detail, full equipment, mate and uninterpreted tag4 records; separate tests retain
+nonzero equipment reserved bytes, opaque union contents and reject wrong wire lengths.
+All four native-record tests pass, in addition to the three earlier codec unit tests.
 
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's
