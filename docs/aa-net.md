@@ -6425,3 +6425,46 @@ Column10 calls3907e6e0/XlGetLocalTime then localized category102 year_to_minute 
 five decimal strings (year+1900,month+1,day,hour,minute). It is local calendar time, not
 UTC/ISO or an invented fixed format. Invalid timestamp behavior and column9 position
 localization remain adapter boundaries; raw packet fields are preserved independently.
+
+
+### Original trial getter execution and static/spatial boundaries (2026-10-18)
+
+trial_crime_data_oracle.py executes3907e830 and records all19 typed keys in native order:
+isJury BOOL; defendant/race/faction STRING; murder,assault,theft,etc,total,
+defaultSentenceTime,crimePoint,arrest,acceptGuilty,acceptTrial,notGuilty,guilty,
+totalSeconds,curSeconds,totalRecords numeric f32. All numeric fields use signed i32
+conversion except unsigned defaultSentenceTime. Defendant name is first-NUL terminated.
+The oracle mocks script table insertion and labeled race/faction static lookups; actual
+getter instructions/conversions execute. It supplies read-only verified threshold100.
+Its JSON records trial types0/1/UINT_MAX and signed extrema independently of Rust code.
+
+Race3907e640 calls395701e0: IDs0..8 map none,nuian,fairy,dwarf,elf,hariharan,ferre,
+returned,warborn; other IDs map literal invalid char_race. Localize category47 using
+that key into initially empty std::string. The lookup result bool is ignored: missing
+translation has NO raw-key fallback and yields an empty race string. XlFormatString
+then copies into a16-byte static buffer39ade594. Normal en_us race names fit; arbitrary
+UTF-8/overlong localized-byte truncation is not claimed closed by the lookup oracle.
+
+trial_record_page_oracle.py executes390803c0 over17 synthetic records. Internal zero-based
+pages -1,0,1,2 return0,10,7,0 rows in insertion order. Every row has exactly ten entries:
+1 signed decimal ID string;2 reporter string;3 kind numeric f32;4 victim string;
+5 report message;6 faction string;7 doodad descriptor name(+3c via3963b290);
+8 skill descriptor name(+104 via396f6390);9 position string;10 report-time string.
+Script interfaces, memset/ID formatter and explicitly labeled static/location/date
+lookups are mocked; native selection/order/index/type assembly executes. This does not
+claim localization/calendar mocks as native formatter goldens. Preserve native7/8 even
+where pseudo-decompiled consumer local names appear reversed.
+
+Position3907f940 first3961de30 subtracts origin3a5e1080 and converts signed fixed44-bit
+XY to f32 (scale2^-44), subtracting origin.z. Actual current-world geometry391eef00
+finds subzone ID ->3976ade0 sub_zones.name. A separate main_world layer point query
+finds zone ->395779f0 (zone_key index), then zone display text/group, zone_groups target,
+world_groups name localized kind92 with raw fallback. Complete output is
+subzone >> zone >> worldgroup; missing subzone gives zone >> worldgroup; missing zone
+gives worldgroup only. This path does not skip none/main_world like expedition position.
+If worldgroup lookup fails, native stack buffer is uninitialized: refuse an unknown safe
+projection rather than inventing a location. Received records have no zone field; full
+rendering needs the actual spatial query, not an ownership/proximity/protocol heuristic.
+Date3907e6e0 uses XlGetLocalTime -> xlcommon3301ca30 -> _localtime64_s, then category102
+key year_to_minute with decimal strings year/month/day/hour/minute. Invalid CRT date
+outputs and long locale truncation remain explicit formatter boundaries.
