@@ -167,10 +167,15 @@ fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: 
         t.raw_set("magicResistance", s.magic_resistance)?;
     }
     if s.max_durability > 0 {
-        let durability = i32::from(instance.durability.unwrap_or(u8::MAX)).min(s.max_durability);
+        let durability = i32::from(instance.durability.unwrap_or(u8::MAX));
         t.raw_set("durability", if instance.durability.is_some() { durability } else { s.max_durability })?;
         t.raw_set("maxDurability", s.max_durability)?;
         t.raw_set("repairable", s.repairable)?;
+        if s.repairable && durability < s.max_durability && instance.durability.is_some() {
+            if let Some(cost) = super::repair::item_cost(game, id, grade.clamp(0, 255) as u8, durability as u8, s.max_durability as u8) {
+                t.raw_set("repairCost", cost)?;
+            }
+        }
     }
     if !s.use_as_stat {
         t.raw_set("useAsStat", false)?;

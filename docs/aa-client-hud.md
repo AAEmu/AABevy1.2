@@ -1184,3 +1184,66 @@ forward the confirmed true value. The focused callback test covers repeated/coal
 raw2, pending-before-callback release, unrelated/matching unlocks and rejection cleanup.
 The current lane does not register the setting packet, so live persistence remains unverified;
 these tests supply explicit received fixtures and do not fabricate a server acknowledgement.
+
+## Original equipment repair controls (2026-10-17)
+
+The authored blacksmith window now uses received bag/equipment details. X2Item repair-mode
+entry/leave/getter, RepairAll/RepairAllCost, both physical ItemRepair APIs, ItemDurability and
+the original DameagedItems spelling are bound. Enter/leave is idempotent. Escape cancels
+repair mode; NPC cancellation schedules mode cleanup after the event listeners. Merely hiding
+the window preserves mode, as the original Lua does. The mode setter uses aa-ui's separate
+native repair cursor hook and never changes the held item.
+
+Native391ff2f0 maps a bag cell to its physical slot before391f2a70 consumes a repair-mode click,
+including rejected/empty/healthy targets. The bridge follows that boundary after original
+Lua PreClickSlot. Bag HandleUse has a separate native path and stays unchanged; the original
+equipped-item Lua itself intercepts either mouse button. Regular repair slots are one-based
+Lua to zero-based wire; the native equipment-slot0 last-location sentinel remains unsupported.
+
+RepairAll quotes exactly28 equipped slots, excludes bag items and sends nothing for an empty
+candidate set. Confirmation captures character, NPC context, UIDs, physical locations, grade,
+wear and costs, then compares the complete target set against fresh Inventory before sending.
+Gold insufficiency rejects locally. No durability, balance, inventory or successful-repair event
+is invented. The current bridge supports the authored gold window; native premium currency
+selection and charge/use-AA task dialogs remain separate work.
+
+ItemDurability returns nil for absent/unsupported/zero-max items, otherwise {current,max},
+with actual unsigned-byte wear. Its optional repairability filter defaults true; false includes
+unrepairable durable definitions. DameagedItems scans equipment, includes ratio<=0.25f32,
+stable-sorts by ratio, then truncates to the required signed numeric count. It returns parallel
+template/raw-grade/physical-slot arrays; missing numeric count returns nil. Healthy or
+unrepairable item tooltips omit repairCost. Metadata queries avoid allocating complete item stats.
+
+Displayed costs reproduce native397cea70's separately rounded f32 multiplications, verified
+against ten original-x86 oracle cases. Eight intentionally differ by one copper from the lane's
+existing operation order; aa-net's lane helper is unchanged. Actual charged money is always
+received. The numeric RepairAllCost follows the original integer-to-f32-to-Lua conversion.
+
+UPDATE_DURABILITY_STATUS replays the original UID tracker, rather than comparing final frames.
+Initialization scans equipment and bag without an event. Only action5/6 insert,7 remove and9
+detail update affect it; a subsequent bank3 create/take can also enter the map. A detail update
+uses the stored maximum. Duplicate low insertion reports added again, missing UIDs do nothing,
+and high/low crossings accumulate both flags through the batch. Grade/move/owner/crafting/
+seize tasks and the trailing force-remove list do not synthesize edges. Emission follows the
+per-action auto-AA callbacks. Native audit addresses and cursor-resource contracts are in aa-ui.md.
+
+Validation: client146 passed/23 ignored in5.96s. The exact isolated original repair probe passed
+in2.54s: real Single Repair/Repair All buttons, real bag and equipment cells, physical request
+slots, no optimistic wear/money, mode/escape/hide/cancel behavior, tooltip-cost removal after
+received repair, and both threshold edges in one received batch. Six exact original compatibility
+probes also passed: expansion2.73s, sorting2.45s, Options2.86s, mail1.85s, trade1.77s, breath1.84s.
+Logs are in `shots/hud/sol61-repair/`. These are explicit offline fixtures. Natural repair NPC
+selection is still unresolved: lane skill12086 belongs to repairman data while repair execution
+requires blacksmith data, and the original repairman UI branch references an undefined constant.
+No unproved service routing or server restart was added to conceal that gap.
+
+The inspected `shots/hud/sol61-repair/native-controls.png` shows the original repair window,
+equipped low-durability icon/notifier, bag cells, numeric repair cost and correct remaining-gold
+display. The authored bag art/layout was compared with `reference/ingame/bag/real.png`.
+The explicit fixture has no world scene or character-model preview; it is not a live game
+capture. It measured294-352FPS, reported no script errors and exited normally.
+
+The refreshed `target/debug/aa-client-play.exe` has SHA256
+`2FF8F4EE669002BD5FDB380ED1C6F5A1ACC69027616A5915B9ED2059F7A15580`.
+Its inspected `world-select.png` in this folder reaches the live Lane-bevy world list with
+zero script errors;394-439FPS before capture,314FPS during capture. The process exited normally.

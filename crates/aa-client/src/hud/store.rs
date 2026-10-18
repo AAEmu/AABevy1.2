@@ -84,6 +84,10 @@ impl Tables {
         // The lane and original use single precision and truncate each item's unit price.
         (base.saturating_mul(multiplier) as f32 / 100.0) as i32 as i64
     }
+
+    pub(super) fn refund_multiplier(&self, raw_grade: u8) -> Option<i32> {
+        self.refund_multipliers.get(&raw_grade).and_then(|value| i32::try_from(*value).ok())
+    }
 }
 
 pub fn ui_grade(raw: u8) -> u8 {

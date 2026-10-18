@@ -8,7 +8,7 @@ use bevy::window::PrimaryWindow;
 
 use super::super::{api, panels};
 
-pub(super) fn spawn() -> aa_net::PlayerSpawn {
+pub(crate) fn spawn() -> aa_net::PlayerSpawn {
     aa_net::PlayerSpawn {
         obj_id: 100,
         state: aa_net::model::CharacterState {
