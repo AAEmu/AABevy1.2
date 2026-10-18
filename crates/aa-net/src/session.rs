@@ -523,6 +523,7 @@ pub enum Event {
     Party(crate::party::PartyEvent),
     LootRoll(crate::loot_roll::LootRollEvent),
     Battlefield(crate::battlefield::BattlefieldEvent),
+    ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
     InitialConfig(crate::initial_config::InitialConfig),
@@ -1543,6 +1544,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
+            M::ScheduledEventStarted(e) => self.emit(Event::ScheduledEventStarted(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
             M::InitialConfig(config) => self.emit(Event::InitialConfig(config)),
             M::CraftItemUnlocked(e) => self.emit(Event::CraftItemUnlocked(e)),
@@ -2322,6 +2324,16 @@ mod tests {
         assert!(matches!(events.try_recv(),Ok(Event::Pong(p)) if p==pong));
         assert!(session.server_clock.borrow().mapped_now().is_some());
         assert_eq!(*session.battlefield.borrow(),before);assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn complete_scheduled_receipt_updates_only_its_received_ratio_and_forwards_all_fields() {
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        let start=crate::scheduled::ScheduledEventStarted{id:3,values:[-7;21],changes:u32::MAX,priority:0,start_date:1,period_date:2,hour:3,minute:4,period_minutes:5,week_day:6,open_message:b"notice".to_vec()};
+        session.game_msg(Ok(game::ServerMsg::ScheduledEventStarted(start.clone()))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::ScheduledEventStarted(actual)) if actual==start));
+        assert!(events.try_recv().is_err());assert_eq!(session.battlefield.borrow().my_corps_kill_death_ratio,-7);
+        assert!(!session.battlefield.borrow().in_instant_game());assert_eq!(session.server_clock.borrow().mapped_now(),None);
     }
 
     #[tokio::test]

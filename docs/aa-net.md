@@ -4895,7 +4895,7 @@ original AddSample, comparator and actual MSVCR100 qsort locally in Unicorn.
 Committed goldens cover all7 sequences: odd RTT/outlier, mixed threshold, f32
 precision boundary, unsigned wrap, zero anchor, signed-square overflow/count0,
 and nontransitive RTT. Additional tests cover delayed delivery, lifecycle,
-WorldState/Bevy integration and genuine Pong?backend phase?empty Leave wire.
+WorldState/Bevy integration and genuine Pong -> backend phase -> empty Leave wire.
 
 
 ### SC196 unearned-win remaining-time notice
@@ -4915,3 +4915,52 @@ UI callbacks. Initial state is None and lifecycle reset clears the receipt. Wire
 goldens cover u32 extremes, all truncations and DD04 trailing entry alignment;
 rounding tests cover both sides of499/500 and1499/1500. No simulated countdown,
 completion acknowledgement, or lane transaction is introduced.
+
+
+### Complete original ScheduledEventStarted and battlefield ratio producer
+
+SCScheduledEventStarted0x1ec is source-proven by native factory391b6e90 (packet
+vtable399b4270), serializer397b01f0, shared descriptor serializers398a7ed0 and
+398a7d80. The lane defines this opcode only; no writer/handler implementation
+exists there. The default decoder uses this explicitly named original-source
+reader, not a guessed lane layout or payload profile heuristic.
+
+The complete wire order is u32 id;21 i32 values;u32 changes;u8 priority,u8
+startDate,u8 periodDate,u8 hour,u8 min;i32 periodMin;u8 weekDay;length-prefixed
+openMsg bytes. The fixed prefix before the message length is102 bytes. Native
+expands low21 changes bits into booleans, but `ScheduledEventStarted` retains all
+raw bits. Native field-name literals are id3999d470, v399d8ee8,
+changes399e79c4, priority39a20504, startDate3999fc70, periodDate39a204f8,
+hour3999fc8c, min399e4cb0, periodMin39a204ec, weekDay39a204e4,
+openMsg39a12934. No date/priority policy is inferred from these raw fields.
+
+Native openMsg read requests a127-byte destination plus terminator
+(397b0244..024e). The decoder applies this supported byte bound before publishing
+a receipt; rejection of overlong input is a safety boundary, not a claim about
+native malformed-input recovery. The normal signed-i16 blob framing is retained;
+raw message bytes, including NUL/non-UTF8, are preserved. `open_message_text()`
+uses the crate's existing lossy UTF8/NUL-trim convention only on demand. Tests
+cover126/127/128-byte boundaries independently of text character counts.
+
+Native handler391e1e10 copies the whole descriptor into the player scheduled
+manager through3930b900, then unconditionally passes packet+4c to3936cec0.
+That field is descriptor.values[10] (descriptor base packet+c, array base+18).
+3936cec0 stores it directly into battlefield manager+3cd4. Consequently
+`Battlefield.my_corps_kill_death_ratio` is an i32 initial/reset0 and updates from
+every genuine complete ScheduledEventStarted receipt, regardless of phase,
+changes-bit10, event ID, or priority. Joined does not reset it; match reset does.
+No local kill/score arithmetic is substituted for this received ratio.
+
+`ScheduledEvents.starts` retains the latest complete raw start per ID and is
+available in WorldState/Bevy. It is explicitly receipt history; the native
+scheduled-manager priority/active merge policy is not invented. Its record can
+survive a match-only LoadInstance reset while the separate battlefield ratio
+resets to0; callers must read the actual battlefield fold rather than replaying
+an old record to manufacture a ratio update. Selection/kick/leave/disconnect
+clear receipt history. Native optional open-message event0x256 is separately
+gated by global3a5a4db8; no unconditional Lua announcement is fabricated here.
+
+Goldens cover every field, high change bits, negative values/raw date bytes,
+all truncations, DD04 trailing-packet alignment, raw message bounds and lifecycle.
+WorldState/Bevy tests prove the complete record and ratio reach their resources.
+Source artifact: `data/extract/aa-net/battlefield-native/scheduled-event-20261018.txt`.

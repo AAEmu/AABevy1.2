@@ -44,6 +44,8 @@ pub mod party;
 pub mod proxy;
 pub mod quest;
 pub mod repair;
+pub mod scheduled;
+pub use scheduled::{ScheduledEventStarted,ScheduledEvents};
 pub mod session;
 pub mod skill;
 pub mod shop;
