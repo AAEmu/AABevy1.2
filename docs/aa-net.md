@@ -4804,3 +4804,35 @@ myKillStreakPoint and team result arrays; Joined3936d890 zeros cumulative score
 and kill-score arrays but does **not** zero myKillStreakPoint. The fold preserves
 that exact Joined distinction. No result team totals or victory state are
 fabricated from kill notifications; they remain in genuine SC192 results.
+
+
+### Typed proxy Pong receipt; clock synchronization boundary
+
+Proxy0x13 now decodes to `game::ServerMsg::Pong(proxy::ProxyPong)` and forwards
+`session::Event::Pong` instead of discarding its body. The exact40-byte payload
+is `i64 tm,i64 when,i64 elapsed,i64 remote,u32 local,u32 world`. Native
+CryNetwork constructor1626c606 sets opcode0x13/vtable1629b190; registration
+1626bbff?16270d7e installs callback1626b6e6?1626af9b; serializer16267a47
+uses packet offsets+8,+10,+18,+20,+28,+2c. UI-agent module/runtime proof is
+independent of the active lane writer in `packets/proxy.rs::PongPacket`, whose
+golden has tm1,when2,elapsed0,remote4000,local3,world4.
+
+Native1626b0e1..1626b119 calls TimeKeeper::AddSample only when connection+2c
+is nonzero, using received local, received world, and a freshly read timer0
+local receive time. It does not use the four i64 fields for that sample. The
+connection starts with+2c zero; enabling producer/filter details are a remaining
+clock integration boundary. Raw values, including signed i64 extremes and u32
+wrap, are preserved without sanitization or phase advancement.
+
+Lane Ping echoes tm/when/local. It generates elapsed0 and remote=world*1000,
+where world comes from `packets/proxy.rs::tick_count`. Existing aa-net Ping
+already sends Session elapsed milliseconds in both i64 fields and low32 local.
+Crucially, lane `systems/instances/instant_game.rs::tick_count` has a **separate**
+function-local OnceLock<Instant> origin from proxy tick_count. SC191 start/now
+are generated in that separate domain. The original native shared remote-clock
+assumption is therefore not established for the lane. Neither typed Pong nor
+SC191 now is silently used to manufacture a common clock or completion.
+
+Wire tests preserve all40bytes, reject every truncation, and leave a trailing
+sentinel aligned. A Session test verifies exact forwarding without changing
+Battlefield state or emitting any extra acknowledgement.

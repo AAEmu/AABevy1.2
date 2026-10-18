@@ -364,7 +364,7 @@ pub enum ServerMsg {
     // -- proxy channel
     /// CryNetwork state machine: answer with `FinishState` of the same state.
     ChangeState(i32),
-    Pong,
+    Pong(crate::proxy::ProxyPong),
     // -- lobby
     EnterWorldResponse { reason: i16, gm: bool, stream_token: u32, stream_port: u16, world_time: i64 },
     /// The server asks the client to reconnect to the login server (return to world select).
@@ -558,7 +558,7 @@ impl ServerMsg {
     pub fn name(&self) -> &'static str {
         match self {
             Self::ChangeState(_) => "ChangeState",
-            Self::Pong => "Pong",
+            Self::Pong(_) => "Pong",
             Self::EnterWorldResponse { .. } => "X2EnterWorldResponse",
             Self::ReconnectAuth { .. } => "SCReconnectAuth",
             Self::SlotCount(_) => "SCGetSlotCount",
@@ -747,7 +747,7 @@ impl ServerMsg {
     fn decode_proxy(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
             pp::ChangeStatePacket => Self::ChangeState(r.i32()?),
-            pp::PongPacket => Self::Pong,
+            pp::PongPacket => Self::Pong(crate::proxy::ProxyPong::read(r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_PROXY,
                 opcode,

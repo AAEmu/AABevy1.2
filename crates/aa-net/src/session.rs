@@ -369,6 +369,8 @@ pub enum Event {
     ReadyToConnect { world_id: u8, cookie: WorldCookie },
     /// Connecting to the game server failed.
     ConnectFailed { message: String },
+    /// Genuine proxy 0x13 receipt; no clock mapping or phase advancement is inferred.
+    Pong(crate::proxy::ProxyPong),
     /// The game connection is established and in the lobby.
     LobbyReady,
     /// Congestion per race (index = race id) for character creation.
@@ -1593,7 +1595,8 @@ impl Session {
             }
             M::LeaveWorldGranted { target } => self.left_world(target).await,
             M::ReconnectAuth { token } => self.reconnect(token).await,
-            M::SlotCount(_) | M::AccountInfo { .. } | M::Pong => {}
+            M::Pong(pong) => self.emit(Event::Pong(pong)),
+            M::SlotCount(_) | M::AccountInfo { .. } => {}
             M::Unhandled { level, opcode, len } => {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");
             }
@@ -2281,6 +2284,16 @@ mod tests {
         let load=crate::world_msg::InstanceLoad{raw_id:1,zone_id:2,pos:Default::default(),angles:[0.;3]};
         session.game_msg(Ok(game::ServerMsg::LoadInstance(load))).await;
         assert_eq!(*session.battlefield.borrow(),crate::battlefield::Battlefield::default());
+    }
+
+    #[tokio::test]
+    async fn pong_forwards_raw_clock_fields_without_mutating_received_battlefield_state() {
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        let pong=crate::proxy::ProxyPong{tm:-1,when:2,elapsed:3,remote:4000,local:u32::MAX,world:4};
+        let before=session.battlefield.borrow().clone();
+        session.game_msg(Ok(game::ServerMsg::Pong(pong))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Pong(p)) if p==pong));
+        assert_eq!(*session.battlefield.borrow(),before);assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
