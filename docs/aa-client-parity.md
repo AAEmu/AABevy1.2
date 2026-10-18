@@ -13,13 +13,21 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Current source validation:315 passed /38 existing optional probes ignored
+Accepted records-build validation:315 passed /38 existing optional probes ignored
 in91.99s with three test threads. Twenty focused enchant checks pass in6.60s.
 Selection and BAG totals now use explicitly known native pre-row records,
 preserving zero/negative stacks, ID lookup/removal ordering and native empty
 records; unsafe/unprovided rows retire certainty. Typed request/controller
-integration remains open. This source validation precedes the next playable
-build/capture cut; the accepted alias below remains the earlier tested copy.
+integration remains open. Main and three fixtures build in3m37s; eight
+shots/hud/enchant-records/ captures are inspected without runtime errors.
+Seven are pixel equal to the prior frames cut; the buff differs only at its
+advancing countdown digit. The idle playable alias is refreshed from
+target/debug/aa-client-20261018-enchant-records.exe, SHA256
+8C3D1CDC2FDDF96F44F050814A93D32822F755D18FF61C1BB1F175D1CC8A3726.
+This cut includes native item projections, button-state colors/checkbutton
+visibility and native foam precision/static-water lighting. Later ordinary
+button-art state, recharge and typed-request/SC093 work are outside this build
+(aa-client-enchant.md). No overall feature-completion claim is inferred.
 
 Previous full-client suite:307 passed /38 optional probes ignored in86.92s
 with three test threads. Twelve focused enchant checks pass in5.28s: received
@@ -29,7 +37,7 @@ socket-info/modifier tables and full original updater calls. Eight repair
 captures are inspected without runtime errors; original source portraits and
 effect lines are present. Protected planning, shared operation pending state,
 typed request integration and result/consumption continuation remain open.
-The playable alias is refreshed from target/debug/aa-client-20261018-enchant-frames.exe,
+The previous playable alias was refreshed from target/debug/aa-client-20261018-enchant-frames.exe,
 SHA256347DDF0D98E758E49CCBF6E082048BA2894635637CBF7430D14EBD2F83A00327.
 Main and three fixtures build; eight shots/hud/enchant-frames/ captures are
 inspected, pixel equal to the repaired selection captures, with no runtime

@@ -260,3 +260,27 @@ raw_detail_block=None; a synthetic item is not promoted to a native raw128
 receipt. Execute still refuses explicitly: typed request integration, shared
 operation pending/effects and controller callbacks are the next integration
 boundary. No request, ACK or item settlement is inferred from this provider.
+
+## Accepted records build
+
+The inspected main target/debug/aa-client-20261018-enchant-records.exe and the
+idle-refreshed target/debug/aa-client-play.exe share SHA256
+8C3D1CDC2FDDF96F44F050814A93D32822F755D18FF61C1BB1F175D1CC8A3726.
+Main and the enchant/buffs/item_effects examples build in3m37s. This frozen cut
+contains81bef84's native records,25c549a's button colors,2883227's checkbutton
+art visibility,09ea3bf/5520f1b's item projections and87a3c0a/487cfd7's water
+precision/static-light changes. The worker's later recharge helper, ordinary
+button-art state work, typed request preparation and SC093 follow-up are outside
+this executable. Its frozen suite is315 passed /38 optional probes ignored
+in91.99s, with twenty focused enchant checks passing in6.60s.
+
+Eight1920x1080 shots/hud/enchant-records/ captures are inspected: grade
+283.0-304.3 FPS, support306.4-325.3, socket303.0-310.6, unsocket315.7-324.5,
+gem284.2-321.1, buff tooltip166.2-200.0, grade result206.4-224.5 and live lane
+world select218.8-265.0. All eight self-close without WARN/ERROR/panic.
+Compilation is active on the shared machine; these are observations, not an
+isolated performance comparison. Seven captures are pixel equal to the prior
+frames cut; the buff differs only in45 pixels at its advancing countdown digit.
+These remain original-script/asset regression checks, not paired original-client
+pixel parity or live enchant transactions. The controller/planner/transport
+integration limitations above remain open.
