@@ -31,6 +31,7 @@ local function bagKnown() return HUD.bag_slots ~= 0 end
 -- The real bag slot behind a cell of the bag window. An empty cell of the All tab is the slot itself; in a
 -- filtered tab it is the first free slot.
 local function realSlot(virtual)
+  if HUD.inventory_dest and HUD.inventory_owner() ~= 0 then return HUD.inventory_dest(CONTAINER_BAG, virtual) end
   local real = X2Bag:SlotByIdx(virtual)
   if real ~= nil then return real end
   if virtual < 1 or virtual > HUD.bag_slots then return nil end

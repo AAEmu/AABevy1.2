@@ -12,6 +12,14 @@ use super::api::{HudBridge, HudData, Shared};
 #[allow(dead_code)]
 pub(super) mod fixture;
 
+pub(super) fn extend_slots(rt: &UiRuntime, capacity: u32) {
+    let result = rt.lua.load(include_str!("expansion_slots.lua")).set_name("@expansion_slots.lua")
+        .eval::<mlua::Function>().and_then(|function| function.call::<()>(capacity));
+    if let Err(error) = result {
+        warn!("hud: inventory widget pool: {error}");
+    }
+}
+
 pub(super) fn load(conn: &Connection) -> rusqlite::Result<Vec<ExpansionRule>> {
     let mut q = conn.prepare("SELECT is_bank,step,price,item_id,item_count,currency_id FROM bag_expands ORDER BY id")?;
     q.query_map([], |r| {
@@ -370,6 +378,14 @@ mod tests {
         app.world().non_send::<UiRuntime>().lua.load("X2Bank:Expand(); assert(EXPANSION_INFO.kind=='bank'); X2DialogManager:Delete(DLG_TASK_EXPAND_INVENTORY); assert(not EXPANSION_DIALOG:IsVisible())").exec()?;
         app.update();
         assert!(drain(&mut app).is_empty());
+        // The database's upper bag tiers exceed the shipped Lua's fixed130-cell allocation.
+        let ack = Event::InventoryExpanded { container: 2, slots: 150 };
+        app.world_mut().resource_mut::<Inventory>().apply(&ack);
+        app.world_mut().write_message(NetEvent(ack));
+        bridge.borrow_mut().panels.bag_slots = 150;
+        super::super::api::push_changes(app.world().non_send::<UiRuntime>(), &bridge);
+        app.update();
+        app.world().non_send::<UiRuntime>().lua.load("assert(X2Bag:Capacity()==150 and #newbag.slots.btns==150); newbag:Update(); assert(newbag.slots.btns[150]:IsVisible())").exec()?;
         assert!(app.world().non_send::<UiRuntime>().errors.is_empty());
         if path.exists() {
             std::fs::remove_file(path)?;

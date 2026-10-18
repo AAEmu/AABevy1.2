@@ -47,6 +47,7 @@ pub struct SlotSnap {
     pub level: i64,
     /// Items: `item_groups.id` (bag tabs).
     pub group: u32,
+    pub category_order: i64,
     /// Worn items and bag items: the instance's durability (`None` for an item that does not wear out or is not
     /// an instance), temper values and item flags (the tooltip's durability, stats and "Untradeable").
     pub dur: Option<u8>,
@@ -140,6 +141,7 @@ fn item_slot(game: Option<&GameData>, template: u32, count: i64, grade: u8) -> S
         desc: info.map(|i| i.desc.clone()).unwrap_or_default(),
         level: info.map_or(0, |i| i.level),
         group: info.map_or(0, |i| i.group),
+        category_order: info.map_or(0, |i| i.category_order),
         dur: None,
         temper: (0, 0),
         flags: None,
@@ -195,6 +197,7 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
         desc: String::new(),
         level: 0,
         group: 0,
+        category_order: 0,
         dur: None,
         temper: (0, 0),
         flags: None,
@@ -357,6 +360,7 @@ fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
     t.raw_set("desc", s.desc.as_str())?;
     t.raw_set("level", s.level)?;
     t.raw_set("group", i64::from(s.group))?;
+    t.raw_set("category_order", s.category_order)?;
     if let Some(d) = s.dur {
         t.raw_set("dur", i64::from(d))?;
     }

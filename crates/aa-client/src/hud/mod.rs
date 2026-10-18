@@ -43,6 +43,7 @@ mod data;
 mod dialog;
 mod drag;
 mod expansion;
+mod sorting;
 mod formula;
 mod friends;
 mod input;
@@ -114,6 +115,11 @@ pub(crate) fn breath_fixture() {
 #[allow(dead_code)]
 pub(crate) fn expansion_fixture() {
     expansion::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn sorting_fixture() {
+    sorting::fixture::run();
 }
 
 use aa_net::state::Player;

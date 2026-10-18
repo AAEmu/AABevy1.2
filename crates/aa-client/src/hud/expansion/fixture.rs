@@ -53,7 +53,7 @@ pub(super) fn spawn() -> aa_net::PlayerSpawn {
     }
 }
 
-pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared, PathBuf, Inventory), Box<dyn std::error::Error>> {
+pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared, PathBuf, Inventory), Box<dyn std::error::Error>> {
     let (rt, bridge, path) = super::super::breath::fixture::runtime(width, height)?;
     api::mark_pushed(&bridge);
     let mut inventory = Inventory::default();
@@ -100,7 +100,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
     Ok((rt, bridge, path, inventory))
 }
 
-pub(super) fn click(rt: &UiRuntime, widget: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn click(rt: &UiRuntime, widget: &str) -> Result<(), Box<dyn std::error::Error>> {
     let object: mlua::Value = rt.lua.load(widget).eval()?;
     let id = aa_ui::lua::value_id(&rt.lua, &object).ok_or("fixture widget missing")?;
     let rect = aa_ui::lua::ui(&rt.lua).tree.rect(id);
