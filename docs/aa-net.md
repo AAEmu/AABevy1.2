@@ -3376,7 +3376,7 @@ The static constant audit found only reads of ten language-ID globals39acb624..6
 excluded Enum group39ac99b8 and special count-exclusion39acb620. Their image contents are
 protected/nonplaintext; no direct static initializer assignment was found. The later
 read-only runtime check below closes the language and count-exclusion IDs; the separate
-Enum exclusion39ac99b8 remains unresolved. No value is inferred from catalog names.
+Enum exclusion39ac99b8 was subsequently read as20 in the same verified process. No value is inferred from catalog names.
 
 ### Stablehand quote getter source audit (2026-10-18)
 
@@ -4095,8 +4095,8 @@ original PID48924, verified module string StandMode at399a08dc, has3a5e112c=0,
 39acb620=19, and39acb624..39acb648 consecutively21..30. Thus these count predicates
 exclude IDs0,19,21..30. IsLanguageActability397a7c60 recognizes exactly21..30.
 Source artifact data/extract/aa-ui/native-proficiency-runtime-20261018.txt records
-PROCESS_VM_READ-only reads, with no writes or UI input. This does not resolve the
-separate Enum exclusion global39ac99b8; it must not be silently assigned19 too.
+PROCESS_VM_READ-only reads, with no writes or UI input. A subsequent same-process read resolves the separate Enum exclusion global39ac99b8
+as20. Enum filtering must not reuse capacity count exclusion19.
 
 CanExpandExpert3943b940 only tests whether397a9540 finds key(receivedCount+1), with
 native byte arithmetic. Neither funds nor certificates are checked. Expansion ends
@@ -4130,3 +4130,156 @@ this must not become a fabricated ACK. Other currency IDs fall through this help
 which is not evidence of a complete general currency validator. Current visible
 expert rows have zero raw0 costs. Getter eligibility and action payment are separate
 contracts; received tier/expansion events remain the only authoritative settlement.
+
+
+### Mate maximum pools and modifier producers (2026-10-18)
+
+UnitMaxHealth registration394c4526 selects394bc180; UnitMaxMana394c4624 selects394bc430.
+Both resolve the actual unit and call390b3a80 with attributes6/7. That reads the common
+attribute component via398a0bc0. Mate kind5 is NOT evaluated as an NPC-grade formula:
+398a0bc0 selects generic398b4e80, whose fallback398a0d60 maps attributes6/7 at398a0e08/
+398a0e12 to unit formula kinds14/15. Evaluator39567110 indexes the formula by the actual
+actor kind+408 (Mate5). For kind5,3956722b resolves the actor's NPC template(+414) through
+396962c0, reads template+74 (mate_kind_id), and chooses the corresponding per-formula
+coefficient. It does not use NPC template/grade/kind formula variables for this branch.
+
+Current DB owner5 formula99(kind14) is `(level * 140 + sta * 12) * mate_kind`; formula100
+(kind15) is `level * 15 + int * 10 * mate_kind`. Primary kinds22..27 each use
+`10 + (level - 1) * 4`. Variable kind5 supplies separate HP/MP coefficients: mate kind3
+uses1.1/0.9, for example. Kind1 at level5 with no modifiers has primary26, HP1012/MP335,
+matching the lane's recorded independent original-client horse fixture. These are
+catalog formulas, not constants to replace future template data. Inputs/coefficient are
+stored as f32;395672b3 explicitly rounds the evaluated result to f32 before398b56d0
+truncates to i32. A generic f64-to-i32 evaluation can differ near integer boundaries.
+
+The common component additionally applies modifiers.398a0060 visits actual buffs
+through3989e5c0, passive/static sources through3989e6a0, and optional attached provider
+virtual+24. Buff callback398a0960 resolves the received buff, folds its unit modifiers
+at descriptor+2b4 through3989fde0 using received stack/level arguments, and includes
+conditional modifier path398a07c0 plus duration-dependent path3989fee0. Merely loading
+Buff-owned flat rows is not a complete implementation of every buff predicate.
+Native3989ffb0 separately applies the mate NPC template's vector+184 using received
+level. Therefore Npc-owned template modifiers still contribute even though the base
+formula owner is Mate5. Missing or unresolved source state must remain an explicit gap.
+
+For kind0/5,398a0bc0 also includes cached gear contributions from398a0a50. It iterates
+ordinary physical equipment slots0..18 (stride0xc0, offsets through0xd80), excludes
+missing/ineligible item states, adds generated
+primary-stat contributions through3989fa80 for attributes0..4, static item modifier
+vector+dc, secondary item+20 modifiers, and socket-related item arrays+30. It also folds
+slot27 through398a0350. Required inputs include actual received item template/raw grade,
+condition/detail/socket state and catalog eligibility; equipment is not merely cosmetic.
+Item-owned modifiers can directly change pools (current DB has272 attribute6 and229
+attribute7 rows), beyond gear STA/INT changing the underlying formulas. Existing client
+Buff/Npc-only modifier loading does not cover those direct Item contributions.
+
+All applicable native flat/percent contributions aggregate before final pool arithmetic:
+initial flat0/percent100;398a0d0d uses integer base+flat when percent==100, otherwise
+398a0d15..35 computes trunc_i32(f32(base+flat)*f32(percent)*f32(0.01)), in that order.
+It then clamps through395729f0 against unit_attribute_limits (current HP6 maximum10M).
+This differs from sequentially applying each percent bonus in lane vehicles::stats::
+int_bonuses. Lane uses the same Mate formula owner/variables but its bonus arithmetic
+must not be advertised as an exact native oracle. No new receive packet is required:
+this is derived state from existing received unit/equipment/buffs plus static data.
+Read-only disassembly artifact: data/extract/aa-net/mate-stats-native/contracts-disassembly.txt.
+
+
+Original pet_view.lua UpdateInfoView explicitly calls UnitInfo("playerpet") and
+UnitModifierInfo("playerpet"). Its labels consume melee_dps, melee_critical_rate,
+dodge_rate, armor/armor_percentage, magic_resist/magic_resist_percentage, health_regen
+and mana_regen; health/mana labels use dedicated current/max getters. Native UnitInfo
+registration394c4fc2 selects394bdc10, resolves the supplied unit via3945fcd0, and builds
+that actual actor's stats with398aa290. This repeatedly queries its own398a0bc0 component;
+substituting player attributes for a mate tooltip is not the native contract. Full
+combat-derived percentage formulas and conditional modifier eligibility remain a
+separate integration task; the pool/formula producer audit does not claim all tooltip
+fields have been reconstructed.
+
+
+### Battlefield initial queue getter and received producer (2026-10-18)
+
+Original battlefield/entrance.lua ENTERED_WORLD calls X2BattleField:GetJoinedInfos(),
+not GetParticipationCount/GetEntranceCount. It returns immediately only when curCount
+and maxCount both equal0; otherwise FillParticipationInfo multiplies maxCount by2.
+The native method always returns THREE numeric values, so a nil/no-result placeholder
+causes an original UI error even when there is no queue. Registration394573b9 selects
+394562f0 and three-number return helper39455e80. With M=manager+28 and queue counts
+C0/C1/C2 at+2c/+30/+34, returns are:
+`min(min(C0,M)+min(C1,M)+min(C2,2*M),2*M), M, manager+8(myCorps)`.
+Comparisons are unsigned; outputs become Lua f32 numeric values, with myCorps signed.
+
+Singleton3936ce50 points3a16efd8; static initializer39990650 invokes3936d0d0, which
+explicitly sets state0, max/counts0, myCorps-1. Thus native initial getter is exactly
+(0,0,-1), without requiring a server queue packet. This source-backed local default
+must not be described as an authoritative received roster. IsInInstantGame3936d0a0
+returns true only for manager state5,6,7,8; initialstate0 returns false.
+
+Received queue producer3936e030 accepts only appliedstate2 and matching battlefieldID
+(manager+4), writes maximum/counts, then emits UPDATE_INSTANT_GAME_STATE(event160) if
+the static battlefield resolves397f2210. Applied reply3936dfb0 requires requestingstate1
+and matching battlefieldID+corps; success becomesstate2, error resets3936d0d0. Cancel/
+local reset3936d1b0/3936d260 call that constructor; no optimistic population is implied.
+
+Active lane SC18b SCAppliedToInstantGamePacket is u32 battlefield,u8 corps,u16 error.
+SC18d SCInstantGameStatePacket is u32 battlefield,u8 per-corps size,u16 corps0 count,
+u16 corps1 count,u16 any count. Server instances/instant_game.rs broadcasts only to
+actual applicants, deriving size from rule_set.corps_size; no world-entry initial
+queue snapshot is sent. The typed Battlefield queue resource below now exposes these received reports.
+Unknown later game transitions must not be replaced by invented success or capacity values.
+
+
+Battlefield typed queue milestone: Command::Battlefield and BattlefieldEvent cover
+CSApply0e1(u32 battlefield,u8 corps0/1/2), CSCancel0e2(empty), SC18b..18f. Native apply
+3936f816 requires idle state0, records request identity/state1, builds vtable399d0ce0
+through397ac7f0; serializer397bb9b0 writes exactly u32/u8. Cancel3936d1b0 resets local
+manager before empty send. The aa-net resource deliberately keeps successful-write
+Requested state separate from received admission/population, and retains its received
+snapshot until cancellation report/lifecycle reset; sending Cancel is not a received ACK.
+Static content/interaction/entry eligibility remains the original client's responsibility.
+
+Battlefield::joined_infos reproduces the native capped received tuple and initial(0,0,-1).
+During pending Apply, native locally exposes requested corps before ACK; this received
+getter instead leaves corps-1 and exposes that known local input separately in requesting.
+This distinction does not fabricate admission or counts and must not be mislabeled as
+a fully emulated native pending getter.
+requesting is only a successful write; applied requires matching SC18b battlefield+corps
+and error0. Matching error resets state and retains raw u16 error bits. Queue reports
+are ignored until received admission or for another battlefield. A successful Cancel
+write blocks late admission/queue/invitation mutations without fabricating a clear;
+only the cancellation report resets the retained received snapshot. Genuine accepted
+SC18d provides optional queue snapshot; no admission creates artificial counts. All
+raw reports still forward through session Event, even when state correlation rejects
+one or the values repeat. WorldState and Bevy resource fold the same reducer and reset
+on CharacterSelected/LeftWorld/Disconnected/Kicked. No units, currency or inventory
+are created/changed by this queue slice.
+
+SC18e invitation body is u32 zone,u32 instance,u32 ruleset,u8 assigned corps,u64
+qualifiedID; SC18f timeout is the same without qualifiedID. Native factories391b3ed0/
+391b3f60 install399b3dc8/399b3dd4, serializers397b6ec0/397b6f50. Invitation consumer
+3936d810 requires appliedstate2 and corps0/1 exact or requestedANY2 with assigned0/1;
+there is no battlefieldID in this message to compare. It enters invitedstate3, retaining
+existing queue counts. The typed resource likewise retains the snapshot but blocks
+new queue updates while invited. Timeout3936d2a0 requires matching zone,instance,
+ruleset and assigned corps and returns to appliedstate2; wrong/stale contexts do nothing.
+Native counters remain capped for display rather than being interpreted as actual
+participant entities. Join/world-enter/gameplay state controls and results SC190+
+remain outside this bounded queue slice; no original join/completion event is fabricated.
+
+Critical SC18c transport distinction: native factory391b3dd0/vtable399b3db0 serializer
+397c3bf0 transfers ONLY signed i16 (stream virtual+50), then signextends into its DWORD
+struct field. Handler391de380 passes that field to3936d260, which ignores its argument
+and resets native state<=4. The lane writer instead deliberately sends FOUR bytes
+(u16 error,u8 branch,u8padding), based on older handler-width inference. Active dispatch
+reads exactly lane four bytes and preserves all as Cancelled.raw, necessary for DD04
+alignment. BattlefieldEvent::read_native_cancel_error is a separate explicit two-byte
+source decoder; never choose a layout heuristically from remaining payload bytes.
+SC18b error is likewise signed16 natively; public u16 preserves its exact wire bits.
+No cancellation packet contains a context ID, so a delayed cancellation after reapply
+cannot honestly be distinguished using an invented request token.
+
+Tests cover command goldens, every prefix truncation for all five receipts, each receipt
+followed by another DD04 packet, explicit native/lane cancel boundaries, initial getter,
+request versus received admission, wrong queue IDs/corps,
+capacity caps, exact invitation/timeout matching, lifecycle, WorldState/Bevy folding,
+local inactive/missing transport outcomes and session event ordering. No live queue
+transaction or server mutation was used.

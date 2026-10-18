@@ -365,6 +365,7 @@ pub struct WorldState {
     pub trade: Trade,
     pub auction: Auction,
     pub loot_rolls: LootRolls,
+    pub battlefield: crate::battlefield::Battlefield,
     pub actabilities: Actabilities,
     pub mates: Mates,
     pub slaves: Slaves,
@@ -405,6 +406,7 @@ impl WorldState {
         self.mailbox.apply(e);
         self.auction.apply(e);
         self.loot_rolls.apply(e);
+        self.battlefield.apply(e);
         self.actabilities.apply(e);
         self.mates.apply(e);
         self.units.apply_mate_equipment_flags(e, &self.mates);

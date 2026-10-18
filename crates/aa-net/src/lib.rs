@@ -26,6 +26,7 @@ pub mod game;
 pub mod gimmick;
 pub mod housing;
 pub mod radar;
+pub mod battlefield;
 pub mod interaction;
 pub mod initial_config;
 pub mod items;
@@ -96,3 +97,5 @@ mod unit_state_tests;
 
 #[cfg(test)]
 mod equipment_notice_tests;
+
+pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, BattlefieldInvitation, BattlefieldQueue};
