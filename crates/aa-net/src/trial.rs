@@ -1,7 +1,8 @@
 //! Received trial wait cache and every received producer of its defendant callback gate.
-//! Does not implement elapsed trial clocks. Session owns outgoing controls and the automatic CS072 reply.
+//! Samples explicit local Unix seconds for native trial ticks. Session owns outgoing controls and the automatic CS072 reply.
 mod data;
 mod commands;
+mod clock;
 pub use commands::TrialCommand;
 mod progress;
 #[cfg(test)]
@@ -76,6 +77,8 @@ impl TrialEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrialNotice {
+    /// TRIAL_TIMER(phase, period table from raw signed seconds), using an explicit local Unix sample.
+    Timer { phase:u8, remaining_seconds:i64 },
     /// AUDIENCE_JOINED(name), before local object/context admission. Raw bytes; Lua uses first NUL.
     AudienceJoined { name:Vec<u8> },
     /// AUDIENCE_LEFT(name), after any local close/reset callbacks.
@@ -105,7 +108,7 @@ pub enum TrialNotice {
     /// Event142: SHOW_DEPENDANT_WAIT_JURY(signed count,total, unsigned sentence bits).
     JuryWaiting { count: i32, total: i32, sentence_time_ms: i32 },
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Trials {
     /// Actual PlayerSpawn object, never inferred from an audience row or persistent ID.
@@ -119,8 +122,12 @@ pub struct Trials {
     pub jury_court:Option<u32>,
     pub jury_number:Option<i32>,
     pub phase:u8,
-    /// Raw last received phase duration; this resource does not advance a trial clock.
+    /// Raw last received phase duration, retained independently of explicit wall-clock ticks.
     pub remaining_time_ms:u32,
+    /// Native last local Unix seconds sample; unknown until explicit sampling.
+    pub last_epoch_seconds:Option<i64>,
+    /// Native constructor/reset zero disables ticks; unknown if a phase was folded without a sample.
+    pub expires_at_epoch_seconds:Option<i64>,
     /// Last coherent details projection; invalidated when native resets defendant identity.
     pub defendant:Option<TrialDefendantData>,
     pub records:Vec<TrialCrimeRecord>,
@@ -150,18 +157,18 @@ impl Trials {
         self.defendant_context.is_some()
     }
     pub fn apply(&mut self, e: &Event) -> bool {
-        self.fold(e,&mut |_,_|{})
+        self.fold(e,None,&mut |_,_|{})
     }
     /// Use instead of apply when only ordered notices are required, without callback snapshots.
     pub fn apply_with_notices(&mut self,e:&Event)->(bool,Vec<TrialNotice>){
-        let mut notices=Vec::new();let changed=self.fold(e,&mut |notice,_|notices.push(notice));(changed,notices)
+        let mut notices=Vec::new();let changed=self.fold(e,None,&mut |notice,_|notices.push(notice));(changed,notices)
     }
     /// Each owned snapshot is captured at the native callback point, before subsequent mutations.
     /// The resource itself holds final received state. Present snapshots only while dispatching Lua.
     pub fn apply_with_dispatch(&mut self,e:&Event)->(bool,Vec<(TrialNotice,Self)>){
-        let mut dispatch=Vec::new();let changed=self.fold(e,&mut |notice,state|dispatch.push((notice,state.clone())));(changed,dispatch)
+        let mut dispatch=Vec::new();let changed=self.fold(e,None,&mut |notice,state|dispatch.push((notice,state.clone())));(changed,dispatch)
     }
-    fn fold(&mut self,e:&Event,emit:&mut impl FnMut(TrialNotice,&Self))->bool {
+    fn fold(&mut self,e:&Event,epoch_seconds:Option<i64>,emit:&mut impl FnMut(TrialNotice,&Self))->bool {
         // Most network events cannot affect this manager; do not clone evidence on every movement.
         if !matches!(e,Event::Trial(_)|Event::PlayerSpawn(_)|Event::UnitsRemoved(_)|Event::CharacterSelected(_)|Event::LoginSucceeded(_)|Event::LeftWorld{..}|Event::Disconnected{..}|Event::Kicked{..}|Event::PhaseChanged(Phase::Authenticating|Phase::Connecting)){return false}
         let before = self.clone();
@@ -228,10 +235,10 @@ impl Trials {
                         self.adopt_trial(*trial_id,emit);self.jury_court=Some(*court);self.jury_number=Some(*jury_number);self.defendant_context=None;self.is_jury=true;
                     }
                     TrialEvent::RulingClosed => {
-                        self.reset_role(emit);emit(TrialNotice::RulingClosed,self);emit(TrialNotice::Closed,self);
+                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::RulingClosed,self);emit(TrialNotice::Closed,self);
                     }
                     TrialEvent::Canceled { .. } => {
-                        self.reset_role(emit);emit(TrialNotice::Closed,self);emit(TrialNotice::Canceled,self);
+                        self.reset_role(epoch_seconds,emit);emit(TrialNotice::Closed,self);emit(TrialNotice::Canceled,self);
                     }
                     TrialEvent::DefendantData(data) => {
                         if data.name.len()<=128 {
@@ -263,7 +270,9 @@ impl Trials {
                         emit(TrialNotice::Status{phase:*phase,current_jury:*current_jury},self);
                         if *trial_id==self.trial_id || (!self.is_jury&&!self.is_defendant()) {
                             self.adopt_trial(*trial_id,emit);
-                            self.phase=*phase;self.remaining_time_ms=*remaining_time_ms;self.current_jury=Some(*current_jury);
+                            self.phase=*phase;self.remaining_time_ms=*remaining_time_ms;
+                            self.last_epoch_seconds=epoch_seconds;self.expires_at_epoch_seconds=epoch_seconds.map(|now|now.wrapping_add((*remaining_time_ms/1000)as i64));
+                            self.current_jury=Some(*current_jury);
                             let total=self.jury_counts.map(|v|v[1]);self.jury_counts=total.map(|v|[*current_jury,v]);
                             match *phase {
                                 2 => {
@@ -290,7 +299,7 @@ impl Trials {
                         if name.len()>128 {return *self!=before}
                         if name.len() <= 128 && *obj_id == self.local_obj_id.unwrap_or(0) {
                             if self.trial_id!=0 {emit(TrialNotice::Closed,self);}
-                            self.reset_role(emit)
+                            self.reset_role(epoch_seconds,emit)
                         }
                         emit(TrialNotice::AudienceLeft{name:name.clone()},self);
                     }
@@ -308,8 +317,9 @@ impl Trials {
         if let Some(status)=self.ruling.as_mut(){status.count=0;status.total=0;}
         emit(TrialNotice::BeautyshopStatus,self);
     }
-    fn reset_role(&mut self,emit:&mut impl FnMut(TrialNotice,&Self)){
+    fn reset_role(&mut self,epoch_seconds:Option<i64>,emit:&mut impl FnMut(TrialNotice,&Self)){
         self.trial_id=0;self.defendant_context=None;self.is_jury=false;self.phase=0;self.remaining_time_ms=0;
+        self.last_epoch_seconds=epoch_seconds;self.expires_at_epoch_seconds=Some(0);
         if let Some(data)=self.defendant.as_mut(){data.judge_obj_id=0;}
         emit(TrialNotice::BeautyshopStatus,self);
     }
