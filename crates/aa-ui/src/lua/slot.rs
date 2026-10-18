@@ -982,6 +982,67 @@ fn masked_image_quads(image: Quad, mask: &CooldownMask, progress: f32, out: &mut
     }
 }
 
+/// Native slot+32c: a fixed 5x22 image on a ten-pixel circle, restarted at the
+/// current sweep angle on every draw. This is independent of the Lua motion API.
+fn cooldown_edge(
+    u: &mut Ui,
+    rect: Rect,
+    progress: f32,
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    const HUD: &str = "ui/common/hud.dds";
+    let Some(path) = u.textures.resolve(HUD) else {
+        return;
+    };
+    let Some((width, height)) = u.textures.size(HUD) else {
+        return;
+    };
+    let angle = (progress * 360.).to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let center = [
+        (rect.x + rect.w * 0.5) * scale,
+        (rect.y + rect.h * 0.5) * scale,
+    ];
+    let radius = 10. * scale;
+    let position = [center[0] + sin * radius, center[1] - cos * radius];
+    // Keep the native matrix's f32 operation order. Reassociating this around
+    // local coordinates changes add0.5/CVTT results at half-pixel boundaries.
+    let translation = [
+        (-center[0] * cos + center[1] * sin) + position[0],
+        (-center[0] * sin - center[1] * cos) + position[1],
+    ];
+    let corners = [[-2.5, -11.], [2.5, -11.], [2.5, 11.], [-2.5, 11.]].map(|[x, y]| {
+        let (x, y) = (center[0] + x * scale, center[1] + y * scale);
+        // Image39220590 snaps AFTER the effect's rotation and translation.
+        [
+            (x * cos + y * -sin) + translation[0],
+            (y * cos + x * sin) + translation[1],
+        ]
+        .map(|p| (p + 0.5).trunc())
+    });
+    out.push(Quad {
+        tex: Tex::Image(path),
+        pos: [corners[0][0], corners[0][1], corners[2][0], corners[2][1]],
+        uv: [
+            748. / width as f32,
+            166. / height as f32,
+            753. / width as f32,
+            188. / height as f32,
+        ],
+        color: [
+            1.,
+            1.,
+            1.,
+            ((f64::from(alpha.clamp(0., 1.)) * 255.).trunc() / 255.) as f32,
+        ],
+        corners: Some(corners),
+        uvs: None,
+        vcolors: None,
+    });
+}
+
 /// The quads of a widget's cooldown: the native texture fan (a slot's independent one-pixel
 /// inset image, or a generic button's selected art) and slot time in `cooltime_style`. Drawn after
 /// the widget's background and artwork, before its overlay.
@@ -1068,6 +1129,7 @@ pub(crate) fn cooldown_quads(
                 progress,
                 out,
             );
+            cooldown_edge(u, widget_rect, progress, alpha, scale, out);
         } else if slot.native_cooldown.is_some() {
             // Native392c3960 clears draw fields before caption delivery, without an event.
             // Compatibility's separate estimated clock remains until its next tick/rebind.

@@ -60,7 +60,7 @@ fn main() {
    panel:SetExtent(640,420);panel.slotTitle:SetExtent(620,24)
    local title=panel:CreateChildWidget('label','perimeterTitle',0,true)
    title:SetExtent(620,24);title:AddAnchor('TOP',panel,0,265);title.style:SetFontSize(16)
-   title:SetText('Native fan: 1/16 elapsed / 1/5 / 1/2 / rectangular')
+   title:SetText('Native mask + edge: 1/16 / 1/5 / 1/2 / rectangular')
    perimeterSlots={}
    local old=AAUI.SlotContent
    AAUI.SlotContent=function(kind,index)

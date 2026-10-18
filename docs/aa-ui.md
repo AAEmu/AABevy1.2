@@ -5351,3 +5351,61 @@ reverse method is exposed. `native-slot-reverse-writer-source-20261018.txt`
 archives the candidate setter registrations, casts, constructor and draw read.
 Both source-only scripts were rerun successfully; no Cargo build, visual
 change, app adapter or production mode change is part of this follow-up.
+
+### Native ordinary slot cooldown edge artwork (2026-10-18)
+
+Ordinary slots now draw the missing native rotating edge after their mask fan
+and before the time caption. Actual loader392c2f50 creates a centered5x22
+EffectDrawable from `ui/common/hud.dds` crop748/166/5/22. Its white constant
+color phase and internal circle arguments0.45454547/2 produce a ten-pixel
+orbit. This fixed-size child stays centered when its slot becomes rectangular;
+the bound icon's anchors, crop, color and extent do not control it.
+
+Actual392c3960 sets BOTH motion angle bounds to f32(progress*360), restarts
+the effect through3928fb50 and immediately draws3928f810. Restart resets the
+phase time on every valid draw, so the edge follows the supplied sweep sample
+without an independent clock. The toolkit emits the equivalent stock-art
+quad directly. It shares the mask's loaded-texture/positive-remaining/valid-
+progress gates and minimum200 total gate; repeated snapshots, invalid-progress
+reset, ready state and later restored samples add no callbacks or timer state.
+Global caption suppression and generic cooldown-button drawing are unchanged.
+Completion-child flashes, reverse producers and raw GCD selection inputs remain
+separate unresolved work.
+
+Native Image39220590 applies the effect matrix BEFORE add0.5/CVTT snapping.
+The implementation retains the native f32 matrix operation order: reassociating
+the transform around local coordinates changes half-pixel results. At1/16
+elapsed in a42px slot, final vertices are27/1,31/3,23/23,18/21; at half elapsed
+they are24/42,19/42,19/20,24/20. The crop uses its locale-resolved atlas and
+white packed-RGBA8 modulation. Existing widget transforms and clipping still
+apply through the ordinary renderer.
+
+`slot_edge_motion_oracle.py` /
+`native-slot-edge-motion-oracle-20261018.json` execute **31 groups**: actual
+loader through328b; native circle/ellipse controls; actual Lua wrapper; complete
+effect restart, draw, matrix helpers and Image transform/snapping; fractional
+UI scale0.85; rectangular slots; repeated sample, invalid, restore and zero
+sequences. Texture allocation/catalog lookup, renderer submission after vertex
+arithmetic, frame-time input and external SSE sinf/cosf are explicit endpoints.
+Completion drawing is captured separately, without substituting an effect.
+`native-slot-edge-motion-source-20261018.txt` archives the relevant bodies.
+
+The internal circle helper's radius order differs from the Lua API. Actual
+wrapper392353b0 swaps the radius arguments before calling39291b30; its executed
+control confirms that the existing Lua-facing motion implementation and original
+autoattack arrow remain correct. No motion API or existing motion test is
+changed. Fresh crate check and **55 selected tests pass**, including animation10,
+constant7, caption6, generic-mask7, HUD6, scale/clip4, ordinary-mask8, selector6
+and slot-state1. New assertions cover actual native vertices/UVs, draw order,
+scale, rectangular extent and snapshot/visibility lifetime; original control
+provider/consumer order and physical click regressions remain passing.
+
+The aa-dev original-control fixture was built fresh and both captures inspected:
+`shots/aa-ui/native-slot-edge-720-20261018.png` at1280x720/default0.85
+(**302.5-337.7 FPS**) and
+`shots/aa-ui/native-slot-edge-1080-20261018.png` at1920x1080/1.0
+(**295.0-366.9 FPS**). Both report zero script errors/WARN/ERROR and self-close
+(PIDs21144/41272); the copied executable was removed. The original combat
+reference `reference/ingame/combat_triple_slash/real_05.png` was inspected again
+for toolbar context, with its unknown live phase kept separate from native
+geometry goldens. No original scripts, source assets or app providers change.
