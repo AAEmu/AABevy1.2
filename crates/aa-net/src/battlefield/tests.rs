@@ -372,7 +372,7 @@ fn start() -> BattlefieldStart { BattlefieldStart {zone_id:8,instance_id:9,now_m
 fn end() -> BattlefieldEnd {
     BattlefieldEnd {zone_id:8,instance_id:9,reason:3,teams:std::array::from_fn(|i| BattlefieldTeamResult {
         state:i as u8,faction_id:100+i as u32,score:-123,total_kills:-2,total_deaths:7,
-        members:vec![BattlefieldMemberResult {character_id:77,name:"??".into(),score:-9,bonus:10,bonus_set:0xfedcba98,killstreak:2,kills:3,assists:4,deaths:5}]
+        members:vec![BattlefieldMemberResult {character_id:77,name:"\u{c774}\u{b984}".into(),score:-9,bonus:10,bonus_set:0xfedcba98,killstreak:2,kills:3,assists:4,deaths:5}]
     })}
 }
 #[test]

@@ -202,6 +202,8 @@ pub struct Battlefield {
     pub kill_scores: [i32;2],
     /// Native stored getter value; victim notification independently passes zero.
     pub my_killstreak_point: i32,
+    /// Native manager+3cd4, assigned unconditionally by received ScheduledEventStarted.values[10].
+    pub my_corps_kill_death_ratio: i32,
     /// Actual selected character identity, retained through a match-only instance reset.
     pub local_character_id: Option<u32>,
     pub last_error: Option<u16>,
@@ -318,6 +320,7 @@ impl Battlefield {
             _ => {}
         }
         match e {
+            Event::ScheduledEventStarted(start) => self.my_corps_kill_death_ratio=start.values[10],
             Event::LoadInstance(_) if self.in_instant_game() => self.reset_match(),
             Event::CharacterSelected(state) => {
                 *self=Self::default(); self.local_character_id=(state.character.id!=0).then_some(state.character.id);

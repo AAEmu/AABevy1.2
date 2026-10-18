@@ -175,6 +175,7 @@ net_state! {
     trade: Trade,
     auction: Auction,
     loot_rolls: LootRolls,
+    scheduled_events: crate::scheduled::ScheduledEvents,
     server_clock: crate::clock::ServerClock,
     actabilities: Actabilities,
     mates: Mates,
@@ -254,6 +255,15 @@ mod equipment_flags_tests {
         assert_eq!(app.world().resource::<Battlefield>().phase,Some(BattlefieldPhase::Playing));
         app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
         assert_eq!(app.world().resource::<ServerClock>().mapped_now(),None);
+    }
+
+    #[test]
+    fn plugin_retains_complete_scheduled_receipt_and_received_ratio() {
+        let mut app=App::new();init_state(&mut app);
+        let start=crate::scheduled::ScheduledEventStarted{id:3,values:[-7;21],changes:u32::MAX,priority:0,start_date:1,period_date:2,hour:3,minute:4,period_minutes:5,week_day:6,open_message:b"notice".to_vec()};
+        app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ScheduledEventStarted(start.clone()))).unwrap();
+        assert_eq!(app.world().resource::<crate::battlefield::Battlefield>().my_corps_kill_death_ratio,-7);
+        assert_eq!(app.world().resource::<crate::scheduled::ScheduledEvents>().starts[&3].open_message,b"notice");
     }
 
 }
