@@ -1,4 +1,4 @@
-//! Original trial records, verdict, waiting and invitation controls over explicit received fixtures.
+//! Original trial/bounty controls over explicit received fixtures; standalone bounty setup is labeled.
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;

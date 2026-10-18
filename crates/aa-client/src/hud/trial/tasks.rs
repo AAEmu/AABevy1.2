@@ -71,7 +71,7 @@ fn choose(state: &Shared, token: u32, accepted: bool) -> Option<i16> {
     }
     refused_world.then_some(544)
 }
-fn show_error(lua: &Lua, code: i16) -> mlua::Result<()> {
+pub(super) fn show_error(lua: &Lua, code: i16) -> mlua::Result<()> {
     let Some(key) = super::super::alerts::error_name(code) else {
         return Ok(());
     };
