@@ -946,16 +946,22 @@ pub fn mask_triangles(progress: f32) -> Vec<[[f32; 2]; 3]> {
         [0.5, 0.],
     ];
     let mut out = Vec::new();
+    let mut start = [0.5, 0.5];
     for i in 0..8 {
         if progress >= (i + 1) as f32 * 0.125 {
             continue;
         }
-        let f = ((progress - i as f32 * 0.125) * 8.).max(0.);
-        let start = [
-            edge[i][0] + (edge[i + 1][0] - edge[i][0]) * f,
-            edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f,
-        ];
+        // Native3928aed2 skips interpolation for negative/unordered progress,
+        // retaining the previous endpoint (initially the center) instead of clamping.
+        if progress >= i as f32 * 0.125 {
+            let f = (progress - i as f32 * 0.125) * 8.;
+            start = [
+                edge[i][0] + (edge[i + 1][0] - edge[i][0]) * f,
+                edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f,
+            ];
+        }
         out.push([[0.5, 0.5], edge[i + 1], start]);
+        start = edge[i + 1];
     }
     out
 }
@@ -1080,7 +1086,7 @@ pub(crate) fn cooldown_quads(
         .sampled_ms
         .map(f64::from)
         .unwrap_or(cd.end_ms - u.time_ms);
-    if remain <= 0.0 || cd.total_ms <= 0.0 {
+    if remain <= 0.0 || (w.slot.is_some() && cd.total_ms <= 0.0) {
         return;
     }
     if w.slot.is_some() && cd.total_ms < LABEL_MIN_TOTAL_MS {
@@ -1275,17 +1281,23 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     Ok(())
 }
 
-/// The cooldown buttons' natives: `SetCoolDown(remainMs, totalMs)` starts the sweep
-/// (`SetCoolDown(0, 0)` clears it). Mask texture/UV state survives timer replacement.
+/// The cooldown buttons' native setter stores two raw f32 numbers; nonpositive remaining
+/// suppresses drawing without discarding the sample. Mask state survives timer replacement.
 pub(crate) fn cooldown_button_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "SetCoolDown",
         method(lua, |lua, id, a| {
-            let remain = a.opt_f(1).unwrap_or(0.0);
-            let total = a.opt_f(2).unwrap_or(remain).max(remain);
-            let cd = (remain > 0.0).then_some((remain, total));
-            let mut u = ui(lua);
-            set_cooldown(lua, &mut u, id, cd);
+            // Native392328b0/3922f380 requires both Lua number values. Strings,
+            // booleans and missing arguments leave the prior raw sample intact.
+            let number = |index| match a.v(index) {
+                Value::Integer(n) => Some(n as f32),
+                Value::Number(n) => Some(n as f32),
+                _ => None,
+            };
+            if let (Some(remain), Some(total)) = (number(1), number(2)) {
+                let mut u = ui(lua);
+                set_cooldown(lua, &mut u, id, Some((remain, total)));
+            }
             none()
         })?,
     )?;
