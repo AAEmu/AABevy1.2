@@ -75,6 +75,8 @@ pub struct HudData {
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,
     pub passive_buffs: Vec<u32>,
+    /// Timed received cooldowns and cast observations; read at widget tick time.
+    pub cooldowns: aa_net::state::Skills,
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
@@ -131,6 +133,7 @@ impl Default for HudData {
             yaw: 0.0,
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
+            cooldowns: Default::default(),
             local_combat: false,
             pvp: Default::default(),
             radar: Default::default(),
@@ -234,6 +237,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
+    super::cooldown::install(lua, bridge)?;
     super::tips::install_native_lookup(lua, bridge)?;
     super::markers::load_script(lua)?;
     super::drag::load_script(lua)?;
@@ -506,6 +510,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         bridge.borrow_mut().repair = Default::default();
         bridge.borrow_mut().crafting = Default::default();
         bridge.borrow_mut().pets = Default::default();
+        bridge.borrow_mut().cooldowns = Default::default();
         return;
     };
     // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
@@ -545,6 +550,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         if data.friends != *friends { data.friends.clone_from(friends); }
     }
     if let Some(skills) = world.get_resource::<aa_net::state::Skills>() {
+        data.cooldowns.clone_from(skills);
         if skills.known.len() != data.skill_levels.len() || skills.known.iter().any(|k| data.skill_levels.get(&k.id) != Some(&k.level)) {
             data.skill_levels = skills.known.iter().map(|k| (k.id, k.level)).collect();
         }

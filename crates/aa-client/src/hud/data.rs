@@ -55,6 +55,8 @@ pub struct SkillInfo {
     /// `skills.cooldown_time` (ms) and `cooldown_tag_id`.
     pub cooldown_ms: u32,
     pub tag: u32,
+    /// All `tagged_skills` rows in native SQL order, including duplicates.
+    pub tags: Vec<u32>,
     /// The global cooldown casting it starts (ms): `custom_gcd`, or one second for `default_gcd`.
     pub gcd_ms: u32,
     /// `skills.ignore_global_cooldown`: the global cooldown does not hold it back.
@@ -391,6 +393,7 @@ impl GameData {
                         named: Named { name: name("skills", id, r.get(1)?), icon: icon(r.get(2)?) },
                         cooldown_ms: any_int(r, 3)?.max(0) as u32,
                         tag: any_int(r, 4)?.max(0) as u32,
+                        tags: Vec::new(),
                         gcd_ms: if any_flag(r, 6)? { DEFAULT_GCD_MS } else { any_int(r, 5)?.max(0) as u32 },
                         ignore_gcd: any_flag(r, 7)?,
                         ability: any_int(r, 8)?.clamp(0, 10) as u8,
@@ -403,6 +406,16 @@ impl GameData {
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
                 );
+            }
+        }
+        {
+            // Native LoadSkillTagsRelation395d15a0 appends every row, not just cooldown_tag_id.
+            let mut q = conn.prepare("SELECT skill_id, tag_id FROM tagged_skills")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if let Some(skill) = data.skills.get_mut(&r.get::<_, u32>(0)?) {
+                    skill.tags.push(r.get(1)?);
+                }
             }
         }
         {
