@@ -18,7 +18,7 @@ use glam::Vec3;
 use crate::{Error, Result};
 pub use curve::{Curve, Key};
 pub(crate) use runtime::prepare_face;
-pub use runtime::{FacialAnimator, FacialPlugin, prepare_loaded_face};
+pub use runtime::{FacialAnimator, FacialPlugin, prepare_loaded_face, enable_character_face, disable_character_face};
 pub use sound::{FacialSentence, SentenceWord, SoundEntry};
 
 #[derive(Clone, Debug, Default)]
