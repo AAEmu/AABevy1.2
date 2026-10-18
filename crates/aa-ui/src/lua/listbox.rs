@@ -2,7 +2,9 @@
 //! Source-backed row icons, branch images and authored state textures.
 
 mod paint;
+mod tooltip;
 mod tree;
+pub(crate) use tooltip::leave;
 
 use super::{Ui, call_handler, method, none, ret, ui};
 use crate::{
@@ -46,6 +48,8 @@ pub struct ListBoxData {
     state_coords: [[f32; 4]; 3],
     state_inset: [f32; 4],
     icons_seen: bool,
+    tooltip: bool,
+    last_tooltip: Option<usize>,
 }
 
 impl Default for ListBoxData {
@@ -77,6 +81,8 @@ impl Default for ListBoxData {
             state_coords: [[0., 0., 1., 1.]; 3],
             state_inset: [0.; 4],
             icons_seen: false,
+            tooltip: false,
+            last_tooltip: None,
         }
     }
 }
@@ -234,14 +240,14 @@ pub(crate) fn hover(lua: &Lua, old: Option<Id>, new: Option<Id>) {
         };
         if w.enabled { row_at(&mut u, id) } else { None }
     };
-    if data(&ui(lua), id).is_some_and(|d| d.hover == row) {
-        return;
+    if !data(&ui(lua), id).is_some_and(|d| d.hover == row) {
+        change(lua, id, |d| {
+            let changed = d.hover != row;
+            d.hover = row;
+            ((), changed)
+        });
     }
-    change(lua, id, |d| {
-        let changed = d.hover != row;
-        d.hover = row;
-        ((), changed)
-    });
+    tooltip::update(lua, id);
 }
 
 fn set_top(lua: &Lua, id: Id, requested: i32) {
@@ -261,6 +267,7 @@ fn set_top(lua: &Lua, id: Id, requested: i32) {
 pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     tree::methods(lua, m)?;
     paint::methods(lua, m)?;
+    tooltip::methods(lua, m)?;
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
     def(
         "AppendItem",
@@ -332,6 +339,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 d.selected = -1;
                 d.top = 0;
                 d.hover = None;
+                d.last_tooltip = None;
                 d.tree_mode = false;
                 d.epoch = d.epoch.wrapping_add(1);
                 ((), dirty)

@@ -216,6 +216,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 d.selected = -1;
                 d.top = 0;
                 d.hover = None;
+                d.last_tooltip = None;
                 d.epoch = d.epoch.wrapping_add(1);
                 ((), dirty)
             });
