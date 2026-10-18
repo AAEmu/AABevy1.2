@@ -85,4 +85,24 @@ mod tests {
         assert!(g.groups.contains_key(&3799));
         assert!(g.groups.values().all(|v| !v.model.is_empty()));
     }
+    #[test]
+    fn authored_shadow_eligibility_matches_original_compiled_record_flags() {
+        if !crate::pak_available() { return; }
+        let groups = VegGroups::load("main_world").unwrap();
+        for (cell, casters, noncasters) in [("015_015",355,0),("010_010",2529,1275),("021_008",7137,89),("012_014",22467,5901)] {
+            let bytes = aa_pak::Pak::global().read(&format!("worlds/main_world/cells/{cell}/client/vegetation.dat")).unwrap();
+            let plants = crate::placement::parse_vegetation_dat(&bytes).unwrap();
+            let count = plants.iter().filter(|v| v.flags & 0x8 != 0).count();
+            assert_eq!((count, plants.len()-count), (casters,noncasters), "{cell}");
+            for v in &plants {
+                assert_eq!(v.flags & 0x8 != 0, groups.groups[&v.group].cast_shadow, "{cell} group{}",v.group);
+            }
+            if cell == "012_014" {
+                let shine:Vec<_> = plants.iter().filter(|v| v.group == 1084).collect();
+                assert_eq!(shine.len(),5792);
+                assert!(shine.iter().all(|v| v.flags & 0x8 == 0));
+            }
+        }
+    }
+
 }

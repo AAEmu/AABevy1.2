@@ -788,6 +788,71 @@ and absent actors/UI remain, without brightness tuning. All fixture runs
 exit zero with no shader/GPU errors and close their own windows.
 
 
+#### Native vegetation ordinary-shadow eligibility
+
+Vegetation/tree parts now carry `NotShadowCaster` when their original record's
+render flags do not include **0x8**. Previously all vegetation cast Bevy shadows,
+including plants explicitly excluded by the native data. The check is per
+instance/part, so identical meshes/materials can retain different authored
+eligibility. It does not change material sharing, mesh/transform/scale, draw
+visibility, sector budgets or lifetime.
+
+The complete original producer/consumer chain is source-proven:
+`300F76C0` reads XML `bCastShadow` into the group descriptor byte+37;
+`300F8270` packs it into public instance descriptor+20 bit2;
+`30130DB0` (`C3DEngine::SetStatInstGroup`) copies that bit, and `30109F70`
+converts it into group render flags 0x8. Native record loader `301FB580`
+copies the serialized flags at 32 into render-node+12, clearing only 0x300.
+`301EE5E0` (`COctreeNode::FillShadowMapCastersList`) selects ordinary mask 8
+and includes a render node only when `node.flags &mask` is nonzero. Source
+is retained in ignored `lights/vegetation-{flags,group,shadow,shadow-cull}-native.txt`.
+
+The same producer/consumer distinguishes extra-range 0x80000000 and
+terrain-shadow 0x800000 modes. These retain their explicit unsupported status;
+the supported ordinary mode uses 0x8 alone. Native shadow distance ratios,
+material-specific shadow techniques and special-frustum/cascade/per-light
+filtering remain separate gaps; current Bevy draw/cascade bounds are retained.
+
+A regression compares original XML and compiled flags across 39,753 plants
+in cells (15,15), (10,10), (21,8), (12,14), with zero mismatches. Ordinary
+caster/non-caster counts are 355/0, 2529/1275, 7137/89 and 22467/5901. The
+forest's group 1084 (`common_plants_shine_fa04`) contributes 5,792 explicit
+non-casters. Those four cells contain no special-mode-only records. Fixture
+input summary is `lights/vegetation-shadow-fixtures.txt`.
+
+
+`cargo check -p aa-world --examples` passes; focused vegetation tests pass 7/1
+ignored (the full 170/9-ignored baseline passed in the preceding colour slice).
+The first colour-view footprint has only casters and is a negative control.
+The same aa-dev example now accepts `--world --shadow-view` and
+`--world --shadow-view --all-cast`, using original shine group 1084 at
+Cry(12573.3726,15202.0869,151.0248), hour 10, camera offset (-5.5,-10,3.8).
+The fixture-only all-cast control removes `NotShadowCaster` from fresh native
+non-casters; production has no toggle, scan or extra material/mesh allocation.
+
+Inspected `shots/aa-world/vegetation/forest12_14_shadow_flags.png` and
+`forest12_14_all_cast_control.png` show 5,446 total objects, 5,139 vegetation
+parts with 2,185 authored non-casters and 2,954 eligible casters, with no failed/
+pending models. The plant patch (600,450)-(1100,800) is locally brighter in the
+native result: mean signed RGB difference+[1.01,0.89,0.44]; 8.3% of pixels differ
+by more than 2 in at least one channel. Changed pixels average +[11.63,10.25,5.12].
+The effect is localized; no broad lighting adjustment is claimed. Native
+130-158 FPS; all-cast 137-183 FPS under shared load, not a controlled performance
+benchmark. Existing conspicuous material/terrain differences remain unchanged.
+There is no matching original forest-camera capture on disk.
+
+`--world --shadow-view --unload-check --shot ... --shot-after 24` verifies
+both caster classes were loaded and every one of the 5,139 recorded vegetation
+part entity IDs is gone after leaving the world; total streamed objects return
+to zero (`forest12_14_shadow_unload.png`). The spawn reference view remains a
+negative control: 1,963 vegetation parts, zero non-casters, nearby framing
+unchanged against `reference/ingame/spawn/real.png`
+(`spawn_native_shadow_flags.png`, about 112-119 FPS after settle). Known short
+fixture draw distances, lighting/terrain/water grading and missing actors/UI
+remain as described above. All captures exit zero without shader/GPU errors;
+every fixture window closes.
+
+
 ### client/object.dat
 
 `u32 n` + `n x { u32, char[256] }` models, `u32 m` + `m x { u32, char[256] }` materials, then a depth first octree:
