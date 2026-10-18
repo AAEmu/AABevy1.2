@@ -92,7 +92,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
 | client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld` |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
 Everything else the server sends (houses, guilds, mount-owner packets ...) is decoded as
@@ -2757,3 +2757,58 @@ There is no `COMBAT_TEXT` call in this handler; original
 `x2ui/combattext/combat_text.lua` consumes this COMBAT_MSG event and presents environment text.
 Sources 1 and other values return without this presentation. This is an aa-client integration
 contract, with no inferred HP subtraction or extra network traffic.
+
+
+## Conflict-zone state (`SCConflictZoneState 0x0ee`)
+
+`conflict::ConflictZoneState { zone_group_id: u16, state: u8, end_time: u64 }` is also
+reexported at crate root. Its body is exactly eleven bytes: `u16 group, u8 state, u64 endTime`.
+`ServerMsg::ConflictZoneState` / `Event::ConflictZoneState` forward every report in wire order,
+including duplicates, zero/max group IDs, unknown state bytes and all timestamp bits. The raw
+native timestamp is not interpreted as a local deadline. `lane_end_time_seconds() -> i64`
+explicitly reinterprets its bits for the current lane writer, which uses signed Unix seconds;
+zero there means no scheduled transition. Negative/high-bit values are retained, never clamped.
+
+Native factory assignment `391ae37b` uses vtable `399b369c`, whose body reader is `397c2cc0`.
+It reads group through unsigned-short slot `+0x40`, expands the unsigned-byte state into an
+internal enum-sized field via slot `+0x44`, then reads unsigned 64-bit endTime through `+0x38`.
+There is no BC object ID, instance ID, extra conditional tail, count or time scaling. Native
+`OnConflictZoneState` (`391d9600`, string `399b877c`) forwards those three values to `3902a000`.
+That helper inserts/updates the global map `39adb0f8`, keyed by unsigned-short zone-group ID,
+retaining state and endTime even when the local player/UI presentation context is absent.
+No unit spawn or attack-permission acknowledgement is proved by this packet.
+
+The lane agrees on byte order and size in `packets/world.rs:327..347`; its signed i64 writer
+preserves the same 64 bits as the native unsigned reader. `world/session.rs:514` sends all
+initial conflict records, and `systems/social/zone_conflict.rs:303` broadcasts authoritative
+switches. That system stores an internal Unix-millisecond scheduler separately, but writes
+`next_state_time` in **seconds** (`Entry::set_next` uses `ms.div_euclid(1000)`), with zero for no
+scheduled switch. This lane interpretation does not establish a broader native time encoding or
+justify extrapolating another state after the reported time passes.
+
+`ConflictZones` is a plain/Bevy resource, reexported through `state` and crate root, and stored
+as `WorldState.conflict_zones`. Its public `by_group: HashMap<u16, ConflictZoneState>` and
+`get(group: u16)` retain the latest received value for each group. The protocol's u16 key space
+bounds storage to 65,536 groups. A duplicate exact report does not flag the resource changed,
+but the session still forwards its event. Changed state or timestamp replaces only that group;
+other groups stay untouched. The cache has no timer tick, local state transitions, zone lookup,
+permission boolean or UI acknowledgement.
+
+This state belongs to the world, rather than one character. It accepts reports without a local
+player and preserves them through `CharacterSelected`, `PlayerSpawn`, `EnteredWorld`, lobby
+notifications, map movement and ordinary world-state events. It clears on `LoginSucceeded`,
+`ReadyToConnect`, `LeftWorld` and `Disconnected` to scope it to the current account/world
+connection; this is the app cache lifecycle, not an invented native packet. In particular,
+initial records arriving before character/spawn events are never discarded by those events.
+Native zone/peace permission predicates still require separate source audit; a state byte does
+not automatically permit or prohibit a skill under Bloodlust.
+
+Offline tests cover native golden bytes, every truncated prefix, all 256 state bytes, raw
+unsigned/signed timestamp boundaries, DD04 following breath/unit-points packets, duplicate and
+updated-group ordering, pre-spawn session forwarding, no phantom units/entry/permission events,
+state retention across character/spawn notifications and account/world cleanup. No stalled-lane
+sockets, grants or server changes were used.
+
+Validation: `cargo test -p aa-net --features bevy --quiet` passed 258 library tests and two
+loopback integration tests; nine lane-dependent tests stayed ignored.
+`cargo check -p aa-net --features bevy --examples --quiet` and `git diff --check` passed.

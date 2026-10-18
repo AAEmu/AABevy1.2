@@ -268,6 +268,7 @@ opcodes! {
         SCOverHeadMarkerSetPacket = 0x0e6,
         SCTeamPingPosPacket = 0x0e7,
         SCTeamAckRiskyActionPacket = 0x0e8,
+        SCConflictZoneStatePacket = 0x0ee,
         SCTimeOfDayPacket = 0x0f0,
         SCDetailedTimeOfDayPacket = 0x0f1,
         SCQuestsPacket = 0x0f2,

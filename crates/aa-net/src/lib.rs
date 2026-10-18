@@ -19,6 +19,7 @@ pub mod buff;
 pub mod bank;
 mod compression;
 pub mod combat_status;
+pub mod conflict;
 pub mod craft;
 pub mod friend;
 pub mod game;
@@ -60,6 +61,7 @@ pub use gimmick::{Gimmick, GimmickEvent, GimmickJoint, GimmickMovement, GimmickS
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
 pub use craft::CraftFailureNotice;
 pub use combat_status::{CombatStatus, EnvironmentDamage, UnitCombatFlags};
+pub use conflict::{ConflictZones, ConflictZoneState};
 pub use items::ItemLifespan;
 pub use world_msg::{BlinkUnit, InstanceLoad};
 pub use login::Secret;

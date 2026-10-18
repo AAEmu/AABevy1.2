@@ -386,6 +386,8 @@ pub enum ServerMsg {
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
+    /// World-level report; raw state and timestamp bits, independent of own spawn.
+    ConflictZoneState(crate::conflict::ConflictZoneState),
     ForceAttackSet { obj_id: u32, on: bool },
     UnitInvisible { obj_id: u32, invisible: bool },
     UnitDeath {
@@ -633,6 +635,7 @@ impl ServerMsg {
             Self::UiData(_) => "SCResponseUIData",
             Self::EnvDamage(_) => "SCEnvDamage",
             Self::SetBreath { .. } => "SCSetBreath",
+            Self::ConflictZoneState(_) => "SCConflictZoneState",
             Self::ForceAttackSet { .. } => "SCForceAttackSet",
             Self::UnitInvisible { .. } => "SCUnitInvisible",
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
@@ -940,6 +943,7 @@ impl ServerMsg {
             sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
             sc::SCEnvDamagePacket => Self::EnvDamage(crate::combat_status::EnvironmentDamage::read(r)?),
             sc::SCSetBreathPacket => Self::SetBreath { breath: r.u32()? },
+            sc::SCConflictZoneStatePacket => Self::ConflictZoneState(crate::conflict::ConflictZoneState::read(r)?),
             sc::SCForceAttackSetPacket => Self::ForceAttackSet { obj_id: r.bc()?, on: r.bool()? },
             sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
