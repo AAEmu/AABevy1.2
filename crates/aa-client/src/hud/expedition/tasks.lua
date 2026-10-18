@@ -12,6 +12,15 @@ function HUD.expedition_show_task(task,token,info)
   local wnd=X2DialogManager:RequestTaskDialog(task,info,'expedition')
   if not wnd then HUD.expedition_choose(token,false);return end
   active[task]={wnd=wnd,token=token}
+  if task==35 then
+    local proc=wnd.OkProc
+    wnd.OkProc=function(self)
+      local entry=active[task]
+      if entry and entry.token==token and HUD.expedition_task_current(token) then
+        return proc(self)
+      end
+    end
+  end
 end
 local ok,cancel=X2DialogManager.OnOK,X2DialogManager.OnCancel
 local function choose(id,accepted)

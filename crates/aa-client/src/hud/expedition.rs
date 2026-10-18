@@ -5,6 +5,7 @@ use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 mod actions;
+mod creation;
 mod tasks;
 
 #[allow(dead_code)]
@@ -20,6 +21,7 @@ pub(super) struct View {
     requests: Vec<(u32, u32, aa_net::ExpeditionCommand)>,
     tasks: tasks::Tasks,
     dominion: aa_net::Dominion,
+    creation_npc: Option<(u32, u32)>,
 }
 
 fn text(lua: &Lua, bytes: &[u8]) -> mlua::Result<mlua::LuaString> {
@@ -124,6 +126,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     faction.set("GetExpeditionMembersPerPage", lua.create_function(|_, _: Value| Ok(50.0))?)?;
     members::install(lua, &faction, bridge)?;
     actions::install(lua, &faction, bridge)?;
+    creation::install(lua, &faction, bridge)?;
     tasks::install(lua, bridge)
 }
 
@@ -144,6 +147,7 @@ fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
         );
     if reset {
         data.expedition.requests.clear();
+        data.expedition.creation_npc = None;
         tasks::clear(&mut data.expedition);
     }
     drop(data);
@@ -174,15 +178,28 @@ fn track(mut events: MessageReader<NetEvent>, rt: Option<NonSend<UiRuntime>>, bu
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(Update, track.before(super::sync_hud).before(super::prebuild_hud))
-        .add_systems(Update, update.after(super::sync_hud).before(aa_ui::UiFrame).run_if(super::hud_up));
+        .add_systems(
+            Update,
+            update
+                .after(super::sync_hud)
+                .after(super::dialog::handle_dialog)
+                .before(aa_ui::UiFrame)
+                .run_if(super::hud_up),
+        );
 }
 
 fn update(
     rt: NonSend<UiRuntime>,
     bridge: NonSend<HudBridge>,
     player: Res<aa_net::state::Player>,
+    units: Res<aa_net::state::Units>,
+    mut events: MessageReader<NetEvent>,
     mut out: MessageWriter<aa_net::NetCommand>,
 ) {
+    for NetEvent(event) in events.read() {
+        creation::service(&rt, &bridge.0, &player, &units, event);
+    }
+    creation::check_service(&rt, &bridge.0, &units);
     tasks::show(&rt.lua, &bridge.0);
     for command in actions::flush(&mut bridge.0.borrow_mut(), &player) {
         out.write(aa_net::NetCommand(command));

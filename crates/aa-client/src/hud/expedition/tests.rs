@@ -20,7 +20,7 @@ fn capture_tasks(rt: &UiRuntime) -> mlua::Result<()> {
         local request=X2DialogManager.RequestTaskDialog
         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)
             local wnd=request(self,task,info,owner)
-            if task==3 or task==26 or task==27 then GUILD_TASK_WINDOWS[task]=wnd;GUILD_TASK_INFO[task]=info end
+            if task==3 or task==26 or task==27 or task==35 then GUILD_TASK_WINDOWS[task]=wnd;GUILD_TASK_INFO[task]=info end
             return wnd
         end
     "#,
@@ -504,6 +504,205 @@ fn original_leadership_transfer_uses_received_dominion_gate_and_received_owner_s
     rt.lua.load("assert(X2Faction:GetExpeditionMyRolePolicy()[1]==0);expedMgmt:ChangeTab(4);assert(expedMgmt.tab.window[4].innerWnd.leaveButton:IsVisible() and not expedMgmt.tab.window[4].innerWnd.delegateButton:IsVisible())").exec()?;
     if path.exists() {
         std::fs::remove_file(path)?
+    }
+    Ok(())
+}
+
+#[test]
+fn original_creation_sponsors_and_confirm_use_native_current_faction_and_captured_requests() -> Result<(), Box<dyn std::error::Error>> {
+    use aa_net::ExpeditionCommand as C;
+    let (rt, bridge, path, mut player) = fixture::runtime(1280., 720.)?;
+    for (alliance, active, sponsor) in [(148, 6, 107), (149, 5, 113), (114, 0, 161), (1005, 0, 1005)] {
+        fixture::show_creation(&rt, &bridge, &mut player, alliance)?;
+        if active != 0 {
+            rt.lua
+                .load(format!(
+                    "assert(#expedition.selectSponsor.tab.window==7 and expedition.selectSponsor.tab:GetActivateTabCount()=={active})"
+                ))
+                .exec()?;
+            super::super::expansion::fixture::click(&rt, &format!("expedition.selectSponsor.tab.unselectedButton[{active}]"))?;
+        } else {
+            rt.lua.load("assert(expedition.selectSponsor.tab:GetSelectedTab()==0)").exec()?;
+        }
+        rt.lua
+            .load("expedition.cmd.expeditionName:SetText('Silver Vale');assert(expedition.cmd.confirm:IsEnabled())")
+            .exec()?;
+        super::super::expansion::fixture::click(&rt, "expedition.cmd.confirm")?;
+        assert_eq!(
+            commands(actions::flush(&mut bridge.borrow_mut(), &player)),
+            [(
+                47,
+                C::Create {
+                    name: b"Silver Vale".to_vec(),
+                    sponsor_id: sponsor
+                }
+            )]
+        );
+        assert_eq!(bridge.borrow().expedition.cache.own_id, 0, "creation request is not membership");
+        rt.lua.load("assert(not expedition:IsVisible())").exec()?;
+    }
+    fixture::show_creation(&rt, &bridge, &mut player, 148)?;
+    for (value, sponsor) in [("-1", u32::MAX), ("0/0", 0x8000_0000), ("1/0", 0x8000_0000), ("101.9", 101)] {
+        rt.lua
+            .load(format!("assert(select('#',X2Faction:CreateExpedition('Silver Vale',{value}))==0)"))
+            .exec()?;
+        assert_eq!(
+            commands(actions::flush(&mut bridge.borrow_mut(), &player)),
+            [(
+                47,
+                C::Create {
+                    name: b"Silver Vale".to_vec(),
+                    sponsor_id: sponsor
+                }
+            )]
+        );
+    }
+    rt.lua
+        .load("X2Faction:CreateExpedition('Silver Vale','101');X2Faction:CreateExpedition('AB',101)")
+        .exec()?;
+    assert!(actions::flush(&mut bridge.borrow_mut(), &player).is_empty());
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn received_rename_prompt_uses_original_task_edit_ok_and_native_direct_call_semantics() -> Result<(), Box<dyn std::error::Error>> {
+    use aa_net::ExpeditionCommand as C;
+    let (rt, bridge, path, player) = fixture::runtime(1280., 720.)?;
+    capture_tasks(&rt)?;
+    dispatch(Some(&rt), &bridge, &Event::Expedition(ExpeditionEvent::ShowRenameUi));
+    rt.lua.load("assert(GUILD_TASK_WINDOWS[35]:IsVisible());assert(GUILD_TASK_WINDOWS[35].editbox:GetText()=='The Silver Vale');OLD_RENAME_PROC=GUILD_TASK_WINDOWS[35].OkProc;OLD_RENAME_TOKEN=GUILD_TASK_TOKEN[35]").exec()?;
+    dispatch(Some(&rt), &bridge, &Event::Expedition(ExpeditionEvent::ShowRenameUi));
+    rt.lua.load("assert(GUILD_TASK_TOKEN[35]==OLD_RENAME_TOKEN)").exec()?;
+    super::super::expansion::fixture::click(&rt, "GUILD_TASK_WINDOWS[35].btnCancel")?;
+    assert!(actions::flush(&mut bridge.borrow_mut(), &player).is_empty());
+    dispatch(Some(&rt), &bridge, &Event::Expedition(ExpeditionEvent::ShowRenameUi));
+    rt.lua.load("GUILD_TASK_WINDOWS[35].editbox:SetText('AB');assert(not GUILD_TASK_WINDOWS[35].btnOk:IsEnabled());GUILD_TASK_WINDOWS[35].editbox:SetText('The New Vale');assert(GUILD_TASK_WINDOWS[35].btnOk:IsEnabled())").exec()?;
+    super::super::expansion::fixture::click(&rt, "GUILD_TASK_WINDOWS[35].btnOk")?;
+    assert_eq!(
+        commands(actions::flush(&mut bridge.borrow_mut(), &player)),
+        [(
+            47,
+            C::Rename {
+                expedition_id: 900,
+                name: b"The New Vale".to_vec()
+            }
+        )]
+    );
+    assert_eq!(bridge.borrow().expedition.cache.factions[&900].name, b"The Silver Vale");
+    dispatch(
+        Some(&rt),
+        &bridge,
+        &Event::Expedition(ExpeditionEvent::Renamed {
+            expedition_id: 900,
+            name: b"The New Vale".to_vec(),
+            by_gm: 0,
+        }),
+    );
+    rt.lua.load("assert(X2Faction:GetMyExpeditionName()=='The New Vale')").exec()?;
+    dispatch(
+        Some(&rt),
+        &bridge,
+        &Event::Expedition(ExpeditionEvent::OwnerChanged {
+            old_owner_id: 47,
+            new_owner_id: 48,
+            name: b"Elowen".to_vec(),
+        }),
+    );
+    dispatch(Some(&rt), &bridge, &Event::Expedition(ExpeditionEvent::ShowRenameUi));
+    rt.lua
+        .load("assert(not GUILD_TASK_WINDOWS[35]:IsVisible());assert(X2Faction:RenameExpedition('')==true)")
+        .exec()?;
+    assert_eq!(
+        commands(actions::flush(&mut bridge.borrow_mut(), &player)),
+        [(
+            47,
+            C::Rename {
+                expedition_id: 900,
+                name: vec![]
+            }
+        )],
+        "the direct native call has no name/owner gate; its true result is not success"
+    );
+    dispatch(Some(&rt), &bridge, &Event::LeftWorld { target: 0 });
+    rt.lua.load("OLD_RENAME_PROC(GUILD_TASK_WINDOWS[35])").exec()?;
+    assert!(
+        actions::flush(&mut bridge.borrow_mut(), &player).is_empty(),
+        "stale original OkProc cannot rename a later context"
+    );
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn received_guild_service_list_opens_original_npc_preconfirmation_and_closes_stale_context() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, bridge, path, mut player) = fixture::runtime(1280., 720.)?;
+    fixture::show_creation(&rt, &bridge, &mut player, 148)?;
+    rt.lua.load("ShowCreateExpedition(false);local request=X2DialogManager.RequestDefaultDialog;X2DialogManager.RequestDefaultDialog=function(self,fn,owner)GUILD_PRECHECK=request(self,fn,owner);return GUILD_PRECHECK end").exec()?;
+    let mut units = aa_net::state::Units::default();
+    let mut npc = player.spawn.as_ref().unwrap().unit.clone();
+    npc.obj_id = 700;
+    npc.kind = aa_net::model::UnitKind::Npc {
+        template_id: 1024,
+        owner_id: 0,
+    };
+    npc.dead = false;
+    let position = bridge.borrow().pos;
+    npc.pos.x = position.x + 1.;
+    npc.pos.y = position.y;
+    npc.pos.z = position.z;
+    units.by_id.insert(700, npc);
+    bridge.borrow_mut().dialog.npc = Some((700, 1024));
+    let list = |obj_id, interactable| {
+        Event::Interaction(aa_net::interaction::InteractEvent::SkillList {
+            npc_obj_id: 700,
+            obj_id,
+            extra_info: 0,
+            pick_id: 0,
+            mouse_button: 2,
+            modifier_keys: 0,
+            skills: vec![13736],
+            interactable,
+        })
+    };
+    creation::service(&rt, &bridge, &player, &units, &list(999, true));
+    creation::service(&rt, &bridge, &player, &units, &list(100, false));
+    rt.lua.load("assert(GUILD_PRECHECK==nil)").exec()?;
+    creation::service(&rt, &bridge, &player, &units, &list(100, true));
+    rt.lua
+        .load("assert(GUILD_PRECHECK:IsVisible() and not expedition:IsVisible())")
+        .exec()?;
+    super::super::expansion::fixture::click(&rt, "GUILD_PRECHECK.btnOk")?;
+    rt.lua.load("assert(expedition:IsVisible() and expedition.selectSponsor.tab:GetActivateTabCount()==6);expedition.cmd.expeditionName:SetText('Silver Vale')").exec()?;
+    super::super::expansion::fixture::click(&rt, "expedition.cmd.confirm")?;
+    assert_eq!(
+        commands(actions::flush(&mut bridge.borrow_mut(), &player)),
+        [(
+            47,
+            aa_net::ExpeditionCommand::Create {
+                name: b"Silver Vale".to_vec(),
+                sponsor_id: 101
+            }
+        )]
+    );
+    assert_eq!(bridge.borrow().expedition.cache.own_id, 0);
+    units.by_id.remove(&700);
+    creation::check_service(&rt, &bridge, &units);
+    assert!(bridge.borrow().expedition.creation_npc.is_none());
+    assert!(
+        bridge
+            .borrow()
+            .dialog
+            .requests
+            .iter()
+            .any(|request| matches!(request, super::super::dialog::Req::End))
+    );
+    if path.exists() {
+        std::fs::remove_file(path)?;
     }
     Ok(())
 }
