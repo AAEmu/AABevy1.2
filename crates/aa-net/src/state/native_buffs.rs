@@ -1,7 +1,7 @@
 //! Original-client stack folding, separate from the active lane's raw index-based list.
 use super::BuffEntry;
 use crate::{buff::{Buff, BuffKind}, session::Event};
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 /// Exact static `buffs` columns consumed by native 3989e080. No inferred defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub struct NativeBuffRule {
 /// `None` means history/catalog is incomplete, rather than an empty known list.
 #[derive(Clone, Debug, Default)]
 pub struct NativeBuffs {
-    pub rules: HashMap<u32, NativeBuffRule>,
+    pub rules: Arc<HashMap<u32, NativeBuffRule>>,
     by_unit: HashMap<u32, Vec<BuffEntry>>,
     catalog_loaded: bool,
 }
@@ -25,7 +25,7 @@ impl NativeBuffs {
     /// Replace static rules without discarding authoritative snapshot counts. Unknown histories
     /// remain unknown until another unit snapshot; installing a catalog cannot reconstruct them.
     pub fn set_catalog(&mut self, rules: HashMap<u32, NativeBuffRule>) {
-        self.rules = rules;
+        self.rules = Arc::new(rules);
         self.catalog_loaded = true;
     }
 
@@ -192,7 +192,7 @@ mod tests {
     }
     fn view(rule: u32, per_unit_creation: bool) -> NativeBuffs {
         let mut v = NativeBuffs::default();
-        v.rules.insert(
+        Arc::make_mut(&mut v.rules).insert(
             77,
             NativeBuffRule {
                 kind: BuffKind::Good,
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn actual_decode_loss_invalidates_only_native_history_until_snapshot() {
         let mut world=crate::state::WorldState::default();world.buffs.native=view(4,false);
-        world.buffs.native.set_catalog(world.buffs.native.rules.clone());
+        world.buffs.native.set_catalog((*world.buffs.native.rules).clone());
         let buff=Buff{index:7,buff_id:77,kind:BuffKind::Good,..Buff::default()};
         let mut snapshot=crate::state::tests::unit(9);snapshot.buffs=vec![buff.clone()];
         world.apply(&Event::UnitSpawned(Box::new(snapshot.clone())));
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn missing_history_or_catalog_stays_unknown_and_snapshot_recovers() {
         let mut v = view(4, false);
-        v.rules.clear();
+        Arc::make_mut(&mut v.rules).clear();
         v.apply(&created(1, 10, 7));
         assert!(v.of(9).is_none());
         v = view(4, false);
@@ -482,4 +482,17 @@ mod tests {
         v.apply(&created(1, 10, 1));
         assert!(v.of(9).is_none());
     }
+    #[test]
+    fn static_catalog_shared_by_clone_and_preserved_across_runtime_reset() {
+        let mut native=view(4,false);native.set_catalog((*native.rules).clone());let copied=native.clone();
+        assert!(Arc::ptr_eq(&native.rules,&copied.rules));
+        native.seed(9,&[]);assert!(native.of(9).is_some());
+        native.apply(&Event::Disconnected{message:String::new()});
+        assert!(native.of(9).is_none());assert!(native.catalog_loaded());
+        assert!(Arc::ptr_eq(&native.rules,&copied.rules));
+        assert_eq!(*native.rules,*copied.rules);
+        native.set_catalog(HashMap::new());
+        assert!(!Arc::ptr_eq(&native.rules,&copied.rules));assert_eq!(copied.rules.len(),1);
+    }
+
 }
