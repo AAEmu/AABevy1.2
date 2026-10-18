@@ -19,9 +19,10 @@ pub(in crate::hud) fn run() {
     .insert_non_send(rt)
     .insert_non_send(HudBridge(state))
     .add_message::<NetEvent>()
-    .add_systems(Update, show_error.before(super::track))
+    .insert_resource(crate::hud::HudBuilt { up: true, fresh: false })
+    .add_systems(PreUpdate, show_error)
     .add_systems(Startup, physical_pixels);
-    super::plugin(&mut app);
+    crate::hud::enchant::plugin(&mut app);
     app.run();
     if path.exists() {
         std::fs::remove_file(path).unwrap();

@@ -71,8 +71,9 @@ fn actual_schedule_keeps_cache_without_hud_and_does_not_replay_dropped_callbacks
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_message::<NetEvent>()
-        .insert_non_send(HudBridge(state.clone()));
-    plugin(&mut app);
+        .insert_non_send(HudBridge(state.clone()))
+        .insert_resource(crate::hud::HudBuilt { up: false, fresh: false });
+    crate::hud::enchant::plugin(&mut app);
     app.world_mut().write_message(NetEvent(Event::SpecialtyRatio(141)));
     app.update();
     assert_eq!(state.borrow().specialty.ratio, 141);
@@ -105,6 +106,89 @@ fn actual_schedule_keeps_cache_without_hud_and_does_not_replay_dropped_callbacks
       assert(NOTICES[3][3]==222 and X2Store:GetSpecialtyRatio()==222)
     "#,
         )
+        .exec()?;
+    Ok(())
+}
+
+#[test]
+fn ratio_callback_observes_preceding_native_rows_and_not_later_rows_in_same_frame() -> Result<(), Box<dyn std::error::Error>> {
+    use aa_net::{
+        items::{InvenChunk, ItemTask, ItemTasks},
+        model::Item,
+    };
+    let (rt, state) = runtime()?;
+    let spawn = crate::hud::expansion::fixture::spawn();
+    let mut items = vec![Some(Item {
+        id: 123,
+        template_id: 31432,
+        count: 7,
+        ..Default::default()
+    })];
+    items.resize(10, None);
+    for event in [
+        Event::CharacterSelected(Box::new(spawn.state.clone())),
+        Event::PlayerSpawn(Box::new(spawn)),
+        Event::InventoryInit {
+            bag_slots: 10,
+            bank_slots: 0,
+        },
+        Event::InventoryChunk(InvenChunk {
+            container: 2,
+            chunks: 1,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }),
+    ] {
+        crate::hud::enchant::dispatch(None, &state, &event, None);
+    }
+    let current = state.clone();
+    rt.lua.globals().set(
+        "native_count",
+        rt.lua
+            .create_function(move |_, ()| Ok(crate::hud::enchant::current(&current.borrow(), 123).map(|item| item.count)))?,
+    )?;
+    rt.lua
+        .load(
+            r#"
+      assert(native_count()==7)
+      NATIVE_ROW_NOTICES={}
+      local w=UIParent:CreateWidget('emptywidget','specialtyNativeRowObserver','UIParent')
+      w:RegisterEvent('NPC_INTERACTION_START')
+      w:SetHandler('OnEvent',function(_,event,...)
+        assert(event=='NPC_INTERACTION_START' and select('#',...)==1 and ...=='specialty')
+        NATIVE_ROW_NOTICES[#NATIVE_ROW_NOTICES+1]=native_count()
+      end)
+    "#,
+        )
+        .exec()?;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_message::<NetEvent>()
+        .insert_non_send(HudBridge(state.clone()))
+        .insert_non_send(rt)
+        .insert_resource(crate::hud::HudBuilt { up: false, fresh: false });
+    crate::hud::enchant::plugin(&mut app);
+    let count = |delta| {
+        Event::ItemsChanged(ItemTasks {
+            tasks: vec![ItemTask::Count {
+                container: 2,
+                slot: 0,
+                item_id: 999,
+                template_id: 999,
+                delta,
+            }],
+            ..Default::default()
+        })
+    };
+    for event in [count(-3), Event::SpecialtyRatio(127), count(5)] {
+        app.world_mut().write_message(NetEvent(event));
+    }
+    app.update();
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load("assert(#NATIVE_ROW_NOTICES==1 and NATIVE_ROW_NOTICES[1]==4 and native_count()==9 and X2Store:GetSpecialtyRatio()==127)")
         .exec()?;
     Ok(())
 }

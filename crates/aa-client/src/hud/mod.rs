@@ -445,7 +445,6 @@ impl Plugin for HudPlugin {
         loot_roll::plugin(app);
         trade::plugin(app);
         store::plugin(app);
-        specialty::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));

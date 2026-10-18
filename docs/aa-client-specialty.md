@@ -71,3 +71,17 @@ target/debug/aa-specialty-layers-20261018.exe has SHA256
 The idle target/debug/aa-client-play.exe alias was refreshed at17:31:23 local
 and hash-verified equal to the main. This cut includes networkf51d264 and
 UI3332e92; subsequent overlay traversal and brush LOD work are outside it.
+
+Current source now dispatches specialty callbacks inside the same native item
+receipt pass used by enchant selection and result links. A callback therefore
+reads all preceding native item rows before later packets in the same frame.
+The existing item callbacks retain their HUD admission; SC099 alone retains
+the actual stage runtime without a Game/HUD-up gate. Its cache still changes
+when no runtime exists, without replay into a later stage.
+
+All five focused checks pass in5.25s, including the added ordered-row regression:
+Count7->4, ratio callback observes4, then a later Count produces9. This follows
+the physical native item despite mismatched packet ID/template and runs with
+HUD-up false to verify independent SC099 admission. The aa-dev error fixture
+now injects in PreUpdate and uses this shared receipt consumer. This follow-up
+is outside the inspected2495C403...0E87994 executable until the next refresh.

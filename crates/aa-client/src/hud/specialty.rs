@@ -33,7 +33,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     )
 }
 
-fn receive(lua: Option<&Lua>, state: &Shared, event: &Event) {
+pub(super) fn receive(lua: Option<&Lua>, state: &Shared, event: &Event) {
     let Event::SpecialtyRatio(ratio) = event else { return };
     if *ratio == 0 {
         // Original error225 is synchronous and precedes the reset to100.
@@ -62,18 +62,6 @@ fn receive(lua: Option<&Lua>, state: &Shared, event: &Event) {
                 vec![Value::String(lua.create_string("specialty").expect("Lua string"))],
             );
         }
-    }
-}
-
-pub(super) fn plugin(app: &mut App) {
-    // The native receipt has no Game gate. Retain its cache even while no HUD
-    // runtime exists; do not replay dropped callbacks into a later stage.
-    app.add_systems(Update, track.before(super::sync_hud));
-}
-
-fn track(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, mut events: MessageReader<NetEvent>) {
-    for NetEvent(event) in events.read() {
-        receive(rt.as_deref().map(|rt| &rt.lua), &bridge.0, event);
     }
 }
 
