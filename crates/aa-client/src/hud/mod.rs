@@ -32,6 +32,7 @@
 //! (`ingame::player::control_player`, camera, hotkeys) should skip their key handling while
 //! `HudKeyboardFocus.0` is true.
 
+mod achievement;
 mod alerts;
 mod battlefield;
 mod breath;
@@ -165,6 +166,9 @@ pub(crate) fn cooldown_fixture() { cooldown::fixture::run(); }
 pub(crate) fn family_fixture() { family::fixture::run(); }
 #[allow(dead_code)]
 pub(crate) fn expedition_fixture() { expedition::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn achievement_fixture() { achievement::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -388,6 +392,7 @@ impl Plugin for HudPlugin {
         friends::plugin(app);
         family::plugin(app);
         expedition::plugin(app);
+        achievement::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
