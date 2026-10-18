@@ -5614,3 +5614,103 @@ raw values/duplicate IDs, following DD04 alignment, all five gate transitions,
 missing-row behavior, constructor/invalid-ID values, sticky decode/unknown gaps,
 inline-overflow handling, plugin and Session forwarding. Native source artifact:
 `data/extract/aa-net/native-dominion-received-20261018.txt` (ignored).
+
+
+### Expedition creation, rename, and actual faction context (2026-10-18)
+
+`ExpeditionCommand::Create { name, sponsor_id }` writes CS004 blob/u32;
+`Rename { expedition_id, name }` writes CS009 u32/blob/byte1. Both use the
+existing captured-character Session preflight and real-write Requested/Rejected
+notifications. Name bytes are preserved, with the existing explicit app cap of
+128 bytes; no name policy, permission success, roster mutation, or receipt is
+invented by a send. Native direct Rename accepts the current own ID even if zero
+and returns BOOL true on invocation, not server acceptance. The lane rename
+handler only logs the request, so this client cannot claim rename settlement on
+that lane without an actual SC011.
+
+Native Create39472810/392fa240 first applies ValidNameType2 (failure0x22), then
+398a3820 requires ownID0 and cached current faction (failure0x21). Only afterward
+it overrides the caller sponsor with current faction when current faction is at
+least39ac72b0. That protected writable global is verified1000 in the read-only
+original process; its initializer/producer remains unresolved. It is an audited
+original-build runtime compatibility value, **not** a proven GameConfig field or
+static PE literal. The lane parses the sponsor u32 but currently ignores it and
+uses the actual character faction. Native adapter39473970?3905ef50 requires a
+string first argument and numeric second argument;39058d10 converts f32 using
+signed CVTTSS2SI and preserves its bits as u32 (including negative and x86
+indefinite conversion results). Wrong types produce no action/zero Lua results.
+
+`Expeditions.current_faction_id` starts from actual selected Character.faction_id,
+matching391b98b7?392f8030/39d44b94. SC01b retains BC runtime ID, binary name,
+u32 old/new factions and raw temporary byte. Only a matching hydrated local
+actor and its current old faction update the manager field; missing actor,
+wrong object, stale old faction, or removed actor do not. Existing Units and
+Player apply the same old-faction check without creating actors. The raw
+Temporary byte is retained on the event; no additional actor-mode meaning is
+inferred. Lifecycle isolation clears this context. Native392fe0e0?390b9b20 does
+also retain a temporary byte in the actor, beyond the current Unit representation.
+
+`top_level_faction()` follows the received current faction through cached
+mother_id links, returning the last reached ID if a row is missing or its mother
+is0. Source39472c70?392f80d0?392f8180?398a37a0 is recursive, unlike the
+single-parent398a3740 helper. The app uses at most cache.len()+1 iterations and
+returns None on a malformed cycle; native has no cycle guard. No race-based or
+static148 fallback is used.
+
+SC00f is `ShowRenameUi`, empty:391eba93?391ba8e0?391a7950 allocates opcode0x0f
+with vtable399b3084; serializer39184540 immediately returns. Handler391d2310
+calls392f8db0(nullptr). That planner silently refuses ownID equal to manager
+invalid sentinel39d44b8c or398a36e0 failure (missing own faction, political_system
+nonzero, or cached owner not actual persistent local character). It captures
+cached faction name into Task35's128-byte buffer. Task vtable399ccd90 reports
+buttonType0, isModal=false, admission only if no queued Task35, and info key
+`expeditionName`. Its result callback392f8a70 is a no-op; the original Lua
+OkProc alone calls RenameExpedition. There is no invented ShowRename Lua method.
+Other calls to this planner are391e5585 and392f7c0e, outside this empty-receipt
+path's completion claim.
+
+SC011 `Renamed` is u32 faction ID/blob name/raw by_gm byte. Native392fdce0
+requires existing faction metadata, replaces its capped name, and clears
+allow_change_name only if by_gm==0. It does not change own ID, policies or loaded
+state, and emits no expedition-management notice in this callback. Raw receipt
+bytes remain available even when metadata is absent.
+
+SC013 `Created` carries a complete Faction, BC owner runtime ID, countu8, then
+interleaved BC member object/u32 persistent ID/blob name rows. Native397c1910
+clamps its inline count to4 before reading; the active lane writes the declared
+full vector. The lane decoder consumes **all** rows to keep subsequent DD04
+packets aligned, while the native state view admits only the first4. Raw event
+and last_receipt retain every row. Native398a5280 inserts absent metadata but
+leaves existing metadata unchanged on duplicate creation.392febb0 requires
+political_system0 and a nonzero result from the single-parent398a3740 lookup.
+The app additionally refuses membership effects for invalid factionID0 (a stronger
+malformed-identity boundary); valid IDs satisfy that native parent check. It emits
+an initial menu notice when actual
+local persistent ID is the incoming owner and incoming mother!=0, and invokes
+the ordinary membership reducer for owner then each admitted row. This may emit
+a second genuine menu notice for the matching local actor; neither is deduped.
+Existing actor updates require matching persistent character identity; no first
+row, proximity, ownership guess or new actor supplies membership. The raw Created
+receipt remains distinct from its internal source-ordered membership effects.
+
+Source excerpts: ignored `data/extract/aa-net/native-expedition-create-rename-20261018.txt`.
+Lane sources: `systems/social/packets/{expedition,faction}.rs`. Regression coverage
+includes binary strings/raw boolean bytes, every truncation, full count5 framing
+past the native4 boundary, following-packet alignment, duplicate creation,
+actual actor/old-faction guards, recursive lookup cycles, existing-only rename,
+Session create/rename writes without fabricated receipts, and Bevy resource folds.
+
+The previous SC01b `ServerMsg::UnitFactionChanged` / `Event::UnitFactionChanged`
+(String/bool) variants remain compatibility-only. Actual wire dispatch now uses
+raw `Event::Expedition(UnitFactionChanged { .. })`, avoiding their lossy string
+and bool conversion and the former old-ID assignment bug. The compatibility
+Units fold now also requires the old faction and assigns the new faction.
+
+Lane creation currently constructs political_system=1, then sends SC013,
+broadcasts SC008, sends SC01c(0?newID), and sends policy/member info. The native
+political_system0 Created planner therefore deliberately skips that SC013's
+membership/menu effects; the subsequent genuine SC01c supplies membership.
+The same political-system boundary prevents native Task35 admission for that
+lane-created row. No client workaround changes the received political system.
+
+Validation: cargo test -p aa-net --features bevy --lib: 433 passed, 0 failed, 0 ignored (2026-10-18).

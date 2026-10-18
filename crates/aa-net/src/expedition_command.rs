@@ -2,6 +2,8 @@
 use crate::{ExpeditionRolePolicy, wire::Writer};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpeditionCommand {
+    Create { name: Vec<u8>, sponsor_id: u32 },
+    Rename { expedition_id: u32, name: Vec<u8> },
     Invite { name: Vec<u8> },
     Reply { inviter_id: u32, expedition_id: u32, join: bool },
     Leave,
@@ -16,11 +18,11 @@ impl ExpeditionCommand {
     pub fn validate(&self) -> Result<(), &'static str> {
         let id = |id| if id == 0 { Err("expedition identity must be nonzero") } else { Ok(()) };
         match self {
-            Self::Invite { name } => {
+            Self::Invite { name } | Self::Create { name, .. } | Self::Rename { name, .. } => {
                 if name.len() <= 128 {
                     Ok(())
                 } else {
-                    Err("expedition invite name exceeds 128 bytes")
+                    Err("expedition request name exceeds 128 bytes")
                 }
             }
             Self::Reply { inviter_id, expedition_id, .. } => {
@@ -43,6 +45,8 @@ impl ExpeditionCommand {
     }
     pub(crate) fn opcode(&self) -> u16 {
         match self {
+            Self::Create { .. } => 0x004,
+            Self::Rename { .. } => 0x009,
             Self::ChangePolicy { .. } => 0x006,
             Self::ChangeMemberRole { .. } => 0x007,
             Self::ChangeOwner { .. } => 0x008,
@@ -55,6 +59,8 @@ impl ExpeditionCommand {
     }
     pub(crate) fn write(&self, w: &mut Writer) {
         match self {
+            Self::Create { name, sponsor_id } => { w.blob(name).u32(*sponsor_id); }
+            Self::Rename { expedition_id, name } => { w.u32(*expedition_id).blob(name).u8(1); }
             Self::Invite { name } => {
                 w.blob(name);
             }
@@ -89,6 +95,8 @@ mod tests {
     fn native_lane_eight_requests_exact_wire() {
         let cases = [
             (ExpeditionCommand::Invite { name: vec![255, 0, 65] }, 12, vec![3, 0, 255, 0, 65]),
+            (ExpeditionCommand::Create{name:vec![255,0,65],sponsor_id:0x12345678},4,vec![3,0,255,0,65,120,86,52,18]),
+            (ExpeditionCommand::Rename{expedition_id:0x12345678,name:vec![255,0]},9,vec![120,86,52,18,2,0,255,0,1]),
             (
                 ExpeditionCommand::Reply {
                     inviter_id: 0x12345678,

@@ -330,6 +330,22 @@ mod equipment_flags_tests {
     }
 
     #[test]
+    fn plugin_created_and_faction_change_fold_existing_local_actor_and_cache() {
+        use crate::{ExpeditionEvent as E,ExpeditionFaction};
+        let mut app=App::new();init_state(&mut app);
+        let mut unit=crate::state::tests::unit(77);unit.kind=crate::model::UnitKind::Character{char_id:7};unit.faction_id=101;
+        let mut state=crate::model::CharacterState::default();state.character.id=7;state.character.faction_id=101;
+        let spawn=crate::session::PlayerSpawn{obj_id:77,unit:unit.clone(),state};
+        app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::PlayerSpawn(Box::new(spawn.clone())))).unwrap();
+        app.world_mut().resource_mut::<Units>().by_id.insert(77,unit);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Expedition(E::Created{faction:ExpeditionFaction{id:9,mother_id:101,owner_id:7,..Default::default()},owner_obj_id:77,members:vec![]}))).unwrap();
+        assert_eq!(app.world().resource::<crate::Expeditions>().own_id,9);assert_eq!(app.world().resource::<Units>().by_id[&77].expedition_id,9);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Expedition(E::UnitFactionChanged{obj_id:77,name:vec![],old_faction_id:101,new_faction_id:102,temporary:2}))).unwrap();
+        assert_eq!(app.world().resource::<crate::Expeditions>().current_faction_id,102);assert_eq!(app.world().resource::<Units>().by_id[&77].faction_id,102);
+        assert_eq!(app.world().resource::<Player>().spawn.as_ref().unwrap().state.character.faction_id,102);
+    }
+
+    #[test]
     fn plugin_dominion_fold_keeps_real_gate_and_coverage_loss_then_resets() {
         let mut app=App::new();init_state(&mut app);
         assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),Some(false));

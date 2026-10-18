@@ -963,13 +963,7 @@ impl ServerMsg {
             sc::SCCombatEngagedPacket => Self::CombatEngaged { obj_id: r.bc()? },
             sc::SCCombatClearedPacket => Self::CombatCleared { obj_id: r.bc()? },
             sc::SCUnitNameChangedPacket => Self::UnitNameChanged { obj_id: r.bc()?, name: r.string()? },
-            sc::SCUnitFactionChangedPacket => Self::UnitFactionChanged {
-                obj_id: r.bc()?,
-                name: r.string()?,
-                faction_id: r.u32()?,
-                faction_id2: r.u32()?,
-                temporary: r.bool()?,
-            },
+            sc::SCUnitFactionChangedPacket => Self::Expedition(crate::expedition::ExpeditionEvent::read_lane(opcode,r)?),
             sc::SCTimeOfDayPacket => Self::TimeOfDay { hour: r.f32()?, speed: None },
             sc::SCDetailedTimeOfDayPacket => {
                 let hour = r.f32()?;
@@ -1564,13 +1558,9 @@ mod tests {
         let body = [0x10, 0, 0, 1, 0, b'A', 101, 0, 0, 0, 161, 0, 0, 0, 0];
         assert_eq!(
             decode(sc::SCUnitFactionChangedPacket, &body),
-            ServerMsg::UnitFactionChanged {
-                obj_id: 0x10,
-                name: "A".into(),
-                faction_id: 101,
-                faction_id2: 161,
-                temporary: false
-            }
+            ServerMsg::Expedition(crate::ExpeditionEvent::UnitFactionChanged {
+                obj_id:0x10,name:vec![b'A'],old_faction_id:101,new_faction_id:161,temporary:0,
+            })
         );
     }
 

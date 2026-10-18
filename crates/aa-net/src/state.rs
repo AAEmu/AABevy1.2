@@ -129,7 +129,7 @@ impl Player {
             Event::PlayerSpawn(s) => self.spawn = Some((**s).clone()),
             Event::Expedition(receipt) => return self.spawn.as_mut().is_some_and(|spawn| {
                 let changed=spawn.unit.apply_expedition(receipt);
-                if changed {spawn.state.character.expedition_id=spawn.unit.expedition_id;}
+                if changed {spawn.state.character.expedition_id=spawn.unit.expedition_id;spawn.state.character.faction_id=spawn.unit.faction_id;}
                 changed
             }),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
@@ -178,8 +178,19 @@ impl Units {
             Event::UnitSpawned(u) => {
                 self.by_id.insert(u.obj_id, (**u).clone());
             }
-            Event::Expedition(receipt @ crate::ExpeditionEvent::MembershipChanged{obj_id,..}) =>
-                return self.by_id.get_mut(obj_id).is_some_and(|unit|unit.apply_expedition(receipt)),
+            Event::Expedition(receipt) => {
+                use crate::ExpeditionEvent as E;
+                match receipt {
+                    E::MembershipChanged{obj_id,..} | E::UnitFactionChanged{obj_id,..} =>
+                        return self.by_id.get_mut(obj_id).is_some_and(|unit|unit.apply_expedition(receipt)),
+                    E::Created{owner_obj_id,members,..} => {
+                        let mut changed=self.by_id.get_mut(owner_obj_id).is_some_and(|unit|unit.apply_expedition(receipt));
+                        for row in members.iter().take(4) {changed|=self.by_id.get_mut(&row.obj_id).is_some_and(|unit|unit.apply_expedition(receipt));}
+                        return changed;
+                    }
+                    _=>return false,
+                }
+            }
             Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
@@ -260,9 +271,11 @@ impl Units {
                 let Some(unit) = self.by_id.get_mut(obj_id) else { return false };
                 unit.name = name.clone();
             }
-            Event::UnitFactionChanged { obj_id, faction_id, .. } => {
+            // Compatibility-only event: active SC01b decoding uses the raw Expedition receipt.
+            Event::UnitFactionChanged { obj_id, faction_id, faction_id2, .. } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
-                u.faction_id = *faction_id;
+                if u.faction_id!=*faction_id || u.faction_id==*faction_id2 {return false;}
+                u.faction_id = *faction_id2;
             }
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.by_id.is_empty() {
