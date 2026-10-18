@@ -21,6 +21,7 @@ use crate::actability::Actabilities;
 use crate::mate::Mates;
 use crate::slave::Slaves;
 use crate::gimmick::Gimmicks;
+use crate::housing::Houses;
 use crate::ui_data::UiData;
 use crate::initial_config::GameConfig;
 use crate::combat_status::CombatStatus;
@@ -163,6 +164,7 @@ net_state! {
     mates: Mates,
     slaves: Slaves,
     gimmicks: Gimmicks,
+    houses: Houses,
     ui_data: UiData,
     game_config: GameConfig,
     combat_status: CombatStatus,
