@@ -76,7 +76,7 @@ pub use login::Secret;
 pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey, LootRollNotice, LootRollPrompt, LootRollResult, LootRollRound, LootRolls, LootRollSummary};
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};
 pub use mate::{DynamicUnitState, MateCommand, MateEvent, MateSpawn, Mates, OwnedMate, SlaveState};
-pub use mate_equipment::{MateEquipmentChange, MateEquipmentEntry, MateItemLocation};
+pub use mate_equipment::{MateEquipmentRequest, MateEquipmentChange, MateEquipmentEntry, MateItemLocation};
 pub use model::{Character, CreateCharacter, Doodad, Unit, UnitStateAttachments};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;

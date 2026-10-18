@@ -138,6 +138,7 @@ opcodes! {
         CSSwapAbilityPacket = 0x096,
         CSRemoveMatePacket = 0x0a4,
         CSChangeMateTargetPacket = 0x0a5,
+        CSChangeMateEquipmentPacket = 0x0a9,
         CSChangeMateNamePacket = 0x0a6,
         CSRepairPetItemsPacket = 0x0b5,
         CSMountMatePacket = 0x0a7,

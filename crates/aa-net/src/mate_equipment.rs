@@ -1,5 +1,8 @@
 //! Full-item mate equipment notifications; no inferred swap or success settlement.
 
+mod request;
+pub use request::MateEquipmentRequest;
+
 use crate::model::Item;
 use crate::wire::{Reader, Result, WireError};
 
