@@ -1004,14 +1004,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "EnableDrawables",
         method(lua, |lua, id, a| {
-            set_layer_visible(lua, id, a.s(1).as_deref(), true);
+            set_layer_enabled(lua, id, a.v(1), true);
             none()
         })?,
     )?;
     def(
         "DisableDrawables",
         method(lua, |lua, id, a| {
-            set_layer_visible(lua, id, a.s(1).as_deref(), false);
+            set_layer_enabled(lua, id, a.v(1), false);
             none()
         })?,
     )?;
@@ -1882,23 +1882,24 @@ pub(crate) fn set_slider(lua: &Lua, id: Id, v: f32, trigger: bool) {
     }
 }
 
-fn set_layer_visible(lua: &Lua, id: Id, layer: Option<&str>, on: bool) {
-    let mut g = ui(lua);
-    let u = &mut *g;
-    let layer = layer.map(DrawLayer::parse);
-    let ds = u
-        .tree
-        .widget(id)
-        .map(|w| w.drawables.clone())
-        .unwrap_or_default();
-    for d in ds {
-        let matches = u
-            .tree
-            .get(d)
-            .drawable()
-            .is_some_and(|dr| layer.is_none_or(|l| dr.layer == l) && dr.state_of.is_none());
-        if matches {
-            u.tree.get_mut(d).shown = on;
+fn set_layer_enabled(lua: &Lua, id: Id, layer: Value, on: bool) {
+    // Native392674c0 requires an actual string;3922c120 uses case-sensitive
+    // strcmp, with every unknown name selecting all four owner layers.
+    let Value::String(layer) = layer else { return };
+    let bytes = layer.as_bytes();
+    let name = bytes.split(|&b| b == 0).next().unwrap_or_default();
+    let layer = match name {
+        b"background" => Some(0),
+        b"artwork" => Some(1),
+        b"overlay" => Some(2),
+        b"overoverlay" => Some(3),
+        _ => None,
+    };
+    if let Some(w) = ui(lua).tree.widget_mut(id) {
+        if let Some(layer) = layer {
+            w.drawable_layers[layer] = on;
+        } else {
+            w.drawable_layers.fill(on);
         }
     }
 }
@@ -1917,7 +1918,7 @@ fn set_button_bg(lua: &Lua, id: Id, state: usize, d: Id) {
         ButtonState::Disabled,
     ][state];
     if let Some(dr) = u.tree.drawable_mut(d) {
-        // Retain membership for layer operations; rendering uses actual shown flags.
+        // Retain membership as metadata; state writes govern actual shown flags.
         dr.state_of = Some((id, st));
     }
     reapply_button_state(u, id);

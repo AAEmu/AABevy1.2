@@ -509,6 +509,10 @@ pub struct Widget {
     pub class: String,
     pub children: Vec<Id>,
     pub drawables: Vec<Id>,
+    /// Native owner-layer draw admission (+108/+128/+148/+168), independent of
+    /// each drawable's shown flag and the dynamic layer factors. The fourth
+    /// flag is retained although fourth-layer drawable creation is unsupported.
+    pub drawable_layers: [bool; 4],
     pub layer: Layer,
     pub dynamic_drawable: DynamicDrawableState,
     /// Native +dc/+e0: manager fade factor and pending fade, separate from base alpha/shown.
@@ -590,7 +594,7 @@ pub struct Drawable {
     pub color: [f32; 4],
     /// Text drawables.
     pub text: Option<TextBlock>,
-    /// Most recent button-background membership (used by layer operations).
+    /// Most recent button-background membership, retained as metadata.
     /// State application writes `Object::shown`; this is not a draw-time predicate.
     pub state_of: Option<(Id, ButtonState)>,
     /// Extra drawables of one button state (`CreateHighlightDrawable`, `CreateStateDrawable`):
@@ -1365,6 +1369,7 @@ impl Widget {
             ty,
             children: Vec::new(),
             drawables: Vec::new(),
+            drawable_layers: [true; 4],
             layer: Layer::Normal,
             dynamic_drawable: Default::default(),
             fade_alpha: 1.0,

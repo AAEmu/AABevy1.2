@@ -142,7 +142,9 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             .copied()
             .filter(|&d| {
                 let o = u.tree.get(d);
-                o.alive && o.shown && o.drawable().is_none_or(|dr| !dr.row_template)
+                o.alive && o.shown && o.drawable().is_some_and(|dr| {
+                    !dr.row_template && w.drawable_layers[dr.layer as usize]
+                })
             })
             .collect();
         ds.sort_by_key(|&d| {
