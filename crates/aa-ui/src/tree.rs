@@ -409,8 +409,9 @@ pub struct ButtonData {
     pub click_buttons: [bool; 3],
     /// Drawables per state: normal, highlight, pushed, disabled.
     pub bg: [Option<Id>; 4],
-    /// Text colours per state.
-    pub text_color: [Option<[f32; 4]>; 4],
+    /// Native text palette, normal/highlight/pushed/disabled; applied on state writes.
+    /// The current text style remains independently writable between those writes.
+    pub text_color: [[f32; 4]; 4],
     pub checked: bool,
     pub checked_bg: Option<Id>,
     pub disabled_checked_bg: Option<Id>,
@@ -426,7 +427,7 @@ impl Default for ButtonData {
             state: ButtonState::Normal,
             click_buttons: [true, false, false],
             bg: [None; 4],
-            text_color: [None; 4],
+            text_color: [[1.; 4]; 4],
             checked: false,
             checked_bg: None,
             disabled_checked_bg: None,
