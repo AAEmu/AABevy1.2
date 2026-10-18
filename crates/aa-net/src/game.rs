@@ -549,6 +549,8 @@ pub enum ServerMsg {
     BuffRemoved { obj_id: u32, index: u32 },
     BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// Raw skill-effect feedback. Authoritative item updates are separate item-task receipts.
+    GradeEnchantResult(crate::item_effect::GradeEnchantResult),
+    GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
     LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
     LunastoneSocketingResult { raw_result:u8, item_id:u64, template_id:u32 },
     /// A passive buff was learned (characters).
@@ -687,6 +689,8 @@ impl ServerMsg {
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
             Self::BuffUpdated { .. } => "SCBuffUpdated",
+            Self::GradeEnchantResult(_) => "SCItemGradeEnchantResult",
+            Self::GradeEnchantBroadcast(_) => "SCItemGradeEnchantBroadcast",
             Self::LunagemSocketingResult { .. } => "SCItemSocketingLunagemResult",
             Self::LunastoneSocketingResult { .. } => "SCItemSocketingLunastoneResult",
             Self::BuffLearned { .. } => "SCBuffLearned",
@@ -1106,6 +1110,8 @@ impl ServerMsg {
             }
             sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
             sc::SCBuffUpdatedPacket => Self::BuffUpdated { obj_id:r.bc()?, index:r.u32()?, stacks:r.i32()?, charged:r.i32()? },
+            sc::SCItemGradeEnchantResultPacket => Self::GradeEnchantResult(crate::item_effect::GradeEnchantResult::read(r)?),
+            sc::SCItemGradeEnchantBroadcastPacket => Self::GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast::read(r)?),
             sc::SCItemSocketingLunagemResultPacket => Self::LunagemSocketingResult { raw_result:r.u8()?, item_id:r.u64()?, template_id:r.u32()?, raw_install:r.u8()? },
             sc::SCItemSocketingLunastoneResultPacket => Self::LunastoneSocketingResult { raw_result:r.u8()?, item_id:r.u64()?, template_id:r.u32()? },
             sc::SCBuffLearnedPacket => Self::BuffLearned { obj_id: r.bc()?, buff_id: r.u32()? },
@@ -2122,6 +2128,21 @@ mod tests {
         batch.u16(0).u16(sc::SCItemSocketingLunagemResultPacket).raw(&gem);
         batch.u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
         assert_eq!(ServerMsg::decode_batch(&batch.finish(),4),vec![expected_gem.clone(),expected_stone,expected_gem,ServerMsg::BuffRemoved{obj_id:9,index:7}]);
+    }
+
+    #[test]
+    fn grade_result_inline_item_and_broadcast_dd04_alignment() {
+        // Non-null existing Item wire, independently assembled with no detail payload.
+        let mut item=Writer::new();item.u32(123).u64(456).u8(6).u8(128).i32(-2).u8(0).i64(i64::MIN).i32(-1).u32(789).u8(255).i64(-2).i64(i64::MAX);
+        let item=item.finish();let mut result=vec![255];result.extend_from_slice(&item);result.extend_from_slice(&[1,6]);
+        let expected=match decode(sc::SCItemGradeEnchantResultPacket,&result){ServerMsg::GradeEnchantResult(v)=>v,_=>panic!()};
+        assert_eq!(expected.item_wire,item);let decoded=expected.item.as_ref().unwrap();assert_eq!((decoded.template_id,decoded.id,decoded.count),(123,456,-2));assert_eq!(decoded.create_time,i64::MIN);
+        let mut broadcast=vec![4,0,255,b'A',0,b'B'];broadcast.extend_from_slice(&result);
+        let announced=crate::item_effect::GradeEnchantBroadcast{raw_name:vec![255,b'A',0,b'B'],result:expected.clone()};
+        assert_eq!(decode(sc::SCItemGradeEnchantBroadcastPacket,&broadcast),ServerMsg::GradeEnchantBroadcast(announced.clone()));
+        for (opcode,body) in [(sc::SCItemGradeEnchantResultPacket,&result),(sc::SCItemGradeEnchantBroadcastPacket,&broadcast)] {for n in 0..body.len(){assert!(ServerMsg::decode(&game_frame(opcode,&body[..n])).is_err());}}
+        let mut batch=Writer::new();batch.u16(0).u16(sc::SCItemGradeEnchantResultPacket).raw(&result).u16(0).u16(sc::SCItemGradeEnchantBroadcastPacket).raw(&broadcast).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
+        assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![ServerMsg::GradeEnchantResult(expected),ServerMsg::GradeEnchantBroadcast(announced),ServerMsg::BuffRemoved{obj_id:9,index:7}]);
     }
 
 }
