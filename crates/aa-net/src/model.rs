@@ -794,6 +794,8 @@ pub struct Unit {
     pub appellation: u32,
     /// Unit flag bits as sent (`0x2000` on NPCs).
     pub flags: u16,
+    /// First common UnitState PISC integer, expanded in native actor byte order.
+    pub gm_modes: [u8; 4],
     /// Characters: learned skills as `(skill id, level)`.
     pub skills: Vec<(u32, u8)>,
     /// Characters: ids of the passive buffs.
@@ -834,6 +836,15 @@ pub struct Attachment {
 }
 
 impl Unit {
+    /// Apply only a known mode to this existing matching runtime object.
+    pub fn apply_gm_mode(&mut self, change: &crate::unit_msg::UnitGmModeChanged) -> bool {
+        if self.obj_id != change.obj_id { return false; }
+        let Ok(index) = usize::try_from(change.mode) else { return false };
+        let Some(value) = self.gm_modes.get_mut(index) else { return false };
+        if *value == change.value { return false; }
+        *value = change.value;
+        true
+    }
     pub fn is_character(&self) -> bool {
         matches!(self.kind, UnitKind::Character { .. })
     }
@@ -950,6 +961,7 @@ impl Unit {
             expedition_id: 0,
             appellation: 0,
             flags: 0,
+            gm_modes: [0; 4],
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),
@@ -1037,7 +1049,9 @@ impl Unit {
     /// After the race: appellation, faction, honor, flags, (characters: abilities and visual
     /// options) and the three buff lists.
     fn read_extras(&mut self, r: &mut Reader, kind_byte: u8) -> Result<()> {
-        self.appellation = r.pisc(4)?[2] as u32;
+        let common = r.pisc(4)?;
+        self.gm_modes = (common[0] as u32).to_le_bytes();
+        self.appellation = common[2] as u32;
         let [faction, expedition, ..] = r.pisc(4)?;
         (self.faction_id, self.expedition_id) = (faction as u32, expedition as u32);
         r.pisc(2)?; // honor gained in combat, hostile faction kills
@@ -1979,5 +1993,22 @@ mod tests {
         assert_eq!((c.chat_type, c.sender.as_str(), c.message.as_str()), (1, "Bob", "hello"));
         assert_eq!((c.sub_type, c.channel_faction), (7, 0));
         assert_eq!((c.sender_obj_id, c.sender_id, c.sender_race), (0x102, 77, 1));
+    }
+}
+
+#[cfg(test)]
+mod gm_snapshot_tests {
+    use super::*;
+    #[test]
+    fn common_first_pisc_integer_hydrates_four_mode_bytes_without_reusing_u16_flags() {
+        for word in [0u32, 0x04030201, 0xff00fe80, u32::MAX] {
+            let mut w=crate::wire::Writer::new();
+            w.pisc(&[i64::from(word),9,77,8]).pisc(&[13,14,0,0]).pisc(&[0,0]).u16(0x2000).raw(&[0,0,0]);
+            let bytes=w.finish(); let mut r=Reader::new(&bytes);
+            let mut unit=crate::state::tests::unit(7);
+            unit.read_extras(&mut r,1).unwrap();
+            assert!(r.is_empty()); assert_eq!(unit.gm_modes,word.to_le_bytes());
+            assert_eq!((unit.appellation,unit.flags),(77,0x2000));
+        }
     }
 }

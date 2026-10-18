@@ -268,6 +268,18 @@ mod equipment_flags_tests {
     }
 
     #[test]
+    fn plugin_gm_modes_update_existing_unit_and_clear_with_lifecycle() {
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::UnitSpawned(Box::new(crate::state::tests::unit(8))))).unwrap();
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged{obj_id:8,mode:1,value:255}))).unwrap();
+        assert_eq!(app.world().resource::<Units>().by_id[&8].gm_modes,[0,255,0,0]);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged{obj_id:99,mode:0,value:1}))).unwrap();
+        assert_eq!(app.world().resource::<Units>().by_id.len(),1);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert!(app.world().resource::<Units>().by_id.is_empty());
+    }
+
+    #[test]
     fn plugin_family_receipts_hydrate_and_reset_the_public_resource() {
         use crate::family::{Families,FamilyEvent,FamilyRoster};
         let mut app=App::new();init_state(&mut app);

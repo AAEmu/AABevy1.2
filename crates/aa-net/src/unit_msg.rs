@@ -369,3 +369,61 @@ mod tests {
         assert_eq!(list[0].0, 0x42);
     }
 }
+
+/// Raw SCUnitGmModeChanged (0x203), including unknown signed mode indices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitGmModeChanged {
+    pub obj_id: u32,
+    pub mode: i32,
+    pub value: u8,
+}
+impl UnitGmModeChanged {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { obj_id: r.bc()?, mode: r.i32()?, value: r.u8()? })
+    }
+}
+
+#[cfg(test)]
+mod gm_mode_tests {
+    use super::*;
+    use crate::{game::{ServerMsg,MAGIC},opcodes::sc,wire::Writer};
+    #[test]
+    fn native_lane_gm_mode_retains_signed_mode_and_raw_byte_at_exact_packet_boundary() {
+        for mode in [i32::MIN,-1,0,1,2,3,4,i32::MAX] {
+            let mut w=Writer::new(); w.bc(0xabcdef).i32(mode).u8(255);
+            let body=w.finish();
+            for end in 0..body.len() { assert!(UnitGmModeChanged::read(&mut Reader::new(&body[..end])).is_err()); }
+            let mut r=Reader::new(&body);
+            assert_eq!(UnitGmModeChanged::read(&mut r).unwrap(),UnitGmModeChanged{obj_id:0xabcdef,mode,value:255});
+            assert!(r.is_empty());
+            let mut raw=vec![0,0];
+            raw.extend(sc::SCUnitGmModeChangedPacket.to_le_bytes()); raw.extend(&body);
+            raw.extend([0,0]); raw.extend(sc::SCSkillEndedPacket.to_le_bytes()); raw.extend(77u16.to_le_bytes());
+            let mut batch=vec![MAGIC,4,2,0,1]; // final stored DEFLATE block
+            let n=raw.len() as u16; batch.extend(n.to_le_bytes()); batch.extend((!n).to_le_bytes()); batch.extend(raw);
+            let ServerMsg::Batch(events)=ServerMsg::decode(&batch).unwrap() else {panic!("not batch")};
+            assert_eq!(events.len(),2);
+            assert!(matches!(events[0],ServerMsg::UnitGmModeChanged(UnitGmModeChanged{obj_id:0xabcdef,mode:m,value:255}) if m==mode));
+            assert_eq!(events[1],ServerMsg::SkillEnded{tl:77});
+        }
+    }
+    #[test]
+    fn mode_updates_existing_player_and_units_only_and_snapshot_replaces_old_flags() {
+        use crate::{session::{Event,PlayerSpawn},state::{WorldState,tests::unit}};
+        let mut world=WorldState::default();
+        let event=|obj_id,mode,value| Event::UnitGmModeChanged(UnitGmModeChanged{obj_id,mode,value});
+        world.apply(&event(7,1,255)); assert!(world.units.by_id.is_empty()); assert!(world.player.spawn.is_none());
+        world.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn{obj_id:7,state:Default::default(),unit:unit(7)})));
+        world.apply(&Event::UnitSpawned(Box::new(unit(8))));
+        for index in 0..4 { world.apply(&event(7,index,(index+1) as u8)); world.apply(&event(8,index,(index+5) as u8)); }
+        assert_eq!(world.player.spawn.as_ref().unwrap().unit.gm_modes,[1,2,3,4]);
+        assert_eq!(world.units.by_id[&8].gm_modes,[5,6,7,8]);
+        for mode in [-1,4,i32::MIN,i32::MAX] { world.apply(&event(8,mode,255)); }
+        assert_eq!(world.units.by_id[&8].gm_modes,[5,6,7,8]);
+        assert!(!world.units.apply(&event(8,1,6)),"identical byte reports remain available as events but do not mutate state");
+        world.apply(&Event::UnitsRemoved(vec![8])); world.apply(&event(8,1,99)); assert!(!world.units.by_id.contains_key(&8));
+        world.apply(&Event::UnitSpawned(Box::new(unit(8)))); assert_eq!(world.units.by_id[&8].gm_modes,[0;4]);
+        world.apply(&Event::LeftWorld{target:0}); assert!(world.units.by_id.is_empty() && world.player.spawn.is_none());
+    }
+
+}

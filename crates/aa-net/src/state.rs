@@ -121,6 +121,7 @@ impl Player {
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
             Event::PlayerSpawn(s) => self.spawn = Some((**s).clone()),
+            Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
                     return false;
@@ -159,6 +160,7 @@ impl Units {
             Event::UnitSpawned(u) => {
                 self.by_id.insert(u.obj_id, (**u).clone());
             }
+            Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
                 if !matches!(unit.kind, crate::model::UnitKind::Slave { .. }) { return false; }
@@ -603,6 +605,7 @@ pub(crate) mod tests {
             expedition_id: 0,
             appellation: 0,
             flags: 0,
+            gm_modes: [0;4],
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),
