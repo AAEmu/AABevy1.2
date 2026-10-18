@@ -15,7 +15,7 @@ fn member<'a>(view: &'a View, name: &[u8]) -> Option<&'a ExpeditionMember> {
 
 /// Original en_us/type2 policy-name path, checked against23 executed native cases.
 /// Invalid UTF-8 is refused as an app boundary; native malformed decoding is not claimed.
-fn valid_policy_name(bytes: &[u8]) -> bool {
+pub(super) fn valid_policy_name(bytes: &[u8]) -> bool {
     let bytes = cstr(bytes);
     let Ok(name) = std::str::from_utf8(bytes) else { return false };
     let space = |value: u32| matches!(value, 9..=13 | 32);

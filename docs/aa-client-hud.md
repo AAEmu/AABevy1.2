@@ -1965,3 +1965,87 @@ A fresh `original-members-final.png` from the integrated example confirms the
 same original rows at316.6-450.0 FPS with no runtime errors. Both self-close.
 This verifies login/world selection; the existing lane game-connection timeout
 still prevents natural in-game settlement QA.
+
+### Original guild creation and received rename prompt (2026-10-18)
+
+Original creation now sends the captured Create command after name validation and
+the native own-guild/current-faction cache checks, preserving error order0x22 then
+0x21. Its sponsor argument follows the actual numeric-only f32/CVTTSS2SI adapter,
+including negative two's-complement and invalid-conversion0x80000000. The current
+faction starts from Character.faction_id and follows guarded received SC01b changes.
+Current faction IDs>=1000 replace the supplied sponsor:1000 is verified in the
+original1.2 runtime and original Lua; the protected native global's initializer
+remains unresolved. It is an explicit build compatibility value, not a claimed
+received GameConfig field.
+
+GetMyTopLevelFaction follows cached mother links and returns the last reached ID
+when a link is absent or mother0 ends the chain. It has no static Nuia fallback.
+Malformed cycles are an app refusal instead of native nontermination. Original
+Nuia/Harihara sponsor allocation stays seven tabs, with six/five active buttons;
+outlaw and user-alliance layouts use native SelectTab(0) to hide every pane.
+
+The lane's received guild-service skill13736 opens the original NPC preconfirmation
+and sponsor flow only for the actual local actor, matching pending NPC, known
+expedition template flag, existing live NPC and six-metre talk range. NPC removal,
+range or context change cancels the service. It sends no creation command until
+the original Create button is clicked. This follows the lane's service mapping;
+multi-service selection and quest/service precedence remain the app's existing
+bounded policy rather than a claim of full native NPC planner parity.
+
+VNT_FACTION2 now exposes the native en_us name-policy record: local2..32,
+English3..32, limit_space_cnt0, space/mixed-case allowed and mixed-language/special
+letter flags false. Its original IsValidName uses the already executed type2
+validator, including the native trailing-byte quirk. Other name-policy kinds keep
+their existing adapters. This corrects the old generic2..26/letters-only fallback
+for these windows. Rename's original edit handler has autoTextChange=false, so
+CheckAvailableName is not part of this path and remains separate work.
+
+Actual empty SC00f opens original nonmodal Task35 only for a cached own faction
+with political_system0 and matching actual owner; failures and duplicate tasks
+are silent. Captured expeditionName and original edit/OK/Cancel controls own the
+presentation. Its native task result callback does nothing; original Lua OkProc
+calls RenameExpedition. That direct method sends the current guild ID/name and
+returns boolean true without name/owner validation; true is invocation, not
+success. Character/object/task tokens suppress stale OkProc closures. Received
+Renamed/Created and actor-membership receipts alone change state. The lane's
+Rename handler currently logs the request without implementing success; no
+server-side completion is fabricated.
+
+The lane constructs new guild factions with political_system1. Native Created
+membership/menu effects require incoming political_system0, so those effects
+correctly skip that SC013; the later real SC01c(0->newGuild) establishes local
+membership. This is a lane/native mismatch, not a reason to infer creation success
+from its request. The same political-system mismatch prevents native Task35 for
+such lane-created guilds, independently of the lane's log-only Rename handler.
+
+The `expedition` aa-dev example additionally supports `--create --alliance
+148|149|114|1005` and `--rename`. Source evidence is in
+`data/extract/aa-net/native-expedition-create-rename-20261018.txt` and
+`data/extract/aa-ui/native-name-policy-table-20261018.txt`. Full received/raw-row,
+actor guard and transport contracts remain in docs/aa-net.md; native active-tab
+setter/selection lifetime and independent original sponsor captures are in
+docs/aa-ui.md.
+
+Validation: all16 focused guild checks pass in7.62s, including physical original
+Nuia/Harihara/outlaw/user-alliance Create, active sponsor picking, numeric adapter
+edge cases, original NPC preconfirmation, stale service/actor refusal, Task35
+Confirm/Cancel/duplicate handling, received rename settlement and stale OkProc
+suppression. The native direct Rename empty-name/nonowner call is checked
+separately from its guarded task. Full client224 passed/36 ignored in14.87s
+against the corrected SC01b decoder, native active-tab changes and authored fog
+implementation. These controlled original-script tests do not claim live guild
+creation/rename settlement.
+
+Inspected fresh aa-dev captures in `shots/hud/sol61-expedition-create/` show Nuia's
+six sponsors at287.8-395.2 FPS, Harihara's five at283.2-378.3, outlaw at292.5-381.0,
+user alliance at374.9-390.2 and original Rename at320.3-398.4. The native3-32 guide
+and four source layouts are visible; every process self-closes with zero runtime
+warnings/errors. A refreshed main world-selection capture reaches live Lane-bevy
+at266.3-346.9 FPS with zero script errors. These are inspected original-script
+fixtures, without a native guild reference screenshot comparison.
+
+Tested main: `target/debug/aa-client-20261018-guild-create.exe`, SHA256
+`A59873D362C91FAE163AB7B9084871AF4220562BD470B78A0179C0EEFA8C41D6`.
+The playable alias `target/debug/aa-client-play.exe` is refreshed from that copy
+after confirming no user process is using it. This build includes32fd907 active
+tabs, c39411a network creation/rename/faction handling and906413a authored fog.

@@ -1,4 +1,4 @@
-//! Original type3/26/27 tasks with one-shot captured identities and native result rules.
+//! Original type3/26/27/35 tasks with captured identities and native result rules.
 use super::*;
 use aa_net::ExpeditionCommand as Command;
 use std::collections::BTreeMap;
@@ -62,6 +62,26 @@ fn reply(view: &mut View, command: Command) -> Option<i16> {
 }
 
 pub(super) fn received(lua: Option<&Lua>, bridge: &Shared, event: &ExpeditionEvent) {
+    if matches!(event, ExpeditionEvent::ShowRenameUi) {
+        let mut data = bridge.borrow_mut();
+        let view = &mut data.expedition;
+        if !view.tasks.quotes.contains_key(&35) && view.cache.own_id != 0 {
+            if let Some(faction) = view.cache.factions.get(&view.cache.own_id) {
+                if faction.political_system == 0 && Some(faction.owner_id) == view.cache.local_character_id {
+                    let command = Command::Rename {
+                        expedition_id: view.cache.own_id,
+                        name: faction.name.clone(),
+                    };
+                    insert(view, 35, command, Vec::new());
+                }
+            }
+        }
+        drop(data);
+        if let Some(lua) = lua {
+            show(lua, bridge);
+        }
+        return;
+    }
     let ExpeditionEvent::Invitation {
         inviter_id,
         inviter_name,
@@ -108,6 +128,10 @@ fn choose(view: &mut View, token: u32, accepted: bool) -> Option<i16> {
         return None;
     }
     let mut quote = view.tasks.quotes.remove(&task)?;
+    // Original Task35 result callback392f8a70 is a no-op. Its Lua OkProc owns Rename.
+    if task == 35 {
+        return None;
+    }
     if let Command::Reply { join, .. } = &mut quote.command {
         *join = accepted;
         return reply(view, quote.command);
@@ -135,6 +159,18 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         .exec()?;
     let hud: Table = lua.globals().get("HUD")?;
     let shared = bridge.clone();
+    hud.set("expedition_task_current", {
+        let shared = bridge.clone();
+        lua.create_function(move |_, token: u32| {
+            let data = shared.borrow();
+            let view = &data.expedition;
+            Ok(view.tasks.quotes.values().any(|quote| {
+                quote.token == token
+                    && view.cache.local_character_id == Some(quote.owner)
+                    && view.cache.local_object_id == Some(quote.object)
+            }))
+        })?
+    })?;
     hud.set(
         "expedition_choose",
         lua.create_function(move |lua, (token, accepted): (u32, bool)| {
@@ -175,6 +211,7 @@ pub(super) fn show(lua: &Lua, bridge: &Shared) {
                     Command::Reply { expedition_id, .. } => {
                         cache.factions.get(&expedition_id).map(|row| row.name.clone()).unwrap_or_default()
                     }
+                    Command::Rename { ref name, .. } => name.clone(),
                     _ => Vec::new(),
                 };
                 Some((task, quote.token, quote.inviter.clone(), name))
@@ -185,7 +222,13 @@ pub(super) fn show(lua: &Lua, bridge: &Shared) {
         let result = (|| -> mlua::Result<()> {
             let info = lua.create_table()?;
             info.set("buttonType", 0)?;
-            info.set("isModal", task != 3)?;
+            info.set("isModal", task != 3 && task != 35)?;
+            if task == 35 {
+                info.set("expeditionName", text(lua, &expedition)?)?;
+                let hud: Table = lua.globals().get("HUD")?;
+                let show: mlua::Function = hud.get("expedition_show_task")?;
+                return show.call((task, token, info));
+            }
             let key = match task {
                 3 => "ask_expedition_invite",
                 26 => "ask_leave_expedition",

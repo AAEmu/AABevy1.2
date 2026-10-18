@@ -23,7 +23,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
 | Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages | Native send-size overflow policy, chat layout persistence, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
-| Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission and title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; guild creation/rename/web/siege controls, nation and remaining management |
+| Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
@@ -154,3 +154,31 @@ The integrated main executable `target/debug/aa-client-20261018-guild.exe`
 reaches the live world list at260.3-361.5 FPS with zero script errors; a fresh
 original guild-member example capture runs316.6-450.0 FPS. Both self-close.
 The game-connection timeout remains a live validation blocker.
+
+### Guild creation, rename prompt and active sponsor controls (2026-10-18)
+
+Original guild-service preconfirmation and all four creation layouts now send
+captured requests using actual current faction, cached mother chain and native
+name validation. Received SC00f opens original Task35 with cached-owner and
+political-system admission. The original edit handler validates names; the direct
+Rename method retains its native wire-only/boolean-true behavior. Received state
+alone establishes membership or a new name. Faction-name policy metadata now uses
+the native en_us record instead of the generic2..26 fallback.
+
+All16 focused guild checks pass, including physical Create/sponsor/preconfirmation
+and rename Confirm/Cancel, duplicate and stale callback cases. Full client224
+passed/36 ignored in14.87s; network433/433 passes; native active-tab70 selected
+checks and11 executed native oracle groups pass. Authored box/ellipsoid fog adds
+13 GPU controls and world189 passed/9 ignored. Owning docs retain precise scope.
+
+Live creation/rename is still unverified. The lane sends new factions with
+political_system1 while native Created/rename-task effects require0: actual later
+SC01c supplies membership, and such lane-created guilds cannot open native Task35.
+The lane Rename handler only logs. These server/native gaps are explicit;
+the client does not fabricate successful requests or relax native checks.
+
+Fresh main `target/debug/aa-client-20261018-guild-create.exe` and its playable
+alias reach the live world list at266.3-346.9 FPS with zero script errors. All five
+inspected creation/rename aa-dev captures self-close without warnings/errors;
+ranges and the executable SHA256 are in aa-client-hud.md. No live in-game guild
+settlement is claimed.

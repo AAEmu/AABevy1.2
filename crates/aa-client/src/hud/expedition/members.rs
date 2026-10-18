@@ -2,7 +2,7 @@
 use super::*;
 use aa_net::ExpeditionMember;
 use rusqlite::Connection;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PER_PAGE: usize = 50;
@@ -10,11 +10,19 @@ const PER_PAGE: usize = 50;
 #[derive(Default)]
 pub(in crate::hud) struct Tables {
     zones: HashMap<u32, (String, Option<String>)>,
+    creators: HashSet<u32>,
 }
 
 impl Tables {
     pub(in crate::hud) fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut out = Self::default();
+        let mut query = conn.prepare("SELECT id,expedition FROM npcs")?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            if super::super::data::any_flag(row, 1)? {
+                out.creators.insert(row.get(0)?);
+            }
+        }
         let mut query = conn.prepare(
             "SELECT z.zone_key, COALESCE(lz.en_us,z.display_text,''), w.name, COALESCE(lw.en_us,u.text,w.name) \
              FROM zones z LEFT JOIN localized_texts lz ON lz.tbl_name='zones' AND lz.tbl_column_name='display_text' AND lz.idx=z.id \
@@ -33,9 +41,13 @@ impl Tables {
         }
         Ok(out)
     }
+
+    pub(in crate::hud) fn is_creator(&self, template: u32) -> bool {
+        self.creators.contains(&template)
+    }
 }
 
-fn integer(value: Value) -> Option<i32> {
+pub(super) fn integer(value: Value) -> Option<i32> {
     let number = match value {
         Value::Integer(number) => number as f32,
         Value::Number(number) => number as f32,
