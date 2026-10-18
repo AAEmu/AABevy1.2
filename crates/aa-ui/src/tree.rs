@@ -439,6 +439,22 @@ pub struct ListCtrlData {
     pub selected_image: Option<Id>,
 }
 
+/// Native drawable-layer state, separate from a widget's whole-subtree alpha.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicDrawableState {
+    pub enabled: [bool; 4],
+    /// Leave/over values; layer order is background, artwork, overlay, overoverlay.
+    pub pairs: [[f32; 2]; 4],
+    pub current: [f32; 4],
+}
+
+impl Default for DynamicDrawableState {
+    fn default() -> Self {
+        // Native layer constructor3927ec30: current1, leave0.2, over1.
+        Self { enabled: [false; 4], pairs: [[0.2, 1.]; 4], current: [1.; 4] }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SliderData {
     pub min: f32,
@@ -464,6 +480,7 @@ pub struct Widget {
     pub children: Vec<Id>,
     pub drawables: Vec<Id>,
     pub layer: Layer,
+    pub dynamic_drawable: DynamicDrawableState,
     pub enabled: bool,
     pub clickable: bool,
     pub text: Option<TextBlock>,
@@ -817,6 +834,20 @@ impl Tree {
         self.by_class.entry(w.class.clone()).or_default().push(id);
         if let Some(p) = parent {
             w.layer = self.widget(p).map(|pw| pw.layer).unwrap_or_default();
+            // Native ordinary initialization does not clone its parent's enable flags.
+            // Attachment3927e5d0 copies pairs from enabled ancestors, farther ones last.
+            let mut ancestor = Some(p);
+            while let Some(a) = ancestor {
+                if let Some(pw) = self.widget(a) {
+                    for layer in 0..4 {
+                        if pw.dynamic_drawable.enabled[layer] {
+                            w.dynamic_drawable.pairs[layer] = pw.dynamic_drawable.pairs[layer];
+                            w.dynamic_drawable.current[layer] = pw.dynamic_drawable.pairs[layer][0];
+                        }
+                    }
+                }
+                ancestor = self.get(a).parent;
+            }
         }
         self.raise_counter += 1;
         w.raise = self.raise_counter;
@@ -1279,6 +1310,7 @@ impl Widget {
             children: Vec::new(),
             drawables: Vec::new(),
             layer: Layer::Normal,
+            dynamic_drawable: Default::default(),
             enabled: true,
             text,
             title,

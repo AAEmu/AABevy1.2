@@ -4115,3 +4115,79 @@ first u32 persistent character ID (`39089d58`) and stores it at header `+8`
 (`39089d69`), namely object `+18`. Thus chat's `[[client+40]+18]` component
 is the selected persistent character ID, alongside the already traced world
 byte and the separate account-scoped generic Data storage.
+
+### Native chat alpha and owner drawable layers (2026-10-18)
+
+Global chat opacity now uses the native owner drawable-layer state rather than
+rewriting message tint or multiplying every ancestor's opacity. The application
+calls `lua::chat::set_alpha_options(&Lua, over_alpha, leave_alpha)` after saving
+its configuration. The raw f32 pair is retained for future windows and applied
+to existing windows, including an unchanged-pair refresh. The setter adds no
+native Lua methods, events or persistence policy.
+
+Native defaults `395072c0` are over `0.7`, leave `0.5`. Get/UpdateChatOption
+(`39459bd0`, `39458230`, `39459db0`) use those two numeric fields without
+clamping; missing or nonnumeric update fields retain the old value. Setter
+`39508b90` saves the eight bytes through `395019d0`, then refreshes live windows
+even when saving fails. This refresh snaps enabled layers to idle immediately;
+the next ordinary frame reapplies the current pointer state.
+
+Configuration `39512a40` assigns leave/over pairs recursively, then enables
+background, artwork and overlay on the chat window. Input/edit/selector/IME
+drawables use `1/1`; the four message scroll controls use `0/1` through the
+message override `39511cc0 -> 395118d0`. These controls are configured before
+the original message/window creation callbacks (`39512447..7b`,
+`39514714..29`). Content opacity remains one, preserving text, links and inline
+markup. Message metadata application `395125a0` retains the complete raw
+background RGBA but explicitly supplies alpha **one** to the background tint
+at `39512607`; global opacity is independent of that metadata alpha. The raw
+alpha remains available for the existing tab/divider decoration paths
+(`395118c0`, `395138ea`, `3950408f`).
+
+`UseDynamicDrawableState(layer, bool)` now implements the real binding.
+Native `3927d4b0` holds the current value when disabled and snaps/propagates
+the owner's present hover state when enabled. Original enter/leave handlers
+run before propagation (`3927ef10`); the per-frame chat update also reapplies
+state (`395130e0 -> 3927e500`), so later children settle even without a new
+pointer transition. Ordinary child initialization leaves its own enable flags
+false. Attachment `3927e5d0` copies enabled ancestors' pairs and initial idle
+values, with farther ancestors applied last. It does not clone enable flags.
+This preserves an original popup's ability to freeze a whole chat branch.
+
+The renderer applies only the drawable owner's layer factor. Native
+`3927af50 -> 3921a870/3921a8e0` pushes and restores that factor before child
+rendering, so parent and child factors are not multiplied together. Authored
+widget/drawable alpha and animation remain separate. The native fourth
+`overoverlay` state can be stored, but this backend still renders only its
+existing three drawable layers. Generic dynamic content state, native
+input-activation exceptions, blocked-layer flag producers, and the older
+toolkit tab-decoration visibility/alpha estimates remain separate gaps. This
+slice does not infer their behavior from hover or focus.
+
+`data/extract/aa-ui/chat_alpha_oracle.py` and
+`native-chat-alpha-oracle-20261018.json` execute **16 native groups** with the
+original PE hash: defaults, raw options and failed save, recursive pairs,
+hover/idle, disabled/reenabled state, callback order, late-child attachment,
+metadata alpha, and renderer stack restoration. The real child loops and
+numeric/state operations execute unchanged; external manager/save/render
+delivery and metadata/font/layout endpoints are captured. In particular,
+four raw metadata alphas (`0`, `0.8`, `-1`, `2`) survive storage while all four
+background draw tints use alpha one. Targeted instructions are recorded in
+`native-chat-alpha-source-20261018.txt`.
+
+`cargo check -p aa-ui`, the example build and **101 selected tests** pass,
+including six new alpha tests and the chat lifecycle, clipping, transport,
+text/link, input, tab layout, animation, native/HUD widget, list geometry and
+popup retirement suites. Tests exercise original physical pointer hover,
+scroll overrides, raw options, unchanged refresh, original callback order,
+disabled state, late children and preserved history. Two fresh original World
+runtimes restore four tabs while refreshing options inside `AAUI.ChatTabs`.
+
+The aa-dev example `native_chat_alpha` uses the original World/chat scripts at
+1280x720 and UI scale 0.85. Inspected captures
+`shots/aa-ui/native-chat-alpha-idle-20261018.png` (**255.5-265.2 FPS**) and
+`native-chat-alpha-hover-20261018.png` (**465.7-548.9 FPS**) show the background
+changing while text and links remain fully opaque. Both report zero Lua errors,
+no runtime warnings/errors, and self-close after the screenshot. These are
+deterministic source-contract captures; no matching real-client opacity
+reference is claimed.

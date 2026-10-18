@@ -97,7 +97,9 @@ fn apply_message_info(lua: &Lua, message: Id, info: &ChatTabInfo) {
             if let Some(drawable) = u.tree.drawable_mut(id)
                 && drawable.layer == DrawLayer::Background
             {
-                drawable.color = color;
+                // Native39512607 retains metadata alpha but applies an opaque RGB tint.
+                // Global leave/over opacity is the independent owner-layer factor.
+                drawable.color = [color[0], color[1], color[2], 1.];
             }
         }
     }

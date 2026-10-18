@@ -227,11 +227,13 @@ pub fn update_buttons(
             if !new_chain.contains(&o) {
                 lua::listbox::leave(lua, o);
                 call_handler(lua, o, "OnLeave", vec![]);
+                lua::chat::alpha::hover(lua, o, false);
             }
         }
         for &n in &new_chain {
             if !old_chain.contains(&n) {
                 call_handler(lua, n, "OnEnter", vec![]);
+                lua::chat::alpha::hover(lua, n, true);
                 lua::sound::over_sound(lua, n);
             }
         }
