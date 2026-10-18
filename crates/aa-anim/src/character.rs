@@ -332,6 +332,29 @@ pub fn spawn_character(
     assets: CharacterAssets,
     transform: Transform,
 ) -> Result<Entity> {
+    spawn_character_inner(commands, cry, clips, assets, transform, false)
+}
+
+/// Like [`spawn_character`], with the original face00 expression morphs overlaid on a verified
+/// compatible customisable head. Add [`crate::facial::FacialPlugin`] to play its matching FSQs.
+pub fn spawn_character_with_facial(
+    commands: &mut Commands,
+    cry: &mut CryAssets,
+    clips: &ClipLibrary,
+    assets: CharacterAssets,
+    transform: Transform,
+) -> Result<Entity> {
+    spawn_character_inner(commands, cry, clips, assets, transform, true)
+}
+
+fn spawn_character_inner(
+    commands: &mut Commands,
+    cry: &mut CryAssets,
+    clips: &ClipLibrary,
+    assets: CharacterAssets,
+    transform: Transform,
+    facial: bool,
+) -> Result<Entity> {
     let t_skeleton = aa_cry::prof::scope("char.skeleton");
     // one rig per skeleton file: clip bindings and skeleton-bound models are shared between the characters
     let rig = crate::pose::shared_rig(&assets.skeleton)?;
@@ -365,6 +388,16 @@ pub fn spawn_character(
                 continue;
             }
         };
+        if facial && part.kind == PartKind::Face {
+            match crate::facial::prepare_face(cry, &assets, part, &loaded) {
+                Ok(face) => {
+                    if let Ok(weights) = bevy::mesh::morph::MorphWeights::new(vec![0.0; face.targets.len()], None) {
+                        commands.entity(root).insert((face, weights));
+                    }
+                }
+                Err(error) => warn!("aa-anim: facial overlay for {}: {error}", part.path),
+            }
+        }
         let t_spawn = aa_cry::prof::scope("char.spawn_loaded");
         let e = spawn_loaded(commands, &part.path, &loaded, &options);
         drop(t_spawn);

@@ -237,6 +237,8 @@ impl Pose {
 /// A shared clip with its precomputed binding.
 #[derive(Clone, Debug)]
 pub struct BoundClip {
+    /// Normalized pak path when bound by [`crate::ClipLibrary`]. Raw in-memory clips have none.
+    pub source: Option<Arc<str>>,
     pub clip: Arc<Clip>,
     pub binding: Arc<ClipBinding>,
     pub options: SampleOptions,
@@ -245,7 +247,7 @@ pub struct BoundClip {
 impl BoundClip {
     pub fn new(rig: &Rig, clip: Arc<Clip>, options: SampleOptions) -> BoundClip {
         let binding = Arc::new(rig.bind_clip(&clip));
-        BoundClip { clip, binding, options }
+        BoundClip { source: None, clip, binding, options }
     }
 }
 

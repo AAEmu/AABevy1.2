@@ -16,6 +16,7 @@ pub mod cut;
 pub mod db;
 pub mod dye;
 pub mod face;
+pub mod facial;
 mod face_normal;
 pub mod lmg;
 pub mod morph;
@@ -25,7 +26,7 @@ pub use animator::{AnimPlugin, Animator, ClipLibrary, Playing, RandomIdle, spawn
 pub use caf::{Clip, Track};
 pub use cal::Cal;
 pub use cdf::Cdf;
-pub use character::{Character, CharacterAssets, CharacterDesc, Costume, PartAsset, PartKind, spawn_character};
+pub use character::{Character, CharacterAssets, CharacterDesc, Costume, PartAsset, PartKind, spawn_character, spawn_character_with_facial};
 pub use custom::Customization;
 pub use db::{GameDb, Gender, Race};
 pub use lmg::Lmg;

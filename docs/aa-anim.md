@@ -198,8 +198,9 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
    sub-mesh covers the exposed skin. Callers need no depth bias any more.
 4. **Morphs**: `FaceMaker::weights(modifier)` -> target weights -> vertex deltas applied to the face
    mesh on the CPU before the Bevy mesh is built (`MorphSet::apply`).
-5. **Animation**: `Animator` samples `fist_ac_stage_idle` (with `fist_ac_stage_rand_1` every few
-   loops) using the `.cal` position scale of the model, in `PostUpdate` before transform propagation.
+5. **Animation**: `Animator` samples the selected body clip, supports cross-fades and a masked upper-body
+   layer, and applies the model's `.cal` position scale before transform propagation. Spawn starts the
+   login idle (with its authored variant); `aa-client` selects locomotion and action clips in game.
 
 Face texture details (`face.rs`): decals are small BC3 images whose alpha is the shape, drawn at
 `(defaultX, defaultY)` (+ move offsets for the scar) on the 512x512 face texture. Eyebrow and deco
@@ -381,6 +382,89 @@ base skeleton (all 0.000 m), the face mesh bounds, the morph targets and the idl
 bind pose, and the customisation colours of the preset. `face_dump` lists / sizes pak files
 (`face_dump "game/objects/characters/ferre/female/face/*"`).
 
+## Authored facial sequences and eye blinks
+
+`facial::{FacialSequence, ExpressionLibrary, Curve}` reads the original XML `.fsq`/`.fxl` assets.
+The 1.2 pak has **894 FSQs, 9 FXLs, no FXXs**; a regression test parses every FSQ and FXL.
+Sequence channels sum their Hermite splines, keep signed values and tangent flags, and ignore editor
+folder/selection state. FXL controllers recurse into the original morphs through Catmull?Rom curves
+or a constant multiplier; a spline controller does not multiply its output by `Weight`.
+The engine's [facial animation description](https://www.cryengine.com/docs/static/engines/cryengine-5/categories/23756813/pages/23306439)
+and Crytek-authored [channel implementation](https://github.com/ValtoGameEngines/CryEngine/blob/release/Code/CryEngine/CryAnimation/FacialAnimation/FaceAnimSequence.cpp)
+and [effector implementation](https://github.com/ValtoGameEngines/CryEngine/blob/release/Code/CryEngine/CryAnimation/FacialAnimation/FaceEffector.cpp)
+were checked for these contracts; the regression samples come directly from the 1.2 pak.
+
+```rust
+app.add_plugins(aa_anim::facial::FacialPlugin); // alongside CryPlugin and AnimPlugin
+let root = aa_anim::spawn_character_with_facial(&mut commands, &mut cry, &clips, assets, transform)?;
+// The root has FacialAnimator and Bevy MorphWeights. Existing spawn_character stays unchanged.
+```
+
+The customisable face01 carries 91 static sliders; the compatible face00 carries 28 authored expression
+morphs, including each eyelid, brows and `m_a` / `m_b` / `m_e` / `m_f` / `m_i` / `m_o` / `m_u`.
+They can be combined without replacing a character's customisation, textures or skinning. The overlay
+proves matching neutral position/UV classes and matching oriented surface triangles, then checks that
+coincident source vertices have equal deltas for every morph. This matters for Nuian female: the
+exporter reorders vertices, splits seams differently, and combines source material subsets. It is
+not sufficient to compare vertex counts or directly copy the vertex indices. The verified remap is
+cached per head; subsequent characters do not repeat the geometry proof.
+
+Current coverage is **Nuian male/female, Elf male/female and Hariharan male**. Hariharan female and
+Ferre male/female have different neutral geometry from the available expression companions: they
+keep their existing face and log a rejection. No nearest-surface fitting or eyelid scaling is used.
+Playable heads use the supplied `animations/pc_expressions.fxl`; older race-specific FXLs contain
+prefixed morph names that do not match the current customisable heads/FSQs.
+
+`FacialAnimator` follows the current `Animator` CAF's matching `.cal` facial entry, using the same
+clock (including body pause, speed, random idle variants and one-shot return). Missing facial entries
+and a stopped body blend to neutral. `BoundClip::source` retains the normalized CAF path for this;
+raw in-memory bound clips have no source. Sequence changes blend for `fade_seconds` (default 0.08).
+For an independent authored expression/speech sequence:
+
+```rust
+face.play(FacialSequence::load("animations/nuian/male/facial/default.fsq")?, true);
+face.time = 3.5;       // seek, in original sequence seconds
+face.paused = true;   // hold a reference frame
+face.stop();          // blend to neutral
+face.follow_body();   // resume matching the body clip
+```
+
+The original stage idle includes the actual eye-close/brow curves, around 1.0?1.2 seconds in the
+Nuian male's three-second loop. No blink interval or closure geometry is invented. Morphs run on
+the GPU before skinning; frames update only the 28 weights. On this Bevy 0.20 GPU path, initial instance metadata can precede the morph descriptor. The
+plugin refreshes each new facial mesh's instance metadata for three frames, then removes its marker.
+No vertex uploads or ongoing instance refreshes occur. A uniquely named eight-second capture verified
+that the authored blink/speech persist after those initial frames; the no-refresh comparison stays neutral. Morph attributes cost roughly 4 MB per enabled head on the GPU;
+use the opt-in spawn for the player/nearby faces instead of enabling an entire distant crowd.
+
+Limits: only position deltas are supplied (normal/tangent deformation is not reconstructed).
+Bone effectors and skeleton-animation names are decoded/retained but the facial runtime does not
+apply bone effectors. Procedural/balance channels, sound scheduling, phoneme extraction/blending and
+camera paths are not played. Existing FSQ speech/viseme curves can play; this is not automatic
+voice-driven lip sync.
+
+Validation: **50 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
+curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
+controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/
+explicit-sequence transitions, all 903 facial XML assets, and safe transfer/rejection for all eight
+playable race/gender heads.
+
+```powershell
+cargo run -p aa-anim --example facial -- --shot shots/aa-anim/facial_nuian_male.png --shot-after 8
+# Repeat the copied executable with --race nuian --gender f; --live follows the body idle.
+```
+
+The example selects original keys for open stage idle, the authored blink peak and an A speech
+peak. Nuian female's default FSQ is neutral; its own `fist_ac_talk_11` supplies the speech frame. `reference/character_create/step2_nuian_male/real.png` contains a real
+closed-eye frame and was inspected as a geometry reference. The showroom uses different lighting
+and deliberately removes hair to make the lids visible; it does not recalibrate skin.
+Inspected final captures are `shots/aa-anim/facial_startup_refresh_verify.png` (male) and
+`shots/aa-anim/facial_startup_refresh_female.png`. At 1920x1080 with three frozen reference heads,
+male FPS was 259.1?260.4 after the first 311.0 sample (212.3 during capture); female was
+193.1?249.9 (240.9 during capture), with other builds sharing the machine. The copied executable is
+`data/extract/aa-anim/facial-qa.exe`. Use unique screenshot names when iterating: repeated reads of
+an overwritten path returned stale imagery during QA.
+
 ## Gaps
 
 * Skin shading: the engine's HumanSkin shader (SSS map, rim, `bright` / `middle` colours per light
@@ -394,9 +478,10 @@ bind pose, and the customisation colours of the preset. `face_dump` lists / size
   the chosen style (`hair_colors`).
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
   texture).
-* Only the idle clips play. Locomotion blending (`Lmg`), facial animation (`.fsq`) and lip sync, eye
-  blinks, dye choice for armour other than the default dye are not done. The `.dbh` track database
-  is not decoded (not needed).
+* `aa-client` selects locomotion and action clips; `Lmg` parsing and direction sampling are available.
+  Facial playback is opt-in and currently supports five heads (below). Hariharan female and Ferre
+  expression transfer, facial bone controllers, automatic voice/phoneme lip sync, and non-default
+  armour dye choice remain gaps. The `.dbh` track database is not decoded (not needed).
 * Costume specular: metal comes from the baked specular map; dielectric strength and (warm) tint
   from Bevy's `specular_texture` / `specular_tint_texture` (gold trims, leather streaks). Silver
   armour is still a bit duller than the captures.

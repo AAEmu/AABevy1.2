@@ -312,7 +312,7 @@ pub fn take_stats() -> (u32, u64) {
     (UPDATED.swap(0, Ordering::Relaxed), NANOS.swap(0, Ordering::Relaxed))
 }
 
-fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms: Query<&mut Transform>) {
+pub(crate) fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms: Query<&mut Transform>) {
     let started = Instant::now();
     let dt = time.delta_secs();
     // sample the poses of the characters that are due (in parallel: a crowd is hundreds of bones each)
@@ -395,11 +395,11 @@ impl ClipLibrary {
             Some(b) => b,
             None => {
                 let b = Arc::new(rig.bind_clip(&clip));
-                self.bindings.lock().unwrap().insert(key, b.clone());
+                self.bindings.lock().unwrap().insert(key.clone(), b.clone());
                 b
             }
         };
-        Ok(BoundClip { clip, binding, options })
+        Ok(BoundClip { source: Some(key.1.into()), clip, binding, options })
     }
 }
 
