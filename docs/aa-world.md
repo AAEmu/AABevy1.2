@@ -1984,7 +1984,8 @@ reads the depth prepass. It follows the engine's own two shaders, `watersurface.
   `water_refl` (1). The reflected colour is the material's **environment cube map** (`Environment` texture of the `.mtl`, nearly always
   `textures/cubemaps/camera_river_cubemap.dds`: a dark overcast panorama with trees, rock and a sun, sampled with the Cry space reflection
   vector, +Z is up) times the engine's `sun + sky` colour, and `water_env` (0.08, fitted) for the unit conversion. There are no screen space
-  reflections on ponds by default (the engine has none; `water_ssr=1` brings the two ray march back on top of the cube map),
+  reflections on ponds by default (the engine has none; `water_ssr=1` brings the two ray march back on top of the cube map). Native volume surfaces apply
+  `saturate(SoftIntersectionFactor*rayDepth)` once to final surface alpha (see shoreline follow-up),
 * sun glint `pow(dot(reflect(unclamped normal), sun), SunShinePow) x sun colour x SunMultiplier x water_sun`,
 * **foam** (`FOAM`): `textures/defaults/water_foam.dds` (256 x 256 DXT5, linear, wrapping) sampled twice, `world.xy x 0.3197 - a` and
   `world.yx x 0.2797 + a` with `a = fract(time x 0.025 x WavesSpeed)` plus the bump x 0.075, `lum = saturate((rgb1 + rgb2 summed over channels
@@ -2124,8 +2125,8 @@ surface alpha blends from that unshifted fogged background to the existing
 refracted/reflected/foam result. It retains the same render phase and does not
 add blended sorting or draw calls. Qualifying WaterSurface/BUMP_MAP styles use the
 native channels; the sea and unknown shaders retain their prior path. Native
-soft-intersection/full BRDF and separate native render-pass behavior remain
-existing approximations; this is not a claim of complete water compositing parity.
+soft-intersection is completed by the follow-up below; full BRDF and separate native
+render-pass behavior remain existing approximations; this is not a claim of complete water compositing parity.
 Material gains, exposure, inherited mip edits, sloped geometry and physical
 currents were not changed. There is no per-frame mesh work, no new images or
 materials, and one16-byte vertex color per water vertex. The same two placement
@@ -2164,6 +2165,69 @@ neither exposure nor authored lighting was tuned. All nine final runs exit zero,
 close their windows, and report no GPU errors. Evidence: ignored
 `lights/water-endpoint-source.txt`, `water-endpoint-inputs.txt`,
 `water-endpoint-reference-means.txt`, and `water-endpoints-*.log`.
+
+### Native shoreline surface alpha
+
+Original `watersurface.cfx::WaterSurfacePS` computes
+`softIntersect=saturate(SoftIntersectionFactor*rayDepth)`, multiplies `fA` by it,
+adds the fully shaded reflection/glint/foam result, and finally writes alpha
+`softIntersect*sqrt(saturate(IN.Color.a))*IN.Color.r`. General uses
+SrcAlpha/InvSrcAlpha. Softness therefore applies once to the **complete surface**,
+including refraction. The previous combined shader only masked reflection/glint/
+foam contributions, not fading refracted scene color with shoreline depth.
+For qualifying authored WaterSurface/BUMP_MAP volumes the source-backed factor now
+belongs at final compositing. The foam density's own source smoothstep still uses
+soft intersection; it is not an extra whole-surface alpha. Volume fog remains the
+independent linear endpoint blend established above.
+
+The sea/unknown-shader contribution path and all inherited material gains/mip
+calibration remain unchanged. No new uniforms, texture resources, draw calls,
+streaming workers or per-frame mesh work are introduced. The negative diagnostic
+mode only exposes the old soft-mask control in the example. This closes the
+specific soft-intersection placement gap, not the remaining native BRDF, full
+separate-pass/refraction contract or physical-current gaps.
+
+`water_motion --endpoints --composite --shallow` places actual opaque blue/red
+halves at vertical depths .05/.1/.4/1.2m. A known linear bump crosses that real
+scene-copy boundary. Independent CPU controls include perspective view direction,
+actual ray depths .05376/.10155/.40620/1.29035m, Fresnel, fog and the final alpha.
+This exercises refracted color rather than an algebraically equivalent constant
+background/reflection test. Inspected `native_shore_depth.png` yields
+`[84,90,121]`, `[97,91,119]`, `[150,99,103]`, `[198,114,77]`, within one RGB value
+of CPU controls. `--sea-control` preserves the old contribution-only formula and
+matches its separate CPU controls exactly. The four deep endpoint/fog/reflection
+regression triplets now also match exactly with view-angle-correct CPU depth.
+Numeric capture ranges are 233-409 FPS.
+
+`--world --shore` chooses an actual shallow point from the original pond volume
+and `TerrainQuery`: Cry `(15563.5,15361,127)`, vertical depth **.1627655m**, camera
+`(15558.5,15354,131.24843)`, hour10. `native_shore_pond_on.png` / `_legacy.png` were
+inspected: the shoreline difference is subtle with the real material's small
+refraction, unlike the deliberately discriminating GPU control. Normal-wave phase
+is held at zero in both views; no authored lighting/opacity values are tuned.
+One style mesh /8 vertices, zero pending/failed models; native 145-204 FPS /
+control 156-197 FPS. `native_shore_unload.png` verifies its mesh asset ID and water
+entity absent after actual camera movement; recorded 87-215 FPS during release on
+the shared GPU. Shared material/image cache lifetime is unchanged.
+
+The original combat05 camera/hour was recaptured in `native_shore_reference05.png`
+and inspected against the real frame. The same twelve water patches retain
+**6.2** mean RGB error, 194-222 FPS; scene/vegetation/phase and complete reflection/
+refraction limits remain. All seven deliverable runs exit zero, close their windows,
+and have no GPU errors. **166 library tests pass /9 existing ignored** and all
+examples check. Ignored `lights/water-shore-source.txt`, `water-shore-*.log` and
+`water-shore-reference-means.txt` retain proof and measured controls.
+
+**Bounded follow-up boundaries.** Eight distinct main-world cells (9,12 /10,12 /
+15,15 /17,17 /12,15 /21,8 /24,18 /18,14) contain 577 water volumes; every authored
+plane is exactly `(0,0,1)`. Native vertical-to-plane projection intentionally
+flattens the editor outline's varying Z. No real sloped-plane fixture was found,
+so generalized tilted-water support was not added. A separate ten-cell type14
+survey finds one DistanceCloud in 9,12 referencing empty material7. Native setter
+300B42A0 leaves holder+124 null, getter300B3C10 returns0 and Render300B4410 declines
+it. No visible cloud is invented for that inactive record. Audit artifacts are
+`water-slope-inputs.txt`, `water-slope-more.txt`, `placed-cloud-inputs.txt`,
+`placed-cloud-native.txt` and `placed-cloud-material.txt` under ignored `lights/`.
 
 **Water queries** (`water_query.rs`): `aa_world::WaterQuery` (a `Resource` the plugin inserts next to `TerrainQuery`, a clonable `Arc` handle
 like it, `&self`, `Send + Sync`) answers "is there water here":
