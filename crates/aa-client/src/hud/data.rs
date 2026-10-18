@@ -231,6 +231,7 @@ pub struct GameData {
     pub mail: super::mail::Tables,
     pub expansions: Vec<aa_net::bank::ExpansionRule>,
     pub(super) repair: super::repair::Tables,
+    pub(super) crafting: super::crafting::Tables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -549,6 +550,7 @@ impl GameData {
         data.mail = super::mail::Tables::load(&conn)?;
         data.expansions = super::expansion::load(&conn)?;
         data.repair = super::repair::Tables::load(&conn)?;
+        data.crafting = super::crafting::Tables::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }

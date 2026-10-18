@@ -192,6 +192,8 @@ pub struct Attrs {
     pub level: i32,
     /// Character attribute 91: native 60,000 ms base with the worn-item and buff modifiers.
     pub lung_capacity_ms: u32,
+    /// Worn-item/buff modifiers retained for native proficiency unit-attribute lookups.
+    pub(super) modifiers: Vec<(u8, bool, i32)>,
     /// `str, dex, sta, int, spi, fai`
     pub primaries: [i32; 6],
     /// `LevelDps` of the character formulas.
@@ -614,6 +616,7 @@ impl TipTables {
             scale: [0, 1, 2].map(|i| weapon[i].map_or(0, |w| w.3)),
             abilities: *abilities,
             details: false,
+            modifiers: mods,
         }
     }
 

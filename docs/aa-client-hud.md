@@ -1247,3 +1247,58 @@ The refreshed `target/debug/aa-client-play.exe` has SHA256
 `2FF8F4EE669002BD5FDB380ED1C6F5A1ACC69027616A5915B9ED2059F7A15580`.
 Its inspected `world-select.png` in this folder reaches the live Lane-bevy world list with
 zero script errors;394-439FPS before capture,314FPS during capture. The process exited normally.
+
+## Original recipe-book browsing (2026-10-18)
+
+The original Folio uses read-only database definitions:7,010 recipes,34 groups,273 categories,
+ordered material/product rows and localized English labels, loaded with the existing background
+HUD catalog. Native visible expert grades are the seven SHOW rows sorted by up_limit, not all31
+raw expert rows. Real recipes have at most eight materials; the getter has no invented12-row
+cap. Empty visible categories remain part of the catalog. Categories and ordinary recipe lists
+use native visible-order/ID sorting; search uses case-insensitive substrings without trimming,
+with the verified1..30 UTF-8-sequence length limit (Unicode scalar count for valid UTF-8).
+Material-name search and higher-tier links retain repeated matching material rows. The latter
+uses the source recipe's last product and each consuming recipe's first product, as native.
+
+Material quantities use received physical bag slots, raw grade requirements and the authored
+secure-item gate. Row.count is the total; item_info.stack is the first positive eligible
+representative's own stack. A synthesized descriptor has no owned stack and uses required grade,
+or native raw0 for grade-1, independently of item.fixed_grade. A missing material/product item
+definition invalidates that entire getter. Product success_rate remains the raw f32 rate, with
+no percentage normalization. The executable-count getter follows the source's unusual rule:
+labor limits only recipes with no materials; material recipes take the minimum material quotient.
+
+Received proficiency points/grades back GetMyActabilityInfo; unknown totals (including a
+downgrade ACK without points) remain unknown. Unit-attribute item/buff modifiers are retained
+for the displayed modifier and labor calculation. Native SSE f32 labor rounding/previous-grade
+threshold selection matches independent original-byte oracle cases. This does not yet fold
+the separate enclosing-owned-house decoration bonus or emit the complete proficiency event set.
+
+The native X2Item numeric-grade lookup now converts raw grades0/1 exactly once into the existing
+internal display-order tooltip path, returning the original raw itemGrade. Internal bag lookups
+retain their display-order convention. The complete native30-value item_impl names replace the
+coarse `etc` class: the original crafting Lua compares classes when inheriting product grades,
+so unrelated classes must remain distinct. Omitted-grade X2Item calls retain the existing path.
+
+Validation:150 client tests passed /24 ignored in1.46s. Exact isolated original-stage probes
+passed for recipe book, repair, expansion, sorting, mail and trade. The book probe physically
+clicks the original group button, category header and recipe row and confirms the detail item
+and hidden execution-button frame. Focused tests cover raw0/1 grade colors, representative
+stacks, missing descriptors, secure policies, raw rates, duplicate links and Unicode length.
+Logs live under `shots/hud/sol61-crafting/`. The inspected `recipe-details-final.png` shows the
+original Folio and real Wrapped Potion Rack recipe/workbench/material requirements;391–446 FPS,
+no script/GPU errors, normal screenshot exit. No same-screen original Folio reference exists
+in the current `reference/` tree; absolute font/layout calibration remains open.
+
+This milestone is recipe browsing. Natural workbench selection/current recipe maps, batch
+requests and observed cast presentation, proficiency tier/expansion controls, housing modifiers,
+special-currency material IDs and the separate playerflags2000 executable-count secure policy
+remain active work. Unknown secure policy conservatively excludes flagged stacks. Protected
+catalog exclusion/all-group sentinel IDs remain source boundaries. No bench context, craft
+completion, product, labor expenditure or successful request is fabricated by opening the book.
+
+The refreshed playable copy `target/debug/aa-client-play.exe` has SHA256
+`B85B7F63D8731CEFFBC82C7D3E4E4C39E8668FCBCE603D3F118BCCDC19314447`.
+Its inspected `world-select-final.png` in this folder reaches the live Lane-bevy world list,
+with no reported script errors and357–404 FPS. It exited after the screenshot. This verifies
+login/world listing; it does not resolve the existing lane game-connection stall.

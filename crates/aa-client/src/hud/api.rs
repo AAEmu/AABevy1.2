@@ -82,6 +82,7 @@ pub struct HudData {
     pub(super) breath: super::breath::View,
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
+    pub(super) crafting: super::crafting::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
     /// The loot window's rows and what it asked for (`loot.rs`).
@@ -132,6 +133,7 @@ impl Default for HudData {
             breath: Default::default(),
             expansion: Default::default(),
             repair: Default::default(),
+            crafting: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
@@ -226,6 +228,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
+    super::tips::install_native_lookup(lua, bridge)?;
     super::markers::load_script(lua)?;
     super::drag::load_script(lua)?;
     super::skillbook::load_script(lua)?;
@@ -240,6 +243,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::breath::install(lua, bridge)?;
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
+    super::crafting::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::sorting::install(lua, bridge)
 }
@@ -489,6 +493,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         bridge.borrow_mut().pvp = Default::default();
         bridge.borrow_mut().expansion.clear();
         bridge.borrow_mut().repair = Default::default();
+        bridge.borrow_mut().crafting = Default::default();
         return;
     };
     // the world renderer's clock (`ingame::sync_clock` copies the server's into it, `--hour` pins it: the HUD
@@ -517,6 +522,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     data.character_id = spawn.character().id;
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
+    super::crafting::refresh(world, &mut data);
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
