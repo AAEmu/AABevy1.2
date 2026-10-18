@@ -496,6 +496,14 @@ impl ItemTables {
         i32::from(v as u8)
     }
 
+    /// Durability metadata without calculating damage, modifiers or allocating tooltip stats.
+    pub fn durability(&self, template: u32, grade: u8) -> Option<(u8, bool)> {
+        let e = self.equip.get(&template)?;
+        let g = self.grades.get(&i32::from(grade)).or_else(|| self.grades.get(&0))?;
+        let maximum = self.max_durability(e, g) as u8;
+        (maximum != 0).then_some((maximum, e.repairable))
+    }
+
     /// The stats of an item of `template` at `grade` (`item_grades.id`) with the temper values of its detail block.
     pub fn stats(&self, template: u32, grade: i32, temper_physical: u16, temper_magical: u16) -> Option<ItemStats> {
         let e = self.equip.get(&template)?;

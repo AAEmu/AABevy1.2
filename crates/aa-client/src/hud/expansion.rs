@@ -239,7 +239,7 @@ fn auto_event(rt: &UiRuntime, bridge: &Shared, event: &Event) {
     }
 }
 
-fn update(
+pub(super) fn update(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,

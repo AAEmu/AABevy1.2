@@ -58,6 +58,7 @@ mod panels;
 mod party;
 mod plates;
 mod pvp;
+mod repair;
 mod quests;
 mod ring;
 mod session;
@@ -120,6 +121,11 @@ pub(crate) fn expansion_fixture() {
 #[allow(dead_code)]
 pub(crate) fn sorting_fixture() {
     sorting::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn repair_fixture() {
+    repair::fixture::run();
 }
 
 use aa_net::state::Player;
@@ -330,6 +336,7 @@ impl Plugin for HudPlugin {
         pvp::plugin(app);
         breath::plugin(app);
         expansion::plugin(app);
+        repair::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
         ring::plugin(app);

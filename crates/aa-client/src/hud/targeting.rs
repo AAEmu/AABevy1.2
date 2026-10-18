@@ -147,6 +147,7 @@ pub fn escape_key(
         }
         return;
     }
+    if super::repair::escape(&rt) { return; }
     if rt.holding() {
         rt.clear_cursor();
         return;
