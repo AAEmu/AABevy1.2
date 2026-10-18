@@ -33,6 +33,7 @@
 //! `HudKeyboardFocus.0` is true.
 
 mod alerts;
+mod battlefield;
 mod breath;
 mod buffs;
 pub(crate) mod api;
@@ -150,6 +151,9 @@ pub(crate) fn radar_fixture() { radar::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn proficiency_fixture() { crafting::expert_fixture(); }
+
+#[allow(dead_code)]
+pub(crate) fn battlefield_fixture() { battlefield::fixture::run(); }
 
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
@@ -358,6 +362,7 @@ impl Plugin for HudPlugin {
         combat::plugin(app);
         pvp::plugin(app);
         radar::plugin(app);
+        battlefield::plugin(app);
         breath::plugin(app);
         expansion::plugin(app);
         repair::plugin(app);

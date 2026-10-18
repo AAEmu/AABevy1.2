@@ -27,8 +27,9 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
-| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar, filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native computed pet stats/gear controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
-| Achievements, ranking and trials | Original achievement/ranking/usertrial/battlefield/racing UI groups load | Actual protocol/state/rewards, trial/jury/crime/prison, queue/match/score/racing flows |
+| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar with native received-level/equipment/buff health and mana maxima, filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Complete pet UnitInfo/modifier colors and gear controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
+| Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
+| Achievements, ranking and trials | Original achievement/ranking/usertrial/racing UI groups load | Actual protocol/state/rewards, trial/jury/crime/prison and racing flows |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
 | Options and UI toolkit | Applied account-local options/sound/key bindings and bag persistence; original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, graphics application, font calibration/layout persistence, listbox template/line-border variants and other native methods |
 
@@ -75,3 +76,26 @@ still work, but subsequent game connections time out. This is a validation block
 client transaction failure. No service restart or server edits were performed. Further live
 claims are gated off; root continues original-script, protocol and rendering checks. Auction
 settlement tail/reconnect and final social unblock/offline/restart live checks remain unverified.
+
+
+### Battlefield integration and fresh playable build (2026-10-18)
+
+The original recruiter/queue/cancel and full-qualifier invitation flow is connected to
+received native match phases, mapped clock, progress/score getters, results/roster,
+physical Leave and actual-load reset. Slot244 displays real tag204 skill metadata,
+first-matching-ID enable bytes and current ordinary HUD restrictions, including its
+dark overlay; native protected ordinary can-use and casting planner remain open.
+Scheduled-event start receipts supply the source result ratio with all raw fields
+retained; the lane has no sender. Its separate Pong/start clock origins remain an
+explicit live compatibility defect, not hidden with SC191.now substitution.
+
+Full client suite186 passed/32 ignored; all three original battlefield probes pass.
+Inspected invitation/play/results captures contain no runtime errors. Fresh main
+binary at `target/debug/aa-client-play.exe` includes previous CDF/pet/radar/proficiency,
+native mate-pool and this battlefield work. Live world-list capture confirms the
+lane list at369-417 FPS and zero script errors. Full-game parity and natural live
+matchmaking/casting remain unfinished. Details: `docs/aa-client-hud.md`.
+
+Parallel landed milestones include native task decoration before layout, statusbar
+fill drawable anchors/casting highlights, water endpoint/shoreline alpha and native
+per-instance vegetation color variation; those retain their own crate QA evidence.

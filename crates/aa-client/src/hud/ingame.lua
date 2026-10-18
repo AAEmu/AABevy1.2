@@ -6,6 +6,10 @@
 local function S() return HUD.state end
 local function isPlayer(unit) return unit == "player" or unit == S().unit_id end
 
+-- There is currently no active cutscene player. Original level-up effects query this count.
+-- Cutscene playback and its UI suppression remain an unimplemented feature.
+Movie.GetNumOfPlayingCutscenes = function() return 0 end
+
 -- Names (guild, family, mail ... windows read the limits while they are built). FALLBACK: the limits
 -- of the capture's "Enter 2-26 characters." until the server's name policy is on the wire.
 X2Util.GetNamePolicyInfo = function(self, kind)
@@ -25,9 +29,6 @@ end
 X2Dominion.GetPeaceTaxMoney = function(self, zoneId) return "" end
 X2Dominion.GetPeaceTaxAAPoint = function(self, zoneId) return "" end
 
--- Native battlefield manager3936d0d0 initial state. Queue protocol/state integration follows.
-X2BattleField.GetJoinedInfos = function() return 0, 0, -1 end
-X2BattleField.IsInInstantGame = function() return false end
 
 -- Units --------------------------------------------------------------------------------------------------
 -- The data of a unit the scripts ask about: the player (HUD.state) or the target (HUD.target).
@@ -81,6 +82,11 @@ end
 X2Unit.GetUnitType = function(self, unit)
   local kind, detail = self:GetUnitTypeString(unit)
   return detail or kind
+end
+-- Native394c0f40 requires raw kind1 (Npc), not the broader UI "npc" category.
+X2Unit.GetNpcTypeIndex = function(self, unit)
+  local t = U(unit)
+  if t ~= nil and t.detail == "npc" and t.npc_type ~= nil then return t.npc_type end
 end
 X2Unit.GetUnitGradeById = function(self, id)
   local t = HUD.target
