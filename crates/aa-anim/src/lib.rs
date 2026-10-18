@@ -17,6 +17,7 @@ pub mod db;
 pub mod dye;
 pub mod face;
 pub mod facial;
+pub mod hair;
 mod face_normal;
 pub mod lmg;
 pub mod morph;
