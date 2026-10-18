@@ -451,22 +451,60 @@ face.follow_body();   // resume matching the body clip
 
 The original stage idle includes the actual eye-close/brow curves, around 1.0-1.2 seconds in the
 Nuian male's three-second loop. No blink interval or closure geometry is invented. Morphs run on
-the GPU before skinning; frames update only the 28 or 33 weights. On this Bevy 0.20 GPU path, initial instance metadata can precede the morph descriptor. The
+the GPU before skinning; frames update only the 28 or 33 GPU weights. Bone channels write joint
+transforms before Bevy transform propagation. On this Bevy 0.20 GPU path, initial instance metadata can precede the morph descriptor. The
 plugin refreshes each new facial mesh's instance metadata for three frames, then removes its marker.
 No vertex uploads or ongoing instance refreshes occur. A uniquely named eight-second capture verified
 that the authored blink/speech persist after those initial frames; the no-refresh comparison stays neutral. Morph attributes cost roughly 4-6 MB per enabled head on the GPU;
 use the opt-in spawn for the player/nearby faces instead of enabling an entire distant crowd.
 
-Limits: only position deltas are supplied (normal/tangent deformation is not reconstructed).
-Bone effectors and skeleton-animation names are decoded/retained but the facial runtime does not
-apply bone effectors. Procedural/balance channels, sound scheduling, phoneme extraction/blending and
+The original **1.2 expression stream is XYZ-only**. Its compiled internal/external morph records
+contain vertex IDs and three position floats. The original `bin32/cryanimation.dll` function
+`CSkinInstance::AddMorphTargetsToVertexBuffer_Verified` at `31502200` accumulates position deltas and
+uploads exactly 12 bytes per vertex to the GPU morph stream (`MorphCopyToGPU`). The original normal
+and tangent basis continues through skinning; no authored expression normal/tangent deltas are
+present in these records. Later CryEngine's masked, eight-weight software tangent-recalculation
+path is a separate contract and is not used to invent a shading correction for these heads.
+
+Bone effectors now follow the original client contract in `facial/bone.rs`:
+
+* `31591680` reads radian XYZ offsets (`Rz * Ry * Rx`). Attachment names bind only to actual
+  skeleton joints, case-insensitively; missing joints are skipped.
+* Channel/controller contributions sum at each effector's face-state index first. Bone effectors
+  compose in their original `AllEffectors` order. `31599C60` linearly weights the quaternion toward
+  identity, conjugates for negative weights, and extrapolates beyond unit weights. The individual
+  weighted quaternions remain unnormalised until `3159AA40` has composed all of them.
+* `3159A3C0` rotates the resulting model-space translation by the inverse default-parent rotation.
+  `SkeletonPostProcess` (`3154B4B0`) calls `31599DC0` to reset active joints to the master default
+  local pose, then `31599E80` right-multiplies that pose by the displacement. Thus active facial
+  joints use the default pose; inactive joints retain the current body pose.
+* Each evaluation restores the previous facial joints from the stored `Animator` pose before
+  applying new offsets. Body pause, reduced update intervals, no current body clip, stop/fades and
+  library changes cannot accumulate offsets on last frame's transforms. Morph/bone weights share
+  the same sequence clock and interruption fade.
+
+These numeric regressions execute the original DLL bytes in an isolated x86 Unicorn process,
+including its `3166F5F0` SSE-mask CRT initializer. A fresh one-file `aa-pak` extraction matches
+SHA256 `c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f`.
+The bounded decompilations, `oracle.py` and `oracle.json` remain under
+`data/extract/aa-anim/facial/native/`; golden tests cover signed/extrapolated weights, noncommuting
+ordered composition, parent-space translation and default-pose multiplication.
+
+Playable face CALs specify `animations/pc_expressions.fxl` and retain that selection. An explicit
+library assignment (for example `face.library = ExpressionLibrary::load(path)?`) also rebinds bones.
+The older Ferre FXL's `fist_em_cry` eye curves are real, but both root face00 and current face01
+assign **zero vertices** to its `eye_left_bone` / `eye_right_bone` joints. Their bone transforms
+evaluate accurately without visible gaze movement; the original skin weights stay unchanged.
+
+Limits: skeleton-animation names are retained but are not started by FSQs.
+Procedural/balance channels, sound scheduling, phoneme extraction/blending and
 camera paths are not played. Existing FSQ speech/viseme curves can play; this is not automatic
 voice-driven lip sync.
 
-Validation: **53 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
+Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/
-explicit-sequence transitions, all 903 facial XML assets, and exact transfer for all eight
+explicit-sequence transitions, native bone arithmetic and lifecycle, all 903 facial XML assets, and exact transfer for all eight
 playable race/gender heads.
 
 ```powershell
@@ -493,6 +531,18 @@ female settled at 245.4-261.0 FPS (184.9 during capture), Ferre male at 198.8-26
 (243.5 during capture), and Ferre female at 209.2-243.6 FPS (196.5 during capture).
 Ferre female's authored blink leaves a narrow eye sliver; the original deltas are retained.
 
+Bone QA uses the same `facial` example: `--head` previews the original PC library's `head_x`
+effector at -1, 0 and +1 (authored -50/0/+50 degree offsets). The diagnostic's held scalar keys
+are explicit reference inputs, not an original FSQ head-motion claim. Inspected eight-second
+capture `shots/aa-anim/facial_bone_head_reference.png` shows the skinned head turning correctly,
+at 244.4-254.7 FPS (237.9 during capture). `--bones` instead plays the original Ferre male cry
+FSQ with its older FXL at 0 / 0.239096 / 1.67368 seconds; the visually neutral eyes in
+`facial_bone_ferre_cry.png` reflect the zero eye-joint skin weights described above (225.3-268.4 FPS,
+194.2 during capture). Default-library regression captures `facial_bones_default_nuian_verified.png`
+and `facial_bones_default_ferre_verified.png` still show the original open/blink/speech poses after
+eight seconds: Nuian 238.6-250.1 FPS after the first 311.2 sample (244.3 during capture), Ferre
+female 193.8-250.9 FPS (235.5 during capture). The three-frame startup refresh remains unchanged.
+
 ## Gaps
 
 * Skin shading: the engine's HumanSkin shader (SSS map, rim, `bright` / `middle` colours per light
@@ -507,8 +557,8 @@ Ferre female's authored blink leaves a narrow eye sliver; the original deltas ar
 * The face texture is a CPU bake per character at spawn; the right pupil colour is ignored (one eye
   texture).
 * `aa-client` selects locomotion and action clips; `Lmg` parsing and direction sampling are available.
-  Facial playback is opt-in and supports all eight heads (above). Facial bone controllers,
-  automatic voice/phoneme lip sync, and non-default
+  Facial playback is opt-in and supports all eight heads and authored bone controllers (above).
+  Automatic voice/phoneme lip sync and non-default
   armour dye choice remain gaps. The `.dbh` track database is not decoded (not needed).
 * Costume specular: metal comes from the baked specular map; dielectric strength and (warm) tint
   from Bevy's `specular_texture` / `specular_tint_texture` (gold trims, leather streaks). Silver

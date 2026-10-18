@@ -4,6 +4,7 @@
 //! expression values to morphs through Catmull–Rom curves (or a constant multiplier).
 //! Neither channel folders nor the editor's selected/expanded flags affect playback.
 
+mod bone;
 mod curve;
 mod remap;
 mod runtime;
@@ -127,6 +128,9 @@ pub struct Effector {
 #[derive(Clone, Debug, Default)]
 pub struct ExpressionLibrary {
     pub effectors: HashMap<String, Effector>,
+    // Native face-state indices are assigned while reading AllEffectors. Rotations on the
+    // same joint do not commute; HashMap iteration must never choose their composition order.
+    bone_order: Vec<String>,
 }
 
 impl ExpressionLibrary {
@@ -137,6 +141,7 @@ impl ExpressionLibrary {
             return Err(Error::Format("expected ExpressionLibrary".into()));
         }
         let mut effectors = HashMap::new();
+        let mut bone_order = Vec::new();
         if let Some(all) = root.children().find(|n| n.has_tag_name("AllEffectors")) {
             for node in all.children().filter(|n| n.has_tag_name("Effector")) {
                 let name = name(node, "Name");
@@ -151,6 +156,9 @@ impl ExpressionLibrary {
                     },
                     other => return Err(Error::Format(format!("facial effector type {other}"))),
                 };
+                if matches!(kind, EffectorKind::Bone { .. }) && !bone_order.contains(&name) {
+                    bone_order.push(name.clone());
+                }
                 effectors.insert(
                     name.clone(),
                     Effector {
@@ -180,7 +188,7 @@ impl ExpressionLibrary {
                 }
             }
         }
-        Ok(Self { effectors })
+        Ok(Self { effectors, bone_order })
     }
 
     pub fn load(path: &str) -> Result<Arc<Self>> {
@@ -189,8 +197,13 @@ impl ExpressionLibrary {
     }
 
     /// Evaluates authored channels into morph weights in `targets` order, without allocations.
-    /// Bone effectors are retained in the library but do not become morph displacements.
     pub fn sample_morphs(&self, sequence: &FacialSequence, time: f32, targets: &[String], out: &mut [f32]) {
+        self.sample_weights(sequence, time, targets, out);
+    }
+
+    /// Evaluates both morph and bone leaf weights. Contributions to the same bone effector
+    /// sum before quaternion weighting, as in the native face state.
+    pub fn sample_weights(&self, sequence: &FacialSequence, time: f32, targets: &[String], out: &mut [f32]) {
         out.fill(0.0);
         for channel in &sequence.channels {
             self.apply(&channel.name, channel.sample(time), targets, out, 0);
@@ -203,7 +216,7 @@ impl ExpressionLibrary {
         }
         let Some(effector) = self.effectors.get(name) else { return };
         match effector.kind {
-            EffectorKind::Morph => {
+            EffectorKind::Morph | EffectorKind::Bone { .. } => {
                 if let Some(i) = targets.iter().position(|s| s.eq_ignore_ascii_case(name)) {
                     if let Some(w) = out.get_mut(i) {
                         *w += input;
@@ -219,7 +232,6 @@ impl ExpressionLibrary {
                     self.apply(&controller.effector, value, targets, out, depth + 1);
                 }
             }
-            EffectorKind::Bone { .. } => {}
         }
     }
 }
