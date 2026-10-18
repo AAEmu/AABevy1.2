@@ -2889,3 +2889,64 @@ zero Lua errors and no WARN/ERROR, and its process 25604 closed automatically.
 The spawn reference was used for HUD context; it has no matching passive-slot
 sample. The fixture colors intentionally multiply the authored Snail image
 font, rather than replacing it with a guessed font or recolored asset.
+
+### Constant equipment-button skill cooldowns (2026-10-18)
+
+Original `chracterinfo/equipped_item.lua` sets an equipped item's icon and
+then calls its constant button's `SetSkill(tooltip.skillType or 0)`. That
+native was a stub. It now records a cooldown identity without creating a
+slot accessor or changing the existing item icon and original click handler.
+The app supplies `AAUI.SkillCooldown(rawId)` independently of learned-skill
+metadata: two u32 millisecond values `(remaining, total)` for an existing
+descriptor, or nil/no results for an unknown descriptor. Known descriptors
+without an actor or timer return `(0, 0)`.
+
+Native setter `392325b0` -> `39280c20` writes skill `+5cc`, invalid item
+identity `+5c8`, and clears ready flag `+5d0`. Initializer `39284865..86`
+sets invalid identities and ready=false; a read-only, module-verified read
+of original process 48924 confirmed both invalid globals `39d2e568` and
+`39d2e57c` are zero. Virtual update `39281df0` resolves the descriptor
+through `396f6390`, then calls `393919f0` -> current actor's cooldown
+manager -> `3989a3e0`. Active timers emit `OnContentUpdated(self,
+"skill_cooldown", remaining, total)` each visible update, clearing the
+ready flag. Zero remaining emits once and sets ready=true. Missing
+descriptors emit zeros while ready=false without setting it; rebinding,
+including the same ID, resets it. Counts reach Lua through native f32
+conversion, including the original rounding of large unsigned values.
+The unchanged `AddOnUpdateConstantCooldown` callback owns `SetCoolDown`
+and its original completion animation.
+
+The timer-selection contract is also source-closed. `3989a3e0` passes
+descriptor byte `+dc` to `3989a290`. If false, global remaining/total at
+manager `+8/+c` is the first candidate; otherwise the initial pair is zero.
+The getter then scans every ordered descriptor tag (`+238..23c`) against
+received tag rows and finally direct skill rows. A candidate replaces the
+winner only when its unsigned remaining time is strictly greater, so ties
+retain the global/earlier-tag/earlier-row total. `LoadSkillDescs` SQL at
+`39a06a90` reads column 61, `ignore_global_cooldown`, into `+dc` at
+`39731f04..24`. `LoadSkillTagsRelation` (`395d15a0`) executes exactly
+`SELECT skill_id, tag_id FROM tagged_skills` and appends each matching tag
+to `+238` in SQL result order (`395d166a..1720`). This vector is all generic
+skill-tag memberships, not only `skills.cooldown_tag_id`.
+
+Source artifacts: `data/extract/aa-ui/native-cooldown-constant-source-20261018.txt`,
+`native-cooldown-manager-source-20261018.txt`,
+`native-cooldown-loader-full-20261018.txt`, and
+`native-cooldown-tag-loader-20261018.txt`. Native `SetItem` descriptor
+selection and the global update-suppression byte `3a5a4db8` remain outside
+this milestone. Local-cast timer production is being audited separately;
+the new hook does not invent a cast or derive timers from this widget.
+
+Validation: `cargo check -p aa-ui` and **48 selected tests** passed
+(constant cooldown, animation, original natives/slot state and statusbar).
+The five constant-button tests cover constructor/unbound behavior,
+active/ready/missing-descriptor transitions, rebinding, hidden widgets,
+u32 identity/f32 callback conversion, and the actual original equipment
+button constructor and cooldown handler with preserved item texture/click.
+Built and ran the copied `native_constant_cooldown` aa-dev example with
+`--shot shots/aa-ui/native-constant-cooldown-20261018.png --shot-after 8`.
+Inspected that unique capture: original item 4045 icons show 8 seconds,
+3 seconds, and ready. The run logged **188.8-274.7 FPS** during shared
+builds, zero Lua errors and no WARN/ERROR; process 46448 self-closed.
+The spawn reference supplies HUD context but has no matching equipped-item
+cooldown sample, so a timed pixel match is not claimed.

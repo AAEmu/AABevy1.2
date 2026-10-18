@@ -398,6 +398,8 @@ pub struct ButtonData {
     pub checked: bool,
     pub checked_bg: Option<Id>,
     pub disabled_checked_bg: Option<Id>,
+    /// `cooldownconstantbutton:SetSkill` observes timers without binding a clickable slot.
+    pub cooldown_skill: Option<crate::lua::slot::ConstantSkillCooldown>,
 }
 
 /// Native list control state.

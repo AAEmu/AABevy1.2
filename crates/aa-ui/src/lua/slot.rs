@@ -47,6 +47,9 @@
 //! `button:SetCoolDown(remainMs, totalMs)` (the scripts call it from `OnContentUpdated(self,
 //! "item_cooldown" | "skill_cooldown", remain, total)`; `SetCoolDown(0, 0)` clears it);
 //! `SetCoolDownMask` / `SetCoolDownMaskCoords` (always the stock mask) are accepted and ignored.
+//! `cooldownconstantbutton:SetSkill(rawId)` observes `AAUI.SkillCooldown(rawId)`, which returns
+//! `(remaining_ms, total_ms)` for an existing descriptor, or nil for an unknown descriptor.
+//! This is independent of `SkillContent` and never replaces the item's icon or click action.
 //!
 //! [`refresh_slots`] asks again for every bound slot (the app calls it when bars change). The slot
 //! creates its icon drawable itself (`slot.icon`, also `slot.gradeIcon`, inset 1 like the
@@ -86,6 +89,13 @@ pub struct Cooldown {
     pub total_ms: f32,
     /// What the last frame update saw (sweep step, label): the tree is touched when it changes.
     pub drawn: (i32, String),
+}
+
+/// Native constant-button skill identity and its one-shot ready notification (+5cc/+5d0).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConstantSkillCooldown {
+    pub skill_type: u32,
+    pub ready_notified: bool,
 }
 
 /// Widgets with a running cooldown, id -> true (so the per-frame update does not scan the whole
@@ -846,4 +856,101 @@ pub(crate) fn cooldown_button_methods(lua: &Lua, m: &Table) -> mlua::Result<()> 
         m.raw_set(name, method(lua, |_, _, _| none())?)?;
     }
     Ok(())
+}
+
+pub(crate) fn constant_cooldown_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    m.raw_set(
+        "SetSkill",
+        method(lua, |lua, id, a| {
+            // 39280c20 only changes the cooldown identity and clears the ready flag.
+            // EstablishSkill would also replace the equipment icon and native click accessor.
+            if let Some(button) = ui(lua).tree.widget_mut(id).and_then(|w| w.button.as_mut()) {
+                button.cooldown_skill = Some(ConstantSkillCooldown {
+                    skill_type: match a.v(1) {
+                        Value::Integer(n) => n as u32,
+                        Value::Number(n) => n as u32,
+                        _ => 0,
+                    },
+                    ready_notified: false,
+                });
+            }
+            none()
+        })?,
+    )
+}
+
+/// Constant-button virtual update 39281df0. The app resolves the descriptor and native
+/// global/tag/skill winner; this layer delivers the original Lua callback lifecycle.
+pub(crate) fn update_constant_cooldowns(lua: &Lua) {
+    let ids = ui(lua).tree.of_class("cooldownconstantbutton");
+    for id in ids {
+        let skill_type = {
+            let u = ui(lua);
+            if !u.tree.visible(id) {
+                continue;
+            }
+            let Some(state) = u
+                .tree
+                .widget(id)
+                .and_then(|w| w.button.as_ref())
+                .and_then(|b| b.cooldown_skill.as_ref())
+            else {
+                continue;
+            };
+            state.skill_type
+        };
+        let result = match hook(lua, "SkillCooldown") {
+            Some(f) => match f.call::<(Option<u32>, Option<u32>)>(skill_type) {
+                Ok((Some(remain), Some(total))) => Some((remain, total)),
+                Ok(_) => None,
+                Err(e) => {
+                    bevy::log::warn!("aa-ui: AAUI.SkillCooldown: {e}");
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let notify = {
+            let mut u = ui(lua);
+            if !u.tree.visible(id) {
+                continue;
+            }
+            let Some(state) = u
+                .tree
+                .widget_mut(id)
+                .and_then(|w| w.button.as_mut())
+                .and_then(|b| b.cooldown_skill.as_mut())
+            else {
+                continue;
+            };
+            if state.skill_type != skill_type {
+                continue;
+            }
+            match result {
+                // An absent descriptor emits zeros every update without setting +5d0.
+                None => (!state.ready_notified).then_some((0, 0)),
+                Some((0, total)) if !state.ready_notified => {
+                    state.ready_notified = true;
+                    Some((0, total))
+                }
+                Some((0, _)) => None,
+                Some(pair) => {
+                    state.ready_notified = false;
+                    Some(pair)
+                }
+            }
+        };
+        if let Some((remain, total)) = notify {
+            super::call_handler(
+                lua,
+                id,
+                "OnContentUpdated",
+                vec![
+                    Value::String(lua.create_string("skill_cooldown").unwrap()),
+                    Value::Number((remain as f32) as f64),
+                    Value::Number((total as f32) as f64),
+                ],
+            );
+        }
+    }
 }
