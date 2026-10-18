@@ -288,3 +288,12 @@ impl Rankings {
 
 #[cfg(test)]
 mod tests;
+
+
+/// Explicit ranking requests; tab selection, local locks and readiness remain the caller's policy.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum RankingCommand { RequestPlayerRecords,RequestSnapshots{rank_id:u32} }
+impl RankingCommand {
+ pub fn opcode(self)->u16 {match self {Self::RequestPlayerRecords=>0x12f,Self::RequestSnapshots{..}=>0x130}}
+ pub(crate) fn write(self,w:&mut crate::wire::Writer){if let Self::RequestSnapshots{rank_id}=self{w.u32(rank_id);}}
+}

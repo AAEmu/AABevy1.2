@@ -279,6 +279,7 @@ pub enum Command {
     Trial { character_id:u32,command:crate::TrialCommand },
     Bounty { character_id:u32,command:crate::BountyCommand },
     QueryCharacterName { character_id:u32,requested_id:u32 },
+    Ranking { character_id:u32,command:crate::RankingCommand },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -544,6 +545,8 @@ pub enum Event {
     Crime(crate::crime::CrimeEvent),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
+    RankingRequested { character_id:u32,command:crate::RankingCommand },
+    RankingRequestRejected { character_id:u32,command:crate::RankingCommand,message:String },
     CharacterName(crate::CharacterName),
     CharacterNameRequested { character_id:u32,requested_id:u32 },
     CharacterNameRequestRejected { character_id:u32,requested_id:u32,message:String },
@@ -725,6 +728,7 @@ struct Session {
     server_clock: std::cell::RefCell<crate::clock::ServerClock>,
     received_inventory: std::cell::RefCell<crate::state::Inventory>,
     received_trials: std::cell::RefCell<crate::Trials>,
+    received_rankings:std::cell::RefCell<crate::Rankings>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -778,6 +782,7 @@ impl Session {
             server_clock: Default::default(),
             received_inventory: Default::default(),
             received_trials: Default::default(),
+            received_rankings:Default::default(),
             waiting: None,
         }
     }
@@ -825,6 +830,7 @@ impl Session {
         if matches!(e,Event::Kicked{..}) {*self.received_inventory.borrow_mut()=Default::default();}
         self.received_inventory.borrow_mut().apply(&e);
         self.received_trials.borrow_mut().apply(&e);
+        self.received_rankings.borrow_mut().apply(&e);
         self.server_clock.borrow_mut().apply(&e);
         self.advance_battlefield_clock();
         self.battlefield.borrow_mut().apply_with_time(&e,self.server_clock.borrow().mapped_now());
@@ -1078,6 +1084,14 @@ impl Session {
                 } else {
                     self.emit(Event::ExpeditionRequestRejected { character_id, command, message: "expedition request was not sent".into() });
                 }
+            }
+            Command::Ranking{character_id,command}=>{
+                let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id){Some("ranking request belongs to an inactive character")}
+                else if let crate::RankingCommand::RequestSnapshots{rank_id}=command {let cache=self.received_rankings.borrow();if cache.character_id!=Some(character_id)||!cache.by_id.contains_key(&rank_id){Some("ranking snapshot requires an actual received board for this character")}else{None}}
+                else {None};
+                if let Some(message)=invalid {self.emit(Event::RankingRequestRejected{character_id,command,message:message.into()});}
+                else if self.send_game(game::ClientMsg::Ranking(command)).await {self.emit(Event::RankingRequested{character_id,command});}
+                else {self.emit(Event::RankingRequestRejected{character_id,command,message:"ranking request was not sent".into()});}
             }
             Command::QueryCharacterName{character_id,requested_id}=>{
                 let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id) {Some("character-name request belongs to an inactive character")}
@@ -4689,6 +4703,23 @@ mod tests {
       s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));assert!(s.pending_names.contains(&7));
       for name in [b"A".to_vec(),b"B".to_vec(),b"B".to_vec()]{let row=crate::CharacterName{character_id:7,name};s.stream_msg(Ok(stream::ServerMsg::CharacterName(row.clone())));assert!(matches!(events.try_recv(),Ok(Event::CharacterName(actual)) if actual==row));assert!(!s.pending_names.contains(&7));}
       s.stream.as_mut().unwrap().shutdown().await;s.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::CharacterNameRequestRejected{..})));assert!(!s.pending_names.contains(&7));
+    }
+
+    #[tokio::test]
+    async fn ranking_requests_received_board_identity_loopback_and_no_optimism(){
+      use crate::{RankingCommand as C,RankingEvent,RankCharacterRow};
+      async fn frame(peer:&mut tokio::net::TcpStream)->Vec<u8>{let n=peer.read_u16_le().await.unwrap();let mut bytes=vec![0;n as usize];peer.read_exact(&mut bytes).await.unwrap();bytes[4..].to_vec()}
+      let(tx,mut events)=unbounded_channel();let mut s=Session::new(tx,ClientOptions::default());s.phase=Phase::InWorld;s.selected=42;let mut header=CharacterState::default();header.character.id=42;s.selected_state=Some(header.clone());s.emit(Event::CharacterSelected(Box::new(header)));while events.try_recv().is_ok(){}
+      s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::RankingRequested{..}|Event::Ranking(_)));rejected|=matches!(e,Event::RankingRequestRejected{..});}assert!(rejected);
+      let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();s.game=Some(connection.unwrap());
+      s.command(Command::Ranking{character_id:42,command:C::RequestSnapshots{rank_id:7}}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));
+      let row=RankCharacterRow{account_id:1,account:vec![],character_id:42,rank_id:7,world_id:1,v1:0,raw_sum_v1:0,v2:0,raw_sum_v2:0,recorded_raw:0};s.emit(Event::Ranking(RankingEvent::Personal{type_id:1,error:0,ack_time_raw:123,count:1,rows:vec![row]}));assert!(matches!(events.try_recv(),Ok(Event::Ranking(_))));
+      for command in [C::RequestPlayerRecords,C::RequestSnapshots{rank_id:7}]{let before=s.received_rankings.borrow().clone();s.command(Command::Ranking{character_id:42,command}).await;let mut expected=command.opcode().to_le_bytes().to_vec();expected.extend(game::ClientMsg::Ranking(command).encode_body());assert_eq!(frame(&mut peer).await,expected);assert!(matches!(events.try_recv(),Ok(Event::RankingRequested{command:c,..})if c==command));assert_eq!(*s.received_rankings.borrow(),before);}
+      s.command(Command::Ranking{character_id:41,command:C::RequestPlayerRecords}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));
+      s.selected_state.as_mut().unwrap().character.id=41;s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));s.selected_state.as_mut().unwrap().character.id=42;
+      s.phase=Phase::CharacterSelect;s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));s.phase=Phase::InWorld;
+      s.received_rankings.borrow_mut().character_id=Some(41);s.command(Command::Ranking{character_id:42,command:C::RequestSnapshots{rank_id:7}}).await;assert!(matches!(events.try_recv(),Ok(Event::RankingRequestRejected{..})));
+      assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());s.game.as_mut().unwrap().shutdown().await;s.command(Command::Ranking{character_id:42,command:C::RequestPlayerRecords}).await;let mut rejected=false;while let Ok(e)=events.try_recv(){assert!(!matches!(e,Event::RankingRequested{..}|Event::Ranking(_)));rejected|=matches!(e,Event::RankingRequestRejected{..});}assert!(rejected);
     }
 
 }

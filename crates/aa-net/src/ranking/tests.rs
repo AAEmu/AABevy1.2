@@ -300,3 +300,8 @@ fn empty_map_native_error_precedes_ack_assignment_dispatch_view() {
     assert_eq!(views[1].1.ack_time_raw, Some(123));
     assert_eq!(cache, views[1].1);
 }
+
+#[test]
+fn ranking_request_native_lane_wire_goldens(){
+ for (command,opcode,body) in [(RankingCommand::RequestPlayerRecords,0x12f,vec![]),(RankingCommand::RequestSnapshots{rank_id:0},0x130,vec![0,0,0,0]),(RankingCommand::RequestSnapshots{rank_id:u32::MAX},0x130,vec![255,255,255,255])]{let packet=crate::game::ClientMsg::Ranking(command);assert_eq!(packet.opcode(),opcode);assert_eq!(packet.encode_body(),body);}
+}
