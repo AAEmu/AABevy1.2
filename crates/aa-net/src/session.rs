@@ -215,6 +215,9 @@ pub enum Command {
     /// Select a unit (`obj_id`) as the target, 0 clears the target. The server answers with
     /// `TargetChanged` for the player (also to the sender).
     Target { obj_id: u32 },
+    /// Request explicit Bloodlust state; the native toggle sends the inverse of current state.
+    /// A local send is not an acknowledgement and never changes CombatStatus.
+    SetForceAttack { on: bool },
     /// Cast `skill_id` (a skill the character knows, `Unit::skills`) at the unit `target_obj_id`
     /// (0 = the player itself, for self buffs and heals). The answer is `SkillStarted`: with a
     /// non zero `result` when the server refuses.
@@ -395,6 +398,9 @@ pub enum Event {
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
     ForceAttackSet { obj_id: u32, on: bool },
+    /// Successful local socket write only; wait for ForceAttackSet to update received state.
+    ForceAttackRequested { on: bool },
+    ForceAttackRejected { on: bool, message: String },
     UnitInvisible { obj_id: u32, invisible: bool },
     UnitDeath { obj_id: u32 },
     /// The details of a death (follows [`Event::UnitDeath`] for the same packet).
@@ -906,6 +912,13 @@ impl Session {
             }
             Command::DestroyItem { item_id, container, slot, count } => {
                 self.send_game(game::ClientMsg::DestroyItem { item_id, container, slot, count }).await;
+            }
+            Command::SetForceAttack { on } => {
+                if self.phase != Phase::InWorld || self.self_obj == 0 {
+                    self.emit(Event::ForceAttackRejected { on, message: "force attack requires the active player in world".into() });
+                } else if self.send_game(game::ClientMsg::SetForceAttack { on }).await {
+                    self.emit(Event::ForceAttackRequested { on });
+                }
             }
             Command::Target { obj_id } => {
                 self.send_game(game::ClientMsg::ChangeTarget { obj_id }).await;
@@ -1662,6 +1675,105 @@ impl Session {
 mod tests {
     use super::*;
     use crate::model::{alertness, FALL_VELOCITY_PER_MPS};
+
+    #[tokio::test]
+    async fn force_attack_requests_wait_for_authoritative_echo_and_never_toggle_sent_state() {
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        session.command(Command::SetForceAttack { on: true }).await;
+        assert!(
+            events.try_recv().is_err(),
+            "without a socket no Requested event is possible"
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        for (phase, self_obj) in [
+            (Phase::CharacterSelect, 7),
+            (Phase::EnteringWorld, 7),
+            (Phase::Leaving, 7),
+            (Phase::InWorld, 0),
+        ] {
+            session.phase = phase;
+            session.self_obj = self_obj;
+            session.command(Command::SetForceAttack { on: true }).await;
+            assert!(
+                matches!(events.try_recv(), Ok(Event::ForceAttackRejected { on: true, message }) if !message.is_empty())
+            );
+        }
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let mut state = crate::state::WorldState::default();
+        let mut character = CharacterState::default();
+        character.character.id = 17;
+        state.apply(&Event::CharacterSelected(Box::new(character.clone())));
+        state.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn {
+            obj_id: 7,
+            state: character,
+            unit: crate::state::tests::unit(7),
+        })));
+        assert_eq!(
+            state.combat_status.get(7).unwrap().force_attack,
+            Some(false)
+        );
+        for (counter, on) in [true, true, false].into_iter().enumerate() {
+            // Repeated native toggles before an echo read the same old byte. Explicit requests
+            // neither alternate a guessed local value nor optimistically update this cache.
+            session.command(Command::SetForceAttack { on }).await;
+            let event = events.try_recv().unwrap();
+            assert!(matches!(event, Event::ForceAttackRequested { on: actual } if actual == on));
+            state.apply(&event);
+            let mut length = [0; 2];
+            peer.read_exact(&mut length).await.unwrap();
+            let mut received = vec![0; u16::from_le_bytes(length) as usize];
+            peer.read_exact(&mut received).await.unwrap();
+            assert_eq!(
+                received,
+                [0xdd, 1, 0, counter as u8, 0x4f, 0, u8::from(on)],
+                "no rejected request reaches the socket"
+            );
+            assert_eq!(
+                state.combat_status.get(7).unwrap().force_attack,
+                Some(false)
+            );
+            assert!(!state.stats.in_combat);
+            assert!(
+                events.try_recv().is_err(),
+                "no synthetic ForceAttackSet or Lua acknowledgement"
+            );
+        }
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::ForceAttackSet {
+                    obj_id: 7,
+                    on: true,
+                },
+                game::ServerMsg::ForceAttackSet {
+                    obj_id: 7,
+                    on: true,
+                },
+                game::ServerMsg::ForceAttackSet {
+                    obj_id: 7,
+                    on: false,
+                },
+                game::ServerMsg::Snow(true),
+            ])))
+            .await;
+        for on in [true, true, false] {
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(event, Event::ForceAttackSet { obj_id: 7, on: actual } if actual == on)
+            );
+            state.apply(&event);
+            assert_eq!(state.combat_status.get(7).unwrap().force_attack, Some(on));
+        }
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
+        assert!(events.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn combat_status_session_preserves_reports_and_batch_tail_without_predicting_points() {
