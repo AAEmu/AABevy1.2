@@ -30,7 +30,7 @@ use std::time::Instant;
 
 use bevy::asset::embedded_asset;
 use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
+use bevy::camera::visibility::{RenderLayers, ViewVisibility, VisibilitySystems};
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::MaterialPlugin;
@@ -784,7 +784,7 @@ fn upload(
     mut stats: ResMut<FxStats>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut q: Query<&mut FxRun, With<FxActive>>,
-    mut vis: Query<(&mut Aabb, &mut Visibility), With<FxMesh>>,
+    mut vis: Query<(&mut Aabb, &mut Visibility, &ViewVisibility), With<FxMesh>>,
 ) {
     let t0 = Instant::now();
     for mut run in &mut q {
@@ -803,7 +803,15 @@ fn upload(
                 continue;
             }
             let Some(Some((entity, handle))) = run.meshes.get(i) else { continue };
-            let Ok((mut aabb, mut visibility)) = vis.get_mut(*entity) else { continue };
+            let Ok((mut aabb, mut visibility, seen)) = vis.get_mut(*entity) else { continue };
+            // a mesh no view saw last frame keeps its vertices, only its bounds follow the particles (they decide whether a view
+            // sees it next frame; it stays dirty): every mesh written here is extracted, freed and allocated again by the
+            // render world, about 10 us each, and a town has a thousand emitters within reach (`docs/research/perf.md`).
+            // (`HIDDEN`: neither bit set, whether or not this frame's `reset_view_visibility` ran already)
+            if e.units > 0 && *visibility == Visibility::Inherited && *seen == ViewVisibility::HIDDEN {
+                *aabb = Aabb::from_min_max(e.min, e.max);
+                continue;
+            }
             e.dirty = false;
             if e.units == 0 {
                 if *visibility != Visibility::Hidden {
