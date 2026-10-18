@@ -19,9 +19,11 @@ const BLINK_MS: f64 = 530.0;
 
 mod clipboard;
 mod geometry;
+pub mod ime;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditData {
+    pub(crate) ime_cursor: Option<bool>,
     /// Caret position in characters.
     pub cursor: usize,
     pub selection_anchor: Option<usize>,
@@ -155,6 +157,7 @@ pub fn set_focus(lua: &Lua, id: Option<Id>) {
         old
     };
     if let Some(old) = old {
+        ime::release(lua, old);
         call_handler(lua, old, "OnReleaseFocus", vec![]);
     }
     if let Some(i) = id
@@ -443,6 +446,7 @@ pub(crate) fn press(lua: &Lua, id: Id, k: &UiKey) {
 
 /// Replace the text, caret at the end. Returns whether it changed.
 pub(crate) fn set_text(lua: &Lua, id: Id, s: String) -> bool {
+    ime::forget(lua, id);
     let mut u = ui(lua);
     let n = s.chars().count();
     let Some(w) = u.tree.widget_mut(id) else {
@@ -454,6 +458,7 @@ pub(crate) fn set_text(lua: &Lua, id: Id, s: String) -> bool {
     let changed = t.text != s;
     t.text = s;
     if let Some(e) = w.edit.as_mut() {
+        e.ime_cursor = None;
         e.cursor = n;
         e.selection_anchor = None;
         e.preferred_x = None;
@@ -561,6 +566,7 @@ fn store(lua: &Lua, id: Id, text: String, caret: usize) {
             t.text = text;
         }
         let edit = w.edit.get_or_insert_with(EditData::default);
+        edit.ime_cursor = None;
         edit.cursor = caret;
         edit.selection_anchor = None;
         edit.preferred_x = None;
@@ -727,7 +733,7 @@ pub(crate) fn render(
         h: g.inner.h,
     };
     crate::render::edit_text_quads(u, &shown, r, shown.style.color, alpha, scale, out);
-    if caret {
+    if caret && edit.ime_cursor.unwrap_or(true) {
         let p = g.point_on(edit.cursor, edit.visual_line);
         let h = g.line_height + edit.cursor_height.unwrap_or(0.0);
         let x = ((p[0] + edit.cursor_offset) * scale).round();
@@ -969,7 +975,10 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    def("IsComposingText", method(lua, |lua, _, _| ret(lua, false))?)?;
+    def(
+        "IsComposingText",
+        method(lua, |lua, id, _| ret(lua, ime::composing(lua, id)))?,
+    )?;
     def(
         "SetCursorOffset",
         method(lua, |lua, id, a| {

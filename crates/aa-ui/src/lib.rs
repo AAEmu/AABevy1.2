@@ -234,6 +234,12 @@ impl UiRuntime {
         lua::keyboard::event(&self.lua, code, pressed, text)
     }
 
+    /// Deliver an OS IME event to its enabled edit owner. Composition is visible to
+    /// original GetText/OnTextChanged handlers; it does not invent physical key edges.
+    pub fn ime_event(&self, event: &bevy::window::Ime) -> bool {
+        lua::edit::ime::event(&self.lua, event)
+    }
+
     /// Load the game database's UI texts (cached per path and locale) and serve
     /// `X2Locale:LocalizeUiText` from them. Returns the number of texts.
     pub fn load_ui_texts(&self, db: &std::path::Path) -> anyhow::Result<usize> {
@@ -505,8 +511,9 @@ impl Plugin for UiPlugin {
             .init_resource::<UiRenderState>()
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
+            .add_message::<bevy::window::Ime>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame)).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame), ui_ime_window.in_set(UiFrame)).chain());
     }
 }
 
@@ -638,17 +645,38 @@ fn ui_keyboard(
     rt: Option<NonSend<UiRuntime>>,
     mut keys: MessageReader<KeyboardInput>,
     mut lost: MessageReader<KeyboardFocusLost>,
+    mut ime: MessageReader<bevy::window::Ime>,
+    windows: Query<Entity, With<PrimaryWindow>>,
     mut stats: ResMut<UiStats>,
 ) {
     let Some(rt) = rt else {
         keys.clear();
         lost.clear();
+        ime.clear();
         stats.keyboard_focus = false;
         return;
     };
     lua::keyboard::begin_frame(&rt.lua);
     let focus_lost = lost.read().next().is_some();
     lost.clear();
+    let window = windows.single().ok();
+    let events: Vec<_> = ime.read().filter(|ev| {
+        let id = match ev {
+            bevy::window::Ime::Enabled { window }
+            | bevy::window::Ime::Disabled { window }
+            | bevy::window::Ime::Preedit { window, .. }
+            | bevy::window::Ime::Commit { window, .. } => *window,
+        };
+        Some(id) == window
+    }).collect();
+    for (i, event) in events.iter().enumerate() {
+        // Winit emits an empty preedit immediately before a result. Native handles
+        // GCS_COMPSTR + GCS_RESULTSTR together and publishes only the resulting text.
+        if matches!(event, bevy::window::Ime::Preedit { value, .. } if value.is_empty())
+            && events.get(i + 1).is_some_and(|next| matches!(next, bevy::window::Ime::Commit { value, .. } if !value.is_empty()))
+        { continue; }
+        rt.ime_event(event);
+    }
     for ev in keys.read() {
         rt.key_event(ev.key_code, ev.state == bevy::input::ButtonState::Pressed, ev.text.as_deref());
     }
@@ -656,6 +684,18 @@ fn ui_keyboard(
         lua::keyboard::focus_lost(&rt.lua);
     }
     stats.keyboard_focus = rt.keyboard_captured();
+}
+
+fn ui_ime_window(rt: Option<NonSend<UiRuntime>>, mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let Some(rt) = rt else { return };
+    let Ok(mut window) = windows.single_mut() else { return };
+    let (enabled, point) = lua::edit::ime::window(&rt.lua, window.focused);
+    if window.ime_enabled != enabled { window.ime_enabled = enabled; }
+    if let Some(point) = point {
+        let s = rt.ui_scale() / window.resolution.scale_factor();
+        let point = Vec2::new(point[0] * s, point[1] * s);
+        if window.ime_position != point { window.ime_position = point; }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -378,8 +378,8 @@ The same cached literal layout drives text, selection, picking, and navigation, 
 markup characters and final empty lines. Text, backing and caret clip to the authored inset;
 typing/navigation scroll the caret into view, and wheel input scrolls multiline text.
 The native multiline Lua class has no `SetFocus`; pointer input and the application focus API
-can focus it. Native clipboard shortcuts are implemented below; IME composition remains
-unimplemented. Native Left/Right remain per-scalar with Ctrl held: model `392291f0` uses
+can focus it. Native clipboard shortcuts and IME composition are implemented below.
+Native Left/Right remain per-scalar with Ctrl held: model `392291f0` uses
 `3922962d` / `3922964a`, then `39224c70` applies Shift selection without a Ctrl-word branch.
 
 Native evidence: select-all flag `39239c40` / focus path `39292230`; single/multiline rendering
@@ -656,6 +656,63 @@ the original mail recipient, plus selected/scrolled literal mail text. Shared pa
 textures and HUD art were checked against `reference/ingame/bag/real.png`; the supplied
 references contain no dedicated social/mail capture. The `aa_dev` run logged 372-445 FPS,
 zero script errors, and exited after its screenshot.
+
+IME events now reach focused, visible, enabled edit widgets through `UiPlugin` and
+`UiRuntime::ime_event(&bevy::window::Ime)`. The plugin reads only the primary window's
+events, enables its OS context for ordinary editable text, and disables it for password,
+numeric, read-only, hidden or disabled edits and generic keyboard capture. Physical
+`OnKeyDown` / `OnKeyUp` names and modifier state remain separate from IME text.
+
+Preedit replaces the previous preview at the original insertion anchor. `GetText` exposes
+that visible buffer and `OnTextChanged` runs for selection removal, preedit, cancellation
+and nonempty result, matching the native widget/model boundary. An empty result commits
+the current visible buffer without a new text event or caret move. Single-line `IsComposingText()`
+reports true during preedit and false while a result is validated; the native multiline
+class has no such Lua method. Starting composition deletes the selected committed text;
+cancellation restores the remaining committed base. Results replace the preview, apply
+the whole-buffer character limit, and preserve original synchronous validation handlers.
+An overflow result places the caret at the maximum length, including any retained tail.
+IME ingress is capped at 512 UTF-16 units; supplementary characters consume two units.
+The adapter retains complete Unicode scalars at the boundary.
+
+Focus release completes the visible composition, then detaches its owner. Changing text
+programmatically clears composition and restarts the OS context; an identical `SetText`
+keeps it. Late results cannot overwrite a newer buffer or enter a different edit before
+its own context is enabled. OS focus loss, hiding and keyboard-capture transfer complete
+the old preview. Input keys cannot duplicate text, move the edit caret, or submit chat
+during preedit or its result frame, even when a result handler redirects focus. Bevy's
+separate IME/key queues require this one-frame edit guard. Consecutive empty-preedit and
+commit messages are combined without publishing a transient canceled buffer.
+
+The OS candidate location follows the edit caret through scrolling, inherited widget
+scale, UI scale and window DPI. An absent preedit cursor hides the drawn caret. Idle
+composition checks and candidate positioning reuse cached text layout and do not dirty
+the UI tree. The application needs no extra hook.
+
+Native evidence: window dispatch `3922a0c0`; selection removal `392276f0`; preedit
+`39227da0`; result `392277b0`; cancel-buffer branch `39229c15`; conversion helper
+`39224c10` (1024-byte UTF-16 read, `XlUtf16To8`, then `XlMultiToWide`); visible getter
+`392930c0`; single-line composition query `3923a0d0` reads model+88 at widget+358.
+Single/multiline changed-buffer dispatch is `39292f13` / `39294a57`; focus accept/release
+`39292230` / `39292290` uses `39225360` with `ImmNotifyIME(CPS_COMPLETE)` before detach.
+Candidate placement reaches `ImmSetCandidateWindow` at `3922a8d7` / `3922a952`.
+
+Remaining IME differences are explicit: Bevy does not expose native `GCS_COMPATTR` /
+`GCS_COMPCLAUSE`, so preview glyphs retain the edit's normal color without the native
+per-clause decoration. Bevy also has no portable `CPS_COMPLETE` request for a preview
+overflow; the visible buffer is clipped immediately and the OS composition finishes on
+its result or context release. The automated fixture injects IME messages without changing
+the user's input language; a real OS candidate-popup capture remains pending.
+
+`tests/ime.rs` covers Unicode byte/scalar cursor conversion, preview/cancel/result phases,
+selection, native limits, original friend-name validation, original mail multiline text,
+caret visibility, focus/OS transfer, stale results, readonly/password/digit eligibility,
+chat-submit suppression and reentrant result handlers. The Bevy test checks primary-window
+filtering, DPI position, context restart and commit-before-Enter ordering. The unattended
+`native_ime` example shows the original social/mail assets in `shots/aa-ui/native-ime.png`;
+the shared HUD fonts and textures were compared with `reference/ingame/bag/real.png` (no
+dedicated IME reference is supplied). It logged 268–326 FPS, zero script errors and closed.
+The full suite passed 161 runtime tests and both doc tests; one font-metrics test is ignored.
 
 The chat window's input (`chatwindow:GetChatEdit()`, `lua/chat_input.rs`) takes slash commands
 natively, like the client: a command followed by a space leaves the text and sets the input's

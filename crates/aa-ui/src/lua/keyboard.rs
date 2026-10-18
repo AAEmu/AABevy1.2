@@ -66,15 +66,22 @@ impl Keyboard {
 
 /// Clear the per-frame consumption latch before forwarding OS messages. Held UI keys stay owned.
 pub fn begin_frame(lua: &Lua) {
-    let mut u = ui(lua);
-    u.keyboard.consumed = false;
-    if u.keyboard.capture.is_some_and(|id| !u.tree.visible(id)) {
-        u.keyboard.capture = None;
+    {
+        let mut u = ui(lua);
+        u.keyboard.consumed = false;
+        if u.keyboard.capture.is_some_and(|id| !u.tree.visible(id)) {
+            u.keyboard.capture = None;
+        }
     }
+    edit::ime::begin_frame(lua);
 }
 
 /// Losing OS focus clears held keys without inventing binding release events.
 pub fn focus_lost(lua: &Lua) {
+    let owner = ui(lua).focus;
+    if let Some(owner) = owner {
+        edit::ime::release(lua, owner);
+    }
     let mut u = ui(lua);
     u.keyboard.consumed |= !u.keyboard.owned.is_empty();
     u.keyboard.owned.clear();
@@ -149,7 +156,10 @@ fn dispatch(lua: &Lua, id: Id, name: &str, down: bool, key: Option<&edit::UiKey>
             .tree
             .widget(id)
             .is_some_and(|w| edit::is_edit(&w.ty));
-        if is_edit && let Some(key) = key {
+        if is_edit
+            && !edit::ime::blocks_key(lua, id)
+            && let Some(key) = key
+        {
             edit::press(lua, id, key);
         }
     }
@@ -209,7 +219,7 @@ pub fn event(lua: &Lua, code: KeyCode, down: bool, text: Option<&str>) -> bool {
                 .tree
                 .widget(id)
                 .is_some_and(|w| edit::is_edit(&w.ty));
-            if is_edit {
+            if is_edit && !edit::ime::blocks_key(lua, id) {
                 edit::press(lua, id, &key);
             }
         }
@@ -384,6 +394,7 @@ mod tests {
         .unwrap();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputPlugin))
+            .add_message::<bevy::window::Ime>()
             .init_resource::<UiStats>()
             .init_resource::<GameReleases>()
             .insert_non_send(ui)
