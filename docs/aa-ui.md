@@ -1462,3 +1462,31 @@ viewport with four choices follows the original option combo's fixed `limitItemC
 The repeat capture logged 425–438 FPS and zero script errors and closed itself. Full
 `cargo test -p aa-ui` passed 167 runtime tests and 2 doctests (1 existing ignored font-metrics
 test); the final exact-i32 and unchanged-hover changes passed all 6 listbox tests again.
+
+## Options font face audit
+
+The supplied `fonts/fonts.g` maps `en_us` logical `ui/font/yd_ygo540.ttf` to physical
+`ui/font/flareserif_821_roman.ttf`, whose font metadata identifies Flareserif 821 Regular
+(`Flareserif821BT-Roman`). Its Korean/symbol ranges use YGO 540. Both heading aliases map to
+Libre Baskerville Bold. Original `layout_variable.alb` and label/button helpers use those
+logical paths. The real-asset unit test
+`original_en_us_font_aliases_select_real_pak_faces_and_ranged_fallbacks` verifies the actual
+face selected for the Options ASCII labels, Korean, authored symbols and heading text.
+No alias/fallback defect was found in that path, and no family substitution was made.
+
+Native startup `392ece20` reads `game/fonts/fonts.g`; `392ece92`–`392ecea9` selects the
+section using imported `XlGetLocale` → `XlGetLocaleString` → `Data::ChildWithValue`.
+Logical-font construction `392eca90` looks up the parsed alias table. Native
+`SetFontSize` (`39275030`) preserves the logical path and font kind before calling the same
+font setter (`39274f70`). This rules out a separate size-only raw-file fallback in that path.
+
+The remaining visual difference is unresolved. The reference widget JSON does not contain
+resolved font-face or engine-locale metadata. A concrete renderer boundary remains: the
+native glyph path `392ef130`–`392ef137` calls the static FreeType loader with flags `0x8004`
+(`FT_LOAD_RENDER | FT_LOAD_NO_AUTOHINT`), while the toolkit uses Swash hinted outline
+rasterization and rounded scaled font advances. Those flag meanings follow the
+[FreeType glyph-load definitions](https://freetype.org/freetype2/docs/reference/ft2-glyph_retrieval.html#ft_load_xxx).
+Whether rasterization/metrics or the reference process's effective font configuration causes
+the observed body/menu shape difference still needs a direct glyph comparison; the audit
+does not establish pixel parity. Targeted font extracts are under
+`data/extract/aa-ui/font-audit/`.

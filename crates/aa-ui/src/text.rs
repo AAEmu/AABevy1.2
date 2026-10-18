@@ -1408,6 +1408,23 @@ mod tests {
         assert_eq!(lo.images[0].src, [0.0, 465.0, 15.0, 37.0]);
     }
 
+    #[test]
+    fn original_en_us_font_aliases_select_real_pak_faces_and_ranged_fallbacks() {
+        let mut lib = FontLib::new("en_us");
+        let chain = lib.chain_for(DEFAULT_FONT);
+        let roman = lib.face_by_path["ui/font/flareserif_821_roman.ttf"];
+        let korean = lib.face_by_path["ui/font/yd_ygo540.ttf"];
+        for ch in "Screen Settings - Use 1st Interaction Option".chars() {
+            assert_eq!(lib.lookup(&chain, ch).unwrap().0, roman, "{ch}");
+        }
+        for ch in ['가', '※', '★'] {
+            assert_eq!(lib.lookup(&chain, ch).unwrap().0, korean, "{ch}");
+        }
+        let heading = lib.chain_for("ui/font/yoon_snail_b.ttf");
+        let bold = lib.face_by_path["ui/font/librebaskerville-bold.ttf"];
+        assert_eq!(lib.lookup(&heading, 'O').unwrap().0, bold);
+    }
+
     /// Prints font metrics of the UI fonts (needs the client pak): `cargo test -p aa-ui font_metrics -- --ignored --nocapture`.
     #[test]
     #[ignore]
