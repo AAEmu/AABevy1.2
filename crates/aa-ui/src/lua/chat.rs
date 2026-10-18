@@ -122,8 +122,31 @@ fn call_global(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) {
     }
 }
 
+/// Encode chat text after input-link substitution and before sending it on the wire.
+/// Native 395115b8 preserves item/quest markup while escaping other bars and literal @;
+/// network send 393c5be2 then normalizes CRLF and remaining CR/LF to spaces.
+/// `AAUI.ChatSend` receives raw text; its application adapter calls this exactly once.
+pub fn encode_for_transport(text: &str) -> String {
+    text.replace('|', "||")
+        .replace("||i", "|i")
+        .replace("||q", "|q")
+        .replace('@', "@@")
+        .replace("\r\n", " ")
+        .replace(['\r', '\n'], " ")
+}
+
 /// Add a line to a message frame.
 pub(crate) fn add_line(lua: &Lua, id: Id, text: &str) {
+    // Native AddMessage 392ba8fc calls formatter 39435050, whose escaped-@ branch
+    // 39435156..39435181 decodes once before storing the line. Bars remain escaped
+    // through link expansion and are consumed by glyph layout instead.
+    let decoded;
+    let text = if text.contains("@@") {
+        decoded = text.replace("@@", "@");
+        &decoded
+    } else {
+        text
+    };
     resolve_links(lua, text);
     let mut u = ui(lua);
     let now = u.time_ms;
