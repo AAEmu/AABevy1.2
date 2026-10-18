@@ -547,6 +547,7 @@ pub enum ServerMsg {
     // -- buffs
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
+    BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// A passive buff was learned (characters).
     BuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsCreated(Vec<Doodad>),
@@ -682,6 +683,7 @@ impl ServerMsg {
             Self::PlotStopped { .. } => "SCPlotChannelingStopped",
             Self::BuffCreated { .. } => "SCBuffCreated",
             Self::BuffRemoved { .. } => "SCBuffRemoved",
+            Self::BuffUpdated { .. } => "SCBuffUpdated",
             Self::BuffLearned { .. } => "SCBuffLearned",
             Self::Teleport { .. } => "SCTeleportUnit",
             Self::LoadInstance(_) => "SCLoadInstance",
@@ -1098,6 +1100,7 @@ impl ServerMsg {
                 Self::BuffCreated { obj_id, buff }
             }
             sc::SCBuffRemovedPacket => Self::BuffRemoved { obj_id: r.bc()?, index: r.u32()? },
+            sc::SCBuffUpdatedPacket => Self::BuffUpdated { obj_id:r.bc()?, index:r.u32()?, stacks:r.i32()?, charged:r.i32()? },
             sc::SCBuffLearnedPacket => Self::BuffLearned { obj_id: r.bc()?, buff_id: r.u32()? },
             sc::SCTeleportUnitPacket => Self::Teleport {
                 reason: r.u8()?,
@@ -2073,6 +2076,23 @@ mod tests {
             let packet=ClientMsg::RemoveBuff{obj_id,buff_index,reason};
             assert_eq!(packet.opcode(),0x55);
             assert_eq!(packet.encode_body(),expected);
+        }
+    }
+
+    #[test]
+    fn native_buff_updated_signed_fields_truncation_and_dd04_alignment() {
+        // Original397c63f0 executed read/write, archive primitives mocked; independent of Writer.
+        let native_golden=[3,2,1,255,255,255,255,0,0,0,128,255,255,255,127];
+        assert_eq!(decode(sc::SCBuffUpdatedPacket,&native_golden),ServerMsg::BuffUpdated{obj_id:0x010203,index:u32::MAX,stacks:i32::MIN,charged:i32::MAX});
+        for (stacks,charged) in [(i32::MIN,i32::MAX),(0,-1),(99,-99)] {
+            let mut w=Writer::new();w.bc(0x010203).u32(u32::MAX).i32(stacks).i32(charged);let body=w.finish();
+            assert_eq!(body.len(),15);let expected=ServerMsg::BuffUpdated{obj_id:0x010203,index:u32::MAX,stacks,charged};
+            assert_eq!(decode(sc::SCBuffUpdatedPacket,&body),expected);assert_eq!(expected.name(),"SCBuffUpdated");
+            for n in 0..body.len(){assert!(ServerMsg::decode(&game_frame(sc::SCBuffUpdatedPacket,&body[..n])).is_err());}
+            let mut batch=Writer::new();batch.u16(0).u16(sc::SCBuffUpdatedPacket).raw(&body);
+            batch.u16(0).u16(sc::SCBuffUpdatedPacket).raw(&body);
+            batch.u16(0).u16(sc::SCBuffRemovedPacket).bc(0x010203).u32(7);
+            assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected.clone(),expected,ServerMsg::BuffRemoved{obj_id:0x010203,index:7}]);
         }
     }
 

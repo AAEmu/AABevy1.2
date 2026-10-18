@@ -615,6 +615,7 @@ pub enum Event {
     /// A buff or debuff started on a unit (or was refreshed: same `index`).
     BuffCreated { obj_id: u32, buff: Buff },
     BuffRemoved { obj_id: u32, index: u32 },
+    BuffUpdated { obj_id:u32, index:u32, stacks:i32, charged:i32 },
     /// A passive buff was learned.
     PassiveBuffLearned { obj_id: u32, buff_id: u32 },
     DoodadsSpawned(Vec<Doodad>),
@@ -1774,6 +1775,7 @@ impl Session {
             M::Batch(_) => {} // flattened by `game_msg`
             M::BuffCreated { obj_id, buff } => self.emit(Event::BuffCreated { obj_id, buff }),
             M::BuffRemoved { obj_id, index } => self.emit(Event::BuffRemoved { obj_id, index }),
+            M::BuffUpdated { obj_id, index, stacks, charged } => self.emit(Event::BuffUpdated { obj_id, index, stacks, charged }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
             M::Teleport { pos, .. } => {
                 self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
@@ -4790,6 +4792,17 @@ mod tests {
         }
         session.game.as_mut().unwrap().shutdown().await;session.command(request()).await;
         let mut rejected=false;while let Ok(event)=events.try_recv(){assert!(!matches!(event,Event::BuffRemovalRequested{..}));rejected|=matches!(event,Event::BuffRemovalRequestRejected{..});}assert!(rejected);
+    }
+
+    #[tokio::test]
+    async fn buff_updated_forwards_each_raw_receipt_without_actor_or_success_fabrication() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::BuffUpdated{obj_id:99,index:u32::MAX,stacks:i32::MIN,charged:-1})).await;
+            assert!(matches!(events.try_recv(),Ok(Event::BuffUpdated{obj_id:99,index:u32::MAX,stacks:i32::MIN,charged:-1})));
+            assert!(events.try_recv().is_err());
+        }
+        assert_eq!(session.self_obj,0);assert!(session.selected_state.is_none());assert!(session.game.is_none());
     }
 
 }
