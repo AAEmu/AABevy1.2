@@ -61,7 +61,7 @@ fn key(ui: &UiRuntime, code: KeyCode, text: Option<&str>) {
 #[test]
 fn focus_select_all_replaces_unicode_with_limits_and_releases_once() {
     let ui = setup(false);
-    ui.exec("@focus", "edit:SetText('héllo'); edit:SetMaxTextLength(5); edit:UseSelectAllWhenFocused(true); edit:SetFocus(); edit:SetFocus()").unwrap();
+    ui.exec("@focus", "edit:SetText('héllo'); changes=0; edit:SetMaxTextLength(5); edit:UseSelectAllWhenFocused(true); edit:SetFocus(); edit:SetFocus()").unwrap();
     assert_eq!(
         (state(&ui).cursor, state(&ui).selection_anchor),
         (5, Some(0))
@@ -84,8 +84,11 @@ fn focus_select_all_replaces_unicode_with_limits_and_releases_once() {
 #[test]
 fn shift_selection_ctrl_a_readonly_and_collapsing_edges() {
     let ui = setup(false);
-    ui.exec("@focus", "edit:SetText('abcde'); edit:SetFocus()")
-        .unwrap();
+    ui.exec(
+        "@focus",
+        "edit:SetText('abcde'); changes=0; edit:SetFocus()",
+    )
+    .unwrap();
     ui.key_event(KeyCode::ShiftLeft, true, None);
     key(&ui, KeyCode::ArrowLeft, None);
     key(&ui, KeyCode::ArrowLeft, None);
@@ -376,6 +379,7 @@ fn empty_digit_getter_materializes_init_value_without_a_text_change_event() {
         edit:SetPassword(false); edit:SetInitVal(-7); assert(edit:GetText()=='-7')
         edit:SetDigit(false); edit:SetText(''); assert(edit:GetText()=='')
         edit:SetDigit(true); edit:SetInitVal(0); edit:SetText('')
+        changes=0
     "#,
     )
     .unwrap();
@@ -419,4 +423,52 @@ fn original_write_mail_empty_money_edits_do_not_add_a_phantom_attachment_fee() {
         edits.goldEdit:SetText(''); attachmentCount=2; mail:OnUpdate()
         assert(normalFee==80 and expressFee==180)
     "#).unwrap();
+}
+
+#[test]
+fn changed_programmatic_text_is_synchronous_reentrant_and_unchanged_text_stays_clean() {
+    let ui = setup(false);
+    ui.exec(
+        "@text_events",
+        r#"
+        events={}
+        edit:SetHandler('OnTextChanged',function(self)
+            table.insert(events,self:GetText())
+            if self:GetText()=='unclamped' then self:SetText('clamped') end
+            self:SetText(self:GetText()) -- Native equality guard prevents recursion.
+        end)
+        edit:SetText('unclamped')
+        assert(#events==2 and events[1]=='unclamped' and events[2]=='clamped')
+        assert(edit:GetText()=='clamped')
+    "#,
+    )
+    .unwrap();
+    lua::ui(&ui.lua).tree.settle();
+    ui.exec("@unchanged", "edit:SetText('clamped')").unwrap();
+    assert!(!lua::ui(&ui.lua).tree.changed());
+    assert_eq!(eval::<usize>(&ui, "#events"), 2);
+}
+
+#[test]
+fn original_money_edit_clamps_changed_programmatic_text_without_event_recursion() {
+    let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
+    fake::install(&mut ui, "en_us", &fake::default_worlds());
+    fake::install_ingame(&mut ui);
+    ui.run_stage(aa_ui::Stage::World);
+    assert!(ui.errors.is_empty(), "{:?}", ui.errors);
+    ui.exec(
+        "@original_money_clamp",
+        r#"
+        edit=CreateMoneyEdit('nativeClampedMoney',UIParent)
+        edit:SetDigit(true); edit:SetMinMaxValues(0,99)
+        local original=edit.OnTextChanged
+        calls=0
+        edit:SetHandler('OnTextChanged',function(self) calls=calls+1; original(self) end)
+        edit:SetText('999')
+        assert(edit:GetText()=='99' and edit.lastMsg=='99' and calls==2)
+        edit:SetText('99'); assert(calls==2)
+        edit:SetText(''); assert(edit:GetText()=='0' and edit.lastMsg=='0' and calls==3)
+    "#,
+    )
+    .unwrap();
 }

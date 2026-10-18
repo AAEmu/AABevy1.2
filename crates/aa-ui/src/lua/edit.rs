@@ -7,7 +7,7 @@
 //! (multi-line boxes insert a line break), Escape `OnEscapePressed(self)`, Tab
 //! `OnTabPressed(self)`. Physical keys fire `OnKeyDown(self, name)` on press and
 //! `OnKeyUp(self, name)` on release; programmatic `UiRuntime::key` sends both.
-//! `SetText` does not fire `OnTextChanged` (the money edits call `SetText` from it).
+//! Changed programmatic `SetText` dispatches `OnTextChanged` synchronously; same text is a no-op.
 
 use mlua::{Lua, Table};
 
@@ -724,7 +724,12 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "SetText",
         method(lua, |lua, id, a| {
-            set_text(lua, id, a.s(1).unwrap_or_default());
+            let text = a.s(1).unwrap_or_default();
+            let same = ui(lua).tree.get(id).text().is_some_and(|t| t.text == text);
+            // Native EditBox39292f70 compares before mutation and dispatches event6 afterward.
+            if !same && set_text(lua, id, text) {
+                call_handler(lua, id, "OnTextChanged", vec![]);
+            }
             none()
         })?,
     )?;

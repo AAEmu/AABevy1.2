@@ -45,10 +45,12 @@ fn edit_box_typing() {
     ui.key(&UiKey::End);
     ui.key(&UiKey::Delete);
     assert_eq!(eval::<String>(&ui, "edit:GetText()"), "ZAc");
-    // SetText does not fire OnTextChanged.
+    // Native programmatic SetText fires once on changed content; repeated text is a no-op.
     let before: i64 = eval(&ui, "changes");
     ui.exec("@set", "edit:SetText('hello')").unwrap();
-    assert_eq!(eval::<i64>(&ui, "changes"), before);
+    assert_eq!(eval::<i64>(&ui, "changes"), before+1);
+    ui.exec("@same", "edit:SetText('hello')").unwrap();
+    assert_eq!(eval::<i64>(&ui, "changes"), before+1);
     ui.key(&UiKey::Enter);
     assert_eq!(eval::<i64>(&ui, "entered"), 1);
     ui.key(&UiKey::Escape);
