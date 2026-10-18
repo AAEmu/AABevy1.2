@@ -5285,3 +5285,7 @@ identity plus missing/failed writes. Actual unpack receipts update timestamps wi
 sending equipment continuation. `cargo test -p aa-net --features bevy --lib`:380 passed;
 feature check passed. Exact native excerpts are retained in
 `data/extract/aa-net/mate-equipment-native/unpack-security-source-20261018.txt`.
+
+### SkillFired final wire byte (2026-10-18)
+
+`SkillFired.raw_final_flag` preserves the final u8 after `fire_anim_id`, including noncanonical nonzero values. The active lane `systems/skills/packets.rs::SCSkillFiredPacket::write` writes zero; the preceding u8 remains a separate field. Native handler391d58dd reads packet+160 and passes it as the final argument to3939b010; nonzero at3939b35b bypasses one ordinary own/tag cooldown insertion path39368f90. Zero alone does not imply insertion: native also checks toggle_buff_id and timing_id. This field therefore has a neutral raw name and does not generate estimated cooldowns. Source: `data/extract/aa-ui/native-cooldown-fired-body-20261018.txt` and `native-cooldown-started-fired-20261018.txt`. Tests preserve 1/2/255, reject every truncated prefix, and retain nonzero0x82 followed by three other packets in a DD04 batch.
