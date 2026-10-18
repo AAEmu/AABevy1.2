@@ -197,3 +197,12 @@ Checked main: target/debug/aa-client-20261018-reset.exe, SHA256
 6d90dcca0da162bb4700fcaa417cad16c2de1ba9d13c5136936e96f7c23afba3.
 The playable aa-client-play.exe alias now has the same bytes, refreshed after
 confirming no client process was running. The trial HUD bridge remains pending.
+
+The subsequent forced-input integration calls the source-backed prepare helper
+only when HUD.chat_open opens the actual chat edit, before prefill and focus.
+Pending method11 is consumed there; clearing pending with -6 leaves the visible
+method unchanged. Full Reset Chat clears pending at the manager reload point,
+before original window recreation. All13 configuration checks pass, including
+original chat-open prefill, persisted method11, clear-without-switch and reset
+with a previously pending trial method. This is an input integration check;
+the trial receipt producer is validated with the separate trial HUD bridge.

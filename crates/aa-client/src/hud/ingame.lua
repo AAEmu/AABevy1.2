@@ -555,8 +555,11 @@ local function chatEdit()
 end
 
 HUD.chat_open = function(prefill)
-  local edit = chatEdit()
+  local window = HUD.chat_window()
+  if window == nil then return end
+  local edit = window:GetChatEdit()
   if edit == nil then return end
+  AAUI.PrepareChatInput(window)
   edit:Show(true)
   edit:SetText(prefill or "")
   edit:SetFocus()

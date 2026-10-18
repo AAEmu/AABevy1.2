@@ -19,6 +19,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
                 view.loaded = false;
                 view.model = Model::default();
             }
+            aa_ui::lua::chat_input::set_forced_method(lua, -6);
             ensure(lua, &s)?;
             match lua.globals().get::<Value>("OnResetAllChatWindow")? {
                 Value::Function(callback) => {
