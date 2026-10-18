@@ -4238,3 +4238,45 @@ The example builds successfully. Its inspected aa-dev capture
 tab-zero context menu at 1280x720/UI scale 0.85; zero Lua errors and no runtime
 warnings/errors are reported at **260.1-290.6 FPS**, and the process self-closes
 after its shot.
+
+### Drawable GetColor named RGBA and original chat option save (2026-10-18)
+
+The original chat option dialog passes `colorBG:GetColor()` directly into each
+filter's color record and reads `.r/.g/.b` for the background. The toolkit's
+sequence-only return omitted those names, causing the source-faithful metadata
+parser to reject a real SaveOption operation. `Drawable:GetColor()` now returns
+one fresh table with exactly **`r`, `g`, `b`, `a`** and no numeric aliases.
+Changing the returned table does not change the drawable or another returned
+table. Raw f32 channels are preserved without clamping. Calling the method on
+an object that cannot provide a drawable returns zero values.
+
+Native registration `39237e7d..d3` binds `39235760`. It obtains the drawable
+through virtual `+b0`, reads the four floats through virtual `+f8`, calls
+`CreateTable(0)`, writes those four named keys through `SetValue(+14)`, and
+returns the single table at `39235901..4f`. There are no indexed `SetAt` calls.
+The earlier string reference to GetColor at `39231ec3` belongs to a separate
+cursor RGB API and does not describe this drawable method. Native SetColor's
+float constructor `3922b330` also copies its four inputs without clamping.
+
+`data/extract/aa-ui/drawable_color_oracle.py` and
+`native-drawable-color-oracle-20261018.json` execute **four groups** through
+the unchanged binding, with its PE hash: ordinary channels, values outside
+zero-to-one, missing drawable, and consecutive calls with changed channels.
+Only drawable/script-interface endpoints and table delivery are captured;
+the actual body performs all f32 copies, named writes, fresh table requests
+and return-arity branches. Exact instructions are recorded in
+`native-drawable-color-source-20261018.txt`.
+
+All **12 focused tests** pass, including exact key count, absent numeric keys,
+return arity, table independence, raw f32 values, the original slot-state script,
+chat alpha/context lifetimes, and physical OK on the unchanged original chat
+option dialog. That original save retains filter RGBA `0.25/0.5/0.75/0.8`, saves
+background RGB `0.1/0.2/0.3`, preserves the prior background alpha as its Lua code
+does, and returns font size 16. The application metadata parser remains strict.
+
+The `native_chat_options` aa-dev example builds and performs the original
+physical save before reopening the saved dialog with `--saved`. The inspected
+capture `shots/aa-ui/native-chat-options-named-color-20261018.png` shows its
+retained blue Local palette swatch at 1280x720/UI scale 0.85. It reports zero
+Lua errors, no runtime warnings/errors, **318.9-408.4 FPS**, and self-closes
+after the screenshot. No matching chat-options reference capture is present.

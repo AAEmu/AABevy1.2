@@ -149,9 +149,13 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     def(
         "GetColor",
         method(lua, |lua, id, _| {
-            // A table `{ r, g, b, a }` (`colorTable[4] == 0` in item_icon_button).
-            let c = read(lua, id, |d| d.color).unwrap_or([1.0; 4]);
-            ret(lua, lua.create_sequence_from(c)?)
+            // Native39235760 returns a fresh named RGBA table, with no numeric aliases.
+            let Some(c) = read(lua, id, |d| d.color) else { return none() };
+            let table = lua.create_table_with_capacity(0, 4)?;
+            for (name, value) in ["r", "g", "b", "a"].into_iter().zip(c) {
+                table.raw_set(name, value)?;
+            }
+            ret(lua, table)
         })?,
     )?;
     def(

@@ -7,8 +7,10 @@ fn eval<T: mlua::FromLua>(ui: &UiRuntime, source: &str) -> T {
 }
 
 fn color(ui: &UiRuntime) -> Vec<f32> {
-    eval::<mlua::Table>(ui, "slot.stateImage:GetColor()")
-        .sequence_values::<f32>()
+    let table = eval::<mlua::Table>(ui, "slot.stateImage:GetColor()");
+    ["r", "g", "b", "a"]
+        .into_iter()
+        .map(|key| table.raw_get::<f32>(key))
         .collect::<mlua::Result<_>>()
         .unwrap()
 }
