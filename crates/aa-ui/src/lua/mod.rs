@@ -440,7 +440,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
     }
     {
         let _p = scope("chat");
-        chat::update(lua);
+        chat::update(lua, dt_ms);
     }
     {
         let _p = scope("slots");
