@@ -42,6 +42,9 @@ pub(super) struct View {
 pub(super) fn current(data: &super::api::HudData, id: u64) -> Option<&aa_net::model::Item> {
     data.enchant.selection.records.current(id)
 }
+pub(super) fn equipment(data: &super::api::HudData, slot: u8) -> Option<&aa_net::model::Item> {
+    data.enchant.selection.equipment(slot)
+}
 pub(super) fn request_current(state: &Shared, character_id: u32, request: &aa_net::item_effect::ItemEffectRequest) -> bool {
     state
         .borrow()
