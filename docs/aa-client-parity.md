@@ -27,7 +27,7 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction search/bid/list/cancel |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, gathering interactions, processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
-| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar with native received-level/equipment/buff health and mana maxima, filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Complete pet UnitInfo/modifier colors and gear controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
+| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors, filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment icon/cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
 | Achievements, ranking and trials | Original achievement/ranking/usertrial/racing UI groups load | Actual protocol/state/rewards, trial/jury/crime/prison and racing flows |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
@@ -99,3 +99,21 @@ matchmaking/casting remain unfinished. Details: `docs/aa-client-hud.md`.
 Parallel landed milestones include native task decoration before layout, statusbar
 fill drawable anchors/casting highlights, water endpoint/shoreline alpha and native
 per-instance vegetation color variation; those retain their own crate QA evidence.
+
+
+### Native owned-pet information panel (2026-10-18)
+
+Original info-toggle pointer probe and all11 attribute labels/17 modifier keys are
+connected to the pet's own native actor formulas, equipment and known buff history.
+Received armor/regeneration changes update values and original green colors. Separate
+compiled-expression child rounding and gear/presentation paths match72 executed x86
+gear cases, two expression cases and ten modifier cases (static lookup/AST and external
+CRT mocks are explicit). Existing native pool checks remain valid. Unsupported inputs
+close the info view rather than showing player fallback stats. Speed's actual engine
+component, equipment UI/cursor/confirmation workflows and pet skill planning remain open.
+Full suite195 passed/33 ignored; original panel probe1 pass/2.54s and original battlefield
+regression1 pass/3s. Inspected base info capture260-441 FPS with zero runtime errors.
+The visible world-select client remains the previous tested940a8c6 copy; this panel
+milestone is validated through its separate aa-dev example until the next main rebuild.
+The modified capture also confirms original green defense122 and regeneration18
+labels, both received buff icons and204-306 FPS without runtime errors.

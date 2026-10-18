@@ -105,6 +105,7 @@ struct Pet {
     attached_to_own: bool,
     driving: bool,
     passenger: bool,
+    info: Option<super::super::stats::MateDetails>,
 }
 
 impl Pet {
@@ -197,6 +198,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             attached_to_own,
             driving,
             passenger,
+            info: game.and_then(|game| super::super::stats::mate_details(game, unit, native_buffs)),
         })
     })();
     if data.pets.owned.current.as_ref().map(Pet::identity) != next.as_ref().map(Pet::identity) {
@@ -226,6 +228,7 @@ fn table(lua: &Lua, pet: &Pet) -> mlua::Result<Table> {
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    info::install(lua, bridge)?;
     let mate: Table = lua.globals().get("X2Mate")?;
     for name in [
         "IsPlayerPetExists",
@@ -457,7 +460,9 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
         warn!("hud: owned pet: {error}");
         return;
     }
-    if old.as_ref().map(Pet::identity) != next.as_ref().map(Pet::identity) {
+    let identity_changed = old.as_ref().map(Pet::identity) != next.as_ref().map(Pet::identity);
+    info::push(rt, bridge);
+    if identity_changed {
         if old.is_some() {
             rt.fire_event("DISMISS_PET", ());
         }
@@ -478,6 +483,7 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
             rt.fire_event("LEVEL_CHANGED", (next.level, next.object.to_string()));
         }
     }
+    if identity_changed { info::push(rt, bridge); }
     if let Err(error) = rt.refresh_slots() {
         warn!("hud: pet slots: {error}");
     }
@@ -485,6 +491,7 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
 
 #[cfg(test)]
 mod tests;
+mod info;
 
 fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, &'a Skill)> {
     let context = u32::from(pet.driving);

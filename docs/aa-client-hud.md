@@ -1606,3 +1606,68 @@ shared clock domain. The active lane currently gives Pong and battlefield start 
 separate timer origins, so these are not claims of natural live matchmaking or timer
 correctness against that lane defect. Native source contracts and executed timer
 oracles are linked in `docs/aa-ui.md` and `docs/aa-net.md`.
+
+
+## Original owned-pet information panel (2026-10-18)
+
+The original equipment/info toggle now opens the original eleven-label pet information
+panel over the correlated owned Mate actor. `UnitInfo('playerpet')` and the actual
+object-ID alias return eleven native presentation values; `UnitModifierInfo` supplies
+all seventeen raw modifier keys used by the original label-color loop. They never
+reuse the player's attribute snapshot. Known-stat changes refresh the visible original
+panel. Unknown native buff history, unresolved mate kind, relevant conditional/dynamic
+modifiers or unsupported formula operators return zero Lua values; the application
+disables the info toggle and closes an existing panel in that case. This is an explicit
+unknown-data boundary, separate from native equip-command eligibility.
+
+The owner5 attribute adapter uses the pet's final primaries, actual gear and native
+buff stacks, independent static/temporary/main/rune/gem modifier buckets, single
+aggregate percentages and native limits. Armor/resistance use original wearable
+basis points and signed item levels; held armor narrows to f32 before integer
+conversion. Mainhand DPS retains the no-override expression result before its
+thousandth-unit conversion; a positive received override uses the separate f32 path.
+Broken or ineligible gear contributes neither generated stats nor secondary modifiers;
+gems terminate at the first zero. Empty mainhand's verified default holdable0 has
+zero DPS in this catalog.
+
+The original compiled expression operators narrow each child result to f32, including
+literal/variable leaves. The new separate native evaluator implements source-closed
+add/subtract/multiply/divide/power/negate/floor; the lane-oriented evaluator remains
+unchanged. Division by either zero returns0 through the native error branch; NaN
+continues through arithmetic. Unsupported native operators stay unknown. The existing
+native Mate pool adapter now shares this evaluator and keeps its prior pool goldens.
+
+Presentation retains separate weapon/additional DPS scaled terms, fixed5300 armor/
+resistance denominators, rating multipliers using negative0.001, persistent regeneration
+scaled by0.2 and independent raw modifier deltas. Modifier colors use the original
+Lua helper, including its asymmetric near-zero interval. Their static baseline is
+separately rounded, then the transient delta uses the source x87 operation order
+modeled in f64 before the Lua f32 result; it is not a difference between clamped
+attributes. No-override gear expression precision and positive overrides are tested
+independently.
+
+Executed original x86 goldens are recorded under
+`data/extract/aa-net/mate-stats-native/`:72 gear wrappers/recursive AST cases,
+two owner5 expression cases and ten modifier cases. Static DB/AST lookups are
+reconstructed; external CRT pow/floor use explicitly mocked libm/integral-double
+results. These goldens are embedded in client tests, without depending on ignored
+artifact files. All72 gear values, ten returned modifier values and two expression
+stages match. Native engine-component `GetSpeedInfo` remains open: the original Lua
+nil-to0 speed presentation is retained, with no invented maximum-speed formula.
+Pet equipment item display/cursor/confirmation/transactions remain separate work.
+
+Full client suite:195 passed/33 ignored in14.01s. The exact original panel probe
+passes1 test in2.54s, including unknown-data gating, actual info toggle, eleven labels,
+object alias, all modifier keys, received armor/regeneration changes and green label
+colors. The original battlefield match/results/Leave regression also passes1 test in3s.
+`owned_pet_hud -- --info` and `--modified` are aa-dev capture variants. The inspected
+base capture `shots/hud/sol61-pet-info/original-info-final.png` shows health720/1012,
+mana260/335, attack29.20, critical6.48%, dodge5.19%, magic defense52(0.97%) and
+regeneration10/9 at260-441 FPS, with no runtime errors and a self-closed QA window.
+This is isolated received-state validation, not a live lane pet transaction.
+
+The inspected modified capture
+`shots/hud/sol61-pet-info/original-modified-final.png` shows received defense122
+(2.25%) and health regeneration18 in the original green modifier colors, alongside
+the two actual buff icons. It runs at204-306 FPS without runtime errors and its
+QA window closes after capture.

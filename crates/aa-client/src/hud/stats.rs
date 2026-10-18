@@ -20,6 +20,7 @@ use rusqlite::Connection;
 
 use super::formula::Formula;
 mod mate;
+pub(super) use mate::details::{Info as MateDetails, MODIFIERS as MATE_MODIFIERS, VALUE_KEYS as MATE_VALUE_KEYS};
 
 /// `UnitFormulaOwnerType`.
 const OWNER_CHARACTER: u8 = 0;
@@ -379,6 +380,10 @@ pub fn unit_max(game: &super::data::GameData, unit: &aa_net::Unit, buffs: &[aa_n
 /// Mate formulas require a known native stack view; a lane charge-derived list is not equivalent.
 pub(super) fn mate_max(game: &super::data::GameData, unit: &aa_net::Unit, buffs: Option<&[aa_net::state::BuffEntry]>) -> Option<(i32, i32)> {
     mate::pools(game, unit, buffs)
+}
+
+pub(super) fn mate_details(game: &super::data::GameData, unit: &aa_net::Unit, buffs: Option<&[aa_net::state::BuffEntry]>) -> Option<MateDetails> {
+    mate::details::get(game, unit, buffs)
 }
 
 /// The keys of an NPC's formula variables.

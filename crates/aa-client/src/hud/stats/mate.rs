@@ -6,6 +6,7 @@ use aa_net::{
 };
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
+pub(super) mod details;
 
 #[derive(Default)]
 pub(super) struct Tables {
@@ -16,6 +17,7 @@ pub(super) struct Tables {
     conditional: HashSet<u32>,
     dynamic: HashSet<u32>,
     limits: HashMap<u8, (i32, i32)>,
+    details: details::Tables,
 }
 
 impl Tables {
@@ -61,6 +63,7 @@ impl Tables {
             let (id, range) = row?;
             out.limits.insert(id, range);
         }
+        out.details = details::Tables::load(db)?;
         Ok(out)
     }
 }
@@ -202,7 +205,7 @@ fn gear(game: &crate::hud::data::GameData, equipment: &Equipment, totals: &mut T
     }
 }
 
-pub(super) fn pools(game: &crate::hud::data::GameData, unit: &aa_net::Unit, buffs: Option<&[BuffEntry]>) -> Option<(i32, i32)> {
+fn context(game: &crate::hud::data::GameData, unit: &aa_net::Unit, buffs: Option<&[BuffEntry]>) -> Option<(u32, Totals)> {
     let aa_net::model::UnitKind::Mate { template_id, .. } = unit.kind else {
         return None;
     };
@@ -222,20 +225,35 @@ pub(super) fn pools(game: &crate::hud::data::GameData, unit: &aa_net::Unit, buff
         totals.add(t.buff_bonuses.get(&buff.buff_id), i32::from(buff.ability_level as u16), buff.stacks);
     }
     gear(game, &unit.equipment, &mut totals);
-    let eval = |formula_kind: u8, primary: [i32; 6]| -> Option<i32> {
-        let (id, formula) = t.formulas.get(&(5, formula_kind))?;
-        let variable = t.variables.get(&(*id, 5, kind)).copied().unwrap_or(0.) as f32;
-        let mut vars = HashMap::from([("level", f64::from(unit.level)), ("mate_kind", f64::from(variable))]);
-        for (name, value) in ["str", "dex", "sta", "int", "spi", "fai"].into_iter().zip(primary) {
-            vars.insert(name, f64::from(value as f32));
-        }
-        Some((formula.eval(&vars) as f32) as i32)
-    };
+    Some((kind, totals))
+}
+
+fn evaluate(t: &StatTables, kind: u32, level: u8, formula_kind: u8, primary: [i32; 6]) -> Option<i32> {
+    let (id, formula) = t.formulas.get(&(5, formula_kind))?;
+    let variable = t.variables.get(&(*id, 5, kind)).copied().unwrap_or(0.) as f32;
+    let mut vars = HashMap::from([("level", f64::from(level)), ("mate_kind", f64::from(variable))]);
+    for (name, value) in ["str", "dex", "sta", "int", "spi", "fai"].into_iter().zip(primary) {
+        vars.insert(name, f64::from(value as f32));
+    }
+    Some(details::trunc(formula.eval_native(&vars)? as f32))
+}
+
+fn primaries(t: &StatTables, kind: u32, level: u8, totals: &Totals) -> Option<[i32; 6]> {
     let mut primary = [0; 6];
     for (i, formula) in [22, 23, 24, 25, 26, 27].into_iter().enumerate() {
-        primary[i] = totals.apply(i, eval(formula, [0; 6])?, tables);
+        primary[i] = totals.apply(i, evaluate(t, kind, level, formula, [0; 6])?, &t.mate);
     }
-    Some((totals.apply(6, eval(14, primary)?, tables), totals.apply(7, eval(15, primary)?, tables)))
+    Some(primary)
+}
+
+pub(super) fn pools(game: &crate::hud::data::GameData, unit: &aa_net::Unit, buffs: Option<&[BuffEntry]>) -> Option<(i32, i32)> {
+    let (kind, totals) = context(game, unit, buffs)?;
+    let t = &game.stats;
+    let primary = primaries(t, kind, unit.level, &totals)?;
+    Some((
+        totals.apply(6, evaluate(t, kind, unit.level, 14, primary)?, &t.mate),
+        totals.apply(7, evaluate(t, kind, unit.level, 15, primary)?, &t.mate),
+    ))
 }
 
 #[cfg(test)]

@@ -77,33 +77,60 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
     Ok((rt, bridge, path, player, units, mates))
 }
 
+pub(super) fn native(rt: &UiRuntime, bridge: &Shared, player: &Player, units: &mut Units, mates: &mut Mates) -> aa_net::state::Buffs {
+    let unit = units.by_id.get_mut(&201).unwrap();
+    unit.kind = aa_net::model::UnitKind::Mate { tl_id: 12, template_id: 11554, owner_id: 47 };
+    unit.model_id = 503;
+    unit.level = 5;
+    unit.name = "Native pool fixture".into();
+    mates.own.as_mut().unwrap().spawn.experience = 1500;
+    let mut buffs = aa_net::state::Buffs::default();
+    buffs.native.set_catalog(bridge.borrow().game.get().unwrap().native_buffs.clone());
+    buffs.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+    let mut world = World::new();
+    world.insert_resource(player.clone());
+    world.insert_resource(units.clone());
+    world.insert_resource(mates.clone());
+    world.insert_resource(buffs.clone());
+    super::refresh(&world, &mut bridge.borrow_mut());
+    super::push(rt, bridge);
+    buffs
+}
+
+pub(super) fn modified(rt: &UiRuntime, bridge: &Shared, player: &Player, units: &mut Units, mates: &Mates) -> aa_net::state::Buffs {
+    let unit = units.by_id.get_mut(&201).unwrap();
+    unit.buffs = [670,1426].into_iter().enumerate().map(|(index,buff_id)|aa_net::buff::Buff {
+        index:index as u32+1,buff_id,ability_level:1,stacks:1,..default()
+    }).collect();
+    let mut buffs = aa_net::state::Buffs::default();
+    buffs.native.set_catalog(bridge.borrow().game.get().unwrap().native_buffs.clone());
+    buffs.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+    let mut world = World::new();
+    world.insert_resource(player.clone());world.insert_resource(units.clone());world.insert_resource(mates.clone());world.insert_resource(buffs.clone());
+    super::refresh(&world,&mut bridge.borrow_mut());super::push(rt,bridge);
+    buffs
+}
+
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let mut app = App::new();
     app.add_plugins((aa_dev::default_plugins("aa-client: original owned pet HUD"), aa_dev::DevPlugin));
     let (rt, bridge, path, player, mut units, mut mates) = runtime(width as f32, height as f32).unwrap();
     let mut buffs = aa_net::state::Buffs::default();
-    if std::env::args().any(|a| a == "--native-pools") {
-        let unit = units.by_id.get_mut(&201).unwrap();
-        unit.kind = aa_net::model::UnitKind::Mate { tl_id: 12, template_id: 11554, owner_id: 47 };
-        unit.model_id = 503;
-        unit.level = 5;
-        unit.name = "Native pool fixture".into();
-        mates.own.as_mut().unwrap().spawn.experience = 1500;
-        buffs.native.set_catalog(bridge.borrow().game.get().unwrap().native_buffs.clone());
-        buffs.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
-        let mut world = World::new();
-        world.insert_resource(player.clone());
-        world.insert_resource(units.clone());
-        world.insert_resource(mates.clone());
-        world.insert_resource(buffs.clone());
-        super::refresh(&world, &mut bridge.borrow_mut());
-        super::push(&rt, &bridge);
+    if std::env::args().any(|a| a == "--native-pools" || a == "--info" || a == "--modified") {
+        buffs = native(&rt, &bridge, &player, &mut units, &mut mates);
         rt.lua.load(r#"
             assert(X2Unit:UnitLevel('playerpet') == 5)
             assert(X2Unit:UnitMaxHealth('playerpet') == 1012 and X2Unit:UnitMaxMana('playerpet') == 335)
             assert(petFrame:IsVisible() and petBar:IsVisible())
         "#).exec().unwrap();
+    }
+    if std::env::args().any(|a| a == "--info" || a == "--modified") {
+        super::super::expansion::fixture::click(&rt, "petBar.command.buttons[PET_CMD_EQUIP]").unwrap();
+        rt.lua.load("assert(petBar.equip:IsVisible() and X2Unit:UnitInfo('playerpet'))").exec().unwrap();
+    }
+    if std::env::args().any(|a| a == "--modified") {
+        buffs = modified(&rt,&bridge,&player,&mut units,&mates);
     }
     app.add_plugins(aa_ui::UiPlugin {
         config: Some(crate::login::host::ui_config()),
