@@ -60,7 +60,7 @@ pub use auction::{Auction, AuctionBid, AuctionCommand, AuctionEvent, AuctionFail
 pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendInfo, Friends};
 pub use game::LeaveTarget;
 pub use bank::{BankCommand, BankEvent};
-pub use radar::{RadarEvent, RadarToggle, TransferRadar, TransferRadarContact};
+pub use radar::{ShipRadar, ShipRadarContact, RadarEvent, RadarToggle, TransferRadar, TransferRadarContact};
 pub use housing::{House, HouseSnapshot, Houses, HousingAttachment, HousingEvent, housing_attachments};
 pub use gimmick::{Gimmick, GimmickEvent, GimmickJoint, GimmickMovement, GimmickSpawn, Gimmicks};
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};

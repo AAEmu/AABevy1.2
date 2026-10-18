@@ -44,7 +44,7 @@ pub use crate::slave::Slaves;
 pub use crate::trade::Trade;
 pub use crate::gimmick::Gimmicks;
 pub use crate::housing::Houses;
-pub use crate::radar::TransferRadar;
+pub use crate::radar::{ShipRadar, TransferRadar};
 pub use crate::ui_data::UiData;
 pub use crate::initial_config::GameConfig;
 pub use crate::combat_status::CombatStatus;
@@ -371,6 +371,7 @@ pub struct WorldState {
     pub gimmicks: Gimmicks,
     pub houses: Houses,
     pub transfer_radar: TransferRadar,
+    pub ship_radar: ShipRadar,
     pub ui_data: UiData,
     pub game_config: GameConfig,
     pub combat_status: CombatStatus,
@@ -410,6 +411,7 @@ impl WorldState {
         self.gimmicks.apply(e);
         self.houses.apply(e);
         self.transfer_radar.apply(e);
+        self.ship_radar.apply(e);
         self.ui_data.apply(e);
         self.game_config.apply(e);
         self.combat_status.apply(e);

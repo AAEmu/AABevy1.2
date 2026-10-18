@@ -3878,3 +3878,29 @@ snapshot. This is a memory safety bound, not a claimed native/server contact lim
 Ship radar SC1b2/1b3 and fish contacts are separate formats and remain pending.
 
 Transfer radar validation: all 302 aa-net library tests passed, including session receive order and Bevy resource publication.
+
+
+### Ship telescope receive state (2026-10-18)
+
+SC1b2/1b3 now use `RadarEvent::ShipToggled` and `ShipContacts`, with distinct
+`ShipRadar` publication/pending buffers. SC1b2 native factory391b52f0/vtable399b3f60
+uses397afc40 (bool on, f32 range). SC1b3 factory391d0d40/vtable399b7518 uses397c41c0
+and397bf170: bool last/u8 count, each BC object ID, u32 summoner ID, i32 raw unit
+kind, u32 template, packed position, u32 faction, u32 expedition, string name,
+string summoner name, i32 HP/maxHP and u32 raw tail. Native name bounds1024/128
+and min(count,10) differ from the lane's generic string/full-count writer; active
+reading follows exact lane bytes without guessing a compatibility profile.
+The lane radar service writes kind2 and tail0, but both fields remain received raw
+values. Contacts never create Units, grant ownership or correct visible HP/motion.
+
+Toggle handler391df830?393669c0 clears published/pending ship contacts even on a
+repeated same toggle. List391df8b0?393690f0 appends only while enabled, swaps on
+last, and leaves the published list intact between incomplete chunks. `ShipRadar`
+follows those rules with the same explicit local4096-contact overflow/discard
+boundary as transport radar. Transfer and ship channels do not clear each other.
+Lifecycle resets, duplicates, unknown kind/tail, signed HP, truncations, count11
+DD04 alignment, session forwarding and Bevy registration are covered independently.
+The lane's empty-scan silence is retained as an explicit producer limitation.
+Fish/school-of-fish radar remains a separate format.
+
+Ship radar validation: cargo check and all 305 aa-net library tests passed.

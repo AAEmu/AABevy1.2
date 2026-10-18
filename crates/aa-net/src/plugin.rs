@@ -169,6 +169,7 @@ net_state! {
     gimmicks: Gimmicks,
     houses: Houses,
     transfer_radar: crate::radar::TransferRadar,
+    ship_radar: crate::radar::ShipRadar,
     ui_data: UiData,
     game_config: GameConfig,
     combat_status: CombatStatus,
@@ -182,16 +183,19 @@ mod equipment_flags_tests {
     use bevy::ecs::system::RunSystemOnce;
     #[test]
     fn plugin_fold_publishes_received_transfer_radar_snapshot() {
-        use crate::radar::{RadarEvent, RadarToggle, TransferRadar};
+        use crate::radar::{RadarEvent, RadarToggle, ShipRadar, TransferRadar};
         let mut app = App::new();
         init_state(&mut app);
         for event in [
             Event::Radar(RadarEvent::TransferToggled(RadarToggle { on: true, range: 50.0 })),
             Event::Radar(RadarEvent::TransferContacts { last: true, contacts: vec![] }),
+            Event::Radar(RadarEvent::ShipToggled(RadarToggle { on: true, range: 75.0 })),
+            Event::Radar(RadarEvent::ShipContacts { last: true, contacts: vec![] }),
         ] {
             app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
         }
         assert_eq!(app.world().resource::<TransferRadar>().contacts, Some(vec![]));
+        assert_eq!(app.world().resource::<ShipRadar>().contacts, Some(vec![]));
         assert!(app.world().resource::<Units>().by_id.is_empty());
     }
     #[test]
