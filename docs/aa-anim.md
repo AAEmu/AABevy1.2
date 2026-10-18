@@ -1014,6 +1014,85 @@ Final capture: `shots/aa-anim/facial_attach_toggle_final_20261018.png`, inspecte
 At 3 seconds, after plain GPU upload, the middle and right heads enable in place;
 at 5 seconds the right head disables after its facial meshes have also rendered.
 The final image shows middle authored A and the restored right head matching the
-plain left head. Shared-GPU FPS **251.6?339.1**. Full library verification:
+plain left head. Shared-GPU FPS **251.6-339.1**. Full library verification:
 **73 passed / 1 ignored**. The only character.rs change is face_morph visibility;
 existing material calibration remains outside this milestone.
+
+### Complete original CDF attachment-kind and payload inventory
+
+`cargo run -p aa-anim --example cdf_inventory` is a manual original-catalogue
+regression. It reads only the 13,701 CDF files (3,489,412 bytes) through aa-pak,
+asserts the totals below and writes an inspectable inventory to stdout. It is not
+a default whole-pak geometry test. Sixteen malformed doll-pet armour part CDFs
+are rejected by strict XML: they omit whitespace between File and Material
+attributes. All sixteen contain no Attachment/AttachmentList tag, so they cannot
+hide uncounted attachment kinds. Some also reference legacy singular `/animal/`
+paths absent from this pak; no path alias or permissive XML rule is invented.
+
+| Attachment kind/alignment | Total | Bound | Bound and visible |
+|---|---:|---:|---:|
+| CA_BONE / absent (Model) | 348 | 203 | 203 |
+| CA_BONE / Bone | 1118 | 119 | 117 |
+| CA_SKIN / absent | 939 | 153 | 148 |
+
+There are **zero** Skin-aligned bones, CA_FACE, CA_CAMERA, CA_PROX or other
+attachment kinds in these original CDFs. No surface-projection implementation or
+transform fallback is justified by this inventory; BoneAlignment::Skin continues
+to return an explicit unsupported error.
+
+A separate native field is required for real assets: `AttachmentType`. Original
+loader `3150D870` defaults descriptor+0x44 to **1 (object)**; case-insensitive
+`effect` selects **5**, `entity` selects **3**. Unknown/absent values retain 1.
+Assembler `3150BA00` case 5 creates a particle attachment from the Binding name,
+rather than loading it as a model. Inventory: 2191 absent/default payloads,
+**211 effect payloads** and **3 entity payloads**; all effect/entity entries are
+bound and visible. A dotted effect identifier is not a missing pak file.
+
+`cdf::BindingKind` preserves these numeric semantics and is exposed as
+`Attachment.binding_kind`. Object paths retain existing normalization; effect
+and entity identifiers retain their authored spelling/case. Explicit body-part
+binding resets the payload to Object. `AttachmentKind` and `bone_binding` stay
+unchanged: a CA_BONE effect uses the same native bone/default-model alignment.
+No aa-fx dependency, emitter lifetime rule, forced looping/prime override or
+entity-spawn behavior is introduced by this parser milestone. The client owns
+resource creation and should dispatch the explicit payload kind before prewarm.
+
+Original examples for client integration:
+
+- `animals/horse/horse_lord.cdf`: effect_foot_lf/lr/rf/rr bind
+  `abillity_skill_table_m.system_skill.lord_horse_foot_LF/LR/RF/RR`; default Model
+  alignment against their authored finger/toe bones. The numeric regression
+  proves joint-bind * returned-local equals the authored absolute transform.
+- `elf/female/costume/el_f_sk_whiteday001/el_f_sk_whiteday001.cdf`: headring
+  binds `X2_EFFECTS.doodad_effect.whiteday_custume_head_elf` at Bip01 Head.
+  Its authored spelling and the same absolute/local transform identity are tested.
+  This effect belongs to the costume-part CDF, so resolving only its Model/Material
+  loses the attachment; client assembly must inspect the retained part definition.
+
+Full paths above are relative to `objects/characters/`. Reproducible inventory:
+`data/extract/aa-anim/cdf-attachment-inventory-verified.tsv` (ignored artifact).
+
+Native particle-attachment lifecycle evidence (bounded, no guessed flag names):
+`CEffectAttachment` constructor 31515900 stores the assembler's zero offset,
+Cry +Y direction and unit scale, resolves the Binding effect and retains its
+definition. Lazy creation 31517A40 builds its local matrix and calls adapter
+315170B0 with `(effect, 0, matrix, 0x20000)`; the adapter converts Matrix34 to
+QuatTS and invokes effect virtual+0x0c with that transform and flags 0x20000.
+No explicit prime call or looping override appears in this constructor/spawn/update
+path. The high flag's game-specific semantics remain unresolved; it is not evidence
+for enabling aa-fx priming. The later official
+[IParticles compatibility API](https://raw.githubusercontent.com/aws/lumberyard/master/dev/Code/CryEngine/CryCommon/IParticles.h)
+identifies the compatibility boolean as independence, not priming; that later
+header is corroboration only, not authority for the original custom high flag.
+
+Update 31517CC0 releases/clears its emitter when the attachment's hidden predicate
+is true; otherwise it lazily creates only for a null pointer and updates the
+emitter world matrix. It does not restart a non-null finished emitter in this
+path. Destructor 31515A90 calls emitter virtual+0x10 with false, then releases
+the definition and emitter. This supports attachment-owned cleanup and no forced
+replay loop; the client still owns its ECS parent/despawn implementation. Exact
+source listings are `attachments-native/particle-{decomp,methods,spawn,spawn-adapter}.txt`.
+
+Parser and original numeric checks: **75 passed / 1 ignored**. The manual complete
+CDF inventory assertions also pass. Visual particle assembly remains a client/aa-fx
+integration deliverable, rather than a claimed parser screenshot.
