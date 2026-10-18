@@ -10,6 +10,30 @@
 use crate::model::{Item, ItemDetail};
 use crate::wire::{Reader, Result, WireError};
 
+/// Original SC0A0; the active lane names this six-byte receipt `SCUnknownPacket`.
+/// A nonzero error is presented before two ordered pending-key releases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemOperationError {
+    pub container: u8,
+    pub slot: u8,
+    pub second_container: u8,
+    pub second_slot: u8,
+    pub error_code: i16,
+}
+
+impl ItemOperationError {
+    pub fn read(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Self { container:r.u8()?,slot:r.u8()?,second_container:r.u8()?,second_slot:r.u8()?,error_code:r.i16()? })
+    }
+
+    /// Native397d2200 false-branch admission, in callback order. Equal keys are
+    /// deliberately repeated. This releases no contents and is not a success ACK.
+    pub fn pending_releases(&self) -> impl Iterator<Item=(u8,u8)> {
+        [(self.container,self.slot),(self.second_container,self.second_slot)].into_iter()
+            .filter(move |&(kind,slot)|self.error_code!=0 && kind!=4 && (kind!=0 || slot!=0))
+    }
+}
+
 /// Original SC093: a variable tagged detail prefix, not a padded128 wire field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemDetailUpdate {
@@ -807,6 +831,37 @@ mod tests {
             let mut invalid=update.clone();invalid.raw_detail.push(0);assert!(invalid.native_detail_block().is_none());assert!(invalid.detail().is_none());
         }
         let empty=ItemDetailUpdate{item_id:0,container:2,slot:0,raw_detail:vec![]};assert!(empty.native_detail_block().is_none());
+    }
+
+    #[test]
+    fn item_operation_error_native_lane_signed_goldens_and_ordered_release_contract() {
+        // Actual397c1ec0 read/write oracle; first row is independent lane g2c_misc literal.
+        for (raw,expected) in [
+            ([2,3,1,4,255,255],ItemOperationError{container:2,slot:3,second_container:1,second_slot:4,error_code:-1}),
+            ([2,0,2,0,0,0],ItemOperationError{container:2,slot:0,second_container:2,second_slot:0,error_code:0}),
+            ([4,255,255,128,0,128],ItemOperationError{container:4,slot:255,second_container:255,second_slot:128,error_code:i16::MIN}),
+            ([0,0,3,255,255,127],ItemOperationError{container:0,slot:0,second_container:3,second_slot:255,error_code:i16::MAX}),
+        ] {
+            let mut reader=Reader::new(&raw);assert_eq!(ItemOperationError::read(&mut reader).unwrap(),expected);assert!(reader.is_empty());
+            for n in 0..raw.len() {assert!(ItemOperationError::read(&mut Reader::new(&raw[..n])).is_err());}
+        }
+        let receipt=ItemOperationError{container:2,slot:3,second_container:2,second_slot:3,error_code:-1};
+        assert_eq!(receipt.pending_releases().collect::<Vec<_>>(),[(2,3),(2,3)]);
+        assert_eq!(ItemOperationError{error_code:0,..receipt}.pending_releases().count(),0);
+        assert_eq!(ItemOperationError{container:0,slot:0,second_container:4,second_slot:255,..receipt}.pending_releases().count(),0);
+        assert_eq!(ItemOperationError{container:0,slot:1,second_container:255,second_slot:0,..receipt}.pending_releases().collect::<Vec<_>>(),[(0,1),(255,0)]);
+    }
+
+    #[test]
+    fn item_operation_error_dd04_preserves_repeated_receipts_and_following_packet() {
+        use crate::game::ServerMsg;
+        let receipt=ItemOperationError{container:2,slot:3,second_container:1,second_slot:4,error_code:-1};
+        let mut raw=Writer::new();
+        for _ in 0..2 {raw.u16(0).u16(0xa0).raw(&[2,3,1,4,255,255]);}
+        raw.u16(0).u16(0x4d).raw(&[2,60]);
+        let raw=raw.finish();let len=raw.len() as u16;let mut outer=Writer::new();outer.raw(&[0xdd,4]).u16(3).u8(1).u16(len).u16(!len).raw(&raw);
+        assert_eq!(ServerMsg::decode(&outer.finish()).unwrap(),ServerMsg::Batch(vec![ServerMsg::ItemOperationError(receipt),ServerMsg::ItemOperationError(receipt),ServerMsg::InvenExpanded{container:2,slots:60}]));
+        assert_eq!(ServerMsg::ItemOperationError(receipt).name(),"SCItemOperationError");
     }
 
 }

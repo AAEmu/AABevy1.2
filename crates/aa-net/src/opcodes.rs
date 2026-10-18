@@ -283,6 +283,7 @@ opcodes! {
         SCItemSocketingLunagemResultPacket = 0x09d,
         SCItemSocketingLunastoneResultPacket = 0x09e,
         SCLoadInstancePacket = 0x197,
+        SCItemOperationErrorPacket = 0x0a0,
         SCSkillStartedPacket = 0x0a1,
         SCSkillFiredPacket = 0x0a2,
         SCSkillEndedPacket = 0x0a3,

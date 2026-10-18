@@ -588,6 +588,7 @@ pub enum Event {
     /// Raw item timer metadata; does not change inventory contents or guess an expiry.
     ItemLifespan(crate::items::ItemLifespan),
     ItemDetailUpdated(crate::items::ItemDetailUpdate),
+    ItemOperationError(crate::items::ItemOperationError),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
     Radar(crate::radar::RadarEvent),
@@ -1802,6 +1803,7 @@ impl Session {
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
             M::ItemDetailUpdated(e) => self.emit(Event::ItemDetailUpdated(e)),
+            M::ItemOperationError(e) => self.emit(Event::ItemOperationError(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
             M::Radar(e) => self.emit(Event::Radar(e)),
@@ -5019,6 +5021,24 @@ mod tests {
         session.emit(Event::InventoryChunk(InvenChunk{start_chunk:4,..valid.clone()}));assert!(session.item_effect_known_bag.borrow().contains(&49));
         session.emit(Event::InventoryChunk(InvenChunk{start_chunk:5,..valid.clone()}));assert!(session.item_effect_known_bag.borrow().is_empty());
         session.emit(Event::InventoryInit{bag_slots:130,bank_slots:0});session.emit(Event::InventoryChunk(InvenChunk{start_chunk:12,..valid}));assert!(session.item_effect_known_bag.borrow().contains(&129));
+    }
+
+    #[tokio::test]
+    async fn item_operation_error_decodes_and_forwards_without_automatic_unlock_or_content_change() {
+        use crate::items::ItemOperationError;
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let before=Item{id:11,template_id:101,count:8,..Default::default()};session.received_inventory.borrow_mut().bag=vec![Some(before.clone())];session.received_inventory.borrow_mut().mark_item_slot_pending(2,0);
+        for error in [0,-1,i16::MIN,i16::MAX] {
+            let expected=ItemOperationError{container:2,slot:0,second_container:2,second_slot:0,error_code:error};
+            let mut frame=crate::wire::Writer::new();frame.raw(&[0xdd,1,0,0]).u16(0xa0).raw(&[2,0,2,0]).i16(error);
+            let raw=frame.finish();
+            for _ in 0..2 {
+                session.game_msg(Ok(game::ServerMsg::decode(&raw).unwrap())).await;
+                assert!(matches!(events.try_recv(),Ok(Event::ItemOperationError(got)) if got==expected));assert!(events.try_recv().is_err());
+                assert_eq!(session.received_inventory.borrow().bag,vec![Some(before.clone())]);assert!(session.received_inventory.borrow().item_slot_pending(2,0));
+            }
+        }
+        assert!(session.game.is_none());assert!(session.selected_state.is_none());
     }
 
 }

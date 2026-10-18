@@ -514,6 +514,7 @@ pub enum ServerMsg {
     ItemTasks(ItemTasks),
     ItemLifespan(crate::items::ItemLifespan),
     ItemDetailUpdated(crate::items::ItemDetailUpdate),
+    ItemOperationError(crate::items::ItemOperationError),
     /// Items of a unit's equipment slots changed (`None` = unequipped).
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots`.
@@ -718,6 +719,7 @@ impl ServerMsg {
             Self::ForceAttackSet { .. } => "SCForceAttackSet",
             Self::UnitInvisible { .. } => "SCUnitInvisible",
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
+            Self::ItemOperationError(_) => "SCItemOperationError",
             Self::ItemDetailUpdated(_) => "SCItemDetailUpdated",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
@@ -1030,6 +1032,7 @@ impl ServerMsg {
             sc::SCLoadInstancePacket => Self::LoadInstance(crate::world_msg::InstanceLoad::read(r)?),
             sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
             sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
+            sc::SCItemOperationErrorPacket => Self::ItemOperationError(crate::items::ItemOperationError::read(r)?),
             sc::SCItemDetailUpdatedPacket => Self::ItemDetailUpdated(crate::items::ItemDetailUpdate::read(r)?),
             sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
             sc::SCEnvDamagePacket => Self::EnvDamage(crate::combat_status::EnvironmentDamage::read(r)?),
