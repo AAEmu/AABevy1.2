@@ -84,18 +84,29 @@ as successful in-world validation.
 ## Checks
 
 The full client suite passed237 tests/37 existing or optional probes ignored
-(17.96s), including all38 executed list results, native comparator goldens,
-all1,743 getter rows, invalid/local dates, completion callback ordering, safe
-type5 hydration, sibling/version preservation and captured save-before-leave
-command ordering. The separate original-script physical tracing/remove/re-add,
-completion, detail and Back probe passed (2.49s). It waits for the original
-opening scale animation before checking exact mouse hits.
+(25.29s) with the UI owner's native automatic row geometry. This includes all38
+executed list results, native comparator goldens, all1,743 getter rows,
+invalid/local dates, completion callback ordering, safe type5 hydration,
+sibling/version preservation and captured save-before-leave command ordering.
+The separate original-script physical tracing/remove/re-add, completion, detail
+and Back probe passed (2.69s). It waits for the original opening scale animation
+before checking exact mouse hits.
 
-Visual capture is pending the UI owner's source-verified automatic list-row
-geometry correction. The original six-row achievement viewport is440px; native
-integer division produces73px rows, while the old toolkit used25px. No fixture
-height override is used to conceal this rendering gap. The old English summary
-translation limitation and live validation boundaries above remain open.
+All four1920x1080 original-script pages were captured and inspected under
+`shots/hud/achievement/`: list463.7?509.8FPS, overview401.8?474.8FPS,
+tracing413.7?477.0FPS and detail448.3?530.1FPS. The native440px six-row list
+uses73px rows with the two-pixel remainder unused; no fixture height override
+is present. The list page is selected through its original script function, so
+the left navigation retains the Summary highlight in that fixture capture.
+There were no warning/error log entries, and every QA process closed itself.
+The missing English summary/description data and live boundaries above remain
+open; no matching real-client achievement reference capture exists locally.
+
+The same main build reached the live `Lane-bevy` world list at294.5?414.8FPS,
+with no warning/error entries. This verifies login/world-select only. The
+verified playable alias is `target/debug/aa-client-play.exe`, copied from
+`aa-client-20261018-achievements.exe` after confirming no client instance was
+running. SHA256: `72AFD8DFECB752A08EC0A70141E4A2E76D594A4376E8190F2FC4B664C8ECBB26`.
 
 The reproducible visual example uses `aa_dev::default_plugins` and `DevPlugin`:
 
