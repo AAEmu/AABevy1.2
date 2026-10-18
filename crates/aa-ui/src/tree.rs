@@ -515,8 +515,7 @@ pub struct Drawable {
     /// Extra drawables of one button state (`CreateHighlightDrawable`, `CreateStateDrawable`):
     /// shown exactly while the owner is in that state, independent of the backgrounds.
     pub state_only: Option<ButtonState>,
-    /// Status bar fill: only this fraction of the rect (and of `coords`) is drawn, from the
-    /// left (or the bottom when vertical).
+    /// Status bar fill: layout uses this fraction, from the left (or top when vertical).
     pub fill: Option<(f32, bool)>,
     /// Effect drawables (`CreateEffectDrawable`): visible after `SetStartEffect(true)`;
     /// finite timelines retain their final sample until explicitly stopped.
@@ -1117,6 +1116,16 @@ impl Tree {
             }
             None => r,
         };
+        let mut r = r;
+        if let Some((fraction, vertical)) = o.drawable().and_then(|d| d.fill) {
+            if self.widget(owner).and_then(|w| w.status.as_ref())
+                .is_some_and(|s| s.bar == Some(id) && s.max > s.min && s.value > s.min)
+            {
+                let owner = self.resolve(owner, cache, visiting);
+                r.w = owner.w * if vertical { 1.0 } else { fraction };
+                r.h = owner.h * if vertical { fraction } else { 1.0 };
+            }
+        }
         visiting.pop();
         cache[id as usize] = Some(r);
         r

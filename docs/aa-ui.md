@@ -2730,3 +2730,55 @@ Source excerpts are in
 `data/extract/aa-ui/native-battlefield-members-slots-source-20261018.txt` and
 `native-battlefield-slots-runtime-20261018.txt`. This is source-only work; the
 app owns original scoreboard/action-bar integration and its rendered checks.
+
+### Status-bar child anchors and filled image geometry (2026-10-18)
+
+The unchanged `components/castingbar_view.alb` attaches its 21-pixel light
+decoration with `statusBar:AddAnchorChildToBar(lightDeco, "TOPLEFT",
+"TOPRIGHT", -15, -2)`. That method was a stub, and the bar image's layout
+rectangle still covered its full owner while only the renderer cropped it.
+The casting decoration consequently could not follow the displayed fill.
+
+Native registration `392583d3` selects wrapper `39257b30`, which calls
+`392c7f10`. It anchors the supplied widget/drawable to the existing bar image
+at status-bar `+2cc` through ordinary `39276dd0` anchors; absent child or bar
+is a no-op. aa-ui now implements that method with the actual internal image
+ID. Its filled rectangle participates in normal anchor resolution, and the
+renderer crops the texture once against that already filled geometry.
+
+Update `392c7f80` uses horizontal top-left/bottom-left anchors and a
+`width * fraction` extent. Vertical uses top-left/top-right anchors and
+`height * fraction`, filling downward from the top. The native point table
+`39ac6a5c` and parser `3922c0a0` establish those point identities. The
+`min == max` and `value == min` branches only hide the image (`392c8250`),
+retaining its last extent and anchors. The filled axis therefore retains
+its last length while those cross-axis anchors still follow the owner.
+aa-ui retains the last positive extent before entering either hidden state.
+
+The original vertical UV path has a distinct quirk, which is preserved:
+`392c81bd..392c81c7` writes `original height * fraction` into the UV
+**width** slot and leaves UV height unchanged. This is not inferred from
+the geometry. Wrapper `392574c0` passes x/y/width/height in that order,
+`392c8410` stores them unchanged, and image conversion `3928b260` confirms
+their use. Horizontal crops its UV width normally. Bar value interpolation
+requested by `SetValue(value, animate, ms)` remains unimplemented.
+
+`tests/statusbar.rs` checks missing-bar no-op, ordinary child target IDs,
+moving fill endpoints, range/owner changes, cached hidden lengths in both
+orientations, the native vertical UV quirk, and the unchanged original
+casting-bar view at 25/50/75 percent. `native_castingbar` is the shared
+original-component example using the aa-dev harness. Source excerpts:
+`data/extract/aa-ui/native-statusbar-fill-source-20261018.txt` and
+`native-statusbar-coords-source-20261018.txt`.
+
+Validation: `cargo check -p aa-ui --lib` passed. The library and selected
+statusbar/native/HUD/animation/resize/scale/clip/popup/bounds tests passed
+**81 tests**, with one existing font-metric test ignored. Built and ran the
+copied `native_castingbar` example with
+`--shot shots/aa-ui/native-castingbar-20261018.png --shot-after 8`; inspected
+that unique image, with the authored flare at all three fill endpoints.
+The aa-dev run logged **316.1–498.9 FPS**, zero Lua errors and no WARN/ERROR,
+and process 34436 closed automatically after the capture. The spawn reference
+was inspected for HUD context; it contains no active cast, so this is an
+original-component/native-geometry check rather than a claimed active-cast
+pixel comparison.

@@ -360,21 +360,16 @@ pub(crate) fn drawable_quads(
     } else { px(r, scale) };
     let animation = u.animations.sample(d);
     let base = base.unwrap_or_else(|| u.tree.rect(d));
-    let mut rect = animation.rect(base);
-    // Status bar fill: crop the rect and the texture rectangle alike.
+    let rect = animation.rect(base);
+    // Status bar layout already has the filled extent; crop only its texture here.
     let mut coords = animation.coords.or(dr.coords);
     if let Some((f, vertical)) = dr.fill {
         if vertical {
-            let h = rect.h * f;
-            rect.y += rect.h - h;
-            rect.h = h;
             if let Some(c) = coords.as_mut() {
-                let ch = c[3] * f;
-                c[1] += c[3] - ch;
-                c[3] = ch;
+                // Native 392c81bd..c7 writes height*f into the width slot.
+                c[2] = c[3] * f;
             }
         } else {
-            rect.w *= f;
             if let Some(c) = coords.as_mut() {
                 c[2] *= f;
             }
@@ -417,7 +412,7 @@ pub(crate) fn drawable_quads(
                 (Some(c), _) => c,
                 // Whole texture, cropped like the rect.
                 (None, Some((f, false))) => [0.0, 0.0, tw * f, th],
-                (None, Some((f, true))) => [0.0, th * (1.0 - f), tw, th * f],
+                (None, Some((f, true))) => [0.0, 0.0, th * f, th],
                 (None, None) => [0.0, 0.0, tw, th],
             };
             let tex = Tex::Image(resolved);
