@@ -25,10 +25,16 @@ end
 X2Dominion.GetPeaceTaxMoney = function(self, zoneId) return "" end
 X2Dominion.GetPeaceTaxAAPoint = function(self, zoneId) return "" end
 
+-- Native battlefield manager3936d0d0 initial state. Queue protocol/state integration follows.
+X2BattleField.GetJoinedInfos = function() return 0, 0, -1 end
+X2BattleField.IsInInstantGame = function() return false end
+
 -- Units --------------------------------------------------------------------------------------------------
 -- The data of a unit the scripts ask about: the player (HUD.state) or the target (HUD.target).
 local function U(unit)
   if isPlayer(unit) then return S() end
+  local pet = HUD.playerpet
+  if pet ~= nil and (unit == "playerpet" or unit == pet.unit_id) then return pet end
   local t = HUD.target
   if t ~= nil and (unit == "target" or unit == t.unit_id) then return t end
   if HUD.team_units ~= nil then return HUD.team_units[unit] end
@@ -72,7 +78,10 @@ X2Unit.GetUnitTypeString = function(self, unit)
   if t == nil then return nil end
   return t.unit_type, t.detail
 end
-X2Unit.GetUnitType = X2Unit.GetUnitTypeString
+X2Unit.GetUnitType = function(self, unit)
+  local kind, detail = self:GetUnitTypeString(unit)
+  return detail or kind
+end
 X2Unit.GetUnitGradeById = function(self, id)
   local t = HUD.target
   if t ~= nil and id == t.unit_id then return t.grade end
