@@ -276,6 +276,7 @@ opcodes! {
         SCUnitEquipmentsChangedPacket = 0x094,
         SCUnitEquipmentIdsPacket = 0x095,
         SCSyncItemLifespanPacket = 0x098,
+        SCSpecialtyRatioPacket = 0x099,
         SCScheduleItemSentPacket = 0x151,
         SCScheduleItemUpdatePacket = 0x1eb,
         SCItemUccDataChangedPacket = 0x15d,

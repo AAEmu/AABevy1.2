@@ -512,6 +512,8 @@ pub enum Event {
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// Native SC095 changes persistent IDs only, preserving other record fields.
     EquipmentIdsChanged { obj_id: u32, ids: [u64; 28] },
+    /// Raw native specialty sale ratio receipt; zero is an error/reset path.
+    SpecialtyRatio(i32),
     /// A container grew to `slots` slots.
     InventoryExpanded { container: u8, slots: u8 },
     /// A unit began casting `skill_id` (or, with a non zero `result` and `tl` 0, the server
@@ -1720,6 +1722,7 @@ impl Session {
             M::ItemTasks(tasks) => self.emit(Event::ItemsChanged(tasks)),
             M::EquipmentChanged { obj_id, items } => self.emit(Event::EquipmentChanged { obj_id, items }),
             M::EquipmentIdsChanged { obj_id, ids } => self.emit(Event::EquipmentIdsChanged { obj_id, ids }),
+            M::SpecialtyRatio(ratio) => self.emit(Event::SpecialtyRatio(ratio)),
             M::InvenExpanded { container, slots } => self.emit(Event::InventoryExpanded { container, slots }),
             M::SkillStarted(s) => self.emit(Event::SkillStarted(s)),
             M::SkillFired(s) => self.emit(Event::SkillFired(s)),
@@ -5043,6 +5046,16 @@ mod tests {
         session.command(Command::ItemEffect{character_id:42,request:refreshed.clone()}).await;
         assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));read_item_effect_write(&mut peer,&refreshed).await;
         session.game.as_mut().unwrap().shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn specialty_ratio_forwards_raw_duplicates_without_game_gate_or_optimism() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        for ratio in [0,117,-1,117,i32::MIN,i32::MAX] {
+            session.game_msg(Ok(game::ServerMsg::SpecialtyRatio(ratio))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::SpecialtyRatio(value)) if value==ratio));
+            assert!(events.try_recv().is_err());assert!(session.game.is_none());assert_eq!(session.self_obj,0);
+        }
     }
 
 }
