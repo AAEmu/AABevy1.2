@@ -5031,3 +5031,43 @@ transparent pixel samples at each resolution exactly retain the unmasked
 underlying artwork; `native-cooldown-mask-alpha-pixels-20261018.json` records
 those results. The initial diagnostic `slot_over.dds` was found to be fully
 opaque and was replaced before the final captures. No asset was edited.
+
+### Original bounty bulletin globals are an asset defect (2026-10-18)
+
+The actual original nonempty bounty bulletin fails at
+`usertrial/bounty_bullet.alb:115`. This is not a decompiler-renamed local:
+actual `main/0/4` pc15 reads `GETGLOBAL listCtrl`, pc20 reads
+`GETGLOBAL bountyRecords`, and pc21 reads `GETGLOBAL index`, although its loop
+length uses the uppercase `BOUNTY_RECORDS` upvalue. The original Bounty button
+similarly reads bare lowercase `curSelected`/`bountyRecords` at lines53/54.
+
+A bytecode scan covers all **961 original .alb scripts**, matching the pak
+index count. No script executes SETGLOBAL for `listCtrl`, `bountyRecords` or
+`curSelected`. The lowercase data/selection reads occur only in the bounty
+asset. There ARE four unrelated SETGLOBAL writes to `index` in housing
+maintain-window and tooltip functions, so `index` is not universally absent;
+those writes do not supply the missing bounty table, selected row or list.
+`native-bounty-global-script-refs-20261018.json` records every relevant opcode,
+the full scan counts, bounty asset hash and native ASCII-string presence.
+The x2game PE contains no `bountyRecords`, `curSelected` or `listCtrl` strings;
+`index` is present and is not used as evidence of an absent native binding.
+
+`components/pagelistctrl.alb:28` creates its local list with
+`frame:CreateChildWidget('listctrl','listCtrl',0,true)`; line33 writes
+`SETTABLE frame.listCtrl`, rather than a global. Native wrapper `39266960`
+reaches `39279cb0`; its zero-index attachment at `39279eb6` calls `3920d330`
+with the PARENT script table. The executed `bounty_child_binding_oracle.py` /
+`native-bounty-child-binding-oracle-20261018.json` runs actual `3920d330` and
+captures only script-table/refcount endpoints: AddRef child, SetAny on the
+parent receiver with key `listCtrl`/type6/child object, then Release. It does
+not export a bare global. Source and exact bytecode artifacts are
+`native-bounty-child-binding-source-20261018.txt`,
+`native-bounty-fill-bytecode-20261018.txt`,
+`native-bounty-button-bytecode-20261018.txt` and
+`native-bounty-pagelist-bytecode-20261018.txt` under data/extract/aa-ui.
+
+The usertrial toc explicitly loads bounty_bullet, whose original main
+registers TOGGLE_BOUNTY_BULLETIN. This evidence supports a broken nonempty
+asset path; it does not establish that the screen was unused. No toolkit
+globals, bytecode edits, replacement rows or optimistic bounty actions are
+introduced to conceal it. The client integration documents the boundary.
