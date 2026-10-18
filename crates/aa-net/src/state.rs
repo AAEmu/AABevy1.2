@@ -132,6 +132,7 @@ impl Player {
                 if changed {spawn.state.character.expedition_id=spawn.unit.expedition_id;spawn.state.character.faction_id=spawn.unit.faction_id;}
                 changed
             }),
+            Event::Bounty(crate::BountyEvent::UnitMoney{obj_id,money}) => return self.spawn.as_mut().is_some_and(|spawn| {if spawn.obj_id!=*obj_id{return false;} let changed=spawn.unit.bounty_money!=Some(*money);spawn.unit.bounty_money=Some(*money);changed}),
             Event::Crime(receipt) => return self.spawn.as_mut().is_some_and(|spawn| {
                 match *receipt {
                     crate::CrimeEvent::Changed{crime_points,infamy_points,crime_state,..} => {
@@ -204,6 +205,7 @@ impl Units {
                     _=>return false,
                 }
             }
+            Event::Bounty(crate::BountyEvent::UnitMoney{obj_id,money})=>return self.by_id.get_mut(obj_id).is_some_and(|unit|{let changed=unit.bounty_money!=Some(*money);unit.bounty_money=Some(*money);changed}),
             Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
@@ -419,6 +421,7 @@ pub struct WorldState {
     pub dominion: crate::Dominion,
     pub trials: crate::trial::Trials,
     pub crimes: crate::crime::Crimes,
+    pub bounties:crate::Bounties,
     pub achievements: crate::achievement::Achievements,
     pub expeditions: crate::expedition::Expeditions,
     pub families: crate::family::Families,
@@ -471,6 +474,7 @@ impl WorldState {
         self.dominion.apply(e);
         self.trials.apply(e);
         self.crimes.apply(e);
+        self.bounties.apply(e);
         self.achievements.apply(e);
         self.expeditions.apply(e);
         self.families.apply(e);
@@ -665,6 +669,7 @@ pub(crate) mod tests {
             appellation: 0,
             flags: 0,
             gm_modes: [0;4],
+            bounty_money:None,
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),

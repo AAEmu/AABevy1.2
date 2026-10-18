@@ -627,6 +627,10 @@ pub struct CharacterState {
     /// Unread mail: received, mia received, commercial.
     pub unread_mail: [i32; 3],
     pub jury_point: i32,
+    pub jail_seconds:i32,
+    pub bounty_money:i64,
+    /// Raw native unsigned time field; no epoch interpretation is assumed.
+    pub bounty_time:u64,
     /// Seconds played in total.
     pub play_time: i32,
     /// Expert-specialization expansion count; the final byte of SCCharacterState.
@@ -656,8 +660,10 @@ impl CharacterState {
         // money x2 (the character's own), two reserved i64, auto-use flag, ...
         r.skip(8 * 4 + 1)?;
         let jury_point = r.i32()?;
-        // ... jail seconds, bounty money and time, bot report counters ...
-        r.skip(4 + 8 + 8 + 4 + 4)?;
+        let jail_seconds=r.i32()?;
+        let bounty_money=r.i64()?;
+        let bounty_time=r.u64()?;
+        r.skip(4+4)?; // bot report counters
         let play_time = r.i32()?;
         let created = r.i64()?;
         let expanded_expert = r.u8()?;
@@ -676,6 +682,7 @@ impl CharacterState {
             ability_exp,
             unread_mail,
             jury_point,
+            jail_seconds,bounty_money,bounty_time,
             play_time,
             expanded_expert,
         })
@@ -798,6 +805,8 @@ pub struct Unit {
     pub flags: u16,
     /// First common UnitState PISC integer, expanded in native actor byte order.
     pub gm_modes: [u8; 4],
+    /// Only genuine SCUnitBountyMoney reports hydrate this actor value.
+    pub bounty_money:Option<i64>,
     /// Characters: learned skills as `(skill id, level)`.
     pub skills: Vec<(u32, u8)>,
     /// Characters: ids of the passive buffs.
@@ -987,6 +996,7 @@ impl Unit {
             appellation: 0,
             flags: 0,
             gm_modes: [0; 4],
+            bounty_money:None,
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),
@@ -1781,12 +1791,13 @@ mod tests {
             w.u32(0);
         }
         w.i32(0).i32(0).i32(0).u8(50).i16(200);
-        w.i64(1).i64(2).i64(0).i64(0).bool(true).i32(0).i32(0).i64(0).i64(0);
+        w.i64(1).i64(2).i64(0).i64(0).bool(true).i32(0).i32(i32::MIN).i64(i64::MIN).u64(u64::MAX);
         w.i32(0).i32(0).i32(600).i64(1_700_000_000).u8(7);
         let bytes = w.finish();
         let mut r = Reader::new(&bytes);
         let s = CharacterState::read(&mut r).unwrap();
         assert!(r.is_empty(), "{} bytes left", r.remaining());
+        assert_eq!((s.jail_seconds,s.bounty_money,s.bounty_time),(i32::MIN,i64::MIN,u64::MAX));
         assert_eq!(s.instance_id, 1);
         assert_eq!(s.guid, vec![7; 16]);
         assert_eq!(s.character.name, "Bob");

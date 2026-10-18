@@ -6761,3 +6761,77 @@ separately from the currently loaded engine layer main_world; it is not an InWor
 received feature bit, or faction inference. Unknown producer/world context still
 refuses acceptance safely; decline remains supported. The nominal global flag name
 is not required to preserve its concrete producer/consumer contract.
+
+
+### Received bounty bulletin and settlement boundary (2026-10-18)
+
+Native factories/serializers prove SC0bb (397b3b50), SC1d9 (397c4720),
+SC1da (397c6fc0), SC1db (397c7080), and SC1dc (397c7180). Active lane
+`systems/social/packets/trial.rs` writes matching framing; `crime.rs::BountyDescription`
+writes matching row widths. One semantic mismatch is preserved explicitly: native row
+397bebf0 reads not-guilty then guilty, while the lane writes guilty then not-guilty.
+`BountyRow.first_verdict_count` / `second_verdict_count` retain those actual wire positions.
+No field swap, payment request, reward credit, or optimistic settlement is synthesized.
+Names remain binary, positions retain i64 coordinates and raw f32 z bits, amounts retain
+all 64 bits, and bool/race bytes and signed counters remain raw.
+
+`Event::Bounty` forwards every complete receipt, including duplicates. `Bounties` keeps
+only `last_receipt` plus the native ordered unsigned persistent-ID map. Native39080b00
+assigns each row in order, so the last duplicate ID wins; chunks do not clear earlier
+rows. After all rows, equality of packet total and map size emits
+`TOGGLE_BOUNTY_BULLETIN()` (0xd0), including repeated/empty matching receipts.
+The native inline reader stores at most twenty rows but its callback trusts the original
+count: behavior above twenty is unsafe, not a valid native truncation contract. Our
+reader consumes every lane-declared row for alignment and preserves the raw event;
+the safe cache refuses count>20, inconsistent row counts, or names>128 bytes atomically.
+Names within the admitted cache preserve NUL tails; Lua conversion uses first NUL.
+
+The native map39ade6cc has static construction/destruction and no character/world-leave
+clear in its direct-reference coverage. Accordingly CharacterSelected and LeftWorld
+retain the map here. Authentication/connection, successful login, disconnect and kick
+clear it as explicit app transport isolation, not a claim of native cache reset equivalence.
+`apply_with_notices` folds once and returns callbacks after assignment; these handlers
+have no intermediate map callbacks requiring staged copies.
+
+SC1da false emits native local error584, true emits `SET_BOUNTY(kind,name,money)`
+(0x14e). SC1db nonzero signed i16 error emits that error; zero emits
+`SET_BOUNTY_DONE(kind,name,money,1)` (0x14f). SC1dc emits
+`BOUNTY_PAID(hunter,arrested,money,1)` (0x150). Notices preserve full received amounts;
+`Bounties::displayed_money` separately reproduces native **signed low32 to f32** conversion.
+Original executed getter39080c00 confirms 0x100000001 displays1 and0x80000000 displays
+-2147483648. These callbacks do not prove wallet changes or update the bulletin map.
+
+SC0bb handler391d6570 resolves an existing actor, writes its i64 bounty at+3ad8 via
+39354260/390b63d0, updates its label, then emits the shared0x14f callback with runtime
+objectID, actor name, signed-low32 money, and numeric local0/1. `Units` and `Player`
+update only actual matching existing actors; no actor is created. `Unit.bounty_money`
+is None until this report, and actor replacement starts unknown again. The separate
+`Bounties::unit_money_notice` requires the actual matching actor already holding the
+received amount; callers supply actual local object identity. It does not maintain a
+second actor cache or infer local identity from persistent IDs.
+
+CharacterState39620856..d3 proves the previously skipped `jail_seconds:i32`,
+`bounty_money:i64`, and `bounty_time:u64`. They are now retained without changing
+framing. Native39089e33 copies header bounty money into the selected-character object;
+SC0bb updates the runtime actor independently. No cross-hydration is inferred. Native
+time units/epoch remain unclosed, and the current lane character-state writer sends
+zero for all three fields rather than rehydrating live escrow.
+
+`X2Trial:GetBountyData` registration39079137, wrapper39078810?39080c00 returns
+(table,count), ordered by unsigned persistent ID. Its fifteen row columns are ID,
+name, level, zoneID, low32-signed money, crime points, position string, race string,
+faction string, arrest count, accepted-guilty count, accepted-trial count,
+not-guilty count, guilty count, seconds. Position3907f940 uses actual current-world
+spatial lookup, race3907e640 uses locale47, faction392f8120 requires factionID>=100;
+these providers must not be replaced by invented received-zone/proximity mappings.
+Source: ignored `native-bounty-source-20261018.txt`; actual local x86 getter oracle
+`bounty_get_data_oracle.py` / `native-bounty-get-data-oracle-20261018.json`.
+The oracle executes the original getter and ordered-map iteration; static spatial,
+race, faction and Script interface providers are explicitly mocked/labeled.
+
+QA: all501 aa-net Bevy library tests pass (0failed/0ignored); the final signed-header
+edge assertion also passes independently. Regression coverage includes all five packet
+bodies, every truncated prefix, DD04 following-packet alignment, duplicate ordered-map
+receipts, malformed-cap refusal, transport isolation versus world-leave retention,
+existing/local actor guards, reused actor IDs, unchanged selected header, Bevy folding,
+and duplicate Session forwarding without automatic payments.
