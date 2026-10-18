@@ -172,3 +172,86 @@ fn constructor_observes_invalid_identity_until_set_skill() {
     lua::tick(&ui.lua, 16.);
     run(&ui, "assert(calls==2 and events==2)");
 }
+
+#[test]
+fn generic_set_cooldown_is_a_snapshot_not_an_independent_clock() {
+    for class in [
+        "cooldownbutton",
+        "cooldownactionbutton",
+        "cooldownconstantbutton",
+        "cooldowninventorybutton",
+    ] {
+        let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+        ui.lua.globals().set("class", class).unwrap();
+        run(
+            &ui,
+            r#"
+            button=UIParent:CreateWidget(class,'snapshot','UIParent')
+            button:SetExtent(42,42);button:Show(true);button:SetCoolDown(8000,12000)
+        "#,
+        );
+        let id = lua::value_id(&ui.lua, &ui.lua.load("button").eval().unwrap()).unwrap();
+        let mask = |ui: &UiRuntime| {
+            aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None)
+                .into_iter()
+                .filter_map(|q| q.corners)
+                .collect::<Vec<_>>()
+        };
+        let before = mask(&ui);
+        assert!(!before.is_empty());
+        lua::tick(&ui.lua, 9000.);
+        assert_eq!(mask(&ui), before, "{class}");
+        assert_eq!(
+            lua::ui(&ui.lua)
+                .tree
+                .widget(id)
+                .unwrap()
+                .cooldown
+                .as_ref()
+                .unwrap()
+                .sampled_ms,
+            Some(8000.)
+        );
+        run(&ui, "button:SetCoolDown(0,0)");
+        assert!(mask(&ui).is_empty());
+    }
+}
+
+#[test]
+fn original_consumer_alone_replaces_the_generic_draw_snapshot() {
+    let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    constant_cooldown::install(&mut ui);
+    run(
+        &ui,
+        r#"
+        button=nativeCooldownButtons[1]
+        button:SetCoolDown(8000,12000)
+        button:SetHandler('OnContentUpdated',nil)
+        nativeCooldownSamples[1]={500,1000}
+    "#,
+    );
+    let id = lua::value_id(&ui.lua, &ui.lua.load("button").eval().unwrap()).unwrap();
+    lua::tick(&ui.lua, 9000.);
+    assert_eq!(
+        lua::ui(&ui.lua)
+            .tree
+            .widget(id)
+            .unwrap()
+            .cooldown
+            .as_ref()
+            .unwrap()
+            .sampled_ms,
+        Some(8000.)
+    );
+    run(&ui, "AddOnUpdateConstantCooldown(button,'action')");
+    lua::tick(&ui.lua, 16.);
+    {
+        let u = lua::ui(&ui.lua);
+        let cd = u.tree.widget(id).unwrap().cooldown.as_ref().unwrap();
+        assert_eq!(cd.sampled_ms, Some(500.));
+        assert_eq!(cd.total_ms, 1000.);
+    }
+    run(&ui, "nativeCooldownSamples[1][1]=0");
+    lua::tick(&ui.lua, 16.);
+    assert!(lua::ui(&ui.lua).tree.widget(id).unwrap().cooldown.is_none());
+}

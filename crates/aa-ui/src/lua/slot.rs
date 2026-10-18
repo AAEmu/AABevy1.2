@@ -83,14 +83,16 @@ pub enum Source {
     Item(i64, i64),
 }
 
-/// A running cooldown ([`crate::tree::Widget::cooldown`]). The time left is `end_ms - Ui::time_ms`
-/// (nothing is written per frame, so a cooldown only rebuilds the meshes when the sweep or the
-/// text changes visibly).
+/// A cooldown ([`crate::tree::Widget::cooldown`]): slots use `end_ms - Ui::time_ms`, while
+/// generic buttons retain `sampled_ms` until their next explicit SetCoolDown call.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cooldown {
-    /// UI time (`Ui::time_ms`) the cooldown ends at.
+    /// UI time the slot cooldown ends at; for generic buttons, time of the sample plus remaining.
     pub end_ms: f64,
     pub total_ms: f32,
+    /// Generic buttons retain a draw snapshot until SetCoolDown is called again. Only slots
+    /// count down locally; the derived button providers notify their original Lua consumers.
+    pub sampled_ms: Option<f32>,
     /// What the last frame update saw (sweep step, label): the tree is touched when it changes.
     pub drawn: (i32, String),
 }
@@ -488,15 +490,15 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
 /// Start (`Some((remain, total))` in ms) or clear a widget's cooldown sweep.
 fn set_cooldown(lua: &Lua, u: &mut Ui, id: Id, cd: Option<(f32, f32)>) {
     let now = u.time_ms;
+    let clocked = u.tree.widget(id).is_some_and(|w| w.slot.is_some());
     let value = cd.map(|(remain, total)| Cooldown {
         end_ms: now + remain as f64,
         total_ms: total,
+        sampled_ms: (!clocked).then_some(remain),
         drawn: (-1, String::new()),
     });
-    if value.is_some()
-        && let Ok(a) = active(lua)
-    {
-        let _ = a.raw_set(id, true);
+    if let Ok(a) = active(lua) {
+        let _ = a.raw_set(id, if value.is_some() && clocked { Value::Boolean(true) } else { Value::Nil });
     }
     if let Some(w) = u.tree.widget_mut(id) {
         w.cooldown = value;
@@ -658,6 +660,10 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
                 finished.push(id);
                 continue;
             };
+            if cd.sampled_ms.is_some() {
+                finished.push(id);
+                continue;
+            }
             let remain = cd.end_ms - now;
             if remain <= 0.0 {
                 if let Some(w) = u.tree.widget_mut(id) {
@@ -763,7 +769,7 @@ pub(crate) fn cooldown_quads(
     let Some(cd) = w.cooldown.as_ref() else {
         return;
     };
-    let remain = cd.end_ms - u.time_ms;
+    let remain = cd.sampled_ms.map(f64::from).unwrap_or(cd.end_ms - u.time_ms);
     if remain <= 0.0 || cd.total_ms <= 0.0 {
         return;
     }
