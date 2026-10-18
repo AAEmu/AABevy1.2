@@ -586,18 +586,53 @@ these separate runs are not a controlled GPU benchmark. No matching real-client 
 the sky brightness has not been calibrated against a nighttime reference. The real-catalogue test validates Sirius / Arcturus,
 native magnitude bytes, normalized directions, mesh counts, truncation rejection and nighttime / daytime spline interpolation.
 
-**Remaining moon gap**: main-world `env.xml` authors `big_moon_df.dds` at latitude 240 / longitude 45 / size 0.22 and
-`small_moon_df.dds` at 140 / 35 / 0.025, under the native spelling `SecondayMoons`; the other two slots are disabled. The assets
-are under `textures/skys/night/`. `x2moon.cfx` specifies the textured alpha disc and inner / outer corona formula, and the zone
-splines contain separate Moon 0 / Moon 1 colours and multipliers. The ArcheAge CPU mapping from these sizes to the moon quad
-has not been recovered. Public Cry / Lumberyard single-moon sizing differs and is not sufficient evidence for the two authored
-discs here. Moon discs / coronas remain undrawn pending that mapping; no substitute discs have been added.
+**Original moon discs / coronas** (`moons.rs`, `moons.wesl`): the original 1.2 renderer now resolves the CPU sizing gap.
+Read-only inputs are `data/extract/aa-cry/ida/render/cryrenderd3d10.dll`, `render.i64` and
+`data/extract/aa-cry/ida/cry3dengine.dll` / `cry3d.i64`; IDA scripts used disposable copies under the ignored
+`data/extract/aa-world/night/moon-native/`. The renderer is x86, image base `0x38000000`, version `0.5.1.101406`,
+timestamp 2014-10-14, SHA256 `ebf051bba5d349a6b3bf6d4eb676908115b73bb22d35d5a0cc917c325426589d` (matches its IDB).
+The bounded decompilations and scripts remain under `data/extract/aa-world/night/moon-*.txt` / `.py`.
 
-A bounded follow-up audit of `D:/aa-re/client12/x2game_unpacked.dll` (18,483,712-byte x86 PE,
-image base `0x38ff0000`) found no ASCII/UTF-16 `x2moon`, `MoonDirSize`, `SecondayMoons` or moon
-parameter identifiers. The provided client DLL copies do not include the native renderer /
-3DEngine DLL; the available server `cry3dengine_dedicate` retains the Moon 0..3 time-of-day
-field names. Thus the renderer's CPU disc construction is still unavailable in these copies.
+Native `381B8A50` reads primary `Moon` plus enabled `MoonN` children of the native spelling `SecondayMoons`, retaining each
+time-of-day slot. `381B9080` sorts descending `Order`. Its size remap is `s = .04 + .96 * clamp(Size, 0, 10)`:
+main-world `big_moon_df.dds` size .22 becomes **.2512**, and `small_moon_df.dds` size .025 becomes **.064**. Native
+`381B89F0` / `381B8550` expand the quad by outer-corona size `c`: physical half width `(s+c)/sqrt(3)`, UV half extent
+`e = (c/s+1)/2`, centred at UV .5. The direction-plane basis is `right = normalize(direction cross Z)`,
+`up = normalize(right cross direction)`, with native X/Y basis at either pole. This preserves the disc's angular size while
+extending its UVs outside the texture to draw the corona. The real zone 133's .959728 corona gives the primary quad half width
+.699130 and UV half extent 2.410287. Native sampler addressing clamps the original sRGB DDS textures.
+
+Native draw `380BDAC0` substitutes the first successfully loaded moon's direction with 3DEngine `GetMoonDir`, leaving later
+moon directions authored at default `r_stars_rotate=0`. The client's `CTimeOfDay::Update` (`300A5DD0`) calls moon setter
+`30123A60` with the sun's orbital matrix advanced by pi: **`sun_direction(hour+12, lighting)`**, retaining the planet-axis
+offset; negating the sun is incorrect when that offset is nonzero. Main-world secondary latitude 140 / longitude 35 gives
+Cry direction `(.627507,-.526541,.573576)`. Its own colour spline leaves it visible at noon, while primary disc colour is zero.
+
+Client `UpdateEngineMoonParameters` (`300A5380`) passes sampled float RGB directly times colour multiplier times
+`2^(HDR dynamic power factor)`; `SetGlobalParameter` (`30128050`, cases 30/32/34) copies that RGB unchanged. HDR base getter
+`30121B70` returns the value initialized to 2 by `30131C74`. These moon parameters therefore omit an extra sRGB-to-linear
+conversion. Corona shader scale is **`1+1000*authoredScale`**, from `380BDAC0`. Original `x2moon.cfx` supplies straight-alpha
+blending, alpha `max(textureAlpha, saturate(1-length(uv-.5)/e)^2)`, and the two colour falloffs
+`coronaRGB/(1.05+(1-dot(normalize(skyDirection),moonDirection))*scale)`. The port follows the native HDR branch and existing
+sky exposure, leaves depth unwritten at the far plane, and draws after additive stars while respecting moon order.
+
+One bounded worker request reads each world's XML and up to four textures once; one cached unit quad and at most four
+entities/materials serve the world. Per-frame work only updates those uniforms. World changes remove the old entities and
+materials; disabling the environment or `MoonSettings.enabled` hides the draws. `AA_NO_MOONS=1` disables by default.
+`MoonStats` reports loaded/authored and rendered counts, and `MoonDisc.slot` identifies the authored slot.
+`EnvSample.moon_dir` and `moons` participate in the existing zone blend. Remaining limits: optional non-default
+`r_stars_rotate>=2`, reflection-pass moon boost / planar moon reflections, and the native non-HDR shader branch.
+
+`cargo run -p aa-world --example moons -- --shot shots/aa-world/night/moons.png --shot-after 14` frames both original
+discs and the main-world hills. The fixture pins the real zone 133 curves; `--natural` restores the camera's local zone,
+whose midnight Moon RGB keys yield nearly black discs (`night/moons_natural.png`). Same-camera `--off` and `--day`
+captures are `night/moons_off.png` and `night/moons_day.png`. Inspected at 1920 x 1080: both original textured planets,
+correct relative sizes / orientation, alpha-edged corona with no rectangular border, stars hidden behind each opaque disc,
+no discs when disabled, and only the authored secondary visible at noon. Night FPS 185-282, disabled 183-229, noon 183-260;
+separate shared-GPU runs are not a controlled benchmark. No matching real-client moon capture exists under `reference/`,
+so nighttime brightness remains on the existing atmosphere calibration. All windows close after capture.
+Focused moon tests pass 4/4 (real textures, numeric quad / UV / scale units, colour HDR factor, primary phase / planet offset,
+daylight secondary, disable / world-change cleanup); the 12 environment regression tests and all-example check pass.
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
 `CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
@@ -1247,7 +1282,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Not rendered: deferred object.dat decals (type 9), types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/projected local lights.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: cloud animation (`speed` of `clouds.xml`; the sprites are subtle, the
   real picture has more, brighter clouds), sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
-  conflict, see Post), eye adaptation, moon discs / coronas (original stars are drawn), procedural grass blades, sprites for far vegetation (HLOD).
+  conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
   spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
