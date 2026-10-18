@@ -240,6 +240,16 @@ mod tests {
         let path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
         let cal_path = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal";
         let plain = cry.load_model(path, &aa_cry::scene::ModelOptions::default()).unwrap();
+        let counts = (cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len());
+        let body_path = "objects/characters/people/npc_chef01/nude/npc_chef01_base.chr";
+        assert!(prepare_loaded_face(&mut cry, body_path, cal_path, &plain).is_err());
+        assert_eq!((cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len()), counts);
+        assert!(prepare_loaded_face(&mut cry, path, "missing-body.cal", &plain).is_err());
+        assert_eq!((cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len()), counts);
+        let mut incomplete = (*plain).clone();
+        incomplete.parts[0].1.pop();
+        assert!(prepare_loaded_face(&mut cry, path, cal_path, &incomplete).is_err());
+        assert_eq!((cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len()), counts);
         let (first, mut face, weights) = prepare_loaded_face(&mut cry, path, cal_path, &plain).unwrap();
         let (second, other_face, _) = prepare_loaded_face(&mut cry, path, cal_path, &plain).unwrap();
         assert_eq!(face.targets.len(), 23);
@@ -504,20 +514,41 @@ pub fn prepare_loaded_face(
     body_cal_path: &str,
     loaded: &LoadedModel,
 ) -> Result<(LoadedModel, FacialAnimator, MorphWeights)> {
+    // Parse source data and build/validate every descriptor before allocating assets.
+    // Unsupported CDF skin parts must leave the plain cache and asset counts untouched.
+    let (mut face, prepared) = prepare_face_data(cry, head_path, body_cal_path, loaded)?;
+    let weights = MorphWeights::new(vec![0.0; face.targets.len()], None).map_err(|e| Error::Format(e.to_string()))?;
+    let clones = prepared.into_iter().map(|(handle, attributes)| {
+        let mut mesh = cry.meshes.get(&handle)
+            .ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?.clone();
+        mesh.try_set_morph_targets(attributes).map_err(|e| Error::Format(e.to_string()))?;
+        mesh.set_morph_target_names(face.targets.clone());
+        Ok((handle.id(), mesh))
+    }).collect::<Result<Vec<_>>>()?;
+    let handles: HashMap<_, _> = clones.into_iter().map(|(id, mesh)| (id, cry.meshes.add(mesh))).collect();
     let mut isolated = loaded.clone();
     for (_, parts) in &mut isolated.parts {
         for part in parts {
-            let mesh = cry.meshes.get(&part.mesh)
-                .ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?.clone();
-            part.mesh = cry.meshes.add(mesh);
+            part.mesh = handles[&part.mesh.id()].clone();
         }
     }
-    let face = prepare_face_inner(cry, head_path, body_cal_path, &isolated)?;
-    let weights = MorphWeights::new(vec![0.0; face.targets.len()], None).map_err(|e| Error::Format(e.to_string()))?;
+    face.meshes = face.meshes.iter().map(|id| handles[id].id()).collect();
     Ok((isolated, face, weights))
 }
 
 fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str, loaded: &LoadedModel) -> Result<FacialAnimator> {
+    let (face, prepared) = prepare_face_data(cry, head_path, body_cal_path, loaded)?;
+    for (handle, attributes) in prepared {
+        let mut mesh = cry.meshes.get_mut(&handle).ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?;
+        mesh.try_set_morph_targets(attributes).map_err(|e| Error::Format(e.to_string()))?;
+        mesh.set_morph_target_names(face.targets.clone());
+    }
+    Ok(face)
+}
+
+fn prepare_face_data(
+    cry: &CryAssets, head_path: &str, body_cal_path: &str, loaded: &LoadedModel,
+) -> Result<(FacialAnimator, Vec<(Handle<Mesh>, Vec<MorphAttributes>)>)> {
     let set = expression_set(head_path, &loaded.model)?;
     if set.targets.len() > bevy::mesh::morph::MAX_MORPH_WEIGHTS {
         return Err(Error::Format("too many facial targets".into()));
@@ -579,17 +610,9 @@ fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str,
             meshes.push(part.mesh.id());
         }
     }
-    for (handle, attributes) in prepared {
-        let mut mesh = cry
-            .meshes
-            .get_mut(&handle)
-            .ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?;
-        mesh.try_set_morph_targets(attributes).map_err(|e| Error::Format(e.to_string()))?;
-        mesh.set_morph_target_names(targets.clone());
-    }
     let count = targets.len();
     let channels = targets.clone();
-    Ok(FacialAnimator {
+    Ok((FacialAnimator {
         library,
         targets,
         sequence: None,
@@ -606,5 +629,5 @@ fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str,
         scratch: vec![0.0; count],
         previous: vec![0.0; count],
         fade_age: 0.0,
-    })
+    }, prepared))
 }

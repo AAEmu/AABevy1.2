@@ -592,6 +592,14 @@ handles across two preparations, 23 initial zero weights and original chef CAF/F
 following at 1.7218 and 3 seconds. The authored return has small signed values, retained
 without forcing neutral.
 
+Factory failure is allocation-free for Bevy assets: expression eligibility, head library,
+body CAL, subset/vertex mapping and every morph descriptor are validated before cloned
+meshes are inserted. Unsupported CDF body parts, a missing body CAL and incomplete subset
+data all leave mesh/image/material/bind-pose counts unchanged (regression tested). This
+allows the caller to attempt native head preparation with safe fallback to the plain model.
+The successful result still retains exactly its private prepared mesh handles. Validation
+after the guard refactor: **62 passed, 1 ignored**.
+
 Validation: **57 unit tests passed, 1 whole-pak CAF test intentionally ignored**. The new tests cover
 curve endpoints/duplicates, signed values, tangent modes, groups/multiple splines, recursive FXL
 controllers, cycle limits, native blink/viseme keys, interrupted fades, body pause/unmatched/stop/
