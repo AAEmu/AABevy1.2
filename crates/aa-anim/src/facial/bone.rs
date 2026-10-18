@@ -33,11 +33,12 @@ pub(super) struct BoneChannels {
     pub names: Vec<String>,
     bindings: Vec<Binding>,
     joints: Vec<Joint>,
+    last_body: Vec<(Entity, Quat, Vec3)>,
 }
 
 impl BoneChannels {
     pub fn bind(library: Arc<ExpressionLibrary>, rig: &Rig) -> Self {
-        let mut result = Self { library, rig_id: rig.id, names: Vec::new(), bindings: Vec::new(), joints: Vec::new() };
+        let mut result = Self { library, rig_id: rig.id, names: Vec::new(), bindings: Vec::new(), joints: Vec::new(), last_body: Vec::new() };
         for name in &result.library.bone_order {
             let Some(effector) = result.library.effectors.get(name) else { continue };
             let EffectorKind::Bone { attachment, position, rotation } = &effector.kind else { continue };
@@ -80,16 +81,28 @@ impl BoneChannels {
 
     pub fn apply(&mut self, body: &Animator, weights: &[f32], transforms: &mut Query<&mut Transform>) {
         self.evaluate(weights);
+        self.last_body.clear();
         for joint in &self.joints {
             if !joint.active {
                 continue;
             }
             if let Some(&entity) = body.bones.get(joint.bone) {
                 if let Ok(mut transform) = transforms.get_mut(entity) {
+                    self.last_body.push((entity, body.pose().rot[joint.bone], body.pose().pos[joint.bone]));
                     // 31599DC0 restores active joints from the default local pose, then
                     // 31599E80 right-multiplies it by the facial displacement.
                     (transform.rotation, transform.translation) = joint.local(&body.rig);
                 }
+            }
+        }
+    }
+
+    /// Restore the last underlying body pose even if the client has parked its Animator.
+    pub fn detach(&self, world: &mut World) {
+        for &(entity, rotation, translation) in &self.last_body {
+            if let Some(mut transform) = world.get_mut::<Transform>(entity) {
+                transform.rotation = rotation;
+                transform.translation = translation;
             }
         }
     }

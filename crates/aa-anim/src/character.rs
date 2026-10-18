@@ -706,7 +706,7 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
 }
 
 /// Morph targets of the customisable head and the weights of this character, if any.
-fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, Vec<(String, f32)>)> {
+pub(crate) fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, Vec<(String, f32)>)> {
     let c = &assets.desc.customization;
     let set = MorphSet::load(&part.path).ok().flatten()?;
     let d = &assets.desc;

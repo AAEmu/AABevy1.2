@@ -957,3 +957,63 @@ Its extra two mesh assets and one image are the shared original eyeballs,
 separate from the measured zero-image-growth facial factory.
 
 Full own-crate verification after the audit: **72 passed / 1 ignored**.
+
+### In-place facial opt-in for an existing Character
+
+`facial::enable_character_face(world, root) -> Result<bool>` enables only an
+already spawned ordinary `Character` with an awake `Animator`. Repeated enable
+returns false without allocating. Existing spawn-time facial playback (including
+the local player) is rejected rather than replaced. `disable_character_face(world,
+root) -> bool` undoes only this helper's attachment; it leaves spawn-time facial
+characters alone. Both are exclusive world operations suitable for a deferred
+`commands.queue` on an eligibility transition, not per-frame mesh rebuilding.
+
+The helper finds the face through `Character.assets.parts` and the corresponding
+`Character.parts` entity, validates its `CryModel` path, one rendered LOD0 node
+and direct skinned subset order from aa-cry's `spawn_loaded`. All checks and
+morph descriptors validate before adding assets. It clones those **actual rendered
+mesh handles** while their CPU data remains available. After GPU extraction,
+aa-cry intentionally releases that data; the helper rebuilds only the selected
+subsets through the same `aa_cry::scene::subset_mesh` converter and the existing
+`character::face_morph` recipe (now crate-visible), applying the same static
+race/gender and modifier weights. The regression compares every rebuilt vertex
+attribute and index against the original styled Character mesh after simulating
+GPU extraction. The contract is the Character's authored customization recipe;
+untracked external mesh edits cannot be reconstructed after their CPU data is gone.
+Materials, skin bindings, hierarchy, Animator and other parts stay untouched.
+It never reloads a plain head over customization. Only the face subset `Mesh3d` handles change.
+Each gets its explicit root weight reference and three initial upload refreshes,
+since changing existing Mesh3d is not an Added<Mesh3d> event.
+
+One private attachment component retains the original subset handles while enabled.
+Disable restores them, removes only the helper's facial weights/references and lets
+Bevy release the private clones. Facial bone channels remember the underlying
+body pose only for joints they actually modify; detach restores it even if the
+client has already parked Animator in `Asleep`. This bounded vector is reused,
+with no per-frame mesh or target clones. Root despawn drops all attachment handles.
+
+A concrete client policy can retain the existing local-player face and opt in at
+most **one remote Character**: the server-confirmed `aa_net::state::Target.obj_id`,
+matched to `RemoteUnit.obj_id`, with existing `cull_units` visibility and awake
+Animator eligibility. That culler already applies the camera cone, draw distance
+and 60-metre animation range; no additional arbitrary facial radius is needed.
+Disable the previous eligible entity before enabling a different one, and disable
+on hidden/asleep/removed target. The helper does not own this target/camera policy
+and adds no aa-client/aa-net dependency. A missing/unsupported candidate stays
+plain; retry only on eligibility/entity/appearance changes, not each frame.
+
+The original-asset toggle regression modifies a rendered face vertex before enable,
+checks it survives, preserves material IDs and unrelated characters, exercises
+repeated/idempotent toggles and fail-fast invalid part indexing, and verifies
+private mesh release after disable. The existing bone regression now also removes
+Animator before detach and checks exact underlying body-pose restoration.
+`facial_attach` compares plain, enabled authored A, and disabled/restored characters;
+it waits three seconds before attachment so the plain meshes have already rendered.
+
+Final capture: `shots/aa-anim/facial_attach_toggle_final_20261018.png`, inspected.
+At 3 seconds, after plain GPU upload, the middle and right heads enable in place;
+at 5 seconds the right head disables after its facial meshes have also rendered.
+The final image shows middle authored A and the restored right head matching the
+plain left head. Shared-GPU FPS **251.6?339.1**. Full library verification:
+**73 passed / 1 ignored**. The only character.rs change is face_morph visibility;
+existing material calibration remains outside this milestone.
