@@ -19,13 +19,17 @@ pub struct NativeBuffRule {
 pub struct NativeBuffs {
     pub rules: HashMap<u32, NativeBuffRule>,
     by_unit: HashMap<u32, Vec<BuffEntry>>,
+    catalog_loaded: bool,
 }
 impl NativeBuffs {
     /// Replace static rules without discarding authoritative snapshot counts. Unknown histories
     /// remain unknown until another unit snapshot; installing a catalog cannot reconstruct them.
     pub fn set_catalog(&mut self, rules: HashMap<u32, NativeBuffRule>) {
         self.rules = rules;
+        self.catalog_loaded = true;
     }
+
+    pub fn catalog_loaded(&self) -> bool { self.catalog_loaded }
 
     pub fn of(&self, obj_id: u32) -> Option<&[BuffEntry]> {
         self.by_unit.get(&obj_id).map(Vec::as_slice)
@@ -36,10 +40,11 @@ impl NativeBuffs {
             Event::PlayerSpawn(s) => self.seed(s.obj_id, &s.unit.buffs),
             Event::UnitSpawned(u) => self.seed(u.obj_id, &u.buffs),
             Event::BuffCreated { obj_id, buff } => {
-                let Some(rule) = self.rules.get(&buff.buff_id).copied().filter(|r| r.kind != BuffKind::Unknown) else {
-                    self.by_unit.remove(obj_id);
+                let Some(rule) = self.rules.get(&buff.buff_id).copied() else {
+                    if !self.catalog_loaded { self.by_unit.remove(obj_id); }
                     return;
                 };
+                if rule.kind == BuffKind::Unknown { return; }
                 let Some(list) = self.by_unit.get_mut(obj_id) else { return };
                 let found = if rule.stack_rule_id == 6 {
                     None
@@ -48,6 +53,10 @@ impl NativeBuffs {
                         e.buff.kind == rule.kind && e.buff.buff_id == buff.buff_id && (!rule.per_unit_creation || e.buff.caster_char_id == buff.caster_char_id)
                     })
                 };
+                if found.is_none() && list.iter().filter(|e| e.buff.kind == rule.kind).count() >= kind_capacity(rule.kind) {
+                    // Native allocation returns null before changing any existing row.
+                    return;
+                }
                 // An index already belonging to a different record needs the manager's separate
                 // replacement path. Do not guess that path or create duplicate instance IDs.
                 if list.iter().position(|e| e.buff.index == buff.index).is_some_and(|i| Some(i) != found) {
@@ -96,9 +105,19 @@ impl NativeBuffs {
                 }
             }
             Event::BuffRemoved { obj_id, index } => {
-                if let Some(list) = self.by_unit.get_mut(obj_id) {
-                    list.retain(|e| e.buff.index != *index);
+                let Some(list) = self.by_unit.get_mut(obj_id) else { return };
+                let first = list.iter().enumerate().filter(|(_, e)| e.buff.index == *index)
+                    .min_by_key(|(i, e)| (kind_order(e.buff.kind), *i)).map(|(i, _)| i);
+                let Some(i) = first else { return };
+                if list[i].buff.kind == BuffKind::Unknown {
+                    self.by_unit.remove(obj_id);
+                } else if self.rules.contains_key(&list[i].buff.buff_id) {
+                    list.remove(i);
+                } else if !self.catalog_loaded {
+                    // Presence of the native descriptor cannot yet be decided.
+                    self.by_unit.remove(obj_id);
                 }
+                // A complete catalog proves missing descriptor: native callback does not erase.
             }
             Event::UnitsRemoved(ids) => {
                 for id in ids {
@@ -110,10 +129,23 @@ impl NativeBuffs {
         }
     }
     fn seed(&mut self, id: u32, buffs: &[crate::buff::Buff]) {
+        if [BuffKind::Good, BuffKind::Bad, BuffKind::Hidden].into_iter()
+            .any(|kind| buffs.iter().filter(|buff| buff.kind == kind).count() > kind_capacity(kind)) {
+            // Preserve raw lane receipts elsewhere; malformed original framing is not emulated.
+            self.by_unit.remove(&id);
+            return;
+        }
         let now = Instant::now();
         self.by_unit
             .insert(id, buffs.iter().cloned().map(|buff| BuffEntry { buff, received: now }).collect());
     }
+}
+
+fn kind_capacity(kind: BuffKind) -> usize {
+    match kind { BuffKind::Good => 32, BuffKind::Bad | BuffKind::Hidden => 24, BuffKind::Unknown => 0 }
+}
+fn kind_order(kind: BuffKind) -> u8 {
+    match kind { BuffKind::Good => 0, BuffKind::Bad => 1, BuffKind::Hidden => 2, BuffKind::Unknown => 3 }
 }
 
 #[cfg(test)]
@@ -185,6 +217,71 @@ mod tests {
             assert_eq!(b.duration_ms, if rule == 5 { 2000 } else { 1000 });
         }
     }
+    #[test]
+    fn removal_descriptor_admission_distinguishes_missing_from_unloaded_catalog() {
+        let snapshot=Buff{index:7,buff_id:99,kind:BuffKind::Good,..Buff::default()};
+        let mut v=NativeBuffs::default();v.seed(9,&[]);
+        v.apply(&Event::BuffRemoved{obj_id:9,index:7});assert!(v.of(9).unwrap().is_empty());
+        v.seed(9,&[snapshot.clone()]);v.apply(&Event::BuffRemoved{obj_id:9,index:7});assert!(v.of(9).is_none());
+        v.set_catalog(HashMap::new());assert!(v.catalog_loaded());assert!(v.of(9).is_none());
+        v.seed(9,&[snapshot]);v.apply(&Event::BuffRemoved{obj_id:9,index:7});assert_eq!(v.of(9).unwrap().len(),1);
+        v.apply(&Event::CharacterSelected(Box::default()));assert!(v.catalog_loaded());assert!(v.of(9).is_none());
+        v.seed(9,&[]);assert!(v.of(9).unwrap().is_empty());
+        v.apply(&created(1,0,1));assert!(v.of(9).unwrap().is_empty(),"complete missing descriptor is a native no-op");
+        v.set_catalog([(77,NativeBuffRule{kind:BuffKind::Unknown,per_unit_creation:false,stack_rule_id:4,max_stack:1,max_charge:0})].into_iter().collect());
+        v.apply(&created(1,0,1));assert!(v.of(9).unwrap().is_empty(),"static invalid group cannot allocate");
+        v.by_unit.remove(&9);v.apply(&created(1,0,1));
+        v.apply(&Event::BuffRemoved{obj_id:9,index:7});assert!(v.of(9).is_none(),"unknown history is not reconstructed");
+    }
+
+    #[test]
+    fn removal_uses_first_physical_group_order_and_stably_compacts_duplicates() {
+        let kinds=[BuffKind::Hidden,BuffKind::Good,BuffKind::Bad,BuffKind::Good];
+        let mut v=NativeBuffs::default();let mut buffs=Vec::new();let mut rules=HashMap::new();
+        for (i,kind) in kinds.into_iter().enumerate() {
+            let id=i as u32+1;buffs.push(Buff{index:7,buff_id:id,kind,..Buff::default()});
+            rules.insert(id,NativeBuffRule{kind,per_unit_creation:false,stack_rule_id:4,max_stack:2,max_charge:0});
+        }
+        v.set_catalog(rules);v.seed(9,&buffs);
+        for expected in [vec![1,3,4],vec![1,3],vec![1],vec![]] {
+            v.apply(&Event::BuffRemoved{obj_id:9,index:7});
+            assert_eq!(v.of(9).unwrap().iter().map(|e|e.buff.buff_id).collect::<Vec<_>>(),expected);
+        }
+        v.apply(&Event::BuffRemoved{obj_id:9,index:7});assert!(v.of(9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_capacity_refuses_new_records_but_allows_existing_reconciliation() {
+        for kind in [BuffKind::Good,BuffKind::Bad,BuffKind::Hidden] {
+            let cap=kind_capacity(kind);let mut v=view(4,false);
+            let mut rule=v.rules[&77];rule.kind=kind;v.set_catalog([(77,rule),(88,rule)].into_iter().collect());
+            let buffs=(0..cap).map(|i|Buff{index:i as u32,buff_id:77,kind,stacks:1,..Buff::default()}).collect::<Vec<_>>();v.seed(9,&buffs);
+            let mut event=created(0,0,1);let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.buff_id=88;
+            v.apply(&event);assert_eq!(v.of(9).unwrap().len(),cap,"full allocation is a no-op even with colliding index");
+            let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.buff_id=77;buff.index=cap as u32;
+            v.apply(&event);let list=v.of(9).unwrap();assert_eq!(list.len(),cap);assert_eq!((list[0].buff.index,list[0].buff.stacks),(cap as u32,2));
+            v.apply(&Event::BuffRemoved{obj_id:9,index:cap as u32});assert_eq!(v.of(9).unwrap().len(),cap-1);
+            let Event::BuffCreated{buff,..}=&mut event else{unreachable!()};buff.buff_id=88;buff.index=999;
+            v.apply(&event);assert_eq!(v.of(9).unwrap().len(),cap);assert_eq!(v.of(9).unwrap().last().unwrap().buff.index,999);
+        }
+    }
+
+    #[test]
+    fn oversized_native_snapshot_is_unknown_without_truncating_lane_receipt() {
+        use crate::{buff::tests::net_buff,wire::{Reader,Writer}};
+        for overflow in 0..3 {
+            let counts=[32usize,24,24];let mut w=Writer::new();
+            for (group,count) in counts.into_iter().enumerate() {
+                let n=count+usize::from(group==overflow);w.u8(n as u8);
+                for index in 0..n {net_buff(&mut w,index as u32,77);}
+            }
+            w.u8(0xa5);let bytes=w.finish();let mut r=Reader::new(&bytes);let buffs=Buff::read_lists(&mut r).unwrap();
+            assert_eq!(buffs.len(),81);assert_eq!(r.u8().unwrap(),0xa5);
+            let mut v=NativeBuffs::default();v.seed(9,&buffs);assert!(v.of(9).is_none());assert_eq!(buffs.len(),81);
+            v.seed(9,&[]);assert!(v.of(9).unwrap().is_empty());
+        }
+    }
+
     #[test]
     fn per_unit_source_matching_uses_persistent_caster_not_item_or_mount_identity() {
         use crate::skill::SkillCasterData;
