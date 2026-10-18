@@ -4,7 +4,7 @@
 use super::{Timing, positive};
 use crate::lua::{Ui, method, none, ret, ui};
 use crate::tree::{Id, Point, Rect, Tree};
-use mlua::{Lua, Table};
+use mlua::{Lua, Table, Value};
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,6 +48,8 @@ struct State {
     visible_alpha: Option<f32>,
     scale: Channel,
     pivot: Option<Point>,
+    display_pivot: Point,
+    scale_origin: [f32; 2],
     is_root: bool,
     apply_ui_scale: bool,
     explicit_scale: Option<f32>,
@@ -71,6 +73,8 @@ impl Default for State {
             visible_alpha: None,
             scale: Default::default(),
             pivot: None,
+            display_pivot: Point::Center,
+            scale_origin: [0.0; 2],
             is_root: false,
             apply_ui_scale: true,
             explicit_scale: None,
@@ -78,6 +82,7 @@ impl Default for State {
     }
 }
 
+#[derive(Clone)]
 struct Channel {
     from: f32,
     to: f32,
@@ -148,33 +153,47 @@ impl Channel {
 }
 
 impl State {
-    fn raw_scale(&self, ui_scale: f32) -> f32 {
-        let baseline = if self.is_root && self.apply_ui_scale {
+    fn baseline(&self, ui_scale: f32) -> f32 {
+        if self.is_root && self.apply_ui_scale {
             ui_scale
         } else {
             1.0
-        };
-        if self.scale.started {
-            self.scale.current * baseline
-        } else {
-            self.explicit_scale.unwrap_or(baseline)
         }
+    }
+
+    fn raw_scale(&self, ui_scale: f32) -> f32 {
+        self.explicit_scale.unwrap_or_else(|| {
+            if self.scale.started {
+                self.scale.current * self.baseline(ui_scale)
+            } else {
+                self.baseline(ui_scale)
+            }
+        })
     }
 
     fn sample(&self, ui_scale: f32) -> WidgetSample {
         WidgetSample {
-            alpha: self.alpha.started.then_some(self.visible_alpha.unwrap_or(self.alpha.current)),
+            alpha: self
+                .alpha
+                .started
+                .then_some(self.visible_alpha.unwrap_or(self.alpha.current)),
             scale: self.raw_scale(ui_scale) / if self.is_root { ui_scale } else { 1.0 },
-            pivot: if self.scale.started {
-                self.pivot.unwrap_or(Point::Center)
-            } else {
-                Point::Center
-            },
-            offset: [0.0; 2],
+            pivot: self.display_pivot,
+            offset: self.scale_origin,
         }
     }
     fn running(&self) -> bool {
         self.alpha.running || self.scale.running
+    }
+
+    fn apply_scale(&mut self, rect: Rect, raw: f32, pivot: Point, ui_scale: f32) {
+        let old = self.sample(ui_scale);
+        // Native3927b2f0 retains the chosen point of the CURRENT rectangle. A new
+        // configured pivot must not reinterpret geometry against the original anchors.
+        self.scale_origin[0] += rect.w * (1.0 - old.scale) * (old.pivot.fx() - pivot.fx());
+        self.scale_origin[1] += rect.h * (1.0 - old.scale) * (old.pivot.fy() - pivot.fy());
+        self.display_pivot = pivot;
+        self.explicit_scale = Some(raw);
     }
 }
 
@@ -188,16 +207,24 @@ impl Widgets {
     }
 
     pub fn sample(&self, id: Id) -> WidgetSample {
-        let mut sample = self.states
+        let mut sample = self
+            .states
             .get(&id)
             .map_or_else(Default::default, |s| s.sample(self.ui_scale));
-        sample.offset = self.offsets.get(&id).copied().unwrap_or([0.0; 2]);
+        if let Some(offset) = self.offsets.get(&id) {
+            for i in 0..2 {
+                sample.offset[i] += offset[i];
+            }
+        }
         sample
     }
 
     pub fn set_offset(&mut self, id: Id, offset: [f32; 2]) {
-        if offset == [0.0; 2] { self.offsets.remove(&id); }
-        else { self.offsets.insert(id, offset); }
+        if offset == [0.0; 2] {
+            self.offsets.remove(&id);
+        } else {
+            self.offsets.insert(id, offset);
+        }
     }
 
     pub fn set_ui_scale(&mut self, value: f32) {
@@ -246,6 +273,74 @@ pub(crate) fn set_alpha(u: &mut Ui, id: Id, value: f32) {
 
 pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.set(
+        "InheritAnimationData",
+        method(lua, |lua, id, a| {
+            let Value::Table(source) = a.v(1) else {
+                return none();
+            };
+            let Some(source) = super::super::value_id(lua, &Value::Table(source)) else {
+                return none();
+            };
+            let mut u = ui(lua);
+            if !u.tree.get(source).alive
+                || u.tree.widget(source).is_none()
+                || u.tree.widget(id).is_none()
+            {
+                return none();
+            }
+            let ui_scale = u.animations.widgets.ui_scale;
+            let source_state = u.animations.widgets.states.get(&source);
+            let alpha = source_state.map_or_else(Channel::default, |s| s.alpha.clone());
+            let scale = source_state.map_or_else(Channel::default, |s| s.scale.clone());
+            let pivot = source_state.and_then(|s| s.pivot);
+            let raw = source_state.map_or_else(
+                || {
+                    if u.tree.get(source).parent.is_none() {
+                        ui_scale
+                    } else {
+                        1.0
+                    }
+                },
+                |s| s.raw_scale(ui_scale),
+            );
+            let old = u.animations.widget_sample(id);
+            let visible = old.alpha.unwrap_or(u.tree.get(id).alpha);
+            let rect = u.tree.rect(id);
+            let state = state(&mut u, id);
+            let old_raw = state.raw_scale(ui_scale);
+            let active_scale = scale.running;
+            // Copy the native channel fields/flags, keeping destination root/UI policy.
+            state.alpha = alpha;
+            state.visible_alpha = (!state.alpha.running).then_some(visible);
+            state.explicit_scale = Some(old_raw);
+            state.scale = scale;
+            state.pivot = pivot;
+            if active_scale {
+                state.apply_scale(rect, raw, pivot.unwrap_or(Point::Center), ui_scale);
+            } else {
+                state.explicit_scale = Some(old_raw);
+            }
+            let new_visible = if state.alpha.running {
+                state.alpha.current
+            } else {
+                visible
+            };
+            let running = state.running();
+            u.tree.get_mut(id).alpha = new_visible;
+            if running {
+                u.animations.widgets.active.insert(id);
+            } else {
+                u.animations.widgets.active.remove(&id);
+            }
+            u.tree.repaint();
+            if active_scale {
+                u.pending.push((id, "OnScale".into(), vec![]));
+                super::super::auto_clip::changed(&mut u, id, true);
+            }
+            none()
+        })?,
+    )?;
+    m.set(
         "SetScale",
         method(lua, |lua, id, a| {
             let mut u = ui(lua);
@@ -256,9 +351,16 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 return none();
             }
             let before = s.sample(ui_scale);
+            let rect = u.tree.rect(id);
+            let s = state(&mut u, id);
             s.scale.started = false;
             let scale = a.f(1);
-            s.explicit_scale = Some(if scale.is_finite() { scale } else { 0.0 });
+            s.apply_scale(
+                rect,
+                if scale.is_finite() { scale } else { 0.0 },
+                Point::Center,
+                ui_scale,
+            );
             if s.sample(ui_scale) != before && u.tree.visible(id) {
                 u.tree.repaint();
             }
@@ -284,9 +386,8 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     1.0
                 };
                 s.scale.current = raw / baseline;
-            } else {
-                s.explicit_scale = Some(raw);
             }
+            s.explicit_scale = Some(raw);
             none()
         })?,
     )?;
@@ -315,15 +416,25 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         method(lua, |lua, id, a| {
             let mut u = ui(lua);
             let ui_scale = u.animations.widgets.ui_scale;
+            let rect = u.tree.rect(id);
             let state = state(&mut u, id);
-            let scale_callback = a.b(2, false) || state.scale.running;
+            let scale_callback = a.b(2, false);
             let before = state.sample(ui_scale);
             if a.b(1, false) || state.alpha.running {
                 state.visible_alpha = None;
             }
             state.alpha.start(a.b(1, false));
-            state.scale.start(a.b(2, false));
-            let scale_changed = state.sample(ui_scale).scale != before.scale;
+            if scale_callback {
+                let raw_before = state.raw_scale(ui_scale);
+                state.scale.start(true);
+                let raw = state.scale.current * state.baseline(ui_scale);
+                state.explicit_scale = Some(raw_before);
+                state.apply_scale(rect, raw, state.pivot.unwrap_or(Point::Center), ui_scale);
+            } else {
+                // Native3927dbce clears the scale flag before its stop branch: no snap,
+                // geometry update, OnScale or completion callback when stopping scale.
+                state.scale.running = false;
+            }
             let changed = state.sample(ui_scale) != before;
             if state.running() {
                 u.animations.widgets.active.insert(id);
@@ -333,7 +444,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             if changed && u.tree.visible(id) {
                 u.tree.repaint();
             }
-            if scale_changed {
+            if scale_callback {
                 u.pending.push((id, "OnScale".into(), vec![]));
             }
             if scale_callback {
@@ -377,8 +488,10 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
             continue;
         }
         let ui_scale = u.animations.widgets.ui_scale;
+        let rect = u.tree.rect(id);
         let state = u.animations.widgets.states.get_mut(&id).unwrap();
-        if state.scale.running {
+        let scale_running = state.scale.running;
+        if scale_running {
             scaled.push(id);
         }
         let before = state.sample(ui_scale);
@@ -388,10 +501,16 @@ pub(super) fn tick(u: &mut Ui, dt_ms: f32) -> Vec<(Id, &'static str)> {
         if state.alpha.tick(positive(dt_ms) as f64) {
             ended.push((id, "OnAlphaAnimeEnd"));
         }
-        if state.scale.tick(positive(dt_ms) as f64) {
-            ended.push((id, "OnScaleAnimeEnd"));
-        }
-        if before.scale != state.sample(ui_scale).scale {
+        if scale_running {
+            let raw_before = state.raw_scale(ui_scale);
+            state.explicit_scale = Some(raw_before);
+            // Native3927e0c9 normalizes the copied OWN scale only at the next step.
+            state.scale.current = raw_before / state.baseline(ui_scale);
+            if state.scale.tick(positive(dt_ms) as f64) {
+                ended.push((id, "OnScaleAnimeEnd"));
+            }
+            let raw = state.scale.current * state.baseline(ui_scale);
+            state.apply_scale(rect, raw, state.pivot.unwrap_or(Point::Center), ui_scale);
             ended.push((id, "OnScale"));
         }
         if before != state.sample(ui_scale) {
@@ -431,5 +550,39 @@ pub(super) fn transform_rect(widgets: &Widgets, tree: &Tree, mut owner: Id, rect
         y: lo[1],
         w: hi[0] - lo[0],
         h: hi[1] - lo[1],
+    }
+}
+
+#[cfg(test)]
+mod inherit_tests {
+    use crate::{UiRuntime, lua};
+
+    #[test]
+    fn copied_raw_scale_keeps_native_bits_until_the_next_normalizing_step_and_offsets_survive() {
+        let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+        ui.exec(
+            "@native_raw_bits",
+            r#"
+            p=UIParent:CreateWidget('window','rawParent','UIParent');p:Show(true)
+            a=p:CreateChildWidget('button','rawSource',0,true)
+            b=UIParent:CreateWidget('button','rawDestination','UIParent');b:Show(true)
+            a:SetExtent(100,40);b:SetExtent(100,40)
+            a:SetScaleAnimation(1.700007677078247,1,.1,0,'CENTER')
+            a:SetStartAnimation(false,true)
+        "#,
+        )
+        .unwrap();
+        let b = lua::value_id(&ui.lua, &ui.lua.load("b").eval().unwrap()).unwrap();
+        lua::ui(&ui.lua).animations.set_widget_offset(b, [7., -3.]);
+        ui.exec("@raw_copy", "b:InheritAnimationData(a)").unwrap();
+        {
+            let u = lua::ui(&ui.lua);
+            assert_eq!(u.animations.widget_scale(&u.tree, b).to_bits(), 0x3fd999da);
+            assert_eq!(u.animations.widget_sample(b).offset, [7., -3.]);
+        }
+        lua::tick(&ui.lua, 0.);
+        let u = lua::ui(&ui.lua);
+        assert_eq!(u.animations.widget_scale(&u.tree, b).to_bits(), 0x3fd999db);
+        assert_eq!(u.animations.widget_sample(b).offset, [7., -3.]);
     }
 }

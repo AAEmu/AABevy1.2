@@ -1256,7 +1256,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetMsgToParent",
         "SetMaxTextLength",
         "UseConsistentTextColor",
-        "InheritAnimationData",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
