@@ -836,14 +836,30 @@ pub struct Attachment {
 }
 
 impl Unit {
-    /// Apply only a known mode to this existing matching runtime object.
-    /// Received SC01c only; an existing matching Character identity is required.
+    /// Apply source-backed received faction/membership changes to existing actors.
+    /// Membership requires a matching persistent Character identity.
     pub fn apply_expedition(&mut self, event:&crate::ExpeditionEvent)->bool {
-        let crate::ExpeditionEvent::MembershipChanged{obj_id,character_id,new_expedition_id,..}=event else {return false};
-        if *character_id==0 || self.obj_id!=*obj_id || !matches!(self.kind,UnitKind::Character{char_id} if char_id==*character_id) {return false;}
-        if self.expedition_id==*new_expedition_id {return false;}
-        self.expedition_id=*new_expedition_id;true
+        use crate::ExpeditionEvent as E;
+        match event {
+            E::UnitFactionChanged{obj_id,old_faction_id,new_faction_id,..} => {
+                if self.obj_id!=*obj_id || self.faction_id!=*old_faction_id || self.faction_id==*new_faction_id {return false;}
+                self.faction_id=*new_faction_id;true
+            }
+            E::MembershipChanged{obj_id,character_id,new_expedition_id,..} => self.set_expedition(*obj_id,*character_id,*new_expedition_id),
+            E::Created{faction,owner_obj_id,members} if faction.id!=0 && faction.political_system==0 => {
+                let mut changed=self.set_expedition(*owner_obj_id,faction.owner_id,faction.id);
+                for row in members.iter().take(4) {changed|=self.set_expedition(row.obj_id,row.character_id,faction.id);}
+                changed
+            }
+            _=>false,
+        }
     }
+    fn set_expedition(&mut self,obj_id:u32,character_id:u32,new_expedition_id:u32)->bool {
+        if character_id==0 || self.obj_id!=obj_id || !matches!(self.kind,UnitKind::Character{char_id} if char_id==character_id) {return false;}
+        if self.expedition_id==new_expedition_id {return false;}
+        self.expedition_id=new_expedition_id;true
+    }
+
     pub fn apply_gm_mode(&mut self, change: &crate::unit_msg::UnitGmModeChanged) -> bool {
         if self.obj_id != change.obj_id { return false; }
         let Ok(index) = usize::try_from(change.mode) else { return false };

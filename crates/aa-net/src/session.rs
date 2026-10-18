@@ -4305,6 +4305,15 @@ mod tests {
         let mut frame=vec![0;u16::from_le_bytes(length) as usize]; peer.read_exact(&mut frame).await.unwrap();
         assert_eq!(&frame[4..], &[0x0e,0]);
         assert!(events.try_recv().is_err(), "sending never creates an Expedition receipt");
+        for command in [ExpeditionCommand::Create{name:vec![255,0],sponsor_id:0},ExpeditionCommand::Rename{expedition_id:9,name:vec![128,0]}] {
+            let mut expected=crate::wire::Writer::new();command.write(&mut expected);let body=expected.finish();let opcode=command.opcode();
+            session.command(Command::Expedition{character_id:42,command:command.clone()}).await;
+            assert!(matches!(events.try_recv(),Ok(Event::ExpeditionRequested{character_id:42,command:sent}) if sent==command));
+            peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(u16::from_le_bytes([frame[4],frame[5]]),opcode);assert_eq!(&frame[6..],body);
+            assert!(events.try_recv().is_err(),"creation/rename sends cannot fabricate settlement");
+        }
+
         session.game.as_mut().unwrap().shutdown().await;
         session.command(request()).await;
         let mut rejected=false;
