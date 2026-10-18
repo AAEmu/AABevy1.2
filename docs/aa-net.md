@@ -4663,3 +4663,73 @@ interaction_option selects12660 for recruitingfield>0 only after banker, ability
 auctioneer, priest, repairman, merchant, stabler and expedition are false; before blacksmith.
 StartInteraction sends singleton[option] for an actual NPC in the player's current instance;
 distance check is explicitly TODO. Static field alone is not a received interaction context.
+
+
+### Battlefield later phases and leave (original 1.2 / active lane)
+
+The additive `BattlefieldPhase` resource states correspond to native manager states 5
+(Joined), 6 (Opening), 7 (Playing), and 8 (Ending). `in_instant_game()` includes all
+four, matching `3936cfd0` / `3936d0a0`; receiving results does not mean the player
+has left. `joined_ruleset_id` retains the matched invitation's ruleset across the
+SC190 transition because SC190 does not repeat it.
+
+SC191 is exactly `u32 zone, u32 instance, u32 now, u32 start` in both transports:
+native serializer `397b7100`, handler `391de630`, and lane
+`systems/instances/packets.rs::SCInstantGameStartPacket`. Native `3936d9b0`
+requires state5 and matching zone/instance, writes state6, stores engine-mapped
+clock+6000 at manager+3ce8 and received start at +3cec, then emits event0x159().
+The received `now` argument is passed but **not read** by this function. Wrapper
+`3936e110` immediately enters7/emits0x15a() if start<=engine-mapped now; frame
+update `3936cf50` instead enters7 when unsigned wrapping `(now+6000)>=start`.
+`advance_server_time(mapped_now_ms)` exposes that frame rule explicitly. The
+engine timer virtual+10/+20 clock mapping is not yet established as a network
+clock sample; no packet-now-to-Instant conversion, autonomous timer, or Session
+clock command is invented. Session preflight therefore keeps later leave gated
+until a real clock producer is integrated.
+
+SC192 native factory `391b4110` uses vtable399b3df8, serializer `397c3c50`, and
+team serializer `398a97b0`. Active lane writer `SCInstantGameEndPacket` agrees:
+`u32 zone,u32 instance,u8 reason`, then two teams, each
+`u8 state,u32 faction,i32 score,i16 kills,i16 deaths,u8 memberCount`; each member
+is `u32 character,string name,i32 score,i32 bonus,u32 bonusSet,u16 killstreak,
+u16 kills,u16 assists,u16 deaths`. Native inline storage clamps memberCount to50
+before consuming rows (`398a986d`); the active lane writes the full u8 count and
+all rows. The active decoder deliberately consumes all lane rows (up to255),
+without a payload heuristic or native clamp that would corrupt the next DD04
+entry. Native names use a128-byte destination, while active lane strings retain
+the normal u16 wire bound. Native handler391de6b0?3936f310?3936e9f0 admits
+only state7 and matching identity, enters8, stores reason+38 and mapped-clock
+ending baseline+3cf0, copies both result teams into+58, then emits0x15c().
+`last_end` retains every genuine raw receipt separately from phase-admitted
+`result`; missing clock integration cannot silently discard the received data.
+
+`BattlefieldCommand::Leave` is empty CSe5, native3936d210 (state8 only), and does
+not clear received state or invent completion. Native3936f1c0 (called from
+SCLoadInstance handler391de970) resets the manager and emits0x158() for states
+5..8 before world loading; accepted pre-join state4 is preserved so CSe4 remains
+possible. The received `Event::LoadInstance` now performs that same state reset.
+Lane `leave_instant_game` returns through the existing SCLoadInstance flow; no
+separate leave acknowledgement is fabricated.
+
+Verification: 341 aa-net library tests passed with Bevy, including all Start/End
+truncations and DD04 trailing-packet alignment, non-ASCII result names, the lane
+255-member boundary, stale identity/phase refusal, explicit clock threshold,
+received-only leave/reset, preservation of accepted invitation world-ready, and
+Session loopback proof of the clock-gated no-send path followed by exact empty
+CSe5 and received LoadInstance reset.
+
+UI-agent independent runtime/module trace closes the timer transform itself:
+CrySystem timer virtual+10=3656f740 converts timer[index0] i64 microseconds to
+milliseconds; virtual+20=3656ea30 forwards timer+2a8 to33025600, returning
+wrapping `input + mapper[2c] - mapper[30]`. The mapper-offset producer/network
+synchronization remains unproved here, so received SC191 now is still not used
+as that native timer mapping. Source artifact:
+`data/extract/aa-net/battlefield-native/later-phases-20261018.txt`.
+
+Native callback names are confirmed by event-name registration39215799..392157ee
+against table base39d22ce8: state5 entry is ENTERED_INSTANT_GAME_ZONE() (0x157),
+opening is INSTANT_GAME_WAIT() (0x159), playing is INSTANT_GAME_START() (0x15a),
+results is INSTANT_GAME_END() (0x15c), and received-load reset is
+LEAVED_INSTANT_GAME_ZONE() (0x158). Each has no arguments. Applications must
+use admitted transitions, rather than forwarding an unmatched packet as one of
+these native UI events.

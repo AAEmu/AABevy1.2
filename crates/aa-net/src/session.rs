@@ -2250,6 +2250,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn battlefield_result_receipt_clock_gate_and_leave_reset_reach_session_in_order() {
+        use crate::battlefield::{BattlefieldCommand as C, BattlefieldEvent as E, BattlefieldInvitation, BattlefieldJoined, BattlefieldStart, BattlefieldEnd, BattlefieldTeamResult};
+        let (evt, mut events)=unbounded_channel(); let mut session=Session::new(evt,ClientOptions::default()); session.phase=Phase::InWorld;
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap(); let addr=listener.local_addr().unwrap().to_string();
+        let (connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());
+        let (mut peer,_)=accepted.unwrap(); session.game=Some(connection.unwrap());
+        let i=BattlefieldInvitation {zone_id:8,instance_id:9,ruleset_id:10,corps:1,qualified_id:55};
+        for e in [E::Requested(C::Apply{battlefield_id:7,corps:2}),E::Applied{battlefield_id:7,corps:2,error:0},E::Invited(i),E::Requested(C::RespondToInvitation{invitation:i,accept:true}),
+            E::Joined(BattlefieldJoined{zone_id:8,instance_id:9,corps:1,victory_score:1,victory_kill_count:2,victory_kill_corps_head:3,phase_times_ms:[1,2,3],factions:[4,5],killstreak_skills:[0;24]}),
+            E::Started(BattlefieldStart{zone_id:8,instance_id:9,now_ms:20000,start_ms:20000})] {
+            session.game_msg(Ok(game::ServerMsg::Battlefield(e))).await;
+        }
+        let end=BattlefieldEnd{zone_id:8,instance_id:9,reason:0,teams:std::array::from_fn(|_|BattlefieldTeamResult{state:0,faction_id:1,score:0,total_kills:0,total_deaths:0,members:vec![]})};
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::Ended(end.clone())))).await;
+        assert_eq!(session.battlefield.borrow().last_end,Some(end.clone()));
+        assert!(session.battlefield.borrow().result.is_none()); // Packet now is not the native mapped clock.
+        while events.try_recv().is_ok() {}
+        session.command(Command::Battlefield(C::Leave)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::RequestRejected{command:C::Leave,..}))));
+        assert!(tokio::time::timeout(Duration::from_millis(30),peer.read_u8()).await.is_err());
+        // Explicit test clock, no public command or automatic timer invented.
+        session.battlefield.borrow_mut().advance_server_time(14000);
+        session.game_msg(Ok(game::ServerMsg::Battlefield(E::Ended(end)))).await;
+        events.try_recv().unwrap(); session.command(Command::Battlefield(C::Leave)).await;
+        assert!(matches!(events.try_recv(),Ok(Event::Battlefield(E::Requested(C::Leave)))));
+        let mut length=[0;2]; peer.read_exact(&mut length).await.unwrap(); let mut frame=vec![0;u16::from_le_bytes(length) as usize]; peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6],&0xe5u16.to_le_bytes()); assert!(frame[6..].is_empty());
+        assert!(session.battlefield.borrow().in_instant_game());
+        let load=crate::world_msg::InstanceLoad{raw_id:1,zone_id:2,pos:Default::default(),angles:[0.;3]};
+        session.game_msg(Ok(game::ServerMsg::LoadInstance(load))).await;
+        assert_eq!(*session.battlefield.borrow(),crate::battlefield::Battlefield::default());
+    }
+
+    #[tokio::test]
     async fn expert_control_receipts_forward_exact_ack_order_without_synthetic_points() {
         use crate::actability::{ActabilityEvent, ActabilityValue};
         let (evt, mut events) = unbounded_channel();
