@@ -144,6 +144,7 @@ dependencies = [
  "aa-fx",
  "aa-pak",
  "bevy",
+ "flate2",
  "half",
  "roxmltree",
  "thiserror 2.0.21",

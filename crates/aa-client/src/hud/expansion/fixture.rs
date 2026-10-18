@@ -49,6 +49,7 @@ pub(crate) fn spawn() -> aa_net::PlayerSpawn {
             buffs: vec![],
             anim_action: 0,
             attached_to: None,
+            house_posture: None,
         },
     }
 }
