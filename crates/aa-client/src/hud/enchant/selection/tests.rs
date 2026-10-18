@@ -66,6 +66,20 @@ fn tables() -> Tables {
     Tables::load(&rusqlite::Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap())
         .unwrap()
 }
+fn edit(state: &mut State, slot: u8, change: impl FnOnce(&mut Item)) {
+    let start_chunk = slot / 10;
+    let mut items: Vec<_> = (start_chunk * 10..start_chunk * 10 + 10)
+        .map(|n| state.records.item(2, n).cloned())
+        .collect();
+    change(items[usize::from(slot % 10)].as_mut().unwrap());
+    state.receive(&Event::InventoryChunk(InvenChunk {
+        container: 2,
+        chunks: 1,
+        start_chunk,
+        items,
+        truncated: false,
+    }));
+}
 
 #[test]
 fn actual_four_modes_select_target_source_in_either_order_and_support_follows_native_grade_order() {
@@ -75,10 +89,10 @@ fn actual_four_modes_select_target_source_in_either_order_and_support_follows_na
         for source_first in [false, true] {
             let mut state = seeded();
             if mode == Mode::Unsocket {
-                let ItemDetail::Equip(e) = &mut state.inventory.bag[0].as_mut().unwrap().detail else {
-                    unreachable!()
-                };
-                e.gem_ids = [31003, 0, 31003, 0, 0, 0, 0];
+                edit(&mut state, 0, |item| {
+                    let ItemDetail::Equip(e) = &mut item.detail else { unreachable!() };
+                    e.gem_ids = [31003, 0, 31003, 0, 0, 0, 0];
+                });
             }
             let order = if source_first {
                 [(1, source), (0, 0)]
@@ -109,19 +123,33 @@ fn received_snapshot_feature_pending_and_loss_guards_do_not_invent_readiness() {
     let tables = tables();
     let skills = Skills::default();
     let mut state = seeded();
-    state.known.remove(&49);
+    let items: Vec<_> = (0..50).map(|slot| state.records.item(2, slot).cloned()).collect();
+    state.receive(&Event::InventoryInit {
+        bag_slots: 50,
+        bank_slots: 50,
+    });
+    state.receive(&Event::InventoryChunk(InvenChunk {
+        container: 2,
+        chunks: 4,
+        start_chunk: 0,
+        items: items[..40].to_vec(),
+        truncated: false,
+    }));
     assert_eq!(state.target(&tables, &skills, Mode::Grade, 0), Err(0xb5));
-    state.known.insert(49);
-    state.inventory.bag[0].as_mut().unwrap().flags = 4;
+    state.receive(&Event::InventoryChunk(InvenChunk {
+        container: 2,
+        chunks: 1,
+        start_chunk: 4,
+        items: items[40..].to_vec(),
+        truncated: false,
+    }));
+    edit(&mut state, 0, |item| item.flags = 4);
     state.config.received = None;
     assert_eq!(state.target(&tables, &skills, Mode::Grade, 0), Err(1));
     state.receive(&config(0x20));
     assert_eq!(state.target(&tables, &skills, Mode::Grade, 0), Err(0x298));
     state.receive(&config(0));
     assert_eq!(state.target(&tables, &skills, Mode::Grade, 0), Ok(()));
-    state.inventory.mark_item_slot_pending(2, 0);
-    assert_eq!(state.target(&tables, &skills, Mode::Grade, 0), Err(0xb5));
-    state.inventory.clear_item_slot_pending(2, 0);
     let mut pending = Inventory::default();
     pending.mark_item_slot_pending(2, 0);
     state.sync_pending(&pending);
@@ -155,7 +183,7 @@ fn received_native_bag_header_floors_low_byte_and_contents_cannot_expand_it() {
             bag_slots: slots,
             bank_slots: 50,
         });
-        assert_eq!(state.bag_extent, Some(expected));
+        assert_eq!(state.records.bag_extent(), Some(expected));
         state.receive(&Event::InventoryChunk(InvenChunk {
             container: 2,
             chunks: 5,
@@ -163,11 +191,11 @@ fn received_native_bag_header_floors_low_byte_and_contents_cannot_expand_it() {
             items: vec![None; 50],
             truncated: false,
         }));
-        assert_eq!(state.bag_extent, Some(expected), "contents do not modify native headers");
+        assert_eq!(state.records.bag_extent(), Some(expected), "contents do not modify native headers");
         assert_eq!(state.complete(), expected > 0 && expected <= 50);
     }
     state.receive(&Event::InventoryExpanded { container: 2, slots: 63 });
-    assert_eq!(state.bag_extent, Some(60));
+    assert_eq!(state.records.bag_extent(), Some(60));
     assert!(!state.complete(), "new slots need actual contents before selection");
     state.receive(&Event::InventoryChunk(InvenChunk {
         container: 2,
@@ -178,9 +206,8 @@ fn received_native_bag_header_floors_low_byte_and_contents_cannot_expand_it() {
     }));
     assert!(state.complete());
     state.receive(&Event::InventoryExpanded { container: 3, slots: 90 });
-    assert_eq!(state.bag_extent, Some(60), "bank expansion cannot alter BAG header");
+    assert_eq!(state.records.bag_extent(), Some(60), "bank expansion cannot alter BAG header");
     state.receive(&Event::InventoryExpanded { container: 2, slots: 140 });
-    state.known.extend(0..140);
     assert!(!state.complete(), "whole-BAG quotes cannot scan beyond native130-row storage");
     let mut state = seeded();
     state.receive(&Event::InventoryChunk(InvenChunk {
@@ -190,7 +217,7 @@ fn received_native_bag_header_floors_low_byte_and_contents_cannot_expand_it() {
         items: vec![None; 60],
         truncated: false,
     }));
-    assert!(state.lost, "native SC4c packet storage holds only five blocks");
+    assert!(!state.complete(), "native SC4c packet storage holds only five blocks");
     let mut state = seeded();
     state.receive(&Event::InventoryChunk(InvenChunk {
         container: 2,
@@ -199,7 +226,60 @@ fn received_native_bag_header_floors_low_byte_and_contents_cannot_expand_it() {
         items: vec![None; 10],
         truncated: false,
     }));
-    assert!(state.lost, "a chunk outside native static storage cannot establish certainty");
+    assert!(
+        !state.complete(),
+        "a chunk outside native static storage cannot establish certainty"
+    );
+}
+
+#[test]
+fn selected_quotes_keep_native_zero_stacks_then_apply_id_removal_in_receipt_order() {
+    use aa_net::items::{ItemTask, ItemTasks};
+    let tables = tables();
+    let mut state = seeded();
+    state.set(&tables, &Skills::default(), Mode::Grade, 0, 0).unwrap();
+    state.set(&tables, &Skills::default(), Mode::Grade, 1, 1).unwrap();
+    state.receive(&Event::ItemsChanged(ItemTasks {
+        reason: 40,
+        tasks: vec![ItemTask::Count {
+            container: 2,
+            slot: 1,
+            item_id: 999,
+            template_id: 999,
+            delta: -3,
+        }],
+        ..Default::default()
+    }));
+    assert_eq!(state.selected(1).unwrap().count, 0, "legacy reducer would erase this slot");
+    let total = state
+        .records
+        .bag_items()
+        .filter(|(_, item)| item.template_id == 28299)
+        .map(|(_, item)| item.count)
+        .sum::<i32>();
+    assert_eq!(total, 4);
+    state.receive(&Event::ItemsChanged(ItemTasks {
+        reason: 40,
+        tasks: vec![
+            ItemTask::Count {
+                container: 2,
+                slot: 1,
+                item_id: 999,
+                template_id: 999,
+                delta: -1,
+            },
+            ItemTask::Remove {
+                container: 2,
+                slot: 1,
+                item_id: 200,
+                template_id: 999,
+            },
+        ],
+        ..Default::default()
+    }));
+    assert!(state.selected(1).is_none());
+    assert_eq!(state.selected(0).unwrap().template_id, 31432);
+    assert!(state.complete());
 }
 
 #[test]

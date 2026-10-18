@@ -6,6 +6,7 @@ use mlua::{Lua, MultiValue, Table, Value};
 
 use super::api::{HudBridge, Shared};
 mod catalog;
+mod records;
 mod selection;
 pub(super) use catalog::Tables;
 

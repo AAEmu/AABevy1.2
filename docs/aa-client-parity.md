@@ -13,7 +13,15 @@ finished agent another concrete parity gap. Root continues integration and QA
 alongside them. Preserve this policy across handoffs until the full1.2 client
 parity goal is achieved or the user changes the instruction.
 
-Latest full-client suite:307 passed /38 optional probes ignored in86.92s
+Current source validation:315 passed /38 existing optional probes ignored
+in91.99s with three test threads. Twenty focused enchant checks pass in6.60s.
+Selection and BAG totals now use explicitly known native pre-row records,
+preserving zero/negative stacks, ID lookup/removal ordering and native empty
+records; unsafe/unprovided rows retire certainty. Typed request/controller
+integration remains open. This source validation precedes the next playable
+build/capture cut; the accepted alias below remains the earlier tested copy.
+
+Previous full-client suite:307 passed /38 optional probes ignored in86.92s
 with three test threads. Twelve focused enchant checks pass in5.28s: received
 physical BAG selection, actual four-mode compatibility, native costs/ratios,
 secure/pending/header/loss guards, cursor and synchronous event contracts,

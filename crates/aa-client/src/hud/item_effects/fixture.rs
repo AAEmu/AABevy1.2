@@ -32,6 +32,7 @@ pub(super) fn seed(state: &Shared) {
                 container: container::INVENTORY,
                 slot: 0,
                 item: item(),
+                raw_detail_block: None,
             }],
             ..default()
         }),
