@@ -3402,3 +3402,28 @@ It adds no optimistic mutation/acceptance. The existing authoritative reason58 i
 updates remain the source of revival. A faithful UI quote still needs current per-slot
 pending eligibility plus pet static mapping; no new quote API was fabricated from only
 dead flags or from the lane's different floating-point implementation.
+
+### Explicit physical-slot pending state (2026-10-18)
+
+Inventory now retains explicit physical pending slots with mark_item_slot_pending,
+item_slot_pending, clear_item_slot_pending and pending_item_slot_keys. Native397d2200
+uses packed keys[0,container,0,slot] and excludes trade kind4. This API accepts physical
+kinds1..3; setting keys remain separate. Marking changes no item contents, dead flags,
+quote, money or server success. Outgoing automatic lock producers remain unwired:
+the integration must register only its source-proven accepted native operations and
+release explicit local rejection/cancellation. An empty set must not be advertised as
+complete native pending coverage while additional command producers are unresolved.
+
+Genuine SC0f5 releases its exact physical key; successfully applied slot-bearing item
+tasks release reported keys after the complete batch, preserving per-action ordering.
+Unknown/unapplied item updates do not unlock slots. Character selection, LeftWorld and
+disconnection clear physical locks with the existing Inventory lifecycle. Tests cover
+unrelated/repeated unlock, an unmatched item identity, received mate revival retaining
+experience/level, AA-setting independence and lifecycle. Native Mate detail layout is
++18 tag,+19 signed exp,+1d raw dead,+1e raw level; dead is tested nonzero, not only1.
+
+Category-map clarification: initializer394dbe90 calls394dbd50 to make static group
+entries,394daa10 inserts ALL static categories with empty recipe vectors into valid
+groups, then394d8120 appends recipes to existing category vectors. Consequently
+GetActabilityCategoryTypesGroupType includes visible_ui categories with zero recipes;
+it must not filter them merely because the recipe list is empty.

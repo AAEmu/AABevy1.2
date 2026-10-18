@@ -62,6 +62,9 @@ resource! {
         pub auto_use_aa_point_raw: u8,
         /// Sent request awaiting an authoritative item task.
         pub pending_auto_use_aa_point: Option<bool>,
+        /// Native physical-slot pending keys. Explicit UI operations register their proven locks;
+        /// this is not an assertion that every outgoing command has a lock producer wired.
+        pending_item_slots: std::collections::BTreeSet<(u8, u8)>,
         pub bag: Vec<Option<Item>>,
         pub bank: Vec<Option<Item>>,
         /// Worn items by `model::slot`.
@@ -72,6 +75,28 @@ resource! {
 }
 
 impl Inventory {
+    /// Register a native physical-slot lock after its operation has been accepted locally.
+    /// Container4 is deliberately excluded by native397d2200; setting/currency keys are separate.
+    /// This changes neither item contents nor the received result of the operation.
+    pub fn mark_item_slot_pending(&mut self, kind: u8, slot: u8) -> bool {
+        matches!(kind, container::EQUIPMENT | container::INVENTORY | container::BANK)
+            && self.pending_item_slots.insert((kind, slot))
+    }
+
+    pub fn item_slot_pending(&self, kind: u8, slot: u8) -> bool {
+        self.pending_item_slots.contains(&(kind, slot))
+    }
+
+    /// Native physical keys are packed as [0, container, 0, slot].
+    pub fn pending_item_slot_keys(&self) -> impl Iterator<Item = u32> + '_ {
+        self.pending_item_slots.iter().map(|&(kind, slot)| u32::from_le_bytes([0, kind, 0, slot]))
+    }
+
+    /// Release a proven local rejection/cancellation. Server reports release through `apply`.
+    pub fn clear_item_slot_pending(&mut self, kind: u8, slot: u8) -> bool {
+        self.pending_item_slots.remove(&(kind, slot))
+    }
+
     pub fn auto_use_aa_point(&self) -> bool { self.auto_use_aa_point_raw == 1 }
 
     /// Native UI change/pending guard; the command itself is a transport request.
@@ -247,6 +272,7 @@ impl Inventory {
                     bank_slots: cs.num_bank_slots.max(0) as u32,
                     auto_use_aa_point_raw: u8::from(cs.character.auto_use_aa_point),
                     pending_auto_use_aa_point: None,
+                    pending_item_slots: Default::default(),
                     bag: vec![None; usize::from(cs.num_inventory_slots)],
                     bank: vec![None; cs.num_bank_slots.max(0) as usize],
                     equipment: cs.character.equipment.clone(),
@@ -256,6 +282,9 @@ impl Inventory {
             Event::AutoUseAaPointRequested(value) => self.pending_auto_use_aa_point = Some(*value),
             Event::CraftItemUnlocked(unlock) if unlock.unlocks_auto_use_aa_point() => {
                 return self.pending_auto_use_aa_point.take().is_some();
+            }
+            Event::CraftItemUnlocked(unlock) => {
+                return self.clear_item_slot_pending(unlock.kind, unlock.slot);
             }
             Event::PlayerSpawn(s) => self.own_obj_id = s.obj_id,
             Event::InventoryInit { bag_slots, bank_slots } => {
@@ -287,10 +316,28 @@ impl Inventory {
             }
             Event::ItemsChanged(changes) => {
                 let mut changed = false;
+                let mut unlocked = Vec::new();
                 for task in &changes.tasks {
-                    changed |= self.apply_task(task);
+                    let applied = self.apply_task(task);
+                    changed |= applied;
+                    if !applied {
+                        continue;
+                    }
+                    match task {
+                        ItemTask::Add { container, slot, .. } | ItemTask::Count { container, slot, .. }
+                        | ItemTask::Grade { container, slot, .. } | ItemTask::Remove { container, slot, .. }
+                        | ItemTask::RemoveSlot { container, slot, .. } | ItemTask::Update { container, slot, .. }
+                        | ItemTask::Flags { container, slot, .. } => unlocked.push((*container, *slot)),
+                        ItemTask::Move { from_container, from_slot, to_container, to_slot, .. } => {
+                            unlocked.extend([(*from_container, *from_slot), (*to_container, *to_slot)]);
+                        }
+                        _ => {}
+                    }
                 }
                 // Native sink map unlocks reported keys after the complete apply loop.
+                for (kind, slot) in unlocked {
+                    changed |= self.clear_item_slot_pending(kind, slot);
+                }
                 if changes.tasks.iter().any(|task| matches!(task, ItemTask::AutoUseAaPoint(_))) {
                     self.pending_auto_use_aa_point = None;
                 }
@@ -308,7 +355,8 @@ impl Inventory {
             }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.bag.is_empty() && self.bank.is_empty() && self.bag_slots == 0
-                    && self.auto_use_aa_point_raw == 0 && self.pending_auto_use_aa_point.is_none() {
+                    && self.auto_use_aa_point_raw == 0 && self.pending_auto_use_aa_point.is_none()
+                    && self.pending_item_slots.is_empty() {
                     return false;
                 }
                 *self = Self::default();
@@ -419,6 +467,57 @@ mod tests {
             num_bank_slots: 20,
             ..CharacterState::default()
         }))
+    }
+
+    #[test]
+    fn physical_slot_pending_keys_release_only_reported_slots_and_preserve_mate_state() {
+        let mut inv = Inventory::default();
+        inv.apply(&selected(3));
+        let mut pet = item(42, 123, 1);
+        pet.detail = ItemDetail::Mate { exp: 17, dead: 7, level: 28 };
+        inv.bag[0] = Some(pet.clone());
+        assert!(inv.mark_item_slot_pending(container::INVENTORY, 0));
+        assert!(!inv.mark_item_slot_pending(container::INVENTORY, 0));
+        assert!(inv.mark_item_slot_pending(container::BANK, 2));
+        assert!(!inv.mark_item_slot_pending(4, 0));
+        assert!(!inv.mark_item_slot_pending(0xf0, 0));
+        assert_eq!(inv.pending_item_slot_keys().collect::<Vec<_>>(), vec![0x200, 0x02000300]);
+        assert_eq!(inv.bag[0], Some(pet.clone()));
+
+        assert!(!inv.apply(&Event::CraftItemUnlocked(crate::craft::CraftItemUnlock { kind: 2, slot: 1 })));
+        assert!(inv.item_slot_pending(2, 0));
+        assert!(!inv.apply(&Event::ItemsChanged(ItemTasks {
+            tasks: vec![ItemTask::Update { container: 2, slot: 0, item_id: 999,
+                detail: ItemDetail::Mate { exp: 0, dead: 0, level: 1 }, detail_payload: None }],
+            ..Default::default() })));
+        assert!(inv.item_slot_pending(2, 0));
+        assert_eq!(inv.bag[0], Some(pet));
+        let update = Event::ItemsChanged(ItemTasks { reason: crate::mate::REPAIR_PETS_TASK,
+            tasks: vec![ItemTask::Update { container: 2, slot: 0, item_id: 123,
+                detail: ItemDetail::Mate { exp: 17, dead: 0, level: 28 }, detail_payload: None }],
+            ..Default::default() });
+        assert!(inv.apply(&update));
+        assert!(!inv.item_slot_pending(2, 0));
+        assert!(inv.item_slot_pending(3, 2));
+        assert_eq!(inv.bag[0].as_ref().unwrap().detail, ItemDetail::Mate { exp: 17, dead: 0, level: 28 });
+        assert!(inv.apply(&Event::CraftItemUnlocked(crate::craft::CraftItemUnlock { kind: 3, slot: 2 })));
+        assert!(!inv.apply(&Event::CraftItemUnlocked(crate::craft::CraftItemUnlock { kind: 3, slot: 2 })));
+        assert_eq!(inv.bag[0].as_ref().unwrap().id, 123);
+    }
+
+    #[test]
+    fn physical_slot_pending_lifecycle_and_explicit_rejection_are_independent_of_aa_setting() {
+        let mut inv = Inventory::default();
+        inv.mark_item_slot_pending(2, 4);
+        inv.apply(&Event::AutoUseAaPointRequested(true));
+        assert!(inv.clear_item_slot_pending(2, 4));
+        assert_eq!(inv.pending_auto_use_aa_point, Some(true));
+        inv.mark_item_slot_pending(3, 5);
+        inv.apply(&selected(1));
+        assert_eq!(inv.pending_item_slot_keys().count(), 0);
+        inv.mark_item_slot_pending(2, 0);
+        inv.apply(&Event::LeftWorld { target: 1 });
+        assert_eq!(inv.pending_item_slot_keys().count(), 0);
     }
 
     fn tasks(reason: u8, tasks: Vec<ItemTask>) -> Event {
