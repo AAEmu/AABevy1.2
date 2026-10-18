@@ -276,7 +276,12 @@ pub enum ItemTask {
     /// `ItemRemoveSlot` (seized).
     RemoveSlot { container: u8, slot: u8, item_id: u64 },
     /// New details (durability, gems ...) of an item.
-    Update { container: u8, slot: u8, item_id: u64, detail: ItemDetail, detail_payload: Option<Vec<u8>> },
+    Update {
+        container: u8, slot: u8, item_id: u64, detail: ItemDetail, detail_payload: Option<Vec<u8>>,
+        /// Entire consumed declared padded block, including tag/padding. None for synthetics.
+        /// Legacy tolerant decoding is unchanged; presence does not prove native-safe length.
+        raw_detail_block: Option<Vec<u8>>,
+    },
     /// New flag bits (`ItemFlag`: secure, soulbound ...).
     Flags { container: u8, slot: u8, item_id: u64, bits: u8 },
     /// Action11 replaces flags and both timestamps. All native bool bytes remain raw.
@@ -368,8 +373,8 @@ impl ItemTask {
                 let container = r.u8()?;
                 let slot = r.u8()?;
                 let item_id = r.u64()?;
-                let (detail, detail_payload) = read_padded_detail(r)?;
-                Self::Update { container, slot, item_id, detail, detail_payload }
+                let (detail, detail_payload, raw_detail_block) = read_padded_detail_block(r)?;
+                Self::Update { container, slot, item_id, detail, detail_payload, raw_detail_block: Some(raw_detail_block.to_vec()) }
             }
             action::SET_FLAGS_BITS => {
                 let t = Self::Flags { container: r.u8()?, slot: r.u8()?, item_id: r.u64()?, bits: r.u8()? };
@@ -387,18 +392,23 @@ impl ItemTask {
 
 /// `i16` length (128) followed by the detail type, the details and zero padding.
 fn read_padded_detail(r: &mut Reader) -> Result<(ItemDetail, Option<Vec<u8>>)> {
+    let (detail, payload, _) = read_padded_detail_block(r)?;
+    Ok((detail, payload))
+}
+
+fn read_padded_detail_block<'a>(r: &mut Reader<'a>) -> Result<(ItemDetail, Option<Vec<u8>>, &'a [u8])> {
     let len = r.i16()?.max(0) as usize;
     let block = r.bytes(len)?;
     if block.is_empty() {
-        return Ok((ItemDetail::None, None));
+        return Ok((ItemDetail::None, None, block));
     }
     let mut d = Reader::new(block);
     let detail_type = d.u8()?;
     match ItemDetail::read(&mut d, detail_type) {
-        Ok(detail) => Ok((detail, Some(block[1..d.pos()].to_vec()))),
+        Ok(detail) => Ok((detail, Some(block[1..d.pos()].to_vec()), block)),
         // Existing tolerant padded-block behavior: retain the tag, but do not claim a partial
         // or unknown-size block is an exact payload. The outer block still preserves alignment.
-        Err(_) => Ok((ItemDetail::Other(detail_type), None)),
+        Err(_) => Ok((ItemDetail::Other(detail_type), None, block)),
     }
 }
 
@@ -670,4 +680,45 @@ mod tests {
         assert!(t.truncated);
         assert_eq!(t.tasks, vec![ItemTask::Money(-1)]);
     }
+
+    #[test]
+    fn update_detail_literal_retains_whole_native_block_and_following_task() {
+        // Native397cfd40 + lane ItemTask::write: 9,container,slot,u64ID,i16length.
+        let mut wire = vec![9, 2, 3, 0xc8, 1, 0, 0, 0, 0, 0, 0, 128, 0];
+        let mut block = vec![0xa5; 128];
+        block[..7].copy_from_slice(&[3, 0xff, 0xff, 0xff, 0xff, 0xf2, 0xfe]);
+        wire.extend_from_slice(&block);
+        let body_len = wire.len();
+        wire.extend_from_slice(&[1, 4, 3, 2, 1]); // following Money task
+        let mut reader = Reader::new(&wire);
+        let task = ItemTask::read(&mut reader).unwrap();
+        assert!(matches!(task, ItemTask::Update {
+            container: 2, slot: 3, item_id: 456,
+            detail: ItemDetail::Mate { exp: -1, dead: 0xf2, level: 0xfe },
+            ref detail_payload, ref raw_detail_block,
+        } if detail_payload.as_deref()==Some(&block[1..7]) && raw_detail_block.as_deref()==Some(block.as_slice())));
+        assert_eq!(ItemTask::read(&mut reader).unwrap(), ItemTask::Money(0x01020304));
+        assert!(reader.is_empty());
+        for end in 0..body_len {
+            assert!(ItemTask::read(&mut Reader::new(&wire[..end])).is_err(), "prefix {end}");
+        }
+    }
+
+    #[test]
+    fn update_detail_raw_retention_does_not_restrict_legacy_tolerant_lengths() {
+        for block in [vec![], vec![1, 7, 8, 9], vec![0xff; 128], vec![0; 129]] {
+            let mut wire = vec![9, 2, 3, 0xc8, 1, 0, 0, 0, 0, 0, 0];
+            wire.extend_from_slice(&(block.len() as i16).to_le_bytes());
+            wire.extend_from_slice(&block);
+            wire.extend_from_slice(&[1, 4, 3, 2, 1]);
+            let mut reader = Reader::new(&wire);
+            let ItemTask::Update { detail, detail_payload, raw_detail_block, .. } = ItemTask::read(&mut reader).unwrap() else { panic!() };
+            assert_eq!(raw_detail_block.as_deref(), Some(block.as_slice()));
+            if block.is_empty() { assert_eq!((detail, detail_payload), (ItemDetail::None, None)); }
+            else if block==[1, 7, 8, 9] { assert_eq!((detail, detail_payload), (ItemDetail::Other(1), None)); }
+            assert_eq!(ItemTask::read(&mut reader).unwrap(), ItemTask::Money(0x01020304));
+            assert!(reader.is_empty());
+        }
+    }
+
 }
