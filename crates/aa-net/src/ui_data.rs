@@ -1,4 +1,7 @@
-//! Per-character opaque UI data. This module does not interpret serialized UI tables.
+//! Per-character opaque UI data, with an optional native text-tree codec.
+
+mod native_data;
+pub use native_data::{NativeData, NativeDataError, NativeDataNode};
 
 use crate::opcodes::cs;
 use crate::session::Event;
