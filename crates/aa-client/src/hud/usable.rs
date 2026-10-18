@@ -777,6 +777,8 @@ mod tests {
         });
         assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)));
         skills.native_tag_cooldowns[0].updated_at = Instant::now() - Duration::from_secs(31);
+        assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)), "queries read frame-stored remaining time");
+        skills.advance_native_frame(31_000);
         assert_eq!(check(&skills), None);
     }
 

@@ -8,6 +8,8 @@
 //! `CHAT_EXPEDITION` 7, `CHAT_RACE` 14, whispers -3 / -4, notice -1, system -2), so they pass
 //! through unchanged.
 
+pub(super) mod config;
+
 use aa_net::state::Chat;
 use aa_net::{Event, NetEvent};
 use aa_ui::{UiKey, UiRuntime};

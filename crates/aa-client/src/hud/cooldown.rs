@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use aa_net::state::Skills;
+use bevy::prelude::DetectChangesMut;
 use mlua::{Lua, MultiValue, Table, Value};
 
 use super::api::Shared;
@@ -75,7 +76,10 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             } else {
                 combined_at(game, &data.cooldowns, id, Instant::now()).unwrap_or_default()
             };
-            Ok(MultiValue::from_iter([Value::Integer(i64::from(remaining)), Value::Integer(i64::from(total))]))
+            Ok(MultiValue::from_iter([
+                Value::Integer(i64::from(remaining)),
+                Value::Integer(i64::from(total)),
+            ]))
         })?,
     )
 }
@@ -101,3 +105,17 @@ pub(super) fn bind_catalog(
 pub(super) mod fixture;
 #[cfg(test)]
 mod tests;
+
+/// Queued network receipts are folded in PreUpdate. Sample the process frame clock once,
+/// before any UI input/tick or HUD snapshot reads the native manager's stored rows.
+pub(super) fn advance_frame(
+    time: bevy::prelude::Res<bevy::prelude::Time<bevy::time::Real>>,
+    skills: Option<bevy::prelude::ResMut<Skills>>,
+) {
+    let Some(mut skills) = skills else { return };
+    let now = time.elapsed().as_millis() as u32;
+    if skills.bypass_change_detection().advance_native_frame(now) {
+        skills.set_changed();
+    }
+    // Clock-only changes must survive lifecycle resets too, but are not a new server receipt.
+}

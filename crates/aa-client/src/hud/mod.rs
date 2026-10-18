@@ -170,6 +170,9 @@ pub(crate) fn expedition_fixture() { expedition::fixture::run(); }
 #[allow(dead_code)]
 pub(crate) fn achievement_fixture() { achievement::fixture::run(); }
 
+#[allow(dead_code)]
+pub(crate) fn chat_config_fixture() { chat::config::fixture::run(); }
+
 use aa_net::state::Player;
 use aa_ui::render::UiRenderState;
 use aa_ui::{UiConfig, UiRuntime};
@@ -393,6 +396,7 @@ impl Plugin for HudPlugin {
         family::plugin(app);
         expedition::plugin(app);
         achievement::plugin(app);
+        chat::config::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
@@ -413,6 +417,7 @@ impl Plugin for HudPlugin {
             .insert_resource(cameras::DevFov::from_args())
             .insert_non_send(api::HudBridge::default())
             .add_systems(First,(buffs::bind_catalog,cooldown::bind_catalog))
+            .add_systems(Update,cooldown::advance_frame.before(aa_ui::UiInput).before(prebuild_hud).before(build_hud).before(sync_hud))
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
             .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())
