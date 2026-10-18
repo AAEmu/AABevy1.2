@@ -15,7 +15,7 @@
 //! at the surface; the packets then carry the swim stance and no ground flag.
 
 use aa_anim::pose::Rig;
-use aa_anim::{Cal, CharacterAssets, ClipLibrary, spawn_character};
+use aa_anim::{Cal, CharacterAssets, ClipLibrary, spawn_character_with_facial};
 use aa_cry::Skeleton;
 use aa_cry::scene::CryAssets;
 use aa_net::model::stance;
@@ -225,7 +225,7 @@ pub fn spawn_player(
     }
 }
 
-/// `spawn_character` plus the in-world locomotion clips.
+/// The local character's authored facial playback plus in-world locomotion clips.
 pub fn spawn_with_locomotion(
     commands: &mut Commands,
     cry: &mut CryAssets,
@@ -237,7 +237,7 @@ pub fn spawn_with_locomotion(
     let skeleton = assets.skeleton.clone();
     let cal = assets.cal.clone();
     let t = std::time::Instant::now();
-    let root = match spawn_character(commands, cry, clips, assets, transform) {
+    let root = match spawn_character_with_facial(commands, cry, clips, assets, transform) {
         Ok(r) => r,
         Err(e) => {
             error!("cannot spawn a character: {e}");
