@@ -520,6 +520,7 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Actability(crate::actability::ActabilityEvent),
     CraftFailureNotice(crate::craft::CraftFailureNotice),
+    CraftItemUnlocked(crate::craft::CraftItemUnlock),
     /// Raw loading directive; the app must plan the load/response separately.
     LoadInstance(crate::world_msg::InstanceLoad),
     /// Raw blink directive; does not by itself change a unit transform.
@@ -990,6 +991,8 @@ impl Session {
                     self.emit(Event::AutoUseAaPointRequestRejected { value, message: "AA point setting requires an active character".into() });
                 } else if self.send_game(game::ClientMsg::SetAutoUseAaPoint(value)).await {
                     self.emit(Event::AutoUseAaPointRequested(value));
+                } else {
+                    self.emit(Event::AutoUseAaPointRequestRejected { value, message: "AA point setting was not sent".into() });
                 }
             }
             Command::Bank(command) => {
@@ -1481,6 +1484,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Actability(e) => self.emit(Event::Actability(e)),
+            M::CraftItemUnlocked(e) => self.emit(Event::CraftItemUnlocked(e)),
             M::CraftFailureNotice(e) => self.emit(Event::CraftFailureNotice(e)),
             M::LoadInstance(e) => self.emit(Event::LoadInstance(e)),
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
@@ -2059,6 +2063,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn craft_unlock_and_repeated_setting_actions_reach_app_in_received_order() {
+        use crate::craft::CraftItemUnlock;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let changes = crate::items::ItemTasks {
+            reason: 0, tasks: vec![crate::items::ItemTask::AutoUseAaPoint(1)],
+            force_remove: vec![], truncated: false,
+        };
+        let unlock = CraftItemUnlock { kind: 0xf0, slot: 0 };
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::ItemTasks(changes.clone()),
+            game::ServerMsg::ItemTasks(changes.clone()),
+            game::ServerMsg::CraftItemUnlocked(unlock),
+            game::ServerMsg::CraftItemUnlocked(unlock),
+        ]))).await;
+        for _ in 0..2 {
+            assert!(matches!(events.try_recv(), Ok(Event::ItemsChanged(actual)) if actual == changes));
+        }
+        for _ in 0..2 {
+            assert!(matches!(events.try_recv(), Ok(Event::CraftItemUnlocked(actual)) if actual == unlock));
+        }
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn aa_point_request_without_successful_send_never_latches_pending() {
         let (evt, mut events) = unbounded_channel();
         let mut session = Session::new(evt, ClientOptions::default());
@@ -2067,6 +2096,7 @@ mod tests {
         assert!(events.try_recv().is_err());
         session.phase = Phase::InWorld;
         session.command(Command::SetAutoUseAaPoint(true)).await;
+        assert!(matches!(events.try_recv(), Ok(Event::AutoUseAaPointRequestRejected { value: true, .. })));
         assert!(events.try_recv().is_err(), "no connection cannot mark a request pending");
     }
 

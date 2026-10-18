@@ -2899,10 +2899,10 @@ server persistence/live acceptance remains unverified; no success is synthesized
 `Inventory.auto_use_aa_point_raw` hydrates from the existing selected character's
 `character.auto_use_aa_point`. `auto_use_aa_point()` uses raw equality to one. Received
 `ItemTask::AutoUseAaPoint(u8)` (SC item action 18) preserves every byte and clears
-`pending_auto_use_aa_point`; repeats still return a changed/report notification. The app
+`pending_auto_use_aa_point` after folding the whole task batch; repeats still return a changed/report notification. The app
 must fire the original `CHANGED_AUTO_USE_AAPOINT` from received actions, not the request.
 `can_set_auto_use_aa_point` implements the raw-value/single-pending UI guard. The command
-is transport-level and does not enforce this app guard. Failed/absent connections do
+is transport-level and does not enforce this app guard. Failed/absent connections produce a local rejected event and do
 not produce a requested event or latch pending. Selection resets pending and hydrates;
 left-world/disconnect clear both values, including inventories with no allocated slots.
 
@@ -2915,6 +2915,29 @@ Vtable serializer397bc8f0 reads/writes one byte at packet+C; getter397ccd50 retu
 only when inventory+C340 equals one. Native action dispatch branch397d1222 clears its
 +1A8 member with3924cd30 then calls397cd940 on action+8. That function calls its sink's
 virtual slot zero with global3a5e11d0 and then assigns the action raw dword into
-inventory+C340 at397cd95e. Exact sink-to-Lua callback timing remains under investigation;
-aa-net exposes the folded received snapshot before app dispatch, without claiming an
-optimistic setter or an independently proven native callback timing.
+inventory+C340 at397cd95e. Sink timing is now proven: caller394eff00 constructs vtable399e6310; virtual[0]
+394e8600 only inserts the packed location into a map. After Apply returns and C340 is
+written,394f007f calls394e7140. Action18 branch394e758c reads397ccd50 and emits Lua
+0x24a at394e75af through39424240. Registration392165d6 names event0x24a
+`CHANGED_AUTO_USE_AAPOINT`. Thus app dispatch observes the received getter after write.
+
+SC0f5 `CraftItemUnlock { kind, slot }` / `Event::CraftItemUnlocked` is a received inventory
+lock release, not recipe completion or AA-point value acceptance. Native packet factory
+391ae560 sets opcode0xf5 and vtable399b3738; serializer397b4c60 zeroes packed bytes+C/+E
+and reads bytes+D/+F, producing `[0,kind,0,slot]`. Handler391d9700 (`OnCraftItemUnlock`)
+calls inventory397d2200(packed_key,false). Static initializer39991ec0 proves the AA-point
+key3a5b9d38 is `[0,0xf0,0,0]` (0xF000). Only that explicit unlock key clears the pending AA-point
+request; unrelated slots/kinds preserve it, and no unlock changes the received getter
+or justifies a `CHANGED_AUTO_USE_AAPOINT` event. Repeated received unlock events remain
+visible to applications even when no local request is pending.
+
+The regular received value action also releases pending at the end of the item-task batch:
+394eff00 gathers the sink map, and394f021b passes it with false to397d22b0; its loop calls
+397d2200(key,false) at397d22ce. Action18 had inserted0xF000. Native per-action Lua change
+callbacks precede that final map release; aa-net's event fold exposes the finished batch.
+
+Validation: `cargo test -p aa-net --features bevy` passes 267 library tests and two local
+login loopbacks; nine lane-dependent tests remain ignored. Unlock tests cover raw packed
+keys, wrong kind/slot isolation, truncated payloads, following DD04 packet alignment,
+repeated notification ordering, getter immutability, and no-send rejection notifications.
+No lane transaction was attempted during the stalled game-session condition.
