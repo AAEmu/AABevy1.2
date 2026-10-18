@@ -397,6 +397,8 @@ pub enum Event {
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
+    /// World-level report; raw state and timestamp bits, independent of own spawn.
+    ConflictZoneState(crate::conflict::ConflictZoneState),
     ForceAttackSet { obj_id: u32, on: bool },
     /// Successful local socket write only; wait for ForceAttackSet to update received state.
     ForceAttackRequested { on: bool },
@@ -1474,6 +1476,7 @@ impl Session {
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
             M::SetBreath { breath } => self.emit(Event::SetBreath { breath }),
+            M::ConflictZoneState(state) => self.emit(Event::ConflictZoneState(state)),
             M::ForceAttackSet { obj_id, on } => self.emit(Event::ForceAttackSet { obj_id, on }),
             M::UnitInvisible { obj_id, invisible } => self.emit(Event::UnitInvisible { obj_id, invisible }),
             M::Mate(e) => self.emit(Event::Mate(e)),
@@ -3512,6 +3515,52 @@ mod tests {
                 && state.skills.casting.is_empty()
         );
         assert_eq!(state.combat_status.breath, Some(123));
+    }
+
+    #[tokio::test]
+    async fn conflict_reports_forward_in_wire_order_before_character_and_spawn() {
+        use crate::conflict::ConflictZoneState;
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        // No player, selected character or game socket. World reports still remain meaningful.
+        assert_eq!(session.self_obj, 0);
+        let initial = ConflictZoneState {
+            zone_group_id: 14,
+            state: 6,
+            end_time: 1,
+        };
+        let update = ConflictZoneState {
+            state: 255,
+            end_time: u64::MAX,
+            ..initial
+        };
+        session
+            .game_msg(Ok(game::ServerMsg::Batch(vec![
+                game::ServerMsg::ConflictZoneState(initial),
+                game::ServerMsg::SetBreath { breath: 77 },
+                game::ServerMsg::ConflictZoneState(initial),
+                game::ServerMsg::ConflictZoneState(update),
+            ])))
+            .await;
+        let mut state = crate::state::WorldState::default();
+        for index in 0..4 {
+            let event = events.try_recv().unwrap();
+            match (index, &event) {
+                (0 | 2, Event::ConflictZoneState(actual)) => assert_eq!(*actual, initial),
+                (1, Event::SetBreath { breath: 77 }) => {}
+                (3, Event::ConflictZoneState(actual)) => assert_eq!(*actual, update),
+                other => panic!("wrong event order: {other:?}"),
+            }
+            state.apply(&event);
+        }
+        assert!(
+            events.try_recv().is_err(),
+            "no synthetic entry/transition/permission events"
+        );
+        assert_eq!(state.conflict_zones.get(14), Some(&update));
+        assert_eq!(state.combat_status.breath, Some(77));
+        assert!(state.player.spawn.is_none() && state.units.by_id.is_empty());
+        assert_eq!(session.self_obj, 0);
     }
 
 }

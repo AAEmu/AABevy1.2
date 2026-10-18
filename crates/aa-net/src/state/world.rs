@@ -32,7 +32,7 @@ impl TimeOfDay {
 resource! {
     /// Where the player is and what the sky does.
     ///
-    /// The server tells zones only through chat channels: `zone_group_id` follows the zone
+    /// The player's current zone group follows chat channels: `zone_group_id` follows the zone
     /// ("shout") channel's `sub_type`. The sub zone ("Desiree Peak" on the minimap header) is not
     /// sent at all: the client finds it from the position in the `sub_zones` table
     /// (`linked_zone_group_id`, `x`, `y`, `w`, `h`).
