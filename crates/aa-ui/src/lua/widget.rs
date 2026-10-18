@@ -99,7 +99,12 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
         u.tree.get_mut(id).alpha = alpha;
         u.animations.clear_widget_alpha(id);
     }
-    if visible && !was && id != crate::tree::ROOT && u.tree.get(id).parent.is_none() && u.tree.get(id).is_widget() {
+    if visible
+        && !was
+        && id != crate::tree::ROOT
+        && u.tree.get(id).parent.is_none()
+        && u.tree.get(id).is_widget()
+    {
         u.tree.raise(id);
     }
     match fade_ms.filter(|&ms| ms > 0.0) {
@@ -212,7 +217,8 @@ pub(super) fn remove_hidden(lua: &Lua) {
             events.retain(|id| !ids.contains(id));
         }
         u.frame_handlers.retain(|(id, _)| !ids.contains(id));
-        u.attachments.retain(|owner, target| !ids.contains(owner) && !ids.contains(target));
+        u.attachments
+            .retain(|owner, target| !ids.contains(owner) && !ids.contains(target));
         u.pending.retain(|(id, _, _)| !ids.contains(id));
         u.entered.retain(|id| !ids.contains(id));
         if u.hover.is_some_and(|id| ids.contains(&id)) {
@@ -446,10 +452,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "RemoveAllAnchors",
         method(lua, |lua, id, _| {
-            let mut u = ui(lua);
-            if !u.tree.get(id).anchors.is_empty() {
-                u.tree.get_mut(id).anchors.clear();
-            }
+            ui(lua).tree.remove_anchors(id);
             none()
         })?,
     )?;
@@ -525,6 +528,45 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             ret(lua, (r.x, r.y))
         })?,
     )?;
+    def(
+        "CheckOutOfScreen",
+        method(lua, |lua, id, _| {
+            let u = ui(lua);
+            let r = u.animations.widget_rect(&u.tree, id);
+            // Native 39262170 uses effective pixel bounds; global scale cancels
+            // when comparing those bounds with our logical screen dimensions.
+            ret(
+                lua,
+                r.x < 0. || r.y < 0. || r.right() > u.tree.screen_w || r.bottom() > u.tree.screen_h,
+            )
+        })?,
+    )?;
+    def(
+        "CorrectOffsetByScreen",
+        method(lua, |lua, id, _| {
+            let u = ui(lua);
+            let r = u.animations.widget_rect(&u.tree, id);
+            // Native 392622e0 prioritizes a negative near edge, then far overflow.
+            // It returns physical coordinates without changing the anchors. An
+            // oversized widget can therefore return a negative far-edge origin.
+            let correct = |p: f32, size: f32, screen: f32| {
+                if p < 0. {
+                    0.
+                } else if p + size > screen {
+                    screen - size
+                } else {
+                    p
+                }
+            };
+            ret(
+                lua,
+                (
+                    correct(r.x, r.w, u.tree.screen_w) * u.ui_scale,
+                    correct(r.y, r.h, u.tree.screen_h) * u.ui_scale,
+                ),
+            )
+        })?,
+    )?;
 
     // --- visibility / state ---------------------------------------------------------------
     def(
@@ -591,7 +633,13 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "GetAlpha",
         method(lua, |lua, id, _| {
             let u = ui(lua);
-            ret(lua, u.animations.widget_sample(id).alpha.unwrap_or(u.tree.get(id).alpha))
+            ret(
+                lua,
+                u.animations
+                    .widget_sample(id)
+                    .alpha
+                    .unwrap_or(u.tree.get(id).alpha),
+            )
         })?,
     )?;
     def(
@@ -1134,8 +1182,6 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "SetNumberOnly",
         "UseConsistentTextColor",
         "InheritAnimationData",
-        "CheckOutOfScreen",
-        "CorrectOffsetByScreen",
     ] {
         def(name, method(lua, |_, _, _| none())?)?;
     }
@@ -1579,7 +1625,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     super::animation::widget_methods(lua, &m)?;
     super::attachment::methods(lua, &m)?;
-    if ty == "damagedisplay" { super::damage::methods(lua, &m)?; }
+    if ty == "damagedisplay" {
+        super::damage::methods(lua, &m)?;
+    }
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)
 }

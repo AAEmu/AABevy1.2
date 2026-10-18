@@ -2202,3 +2202,46 @@ reappearance, and fresh tooltip metadata without an icon update. The unique
 aa-dev capture `shots/aa-ui/native-radar-shared-cache-20261018.png` was inspected:
 same original map/tooltip rendering, zero script errors, startup 251 FPS and
 387–508 FPS afterward, automatic closure and exit 0.
+
+## Original screen overflow recovery (2026-10-18)
+
+`CheckOutOfScreen()` and `CorrectOffsetByScreen()` now implement the native
+queries instead of returning no values. Unchanged pet-bar Lua uses them when a
+bar or equipment panel changes size/scale, and original tooltip/window positioning
+uses the same methods. A nil check previously bypassed recovery altogether.
+
+Native registration `39262b02` / `39262b6b` binds `39262170` / `392622e0`.
+They read effective position (`39275470`, object `+0x6c`) and extent (`39275490`,
+`+0x74`), then compare against renderer pixel dimensions `39ac67fc` / `39ac6800`.
+The boolean query uses strict overflow: touching an edge is inside. Correction
+returns two physical pixel coordinates without moving the widget. Per axis it
+first corrects a negative near edge to zero; otherwise a far-edge overflow returns
+`screen-size`. An oversized positive-position widget can therefore return a
+negative origin. The original Lua divides these results with `CalcDontApplyUIScale`
+and applies its own anchors. No screen margin or forced global positioning was added.
+
+Pet `CorrectWidgetScreenPos` removes anchors **before** requesting the corrected
+position. Native `RemoveAllAnchors` (`392616c0` -> `39276a70` -> `39276940`)
+frees the nine anchor/dependency records without resetting stored offset or extent.
+The toolkit now retains the resolved logical origin and size on removal, while
+freshly created unanchored objects retain their existing default placement. New
+anchors replace that retained origin. Repeating a remove/re-add of identical
+anchors still leaves settled rendering unchanged. The source excerpts are in
+ignored `data/extract/aa-ui/native-screen-bounds-source-20261018.txt`.
+
+Three new regressions cover edge equality, every overflow direction, non-mutating
+physical returns, oversized-widget precedence, effective persistent scale,
+anchorless origin/extent/dependency removal, and the unchanged pet `OnScale` and
+tooltip placement helpers at UI scales 1 and 0.8. Across the library and focused
+native, animation, grid, scale/clip, popup, event, world-map, radar, marker and ping
+suites, 91 tests passed (one existing font-metrics test ignored). This includes
+the original pet frame/bar constructors and unchanged-state repaint regression.
+
+`examples/native_screen_bounds.rs` uses aa-dev default plugins and `DevPlugin`.
+The final unique `--shot` capture
+`shots/aa-ui/native-screen-bounds-final-20261018.png` was inspected: the original
+Stormmane bar recovered to the bottom-right, the original brown tooltip recovered
+to the top-right, zero script errors, 233–272 FPS, automatic closure and exit 0.
+Shared HUD/tooltip framing was compared with `reference/ingame/tooltip_hud/real.png`;
+that reference has no pet/overflow scenario, so it is not a pixel comparison of
+the corrected placement. No font, asset layout, or scene calibration changed.
