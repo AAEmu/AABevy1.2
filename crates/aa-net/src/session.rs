@@ -527,6 +527,7 @@ pub enum Event {
     LootRoll(crate::loot_roll::LootRollEvent),
     Battlefield(crate::battlefield::BattlefieldEvent),
     ScheduledEventStarted(crate::scheduled::ScheduledEventStarted),
+    Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
     FamilyRequested { character_id: u32, command: crate::FamilyCommand },
@@ -1576,6 +1577,7 @@ impl Session {
             M::Party(e) => self.emit(Event::Party(e)),
             M::LootRoll(e) => self.emit(Event::LootRoll(e)),
             M::Battlefield(e) => self.emit(Event::Battlefield(e)),
+            M::Expedition(e) => self.emit(Event::Expedition(e)),
             M::Family(e) => self.emit(Event::Family(e)),
             M::UnitGmModeChanged(e) => self.emit(Event::UnitGmModeChanged(e)),
             M::ScheduledEventStarted(e) => self.emit(Event::ScheduledEventStarted(e)),
@@ -4256,6 +4258,17 @@ mod tests {
         session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::UnitGmModeChanged(raw),game::ServerMsg::UnitGmModeChanged(raw)]))).await;
         for _ in 0..2 {assert!(matches!(events.try_recv(),Ok(Event::UnitGmModeChanged(value)) if value==raw));}
         assert!(events.try_recv().is_err());assert_eq!(session.self_obj,0);
+    }
+
+    #[tokio::test]
+    async fn expedition_receipts_forward_empty_and_repeated_batches() {
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        let receipt=crate::ExpeditionEvent::Members{total:21,expedition_id:9,members:vec![]};
+        for value in [receipt.clone(),receipt,crate::ExpeditionEvent::Policies(vec![])] {
+            session.game_msg(Ok(game::ServerMsg::Expedition(value.clone()))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::Expedition(actual)) if actual==value));
+        }
+        assert!(events.try_recv().is_err());
     }
 
 }

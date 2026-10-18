@@ -176,6 +176,7 @@ net_state! {
     auction: Auction,
     loot_rolls: LootRolls,
     scheduled_events: crate::scheduled::ScheduledEvents,
+    expeditions: crate::expedition::Expeditions,
     families: crate::family::Families,
     server_clock: crate::clock::ServerClock,
     actabilities: Actabilities,
@@ -296,6 +297,15 @@ mod equipment_flags_tests {
         app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ScheduledEventStarted(start.clone()))).unwrap();
         assert_eq!(app.world().resource::<crate::battlefield::Battlefield>().my_corps_kill_death_ratio,-7);
         assert_eq!(app.world().resource::<crate::scheduled::ScheduledEvents>().starts[&3].open_message,b"notice");
+    }
+
+    #[test]
+    fn plugin_expedition_cache_hydrates_and_resets() {
+        let mut app=App::new();init_state(&mut app);
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Expedition(crate::ExpeditionEvent::Factions(vec![crate::ExpeditionFaction{id:9,..Default::default()}])))).unwrap();
+        assert!(app.world().resource::<crate::Expeditions>().factions.contains_key(&9));
+        app.world_mut().run_system_once(|mut state:NetState|state.apply(&Event::Disconnected{message:String::new()})).unwrap();
+        assert!(app.world().resource::<crate::Expeditions>().factions.is_empty());
     }
 
 }
