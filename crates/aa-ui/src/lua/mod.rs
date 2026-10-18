@@ -71,6 +71,9 @@ pub struct Ui {
     /// Widgets awaiting completed hiding before native removal.
     pub(crate) retiring: std::collections::BTreeSet<Id>,
     pub fades: HashMap<Id, Fade>,
+    /// Native UI manager clock: f32 accumulated frame milliseconds, independent of other clocks.
+    pub(crate) fade_clock: f32,
+    pub(crate) next_fade_order: u64,
     pub animations: animation::Animations,
     pub damage: damage::Damage,
     pub time_ms: f64,
@@ -108,10 +111,11 @@ pub struct Ui {
 /// `Show(visible, ms)` fade.
 #[derive(Clone, Copy, Debug)]
 pub struct Fade {
+    pub(crate) order: u64,
     pub from: f32,
     pub to: f32,
-    pub t: f32,
-    pub duration: f32,
+    pub start: f32,
+    pub end: f32,
 }
 
 /// Lua-side registries (tables live in the Lua registry; handles are cheap to clone).
@@ -457,50 +461,58 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         }
     }
     let p_fades = scope("fades");
-    let (updates, ended) = {
+    let clock = {
         let mut u = ui(lua);
         u.time_ms += dt_ms as f64;
+        u.fade_clock += dt_ms;
         u.frame_ms = dt_ms;
-        let mut ended = animation::tick(&mut u, dt_ms);
-        let fades: Vec<(Id, Fade)> = u.fades.iter().map(|(k, v)| (*k, *v)).collect();
-        for (id, mut f) in fades {
-            f.t += dt_ms;
-            let k = if f.duration <= 0.0 {
-                1.0
-            } else {
-                (f.t / f.duration).min(1.0)
-            };
-            let a = f.from + (f.to - f.from) * k;
-            let o = u.tree.get_mut(id);
-            o.alpha = a;
-            if k >= 1.0 {
-                if f.to <= 0.0 {
-                    o.shown = false;
-                    o.alpha = 1.0;
-                    ended.push((id, "OnEndFadeOut"));
-                } else {
-                    ended.push((id, "OnEndFadeIn"));
-                }
+        u.fade_clock
+    };
+    let mut previous_order = None;
+    loop {
+        // Native list order survives replacement; callbacks can mutate a later record or
+        // append another one, which is visited in this same manager frame.
+        let next = ui(lua).fades.iter()
+            .filter(|(_, f)| previous_order.is_none_or(|order| f.order > order))
+            .min_by_key(|(_, f)| f.order)
+            .map(|(&id, &f)| (id, f));
+        let Some((id, f)) = next else { break };
+        previous_order = Some(f.order);
+        let complete = {
+            let mut u = ui(lua);
+            let k = (clock - f.start) / (f.end - f.start);
+            // Native COMISS/JBE also completes unordered start/end, without clamping early k.
+            let complete = !(f.end > f.start) || k >= 1.0;
+            if let Some(w) = u.tree.widget_mut(id) {
+                w.fade_alpha = if complete { f.to } else { f.from + (f.to - f.from) * k };
+                w.fading = !complete;
+            }
+            if complete {
                 u.fades.remove(&id);
             } else {
-                u.fades.insert(id, f);
+                // Pending native fades keep their admitted paint clocks alive even when
+                // the factor is unchanged (infinite duration or a rounded f32 clock).
+                u.tree.repaint();
             }
+            complete
+        };
+        if complete {
+            call_handler(lua, id, if f.to == 0.0 { "OnEndFadeOut" } else { "OnEndFadeIn" }, vec![]);
         }
-        // `OnEffect(self, dt)` is the per-frame effect tick (the clock bar refreshes the zone name
-        // and the sun there).
-        let updates: Vec<(Id, &'static str)> = u
-            .frame_handlers
-            .iter()
-            .copied()
-            .filter(|&(id, _)| u.tree.visible(id))
-            .collect();
-        (updates, ended)
-    };
-    for (id, h) in ended {
+    }
+    // Native3921c0f9 manager/fade callbacks precede3921c13c visible-widget animation steps.
+    let animation_ended = animation::tick(&mut ui(lua), dt_ms);
+    for (id, h) in animation_ended {
         call_handler(lua, id, h, vec![]);
     }
     drop(p_fades);
     damage::tick(lua);
+    // `OnEffect(self, dt)` is the per-frame effect tick (the clock bar refreshes the zone name
+    // and the sun there). Fade callbacks may have changed visibility/handlers.
+    let updates: Vec<(Id, &'static str)> = {
+        let u = ui(lua);
+        u.frame_handlers.iter().copied().filter(|&(id, _)| u.tree.visible(id)).collect()
+    };
     let _p = scope("on_update");
     for (id, h) in updates {
         let t0 = crate::prof::handler_start();

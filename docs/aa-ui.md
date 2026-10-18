@@ -5651,3 +5651,92 @@ backing makes the original black currency text readable. Initial dark-backing
 diagnostics are not the final visual evidence. Both final runs report zero
 script errors/WARN/ERROR and self-close (PIDs46068/13800); the copied executable
 was removed. No app API, cooldown producer or native selector activation changes.
+
+### Widget visible alpha and the independent Show fade factor (2026-10-18)
+
+Native SetAlpha39267d00/39267620/392658c0 writes visible alpha+d8 without
+clearing the alpha channel at+280..298. Its typed float argument requires a
+number; nil, strings, booleans, missing arguments and failed widget casts
+silently return zero results without changing it. It upper-clamps values>1;
+negative values and unordered NaN survive. A direct visible-alpha override
+lasts until the next active channel step. The toolkit now preserves that
+internal/current versus visible distinction instead of canceling the channel.
+
+Show39266130 validates its first argument as bool or numeric nonzero, optional
+duration as an actual number (invalid/missing means0), and returns zero values.
+Its optional third float does not replace the manager's0/1 target. Helper
+3927e420 compares the widget's own shown+ba first: a repeated value leaves
+the existing fade record and callbacks alone. A transition writes shown
+immediately and queues OnShow/OnHide, preserving both animation channels and
+base alpha. This includes zero-duration transitions: completion occurs during
+the manager frame, rather than resetting alpha synchronously.
+
+Manager392aab40 uses separate fade factor+dc and pending+e0. A new show/hide
+record starts at0/1 and targets1/0; replacement starts from the current factor
+and retains its manager position. Start/end are absolute f32 milliseconds.
+The UI clock39ac67f0 accumulates each f32 frame delta at3921c026..3a; the
+toolkit keeps a dedicated f32 clock without changing its other f64 clocks.
+Frame392ab0e0 completes end<=start (including unordered end/start), otherwise
+evaluates `(now-start)/(end-start)` without a lower clamp. Completion writes
+the factor, clears pending and dispatches OnEndFadeIn/OnEndFadeOut. Negative,
+NaN and infinite durations retain the executed native comparison behavior.
+Pending records request painting even when the factor is unchanged, so native
+admitted draw clocks do not stall at infinite duration or rounded f32 time.
+
+Native records are visited in registration order, with completion delivered
+before evaluating the next record. A callback can replace a later record or
+append one that is visited in the same frame. The toolkit retains an explicit
+sequence on each active record; replacement keeps it and new records append.
+Frame3921c0f9→392ab5f0 delivers manager completions before
+3921c13c→392a9e40→3927de60 steps widget animation channels, so a completion
+callback observes pre-step alpha and can start an admitted channel for that
+same frame. Generic hidden-widget animation-clock policy remains outside this
+slice; the source-order regression uses an admitted shown widget.
+
+Paint3927b010 admits shown OR pending-fade widgets, while hit3927c6d0 requires
+the shown flag. The renderer therefore has a distinct fading paint traversal;
+input/public ancestor visibility remain strict. Each widget forms f32
+`factor*base` before multiplying the parent's inherited alpha in parent-first
+order (3921a870). Existing ancestor clipping and layers still apply. A fading
+hidden ancestor carries its visible descendants until completion, then excludes
+the subtree. EnableHidingIsRemove waits for the actual fade completion and
+keeps descendants valid through its callback before retiring input/event state.
+
+Offline artifacts under `data/extract/aa-ui/` execute **92 actual-native
+fade/visibility controls**: `widget_visibility_oracle.py`51 full-wrapper and
+manager cases; `widget_fade_oracle.py`36 frame/draw/hit cases; and
+`widget_fade_order_oracle.py`5 ordered-record cases. The latter executes actual
+Show/manager replacement through an in-emulator callback trampoline; callback
+retirement/list insertion, allocation, layer interfaces and final renderer
+delivery are explicitly controlled endpoints. It covers replacement position,
+observation/mutation of a later record, retirement and appending. Corresponding
+`native-widget-*-oracle-20261018.json` files retain outputs, and
+`native-widget-visibility-source-20261018.txt` archives the wrapper, manager,
+clock, paint, hit and frame-order disassembly. No editor/global modal policy
+or foreign runtime clock values were inferred.
+
+Fresh crate/example checks and the final example build pass. **103 selected
+tests pass** (one pre-existing optional font-metric test ignored): widget fade12,
+animation10, popup9, attachment5, scale/clip4, unit22, chat alpha6/chat clip7,
+tooltips6, native slot selector6/mask8/completion7/state1. Controls include
+strict wrapper arity/casts, nonfinite/negative values, f32 clock precision,
+active alpha/scale preservation, parent alpha/clipping/layers, physical hit
+exclusion, reentrant callbacks, ordered mutation and descendant retirement.
+Original popup/confirmation, tooltip, arrow/window animation, chat and ordinary
+slot script checks pass. Existing cache tests explicitly settle the new native
+zero-duration Show record with tick0 before measuring later changes; no
+animation elapsed time or restart is hidden by that settlement.
+
+Final aa-dev captures were inspected, both with explicit `--shot-after 8`:
+`shots/aa-ui/native-widget-fade-active-final-720-20261018.png`
+(1280x720/default0.85, **465.9-632.1 FPS**) and
+`shots/aa-ui/native-widget-fade-complete-final-1080-20261018.png`
+(1920x1080/1.0, **518.6-615.2 FPS**). They use unchanged original CreateWindow
+art/OnShow animation and an original CreateEmptyWindow control for base-alpha
+reversal. The first shows active channels and hidden fade painting; the second
+shows completion with the hidden subtree absent and .4 base alpha preserved.
+Both report zero script errors/WARN/ERROR and self-close (PIDs39604/41288).
+The copied executable was removed. Early fixture runs used an unavailable
+CreateEmptyWindow-only helper or the default5s shot before transition; those
+diagnostics are not final visual evidence. InheritAnimationData implementation
+follows separately over these now-correct alpha/fade prerequisites.

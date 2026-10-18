@@ -87,6 +87,10 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     let mut g = ui(lua);
     let u = &mut *g;
     let was = u.tree.get(id).shown;
+    // Repeating the visible flag never replaces/cancels a queued native manager record.
+    if was == visible {
+        return;
+    }
     if visible {
         u.retiring.remove(&id);
     } else if was && u.tree.widget(id).is_some_and(|w| w.remove_on_hide) {
@@ -94,12 +98,6 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     }
     if !visible && fade_ms.is_none_or(|ms| ms <= 0.0) {
         super::damage::hide(u, id);
-    }
-    if (was != visible || fade_ms.is_some_and(|ms| ms > 0.0))
-        && let Some(alpha) = u.animations.widget_sample(id).alpha
-    {
-        u.tree.get_mut(id).alpha = alpha;
-        u.animations.clear_widget_alpha(id);
     }
     if visible
         && !was
@@ -109,43 +107,27 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     {
         u.tree.raise(id);
     }
-    match fade_ms.filter(|&ms| ms > 0.0) {
-        Some(ms) if visible => {
-            let o = u.tree.get_mut(id);
-            o.shown = true;
-            let from = if was { o.alpha } else { 0.0 };
-            o.alpha = from;
-            u.fades.insert(
-                id,
-                Fade {
-                    from,
-                    to: 1.0,
-                    t: 0.0,
-                    duration: ms,
-                },
-            );
-        }
-        Some(ms) if was => {
-            let from = u.tree.get(id).alpha;
-            u.fades.insert(
-                id,
-                Fade {
-                    from,
-                    to: 0.0,
-                    t: 0.0,
-                    duration: ms,
-                },
-            );
-        }
-        _ => {
-            u.fades.remove(&id);
-            let o = u.tree.get(id);
-            if (o.shown, o.alpha) != (visible, 1.0) {
-                let o = u.tree.get_mut(id);
-                o.shown = visible;
-                o.alpha = 1.0;
-            }
-        }
+    let clock = u.fade_clock;
+    let order = if let Some(old) = u.fades.get(&id) {
+        old.order
+    } else {
+        let order = u.next_fade_order;
+        u.next_fade_order += 1;
+        order
+    };
+    let from = if u.fades.contains_key(&id) {
+        u.tree.widget(id).map_or(1.0, |w| w.fade_alpha)
+    } else if visible { 0.0 } else { 1.0 };
+    u.fades.insert(id, Fade {
+        order,
+        from,
+        to: if visible { 1.0 } else { 0.0 },
+        start: clock,
+        end: clock + fade_ms.unwrap_or(0.0),
+    });
+    u.tree.get_mut(id).shown = visible;
+    if let Some(w) = u.tree.widget_mut(id) {
+        w.fading = true;
     }
     let mut sound = false;
     if was != visible && u.tree.get(id).is_widget() {
@@ -175,7 +157,7 @@ pub(super) fn remove_hidden(lua: &Lua) {
         if !remove {
             continue;
         }
-        if ui(lua).tree.get(root).shown {
+        if ui(lua).tree.get(root).shown || ui(lua).tree.widget(root).is_some_and(|w| w.fading) {
             // A fade has not finished. Show(true) cancels retirement in show().
             ui(lua).retiring.insert(root);
             continue;
@@ -612,7 +594,15 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "Show",
         method(lua, |lua, id, a| {
-            show(lua, id, a.b(1, true), a.opt_f(2));
+            if ui(lua).tree.widget(id).is_none() { return none(); }
+            let visible = match a.v(1) {
+                Value::Boolean(v) => v,
+                Value::Integer(v) => v != 0,
+                Value::Number(v) => v != 0.0,
+                _ => return none(),
+            };
+            let duration = a.is_num(2).then(|| a.f(2));
+            show(lua, id, visible, duration);
             none()
         })?,
     )?;
@@ -657,13 +647,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetAlpha",
         method(lua, |lua, id, a| {
-            let (mut u, v) = (ui(lua), a.f(1));
-            let animated = u.animations.widget_sample(id).alpha;
-            u.animations.clear_widget_alpha(id);
-            if u.tree.get(id).alpha != v {
-                u.tree.get_mut(id).alpha = v;
-            }
-            if animated.is_some_and(|old| old != v) && u.tree.visible(id) {
+            if ui(lua).tree.widget(id).is_none() { return none(); }
+            if !a.is_num(1) { return none(); }
+            let mut u = ui(lua);
+            let mut v = a.f(1);
+            if v > 1.0 { v = 1.0; }
+            let before = u.animations.widget_sample(id).alpha.unwrap_or(u.tree.get(id).alpha);
+            super::animation::widgets::set_alpha(&mut u, id, v);
+            if before != v && u.tree.visible(id) {
                 u.tree.repaint();
             }
             none()
