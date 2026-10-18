@@ -24,6 +24,7 @@ struct TerrainParams {
     //   2: (detail normal (like the normal), detail uv scale u, v, material colour r)
     //   3: (detail uv offset u, v, material colour g, b)
     layers: array<vec4<f32>, 384>,
+    normal_uv: array<vec4<f32>, 96>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> terrain: TerrainParams;
@@ -189,7 +190,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 albedo = mix(albedo, c, w);
 
                 if a.y >= 0.0 {
-                    var t = sample_normal(a.y, uv, gx, gy) * 2.0 - 1.0;
+                    // Native TerrainLayerVS applies TS_BUMP independently of TS_DIFFUSE.
+                    let transform = terrain.normal_uv[ids[k]*3u+u32(p)];
+                    var t = sample_normal(a.y, uv*transform.xy+transform.zw,
+                        gx*transform.xy, gy*transform.xy) * 2.0 - 1.0;
                     let nz = sqrt(max(1.0 - dot(t, t), 0.0));
                     // a detail normal map is added to the xy of the base normal (fraglib.cfi, bDetailBumpMapping);
                     // the sum is renormalised below
