@@ -12,6 +12,8 @@ use crate::wire::{Reader, Result, WireError, Writer};
 /// Exact mate control requests. A local send is not a server acknowledgement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MateCommand {
+    /// Stablehand revives dead summon items in bag/bank; separate from equipment repair.
+    ReviveItems { npc_obj_id: u32 },
     Rename { tl_id: u16, name: String },
     Dismiss {
         tl_id: u16,
@@ -43,6 +45,9 @@ pub enum MateCommand {
 impl MateCommand {
     pub fn validate(&self) -> std::result::Result<(), &'static str> {
         let tl_id = match self {
+            Self::ReviveItems { npc_obj_id } => return if *npc_obj_id == 0 || *npc_obj_id > 0xffffff {
+                Err("stablehand NPC ID must be nonzero and fit in 24 bits")
+            } else { Ok(()) },
             Self::Rename { tl_id, .. }
             | Self::Dismiss { tl_id }
             | Self::Mount { tl_id, .. }
@@ -72,6 +77,7 @@ impl MateCommand {
 
     pub fn opcode(&self) -> u16 {
         match self {
+            Self::ReviveItems { .. } => cs::CSRepairPetItemsPacket,
             Self::Rename { .. } => cs::CSChangeMateNamePacket,
             Self::Dismiss { .. } => cs::CSRemoveMatePacket,
             Self::Mount { .. } => cs::CSMountMatePacket,
@@ -83,6 +89,7 @@ impl MateCommand {
 
     pub fn write(&self, w: &mut Writer) {
         match self {
+            Self::ReviveItems { npc_obj_id } => { w.bc(*npc_obj_id); }
             Self::Rename { tl_id, name } => {
                 w.u16(*tl_id).string(name);
             }
@@ -116,6 +123,8 @@ impl MateCommand {
 
 /// Native SCMateSpawned has exactly ten slots, including zero/empty slots.
 pub const MATE_SKILL_SLOTS: usize = 10;
+/// Received summon-item detail updates after stablehand revival (lane REPAIR_PETS).
+pub const REPAIR_PETS_TASK: u8 = 58;
 /// Native 397b2350 has an inline array of 150 triples for each list.
 pub const MAX_DYNAMIC_ENTRIES: usize = 150;
 
@@ -617,6 +626,45 @@ mod tests {
     }
 
     #[test]
+    fn stablehand_request_never_revives_items_before_authoritative_detail_updates() {
+        use crate::items::{ItemTasks, action};
+        use crate::model::{Item, ItemDetail};
+        use crate::state::WorldState;
+        let mut state = WorldState::default();
+        state.apply(&select(42));
+        let old = ItemDetail::Mate { exp: 1234, dead: 1, level: 10 };
+        for (container, id) in [(2, 101), (3, 102)] {
+            let item = Item { id, template_id: 123, detail: old.clone(), ..Item::default() };
+            if container == 2 { state.inventory.bag = vec![Some(item)]; }
+            else { state.inventory.bank = vec![Some(item)]; }
+        }
+        state.apply(&Event::Mate(MateEvent::Requested(MateCommand::ReviveItems { npc_obj_id: 7 })));
+        assert_eq!(state.inventory.bag[0].as_ref().unwrap().detail, old);
+        assert_eq!(state.inventory.bank[0].as_ref().unwrap().detail, old);
+        let mut body = Writer::new();
+        body.u8(REPAIR_PETS_TASK).u8(2);
+        for (container, id) in [(2, 101), (3, 102)] {
+            body.u8(action::UPDATE_DETAIL).u8(container).u8(0).u64(id).i16(128)
+                .u8(3).i32(1234).u8(0).u8(10).raw(&[0; 121]);
+        }
+        body.u8(0);
+        let body = body.finish();
+        let tasks = ItemTasks::read(&mut Reader::new(&body)).unwrap();
+        assert!(!tasks.truncated);
+        assert_eq!(tasks.reason, REPAIR_PETS_TASK);
+        state.apply(&Event::ItemsChanged(tasks));
+        let revived = ItemDetail::Mate { exp: 1234, dead: 0, level: 10 };
+        assert_eq!(state.inventory.bag[0].as_ref().unwrap().detail, revived);
+        assert_eq!(state.inventory.bank[0].as_ref().unwrap().detail, revived);
+        for npc_obj_id in [0, 0x1000000, u32::MAX] {
+            assert!(MateCommand::ReviveItems { npc_obj_id }.validate().is_err());
+        }
+        for npc_obj_id in [1, 0xffffff] {
+            assert!(MateCommand::ReviveItems { npc_obj_id }.validate().is_ok());
+        }
+    }
+
+    #[test]
     fn mate_rename_preserves_native_bytes_and_changes_only_received_existing_unit_names() {
         use crate::state::WorldState;
         let mut state = WorldState::default();
@@ -642,6 +690,7 @@ mod tests {
     #[test]
     fn explicit_mate_controls_match_lane_bytes_and_never_optimistically_change_owned_state() {
         let commands = [
+            (MateCommand::ReviveItems { npc_obj_id: 0xaabbcc }, 0xb5, vec![0xcc, 0xbb, 0xaa]),
             (MateCommand::Rename { tl_id: 0x102, name: "A\u{e9}".into() }, 0xa6, vec![2, 1, 3, 0, 65, 0xc3, 0xa9]),
             (MateCommand::Dismiss { tl_id: 0x102 }, 0xa4, vec![2, 1]),
             (
