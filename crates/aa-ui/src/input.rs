@@ -100,6 +100,7 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             let native = w.ty.mouse_native()
                 || w.slot.is_some()
                 || u.drag.registered.contains(&id)
+                || lua::resize::edge(&u, id, (x, y)).is_some()
                 || in_list;
             let scripted = u
                 .handlers
@@ -230,6 +231,7 @@ pub fn update_buttons(
         update_list_hover(lua, old, hover);
     }
     lua::listbox::hover(lua, old, hover);
+    lua::resize::hover(lua, hover);
     if down {
         if let Some(id) = hover {
             lua::chat_input::activate(lua, id);
@@ -241,16 +243,22 @@ pub fn update_buttons(
             Some(h) => lua::edit::clicked(lua, h),
             None => lua::edit::set_focus(lua, None),
         }
-        if let Some(h) = hover {
+        let resizing = hover.is_some_and(|h| lua::resize::press(lua, h));
+        if let Some(h) = hover.filter(|_| !resizing) {
             call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
         mouse_event(lua, cursor, hover, "MOUSE_DOWN");
-        mouse.slider = hover.and_then(|h| slider_of(lua, h));
+        mouse.slider = hover.filter(|_| !resizing).and_then(|h| slider_of(lua, h));
         mouse.drag = hover
+            .filter(|_| !resizing)
             .and_then(|h| lua::drag::source_of(lua, h))
             .zip(cursor)
-            .map(|(src, at)| DragPress { src, at, started: false });
+            .map(|(src, at)| DragPress {
+                src,
+                at,
+                started: false,
+            });
         if let (Some(s), Some(c)) = (mouse.slider, cursor) {
             drag_slider(lua, s, c);
         }
@@ -282,6 +290,7 @@ pub fn update_buttons(
         lua::drag::start(lua, src);
     }
     if up {
+        let sizing = lua::drag::sizing(lua);
         lua::edit::pointer_up(lua);
         mouse.slider = None;
         let dragged = mouse.drag.take().filter(|p| p.started);
@@ -296,7 +305,8 @@ pub fn update_buttons(
         if let Some(p) = dragged {
             // the release of a drag: the drop, not a click
             lua::drag::finish(lua, p.src, hover);
-        } else if let (Some(p), Some(h)) = (pressed, hover)
+        } else if !sizing
+            && let (Some(p), Some(h)) = (pressed, hover)
             && (ui(lua).tree.is_descendant(h, p) || h == p)
         {
             click(lua, mouse, h, "LeftButton");

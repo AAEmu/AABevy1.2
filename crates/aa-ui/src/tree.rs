@@ -486,6 +486,8 @@ pub struct Widget {
     pub close_on_escape: bool,
     /// `EnableHidingIsRemove(true)`: retire this widget after its hide completes.
     pub remove_on_hide: bool,
+    /// Native user-resize borders and extents, independent of drag registrations.
+    pub resizing: crate::lua::resize::Data,
     /// Raise counter for sibling ordering (higher draws later).
     pub raise: u32,
 }
@@ -1277,6 +1279,7 @@ impl Widget {
             modal: false,
             close_on_escape: false,
             remove_on_hide: false,
+            resizing: Default::default(),
             raise: 0,
         }
     }

@@ -30,6 +30,7 @@ pub mod listbox;
 mod map_ping;
 pub mod picker;
 pub mod radar;
+pub mod resize;
 pub mod roadmap;
 pub mod slot;
 pub(crate) mod sound;

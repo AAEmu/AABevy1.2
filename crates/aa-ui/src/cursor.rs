@@ -4,7 +4,10 @@
 //! can be requested explicitly with [`set_large`]. Images are read from the original
 //! executable's resources, never substituted with scaled artwork.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, ensure};
 use bevy::{
@@ -21,6 +24,22 @@ use bevy::{
 struct Request {
     repair: bool,
     large: bool,
+    resize: Option<ResizeCursor>,
+}
+
+/// Native cursor enums 8..11; the large theme has separate, still 32-pixel artwork.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ResizeCursor {
+    DiagonalDown,
+    DiagonalUp,
+    Horizontal,
+    Vertical,
+}
+
+pub(crate) fn set_resize(lua: &mlua::Lua, resize: Option<ResizeCursor>) {
+    if let Some(mut request) = lua.app_data_mut::<Request>() {
+        request.resize = resize;
+    }
 }
 
 pub(crate) fn init(lua: &mlua::Lua) {
@@ -56,7 +75,7 @@ impl Default for CursorSource {
 #[derive(Default)]
 pub(crate) struct CursorCache {
     source: Option<PathBuf>,
-    icons: Option<[CursorIcon; 2]>,
+    icons: HashMap<Option<ResizeCursor>, Option<[CursorIcon; 2]>>,
     previous: Option<(Entity, Option<CursorIcon>)>,
     applied: Option<CursorIcon>,
 }
@@ -76,7 +95,7 @@ pub(crate) fn sync(
     let Ok((window, current)) = windows.single() else {
         return;
     };
-    if !request.repair {
+    if !request.repair && request.resize.is_none() {
         if let Some((old_window, previous)) = cache.previous.take()
             && old_window == window
             && current == cache.applied.as_ref()
@@ -92,24 +111,27 @@ pub(crate) fn sync(
     }
     if cache.source.as_ref() != Some(&source.0) {
         cache.source = Some(source.0.clone());
-        cache.icons = match load_pair(&source.0) {
-            Ok(pair) => Some(pair.map(|(image, hotspot)| {
-                CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
-                    handle: images.add(image),
-                    hotspot,
-                    ..default()
-                }))
-            })),
-            Err(error) => {
-                warn!(
-                    "aa-ui: native repair cursor {}: {error:#}",
-                    source.0.display()
-                );
-                None
-            }
-        };
+        cache.icons.clear();
     }
-    let Some(icons) = &cache.icons else {
+    if !cache.icons.contains_key(&request.resize) {
+        match load_pair(&source.0, request.resize) {
+            Ok(pair) => {
+                let icons = pair.map(|(image, hotspot)| {
+                    CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
+                        handle: images.add(image),
+                        hotspot,
+                        ..default()
+                    }))
+                });
+                cache.icons.insert(request.resize, Some(icons));
+            }
+            Err(error) => {
+                warn!("aa-ui: native cursor {}: {error:#}", source.0.display());
+                cache.icons.insert(request.resize, None);
+            }
+        }
+    }
+    let Some(icons) = cache.icons.get(&request.resize).and_then(Option::as_ref) else {
         if let Some((old_window, previous)) = cache.previous.take()
             && old_window == window
             && current == cache.applied.as_ref()
@@ -140,9 +162,16 @@ pub fn load_repair_image(executable: &Path, large: bool) -> Result<(Image, (u16,
     repair_image(&bytes, large)
 }
 
-fn load_pair(executable: &Path) -> Result<[(Image, (u16, u16)); 2]> {
+fn load_pair(executable: &Path, resize: Option<ResizeCursor>) -> Result<[(Image, (u16, u16)); 2]> {
     let bytes = std::fs::read(executable).with_context(|| executable.display().to_string())?;
-    Ok([repair_image(&bytes, false)?, repair_image(&bytes, true)?])
+    if let Some(resize) = resize {
+        Ok([
+            resize_image(&bytes, resize, false)?,
+            resize_image(&bytes, resize, true)?,
+        ])
+    } else {
+        Ok([repair_image(&bytes, false)?, repair_image(&bytes, true)?])
+    }
 }
 
 fn u16_at(bytes: &[u8], offset: usize) -> Result<u16> {
@@ -216,7 +245,34 @@ fn resource(bytes: &[u8], kind: u32, id: u32) -> Result<&[u8]> {
 }
 
 fn repair_image(bytes: &[u8], large: bool) -> Result<(Image, (u16, u16))> {
-    let group = resource(bytes, 12, if large { 142 } else { 141 })?;
+    native_image(
+        bytes,
+        if large { 142 } else { 141 },
+        if large { 64 } else { 32 },
+        if large { 24 } else { 32 },
+        (0, 0),
+    )
+}
+
+fn resize_image(bytes: &[u8], kind: ResizeCursor, large: bool) -> Result<(Image, (u16, u16))> {
+    let group =
+        161 + 2 * match kind {
+            ResizeCursor::DiagonalDown => 0,
+            ResizeCursor::DiagonalUp => 1,
+            ResizeCursor::Horizontal => 2,
+            ResizeCursor::Vertical => 3,
+        } + u32::from(large);
+    native_image(bytes, group, 32, 32, (16, 16))
+}
+
+fn native_image(
+    bytes: &[u8],
+    group: u32,
+    expected: usize,
+    expected_bits: usize,
+    expected_hotspot: (u16, u16),
+) -> Result<(Image, (u16, u16))> {
+    let group = resource(bytes, 12, group)?;
     ensure!(
         u16_at(group, 0)? == 0 && u16_at(group, 2)? == 2 && u16_at(group, 4)? == 1,
         "unsupported cursor group"
@@ -224,7 +280,6 @@ fn repair_image(bytes: &[u8], large: bool) -> Result<(Image, (u16, u16))> {
     let cursor = resource(bytes, 1, u16_at(group, 18)? as u32)?;
     let hotspot = (u16_at(cursor, 0)?, u16_at(cursor, 2)?);
     let dib = cursor.get(4..).context("missing cursor DIB")?;
-    let expected = if large { 64 } else { 32 };
     let width = u32_at(dib, 4)? as usize;
     let height = u32_at(dib, 8)? as usize / 2;
     let bits = u16_at(dib, 14)? as usize;
@@ -233,10 +288,10 @@ fn repair_image(bytes: &[u8], large: bool) -> Result<(Image, (u16, u16))> {
             && width == expected
             && height == expected
             && u16_at(dib, 12)? == 1
-            && bits == if large { 24 } else { 32 }
+            && bits == expected_bits
             && u32_at(dib, 16)? == 0
-            && hotspot == (0, 0),
-        "unsupported native repair cursor"
+            && hotspot == expected_hotspot,
+        "unsupported native cursor"
     );
     let stride = (width * bits).div_ceil(32) * 4;
     let mask_stride = width.div_ceil(32) * 4;
@@ -322,6 +377,25 @@ mod tests {
         let large = resource(&bytes, 1, 20).unwrap();
         let end = large.as_ptr() as usize - bytes.as_ptr() as usize + large.len();
         assert!(repair_image(&bytes[..end - 1], true).is_err());
+    }
+
+    #[test]
+    fn original_resize_resources_keep_authored_size_and_center_hotspot() {
+        let bytes = std::fs::read(CursorSource::default().0).unwrap();
+        for kind in [
+            ResizeCursor::DiagonalDown,
+            ResizeCursor::DiagonalUp,
+            ResizeCursor::Horizontal,
+            ResizeCursor::Vertical,
+        ] {
+            for large in [false, true] {
+                let (image, hotspot) = resize_image(&bytes, kind, large).unwrap();
+                assert_eq!((image.width(), image.height(), hotspot), (32, 32, (16, 16)));
+                let pixels = image.data.unwrap();
+                assert!(pixels.chunks_exact(4).any(|p| p[3] == 0));
+                assert!(pixels.chunks_exact(4).any(|p| p[3] != 0));
+            }
+        }
     }
 
     fn app(icon: Option<CursorIcon>) -> (App, Entity) {
@@ -410,6 +484,41 @@ mod tests {
         request(&app, true, false);
         app.update();
         app.world_mut().remove_non_send::<crate::UiRuntime>();
+        app.update();
+        assert_eq!(app.world().get::<CursorIcon>(window), Some(&original));
+    }
+
+    #[test]
+    fn resize_override_restores_repair_and_then_the_prior_os_cursor() {
+        let original = CursorIcon::System(SystemCursorIcon::Crosshair);
+        let (mut app, window) = app(Some(original.clone()));
+        request(&app, true, false);
+        app.update();
+        let repair = custom(&app, window).clone();
+        {
+            let rt = app.world().get_non_send::<crate::UiRuntime>().unwrap();
+            rt.exec(
+                "@resize_cursor",
+                "X2Cursor:SetHeld({kind='bag',slot=4,count=2})",
+            )
+            .unwrap();
+            set_resize(&rt.lua, Some(ResizeCursor::Horizontal));
+        }
+        app.update();
+        let resize = custom(&app, window).clone();
+        assert_eq!(resize.hotspot, (16, 16));
+        assert_ne!(resize.handle, repair.handle);
+        app.update();
+        assert_eq!(custom(&app, window).handle, resize.handle);
+        {
+            let rt = app.world().get_non_send::<crate::UiRuntime>().unwrap();
+            rt.exec("@resize_cursor", "assert(X2Cursor:GetHeld().slot==4)")
+                .unwrap();
+            set_resize(&rt.lua, None);
+        }
+        app.update();
+        assert_eq!(custom(&app, window).handle, repair.handle);
+        request(&app, false, false);
         app.update();
         assert_eq!(app.world().get::<CursorIcon>(window), Some(&original));
     }
