@@ -2143,6 +2143,8 @@ mod tests {
             game::ServerMsg::Radar(chunk.clone()),
             game::ServerMsg::Radar(RadarEvent::ShipToggled(RadarToggle { on: false, range: 15.0 })),
             game::ServerMsg::Radar(RadarEvent::ShipContacts { last: true, contacts: vec![] }),
+            game::ServerMsg::Radar(RadarEvent::FishToggled(RadarToggle { on: false, range: 15.0 })),
+            game::ServerMsg::Radar(RadarEvent::FishContacts { last: true, contacts: vec![] }),
             game::ServerMsg::Snow(true),
         ]))).await;
         for expected in [toggle, chunk.clone(), chunk] {
@@ -2150,6 +2152,8 @@ mod tests {
         }
         assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::ShipToggled(RadarToggle { on: false, range: 15.0 })))));
         assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::ShipContacts { last: true, contacts })) if contacts.is_empty()));
+        assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::FishToggled(RadarToggle { on: false, range: 15.0 })))));
+        assert!(matches!(events.try_recv(), Ok(Event::Radar(RadarEvent::FishContacts { last: true, contacts })) if contacts.is_empty()));
         assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }

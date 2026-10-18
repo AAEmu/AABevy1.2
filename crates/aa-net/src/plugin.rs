@@ -170,6 +170,7 @@ net_state! {
     houses: Houses,
     transfer_radar: crate::radar::TransferRadar,
     ship_radar: crate::radar::ShipRadar,
+    fish_radar: crate::radar::FishRadar,
     ui_data: UiData,
     game_config: GameConfig,
     combat_status: CombatStatus,
@@ -191,11 +192,14 @@ mod equipment_flags_tests {
             Event::Radar(RadarEvent::TransferContacts { last: true, contacts: vec![] }),
             Event::Radar(RadarEvent::ShipToggled(RadarToggle { on: true, range: 75.0 })),
             Event::Radar(RadarEvent::ShipContacts { last: true, contacts: vec![] }),
+            Event::Radar(RadarEvent::FishToggled(RadarToggle { on: true, range: 75.0 })),
+            Event::Radar(RadarEvent::FishContacts { last: true, contacts: vec![] }),
         ] {
             app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
         }
         assert_eq!(app.world().resource::<TransferRadar>().contacts, Some(vec![]));
         assert_eq!(app.world().resource::<ShipRadar>().contacts, Some(vec![]));
+        assert_eq!(app.world().resource::<crate::radar::FishRadar>().contacts, Some(vec![]));
         assert!(app.world().resource::<Units>().by_id.is_empty());
     }
     #[test]

@@ -36,7 +36,16 @@ pub struct ShipRadarContact {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct FishRadarContact {
+    pub obj_id: u32,
+    pub template_id: u32,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum RadarEvent {
+    FishToggled(RadarToggle),
+    FishContacts { last: bool, contacts: Vec<FishRadarContact> },
     ShipToggled(RadarToggle),
     ShipContacts { last: bool, contacts: Vec<ShipRadarContact> },
     TransferToggled(RadarToggle),
@@ -46,11 +55,18 @@ impl RadarEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCTransferTelescopeToggledPacket | sc::SCTransferTelescopeUnitsPacket | sc::SCTelescopeToggledPacket | sc::SCTelescopeUnitsPacket
+            sc::SCTransferTelescopeToggledPacket
+                | sc::SCTransferTelescopeUnitsPacket
+                | sc::SCTelescopeToggledPacket
+                | sc::SCTelescopeUnitsPacket
+                | sc::SCSchoolOfFishFinderToggledPacket
+                | sc::SCSchoolOfFishDoodadsPacket
         )
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::FishToggled(_) => "SCSchoolOfFishFinderToggled",
+            Self::FishContacts { .. } => "SCSchoolOfFishDoodads",
             Self::ShipToggled(_) => "SCTelescopeToggled",
             Self::ShipContacts { .. } => "SCTelescopeUnits",
             Self::TransferToggled(_) => "SCTransferTelescopeToggled",
@@ -60,6 +76,23 @@ impl RadarEvent {
     /// Exact bevy-lane count: the native reader caps each packet at ten entries.
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCSchoolOfFishFinderToggledPacket => Self::FishToggled(RadarToggle {
+                on: r.bool()?,
+                range: r.f32()?,
+            }),
+            sc::SCSchoolOfFishDoodadsPacket => {
+                let last = r.bool()?;
+                let count = r.u8()?;
+                let mut contacts = Vec::with_capacity(count as usize);
+                for _ in 0..count {
+                    contacts.push(FishRadarContact {
+                        obj_id: r.bc()?,
+                        template_id: r.u32()?,
+                        pos: r.position()?,
+                    });
+                }
+                Self::FishContacts { last, contacts }
+            }
             sc::SCTelescopeToggledPacket => Self::ShipToggled(RadarToggle {
                 on: r.bool()?,
                 range: r.f32()?,
@@ -195,6 +228,57 @@ impl ShipRadar {
                 true
             }
             Event::Radar(RadarEvent::ShipContacts { last, contacts }) => {
+                if !self.toggle.is_some_and(|toggle| toggle.on) {
+                    return false;
+                }
+                if self.discarding || self.pending.len().saturating_add(contacts.len()) > MAX_RADAR_CONTACTS {
+                    self.pending.clear();
+                    self.discarding = !last;
+                    return true;
+                }
+                self.pending.extend_from_slice(contacts);
+                if *last {
+                    self.contacts = Some(std::mem::take(&mut self.pending));
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
+pub struct FishRadar {
+    /// None until a genuine toggle arrives; range retains raw f32 bits.
+    pub toggle: Option<RadarToggle>,
+    /// None until a complete enabled snapshot arrives. Order and duplicate IDs remain raw.
+    pub contacts: Option<Vec<FishRadarContact>>,
+    pending: Vec<FishRadarContact>,
+    discarding: bool,
+}
+impl FishRadar {
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+    pub fn discarding_snapshot(&self) -> bool {
+        self.discarding
+    }
+    pub fn apply(&mut self, event: &Event) -> bool {
+        match event {
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => {
+                let changed = self.toggle.is_some() || self.contacts.is_some() || !self.pending.is_empty() || self.discarding;
+                *self = Self::default();
+                changed
+            }
+            Event::Radar(RadarEvent::FishToggled(toggle)) => {
+                self.toggle = Some(*toggle);
+                self.contacts = None;
+                self.pending.clear();
+                self.discarding = false;
+                true
+            }
+            Event::Radar(RadarEvent::FishContacts { last, contacts }) => {
                 if !self.toggle.is_some_and(|toggle| toggle.on) {
                     return false;
                 }
@@ -445,5 +529,93 @@ mod tests {
         assert_eq!(radar.contacts, Some(vec![]));
         radar.apply(&Event::Disconnected { message: "test".into() });
         assert_eq!(radar, ShipRadar::default());
+    }
+
+    fn fish(id: u32) -> FishRadarContact {
+        FishRadarContact {
+            obj_id: id,
+            template_id: 77,
+            pos: crate::wire::decode_position(&[0; 9]),
+        }
+    }
+    #[test]
+    fn fish_radar_goldens_truncations_and_count11_preserve_dd04_alignment() {
+        check(0x1b6, &[1, 0, 0, 0x48, 0x43], RadarEvent::FishToggled(RadarToggle { on: true, range: 200.0 }));
+        let mut body = vec![1, 1, 3, 2, 1, 77, 0, 0, 0];
+        body.extend([0; 9]);
+        check(
+            0x1b7,
+            &body,
+            RadarEvent::FishContacts {
+                last: true,
+                contacts: vec![fish(0x010203)],
+            },
+        );
+        let mut eleven = vec![0, 11];
+        for _ in 0..11 {
+            eleven.extend(&body[2..]);
+        }
+        check(
+            0x1b7,
+            &eleven,
+            RadarEvent::FishContacts {
+                last: false,
+                contacts: vec![fish(0x010203); 11],
+            },
+        );
+        check(0x1b7, &[1, 0], RadarEvent::FishContacts { last: true, contacts: vec![] });
+    }
+    #[test]
+    fn fish_radar_has_independent_received_only_snapshot_and_lifecycle() {
+        let mut state = crate::state::WorldState::default();
+        let chunk = |last, ids: &[u32]| {
+            Event::Radar(RadarEvent::FishContacts {
+                last,
+                contacts: ids.iter().map(|id| fish(*id)).collect(),
+            })
+        };
+        state.apply(&chunk(true, &[1]));
+        assert!(state.fish_radar.contacts.is_none());
+        state.apply(&Event::Radar(RadarEvent::FishToggled(RadarToggle { on: true, range: 25.0 })));
+        state.apply(&chunk(false, &[1, 1]));
+        assert!(state.fish_radar.contacts.is_none());
+        state.apply(&chunk(true, &[2]));
+        assert_eq!(state.fish_radar.contacts.as_ref().unwrap().len(), 3);
+        state.apply(&Event::Radar(RadarEvent::ShipToggled(RadarToggle { on: false, range: 0.0 })));
+        assert_eq!(state.fish_radar.contacts.as_ref().unwrap().len(), 3);
+        assert!(state.doodads.by_id.is_empty());
+        assert!(state.units.by_id.is_empty());
+        state.apply(&Event::Radar(RadarEvent::FishToggled(RadarToggle { on: false, range: 55.0 })));
+        state.apply(&chunk(true, &[3]));
+        assert!(state.fish_radar.contacts.is_none());
+        state.apply(&Event::CharacterSelected(Box::default()));
+        assert_eq!(state.fish_radar, FishRadar::default());
+        state.apply(&Event::Radar(RadarEvent::FishToggled(RadarToggle { on: true, range: 10.0 })));
+        state.apply(&chunk(true, &[]));
+        assert_eq!(state.fish_radar.contacts, Some(vec![]));
+        state.apply(&Event::LeftWorld { target: 0 });
+        assert_eq!(state.fish_radar, FishRadar::default());
+    }
+    #[test]
+    fn fish_radar_overflow_does_not_publish_partial_snapshot() {
+        let mut radar = FishRadar::default();
+        radar.apply(&Event::Radar(RadarEvent::FishToggled(RadarToggle { on: true, range: 10.0 })));
+        let chunk = |last, n| {
+            Event::Radar(RadarEvent::FishContacts {
+                last,
+                contacts: vec![fish(1); n],
+            })
+        };
+        radar.apply(&chunk(true, 1));
+        radar.apply(&chunk(false, MAX_RADAR_CONTACTS));
+        radar.apply(&chunk(false, 1));
+        assert!(radar.discarding_snapshot());
+        radar.apply(&chunk(true, 2));
+        assert!(!radar.discarding_snapshot());
+        assert_eq!(radar.contacts.as_ref().unwrap().len(), 1);
+        radar.apply(&chunk(true, 0));
+        assert_eq!(radar.contacts, Some(vec![]));
+        radar.apply(&Event::Disconnected { message: "test".into() });
+        assert_eq!(radar, FishRadar::default());
     }
 }

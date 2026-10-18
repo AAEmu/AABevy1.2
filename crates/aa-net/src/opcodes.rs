@@ -209,6 +209,8 @@ opcodes! {
         SCSlaveDespawnPacket = 0x063,
         SCSlaveBoundPacket = 0x064,
         SCSlaveEquipmentChangedPacket = 0x068,
+        SCSchoolOfFishFinderToggledPacket = 0x1b6,
+        SCSchoolOfFishDoodadsPacket = 0x1b7,
         SCTelescopeToggledPacket = 0x1b2,
         SCTelescopeUnitsPacket = 0x1b3,
         SCTransferTelescopeToggledPacket = 0x1b4,
