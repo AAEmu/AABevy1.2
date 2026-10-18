@@ -2,6 +2,7 @@
 //! --off / --red-only / --green-only / --blue-only / --budget-two are controls.
 //! --unload-check removes the cell roots, then verifies child lights and cookies release.
 //! --world visits the authored library location with the normal cell streamer.
+//! --pos/--look accept global Cry xyz; --collision-check verifies the original room's floor.
 
 use aa_world::objects::lights::{
     self, LocalLight, LocalLightPlugin, LocalLightSettings, LocalLightStats,
@@ -21,6 +22,18 @@ struct Fixture {
 
 fn flag(name: &str) -> bool {
     std::env::args().any(|arg| arg == name)
+}
+
+fn vector_arg(name: &str) -> Option<Vec3> {
+    let args: Vec<_> = std::env::args().collect();
+    let value = args.get(args.iter().position(|arg| arg == name)? + 1)?;
+    let v: Vec<f32> = value
+        .split(',')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    (v.len() == 3 && v.iter().all(|v| v.is_finite()))
+        .then(|| cry_to_bevy(Vec3::new(v[0], v[1], v[2])))
 }
 
 fn main() {
@@ -51,10 +64,24 @@ fn main() {
     let origin = cry_to_bevy(aa_world::coords::cell_origin(0, 4) + light.matrix.w_axis.truncate());
     let forward = cry_to_bevy(light.matrix.x_axis.truncate().normalize());
     let up = cry_to_bevy(light.matrix.y_axis.truncate().normalize());
-    let right = cry_to_bevy(light.matrix.z_axis.truncate().normalize());
     let receiver = origin + forward * (light.radius * 0.5);
     let size = light.radius * (light.projector_fov.to_radians() * 0.5).tan();
     let world = flag("--world");
+    if flag("--collision-check") {
+        let terrain = aa_world::TerrainQuery::new("instance_library");
+        let collision = aa_world::WorldCollision::new("instance_library", terrain);
+        let cell = collision.build_blocking(0, 4).unwrap();
+        println!("library room collision: {:?}", cell.stats);
+        assert_eq!(cell.stats.brushes, 30287);
+        let from = Vec3::new(872.0, 4200.0, 258.0);
+        let hit = collision.raycast(from, Vec3::NEG_Z, 4.0).unwrap();
+        println!("library floor receiver: {hit:?}");
+        assert!(!hit.terrain && (hit.point.z - 256.55).abs() < 0.1);
+        drop(cell);
+        collision.release_outside(-100000.0, -100000.0, 0.0);
+        assert_eq!(collision.stats().cells, 0);
+        return;
+    }
     let mut app = App::new();
     app.add_plugins(aa_dev::default_plugins("aa-world native RGB projector"))
         .add_plugins(aa_dev::DevPlugin);
@@ -106,16 +133,25 @@ fn main() {
                 ));
             }
             let camera_position = if world {
-                origin + forward * 2.0 + right * 5.0
+                // Clear view of Light_587's original floor (its native proxy top is 256.55066).
+                cry_to_bevy(aa_world::coords::cell_origin(0, 4) + Vec3::new(872.0, 115.0, 262.0))
             } else {
                 receiver - forward * (size * 1.5)
+            };
+            let target = if world {
+                cry_to_bevy(
+                    aa_world::coords::cell_origin(0, 4) + Vec3::new(872.0, 104.0, 256.55066),
+                )
+            } else {
+                receiver
             };
             commands.spawn((
                 Camera3d::default(),
                 Exposure { ev100: 12.0 },
                 Tonemapping::None,
                 DebandDither::Disabled,
-                Transform::from_translation(camera_position).looking_at(receiver, up),
+                Transform::from_translation(vector_arg("--pos").unwrap_or(camera_position))
+                    .looking_at(vector_arg("--look").unwrap_or(target), up),
                 Projection::Perspective(PerspectiveProjection {
                     fov: 50.0_f32.to_radians(),
                     near: 0.1,
@@ -133,8 +169,11 @@ fn verify(
     mut commands: Commands,
     time: Res<Time>,
     stats: Res<LocalLightStats>,
+    objects: Option<Res<aa_world::objects::ObjectState>>,
+    collision: Option<Res<aa_world::WorldCollision>>,
     slots: Query<&LocalLight>,
     spots: Query<&SpotLight>,
+    sectors: Query<&aa_world::objects::ObjectSector>,
     mut cameras: Query<&mut Transform, With<Camera3d>>,
     mut fixture: ResMut<Fixture>,
     mut last: Local<f32>,
@@ -152,6 +191,9 @@ fn verify(
             stats.pending_cookies,
             spots.iter().count()
         );
+        if let Some(objects) = &objects {
+            info!("library geometry: {:?}", objects.stats);
+        }
         assert!(stats.rendered <= if flag("--budget-two") { 2 } else { 64 });
         assert!(stats.shadowed <= 2 && stats.cookie_assets <= 8 && stats.pending_cookies <= 2);
         assert!(spots.iter().all(|spot| !spot.shadow_maps_enabled));
@@ -177,6 +219,11 @@ fn verify(
         && time.elapsed_secs() > if fixture.world { 16.0 } else { 10.0 }
     {
         assert!(slots.is_empty() && spots.is_empty());
+        assert!(sectors.is_empty());
+        if let Some(collision) = &collision {
+            assert_eq!(collision.stats().cells, 0);
+            assert_eq!(collision.stats().loading, 0);
+        }
         assert_eq!(stats.rendered, 0);
         assert_eq!(stats.cookie_assets, 0);
         assert_eq!(stats.pending_cookies, 0);

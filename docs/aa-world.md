@@ -121,6 +121,82 @@ table the Memoria vines (`gw_memo_etc_f02/f03/f04`) were drawn with `remain_divi
 (`Shader=Illum GenMask 16777216`, pale green, opacity 0.3) is not drawn by the engine but showed up as flat pale green sheets, and the canal
 tiles got the stair material's untextured proxy slab (overexposed white under the sun). Test: `brush_materials_come_from_the_object_dat_table`.
 
+### client/visareas.dat
+
+Interior brushes are additional placement, not another exterior `object.dat` export.
+`placement/visareas.rs` reads their independent model/material tables and appends the
+brushes to `load_cell_objects`, remapping nonnegative indices by the existing table
+lengths. Negative native indices remain null/fallback; cell origin is applied once
+by the ordinary render/collision path. This restores rooms, walls, floors and props
+that were absent when only the exterior files were read.
+
+Exact 1.2 evidence is the original `data/extract/aa-cry/ida/cry3dengine.dll` /
+`cry3d.i64`, audited through the disposable `night/moon-native/engine.i64` copy:
+`3017A020` (`CVisAreaManager::SetCompiledData`) validates version 4 and total compiled
+size, then loads area, portal and occlusion records in that order through `30170860`.
+`301FC140` reads each 33-byte version-2 octree node and `301FA0B0` walks its typed
+object block. `301F8420` advances 128 bytes for a brush; instructions at `301F84D2`
+and `301F84F3` read model `+0x7B` and material `+0x73` into separate tables through
+`301F2B00`/`301F2B40` (negative index returns null). `301F2CA0` copies matrix `+67`,
+bounds and view/flags, adding `(cell_x*1024,cell_y*1024,0)` to translation and bounds.
+No deduplication occurs in that native construction path.
+
+```text
+u32 models; models * { u32, char path[256] }
+u32 materials; materials * { u32, char path[256] }
+u32 version=4, compiledBytesIncludingThis20ByteHeader, areas, portals, occlusionAreas
+for each record:
+  264-byte header: u32 version=2|3; bbox[6]@4; bbox[6]@28;
+                   char name[32]@52; u32 octreeBytes@84; connections/flags/area properties
+  if version==3: 12 extra bytes
+  u32 polygonPointCount; polygonPointCount * float3
+  octreeBytes bytes: version-2 octree when length>4
+```
+
+All table/count/block/tree reads are bounded by their container; malformed records
+fail atomically. A 64-level defensive stack limit rejects pathological mask chains.
+The supported slice imports type-1 brushes, skips known vegetation/decal/road record
+lengths, and skips the remaining object block for unknown-sized kinds while retaining
+its child trees. It does **not** render other visarea record kinds, traverse portals
+for occlusion, apply area sky/light/fog flags or implement visarea light confinement.
+Repeated instances inside an authored area are preserved. Exterior `brush.dat` versus
+`object.dat` selection is unchanged, so their duplicate export is still selected once.
+
+Native fixture `instance_library` cell (0,4): 4,242,562 bytes, 116 models, 75 materials,
+152 areas, no portals/occlusion areas, 4,402 octree nodes, **30,286 type-1 records** and
+no unknown blocks. There are 153 byte-identical repeats within their own area; all
+remain present. With the one exterior book, the cell contains **30,287 brushes**.
+The missing `library_floor_a.cgf` / `library3_floor_a` in `visarea_293_pidesa_7` has
+translation `(896,128,255.9970245)`, +90-degree Z rotation, and floor top `256.55066`.
+The outdoor cell (18,7) contributes another 234 interior brushes; (10,14) and login2
+(0,1) have empty valid containers. Pak-backed regressions check those counts,
+transforms/bounds, repeated-instance count and every merged model/material mapping.
+
+Work stays in the existing two placement jobs and 64 m sector bins, with the normal
+48-model queue and main-thread spawn/finish budgets. No world-wide visarea scan or
+per-frame parsing is added. The library view settles at 20 nearby sectors / 1,981
+parts, zero pending/failed models; distant sectors are not spawned. Its full-cell
+collision build sees 28,398 colliding brushes, 663,798 proxy triangles and 30,381,788
+bytes (29.0 MiB), built in 291 ms. The fixture's `--collision-check` ray from global
+Cry `(872,4200,258)` hits the actual floor at `256.55066`, not terrain, then releases
+the collision cell. Physics retains the existing per-cell build policy and shared
+model-proxy cache; sector-level collision streaming remains future work.
+
+Validation: **144 aa-world library tests pass**, nine pre-existing ignored, and all
+examples check. `projected_lights --world` now defaults to a clear view at global Cry
+`(872,4211,262)`, looking at `(872,4200,256.55066)`; `--pos`/`--look` allow explicit
+coordinates. Inspected 1920x1080 `shots/aa-world/lights/library_visarea_{before,on,off,unload}.png`
+show the previously missing room and the original stained-glass projector on its
+authored floor. Same-view light on/off changes 635,914 pixels, including 293,663 in
+the floor rectangle `(430,440)..(1450,1000)`; maximum RGB increase there is (22,87,69).
+Authored light parameters and the existing fixture exposure/material conversion are unchanged. On logs 210-220 FPS,
+off 198-253 FPS (shared GPU, separate runs). Actual camera movement releases all
+sectors/parts, authored lights, RGB children, cookies/pending work and collision
+cells; the unload frame has zero object entities. All runs exit zero without GPU
+errors and close their own windows. There is no matching original-client library
+capture under `reference/`, so absolute native appearance remains uncalibrated;
+projector falloff remains the explicit approximation described under Local lights.
+
 ### client/vegetation.dat, vegetation/NN_NN.dat
 
 `vegetation.dat`: `u32 version (1)`, `u32 offset[16]`, `u32 size[16]` (4 x 4 sectors of 256 m, `sx * 4 + sy`), 64 byte records:
@@ -691,10 +767,11 @@ Actual library streaming retains 2,013 authored slots and selects 64 GPU compone
 11 RGB sources/33 spots plus 31 points, one cookie, zero shadows (208–252 FPS). Moving
 away in `--world --unload-check` verifies zero authored slots, components, RGB children,
 cookie assets and pending cookie jobs. Every run exits with process status zero and
-no renderer errors. The in-scene camera is obstructed by dark geometry, so its on/off
-captures do **not** establish a useful authored-receiver visual match. No same-camera
-library reference is available under `reference/`; the useful comparison is the
-original cookie plus native numeric and neutral-receiver controls. World runs also
+no renderer errors. Those initial in-scene captures did not establish a useful
+authored-receiver visual comparison: interior `visareas.dat` geometry was missing.
+The later `library_visarea_on/off` captures above restore that original receiver and
+show the projected stained glass. No same-camera library reference is available under
+`reference/`; absolute appearance is still uncalibrated. World runs also
 report an existing aa-fx material-load warning for
 `materials/effects/velo_particle_volumelights2.mtl`; no lighting values were tuned to
 hide either scene limitation. All own windows close; the user's client is untouched.
@@ -1473,7 +1550,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
 * Parsers (no Bevy world needed, all tested against the pak): `heightmap::CellHeights::parse`, `cover::Cover::parse` (+ `atlas`),
-  `placement::{parse_brush_dat, parse_vegetation_dat, parse_vegetation_sector, parse_object_dat, parse_water, load_cell_objects}`,
+  `placement::{parse_brush_dat, parse_vegetation_dat, parse_vegetation_sector, parse_object_dat, parse_visareas_dat, parse_water, load_cell_objects}`,
   `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay (parse, parse_layer), Lighting, sun_direction, EnvSample::lerp}`, `sky_material::{ZoneSky, load_sky_box}`, `sky_clouds::{parse_clouds, CloudDef, CloudMaterial}`, `post::{Post, PostUniform}`,
   `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, water_meshes, WaterStyle, triangulate}`, `water_material::{WaterMaterial, WaterStyles}`, `water_query::{WaterQuery, WaterBody, WaterKind}`,
   `terrain_layers::{LayerLibrary::build, parse_surface_types, TerrainMaterial}`.
@@ -1576,7 +1653,7 @@ file; none of the 3826 models fails to parse. `CollisionConfig::visible_fallback
 (`aa_cry::physics::collision_mesh(bytes, true)`); off by default. The physics triangles of all distinct models together are 1.1 M.
 
 **Build.** Per cell, on the `aa_cry::workers` threads (`WorldCollision::request`): `brush.dat` + `statobjs.dat` (else the `object.dat` octree, as
-`load_cell_objects`), each distinct model's proxy loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
+`load_cell_objects`), plus the interior `visareas.dat` brushes. Each distinct model's proxy is loaded once and shared by all cells (a `OnceLock` per model, kept for the process: 3.2k models,
 tens of MB), the brush matrix and the cell origin applied (mirrored matrices flip the winding), the triangles split into structures and props
 and each indexed by an 8 m grid over XY (`collide/soup.rs`: CSR rows of triangle ids, big triangles only in the cells they touch, ground
 candidates first in every row). Vegetation stays instanced: `collide/instances.rs` shares model-space triangles, keeps each placement in 24 bytes,
@@ -1881,6 +1958,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, types 6 and 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
+  Interior visarea brushes render/collide, but portal occlusion, area sky/fog/light flags, light confinement and other interior object kinds remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
   conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
