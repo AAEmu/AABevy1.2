@@ -4,7 +4,7 @@
 //! `--chef` previews the NPC chef's original native face01 speech targets.
 use aa_anim::facial::{ExpressionLibrary, FacialAnimator, FacialPlugin, FacialSequence};
 use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, GameDb, Gender, Race, spawn_character_with_facial};
-use aa_cry::scene::{CryAssets, CryPlugin};
+use aa_cry::scene::{CryAssets, CryPlugin, ModelOptions, SkeletonBinding, spawn_loaded};
 use bevy::prelude::*;
 
 fn arg(name: &str) -> Option<String> {
@@ -38,6 +38,29 @@ struct Preview {
     time: f32,
     library: Option<String>,
     head_weight: Option<f32>,
+}
+
+// Mirrors the client's CDF skin path: load against shared body joints, prepare before
+// spawn_loaded, then put the returned face and weights beside the body Animator.
+fn spawn_chef(commands: &mut Commands, cry: &mut CryAssets, transform: Transform) -> Entity {
+    let head_path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr";
+    let body_cal = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal";
+    let rig = aa_anim::pose::shared_rig("objects/characters/people/npc_chef01/nude/npc_chef01_base.chr").unwrap();
+    let root = commands.spawn((transform, Visibility::default())).id();
+    let model_root = commands.spawn((Transform::from_rotation(aa_cry::CRY_TO_BEVY), Visibility::default(), ChildOf(root))).id();
+    let bones = aa_anim::spawn_bones(commands, model_root, &rig);
+    let options = ModelOptions {
+        skeleton: Some(SkeletonBinding { skeleton: rig.skeleton.clone(), joints: bones.clone() }),
+        cry_space: true,
+        ..default()
+    };
+    let plain = cry.load_model(head_path, &options).unwrap();
+    let (loaded, face, weights) = aa_anim::facial::prepare_loaded_face(cry, head_path, body_cal, &plain).unwrap();
+    assert_eq!(face.targets.len(), 23);
+    let head = spawn_loaded(commands, head_path, &loaded, &options);
+    commands.entity(head).insert(ChildOf(model_root));
+    commands.entity(root).insert((Animator::new(rig, bones), face, weights));
+    root
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
@@ -125,19 +148,9 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         let mut desc = CharacterDesc::from_preset(&db, race, gender, 0).unwrap();
         desc.hair = None;
         let transform = Transform::from_xyz((i as f32 - 1.0) * 0.48, 0.0, 0.0).with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
-        let mut assets = desc.resolve(&db).unwrap();
-        if chef {
-            assets.skeleton = "objects/characters/people/npc_chef01/nude/npc_chef01_base.chr".into();
-            assets.cal = "objects/characters/people/npc_chef01/nude/npc_chef01_base.cal".into();
-            assets.parts.retain(|p| p.kind == aa_anim::PartKind::Face);
-            assets.parts[0].path = "objects/characters/people/npc_chef01/face/npc_chef01_face01.chr".into();
-            assets.parts[0].material = None;
-            assets.face_layers.clear();
-            assets.face_lips = None;
-            assets.face_normal = None;
-            assets.pupil_color = None;
-        }
-        let root = spawn_character_with_facial(&mut commands, &mut cry, &clips, assets, transform).unwrap();
+        let root = if chef { spawn_chef(&mut commands, &mut cry, transform) } else {
+            spawn_character_with_facial(&mut commands, &mut cry, &clips, desc.resolve(&db).unwrap(), transform).unwrap()
+        };
         if !live {
             commands.entity(root).insert(Preview {
                 path: path.clone(),
