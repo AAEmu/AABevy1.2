@@ -5100,3 +5100,127 @@ B29200,S(3,101) gives baseline29495.029296875; T(1,100) returns x87-spilled-doub
 0.9993407123693032 (f32=0.9993407130241394), while T(0,101) gives294.94962711081826
 (f32=294.9496154785156). T(0,100) returns exact zero regardless of nonidentity S.
 B401032,S(11,127),T(-37,88) yields -61151.52126744902 (f32=-61151.51953125).
+
+
+### Pet equipment cursor and confirmation follow-up (2026-10-18)
+
+Original pet_view.lua creates ordinary CreateItemIconButton widgets, not an established
+native equipment-accessor slot. Authored physical Lua slots are1/3/4/7. The actual
+IsMateEquipableSlot3946ef30 first requires resolved actor kind1 and3933b1f0's kind5 /
+local stored-owner equality.3933a9c0 resolves NPC descriptor+70; SQL39a00298 and loader
+396ce710 identify mate_equip_slot_packs(chest,feet,head,name,waist), represented as
+bytes0/1/2, name pointer4 and waistbyte8. Raw slots0/2/3/6 select head/chest/waist/feet;
+missing pack and every other slot return false.
+
+GetEquippedItemTooltipText3946f1b0 requires a resolved kind1 actor but does not require
+owned Mate for the read. It formats actual physical item at actor+3f8+LuaSlot*c0
+(=actor+4b8+(LuaSlot-1)*c0) through39423560 and returns its table. Invalid unit returns
+no values; a valid empty equipment item still goes through the formatter. Packed
+location defaults to the global invalid location for nonlocal actors; only the local
+player branch builds container1. Do not label a mate tooltip as player-worn or infer
+its formatter input location is containerfc. The pet UI uses itemType0 to show empty
+slot help and refreshes on UNIT_NPC_EQUIPMENT_CHANGED.
+
+PickupMateEquippedItem3946e950 returns no Lua values. Empty cursor is raw mode0 at
+3a5a4e68. It invokes39429460/394293b0 with current mate physical item and packedfc
+location; nonstack equipment394292f0 creates cursor mode4, copies item database ID
+low/high into cursor+8/+c, source location+10 and count+14. This is local cursor state,
+not item removal. Item-like modes1/4 are accepted by39424550; dropping onto a pet slot
+requires their source container2 and routes to394eb6c0, then clears the cursor. Current
+mate+bc is a pending-action latch, not a dead flag. MateUnequipItem3946f710 chooses
+the first ascending empty physical BAG2 slot via397d1920/19d0, excluding packed pending
+keys; none emits error19 and BOOLfalse. Otherwise it invokes the shared planner and
+returns BOOLtrue even if that downstream planner refuses. The target bag slot is not
+invented as zero or an overflow slot.
+
+The shared planner has TWO distinct dialogs. Static item field+10==4/5 with received
+flags bit0x10 clear creates task47 ITEM_UNPACK, vtable399e62e8; accepted394ea8e0 sends
+CS134 CSThisTimeUnpackItemPacket, not equipment0a9. Original DialogUnpackItemHandler
+uses isSoulBound from received flags bit0. The lane defines134 but has no located
+handler/writer; unpack continuation remains unsupported. Otherwise397cc300 can create
+task16 SOUL_BIND_ITEM(vtable399e6268); accepted394ea430 invokes394e8b30 with bts=true
+(or394e88e0 for the invalid-owner sentinel branch). Rejection sends neither request.
+Both constructors mark a captured packed slot pending394e8590; completion clears it
+394e8520 before accepting/rejecting. Their preflight re-reads CURRENT item at captured
+slot and refuses missing/empty items, or397cc350's itemflag4 AND playerflag0x2000
+(error298). It does NOT compare captured database IDs with current items. No native
+stale-item identity guarantee is claimed for these dialogs. Actual0a9 sender separately
+rechecks owner, actor+3a76/current mate pending, source/target pending and eligibility.
+Its existing public codec does not reproduce those UI/planner gates.
+
+The actual pet-to-bag destination route is HandleClick, NOT PickupBagFromSlot3944cb90
+(the latter excludesfc). Original sort_inventory.lua OnDragReceive requires nonnil
+cursor then calls adapter:HandleClick(virtualSlot). Native3944c760 decrements the Lua
+virtual index, calls bagmanager[3a5ad900] virtual50 ->394dc7e0 ->selected subbag virtual20.
+A module-verified PROCESS_VM_READ captured main bag vtable399baa60, click391ff2f0 and
+SlotByIdx391f2da0; bagmanager vtable399e5a70. Main bag maps raw virtual index through
+subbag+8+index*4 to the actual packed physical destination, reads its current item,
+checks its pending key, then dispatches391f46c0. Cursor containerfc at391f47ca resolves
+playerpet with the owned-Mate guard, falls back to current mate object+20 if absent,
+then calls394eb6c0(mateObject,carriedFcSource,actualBagDestination,currentBagItem) and
+clears the cursor. It does NOT choose a first empty slot; right-click unequip does.
+Preceding main-bag action-mode391f2a70, quantity/dialog391f4560 and391f3480 predicates
+remain separate source gates and are not reconstructed as always true. No extra packet
+was invented. Exact cursor/dialog excerpts and read-only helper are in
+`data/extract/aa-net/mate-equipment-native/`.
+
+
+### Received Family roster infrastructure (2026-10-18)
+
+`family::{FamilyEvent,FamilyRoster,FamilyMember,Families}` adds received-only SC02d..037.
+Event::Family forwards every genuine receipt unchanged, including duplicates and unknown
+family/member IDs; no request, invitation acceptance or optimistic roster update exists.
+Families.rosters is keyed by family ID, matching original global manager392ff2d0 and
+398a8df0's keyed full-descriptor copy. It is NOT a guessed single local family. Full
+Created/Described/MemberAdded rosters replace their matching key; added_index remains
+raw in the event. Known member updates change only that matching family/member. Remove
+and full-family removal remain separate actual receipts. Native398a8860 owner change
+sets the matching row role1, every other row role0, and clears the new owner's title;
+an absent new-owner row still clears old roles. No missing member is manufactured.
+last_invitation/last_title retain notices, not invented active-dialog/expiry state.
+Selection, Kicked, LeftWorld and Disconnected clear all session-owned family state.
+WorldState and Bevy NetState expose/fold the same resource; Session only forwards wire.
+
+Active-lane source is systems/social/packets/family.rs and family.rs::FamilyInfo::write:
+u32 family ID, signed i32 member count, then each u32 character ID, string name, u8 raw
+role, bool online, string title. Strings retain exact blob bytes (including non-UTF8 and
+NUL); text conversion helpers are explicit presentation conveniences. Negative and
+payload-impossible member counts are rejected BEFORE allocation; framing has no invented
+8-row clamp. Native398a85b0 clamps its inline array to8, with name128/title104 byte
+read limits. That unsafe leftover-wire behavior is not imitated by the lane decoder.
+Complete lane rows and long raw text survive; later native UI visibility can apply its
+source cap separately. Login emits FamilyDesc via social/session.rs and family login.
+No live family transaction/session was performed against the stalled game lane.
+
+Native factory/serializer pairs were independently traced:
+
+|SC opcode|Packet|Factory header|Serializer|
+|---|---|---|---|
+|02d|Invitation|391a886e|397c5810|
+|02e|Created|391a88ee|397ab110 ->398a85b0|
+|02f|Removed|391a896b|397ae900|
+|030|Desc|391a89ee|397ab130 ->398a85b0|
+|031|MemberAdded|391a8a6e|397ae920|
+|032|MemberRemoved|391a8aeb|397c5910|
+|033|OwnerChanged|391a8b6b|397c5980|
+|034|TitleChanged|391a8bee|397c59e0|
+|035|MemberNameChanged|391a8c6e|397c5a90|
+|036|Title|391a8cee|397c5b40|
+|037|MemberOnline|391a8d6b|397b2f00|
+
+All field ordering agrees with the lane writers:032 writes familyID,memberID,kicked;
+036 uses BC unit ID, raw role byte, owner string and title string;031 appends signed
+added_index AFTER the complete roster. Lane notes035/036 are never emitted by its
+original1.2 source flow, but their typed receives preserve genuine traffic if supplied.
+Native handlers391d2a60/2b60/2ae0 apply Created/Desc/MemberAdded snapshots;398a8900
+and398a8990 require a matching cached family/member for title/name changes. Source
+artifact `data/extract/aa-net/family-native/serializers-20261018.txt` preserves the
+complete serializer excerpts. No family/community mutation API is implied by this
+received-only milestone; authored X2Family getters/actions/events still need root UI
+integration and their separate native contracts.
+
+Validation: seven new Family tests cover all eleven lane packet layouts, every field
+truncation, impossible/negative counts, raw roles/NUL/non-UTF8 text, a nine-member roster
+followed by an actual DD04 packet, native owner/title changes, wrong family/member IDs,
+repeated Session forwarding, both WorldState/Bevy folds and lifecycle resets. Full
+`cargo test -p aa-net --features bevy --lib`:374 passed; own feature check passed.
