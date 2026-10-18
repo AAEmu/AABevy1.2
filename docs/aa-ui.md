@@ -898,8 +898,22 @@ App::new()
   The scripts' `UIParent:Log` / `LogAlways` (`print`) output (state names, event names) is logged at debug level
   under the target `aa_ui::lua` (`RUST_LOG=aa_ui::lua=debug` shows it); `UIParent:Warning` / `Error` stay
   warnings and errors. `X2DialogManager:RequestTaskDialog(task, info, owner)` makes the task's
-  dialog (`DLG_TASK_*`, the handlers of `dialog_handler.lua`) with `info` merged in, OK / Cancel;
-  set `wnd.OkProc` on the result for what OK does.
+  dialog (`DLG_TASK_*`, the handlers of `dialog_handler.lua`) with `info` merged before default
+  decoration. Omitted `buttonType` / `isModal` retain OK / Cancel and modal defaults; explicit
+  `DBT_CUSTOM` (2), `DBT_OK` (1), or `isModal = false` reach the original decorator unchanged.
+  Set `wnd.OkProc` on the result for what OK does. The native battlefield invitation task
+  (`3936d620`, vtable `399d0d1c`) supplies task 5, custom buttons, and nonmodal state through
+  virtuals `3936ced0`, `3936cee0`, and `3936cef0`. The manager writes these fields before
+  decoration (`3902d400`). Its unchanged `DialogJoinBattleFieldHandler` adds the original
+  three buttons without hiding Cancel, so decorating as OK / Cancel first left a fourth
+  overlapping button. `popup_lifecycle::original_task_decoration_uses_explicit_buttons_and_modal_state`
+  checks the actual original invitation handler, supplied notice label/content, and omitted
+  field defaults. The unique inspected `shots/aa-ui/native-task-dialog-20261018.png` shows
+  Enter / Next Room / Decline with no overlapping Cancel, using the existing `ingame_hud`
+  aa-dev example (`--lua` requests the explicit custom, nonmodal task); 509–552 FPS and
+  automatic screenshot exit. That generic fake HUD still logs its separate pre-existing
+  `ENTERED_WORLD` battlefield `maxCount` nil error; the invitation and seven popup lifecycle
+  tests complete successfully.
 
   `ui.refresh_slots()` asks the slot hooks again (bars changed); the roadmap and chat colours
   are read when needed. `X2Chat:DispatchChatMessage(filter, text)` is the toolkit's (it routes
