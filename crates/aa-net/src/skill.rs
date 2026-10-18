@@ -961,3 +961,11 @@ mod cooldown_tests {
         }
     }
 }
+
+
+/// Exact native397cad20 item-caster/item-target path; separate from generic no-object casts.
+pub(crate) fn write_item_effect_start(w:&mut Writer,skill_id:u32,self_obj_id:u32,source:&crate::model::Item,target:&crate::model::Item,support:Option<&crate::model::Item>,auto_aa:Option<bool>) {
+    w.u32(skill_id).u8(2).bc(self_obj_id).u64(source.id).u32(source.template_id).u8(source.grade).u32(source.made_unit_id);
+    w.u8(3).bc(self_obj_id).u64(target.id).u32(target.template_id).u8(target.grade);
+    if let Some(auto)=auto_aa {w.u8(7).u32(support.map_or(0,|v|v.template_id)).u64(support.map_or(0,|v|v.id)).bool(auto);} else {w.u8(0);}
+}

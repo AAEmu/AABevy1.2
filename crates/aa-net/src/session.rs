@@ -270,6 +270,7 @@ pub enum Command {
     Bank(crate::bank::BankCommand),
     /// Request only; getter changes on the received action 18 item task.
     SetAutoUseAaPoint(bool),
+    ItemEffect { character_id:u32, request:crate::item_effect::ItemEffectRequest },
     UnpackItem(crate::unpack::UnpackItemRequest),
     /// Captured persistent character identity is local-only, never part of the wire body.
     Expedition { character_id: u32, command: crate::ExpeditionCommand },
@@ -620,6 +621,8 @@ pub enum Event {
     ScheduleItems { declared_count:u8, items:Vec<crate::schedule::ScheduleItem> },
     ScheduleItemSent { schedule_type:u32, raw_by_mail:u8 },
     ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
+    ItemEffectRequested { character_id:u32, request:crate::item_effect::ItemEffectRequest },
+    ItemEffectRejected { character_id:u32, request:crate::item_effect::ItemEffectRequest, message:String },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
     LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
@@ -742,6 +745,7 @@ struct Session {
     battlefield: std::cell::RefCell<crate::battlefield::Battlefield>,
     server_clock: std::cell::RefCell<crate::clock::ServerClock>,
     received_inventory: std::cell::RefCell<crate::state::Inventory>,
+    item_effect_known_bag: std::cell::RefCell<std::collections::BTreeSet<u8>>,
     received_trials: std::cell::RefCell<crate::Trials>,
     received_rankings:std::cell::RefCell<crate::Rankings>,
     /// What we wait for and until when.
@@ -796,6 +800,7 @@ impl Session {
             battlefield: Default::default(),
             server_clock: Default::default(),
             received_inventory: Default::default(),
+            item_effect_known_bag: Default::default(),
             received_trials: Default::default(),
             received_rankings:Default::default(),
             waiting: None,
@@ -842,6 +847,16 @@ impl Session {
         if let Some(now)=self.server_clock.borrow().mapped_now() {self.battlefield.borrow_mut().advance_server_time(now);}
     }
     fn emit(&self, e: Event) {
+        match &e {
+            Event::CharacterSelected(_) | Event::Kicked{..} | Event::LeftWorld{..} | Event::Disconnected{..} | Event::InventoryInit{..} | Event::GameDecodeFailed{..} => self.item_effect_known_bag.borrow_mut().clear(),
+            Event::UnhandledGamePacket{level:4,len,..} if *len>0 => self.item_effect_known_bag.borrow_mut().clear(),
+            Event::InventoryChunk(chunk) if chunk.truncated => self.item_effect_known_bag.borrow_mut().clear(),
+            Event::InventoryChunk(chunk) if chunk.container==crate::items::container::INVENTORY => {
+                for offset in 0..chunk.items.len() {if let Ok(slot)=u8::try_from(chunk.first_slot()+offset){self.item_effect_known_bag.borrow_mut().insert(slot);}}
+            }
+            _=>{}
+        }
+
         if matches!(e,Event::Kicked{..}) {*self.received_inventory.borrow_mut()=Default::default();}
         self.received_inventory.borrow_mut().apply(&e);
         self.received_trials.borrow_mut().apply(&e);
@@ -1169,6 +1184,14 @@ impl Session {
                 } else {
                     self.emit(Event::FamilyRequestRejected { character_id, command, message: "family request was not sent".into() });
                 }
+            }
+            Command::ItemEffect {character_id,request} => {
+                let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.self_obj==0 || self.self_obj>0xff_ffff || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id) {Some("item effect requires the same active received character")}
+                    else if request.captures().any(|v|!self.item_effect_known_bag.borrow().contains(&v.slot)) {Some("item effect BAG snapshot coverage is unknown")}
+                    else {request.recheck(&self.received_inventory.borrow()).err()};
+                if let Some(message)=invalid {self.emit(Event::ItemEffectRejected{character_id,request,message:message.into()});}
+                else if self.send_game(game::ClientMsg::ItemEffect{self_obj_id:self.self_obj,request:request.clone()}).await {self.emit(Event::ItemEffectRequested{character_id,request});}
+                else {self.emit(Event::ItemEffectRejected{character_id,request,message:"item effect request was not sent".into()});}
             }
             Command::UnpackItem(request) => {
                 let invalid=if self.phase!=Phase::InWorld || self.selected==0 {Some("unpack requires an active selected character")}
@@ -4871,6 +4894,29 @@ mod tests {
             let e=events.try_recv().unwrap();assert!(matches!(&e,Event::ScheduleItemSent{schedule_type:7,raw_by_mail:255}));world.apply(&e);assert!(events.try_recv().is_err());
         }
         assert!(session.game.is_none());assert!(world.inventory.bag.is_empty());assert!(world.inventory.bank.is_empty());assert!(world.player.spawn.is_none());
+    }
+
+    #[tokio::test]
+    async fn item_effect_requires_fresh_snapshot_identity_and_reports_actual_write() {
+        use crate::item_effect::{CapturedBagItem,ItemEffectMode,ItemEffectRequest};
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let source=Item{id:11,template_id:101,grade:6,made_unit_id:9,..Default::default()};let target=Item{id:22,template_id:202,grade:7,..Default::default()};
+        let request=ItemEffectRequest::new(ItemEffectMode::Gem,11285,CapturedBagItem{slot:0,item:source.clone()},CapturedBagItem{slot:1,item:target.clone()},None).unwrap();
+        let command=||Command::ItemEffect{character_id:42,request:request.clone()};
+        session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
+        session.phase=Phase::InWorld;session.selected=42;session.self_obj=99;let mut state=CharacterState::default();state.character.id=42;session.selected_state=Some(state);
+        session.emit(Event::InventoryInit{bag_slots:2,bank_slots:0});let chunk=InvenChunk{container:2,chunks:1,start_chunk:0,items:vec![Some(source),Some(target)],truncated:false};session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}
+        session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..}))); // missing transport
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();let(conn,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(conn.unwrap());
+        session.emit(Event::UnhandledGamePacket{level:1,opcode:0xfff,len:20});while events.try_recv().is_ok(){}assert_eq!(session.item_effect_known_bag.borrow().len(),2);
+        session.emit(Event::UnhandledGamePacket{level:4,opcode:0xfff,len:20});while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}session.command(Command::ItemEffect{character_id:41,request:request.clone()}).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));
+        let mut stale=chunk.clone();stale.items[0].as_mut().unwrap().grade+=1;session.emit(Event::InventoryChunk(stale));while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRejected{..})));assert!(tokio::time::timeout(Duration::from_millis(15),peer.read_u8()).await.is_err());
+        session.emit(Event::InventoryChunk(chunk.clone()));while events.try_recv().is_ok(){}session.command(command()).await;assert!(matches!(events.try_recv(),Ok(Event::ItemEffectRequested{..})));
+        let mut length=[0;2];peer.read_exact(&mut length).await.unwrap();let mut frame=vec![0;u16::from_le_bytes(length) as usize];peer.read_exact(&mut frame).await.unwrap();assert_eq!(&frame[4..6],&0x52u16.to_le_bytes());assert_eq!(&frame[6..],&game::ClientMsg::ItemEffect{self_obj_id:99,request:request.clone()}.encode_body());assert_eq!(session.received_inventory.borrow().bag,chunk.items);
+        session.game.as_mut().unwrap().shutdown().await;session.command(command()).await;let mut rejected=false;while let Ok(e)=events.try_recv(){if matches!(e,Event::ItemEffectRejected{..}){rejected=true;}assert!(!matches!(e,Event::ItemEffectRequested{..}));}assert!(rejected);
+        let mut partial=chunk.clone();partial.truncated=true;session.emit(Event::InventoryChunk(partial));assert!(session.item_effect_known_bag.borrow().is_empty());
+        for event in [Event::GameDecodeFailed{message:"loss".into()},Event::InventoryInit{bag_slots:2,bank_slots:0},Event::LeftWorld{target:0},Event::Disconnected{message:String::new()}] {session.emit(Event::InventoryChunk(chunk.clone()));session.emit(event);assert!(session.item_effect_known_bag.borrow().is_empty());}
     }
 
 }
