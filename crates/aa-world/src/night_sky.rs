@@ -24,6 +24,10 @@ use crate::reader::{ReadError, Reader};
 use crate::sky::{AtmosphereTuning, Environment, update_environment, view_exposure};
 use crate::stream::WorldConfig;
 
+// CPU transparent-sort distance only, beyond the bounds of the authored worlds. Sky shaders
+// ignore translation, so their origin's projected distance must not sort them over nearby glass.
+pub(crate) const SKY_SORT_BIAS: f32 = -1_000_000.0;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Star {
     /// Right ascension in hours; declination in degrees.
@@ -116,6 +120,9 @@ impl Material for StarMaterial {
     }
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
+    }
+    fn depth_bias(&self) -> f32 {
+        SKY_SORT_BIAS
     }
     fn enable_prepass() -> bool {
         false
