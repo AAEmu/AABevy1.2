@@ -6,6 +6,7 @@ use aa_ui::{
 };
 use lua::slot::CooldownSample;
 const MASK: &str = "ui/icon/cooldown_mask.dds";
+const HUD: &str = "ui/common/hud.dds";
 
 fn setup(native: bool) -> (UiRuntime, Id) {
     let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
@@ -43,6 +44,86 @@ fn fields(ui: &UiRuntime, id: Id) -> (f32, f32) {
     let u = lua::ui(&ui.lua);
     let cd = u.tree.widget(id).unwrap().cooldown.as_ref().unwrap();
     (cd.total_ms, cd.sampled_ms.unwrap())
+}
+
+fn edge(ui: &UiRuntime) -> Option<Quad> {
+    let path = lua::ui(&ui.lua).textures.resolve(HUD).unwrap();
+    aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None)
+        .into_iter()
+        .find(|q| q.tex == Tex::Image(path.clone()))
+}
+
+#[test]
+fn native_edge_uses_stock_crop_and_transforms_before_snapping() {
+    let (ui, id) = setup(true);
+    for (remain, expected) in [
+        (9375, [[27., 1.], [31., 3.], [23., 23.], [18., 21.]]),
+        (8750, [[34., 4.], [38., 8.], [22., 23.], [19., 20.]]),
+        (5000, [[24., 42.], [19., 42.], [19., 20.], [24., 20.]]),
+        (2000, [[0., 17.], [2., 12.], [23., 19.], [21., 24.]]),
+    ] {
+        sample(&ui, id, remain, 10000);
+        let q = edge(&ui).unwrap();
+        assert_eq!(q.corners.unwrap(), expected, "remaining {remain}");
+        let (w, h) = lua::ui(&ui.lua).textures.size(HUD).unwrap();
+        assert_eq!(
+            q.uv,
+            [
+                748. / w as f32,
+                166. / h as f32,
+                753. / w as f32,
+                188. / h as f32
+            ]
+        );
+        assert_eq!(q.color, [1.; 4]);
+        let all = aa_ui::render::build_quads(&mut lua::ui(&ui.lua), None);
+        let index = all.iter().position(|other| other.tex == q.tex).unwrap();
+        assert!(matches!(all[index - 1].tex, Tex::MaskedImage { .. }));
+        assert_eq!(all[index + 1].tex, Tex::Atlas);
+    }
+}
+
+#[test]
+fn native_edge_stays_fixed_size_in_a_resized_slot_and_scales_with_the_ui() {
+    let (ui, id) = setup(true);
+    ui.exec("@rectangle", "slot:SetExtent(42.6,79.4);slot:RemoveAllAnchors();slot:AddAnchor('TOPLEFT',UIParent,100.3,101.7)").unwrap();
+    sample(&ui, id, 8750, 10000);
+    assert_eq!(
+        edge(&ui).unwrap().corners.unwrap(),
+        [[135., 125.], [138., 128.], [123., 144.], [119., 140.]]
+    );
+    ui.exec("@ui_scale", "UIParent:SetUIScale(0.85)").unwrap();
+    sample(&ui, id, 8000, 10000);
+    assert_eq!(
+        edge(&ui).unwrap().corners.unwrap(),
+        [[120., 113.], [121., 117.], [103., 122.], [102., 118.]]
+    );
+}
+
+#[test]
+fn native_edge_has_no_independent_clock_and_obeys_mask_draw_lifetime() {
+    let (ui, id) = setup(true);
+    sample(&ui, id, 9375, 10000);
+    let expected = edge(&ui).unwrap().corners;
+    lua::tick(&ui.lua, 600.);
+    assert_eq!(edge(&ui).unwrap().corners, expected);
+    sample(&ui, id, 9375, 10000);
+    assert_eq!(edge(&ui).unwrap().corners, expected);
+    for (remain, total) in [(0, 1000), (1000, 1000), (1100, 1000), (100, 199)] {
+        sample(&ui, id, remain, total);
+        assert!(edge(&ui).is_none());
+    }
+    sample(&ui, id, 9375, 10000);
+    assert_eq!(edge(&ui).unwrap().corners, expected);
+    lua::ui(&ui.lua)
+        .tree
+        .widget_mut(id)
+        .unwrap()
+        .slot
+        .as_mut()
+        .unwrap()
+        .cooldown_mask = None;
+    assert!(edge(&ui).is_none());
 }
 
 #[test]
