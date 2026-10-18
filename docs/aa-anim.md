@@ -602,9 +602,13 @@ after the guard refactor: **62 passed, 1 ignored**.
 ### Native helmet hair/beard selectors
 
 `hair::HeadgearVariants::from_asset_detail` decodes the original packed appearance flags
-of the **selected visible helmet asset**, including a visual override when one is active.
+of the **effective visible cosplay/head asset**.
 The original `x2game.dll` `CharacterCustomizer::AdjustHairAsset` at `39315820` first uses
-the override descriptor, then the ordinary helmet descriptor. Only descriptor detail types
+the cosplay descriptor (wire slot 27), then the head descriptor (wire slot 0).
+`ChangeVisual` stores descriptors at `model + 0x1c + 4 * slot`; the preferred pointer
+at `model + 0x88` is therefore cosplay, not an image-item override.
+`HeadgearVariants::effective_detail(head, cosplay)` preserves that exact priority, including
+a present cosplay descriptor whose detail selects ordinary hair. Only descriptor detail types
 3 or 7 (`(detail >> 13) & 7`) select variants; other types/default absence keep normal hair
 and beard. Hair uses `(detail >> 10) & 7`, beard uses `(detail >> 7) & 7`:
 
@@ -620,7 +624,7 @@ A zero alternate ID falls back to the normal asset, not hidden hair. These rules
 The item-assets loader `396C89D0` copies SQL column 9 (`detail`) to descriptor offset `0x24`.
 The bounded assembler listings and original-byte Unicorn oracle are under
 `data/extract/aa-anim/hair-native/`. All **512** combinations of type/hair/beard fields,
-override precedence, absence defaults, normal/missing alternate lookups and the native zero
+cosplay precedence, absence defaults, normal/missing alternate lookups and the native zero
 sentinel were executed against the original unpacked 1.2 binary from read-only RE notes.
 
 `GameDb::item_visuals(item_id, model_id)` exposes asset ID, path and detail in the same order
@@ -628,7 +632,7 @@ as `item_meshes`. The latter retains its existing path-only API. For the selecte
 visual, decode its detail; then `BodyPart::variant_asset_id` / `variant_path` selects the
 original hair or beard body-part row. `Hidden` returns `None`; otherwise callers replace
 the mesh path while retaining their style/colour setup. The character assembly path is
-unchanged: selecting the actual visible helmet/override and applying the result remains an
+unchanged: selecting the actual visible cosplay/head descriptor and applying the result remains an
 integration task. Beard selector decoding is supported, but beard attachment assembly is
 not added. No names, material classes or guessed helmet hiding rules are used.
 
@@ -812,3 +816,24 @@ at **320.2–414.3 FPS**. This is an isolated mesh-selection diagnostic.
 5. Environment light helper: `aa_cry::stage::environment_light` / `StageLighting`.
 6. Dyeing stays in aa-anim (`dye::bake_dyed_diffuse`, applied by `restyle`); per-item dye colours
    for equipment attached outside `spawn_character` (weapons, bows) are not done.
+
+### Visible head/cosplay priority and original visibility options
+
+All **7204** playable-model head item/model groups in the original database have exactly
+one visual row. Across all 10668 head groups the only duplicate is item 27519/model 19,
+with two identical asset 16609/detail 25600 rows. This establishes unambiguous original
+head descriptors for playable models; it is not permission to choose an arbitrary visual
+when a future query returns distinct rows. The bounded audit is recorded in
+`data/extract/aa-anim/hair-native/helmet-cardinality.json`.
+
+The original `interface_option.alb` defines `ShowPlayerHelmet`, default 1, character-level
+storage, calling `X2Unit:ShowHelmet`. Its native wrapper `394BB640` calls `391E8420`,
+which updates the local player's helmet flag and refreshes head slot 0. Appearance assembly
+`39319B90` clears that effective slot when the flag at unit+0x3bb6 is false, retaining the
+equipped item. A separate `ShowMyCosplay` option calls `X2Player:ShowCosplay`; assembly
+clears slot 27 separately using unit+0x3bb8. Thus hiding a helmet alone does **not** force
+normal hair if visible cosplay supplies a descriptor. Callers pass visibility-filtered
+slot details to `effective_detail` before `resolve_with_headgear`/`apply_headgear`.
+Image-item substitution is an earlier descriptor-production concern; the two pointers
+in `AdjustHairAsset` do not establish its policy. No automatic image substitution rule
+is inferred here.
