@@ -466,6 +466,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 ),
             }
             super::chat::geometry(lua, id);
+            list_geometry(lua, id);
             none()
         })?,
     )?;
@@ -474,6 +475,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         method(lua, |lua, id, _| {
             ui(lua).tree.remove_anchors(id);
             super::chat::geometry(lua, id);
+            list_geometry(lua, id);
             none()
         })?,
     )?;
@@ -487,6 +489,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             drop(u);
             super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
+            list_geometry(lua, id);
             scale_event(lua, id);
             none()
         })?,
@@ -497,6 +500,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             ui(lua).tree.get_mut(id).width = a.f(1);
             super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
+            list_geometry(lua, id);
             none()
         })?,
     )?;
@@ -506,6 +510,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             ui(lua).tree.get_mut(id).height = a.f(1);
             super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
+            list_geometry(lua, id);
             none()
         })?,
     )?;
@@ -1967,10 +1972,20 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?,
     )?;
     m.raw_set(
+        "SetItemLineGap",
+        method(lua, |lua, id, a| {
+            if let Some(l) = ui(lua).tree.widget_mut(id).and_then(|w| w.list.as_mut()) {
+                l.item_line_gap = a.f(1);
+            }
+            relayout_rows(lua, id);
+            none()
+        })?,
+    )?;
+    m.raw_set(
         "SetItemHeight",
         method(lua, |lua, id, a| {
             if let Some(l) = ui(lua).tree.widget_mut(id).and_then(|w| w.list.as_mut()) {
-                l.row_height = a.f(1);
+                l.explicit_row_height = Some(a.f(1));
             }
             relayout_rows(lua, id);
             none()
@@ -2047,6 +2062,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             l.rows.clear();
             l.sub_items.clear();
             l.has_data.clear();
+            l.layout_extent = None;
             drop(g);
             let this = super::object_table(lua, id)?.unwrap();
             this.raw_set("items", lua.create_table()?)?;
@@ -2234,32 +2250,60 @@ pub(crate) fn place_on_row(u: &mut super::Ui, img: Id, row: Option<Id>) {
     }
 }
 
-/// Position rows below the column header and sub-items under their columns.
+/// Settle anchored/parent-resized controls without rebuilding unchanged row geometry.
+pub(crate) fn update_lists(lua: &Lua) {
+    let ids = ui(lua).tree.of_class("listctrl");
+    for id in ids {
+        list_geometry(lua, id);
+    }
+}
+
+fn list_geometry(lua: &Lua, id: Id) {
+    let changed = {
+        let u = ui(lua);
+        let Some(l) = u.tree.widget(id).and_then(|w| w.list.as_ref()) else { return };
+        let (w, h) = u.tree.size(id);
+        l.layout_extent != Some([w.to_bits(), h.to_bits()])
+    };
+    if changed {
+        relayout_rows(lua, id);
+    }
+}
+
+/// Native392a4410: subtract header and intervening gaps as f32, CVTTSS2SI,
+/// signed integer division, then assign that one height to every row/sub-item.
 pub(crate) fn relayout_rows(lua: &Lua, id: Id) {
     let mut g = ui(lua);
     let u = &mut *g;
     let Some(l) = u.tree.widget(id).and_then(|w| w.list.clone()) else {
         return;
     };
+    let (width, height) = u.tree.size(id);
+    u.tree.widget_mut(id).unwrap().list.as_mut().unwrap().layout_extent =
+        Some([width.to_bits(), height.to_bits()]);
+    if l.columns.is_empty() || l.rows.is_empty() {
+        return;
+    }
+    let occupied = (l.rows.len() - 1) as f32 * l.item_line_gap + l.column_height;
+    let available = height - occupied;
+    let integral = if available.is_finite() && (-2147483648.0..2147483648.0).contains(&available) {
+        available as i32
+    } else {
+        i32::MIN
+    };
+    let row_height = l.explicit_row_height.unwrap_or_else(|| (integral / l.rows.len() as i32) as f32);
+    u.tree.widget_mut(id).unwrap().list.as_mut().unwrap().row_height = row_height;
     for (i, &r) in l.rows.iter().enumerate() {
         let o = u.tree.get_mut(r);
-        o.height = l.row_height;
-        o.anchors = vec![
-            Anchor {
-                point: Point::TopLeft,
-                target: id,
-                rel: Point::TopLeft,
-                x: 0.0,
-                y: l.column_height + i as f32 * l.row_height,
-            },
-            Anchor {
-                point: Point::TopRight,
-                target: id,
-                rel: Point::TopRight,
-                x: 0.0,
-                y: l.column_height + i as f32 * l.row_height,
-            },
-        ];
+        o.width = width;
+        o.height = row_height;
+        o.anchors = vec![Anchor {
+            point: Point::TopLeft,
+            target: if i == 0 { l.columns[0] } else { l.rows[i - 1] },
+            rel: Point::BottomLeft,
+            x: 0.0,
+            y: if i == 0 { 0.0 } else { l.item_line_gap },
+        }];
         for (j, &s) in l
             .sub_items
             .get(i)
@@ -2268,26 +2312,19 @@ pub(crate) fn relayout_rows(lua: &Lua, id: Id) {
             .iter()
             .enumerate()
         {
-            let Some(&col) = l.columns.get(j) else {
+            let Some(&column_width) = l.column_widths.get(j) else {
                 continue;
             };
             let o = u.tree.get_mut(s);
-            o.anchors = vec![
-                Anchor {
-                    point: Point::TopLeft,
-                    target: col,
-                    rel: Point::BottomLeft,
-                    x: 0.0,
-                    y: i as f32 * l.row_height,
-                },
-                Anchor {
-                    point: Point::BottomRight,
-                    target: col,
-                    rel: Point::BottomRight,
-                    x: 0.0,
-                    y: (i + 1) as f32 * l.row_height,
-                },
-            ];
+            o.width = column_width;
+            o.height = row_height;
+            o.anchors = vec![Anchor {
+                point: Point::TopLeft,
+                target: if j == 0 { r } else { l.sub_items[i][j - 1] },
+                rel: if j == 0 { Point::TopLeft } else { Point::TopRight },
+                x: 0.0,
+                y: 0.0,
+            }];
         }
     }
 }
