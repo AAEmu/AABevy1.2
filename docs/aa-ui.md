@@ -652,6 +652,45 @@ the edit's prefix. Unknown commands stay in the text. Enter, when no script set
 (below), empties the edit, drops the focus and hides the edit; a bare `/p` + Enter only
 switches. The channel stays for the next line.
 
+`X2Chat:IsActivatedChatInput()` and `AddItemLinkToActiveChatInput(fullMarkup)` /
+`AddQuestLinkToActiveChatInput('|qID;')` now use the native active chat window and edit's own
+shown flag, independently of keyboard focus. Creation, chat pointer presses and focus choose
+the active window. Native definitions come from the existing `AAUI.ChatLink` lookup. Missing
+definitions or invalid markup leave the text alone; the native return value still reports
+true when an active shown input exists, false when none exists. `chat_input::install(lua)` is
+public for reinstalling these toolkit methods after application fallback scripts.
+
+Insertion appends plain `[name]` to the end, without a trailing space, then focuses the edit.
+The visible label uses the edit's normal color, not the message link's grade/quest color.
+Caret movement, picking, selection, copy and deletion therefore operate on the visible label
+characters. A separate per-input vector retains each complete original link, including its
+opaque item instance payload. Immediately before `AAUI.ChatSend`, native sequential label
+matching substitutes the raw markup for intact labels in insertion order and clears the vector.
+Editing a label so it no longer matches leaves ordinary literal text when sent. Serialized
+insertion length must remain below 1024 bytes; native label/raw buffers hold 255/511 bytes,
+and the append buffer holds 511 visible bytes. Invalid oversized names/payloads are rejected
+without creating partial metadata. `AAUI.ChatSend` retains its existing raw text contract;
+transport escaping/received unescaping remain a separate application/toolkit follow-up.
+
+Native evidence: entry points `39459960` / `394599e0`, active query `39508700`, explicit
+window selector `39502020` and edit own visibility `395128e0` -> `392778a0(false)`.
+Append paths `39511100` / `39511300` format `%s%s`, keep label/raw records at edit+0xe74,
+check serialized byte length with `3950f940`, and focus through `392a68a0`. Raw item/quest
+parsers are `39511000` / `395111f0`; send substitution is `39510e80`, and send clears the
+vector at `39511547`..`39511582`. No new per-frame text processing is introduced.
+`tests/chat_input_links.rs` covers native activation, end append/caret, exact opaque payload
+send, broken labels, duplicate names, invalid data and byte bounds, plus original
+`chat/common.alb:AddLinkItem` and `SetTitleLabelEventHandler` Shift-click from
+`quest_context_notifier.alb`.
+
+The full suite passes 145 runtime tests and both doc tests (one font test ignored).
+`examples/native_item_links.rs` now opens the original chat input and inserts its original
+loot-debug item link plus a quest link. The inspected `shots/aa-ui/native-chat-input-links.png`
+shows `Link: [Crushing Grip][The Prophet Terrien]` in normal edit color with no encoded data
+visible; the message view retains distinct grade colors. Shared HUD/font/art comparison uses
+`reference/ingame/bag/real.png`, since no dedicated linked-input reference was supplied.
+The `aa_dev` capture logged 377-426 FPS, zero script errors and closed itself.
+
 ## App integration
 
 ```rust

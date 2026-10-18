@@ -121,6 +121,9 @@ fn with<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut EditData) -> R) -> Option<R> {
 
 /// Give the keyboard focus to `id` (`None` clears it): `OnAcceptFocus(self)` on the new owner.
 pub fn set_focus(lua: &Lua, id: Option<Id>) {
+    if let Some(id) = id {
+        super::chat_input::activate(lua, id);
+    }
     let old = {
         let mut u = ui(lua);
         if u.focus == id {

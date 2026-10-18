@@ -191,6 +191,9 @@ pub fn update(
         update_list_hover(lua, old, hover);
     }
     if down {
+        if let Some(id) = hover {
+            lua::chat_input::activate(lua, id);
+        }
         mouse.pressed = hover;
         ui(lua).tree.touch();
         // A press on an edit box focuses it; anywhere else drops the keyboard focus.

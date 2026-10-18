@@ -271,7 +271,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     // `X2Cursor` (what the pointer holds) and `RegisterForDrag`'s storage: see [`super::drag`].
     super::drag::install(lua)?;
     // `X2Chat:DispatchChatMessage(filter, text)` routes a line to the chat tabs (see
-    // [`super::chat`]); the rest of `X2Chat` is the app's.
+    // [`super::chat`]); toolkit active-input link insertion is installed below.
+    // Other X2Chat game/configuration APIs belong to the app.
     let x2chat = install_game_stub(lua, "X2Chat")?;
     x2chat.raw_set(
         "DispatchChatMessage",
@@ -281,6 +282,7 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             },
         )?,
     )?;
+    super::chat_input::install(lua)?;
     // `X2Input:GetMousePos()`: the cursor in screen pixels (the colour pad of character create
     // drags with it from `OnUpdate`).
     let x2input = install_game_stub(lua, "X2Input")?;

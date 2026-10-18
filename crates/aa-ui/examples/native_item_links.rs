@@ -17,6 +17,8 @@ fn main() {
             fake::install_ingame(ui);
             ui.run_stage(aa_ui::Stage::World);
             fake::enter_world(ui);
+            let chat = aa_ui::lua::ui(&ui.lua).tree.of_class("chatwindow")[0];
+            ui.lua.globals().set("inputWindow", aa_ui::lua::object_table(&ui.lua, chat).unwrap()).unwrap();
             ui.exec("@original_item_links", r#"
                 originalLinks={}
                 local original,index
@@ -54,6 +56,11 @@ fn main() {
                 ShowQuestLinkTooltip({questType=2531})
                 local tip=tooltip.tooltipWindows[8]
                 tip:RemoveAllAnchors(); tip:AddAnchor('TOPLEFT',UIParent,760,340)
+                local edit=inputWindow:GetChatEdit()
+                edit:Show(true); edit:SetText('Link: '); edit:SetFocus()
+                AddLinkItem(originalLinks[1])
+                X2Chat:AddQuestLinkToActiveChatInput('|q2531;')
+                assert(edit:GetText()=='Link: [Crushing Grip][The Prophet Terrien]')
             "#).unwrap();
             fake::report(ui, "native_item_links");
         }))

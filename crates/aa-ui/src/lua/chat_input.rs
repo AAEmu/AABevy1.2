@@ -33,6 +33,20 @@ use mlua::{Function, Lua, Table, Value};
 use super::{call_handler, has_handler, ui};
 use crate::tree::Id;
 
+mod links;
+
+pub(crate) use links::InputLink;
+
+/// Toolkit-owned X2Chat input methods; applications retain transport and database ownership.
+pub fn install(lua: &Lua) -> mlua::Result<()> {
+    let chat = super::install_game_stub(lua, "X2Chat")?;
+    links::install(lua, &chat)
+}
+
+pub(crate) fn activate(lua: &Lua, target: Id) {
+    links::activate(lua, target);
+}
+
 const CHAT_SAY: i64 = 0;
 const CHAT_WHISPER: i64 = -3;
 
@@ -244,7 +258,7 @@ pub(crate) fn enter(lua: &Lua, edit: Id) -> bool {
         set_method(lua, win, ch, &target);
         text = rest;
     }
-    let text = text.trim().to_string();
+    let text = links::send(lua, edit, text.trim());
     let (method, target) = ui(lua)
         .tree
         .widget(win)
