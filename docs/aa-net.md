@@ -3814,3 +3814,37 @@ correlation. Repeated raw events remain observable even when the flags are uncha
 Native SC127 expiry remains notification-only and cannot stand in for this update.
 
 SC128 validation: cargo check and all 297 aa-net library tests passed, including the Bevy resource fold.
+
+
+### Initial unit versus local doodad interaction (2026-10-18)
+
+Native input dispatch390f3780 has distinct selected-object paths. At390f37b3 it
+passes selected unit3a5a4dbc to393be030, which resolves39360020, checks local-player
+state and393c01d0 eligibility, constructs CS068 and sends39186810. Constructor
+397ac0a0/serializer397ba470 prove BC target, BC second object, i32 extra, i32 pick,
+u8 mouse and i32 modifiers. The second object is initialized from static3a5e1158;
+this does not prove it is the player object. No sentinel default is invented.
+The lane systems/npcs/npc/packets.rs handler resolves only NPCs and Mates, returns
+SC07b skills and explicitly leaves distance checking TODO. It has no SC07e emitter.
+
+At390f37cc selected doodad3a5a4dc0 instead goes to393b79a0 and resolves39035110.
+It creates local action data393b7320 and builds393bd290; empty action vectors return.
+Otherwise it takes the first action, looks up its associated group393b5b30, and
+calls393b3ec0 at393b7a70 with action, group, actual doodad and mode1. This local path
+does not send CS068 or require a fabricated SC07e. The existing world manager then
+performs eligibility, geometry range and special callback handling before casting.
+
+Builder393bd290 requires runtime doodad+218 and static template3963b250, applies
+player/faction/permission and other local predicates, then iterates all template
+function groups (+24..28) at393bd421. Candidates are gated by393b3300(group+20),
+3983b4e0,393b2c40 and other predicates. Accepted action/group pairs enter a map and
+ordered action vector through393bd240;393b9a80 later filters map entries too.
+Available natural interaction cannot be inferred from static CraftStart/Pack alone.
+393b3300 is a permission switch, not proven phase equality. Protected keys remain
+unresolved; this audit adds no guessed policy. Received SC07e/07f remain useful but
+do not prove every natural workbench interaction starts with a network request.
+
+SC128 refresh follow-up: containerfc dispatch394e0d70 to394e111d extracts slot
+via394e0240, adds one and emits event0xd5 with one numeric one-based slot.
+Registration39214ffb at39d2303c names it UNIT_NPC_EQUIPMENT_CHANGED
+(string399be0f8). This occurs after the received descriptor flags assignment.
