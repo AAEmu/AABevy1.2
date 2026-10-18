@@ -1148,3 +1148,13 @@ one test actually ran. The inspected sorted bag+bank capture `shots/hud/sol61-so
 measured324-423FPS. `native-150.png` shows2/150, the disabled maximum-expansion button and a
 real item at physical147 in the added final row;265-301FPS. Both use explicit synthetic inventory,
 have zero script errors, and exited normally. The client and sorting examples built successfully.
+
+Playable refresh after c73d453: `target/debug/aa-client-play.exe` SHA256
+`1F9789094736416D34A5D866BB7F6132A871E4931FC755EABE084FA4EF5F4AD0`.
+The inspected `world-select-final.png` in this folder shows the live Lane-bevy list with zero
+script errors and305-390FPS. The same copy's offline Ferre-female original creation screen
+(`create-ferre-final.png`, step2) has zero script errors and149-185FPS before capture/140FPS
+during capture. No character creation request was submitted. The rebuilt client-helper facial
+fixture (`client-paths-final.png`) again passed body-clock/FSQ/GPU-blink assertions;201-315FPS
+before capture/101FPS in its capture interval. These shared-machine captures exited normally;
+none establishes natural game-session repair/expansion while the existing lane stall persists.
