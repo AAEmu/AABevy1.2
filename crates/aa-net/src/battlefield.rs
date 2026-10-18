@@ -15,13 +15,15 @@ pub enum BattlefieldCommand {
     Cancel,
     /// Captured received invitation, checked again against current session state before send.
     RespondToInvitation { invitation: BattlefieldInvitation, accept: bool },
+    /// Explicit caller-owned world-ready continuation; never emitted automatically.
+    EnteredWorld { invitation: BattlefieldInvitation },
 }
 impl BattlefieldCommand {
     pub fn validate(self) -> std::result::Result<(), &'static str> {
         match self {
             Self::Apply { battlefield_id: 0, .. } => Err("battlefield ID must be nonzero"),
             Self::Apply { corps: 3.., .. } => Err("battlefield corps must be 0, 1 or 2"),
-            Self::RespondToInvitation { invitation, .. } if invitation.corps > 1 => Err("invitation corps must be 0 or 1"),
+            Self::RespondToInvitation { invitation, .. } | Self::EnteredWorld { invitation } if invitation.corps > 1 => Err("invitation corps must be 0 or 1"),
             _ => Ok(()),
         }
     }
@@ -30,12 +32,14 @@ impl BattlefieldCommand {
             Self::Apply { .. } => cs::CSApplyToInstantGamePacket,
             Self::Cancel => cs::CSCancelInstantGamePacket,
             Self::RespondToInvitation { .. } => cs::CSJoinInstantGamePacket,
+            Self::EnteredWorld { .. } => cs::CSEnteredInstantGameWorldPacket,
         }
     }
     pub fn write(self, w: &mut Writer) {
         match self {
             Self::Apply { battlefield_id, corps } => { w.u32(battlefield_id).u8(corps); }
             Self::RespondToInvitation { invitation, accept } => { w.bool(accept).u64(if accept { invitation.qualified_id } else { 0 }); }
+            Self::EnteredWorld { invitation } => { w.u64(invitation.qualified_id); }
             Self::Cancel => {}
         }
     }
@@ -158,7 +162,18 @@ impl Battlefield {
                 return Err("battlefield invitation is stale or already answered");
             }
         }
+        if let BattlefieldCommand::EnteredWorld { invitation } = command {
+            if self.invitation != Some(invitation) || self.response_pending != Some((invitation, true)) || self.cancel_pending || self.joined.is_some() {
+                return Err("battlefield world-ready requires the current accepted invitation");
+            }
+        }
         Ok(())
+    }
+    /// Called by the app after its actual world-entered continuation, never by packet receipt.
+    pub fn world_ready(&self, invitation: BattlefieldInvitation) -> std::result::Result<BattlefieldCommand, &'static str> {
+        let command = BattlefieldCommand::EnteredWorld { invitation };
+        self.validate_command(command)?;
+        Ok(command)
     }
     pub fn respond_to_invitation(&self, invitation: BattlefieldInvitation, accept: bool) -> std::result::Result<BattlefieldCommand, &'static str> {
         let command = BattlefieldCommand::RespondToInvitation { invitation, accept };
@@ -192,6 +207,7 @@ impl Battlefield {
                         self.requesting = Some((battlefield_id, corps));
                     }
                     BattlefieldCommand::Cancel => self.cancel_pending = true,
+                    BattlefieldCommand::EnteredWorld { .. } => {},
                     BattlefieldCommand::RespondToInvitation { invitation, accept } => {
                         if self.validate_command(*c).is_ok() { self.response_pending = Some((invitation, accept)); }
                     }

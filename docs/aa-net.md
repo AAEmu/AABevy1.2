@@ -4614,8 +4614,8 @@ INVITED Lua event is added. Accepted replies ignore old invitation timeout
 (state4); unaccepted matching timeout can clear invitation/reply. Selection/kick/leave/
 disconnect reset all received and local pending state. Wire carries no qualifiedID in
 Joined, so an old identical zone/instance/corps packet cannot be distinguished by one.
-Joined is a received snapshot, not a complete match-phase state machine: world-entry
-CSe4, start/end/scoreboard/leave packets and timers remain separate follow-up work.
+Joined is a received snapshot, not a complete match-phase state machine: start/end/scoreboard/leave packets and timers remain separate follow-up work;
+explicit CSe4 continuation is detailed below.
 
 Root Lua/source boundaries: CancelInstanceGame39455dc0 calls3936d1b0(true) synchronously.
 For state<=4 it resets/defaults and emits INSTANT_GAME_JOIN_CANCEL() BEFORE sendinge2;
@@ -4627,3 +4627,39 @@ only0..2. Fractional/nonfinite generic Lua conversion has not been established h
 Applied3936dfb0 only processes exact pending field/corps: nonzeroerror resets/defaults
 then reports39428370(error), with NO cancel Lua event; zeroerror changesstate1?2 with
 NO Lua event. UPDATE_INSTANT_GAME_STATE follows later genuine queue-state notification.
+
+
+CSe4 continuation: `Battlefield::world_ready(capturedInvitation)` produces additive
+`BattlefieldCommand::EnteredWorld { invitation }` only for the exact retained invitation
+and a successfully written accepted response, with no cancel or joined state. Session
+rechecks the same identity immediately before socket write. The app alone invokes this
+after its actual world-entered continuation; net never auto-emits it from SCLoadInstance,
+invitation or acceptance. Native3936d2f0 state4 emits UPDATE_INSTANT_GAME_STATE() then
+constructsCSe4 through397ac830 with stored qualifiedID; serializer397b10d0 and lane
+CSEnteredInstantGameWorldPacket reader agree on u64 only. Native remains state4 afterward,
+so explicit retry is permitted, with no invented pending timer or received join mutation.
+A stale qualifier/zone/instance/ruleset/corps, declined reply, pending cancel or absent invite
+rejects the command before sending. Only matching genuine SC190 populates joined.
+
+
+Invitation close/ESC is not a custom choice: original default dialog OnCancel invokes
+X2DialogManager:OnCancel(id). Native3905eb60?3902d1c0?3902cf60 uses helper3902b2f0,
+which calls task virtual+18 with boolean(buttonType==1). Invitation vtable399d0d1c+18
+is3936cf20 RET4, a no-op. The task closes without a queue reply; native state3 remains
+until timeout. Only OnCustom invokes virtual+14?3936f890 choice1/2/3. Therefore an
+adapter must not turn ESC into choice3/Cancel or choice0/decline. Genuine timeout closes
+the task through3902cef0 without invoking a response callback.
+
+Recruiter skill producer:393c1310 maps skillglobal39ac79b0 to 'recruiter'; a module-verified
+PROCESS_VM_READ read of existing original PID48924 (StandMode marker, original image)
+finds12660. Artifact battlefield-native/runtime-recruiter-id-20261018.json records it.
+Native393bf3bf compares that exact skill, resolves targetNPC+41c?3936d5f0 static recruiting
+battlefield, then398a99c0 obtains last loaded ruleset minimum level. If positive and player
+levelbyte+4b4 is lower, it emits restriction/error and does not open. Otherwise393bf45f
+emits NPC_INTERACTION_START('recruiter') (event0x6b name399be9b4, registration392149c5).
+CurrentDB skill12660 has no skill_effects or npc_interactions child rows: this is a local
+special service path, not an invented WorldInteractionEffect. Lane npc/packets.rs
+interaction_option selects12660 for recruitingfield>0 only after banker, ability changer,
+auctioneer, priest, repairman, merchant, stabler and expedition are false; before blacksmith.
+StartInteraction sends singleton[option] for an actual NPC in the player's current instance;
+distance check is explicitly TODO. Static field alone is not a received interaction context.

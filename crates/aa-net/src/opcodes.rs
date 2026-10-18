@@ -157,6 +157,7 @@ opcodes! {
         CSApplyToInstantGamePacket = 0x0e1,
         CSCancelInstantGamePacket = 0x0e2,
         CSJoinInstantGamePacket = 0x0e3,
+        CSEnteredInstantGameWorldPacket = 0x0e4,
         CSUpgradeExpertLimitPacket = 0x0ff,
         CSDowngradeExpertLimitPacket = 0x100,
         CSExpandExpertPacket = 0x101,
