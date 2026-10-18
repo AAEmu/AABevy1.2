@@ -3,7 +3,8 @@
 // the sprite plane), the alpha is density ^ AlphaSaturation. Colours are pre-exposed HDR (CPU side), see `sky_clouds.rs`.
 
 import bevy_pbr::render::{
-    forward_io::VertexOutput,
+    forward_io::{Vertex, decompress_vertex},
+    mesh_functions::get_world_from_local,
     mesh_view_bindings::view,
 };
 
@@ -24,15 +25,35 @@ struct CloudParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var cloud_texture: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var cloud_sampler: sampler;
 
+struct CloudVertex {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) right: vec3<f32>,
+    @location(2) up: vec3<f32>,
+}
+
+@vertex
+fn vertex(input: Vertex) -> CloudVertex {
+    let vertex = decompress_vertex(input, input.instance_index);
+    let world_from_local = get_world_from_local(input.instance_index);
+    let world = world_from_local * vec4<f32>(vertex.position, 1.0);
+    let clip = view.clip_from_world * world;
+    var out: CloudVertex;
+    // Original DistanceCloudsVS sets z=w. Bevy uses reverse Z: far depth is zero.
+    out.clip = vec4<f32>(clip.xy, 0.0, clip.w);
+    out.uv = vertex.uv;
+    out.right = normalize(world_from_local[0].xyz);
+    out.up = normalize(world_from_local[1].xyz);
+    return out;
+}
+
 @fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fragment(in: CloudVertex) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let opacity = textureSample(cloud_texture, cloud_sampler, uv).x;
 
-    // the sprite faces the camera: its plane is spanned by the view's right and up
-    let right = view.world_from_view[0].xyz;
-    let up = view.world_from_view[1].xyz;
-    let toward_sun = vec2<f32>(dot(cloud.sun.xyz, right), -dot(cloud.sun.xyz, up)) * cloud.shape.y;
+    // Native packed tangent / binormal are radial right / -up, independent of camera roll.
+    let toward_sun = vec2<f32>(dot(cloud.sun.xyz, in.right), -dot(cloud.sun.xyz, in.up)) * cloud.shape.y;
     var density = 0.0;
     for (var i = 0; i < 8; i = i + 1) {
         density = density + textureSampleLevel(cloud_texture, cloud_sampler, uv + toward_sun * f32(i), 0.0).x;
@@ -41,8 +62,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let a = pow(opacity, cloud.shape.z) * cloud.material.a;
     let col = mix(cloud.shade_sky.rgb, cloud.shade_sun.rgb, c) * cloud.material.rgb;
 
-    // melt into the haze at the horizon
-    let d = normalize(in.world_position.xyz - view.world_position);
-    let fade = smoothstep(-0.01, 0.1, d.y);
-    return vec4<f32>(col, a * fade * cloud.shade_sky.w);
+    return vec4<f32>(col, a * cloud.shade_sky.w);
 }
