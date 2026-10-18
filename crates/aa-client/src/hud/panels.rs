@@ -167,7 +167,8 @@ fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, star
     // running cooldown must not jitter
     let cooldown = info.and_then(|i| {
         let skills = skills?;
-        let own = skills.cooldown_left(skill, i.tag, i.cooldown_ms).map(|left| (left, i.cooldown_ms));
+        let own = skills.cooldown_with_total(skill, i.tag, i.cooldown_ms)
+            .map(|(left, total)| (left, total.as_millis() as u32));
         let global = (!i.ignore_gcd)
             .then(|| {
                 let len = game?.skills.get(&skills.last_cast_skill)?.gcd_ms;
@@ -551,5 +552,38 @@ pub fn action_keys(
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
             use_slot(slot as usize - 1, &env, &bar, &inventory, &target, &mut net, &mut failed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aa_net::state::ReceivedCooldown;
+
+    #[test]
+    fn skill_sweep_keeps_the_winning_received_duration_including_zero() {
+        let mut game = GameData::default();
+        game.skills.insert(7, super::super::data::SkillInfo {
+            tag: 9, cooldown_ms: 10_000, ignore_gcd: true, ..default()
+        });
+        let start = Instant::now();
+        let mut skills = Skills::default();
+        skills.received_tag_cooldowns.push(ReceivedCooldown {
+            cooldown: aa_net::Cooldown { id: 9, total_ms: 25_000, remaining_ms: 5_000 },
+            received_at: start, reset: false,
+        });
+        let snap = skill_slot(Some(&game), Some(&skills), 7, start);
+        assert_eq!(snap.cooldown.map(|(_, total)| total), Some(25_000));
+        assert!((4_500..=5_250).contains(&snap.cooldown.unwrap().0));
+
+        skills.received_tag_cooldowns[0].cooldown.total_ms = 0;
+        assert_eq!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.map(|(_, total)| total), Some(0));
+
+        // A longer observed cast still wins, with its own DB duration, as before.
+        skills.last_used.insert(7, Instant::now());
+        assert_eq!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.map(|(_, total)| total), Some(10_000));
+        skills.last_used.clear();
+        skills.received_tag_cooldowns[0].reset = true;
+        assert!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.is_none());
     }
 }

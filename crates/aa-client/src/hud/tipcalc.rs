@@ -190,6 +190,8 @@ impl Amount {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Attrs {
     pub level: i32,
+    /// Character attribute 91: native 60,000 ms base with the worn-item and buff modifiers.
+    pub lung_capacity_ms: u32,
     /// `str, dex, sta, int, spi, fai`
     pub primaries: [i32; 6],
     /// `LevelDps` of the character formulas.
@@ -598,6 +600,7 @@ impl TipTables {
         let mul = |a: u8| ((with_bonuses(0.0, a, &mods) + 1000.0) / 1000.0) as f32;
         Attrs {
             level,
+            lung_capacity_ms: with_bonuses(60_000.0, 91, &mods) as u32,
             primaries,
             level_dps,
             dps: [dps, offhand, ranged, spell, heal],
@@ -1159,6 +1162,19 @@ const ATTRIBUTES: &[(u8, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lung_capacity_uses_the_native_base_and_current_attribute_91_modifiers() {
+        let mut t = TipTables::default();
+        let equipment = aa_net::model::Equipment::default();
+        assert_eq!(t.attrs(1, &equipment, &[], &[0; 11]).lung_capacity_ms, 60_000);
+        t.mods.insert(700, vec![
+            Mod { attr: 91, percent: false, value: 30_000, per_level: 0 },
+            Mod { attr: 91, percent: true, value: 50, per_level: 0 },
+        ]);
+        assert_eq!(t.attrs(1, &equipment, &[(700, 1)], &[0; 11]).lung_capacity_ms, 135_000);
+        assert_eq!(t.attrs(1, &equipment, &[], &[0; 11]).lung_capacity_ms, 60_000);
+    }
 
     fn connection() -> Option<Connection> {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());

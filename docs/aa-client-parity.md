@@ -12,12 +12,12 @@ live or visual validation. No overall completion percentage is inferred from scr
 | Character selection and creation | All four 1.2 races and both genders; appearance controls and server creation/re-entry; real captures | Remaining appearance/material differences, facial idle animation, hat/beard variants, training-field animation/wind |
 | Loading and screen lifecycle | Full flow, prebuilt HUD, return-to-list/logout/disconnect, spawn focus tests | Broader interruption/race coverage and persistent driver pipeline cache |
 | Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit |
-| Water and mounted movement | Wading/swimming/diving; remote mount/rider placement and movement packets | Local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
+| Water and mounted movement | Wading/swimming/diving; original breath bar on underwater reports/corrections and calculated capacity; remote mount/rider placement and movement packets | Natural live breath/drowning QA, local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
 | World geometry | Terrain, brushes, vegetation, roads, forward and deferred/wrapped diffuse decals, authored static entity props/local lights, verified rigid CGA windmills, streaming, collision; reference captures and unload tests | Native decal normal/specular accumulation and receiver variants; other animated entities/controllers/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
-| Environment | Native spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Native curve tangents/defaults and area/relic overrides, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
+| Environment | Native Bezier curves and 147-slot defaults/ranges, spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Area/relic overrides and legacy XML color migration, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored static UCC composition/native default, iris color and conservative alpha cutouts | Facial animation/lip sync/blinks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |
 | Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
-| Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state | Broader progression/live coverage; cooldown and tooltip corner cases; damage breakdown option |
+| Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; received skill/tag cooldown durations and preflight gates | Broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs | Repair/sorting/expansion, dye/look/enchant/temper/gem workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original player-trade controls bound | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, auction, specialty |
 | Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons | Objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/ship/public-farm icons, climate/conflict overlays |
@@ -34,11 +34,12 @@ live or visual validation. No overall completion percentage is inferred from scr
 
 ## Active ownership
 
-* Root: `aa-client`, cooldown duration/eligibility then inventory/breath controls; original combat/Options/mail/trade probes and refreshed playable smoke passed. Key settings, mailbox/group-loot/trade, friends and native combat-display milestones landed.
-* Network agent: `aa-net`, underwater report/breath source audit; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
+* Root: `aa-client`, original inventory sorting/repair/expansion controls next; received cooldown and original breath bar milestone passed. Key settings, mailbox/group-loot/trade, friends and native combat-display milestones landed.
+* Network milestone: `aa-net`, underwater receive/source audit complete; conflict-zone reports, received cooldowns, environmental/combat flags, explicit force-attack, UIData, repair/expansion and owned mate/slave APIs landed, with server limitations documented.
 * UI agent: `aa-ui`, native listbox tree hierarchy for original crafting; flat dropdowns/layers, font alias audit, IME, chat insertion/transport, cursor categories, clipboard, links, edit and combat timelines landed.
 * Material milestone: `aa-cry`, UCC defaults, Eye color and alpha cutouts landed; no root integration hook needed.
-* World agent: native curve tangents/defaults audit; spatial raw-curve zone blending, cloud motion/geometry/lifecycle, deferred/wrapped diffuse decals, native moons/coronas/orbit, sky order, static entity props, local lights, stars and rigid windmills landed.
+* World agent: native skybox/cloud spatial opacity and asset fades; native curve tangents/defaults, spatial raw-curve zone blending, cloud motion/geometry/lifecycle, deferred/wrapped diffuse decals, native moons/coronas/orbit, sky order, static entity props, local lights, stars and rigid windmills landed.
+* Animation agent: authored FSQ/FXL facial curves and compatible expression morph overlays, including original blink sequences; root integration pending tested interface.
 
 The shared checkout also contains inherited calibration/performance edits in other crates. Those
 are preserved; they are not counted as newly verified features until their owner or an assigned
@@ -54,7 +55,7 @@ process restart, including volume 0.4, ShowBuffDuration=0 and a custom selected 
 Captures in `shots/hud/sol61-wave2/` have zero Lua errors. See crate docs for exact checks and
 limitations. Each new milestone updates this ledger and its owning crate's evidence.
 
-Current wave: client131 passed /19 ignored, plus isolated original social/mail/loot/trade/keybinding/combat stage fixtures passed; UI167 runtime plus2 doctests passed /1 ignored at the last full baseline; network258 library plus
+Current wave: client135 passed /20 ignored, plus isolated original social/mail/loot/trade/keybinding/combat/breath stage fixtures passed; UI167 runtime plus2 doctests passed /1 ignored at the last full baseline; network261 library plus
 2 scripted passed. Fresh live paired raids/friends covered mutation, offline/reconnect and saved
 lists. Original commerce UI confirmed 33-copper sale and buyback, 25-copper purchase, bag/bank item
 round-trip with identical UID, and 5-copper deposit/withdraw through the original money dialog.

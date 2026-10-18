@@ -40,6 +40,10 @@ pub struct TipState {
 }
 
 impl TipState {
+    pub fn lung_capacity_ms(&self) -> u32 {
+        self.key.as_ref().map_or(60_000, |_| self.attrs.lung_capacity_ms)
+    }
+
     /// Bring the numbers up to date with the player's level, gear, buffs (id, ability level) and ability
     /// experience; nothing is worked out unless one of them changed.
     pub fn refresh(&mut self, game: &GameData, level: u8, equipment: &Equipment, buffs: Vec<(u32, i16)>, ability_exp: &[i32; 11]) {
