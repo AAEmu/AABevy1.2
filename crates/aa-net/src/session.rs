@@ -2086,6 +2086,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transport_equipment_notices_forward_raw_without_completion_events() {
+        use crate::mate::MateEvent;
+        use crate::slave::SlaveEvent;
+        let mate=MateEvent::EquipmentExpired{mate_tl_id:7,container:252,slot:3};
+        let mut raw=crate::wire::Writer::new();raw.u32(1).u16(7).u32(2).bool(false).u32(0).u32(0).raw(&[242,1,2,3]).bool(true);
+        let slave=SlaveEvent::read(crate::opcodes::sc::SCSlaveEquipmentChangedPacket,&mut crate::wire::Reader::new(&raw.finish())).unwrap();
+        let (evt,mut events)=unbounded_channel();let mut session=Session::new(evt,ClientOptions::default());
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::Mate(mate.clone()),game::ServerMsg::Mate(mate.clone()),game::ServerMsg::Slave(slave.clone()),game::ServerMsg::Snow(true)]))).await;
+        for _ in 0..2 { assert!(matches!(events.try_recv(),Ok(Event::Mate(actual)) if actual==mate)); }
+        assert!(matches!(events.try_recv(),Ok(Event::Slave(actual)) if actual==slave));
+        assert!(matches!(events.try_recv(),Ok(Event::Snow(true))));assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn world_interaction_reports_forward_without_opening_or_casting() {
         use crate::interaction::{InteractEvent,WorldInteractionSkillList};
         let list=InteractEvent::WorldSkillList(WorldInteractionSkillList {

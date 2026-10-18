@@ -81,7 +81,7 @@ pub use skill::{Cooldown, SkillCooldowns, COOLDOWN_LIMIT};
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
-pub use slave::{SlaveCreated, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
+pub use slave::{SlaveCreated, SlaveEquipmentChange, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
 pub use slave_control::{SlaveCommand, SlaveItemLocation, SlaveSpawnRequest};
 pub use wire::Pos;
 pub use ui_data::{UiData, UiDataCommand, UiDataEvent, UiDataResponse};
@@ -91,3 +91,6 @@ pub use plugin::{NetCommand, NetEvent, NetPlugin};
 
 #[cfg(test)]
 mod unit_state_tests;
+
+#[cfg(test)]
+mod equipment_notice_tests;

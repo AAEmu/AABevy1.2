@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::model::UnitKind;
 use crate::opcodes::sc;
 use crate::session::Event;
-use crate::slave_control::SlaveCommand;
+use crate::slave_control::{SlaveCommand, SlaveItemLocation};
 use crate::wire::{Pos, Reader, Result, WireError, long_to_coord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +17,32 @@ pub struct SlaveCreated {
     /// Native i64 field; the lane writes zero. No database/item identity is inferred.
     pub raw_id: i64,
     pub creator_name: String,
+}
+
+/// Full received ship/vehicle equipment transaction. Wire order is preserved;
+/// the two items are not interpreted as accepted destinations or bag settlement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlaveEquipmentChange {
+    pub character_id: u32,
+    pub slave_tl_id: u16,
+    pub db_slave_id: u32,
+    pub bts: bool,
+    pub first_item: Option<crate::model::Item>,
+    pub second_item: Option<crate::model::Item>,
+    pub first_location: SlaveItemLocation,
+    pub second_location: SlaveItemLocation,
+    pub success: bool,
+}
+
+impl SlaveEquipmentChange {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            character_id: r.u32()?, slave_tl_id: r.u16()?, db_slave_id: r.u32()?, bts: r.bool()?,
+            first_item: crate::model::Item::read(r)?, second_item: crate::model::Item::read(r)?,
+            first_location: SlaveItemLocation { container: r.u8()?, slot: r.u8()? },
+            second_location: SlaveItemLocation { container: r.u8()?, slot: r.u8()? }, success: r.bool()?,
+        })
+    }
 }
 
 /// SCMySlave's owner-only position/HP report; raw XY retain the native fixed-point bits.
@@ -54,6 +80,7 @@ impl SlaveEscape {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SlaveEvent {
+    EquipmentChanged(SlaveEquipmentChange),
     /// Broadcast around the summoning owner, not owner-only proof by itself.
     Created(SlaveCreated),
     /// Stored master character ID, independent of summoner ownership and runtime player ID.
@@ -84,7 +111,8 @@ impl SlaveEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCSlaveCreatedPacket
+            sc::SCSlaveEquipmentChangedPacket
+                | sc::SCSlaveCreatedPacket
                 | sc::SCSlaveRemovedPacket
                 | sc::SCSlaveDespawnPacket
                 | sc::SCSlaveBoundPacket
@@ -95,6 +123,7 @@ impl SlaveEvent {
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::EquipmentChanged(_) => "SCSlaveEquipmentChanged",
             Self::Created(_) => "SCSlaveCreated",
             Self::Bound { .. } => "SCSlaveBound",
             Self::Position(_) => "SCMySlave",
@@ -108,6 +137,7 @@ impl SlaveEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCSlaveEquipmentChangedPacket => Self::EquipmentChanged(SlaveEquipmentChange::read(r)?),
             sc::SCSlaveBoundPacket => Self::Bound {
                 master_id: r.u32()?,
                 obj_id: r.bc()?,

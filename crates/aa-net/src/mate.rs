@@ -195,6 +195,8 @@ pub enum MateEvent {
     },
     SlaveState(SlaveState),
     EquipmentChanged(MateEquipmentChange),
+    /// Notification only; native formats the current equipped descriptor as EXPIRED_ITEM.
+    EquipmentExpired { mate_tl_id: u16, container: u8, slot: u8 },
     /// Local socket write only; authoritative unit/skill events follow independently.
     Requested(MateCommand),
     RequestRejected {
@@ -220,7 +222,7 @@ impl MateEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket | sc::SCMateEquipmentChangedPacket
+            sc::SCMateSpawnedPacket | sc::SCMateStatePacket | sc::SCSlaveStatePacket | sc::SCMateEquipmentChangedPacket | sc::SCMateEquipmentExpiredPacket
         )
     }
 
@@ -230,6 +232,7 @@ impl MateEvent {
             Self::State { .. } => "SCMateState",
             Self::SlaveState(_) => "SCSlaveState",
             Self::EquipmentChanged(_) => "SCMateEquipmentChanged",
+            Self::EquipmentExpired { .. } => "SCMateEquipmentExpired",
             Self::Requested(_) => "MateRequested",
             Self::RequestRejected { .. } => "MateRequestRejected",
             Self::SkillRequested { .. } => "MateSkillRequested",
@@ -239,6 +242,7 @@ impl MateEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCMateEquipmentExpiredPacket => Self::EquipmentExpired { mate_tl_id: r.u16()?, container: r.u8()?, slot: r.u8()? },
             sc::SCMateEquipmentChangedPacket => Self::EquipmentChanged(MateEquipmentChange::read(r)?),
             sc::SCMateSpawnedPacket => {
                 let mut spawn = MateSpawn {
