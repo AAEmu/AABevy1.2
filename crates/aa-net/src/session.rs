@@ -2159,6 +2159,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expert_control_receipts_forward_exact_ack_order_without_synthetic_points() {
+        use crate::actability::{ActabilityEvent, ActabilityValue};
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let expected = [
+            ActabilityEvent::Snapshot { last: true, entries: vec![ActabilityValue { id: 5, point: 30000, step: 2 }] },
+            ActabilityEvent::TierChanged { is_upgrade: false, id: 5, step: 1 },
+            ActabilityEvent::Expanded { count: 2 },
+            ActabilityEvent::TierChanged { is_upgrade: false, id: 5, step: 1 },
+        ];
+        let mut messages: Vec<_> = expected.iter().cloned().map(game::ServerMsg::Actability).collect();
+        messages.push(game::ServerMsg::Snow(true));
+        session.game_msg(Ok(game::ServerMsg::Batch(messages))).await;
+        for expected in expected {
+            assert!(matches!(events.try_recv(), Ok(Event::Actability(actual)) if actual == expected));
+        }
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn housing_reports_forward_every_received_action_in_order() {
         use crate::housing::HousingEvent;
         let (evt, mut events) = unbounded_channel();

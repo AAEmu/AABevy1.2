@@ -315,3 +315,65 @@ fn only_matching_authoritative_expert_acks_change_tiers_capacity_and_pending() {
     assert!(state.actabilities.pending.is_empty());
     assert!(state.actabilities.last_error.is_some());
 }
+
+
+#[test]
+fn downgrade_catalog_reconciliation_requires_applied_matching_ack_and_sorted_lane_limits() {
+    let mut state = Actabilities::default();
+    snapshot(&mut state, true, &[(5, 100, 2)]);
+    let ack = Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, id: 5, step: 1 });
+    let limits = [10000, 20000, 30000];
+    assert!(!state.resolve_downgrade_points(&ack, &limits));
+    apply(&mut state, ActabilityEvent::Requested(ActabilityCommand::Downgrade { id: 5, auto_use_aa_point: false }));
+    assert!(!state.resolve_downgrade_points(&ack, &limits));
+    state.apply(&ack);
+    assert_eq!(state.get(5).unwrap().point, None);
+    assert!(!state.resolve_downgrade_points(&ack, &[20000, 10000]));
+    assert!(!state.resolve_downgrade_points(&ack, &[10000]));
+    for (id, step, is_upgrade) in [(6, 1, false), (5, 0, false), (5, 1, true)] {
+        assert!(!state.resolve_downgrade_points(&Event::Actability(ActabilityEvent::TierChanged { is_upgrade, id, step }), &limits));
+    }
+    assert!(state.resolve_downgrade_points(&ack, &limits));
+    // Exact lane assignment; native would retain old100 via min(old,limit).
+    assert_eq!(state.get(5).unwrap().point, Some(20000));
+    assert!(state.pending.is_empty());
+    assert!(!state.resolve_downgrade_points(&ack, &limits));
+}
+
+#[test]
+fn later_point_tier_and_snapshot_state_invalidate_old_downgrade_reconciliation() {
+    let ack = Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, id: 5, step: 1 });
+    let mut base = Actabilities::default();
+    snapshot(&mut base, true, &[(5, 30000, 2)]);
+    base.apply(&ack);
+    let mut delta = base.clone();
+    delta.apply(&Event::LaborChanged { amount: -1, action: 5, point: 7, step: 1 });
+    assert!(!delta.resolve_downgrade_points(&ack, &[10000, 20000]));
+    assert_eq!(delta.get(5).unwrap().point, None, "cannot drop an intervening delta");
+    let mut upgraded = base.clone();
+    apply(&mut upgraded, ActabilityEvent::TierChanged { is_upgrade: true, id: 5, step: 2 });
+    assert!(!upgraded.resolve_downgrade_points(&ack, &[10000, 20000, 30000]));
+    let mut received = base.clone();
+    snapshot(&mut received, true, &[(5, 123, 1)]);
+    assert!(!received.resolve_downgrade_points(&ack, &[10000, 20000]));
+    assert_eq!(received.get(5).unwrap().point, Some(123));
+    // A different profession's update does not invalidate this received reset.
+    base.apply(&Event::LaborChanged { amount: -1, action: 6, point: 1, step: 0 });
+    assert!(base.resolve_downgrade_points(&ack, &[10000, 20000]));
+}
+
+#[test]
+fn kick_and_character_lifecycle_clear_pending_and_unresolved_downgrade_evidence() {
+    let ack = Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, id: 5, step: 0 });
+    let mut base = Actabilities::default();
+    snapshot(&mut base, true, &[(5, 20000, 1)]);
+    base.apply(&ack);
+    apply(&mut base, ActabilityEvent::Requested(ActabilityCommand::Expand));
+    for event in [Event::Kicked { reason: 7, message: "test".into() }, Event::LeftWorld { target: 0 },
+        Event::Disconnected { message: "test".into() }, Event::CharacterSelected(Box::default())] {
+        let mut state = base.clone();
+        state.apply(&event);
+        assert!(!state.loaded && state.entries.is_empty() && state.pending.is_empty());
+        assert!(!state.resolve_downgrade_points(&ack, &[10000]));
+    }
+}
