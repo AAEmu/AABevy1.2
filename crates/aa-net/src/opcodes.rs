@@ -272,6 +272,7 @@ opcodes! {
         SCCombatClearedPacket = 0x086,
         SCCombatFirstHitPacket = 0x089,
         SCItemTaskSuccessPacket = 0x090,
+        SCItemDetailUpdatedPacket = 0x093,
         SCUnitEquipmentsChangedPacket = 0x094,
         SCSyncItemLifespanPacket = 0x098,
         SCScheduleItemSentPacket = 0x151,

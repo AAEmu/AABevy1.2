@@ -10,6 +10,52 @@
 use crate::model::{Item, ItemDetail};
 use crate::wire::{Reader, Result, WireError};
 
+/// Original SC093: a variable tagged detail prefix, not a padded128 wire field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemDetailUpdate {
+    pub item_id: u64,
+    pub container: u8,
+    pub slot: u8,
+    /// Includes tag. Original native reader consumes only tag for unknown kinds.
+    pub raw_detail: Vec<u8>,
+}
+
+impl ItemDetailUpdate {
+    fn payload_size(kind: u8) -> usize {
+        match kind { 1=>55, 2=>29, 3=>6, 4=>9, 5=>24, 6|7=>16, 8=>8, 9=>4, _=>0 }
+    }
+
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        let item_id=r.u64()?;
+        let container=r.u8()?;
+        let slot=r.u8()?;
+        let kind=r.u8()?;
+        let mut raw_detail=Vec::with_capacity(1+Self::payload_size(kind));
+        raw_detail.push(kind);
+        raw_detail.extend_from_slice(r.bytes(Self::payload_size(kind))?);
+        Ok(Self{item_id,container,slot,raw_detail})
+    }
+
+    /// Constructor-derived native union. Only the prefix was received; the original
+    /// SC093 factory explicitly zeros the entire128 before reading it.
+    pub fn native_detail_block(&self) -> Option<[u8;128]> {
+        let kind=*self.raw_detail.first()?;
+        if self.raw_detail.len()!=1+Self::payload_size(kind) {return None;}
+        let mut block=[0;128];
+        block[..self.raw_detail.len()].copy_from_slice(&self.raw_detail);
+        Some(block)
+    }
+
+    pub fn detail(&self) -> Option<ItemDetail> {
+        self.native_detail_block()?;
+        let kind=self.raw_detail[0];
+        if !matches!(kind,0|1|3) {return Some(ItemDetail::Other(kind));}
+        let mut reader=Reader::new(&self.raw_detail[1..]);
+        let detail=ItemDetail::read(&mut reader,kind).ok()?;
+        reader.is_empty().then_some(detail)
+    }
+}
+
 /// `SCSyncItemLifespan` metadata for an exact item identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ItemLifespan {
@@ -745,6 +791,22 @@ mod tests {
         assert_eq!(item.detail_payload.as_deref(),Some(&block[1..7]));assert_eq!(item.id,999);assert_eq!(item.template_id,9001);
         assert_eq!((item.create_time,item.lifespan_mins,item.made_unit_id,item.world_id,item.unsecure_time,item.unpack_time),(-7,-9,55,7,66,77));
         assert_eq!(ItemTask::read(&mut reader).unwrap(),ItemTask::Money(50));assert!(reader.is_empty());
+    }
+
+    #[test]
+    fn detail_update_original_codec_goldens_keep_fixed_native_tag_lengths() {
+        // Actual397b3840/3961edf0 read/write oracle, including fixed29 kind2.
+        for (kind,total) in [(0,11),(1,66),(2,40),(3,17),(4,20),(5,35),(6,27),(7,27),(8,19),(9,15),(10,11),(127,11),(128,11),(255,11)] {
+            let mut raw=vec![0x88,0x77,0x66,0x55,0x44,0x33,0x22,0x11,2,3,kind];
+            raw.extend((0..total-11).map(|n|((n*17+3)&255) as u8));
+            for n in 0..raw.len() {assert!(ItemDetailUpdate::read(&mut Reader::new(&raw[..n])).is_err(),"kind {kind} prefix {n}");}
+            let mut reader=Reader::new(&raw);let update=ItemDetailUpdate::read(&mut reader).unwrap();assert!(reader.is_empty());
+            assert_eq!(update.item_id,0x1122334455667788);assert_eq!((update.container,update.slot),(2,3));assert_eq!(update.raw_detail,&raw[10..]);
+            let block=update.native_detail_block().unwrap();assert_eq!(&block[..total-10],&raw[10..]);assert!(block[total-10..].iter().all(|x|*x==0));
+            assert!(update.detail().is_some());
+            let mut invalid=update.clone();invalid.raw_detail.push(0);assert!(invalid.native_detail_block().is_none());assert!(invalid.detail().is_none());
+        }
+        let empty=ItemDetailUpdate{item_id:0,container:2,slot:0,raw_detail:vec![]};assert!(empty.native_detail_block().is_none());
     }
 
 }

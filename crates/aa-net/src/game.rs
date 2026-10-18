@@ -513,6 +513,7 @@ pub enum ServerMsg {
     /// Item changes: loot, use, move, money ...
     ItemTasks(ItemTasks),
     ItemLifespan(crate::items::ItemLifespan),
+    ItemDetailUpdated(crate::items::ItemDetailUpdate),
     /// Items of a unit's equipment slots changed (`None` = unequipped).
     EquipmentChanged { obj_id: u32, items: Vec<(u8, Option<Item>)> },
     /// A container grew to `slots`.
@@ -717,6 +718,7 @@ impl ServerMsg {
             Self::ForceAttackSet { .. } => "SCForceAttackSet",
             Self::UnitInvisible { .. } => "SCUnitInvisible",
             Self::ItemLifespan(_) => "SCSyncItemLifespan",
+            Self::ItemDetailUpdated(_) => "SCItemDetailUpdated",
             Self::DoodadsCreated(_) => "SCDoodad(s)Created",
             Self::DoodadsRemoved(_) => "SCDoodad(s)Removed",
             Self::DoodadChanged { .. } => "SCDoodadChanged",
@@ -1028,6 +1030,7 @@ impl ServerMsg {
             sc::SCLoadInstancePacket => Self::LoadInstance(crate::world_msg::InstanceLoad::read(r)?),
             sc::SCBlinkUnitPacket => Self::BlinkUnit(crate::world_msg::BlinkUnit::read(r)?),
             sc::SCSyncItemLifespanPacket => Self::ItemLifespan(crate::items::ItemLifespan::read(r)?),
+            sc::SCItemDetailUpdatedPacket => Self::ItemDetailUpdated(crate::items::ItemDetailUpdate::read(r)?),
             sc::SCResponseUIDataPacket => Self::UiData(crate::ui_data::UiDataResponse::read(r)?),
             sc::SCEnvDamagePacket => Self::EnvDamage(crate::combat_status::EnvironmentDamage::read(r)?),
             sc::SCSetBreathPacket => Self::SetBreath { breath: r.u32()? },
@@ -2178,6 +2181,24 @@ mod tests {
         for n in 0..sent.len(){assert!(ServerMsg::decode(&game_frame(sc::SCScheduleItemSentPacket,&sent[..n])).is_err());}
         let mut batch=Writer::new();batch.u16(0).u16(sc::SCScheduleItemUpdatePacket).raw(&body).u16(0).u16(sc::SCScheduleItemSentPacket).raw(&sent).u16(0).u16(sc::SCBuffRemovedPacket).bc(9).u32(7);
         assert_eq!(ServerMsg::decode_batch(&batch.finish(),3),vec![expected,ServerMsg::ScheduleItemSent{schedule_type:u32::MAX,raw_by_mail:255},ServerMsg::BuffRemoved{obj_id:9,index:7}]);
+    }
+
+    #[test]
+    fn detail_updates_preserve_repeated_dd04_order_and_following_packet() {
+        let mut inner=Writer::new();
+        for kind in [1u8,2,255] {
+            inner.u16(0).u16(0x93).u64(123).u8(2).u8(3).u8(kind);
+            inner.raw(&vec![0;if kind==1 {55}else if kind==2 {29}else {0}]);
+        }
+        inner.u16(0).u16(0xa3).u16(7);
+        let mut frame=Writer::new();frame.u8(0xdd).u8(LEVEL_COMPRESSED).u16(3).raw(&stored(&inner.finish(),true));
+        let ServerMsg::Batch(messages)=ServerMsg::decode(&frame.finish()).unwrap() else {panic!()};assert_eq!(messages.len(),4);
+        for (m,kind) in messages[..3].iter().zip([1,2,255]) {assert!(matches!(m,ServerMsg::ItemDetailUpdated(u) if u.raw_detail[0]==kind &&u.item_id==123));}
+        assert_eq!(messages[3],ServerMsg::SkillEnded{tl:7});
+        let body=[0x7b,0,0,0,0,0,0,0,2,3,3,0xff,0xff,0xff,0xff,0xf2,0xfe];
+        for n in 0..body.len() {
+            let mut frame=Writer::new();frame.raw(&[0xdd,1,0,0]).u16(0x93).raw(&body[..n]);assert!(ServerMsg::decode(&frame.finish()).is_err());
+        }
     }
 
 }

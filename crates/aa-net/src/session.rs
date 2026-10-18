@@ -587,6 +587,7 @@ pub enum Event {
     BlinkUnit(crate::world_msg::BlinkUnit),
     /// Raw item timer metadata; does not change inventory contents or guess an expiry.
     ItemLifespan(crate::items::ItemLifespan),
+    ItemDetailUpdated(crate::items::ItemDetailUpdate),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
     Radar(crate::radar::RadarEvent),
@@ -854,6 +855,9 @@ impl Session {
             Event::InventoryChunk(chunk) if chunk.container==crate::items::container::INVENTORY => {
                 for offset in 0..chunk.items.len() {if let Ok(slot)=u8::try_from(chunk.first_slot()+offset){self.item_effect_known_bag.borrow_mut().insert(slot);}}
             }
+            // Explicit app safety: private legacy Inventory does not fold SC093.
+            // Retire only that BAG slot until an authoritative snapshot refresh.
+            Event::ItemDetailUpdated(update) if update.container==crate::items::container::INVENTORY => {self.item_effect_known_bag.borrow_mut().remove(&update.slot);}
             _=>{}
         }
 
@@ -1769,6 +1773,7 @@ impl Session {
             M::LoadInstance(e) => self.emit(Event::LoadInstance(e)),
             M::BlinkUnit(e) => self.emit(Event::BlinkUnit(e)),
             M::ItemLifespan(e) => self.emit(Event::ItemLifespan(e)),
+            M::ItemDetailUpdated(e) => self.emit(Event::ItemDetailUpdated(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
             M::Radar(e) => self.emit(Event::Radar(e)),
@@ -4917,6 +4922,23 @@ mod tests {
         session.game.as_mut().unwrap().shutdown().await;session.command(command()).await;let mut rejected=false;while let Ok(e)=events.try_recv(){if matches!(e,Event::ItemEffectRejected{..}){rejected=true;}assert!(!matches!(e,Event::ItemEffectRequested{..}));}assert!(rejected);
         let mut partial=chunk.clone();partial.truncated=true;session.emit(Event::InventoryChunk(partial));assert!(session.item_effect_known_bag.borrow().is_empty());
         for event in [Event::GameDecodeFailed{message:"loss".into()},Event::InventoryInit{bag_slots:2,bank_slots:0},Event::LeftWorld{target:0},Event::Disconnected{message:String::new()}] {session.emit(Event::InventoryChunk(chunk.clone()));session.emit(event);assert!(session.item_effect_known_bag.borrow().is_empty());}
+    }
+
+    #[tokio::test]
+    async fn detail_update_forwards_raw_duplicates_and_retires_only_target_bag_coverage() {
+        let(tx,mut events)=unbounded_channel();let mut session=Session::new(tx,ClientOptions::default());
+        let before=crate::model::Item{id:123,template_id:8001,..Default::default()};
+        let chunk=crate::items::InvenChunk{container:2,chunks:1,start_chunk:0,items:vec![Some(before.clone()),Some(before.clone())],truncated:false};session.emit(Event::InventoryChunk(chunk));while events.try_recv().is_ok(){}
+        let update=crate::items::ItemDetailUpdate{item_id:123,container:2,slot:0,raw_detail:vec![0]};
+        for _ in 0..2 {
+            session.game_msg(Ok(game::ServerMsg::ItemDetailUpdated(update.clone()))).await;
+            assert!(matches!(events.try_recv(),Ok(Event::ItemDetailUpdated(got)) if got==update));assert!(events.try_recv().is_err());
+        }
+        assert!(!session.item_effect_known_bag.borrow().contains(&0));assert!(session.item_effect_known_bag.borrow().contains(&1));
+        assert_eq!(session.received_inventory.borrow().bag,vec![Some(before.clone()),Some(before)]);
+        let mut foreign=update.clone();foreign.container=3;foreign.slot=1;session.game_msg(Ok(game::ServerMsg::ItemDetailUpdated(foreign.clone()))).await;
+        assert!(matches!(events.try_recv(),Ok(Event::ItemDetailUpdated(got)) if got==foreign));assert!(session.item_effect_known_bag.borrow().contains(&1));assert!(events.try_recv().is_err());
+        session.emit(Event::InventoryChunk(crate::items::InvenChunk{container:2,chunks:1,start_chunk:0,items:vec![None],truncated:false}));assert!(session.item_effect_known_bag.borrow().contains(&0));
     }
 
 }
