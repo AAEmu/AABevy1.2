@@ -190,9 +190,13 @@ is refused and the old one stays, as in the client: the tooltip scripts' `ResetS
 anchors every section below the second last one, itself included
 (`reference/ingame/tooltip_item` keeps the chain `PushSection` built).
 
-Drawing order: top-level widgets by UI layer (`SetUILayer`: background, game, hud, normal,
-dialog, tooltip, system), then creation / `Raise` order; children above their parent; inside a
+Drawing order: top-level widgets by UI layer (`SetUILayer`: background, game, normal, hud,
+questdirecting, dialog, tooltip, system), then creation / `Raise` order; children above their parent; inside a
 widget the drawable layers background, artwork, then the widget's own text, then overlay.
+The native names table at `39ac6a80` lists the reverse order (system index 0 through
+background index 7); hit testing at `392a8b65`–`392a8ba2` visits those buckets from 0 to 7,
+returning the first hit. In particular, the original shared combo dropdown's HUD layer must
+receive input above its normal-layer owner.
 
 ### Rendering
 
@@ -1028,54 +1032,53 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
 
 Per native class: methods implemented natively (including deliberate no-ops such as sounds and
 animations), methods present as logging stubs, and the client's total. Generated with
-`cargo run -p aa-ui --example ingame_hud -- --coverage`.
+`cargo run -p aa-ui --example native_listbox -- --coverage` (2026-10-17).
 
 | class | native | stub | listed |
 |---|---|---|---|
-| `button` | 87 | 41 | 128 |
-| `chatwindow` | 95 | 30 | 125 |
-| `checkbutton` | 91 | 41 | 132 |
-| `circlediagram` | 74 | 28 | 102 |
-| `cooldownactionbutton` | 90 | 42 | 132 |
-| `cooldownbutton` | 90 | 41 | 131 |
-| `cooldownconstantbutton` | 90 | 43 | 133 |
-| `cooldowninventorybutton` | 90 | 44 | 134 |
-| `damagedisplay` | 68 | 32 | 100 |
+| `button` | 90 | 38 | 128 |
+| `chatwindow` | 98 | 27 | 125 |
+| `checkbutton` | 94 | 38 | 132 |
+| `circlediagram` | 77 | 25 | 102 |
+| `cooldownactionbutton` | 93 | 39 | 132 |
+| `cooldownbutton` | 93 | 38 | 131 |
+| `cooldownconstantbutton` | 93 | 40 | 133 |
+| `cooldowninventorybutton` | 93 | 41 | 134 |
+| `damagedisplay` | 75 | 25 | 100 |
 | `drawable:color` | 15 | 9 | 24 |
-| `drawable:effect` | 19 | 29 | 48 |
+| `drawable:effect` | 39 | 9 | 48 |
 | `drawable:iconimage` | 20 | 9 | 29 |
-| `drawable:image` | 23 | 14 | 37 |
+| `drawable:image` | 24 | 13 | 37 |
 | `drawable:ninepart` | 18 | 10 | 28 |
 | `drawable:text` | 16 | 13 | 29 |
 | `drawable:threepart` | 18 | 9 | 27 |
-| `editbox` | 86 | 33 | 119 |
-| `editboxmultiline` | 77 | 30 | 107 |
-| `emptywidget` | 66 | 27 | 93 |
-| `folder` | 82 | 32 | 114 |
-| `gametooltip` | 74 | 33 | 107 |
-| `grid` | 91 | 57 | 148 |
-| `label` | 71 | 27 | 98 |
-| `listbox` | 72 | 66 | 138 |
-| `listctrl` | 78 | 31 | 109 |
-| `listctrlitem` | 99 | 1943 | 2042 |
-| `message` | 89 | 30 | 119 |
-| `modelview` | 66 | 93 | 159 |
-| `paintcolorpicker` | 107 | 1935 | 2042 |
-| `roadmap` | 74 | 66 | 140 |
-| `slider` | 80 | 29 | 109 |
-| `slot` | 78 | 28 | 106 |
-| `statusbar` | 73 | 29 | 102 |
-| `tab` | 79 | 27 | 106 |
-| `textbox` | 74 | 30 | 104 |
-| `uiparent` | 20 | 15 | 35 |
-| `webbrowser` | 70 | 55 | 125 |
-| `window` | 74 | 41 | 115 |
-| `worldmap` | 155 | 1890 | 2045 |
+| `editbox` | 92 | 27 | 119 |
+| `editboxmultiline` | 80 | 27 | 107 |
+| `emptywidget` | 69 | 24 | 93 |
+| `folder` | 85 | 29 | 114 |
+| `gametooltip` | 81 | 26 | 107 |
+| `grid` | 94 | 54 | 148 |
+| `label` | 74 | 24 | 98 |
+| `listbox` | 99 | 39 | 138 |
+| `listctrl` | 81 | 28 | 109 |
+| `listctrlitem` | 102 | 1940 | 2042 |
+| `message` | 92 | 27 | 119 |
+| `modelview` | 69 | 90 | 159 |
+| `paintcolorpicker` | 110 | 1932 | 2042 |
+| `roadmap` | 79 | 61 | 140 |
+| `slider` | 83 | 26 | 109 |
+| `slot` | 81 | 25 | 106 |
+| `statusbar` | 76 | 26 | 102 |
+| `tab` | 82 | 24 | 106 |
+| `textbox` | 77 | 27 | 104 |
+| `uiparent` | 21 | 14 | 35 |
+| `webbrowser` | 73 | 52 | 125 |
+| `window` | 77 | 38 | 115 |
+| `worldmap` | 158 | 1887 | 2045 |
 
 `paintcolorpicker`, `worldmap` and `listctrlitem` are not in the capture's class list, so they
 get our natives plus a stub for every method name any class has. Toolkit stubs the login
-screens still call (with the fake game API): `listbox` item colours (`SetDefaultItemTextColor`,
-`SetOveredItemColor`, ...), `emptywidget:EnableScroll` / `ChangeChildAnchorByScrollValue`,
+screens still call (with the fake game API): `emptywidget:EnableScroll` / `ChangeChildAnchorByScrollValue`,
 `button:IgnoreInputOnFading`, and the
 `gametooltip` section natives when a tooltip shows.
 
@@ -1400,3 +1403,62 @@ remain unconfirmed; world sizes should not be guessed from the atlas dimensions.
 
 Targeted read-only extracts: `data/extract/aa-ui/overhead-native.txt`,
 `overhead-marker-native.txt`; decoded asset preview `data/extract/aa-ui/markers/overhead_mark.png`.
+
+## Native flat listbox core
+
+`lua/listbox.rs` implements the flat native row path used by original Options and shared
+combo dropdowns. `AppendItem(text,value)` and its explicit RGBA overload store rows;
+`ClearItem`, `ItemCount`, `GetOpenedItemCount`, selection getters, `Select`,
+`InitializeSelect`, `ClearAllSelected`, row colors, text limits and top-row scrolling are
+native operations. Row data lives on the widget, participates in ordinary teardown, and
+repaints only when the resulting row/hover/style state changes. There is no listbox tick.
+
+Indices are zero-based with initial selection -1. The original `baselib/list.alb` wrapper
+adds one for its combo API. Programmatic `Select` notifies `OnSelChanged` only when the stored
+index changes, which prevents the original slider-list handler's same-index `Select` from
+recursing. A valid mouse click first runs authored `OnClick`, then updates selection and
+always calls `OnSelChanged`, including a click on the selected row. Callbacks may clear the
+row storage. `InitializeSelect` always notifies for a valid row and does not clear prior
+flags. Native `ClearAllSelected` clears flags but preserves the selected index in normal
+mode; consequently `GetSelectedValue` scans selected flags while `GetSelectedText` uses the
+stored index. No selected value/text returns zero Lua values; value -1 is also the native
+no-value sentinel. A high invalid `Select` clears flags while preserving the stored index;
+negative indices are accepted without selecting a row.
+
+Listbox `SetHeight` overrides the widget method: it sets nonnegative row padding, leaving
+widget extent unchanged. `GetHeight` returns font line height plus padding. View count rounds
+the inset-adjusted viewport height to the nearest row, `GetMaxTop` clamps the row count minus
+view count to zero, `SetTop` clamps to that maximum, and `ScrollUp`/`ScrollDown` move one row.
+Scrolling changes hover and painting without emitting a selection event. Row painting uses
+authored insets plus the native extra 5-unit text inset, clips to the row viewport, and
+supports default/hover/selected backgrounds and text colors. `UseConsistentTextColor(false)`
+uses each row's stored append-time color. `SetTextLimit(n)` affects subsequent appends:
+overlong text becomes its first n-1 scalars followed by literal `...`, within the native
+511-scalar storage limit.
+
+Source evidence in the unpacked 1.2 image: registration `39245ba0`, append overloads
+`39243ec0` and row storage `392a3420`, selection `392a10a0`, mouse dispatch `392a22a0`,
+selected-value scan `392a0020`, clear `392a2ae0`, row height `392a00c0` / `3929f5d0`, rounded
+view count `392a0210`, clamped top `392a1d30`, and row renderer `392a0d78`. Native defaults are
+white text; transparent gray normal backing and gray hover/selected backing at alpha 0.5.
+
+The bounded slice leaves tree rows (`SetItemTrees` / `GetViewItemsInfo`), icon append
+overloads, state textures/borders and row tooltips as explicit gaps. Flat
+`GetOpenedItemCount` equals row count. The native selected-text getter also converts through
+a 512-byte UTF-8 output buffer; its overflow policy is not reproduced by the current getter.
+Crafting category hierarchy therefore still needs a separate recovered tree contract.
+
+`tests/listbox.rs` covers native indexing and return counts, event order/reentrancy, repeated
+selection without repaint, row metrics, scroll limits, clipping and colors. Original World
+stage bytecode tests exercise shared dropdown open/select/reopen, repeated selected-row
+clicks, cleanup and wheel scrolling, plus the actual Options resolution control's mouse
+selection and original `Save` method.
+
+`examples/native_listbox.rs` uses `aa_dev` and the original World/Options bytecode, opening
+the resolution list through pointer input. `shots/aa-ui/native-listbox.png` was inspected
+against `reference/ingame/options_keybinds/real.png` for the shared Options art, placement,
+menu and type scale; there is no dedicated resolution-dropdown reference. The ten-row
+viewport with four choices follows the original option combo's fixed `limitItemCount=10`.
+The repeat capture logged 425–438 FPS and zero script errors and closed itself. Full
+`cargo test -p aa-ui` passed 167 runtime tests and 2 doctests (1 existing ignored font-metrics
+test); the final exact-i32 and unchanged-hover changes passed all 6 listbox tests again.

@@ -135,6 +135,10 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
             crate::lua::tooltip::quads(u, id, rect, alpha, scale, &mut out);
         } else if w.class == "damagedisplay" {
             crate::lua::damage::quads(u, id, &w, alpha, scale, &mut out);
+        } else if let Some(d) = w.listbox.as_ref() {
+            if let Some(t) = w.text.as_ref() {
+                crate::lua::listbox::quads(u, id, d, t, alpha, scale, &mut out);
+            }
         } else if let Some(t) = w.text.as_ref() {
             // Widget text above background/artwork, below overlay.
             let edit = crate::lua::edit::is_edit(&w.ty);
