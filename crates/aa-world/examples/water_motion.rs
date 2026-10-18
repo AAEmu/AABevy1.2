@@ -25,6 +25,9 @@ struct Fixture {
     soft_control: bool,
     normals: bool,
     old_normals: bool,
+    cubes: bool,
+    old_cube: bool,
+    grazing: bool,
     unload: bool,
     moved: bool,
     done: bool,
@@ -75,6 +78,9 @@ fn main() {
                 soft_control: flag("--legacy-soft"),
                 normals: flag("--normal-stages") || flag("--legacy-normals"),
                 old_normals: flag("--legacy-normals"),
+                cubes: flag("--cube") || flag("--legacy-cube"),
+                old_cube: flag("--legacy-cube"),
+                grazing: flag("--grazing"),
                 unload: flag("--unload-check"),
                 ..default()
             })
@@ -264,6 +270,13 @@ fn world_camera(
         };
         let yaw = yaw.to_radians();
         (p, p + Vec3::new(-yaw.sin(), yaw.cos(), 0.0), 1.24354708)
+    } else if fixture.grazing {
+        // Original pond polygon/UV/terrain audit: 77 wet receiver rays below the horizon.
+        let camera = Vec3::new(15549.375,15380.0,127.75);
+        let target = Vec3::new(15575.375,15366.0,127.0);
+        assert!(terrain.height_at(camera.x,camera.y).unwrap()<127.0);
+        assert_eq!(water.water_at(camera).unwrap().0,127.0);
+        (camera,target,55.0_f32.to_radians())
     } else if fixture.shore {
         // Pick an actual shallow pond point from original terrain and volume data.
         let anchor = Vec2::new(15564.0, 15346.0);
@@ -343,7 +356,7 @@ fn world_check(
             let count = mesh.count_vertices();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; count]);
         }
-        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals)
+        if (fixture.legacy || fixture.shore || fixture.soft_control || fixture.normals || fixture.cubes)
             && time.elapsed_secs() > 8.0
             && !fixture.controls.values().any(|h| h.id() == material.id())
         {
@@ -364,6 +377,13 @@ fn world_check(
                 if fixture.normals {
                     control.params.motion.z = 0.0;
                     control.params.motion.w = if fixture.old_normals { -2.0 } else { 0.0 };
+                }
+                if fixture.cubes {
+                    assert_eq!(control.params.motion.x,aa_world::water_material::AUTHORED_WATER_CUBE);
+                    control.params.motion.z = 0.0;
+                    if fixture.old_cube {
+                        control.params.motion.x = aa_world::water_material::AUTHORED_WATER_UV;
+                    }
                 }
                 let original = material.id();
                 let handle = materials.add(control);

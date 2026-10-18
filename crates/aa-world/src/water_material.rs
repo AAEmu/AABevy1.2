@@ -28,6 +28,11 @@ use crate::post::PostUniform;
 use crate::sky::{AtmosphereTuning, Environment, view_exposure};
 use crate::water::WaterStyle;
 
+/// `WaterParams.motion.x`: authored UV/raw-bump path with the existing reflection fallback.
+pub const AUTHORED_WATER_UV: f32 = 1.0;
+/// Authored UV plus source-qualified, successfully loaded static environment cube.
+pub const AUTHORED_WATER_CUBE: f32 = 2.0;
+
 /// Uniform of `water.wesl` (see the shader for the meaning of the fields).
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct WaterParams {
@@ -136,6 +141,14 @@ struct StyleBase {
     sea: bool,
     native_uv: bool,
     no_flow: bool,
+    native_cube: bool,
+}
+
+fn static_cube_candidate(material: &aa_cry::material::Material) -> bool {
+    material.shader.eq_ignore_ascii_case("WaterSurface")
+        && material.gen_mask & 0x85 == 0x5 // BUMP_MAP + ENVIRONMENT_MAP; no REALTIME_REFLECTIONS.
+        && material.texture(&aa_cry::material::TextureMap::Environment)
+            .is_some_and(|t| !t.pak_path().is_empty())
 }
 
 impl StyleBase {
@@ -160,6 +173,7 @@ impl StyleBase {
             sea: false,
             native_uv: false,
             no_flow: false,
+            native_cube: false,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -183,6 +197,7 @@ impl StyleBase {
         };
         base.native_uv = mtl.shader.eq_ignore_ascii_case("WaterSurface") && mtl.gen_mask & 1 != 0;
         base.no_flow = base.native_uv && mtl.gen_mask & 0x200 != 0;
+        base.native_cube = static_cube_candidate(&mtl);
         let param = |name: &str, default: f32| mtl.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         base.sun_multiplier = param("SunMultiplier", base.sun_multiplier);
         base.shine = param("SunShinePow", base.shine).max(1.0);
@@ -210,6 +225,12 @@ impl StyleBase {
         }
         (base, normal_map)
     }
+
+    fn motion_mode(&self) -> f32 {
+        if self.native_cube { AUTHORED_WATER_CUBE }
+        else if self.native_uv { AUTHORED_WATER_UV }
+        else { 0.0 }
+    }
 }
 
 const DEFAULT_NORMAL_MAP: &str = "textures/defaults/oceanwaves_ddn.dds";
@@ -226,22 +247,23 @@ pub struct WaterStyles {
     bases: Vec<(Handle<WaterMaterial>, StyleBase)>,
     normal_maps: HashMap<String, Option<Handle<Image>>>,
     foam_map: Option<Option<Handle<Image>>>,
-    env_maps: HashMap<String, Option<Handle<Image>>>,
+    // Image plus whether the authored source itself loaded as a cube (not the fallback).
+    env_maps: HashMap<String, Option<(Handle<Image>, bool)>>,
 }
 
 /// A cube map from the pak (the default one when the file is missing or not a cube map).
-fn load_cube(path: &str, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+fn load_cube(path: &str, images: &mut Assets<Image>) -> Option<(Handle<Image>, bool)> {
     let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat: false };
     let is_cube = |i: &Image| i.texture_view_descriptor.as_ref().is_some_and(|d| d.dimension == Some(TextureViewDimension::Cube));
     match aa_cry::texture::load_dds_from_pak(path, opts) {
-        Ok(image) if is_cube(&image) => return Some(images.add(image)),
+        Ok(image) if is_cube(&image) => return Some((images.add(image), true)),
         Ok(_) => warn!("aa-world: water environment map {path} is not a cube map"),
         Err(e) => warn!("aa-world: water environment map {path}: {e}"),
     }
     if path == DEFAULT_ENV_MAP {
         return None;
     }
-    aa_cry::texture::load_dds_from_pak(DEFAULT_ENV_MAP, opts).ok().filter(is_cube).map(|i| images.add(i))
+    aa_cry::texture::load_dds_from_pak(DEFAULT_ENV_MAP, opts).ok().filter(is_cube).map(|i| (images.add(i), false))
 }
 
 impl WaterStyles {
@@ -255,7 +277,7 @@ impl WaterStyles {
         if let Some(h) = self.materials.get(style) {
             return h.clone();
         }
-        let (base, normal_path) = StyleBase::of(style);
+        let (mut base, normal_path) = StyleBase::of(style);
         let normal_map = self
             .normal_maps
             .entry(if base.native_uv {format!("@raw:{normal_path}")} else {normal_path.clone()})
@@ -291,8 +313,10 @@ impl WaterStyles {
                 }
             })
             .clone();
-        let env_map = self.env_maps.entry(base.env_map.clone()).or_insert_with(|| load_cube(&base.env_map, images)).clone();
-        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(if base.native_uv {1.0}else{0.0},if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
+        let cube = self.env_maps.entry(base.env_map.clone()).or_insert_with(|| load_cube(&base.env_map, images)).clone();
+        base.native_cube &= cube.as_ref().is_some_and(|(_, authored)| *authored);
+        let env_map = cube.map(|(image, _)| image);
+        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
         let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map });
         self.materials.insert(style.clone(), handle.clone());
         self.bases.push((handle.clone(), base));
@@ -377,7 +401,7 @@ pub fn update_water(
             foam: Vec4::new(base.foam_reach, base.speed, 0.0, 0.0),
             foam_col: foam.extend(0.0),
             env_lit: foam_light.extend(cube),
-            motion: Vec4::new(if base.native_uv {1.0}else{0.0},if base.no_flow {1.0}else{0.0},-1.0,0.0),
+            motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0),
         };
         let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
         if !unchanged && let Some(mut m) = materials.get_mut(handle) {
@@ -389,6 +413,29 @@ pub fn update_water(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_authored_cubes_require_flags_and_successful_source_load() {
+        if !crate::pak_available() { return }
+        let mut m = aa_cry::material::Material::load("materials/ocean/lake_tank.mtl").unwrap();
+        assert!(static_cube_candidate(&m));
+        m.gen_mask |= 0x80;
+        assert!(!static_cube_candidate(&m), "realtime reflection is a different source branch");
+        m.gen_mask &= !0x84;
+        assert!(!static_cube_candidate(&m), "no authored environment map feature");
+        let mut images = Assets::<Image>::default();
+        let (original, authored) = load_cube(DEFAULT_ENV_MAP, &mut images).unwrap();
+        assert!(authored);
+        let image = images.get(&original).unwrap();
+        assert_eq!(image.texture_descriptor.size.depth_or_array_layers, 6);
+        assert_eq!(image.texture_descriptor.mip_level_count, 9);
+        let (_, authored) = load_cube("textures/cubemaps/missing_world_test.dds", &mut images).unwrap();
+        assert!(!authored, "fallback cubes retain their previous direction path");
+        let (mut base, _) = StyleBase::of(&WaterStyle::new("materials/ocean/lake_tank",2,[0.0;3],0.2));
+        assert_eq!(base.motion_mode(), AUTHORED_WATER_CUBE);
+        base.native_cube = false;
+        assert_eq!(base.motion_mode(), AUTHORED_WATER_UV);
+    }
 
     #[test]
     fn original_watersurface_no_flow_is_a_material_flag_not_the_volume_kind() {

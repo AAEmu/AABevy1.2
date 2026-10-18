@@ -3900,6 +3900,73 @@ inherited patch/hash baseline and numeric/scene evidence. Only owned water hunks
 are committed; the inherited cube LOD hunk bodies and the other four calibration
 file hashes remain unchanged.
 
+### Native static water cubemap directions
+
+Original `watersurface.cfx`424-439 constructs the reflected **Cry-space** vector
+and passes it directly to `texCUBE(envMapSamplerCUBE, vReflect)`. It never folds
+negative Z upward. The previous renderer took `abs` of reflected Bevy Y before
+sampling the cube, mirroring below-horizon rays into the upper hemisphere. The
+static authored cube path now retains the signed vector and maps it back through
+`(bevy.x,-bevy.z,bevy.y)`. Analytic sky, the optional screen-space reflection path,
+the sea and unqualified/fallback materials keep their previous folded vector.
+
+Qualification is strict: ordinary WaterSurface, BUMP_MAP **0x1** and
+ENVIRONMENT_MAP **0x4**, no REALTIME_REFLECTIONS **0x80**, a nonempty authored
+environment slot, and that source must actually load as a cubemap. The existing
+cache now retains an authored/fallback boolean alongside each image handle.
+Missing/non-cube sources that use the existing fallback do not qualify. Named
+`AUTHORED_WATER_UV=1` and `AUTHORED_WATER_CUBE=2` discriminate the paths in the
+existing `motion.x`; both retain authored UV/raw-normal/endpoint behavior. Uniform
+size, bindings, images, cache lifetime and per-frame CPU work are unchanged.
+There is one cube sample, with the existing color space, LOD, lighting and gain
+operations. The optional SSR path deliberately retains the previous cube fallback.
+
+Original `camera_river_cubemap.dds` is 256x256 BC1, nine mips, six complete faces
+(`caps2=0xFE00`, 262352 bytes). aa-cry retains its face/mip blocks without rotation.
+The [DDS face order](https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-file-layout-for-cubic-environment-maps)
+and [D3D11 face indices](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_texturecube_face)
+match [WebGPU's cube view convention](https://gpuweb.github.io/gpuweb/#enumdef-gputextureviewdimension):
+positive/negative X, Y, Z. The independent CPU control uses the standard major-axis
+face/UV mapping, with probes away from ties and seamless edge taps.
+
+An original-asset audit uses the cell(15,15) lake_tank eight-point polygon, its
+first-point-relative .03/.02 UVs, raw ATI2 NO_FLOW input at time0, and the original
+terrain. Camera Cry(15549.375,15380,127.75) has ground126.672836 under water127.
+Of 434 valid wet receiver samples, 77 rays at distances25-60 m point below the
+horizon in the mip0 control. One example is Cry(.879247,-.473445,-.052674).
+This is actual authored geometry/material input, not a hypothetical flipped sky.
+The analytic audit is not a count of native-client screenshot pixels or a claim
+that implicit mip filtering leaves every one of those rays unchanged.
+
+The aa-dev `water_reflections` fixture compares the production cube sampler
+against decoded original per-face bilinear texels at LOD0/2: all six face axes,
+six original negative receiver rays and their positive controls. All **36 native
+and 36 folded controls** pass within one display byte. The four existing 1920
+sea composite controls pass and the whole sea image remains pixel-identical to
+the pre-normal/cube milestone capture (maximum zero). Numeric captures in
+`shots/aa-world/water_reflections/` log **385-440 FPS** native, **410-432** folded.
+The full world suite passes **223 tests**, nine existing optional ignored;
+source gates, original cube layout and fallback cache qualification are checked.
+
+`water_motion --world --grazing --cube` / `--legacy-cube` use the proved camera,
+target(15575.375,15366,127), original shader inputs frozen at time0, and unchanged
+lighting. Inspected on/off captures are clear but the rendered change is small:
+ROI [240,320,1090,620] mean absolute channel difference .0138, .116% of pixels
+above three values, maximum43. No larger visual improvement or native screenshot
+match is claimed; numeric cube directions and source gates prove the correction.
+Native logs **187-225 FPS**, folded **191-232**. The fixture verifies the real
+streamed material is qualified, one mesh/eight vertices, no failed/pending models.
+Moving away releases its water entities and mesh assets; the existing shared
+style/image cache lifetime remains. All six final runs self-close without errors.
+
+Ignored `roads/water-cube-audit/` retains the original geometry/ray and face
+evidence, primary API references, captures/logs and separately archived pre-edit
+water/material files. Both inherited calibration patches retain their exact
+added/removed payload and operation semantics; nearby owned context may move.
+Only owned cached patches are staged for those two files. The other three
+calibration file hashes remain exact. Native refraction, full pass/lighting
+composition and cubemap/visarea confinement remain open.
+
 ### Native river endpoint opacity and counted outlines
 
 Exact `_LoadWaterVolume` **301F6AB0** reads byte40 bits2/4, equivalently
