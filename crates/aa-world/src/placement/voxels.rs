@@ -39,8 +39,9 @@ impl PlacedVoxel {
     /// detail layers are not included. Colour alpha is the native per-vertex baked-colour flag;
     /// zero requires the cell's terrain-cover texture, and it interpolates across mixed triangles.
     pub fn compiled_base_mesh(&self) -> Option<aa_cry::mesh::MeshData> {
-        base_mesh(self)
+        base_mesh(self).map(|(mesh, _)| mesh)
     }
+    pub(crate) fn compiled_surface_mesh(&self) -> Option<(aa_cry::mesh::MeshData, Vec<u8>)> { base_mesh(self) }
     pub fn mat4(&self) -> Mat4 {
         let m = self.matrix;
         Mat4::from_cols_array(&[
@@ -171,7 +172,7 @@ fn base_colour(colour: [u8; 4], extra: [u8; 4]) -> [u8; 4] {
     [colour[0], colour[2], extra[2], if colour[1] >= 128 { 255 } else { 0 }]
 }
 
-fn base_mesh(voxel: &PlacedVoxel) -> Option<aa_cry::mesh::MeshData> {
+fn base_mesh(voxel: &PlacedVoxel) -> Option<(aa_cry::mesh::MeshData, Vec<u8>)> {
     let transform = voxel.mat4();
     if !transform.is_finite() || transform.determinant().abs() < 1e-9 {
         return None;
@@ -203,10 +204,11 @@ fn base_mesh(voxel: &PlacedVoxel) -> Option<aa_cry::mesh::MeshData> {
         return None;
     }
     let colours = extra.data.get(24..24 + count * 4)?.as_chunks::<4>().0;
+    let surfaces = mesh.colors.iter().map(|c| c[1] & 0x7f).collect();
     for (colour, &extra) in mesh.colors.iter_mut().zip(colours) {
         *colour = base_colour(*colour, extra);
     }
-    Some(mesh)
+    Some((mesh, surfaces))
 }
 
 /// Native 301A0790 physicalizes the first compiled LOD through 3019BFA0. Supported

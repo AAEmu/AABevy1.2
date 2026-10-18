@@ -4,7 +4,9 @@
 
 use std::collections::HashSet;
 
-use aa_world::objects::voxels::{VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelSurface};
+use aa_world::objects::voxels::{
+    VoxelDetail, VoxelExtension, VoxelMaterial, VoxelMaterialPlugin, VoxelSurface,
+};
 use aa_world::{AaWorldPlugin, WorldClock, WorldConfig, cry_to_bevy};
 use bevy::asset::AssetId;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -19,6 +21,7 @@ struct Fixture {
     verified: bool,
     ray_checked: bool,
     exterior: bool,
+    detail_off: bool,
     meshes: HashSet<AssetId<Mesh>>,
     materials: HashSet<AssetId<VoxelMaterial>>,
     images: HashSet<AssetId<Image>>,
@@ -53,6 +56,7 @@ fn main() {
                 off: flag("--off"),
                 unload: flag("--unload-check"),
                 exterior: flag("--exterior"),
+                detail_off: flag("--detail-off"),
                 ..default()
             })
             .add_systems(Startup, world_camera)
@@ -108,6 +112,15 @@ fn verify(
         &mut Visibility,
     )>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
+    mut details: Query<
+        (
+            &VoxelDetail,
+            &Mesh3d,
+            &MeshMaterial3d<VoxelMaterial>,
+            &mut Visibility,
+        ),
+        Without<VoxelSurface>,
+    >,
     meshes: Res<Assets<Mesh>>,
     materials: Res<Assets<VoxelMaterial>>,
     images: Res<Assets<Image>>,
@@ -125,13 +138,40 @@ fn verify(
             *visibility = Visibility::Hidden;
         }
     }
+    for (_, mesh, material, mut visibility) in &mut details {
+        fixture.meshes.insert(mesh.id());
+        fixture.materials.insert(material.id());
+        if let Some(material) = materials.get(material.id()) {
+            for image in [&material.extension.cover, &material.extension.diffuse]
+                .into_iter()
+                .flatten()
+            {
+                fixture.images.insert(image.id());
+            }
+        }
+        if fixture.off || fixture.detail_off {
+            *visibility = Visibility::Hidden;
+        }
+    }
     if fixture.exterior
         && !fixture.ray_checked
         && surfaces.iter().filter(|(v, ..)| v.cell == (21, 8)).count() == 2
     {
-        let target_materials: HashSet<_> = surfaces.iter().filter(|(v, ..)| v.cell == (21,8)).map(|(_,_,m,_)| m.id()).collect();
+        let target_materials: HashSet<_> = surfaces
+            .iter()
+            .filter(|(v, ..)| v.cell == (21, 8))
+            .map(|(_, _, m, _)| m.id())
+            .collect();
         assert_eq!(target_materials.len(), 1, "shared native cover material");
-        assert!(materials.get(*target_materials.iter().next().unwrap()).unwrap().extension.cover.is_some(), "original cover tile");
+        assert!(
+            materials
+                .get(*target_materials.iter().next().unwrap())
+                .unwrap()
+                .extension
+                .cover
+                .is_some(),
+            "original cover tile"
+        );
         fixture.ray_checked = true;
         info!("original neighbour meshes share one original cover tile/material");
     }
@@ -154,14 +194,16 @@ fn verify(
     if time.elapsed_secs() > fixture.last + 2.0 {
         fixture.last = time.elapsed_secs();
         info!(
-            "voxel base: meshes={} triangles={} unsupported={} captured_mesh_assets={} captured_material_assets={} models_pending={} failed={}",
+            "voxel base: meshes={} triangles={} unsupported={} captured_mesh_assets={} captured_material_assets={} models_pending={} failed={} layers={} layer_unsupported={}",
             objects.stats.voxels,
             objects.stats.voxel_triangles,
             objects.stats.voxels_unsupported,
             fixture.meshes.len(),
             fixture.materials.len(),
             objects.stats.models_pending,
-            objects.stats.models_failed
+            objects.stats.models_failed,
+            objects.stats.voxel_layers,
+            objects.stats.voxel_layers_unsupported,
         );
     }
     if fixture.unload && !fixture.moved && time.elapsed_secs() > 12.0 {
@@ -187,6 +229,7 @@ fn verify(
                 .all(|id| materials.get(*id).is_none())
         );
         assert!(fixture.images.iter().all(|id| images.get(*id).is_none()));
+        assert_eq!(details.iter().count(), 0);
         assert_eq!((collision.stats().cells, collision.stats().loading), (0, 0));
         info!(
             "voxel base unload PASSED: entities/cell collision/jobs/owned mesh+material+cover assets = 0"
