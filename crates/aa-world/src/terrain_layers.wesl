@@ -128,15 +128,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     var albedo = cover;
     var normal = n_in;
-    if fade > 0.001 {
+    if fade > 0.0 {
         for (var k = 0; k < 4; k++) {
             let wt = weights[k];
             if wt < 0.002 {
                 continue;
             }
             for (var p = 0; p < 3; p++) {
-                // the engine blends each layer pass with sqrt(weight) to hide the seams between layers
-                let w = sqrt(saturate(wt * axis[p])) * fade;
+                // TerrainLayerVS puts fade in Color.g; the fragment takes its sqrt (terrain.cfx453/614).
+                let w = sqrt(saturate(wt * axis[p] * fade));
                 if w < 0.004 {
                     continue;
                 }

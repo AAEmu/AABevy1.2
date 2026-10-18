@@ -1273,6 +1273,74 @@ minimum: `tex2DTerrain` (see the cover texel encoding) is the whole decode, the 
 A very dark cover (luma 0.11 to 0.16 in the court yard, decoded) is right: the floor looks pale in the capture because of the lighting.
 Re-fit the tint when the lighting calibration (`sun_lux_scale`, `ambient_scale`, the `ambient_*` tuning) changes.
 
+#### Native heightmap layer distance fade
+
+The original `shaders/hwscripts/cryfx/terrain.cfx` proves distance fade belongs
+inside the layer-alpha square root. `TerrainLayerVS` lines 419-453 computes
+surface/projection weight, multiplies by `1-min(distance/max(0.001,D),1)^4`
+and writes that to `Color.g`; `frag_custom_begin` lines 614/622 takes
+`sqrt(saturate(Color.g))*AmbientOpPB.a`. The old heightmap approximation used
+`sqrt(surface*axis)*fade`, fading detail too strongly at distance. The correction
+uses `sqrt(saturate(surface*axis*fade))` for the existing diffuse and normal blend.
+For full surface/axis weight, at half range native alpha is 0.9682458 rather than
+0.9375; at 0.8 range it is 0.7683749 rather than 0.5904. No brightness/material
+constant, texture input, array allocation or draw count changes.
+
+The existing `fade>0.001` early exit would also discard native alpha up to about
+0.0316 near the limit. It now exits only at zero; existing tiny surface/combined
+weight cutoffs, per-pixel distance and bilinear surface/soft-axis approximations
+remain explicit. Native fade is calculated per vertex and interpolated before
+sqrt; reproducing the full native terrain LOD/weight stream remains a separate
+scope. Voxel detail already follows its proved vertex fade/sqrt order and is
+unchanged. `TerrainMaterialPlugin` exposes the same existing shader registration
+for the standalone fixture; ordinary world setup uses it automatically.
+
+The preceding bounded size-filter audit inspected original cell material tables
+in main_world(15,15),(12,14),(10,10),(21,8),(20,8),(9,12),(9,14),(6,17): 70 unique
+materials and 153 diffuse/normal/detail DDS inputs. None falls outside the current
+size/square filters. One original material is missing:
+`materials/aa_terrain/mix/tr_mix_di_gr_401a`, cell(20,8), slot 14. The size
+filters remain unchanged; no replacement texture or material is invented.
+Ignored `data/extract/aa-world/terrain/small-texture-survey.json` and
+`native-fade-proof.txt` retain that audit and source lines (shader SHA256
+`e83a8db0f0b89c41feb495d58570c4fdebdf7892d8768704f8a42a3bea384678`).
+
+Validation uses the full production `TerrainMaterial` shader via the aa-dev
+`terrain_fade` example. The saved old executable's `--legacy` CPU oracle passes
+15 GPU cases; the corrected executable passes 15 native cases (30 total,
+maximum display-RGB error 1). Weights 1/.5/.25 and d/D 0/.5/.8/.9999/1.1 exercise
+full/partial surface weight, zero/full fade and the near-cutoff contribution.
+For full weight at 0.8D, old RGB [215,85,97] becomes native [234,64,84]; just inside
+the cutoff old [129,129,129] becomes [133,128,128], while outside remains neutral.
+The expectations independently reconstruct raw cover decoding, layer offset,
+linear blending and display conversion; unchanged spatial projection is held
+constant. `shots/aa-world/terrain_fade/{legacy,native}_numeric.png` are inspected
+(308-359 FPS legacy, 225-260 FPS native, shared load). `--legacy` is only an oracle
+for the saved old build, not a production visual mode.
+
+Original `--world` uses cell(12,14), target Cry(12812.47,14575.70,158.27849),
+camera 800 m above at 45 degree FOV, hour 10, unchanged atmosphere/terrain material
+settings. Objects are disabled in both images to isolate the original terrain.
+Inspected `original_legacy_fade.png` / `original_native_fade.png` contain the same
+six cells/96 patches, no pending cell loads. Distant detail retains more contrast:
+whole-image mean absolute RGB difference 0.733, 12.7% of pixels differ by more than 2
+in one channel, mean signed RGB+[0.179,0.173,0.140]; mean adjacent-pixel gradient
+rises 1.173 to 1.360 (about 16%). The cliff patch (1180,80)-(1820,810) rises 1.708 to 1.999.
+This is the original shader's blend-order change, with no global light/color
+adjustment. Settled native 177-201 FPS, old 193-231 FPS on the shared machine; the
+runs do not constitute a controlled performance comparison. No matching real-client
+aerial camera exists in `reference`; the existing heightmap/terrain-lighting,
+spatial weight/projection and high-altitude fog approximations remain explicit.
+
+`--world --unload-check --shot-after 24` records all 96 terrain patch ids, moves
+out at 16 s and asserts all ids gone, zero cells/patches and no pending loads at 21 s
+(`original_unload.png`, inspected). No arrays, uniforms, instances or workers are
+added by the production math correction; existing world library/cache lifetime
+and streaming budgets remain. All five fixture runs close with exit 0 and no
+shader/GPU errors. The nine existing terrain-layer tests and
+`cargo check -p aa-world --examples` pass; inherited fly/post/sky/water
+calibration hunks are untouched.
+
 ### Objects (`objects.rs`, `placement.rs`)
 
 Placement files are parsed on the `aa_cry::workers` threads (max 2 cells in flight, ahead of the models in the queue) and binned per 64 m sector. Models are prepared (parsed, textures

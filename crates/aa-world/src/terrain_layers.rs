@@ -778,10 +778,18 @@ impl TerrainLayers {
     }
 }
 
+/// The terrain material alone, also usable by controlled render fixtures.
+pub struct TerrainMaterialPlugin;
+impl Plugin for TerrainMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "terrain_layers.wesl");
+        app.add_plugins(MaterialPlugin::<TerrainMaterial>::default());
+    }
+}
+
 /// Registers the terrain material and starts building the library of the world.
 pub fn build(app: &mut App, cfg: &WorldConfig) {
-    embedded_asset!(app, "terrain_layers.wesl");
-    app.add_plugins(MaterialPlugin::<TerrainMaterial>::default());
+    app.add_plugins(TerrainMaterialPlugin);
     let enabled = cfg.terrain_detail;
     app.init_resource::<TerrainLayers>().add_systems(
         Startup,
