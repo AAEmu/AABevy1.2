@@ -5,12 +5,14 @@ use crate::wire::Writer;
 pub enum TrialCommand {
     ConfirmCrimeRecords { trial_id: u32, jury_number: i32 },
     CancelTrial { trial_id: u32 },
+    ChooseVerdict { trial_id: u32, jury_number: i32, choice: u8 },
 }
 impl TrialCommand {
     pub fn opcode(&self) -> u16 {
         match self {
             Self::ConfirmCrimeRecords { .. } => 0x073,
             Self::CancelTrial { .. } => 0x074,
+            Self::ChooseVerdict { .. } => 0x075,
         }
     }
     pub fn write(&self, w: &mut Writer) {
@@ -21,12 +23,15 @@ impl TrialCommand {
             Self::CancelTrial { trial_id } => {
                 w.u32(*trial_id);
             }
+            Self::ChooseVerdict { trial_id, jury_number, choice } => {
+                w.u32(*trial_id).i32(*jury_number).u8(*choice);
+            }
         }
     }
     /// Native weak gate plus stronger captured-context refusal. No invented phase/defendant gate.
     pub fn validate_received(&self, state: &Trials) -> Result<(), &'static str> {
         let trial_id = match self {
-            Self::ConfirmCrimeRecords { trial_id, .. } | Self::CancelTrial { trial_id } => *trial_id,
+            Self::ConfirmCrimeRecords { trial_id, .. } | Self::CancelTrial { trial_id } | Self::ChooseVerdict { trial_id, .. } => *trial_id,
         };
         if trial_id != state.trial_id {
             return Err("trial request refers to a stale received context");
@@ -38,6 +43,14 @@ impl TrialCommand {
                 }
                 if state.jury_number != Some(*jury_number) {
                     return Err("crime records confirmation refers to an unknown or stale jury seat");
+                }
+            }
+            Self::ChooseVerdict { jury_number, choice, .. } => {
+                if !(1..=6).contains(choice) {
+                    return Err("verdict choice must be in the native one through six range");
+                }
+                if state.jury_number != Some(*jury_number) {
+                    return Err("verdict refers to an unknown or stale jury seat");
                 }
             }
             Self::CancelTrial { .. } => {
@@ -54,6 +67,61 @@ impl TrialCommand {
 mod tests {
     use super::*;
     use crate::{Event, TrialEvent, game::ClientMsg};
+    #[test]
+    fn verdict_executed_native_choice_matrix_and_exact_byte_writer() {
+        for is_jury in [false, true] {
+            let mut state = Trials::default();
+            state.is_jury = is_jury;
+            state.jury_number = Some(i32::MIN);
+            for choice in [0, 1, 2, 5, 6, 7, 255] {
+                let command = TrialCommand::ChooseVerdict {
+                    trial_id: 0,
+                    jury_number: i32::MIN,
+                    choice,
+                };
+                assert_eq!(command.validate_received(&state).is_ok(), (1..=6).contains(&choice));
+                assert_eq!(ClientMsg::Trial(command).encode_body(), [0, 0, 0, 0, 0, 0, 0, 128, choice]);
+                assert_eq!(command.opcode(), 0x75);
+            }
+            assert!(
+                TrialCommand::ChooseVerdict {
+                    trial_id: 1,
+                    jury_number: i32::MIN,
+                    choice: 1
+                }
+                .validate_received(&state)
+                .is_err()
+            );
+            assert!(
+                TrialCommand::ChooseVerdict {
+                    trial_id: 0,
+                    jury_number: 0,
+                    choice: 1
+                }
+                .validate_received(&state)
+                .is_err()
+            );
+            state.jury_number = None;
+            assert!(
+                TrialCommand::ChooseVerdict {
+                    trial_id: 0,
+                    jury_number: i32::MIN,
+                    choice: 1
+                }
+                .validate_received(&state)
+                .is_err()
+            );
+        }
+        assert_eq!(
+            ClientMsg::Trial(TrialCommand::ChooseVerdict {
+                trial_id: u32::MAX,
+                jury_number: -1,
+                choice: 6
+            })
+            .encode(19),
+            [0xdd, 1, 0, 19, 0x75, 0, 255, 255, 255, 255, 255, 255, 255, 255, 6]
+        );
+    }
     #[test]
     fn original_controls_native_lane_exact_payloads_and_raw_extremes() {
         let confirm = TrialCommand::ConfirmCrimeRecords {

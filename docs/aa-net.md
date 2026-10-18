@@ -6573,3 +6573,24 @@ constructors locally, with only socket sender39186810 mocked. All twelve role/co
 cases preserve cache bytes, including zero trial and negative seat. Golden bodies/full
 frames plus real loopback session tests cover duplicate sends, unknown count, actual
 waiting admission, stale character/context/seat, lifecycle and failed transport.
+
+
+### Original verdict selection CS075
+
+TrialCommand::ChooseVerdict { trial_id, jury_number, choice:u8 } captures the same
+received context and seat, writes u32/i32/u8, and uses the existing guarded Session
+transport path. Native390783b0 returns zero Lua results; its common39078ab0 adapter
+accepts ScriptAnyValue type4 only and CVTTSS2SI truncates the numeric f32 argument.
+3907c720 admits only unsigned(choice-1)<=5, so1..6; it does not require jury role,
+phase, defendant status, or nonzero trial. Packet constructor397ac1b0 stores a dword
+choice; serializer397ba580 emits its low byte. Active lane CSJuryVerdictPacket agrees
+and invokes the real jury_verdict handler. No local cache changes or successful-verdict
+receipt is fabricated. Known matching trial/seat and selected header remain stronger
+application stale-context guards; unknown seat refuses safely.
+
+native-trial-verdict-source-20261018.txt and trial_verdict_oracle.py /
+native-trial-verdict-oracle-20261018.json execute original3907c720/397ac1b0 locally
+with only sender mocked:16 cases cover roles0/1, choice0/1/2/5/6/7/MAX/INTMIN,
+trial0 and negative seat; all cache bytes remain unchanged. Protocol tests retain
+raw choice byte, native admitted range, full frame, stale/unknown seat/context;
+loopback tests send duplicate valid requests and reject choice0 without optimism.
