@@ -1721,13 +1721,92 @@ tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 No live lane traffic was used; natural crafting and queued-cancel QA remain pending while
 the lane is stalled.
 
+## Owned mate lifecycle and transport state boundaries
+
+`Event::Mate(MateEvent)` and the corresponding `ServerMsg::Mate` now decode three packets
+which previously stopped DD04 before following unit state/points:
+
+* `Spawned(MateSpawn)` (SC125), owner-only: u16 tlId, u32 stored mateId, u64 summonItemId,
+  u8 userState, i32 experience, i32 mileage, u32 spawnDelayTime, **ten u32 skill slots**.
+  This is exactly 67 bytes, with no skill count and no object ID. Native serializer397b54e0
+  calls3989a910, whose loop reads exactly ten slots. Preserve zero/sparse slots.
+* `State { obj_id, dynamic }` (SC1ac): bc objectId plus the shared dynamic state below.
+* `SlaveState(SlaveState)` (SC1ab): bc objectId, u16 tlId, u64 rawType, shared dynamic
+  state, string creatorName, **u32** ownerObjId, u32 dbId. The lane writes rawType0 and
+  zero dynamic counts; all fields remain available without inferring local slave ownership.
+
+`DynamicUnitState { skills: Vec<[u32;3]>, tags: Vec<[u32;3]> }` preserves both lists as
+raw triples. Native397b7790 /397b7670 share397b2350, which reads i32 skillCount, that many
+three-u32 entries, i32 tagCount and that many three-u32 entries. Each inline native array
+holds 150 entries (second count offset0x70c). Counts must be nonnegative, <=150 and fit the
+remaining bytes before allocation. Triple field meanings remain unverified; no guessed
+skill levels, cooldowns, learned skills or active tags are created from them.
+
+`Mates` is available as a Bevy resource and `WorldState.mates`. Its public
+`own: Option<OwnedMate>` holds `spawn: MateSpawn`, `obj_id: Option<u32>` and
+`dynamic: Option<DynamicUnitState>`. The spawn packet establishes owner-only metadata;
+an actual UnitSpawned must then match both the timeline and the selected stored character
+ID through `UnitKind::Mate.owner_id` before obj_id is set. The source assigns that owner
+field from `owner.data().id`, not the player's runtime object ID. Either arrival order is
+supported. A visible mate alone does not prove ownership. Ambiguous matches remain unset;
+unknown dynamic packets never create a unit or binding.
+
+Matched removal, object-ID reuse for another kind/owner/timeline, a new character selection,
+logout, disconnect and kick clear stale owned state. A removal from a previous spawn does
+not erase a replacement still awaiting its object. Matching repeated UnitSpawned preserves
+its dynamic metadata. Ordinary unit HP/MP, equipment, buffs and movement remain in their
+existing resources; `spawn` values are the last owner spawn announcement, not invented live
+XP/state counters. SlaveState is forwarded as raw visibility metadata and does not create
+an owned-slave resource or a Unit.
+
+The lane fills spawn skill slots with distinct `npc_mount_skills.mount_skill_id` in table
+order. These are `mount_skills.id`, **not combat skill IDs**: the matching compact database
+joins mount skill209 to skill21172, for example. Activation still needs the native slot,
+attachment and caster rules; this milestone sends no pet commands. The current compact
+catalog has at most nine distinct entries for an NPC. The lane writer nevertheless emits
+every vector entry if there are more than ten, with no count; that unsupported overflow
+cannot be safely distinguished from a following DD04 opcode. The decoder follows the
+native fixed-ten format rather than guessing an extra slot count.
+
+Original Lua contracts from `x2ui/hud/pet_action_bar/pet.lua` and `unitframe/pet.lua`:
+`X2Mate:IsPlayerPetExists()` gates the bar/frame; `playerpet` is the unit alias.
+`GetNumMountSkills()` supplies the action slots; `PetState()` returns the mode used by the
+Lua aggressive/protective/passive/idle mapping. `DismissPet()`, `MountMate()`,
+`UnMountMate()` and `KickPassenger()` take no Lua arguments. `SPAWN_PET()` and
+`DISMISS_PET()` have no arguments (native emits0x110 at3933e523 and0x111 at3933f0c5 /
+3933fa28). Owner packet handler391db180 only inserts metadata through3933fd00; later
+visible unit binding emits SPAWN_PET. UI integration should therefore wait for a resolved
+obj_id. `MOUNT_PET(isMyPet)` / `UNMOUNT_PET(isMyPet)` take a bool; passenger mount/unmount
+events have no arguments. No UI success event is synthesized by this receive layer.
+
+Source audit of the remaining actions: summon uses the existing item-caster CSStartSkill
+and SpawnPet/SpawnSlave special effects, not a new mate-summon request. CSRemoveMate0a4
+is u16 tl; CSChangeMateTarget0a5 is u16 tl +bc target; CSChangeMateName0a6 is u16 tl +string;
+CSMountMate0a7 /CSUnMountMate0a8 are u16 tl +u8 attachPoint +u8 reason;
+CSChangeMateUserState0aa is u16 tl +u8 state and has no lane ACK. Mate equipment0a9 is a
+separate full-item transaction contract. Slave info/equipment Lua uses **X2SiegeWeapon**
+(`GetMountedSiegeWeaponInfo`, `GetVehicleInfo`, `GetSlaveEquipSlotInfo`,
+`PickEquipSlotOfSlave`, `UninstallEquipSlotOfSlave`); this is not an invented X2Slave API.
+Lane slave equipment/repair requests are logging-only stubs, and slave target has no
+registered 1.2 opcode. Slave created/removed/despawn/bound/my-slave/escape packets and
+owned-slave state remain subsequent bounded work.
+
+Five new offline tests cover the source spawn golden, every packet truncation, native
+positive dynamic lists, both count limits and 150-entry lists, full-width raw fields,
+following DD04 UnitPoints, event/resource forwarding, either ownership packet order,
+remote/mismatched mates, unknown updates, replacement, ambiguous TLs, object-ID reuse and
+session cleanup. `cargo test -p aa-net` passed 197 library and 2 scripted-session tests,
+with 9 live tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
+No live lane traffic was used; natural pet summon/ride/gear and vehicle QA remain pending
+while the lane is stalled.
+
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
 * Server → client packets not decoded (skipped): houses in the character list
   (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
-  the mount owner's packets
-  (`SCMateSpawned`, `SCMateState`, `SCSlaveCreated` ...; the units themselves and riding are decoded, see
+  slave lifecycle and mate equipment owner packets
+  (`SCSlaveCreated`, `SCMateEquipmentChanged` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
   layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
   variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
