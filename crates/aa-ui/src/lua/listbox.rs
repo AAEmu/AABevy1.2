@@ -1,0 +1,546 @@
+//! Native flat listbox rows (3929fc40 / 392a10a0 / 392a22a0).
+//! Tree records and row icons remain separate, unsupported native variants.
+
+use super::{Ui, call_handler, method, none, ret, ui};
+use crate::{
+    render::{Quad, Tex},
+    tree::{Id, Rect, TextBlock},
+};
+use mlua::{Lua, Table};
+
+#[derive(Clone, Debug, PartialEq)]
+struct Row {
+    text: String,
+    value: i32,
+    color: [f32; 4],
+    selected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListBoxData {
+    rows: Vec<Row>,
+    selected: i32,
+    hover: Option<usize>,
+    top: i32,
+    padding: f32,
+    text_limit: i32,
+    consistent: bool,
+    toggle: bool,
+    text_colors: [[f32; 4]; 3],
+    colors: [[f32; 4]; 3],
+}
+
+impl Default for ListBoxData {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            selected: -1,
+            hover: None,
+            top: 0,
+            padding: 0.0,
+            text_limit: 0,
+            consistent: true,
+            toggle: false,
+            text_colors: [[1.0; 4]; 3],
+            colors: [
+                [0.4, 0.4, 0.4, 0.0],
+                [0.4, 0.4, 0.4, 0.5],
+                [0.4, 0.4, 0.4, 0.5],
+            ],
+        }
+    }
+}
+
+fn data(u: &Ui, id: Id) -> Option<&ListBoxData> {
+    u.tree.widget(id)?.listbox.as_ref()
+}
+
+fn change<R>(lua: &Lua, id: Id, f: impl FnOnce(&mut ListBoxData) -> (R, bool)) -> Option<R> {
+    let mut u = ui(lua);
+    let w = u.tree.widget_mut(id)?;
+    if w.ty != crate::tree::WidgetType::ListBox {
+        return None;
+    }
+    let d = w.listbox.get_or_insert_with(Default::default);
+    let (result, changed) = f(d);
+    if changed {
+        u.tree.repaint();
+    }
+    Some(result)
+}
+
+fn metrics(u: &mut Ui, id: Id) -> Option<(Rect, f32, i32)> {
+    let w = u.tree.widget(id)?;
+    let d = w.listbox.as_ref()?;
+    let text = w.text.clone().unwrap_or_default();
+    let padding = d.padding;
+    let scale = u.ui_scale;
+    let font = u.fonts.layout(
+        &text.style.font,
+        text.style.size * scale,
+        "",
+        None,
+        0.0,
+        false,
+    );
+    let height = font.line_height / scale + padding;
+    let r = u.tree.rect(id);
+    let [left, top, right, bottom] = text.inset;
+    let inner = Rect {
+        x: r.x + left,
+        y: r.y + top,
+        w: (r.w - left - right).max(0.0),
+        h: (r.h - top.max(0.0) - bottom.max(0.0)).max(0.0),
+    };
+    let count = if height > 0.0 {
+        (inner.h / height + 0.5).floor() as i32
+    } else {
+        0
+    };
+    Some((inner, height, count))
+}
+
+fn max_top(u: &mut Ui, id: Id) -> i32 {
+    let count = metrics(u, id).map_or(0, |m| m.2);
+    (data(u, id).map_or(0, |d| d.rows.len() as i32) - count).max(0)
+}
+
+fn row_at(u: &mut Ui, id: Id) -> Option<usize> {
+    let (inner, height, _) = metrics(u, id)?;
+    if height <= 0.0 {
+        return None;
+    }
+    let base = u.tree.rect(id);
+    let view = u.animations.widget_rect(&u.tree, id);
+    let y = base.y + (u.cursor.1 - view.y) * base.h / view.h.max(0.001);
+    // Native cvttss2si truncates toward zero, including the authored top inset.
+    let index = ((y - inner.y) / height).trunc() as i32 + data(u, id)?.top;
+    (index >= 0 && index < (data(u, id)?.rows.len() as i32)).then_some(index as usize)
+}
+
+fn select(lua: &Lua, id: Id, index: i32, notify_same: bool, clear: bool) {
+    let event = change(lua, id, |d| {
+        let old = d.selected;
+        let mut dirty = false;
+        let valid = index < d.rows.len() as i32;
+        if clear {
+            for (i, row) in d.rows.iter_mut().enumerate() {
+                let selected = valid && i as i32 == index;
+                dirty |= row.selected != selected;
+                row.selected = selected;
+            }
+        }
+        if !valid {
+            return (false, dirty);
+        }
+        d.selected = index;
+        if let Some(row) = usize::try_from(index).ok().and_then(|i| d.rows.get_mut(i)) {
+            dirty |= !row.selected;
+            row.selected = true;
+        }
+        let event = notify_same || old != index;
+        (event, dirty || old != index)
+    })
+    .unwrap_or(false);
+    if event {
+        call_handler(lua, id, "OnSelChanged", vec![]);
+    }
+}
+
+pub(crate) fn clicked(lua: &Lua, id: Id) {
+    let index = {
+        let mut u = ui(lua);
+        if !u
+            .tree
+            .widget(id)
+            .is_some_and(|w| w.enabled && w.listbox.is_some())
+        {
+            return;
+        }
+        row_at(&mut u, id)
+    };
+    if let Some(index) = index {
+        change(lua, id, |d| {
+            let selected = !(d.toggle && d.rows[index].selected);
+            let mut dirty = d.selected != index as i32;
+            for (i, row) in d.rows.iter_mut().enumerate() {
+                let next = i == index && selected;
+                dirty |= row.selected != next;
+                row.selected = next;
+            }
+            d.selected = index as i32;
+            ((), dirty)
+        });
+        call_handler(lua, id, "OnSelChanged", vec![]);
+    }
+}
+
+pub(crate) fn hover(lua: &Lua, old: Option<Id>, new: Option<Id>) {
+    if old != new
+        && let Some(id) = old
+        && data(&ui(lua), id).is_some_and(|d| d.hover.is_some())
+    {
+        change(lua, id, |d| {
+            let changed = d.hover.take().is_some();
+            ((), changed)
+        });
+    }
+    let Some(id) = new else { return };
+    let row = {
+        let mut u = ui(lua);
+        let Some(w) = u.tree.widget(id).filter(|w| w.listbox.is_some()) else {
+            return;
+        };
+        if w.enabled { row_at(&mut u, id) } else { None }
+    };
+    if data(&ui(lua), id).is_some_and(|d| d.hover == row) {
+        return;
+    }
+    change(lua, id, |d| {
+        let changed = d.hover != row;
+        d.hover = row;
+        ((), changed)
+    });
+}
+
+fn set_top(lua: &Lua, id: Id, requested: i32) {
+    let limit = max_top(&mut ui(lua), id);
+    let top = requested.clamp(0, limit);
+    change(lua, id, |d| {
+        let changed = d.top != top;
+        d.top = top;
+        ((), changed)
+    });
+    let h = ui(lua).hover;
+    if h == Some(id) {
+        hover(lua, h, h);
+    }
+}
+
+pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+    let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
+    def(
+        "AppendItem",
+        method(lua, |lua, id, a| {
+            // Native overloads: text/value and text/value/RGBA. Icon overloads remain pending.
+            if !matches!(a.len(), 3 | 7) || !a.is_num(2) {
+                return none();
+            }
+            let mlua::Value::String(text) = a.v(1) else {
+                return none();
+            };
+            let text = text.to_string_lossy();
+            let value = match a.v(2) {
+                mlua::Value::Integer(n) => n as i32,
+                mlua::Value::Number(n) => n as i32,
+                _ => unreachable!(), // Native numeric argument check above.
+            };
+            let mut color = ui(lua)
+                .tree
+                .widget(id)
+                .and_then(|w| w.text.as_ref())
+                .map_or([1.0; 4], |t| t.style.color);
+            if a.len() == 7 {
+                color = [a.f(3), a.f(4), a.f(5), a.f(6)];
+            }
+            change(lua, id, |d| {
+                let mut text: String = text.chars().take_while(|c| *c != '\0').take(511).collect();
+                if d.text_limit > 0 && text.chars().count() > d.text_limit as usize {
+                    text = text
+                        .chars()
+                        .take(d.text_limit as usize - 1)
+                        .chain("...".chars())
+                        .take(511)
+                        .collect();
+                }
+                d.rows.push(Row {
+                    text,
+                    value,
+                    color,
+                    selected: false,
+                });
+                ((), true)
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "ClearItem",
+        method(lua, |lua, id, _| {
+            change(lua, id, |d| {
+                let dirty = !d.rows.is_empty() || d.selected != -1 || d.top != 0;
+                d.rows.clear();
+                d.selected = -1;
+                d.top = 0;
+                d.hover = None;
+                ((), dirty)
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "ItemCount",
+        method(lua, |lua, id, _| {
+            ret(lua, data(&ui(lua), id).map_or(0, |d| d.rows.len()))
+        })?,
+    )?;
+    def(
+        "GetOpenedItemCount",
+        method(lua, |lua, id, _| {
+            ret(lua, data(&ui(lua), id).map_or(0, |d| d.rows.len()))
+        })?,
+    )?;
+    def(
+        "Select",
+        method(lua, |lua, id, a| {
+            select(lua, id, a.f(1) as i32, false, true);
+            none()
+        })?,
+    )?;
+    def(
+        "InitializeSelect",
+        method(lua, |lua, id, a| {
+            let index = a.f(1) as i32;
+            if index >= 0 {
+                select(lua, id, index, true, false);
+            }
+            none()
+        })?,
+    )?;
+    def(
+        "ClearAllSelected",
+        method(lua, |lua, id, _| {
+            change(lua, id, |d| {
+                let mut dirty = false;
+                for row in &mut d.rows {
+                    dirty |= row.selected;
+                    row.selected = false;
+                }
+                ((), dirty)
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "GetSelectedIndex",
+        method(lua, |lua, id, _| {
+            ret(lua, data(&ui(lua), id).map_or(-1, |d| d.selected))
+        })?,
+    )?;
+    def(
+        "GetSelectedValue",
+        method(lua, |lua, id, _| {
+            let value = data(&ui(lua), id)
+                .and_then(|d| d.rows.iter().find(|r| r.selected))
+                .map(|r| r.value)
+                .filter(|v| *v != -1);
+            match value {
+                Some(v) => ret(lua, v),
+                None => none(),
+            }
+        })?,
+    )?;
+    def(
+        "GetSelectedText",
+        method(lua, |lua, id, _| {
+            let text = data(&ui(lua), id)
+                .and_then(|d| usize::try_from(d.selected).ok().and_then(|i| d.rows.get(i)))
+                .map(|r| r.text.clone());
+            match text {
+                Some(t) => ret(lua, t),
+                None => none(),
+            }
+        })?,
+    )?;
+    def(
+        "SetHeight",
+        method(lua, |lua, id, a| {
+            let pad = a.f(1);
+            if pad >= 0.0 {
+                change(lua, id, |d| {
+                    let dirty = d.padding != pad;
+                    d.padding = pad;
+                    ((), dirty)
+                });
+            }
+            none()
+        })?,
+    )?;
+    def(
+        "GetHeight",
+        method(lua, |lua, id, _| {
+            ret(lua, metrics(&mut ui(lua), id).map_or(0.0, |m| m.1))
+        })?,
+    )?;
+    def(
+        "GetViewItemCount",
+        method(lua, |lua, id, _| {
+            ret(lua, metrics(&mut ui(lua), id).map_or(0, |m| m.2))
+        })?,
+    )?;
+    def(
+        "GetMaxTop",
+        method(lua, |lua, id, _| ret(lua, max_top(&mut ui(lua), id)))?,
+    )?;
+    def(
+        "GetTop",
+        method(lua, |lua, id, _| {
+            ret(lua, data(&ui(lua), id).map_or(0, |d| d.top))
+        })?,
+    )?;
+    def(
+        "SetTop",
+        method(lua, |lua, id, a| {
+            set_top(lua, id, a.f(1) as i32);
+            none()
+        })?,
+    )?;
+    for (name, delta) in [("ScrollUp", -1), ("ScrollDown", 1)] {
+        def(
+            name,
+            method(lua, move |lua, id, _| {
+                let top = data(&ui(lua), id).map_or(0, |d| d.top);
+                set_top(lua, id, top.saturating_add(delta));
+                none()
+            })?,
+        )?;
+    }
+    def(
+        "SetTextLimit",
+        method(lua, |lua, id, a| {
+            let n = a.f(1) as i32;
+            change(lua, id, |d| {
+                d.text_limit = n;
+                ((), false)
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "UseConsistentTextColor",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            change(lua, id, |d| {
+                let dirty = d.consistent != on;
+                d.consistent = on;
+                ((), dirty)
+            });
+            none()
+        })?,
+    )?;
+    def(
+        "EnableSelectionToggle",
+        method(lua, |lua, id, a| {
+            let on = a.b(1, true);
+            change(lua, id, |d| {
+                d.toggle = on;
+                ((), false)
+            });
+            none()
+        })?,
+    )?;
+    for (prefix, index) in [("Default", 0), ("Overed", 1), ("Selected", 2)] {
+        for text in [false, true] {
+            let name = format!("Set{prefix}Item{}Color", if text { "Text" } else { "" });
+            def(
+                &name,
+                method(lua, move |lua, id, a| {
+                    let color = [a.f(1), a.f(2), a.f(3), a.opt_f(4).unwrap_or(1.0)];
+                    change(lua, id, |d| {
+                        let old = if text {
+                            &mut d.text_colors[index]
+                        } else {
+                            &mut d.colors[index]
+                        };
+                        let dirty = *old != color;
+                        *old = color;
+                        ((), dirty)
+                    });
+                    none()
+                })?,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn quads(
+    u: &mut Ui,
+    id: Id,
+    d: &ListBoxData,
+    text: &TextBlock,
+    alpha: f32,
+    scale: f32,
+    out: &mut Vec<Quad>,
+) {
+    let Some((inner, height, _)) = metrics(u, id) else {
+        return;
+    };
+    if height <= 0.0 || inner.w <= 0.0 || inner.h <= 0.0 {
+        return;
+    }
+    let first = out.len();
+    for (line, row) in d.rows.iter().skip(d.top.max(0) as usize).enumerate() {
+        let y = inner.y + line as f32 * height;
+        if y >= inner.y + inner.h {
+            break;
+        }
+        let state = if row.selected {
+            2
+        } else if d.hover == Some(d.top.max(0) as usize + line) {
+            1
+        } else {
+            0
+        };
+        let mut color = d.colors[state];
+        color[3] *= alpha;
+        if color[3] > 0.0 {
+            out.push(Quad {
+                tex: Tex::Atlas,
+                pos: [
+                    inner.x * scale,
+                    y * scale,
+                    (inner.x + inner.w) * scale,
+                    (y + height) * scale,
+                ],
+                uv: crate::render::white_uv(),
+                color,
+                corners: None,
+                uvs: None,
+                vcolors: None,
+            });
+        }
+        let mut t = text.clone();
+        t.text = row.text.clone();
+        t.inset = [0.0; 4];
+        let color = if d.consistent {
+            d.text_colors[state]
+        } else {
+            row.color
+        };
+        crate::render::text_quads(
+            u,
+            &t,
+            Rect {
+                x: inner.x + 5.0,
+                y,
+                w: (inner.w - 10.0).max(0.0),
+                h: height,
+            },
+            color,
+            alpha,
+            scale,
+            out,
+        );
+    }
+    crate::render::clip::quads(
+        out,
+        first,
+        [
+            inner.x * scale,
+            inner.y * scale,
+            (inner.x + inner.w) * scale,
+            (inner.y + inner.h) * scale,
+        ],
+    );
+}

@@ -1135,6 +1135,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     }
     if ty == "listbox" {
         super::roadmap::listbox_methods(lua, &m)?;
+        super::listbox::methods(lua, &m)?;
     }
     if ty == "grid" {
         super::grid::methods(lua, &m)?;

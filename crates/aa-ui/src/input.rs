@@ -190,6 +190,7 @@ pub fn update(
         }
         update_list_hover(lua, old, hover);
     }
+    lua::listbox::hover(lua, old, hover);
     if down {
         if let Some(id) = hover {
             lua::chat_input::activate(lua, id);
@@ -411,6 +412,10 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
         return;
     }
     // Native list selection.
+    if button == "LeftButton" {
+        lua::listbox::clicked(lua, target);
+        lua::flush(lua);
+    }
     if button == "LeftButton"
         && let Some((list, row)) = list_row(lua, target)
     {

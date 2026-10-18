@@ -230,14 +230,15 @@ impl WidgetType {
     }
 }
 
-/// `SetUILayer` names, bottom to top.
+/// `SetUILayer` names, bottom to top (native table39ac6a80; hit test392a8b65).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Layer {
     Background,
     Game,
-    Hud,
     #[default]
     Normal,
+    Hud,
+    QuestDirecting,
     Dialog,
     Tooltip,
     System,
@@ -249,6 +250,7 @@ impl Layer {
             "background" => Layer::Background,
             "game" => Layer::Game,
             "hud" => Layer::Hud,
+            "questdirecting" => Layer::QuestDirecting,
             "dialog" => Layer::Dialog,
             "tooltip" => Layer::Tooltip,
             "system" => Layer::System,
@@ -450,6 +452,7 @@ pub struct Widget {
     pub title: Option<TextBlock>,
     pub button: Option<ButtonData>,
     pub list: Option<ListCtrlData>,
+    pub listbox: Option<crate::lua::listbox::ListBoxData>,
     pub slider: Option<SliderData>,
     pub folder: Option<crate::lua::folder::FolderData>,
     pub tab: Option<crate::lua::tab::TabData>,
@@ -1204,6 +1207,7 @@ impl Widget {
             vertical: true,
             ..Default::default()
         });
+        let listbox = (ty == WidgetType::ListBox).then(Default::default);
         Widget {
             clickable: !matches!(ty, WidgetType::Label | WidgetType::TextBox),
             class: ty.name().to_string(),
@@ -1216,6 +1220,7 @@ impl Widget {
             title,
             button,
             list,
+            listbox,
             slider,
             folder: None,
             tab: None,
