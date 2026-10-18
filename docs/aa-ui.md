@@ -1935,3 +1935,53 @@ Existing font differences remain unchanged. All 29 prior listbox/animation regre
 Three new cursor tests also passed: exact source pixels/mask and truncated-resource rejection,
 mode/size/leave transitions with unchanged held state, setters while Ui appdata is borrowed,
 missing-source fallback, runtime removal, caching, and preservation of an external OS cursor.
+
+## Popup and dialog input lifecycle (2026-10-18)
+
+Original `components/popup_menu.alb` and `components/combobox.alb` subscribe to
+`MOUSE_DOWN(widgetId)` and decide themselves whether an outside press hides their popup.
+The toolkit now emits that event after `OnMouseDown`, and `MOUSE_UP` after `OnMouseUp`
+before click activation. This follows native `39277da0`: event index 4 at `39277e39`,
+index 5 at `39277eaa`. The payload uses the same numeric identity as our `GetId()`;
+`IsDescendantWidget` and other widget arguments now resolve checked numeric identities.
+Both right-button edges reach the same handlers/events. `UiVirtualPointer.right_press`
+and the examples' `--rclick` deliver a real press followed by a release next frame.
+The existing `input::update` API remains available; `input::update_buttons` accepts all
+four edges together. Empty canvas presses use the toolkit's root identity, 0.
+
+Popup removal is now implemented as requested by the original
+`popup_menu_view.alb`'s `EnableHidingIsRemove(true)`. Native setter `392657e0` stores
+the flag at `+0x2b5`; hide completion checks it at `392ab33e`. Removal waits until
+the widget finishes hiding and callbacks finish, then retires its descendants,
+drawables, Lua object registry entries, event subscriptions and frame handlers.
+This prevents an old popup's event closure from running after its original
+`OnHide` has cleared the shared popup upvalue. A flagged widget remains valid
+through the current click and `OnHide`. Setting the flag while already hidden
+does not remove it; a later shown-to-hidden transition is required, preserving
+the original pet-frame initialization order. Showing it again or disabling the
+flag cancels pending retirement. Removed focus/capture is released, while keys
+already owned by UI remain consumed until their physical release.
+
+Escape dispatches `OnCloseByEsc` before hiding, matching native `392d4500`'s handler
+index `0x29`. The unchanged `components/dialog_handler.alb` therefore runs its
+`OnCancel`: ordinary confirmations invoke `CancelProc` and manager cleanup;
+notice dialogs invoke their `OkProc`. The dialog's `OnHide` follows that callback.
+No new modal keyboard-routing policy is inferred from these mouse/Escape traces.
+
+`tests/popup_lifecycle.rs` runs unchanged original popup, combo and dialog bytecode,
+with mouse edges through the real dispatcher. Six regressions cover inside/owner/
+outside/empty-space presses, both mouse buttons, dropdown selection, repeated
+opening and listener cleanup, confirmation/notice Escape, initially-hidden flag
+ordering, fade completion, cancellation of removal, descendant focus release and
+held-key consumption. All 52 tests passed across this suite and the existing
+keyboard, attachment, drag, animation, edit-selection and cursor/trade suites.
+
+Visual check used the existing `character_create` example (`aa-dev` default plugins
+and `DevPlugin`), selected Battlerage and the reference name `Refone`, opened the
+original `ShowCreateConfirmPopup`, pressed Escape,
+asserted exactly one cancellation, and reopened it before `--shot`.
+`shots/aa-ui/native-popup-lifecycle-confirm-20261018.png` was inspected against
+`reference/character_create/step3_nuian_male/real_confirm_dialog.png`: the dialog's
+350x165 crop has mean absolute pixel error 3.59/255, and all 52 comparable named
+screen objects match geometry. The 2D example omits the reference's character and
+3D scene. It logged 356-463 FPS, zero script errors, exit 0 and automatic closure.

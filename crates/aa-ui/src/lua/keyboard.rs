@@ -27,6 +27,14 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
+    pub(crate) fn removed(&mut self, id: Id) {
+        if self.capture == Some(id) {
+            self.capture = None;
+        }
+        self.focusable.remove(&id);
+        // Keep UI-owned key edges until release, even after their original owner is gone.
+    }
+
     pub(crate) fn consume(&mut self) {
         self.consumed = true;
     }

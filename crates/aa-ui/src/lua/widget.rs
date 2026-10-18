@@ -85,6 +85,11 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     let mut g = ui(lua);
     let u = &mut *g;
     let was = u.tree.get(id).shown;
+    if visible {
+        u.retiring.remove(&id);
+    } else if was && u.tree.widget(id).is_some_and(|w| w.remove_on_hide) {
+        u.retiring.insert(id);
+    }
     if !visible && fade_ms.is_none_or(|ms| ms <= 0.0) {
         super::damage::hide(u, id);
     }
@@ -147,6 +152,78 @@ pub(crate) fn show(lua: &Lua, id: Id, visible: bool, fade_ms: Option<f32>) {
     drop(g);
     if sound {
         super::sound::widget_sound(lua, id, if visible { "show" } else { "hide" });
+    }
+}
+
+/// Native hide completion (392ab33e) queues flagged widgets for removal after callbacks.
+/// Keep them valid through OnHide and the current click; the next input frame has no stale
+/// event listeners or descendants from the removed popup.
+pub(super) fn remove_hidden(lua: &Lua) {
+    let retiring = std::mem::take(&mut ui(lua).retiring);
+    for root in retiring {
+        let remove = {
+            let u = ui(lua);
+            u.tree.get(root).alive && u.tree.widget(root).is_some_and(|w| w.remove_on_hide)
+        };
+        if !remove {
+            continue;
+        }
+        if ui(lua).tree.get(root).shown {
+            // A fade has not finished. Show(true) cancels retirement in show().
+            ui(lua).retiring.insert(root);
+            continue;
+        }
+        let ids = {
+            let u = ui(lua);
+            let mut ids = std::collections::BTreeSet::new();
+            let mut stack = vec![root];
+            while let Some(id) = stack.pop() {
+                if !ids.insert(id) {
+                    continue;
+                }
+                if let Some(w) = u.tree.widget(id) {
+                    stack.extend(w.children.iter().copied());
+                    stack.extend(w.drawables.iter().copied());
+                }
+            }
+            ids
+        };
+        if ui(lua).focus.is_some_and(|id| ids.contains(&id)) {
+            super::edit::set_focus(lua, None);
+        }
+        let mut g = ui(lua);
+        let u = &mut *g;
+        if let Some(parent) = u.tree.get(root).parent
+            && let Some(w) = u.tree.widget_mut(parent)
+        {
+            w.children.retain(|id| !ids.contains(id));
+        }
+        for &id in &ids {
+            u.tree.get_mut(id).alive = false;
+            u.animations.remove(id);
+            super::damage::hide(u, id);
+            u.handlers.remove(&id);
+            u.fades.remove(&id);
+            u.widget_sounds.remove(&id);
+            u.keyboard.removed(id);
+            u.drag.registered.remove(&id);
+        }
+        for events in u.events.values_mut() {
+            events.retain(|id| !ids.contains(id));
+        }
+        u.frame_handlers.retain(|(id, _)| !ids.contains(id));
+        u.attachments.retain(|owner, target| !ids.contains(owner) && !ids.contains(target));
+        u.pending.retain(|(id, _, _)| !ids.contains(id));
+        u.entered.retain(|id| !ids.contains(id));
+        if u.hover.is_some_and(|id| ids.contains(&id)) {
+            u.hover = None;
+        }
+        drop(g);
+        let r = reg(lua);
+        for id in ids {
+            let _ = r.handlers.raw_set(id, Value::Nil);
+            let _ = r.objs.raw_set(id, Value::Nil);
+        }
     }
 }
 
@@ -1033,8 +1110,17 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
-    for name in [
+    def(
         "EnableHidingIsRemove",
+        method(lua, |lua, id, a| {
+            if let Some(w) = ui(lua).tree.widget_mut(id) {
+                // Native 392657e0 stores the flag at +0x2b5; hide completion checks it.
+                w.remove_on_hide = a.b(1, true);
+            }
+            none()
+        })?,
+    )?;
+    for name in [
         "RegisterForClicks",
         "RegisterForDrag",
         "StartMoving",

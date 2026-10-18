@@ -75,6 +75,7 @@ impl UiRuntime {
             frame_handlers: Default::default(),
             events: Default::default(),
             pending: Vec::new(),
+            retiring: Default::default(),
             fades: Default::default(),
             animations: lua::animation::Animations::with_ui_scale(ui_scale),
             damage: Default::default(),
@@ -487,6 +488,8 @@ pub struct UiVirtualPointer {
     pub pos: Option<Vec2>,
     pub press: bool,
     pub release: bool,
+    /// A right button press, cleared after use; dispatches native outside-click listeners.
+    pub right_press: bool,
     /// A right button click (the release counts: right clicks fire on release), cleared after use.
     pub right_release: bool,
     pub wheel: f32,
@@ -766,13 +769,18 @@ fn ui_frame(
         std::mem::take(&mut virt.release),
     );
     let p_input = prof::scope("input");
-    input::update(
+    input::update_buttons(
         lua,
         &mut rt.mouse,
         cursor,
-        buttons.just_pressed(MouseButton::Left) || vpress,
-        buttons.just_released(MouseButton::Left) || vrelease,
-        buttons.just_released(MouseButton::Right) || std::mem::take(&mut virt.right_release),
+        input::MouseButtons {
+            press: buttons.just_pressed(MouseButton::Left) || vpress,
+            release: buttons.just_released(MouseButton::Left) || vrelease,
+            right_press: buttons.just_pressed(MouseButton::Right)
+                || std::mem::take(&mut virt.right_press),
+            right_release: buttons.just_released(MouseButton::Right)
+                || std::mem::take(&mut virt.right_release),
+        },
         wheel,
     );
     drop(p_input);
