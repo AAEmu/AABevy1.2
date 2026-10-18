@@ -2963,3 +2963,35 @@ the socket and successful requests preserve frame order and leave points/capacit
 Validation for this request-outcome followup: `cargo test -p aa-net --features bevy --lib`
 passes 268 tests. The preceding full crate run passed both login loopbacks, with nine
 lane-dependent tests ignored. No live crafting/proficiency transaction was attempted.
+
+### Owned mate rename request (2026-10-17)
+
+`Command::Mate(MateCommand::Rename { tl_id, name })` sends CS0a6: u16 timeline ID,
+u16 UTF-8 byte length, then the exact name bytes. `MateCommand` is now `Clone` rather
+than `Copy`; its validate/opcode/write methods borrow the command. Existing controls
+retain their bytes and callers clone when retaining a sent request. A local Requested
+notification never changes a name. Existing `UnitNameChanged` updates only an existing
+unit by runtime object ID; no mate/unit or rename acceptance is invented.
+
+Native `SetMateName` binding3906b6f7 names wrapper39069860. It performs the game's imported
+name check (3906988f), then uses a 0x81-byte C buffer. At3906995c it sets vtable399a0738
+and opcode0xa6, obtains the mate timeline at object+14, calls ctor397ac250, then sends
+39186810. Ctor397ac250 copies at most0x81 bytes including termination. Serializer397ba7e0
+uses virtual+40 for TL, string length at397ba824 and virtual+dc for string data; its read
+branch caps the string at0x80 bytes. The lane `vehicles/packets.rs::CSChangeMateNamePacket`
+confirms u16 TL/string, and `mates.rs::rename_mount` checks the current owned mate and
+server name rules before broadcasting `SCUnitNameChangedPacket`. The transport API
+rejects zero TL, embedded NUL and names exceeding128 UTF-8 bytes to avoid native
+truncation. It does not duplicate or guess the imported language/name policy: whitespace,
+empty names and exact bytes remain the caller/server's policy decision.
+
+Tests cover exact multibyte UTF-8 frame bytes,128-byte boundaries, NUL/oversize rejection,
+unchanged existing mate controls, local send without optimistic name mutation, received
+name forwarding, and ignoring names for unknown units. No natural mate rename was
+attempted against the stalled game-session lane. Mate equipment remains a separate
+larger scope: native full-item request echo and received bag/mate reconciliation need
+source proof beyond the lane's known mismatching settlement representation.
+
+Validation: `cargo check -p aa-net --features bevy` and the full270-test library suite pass
+for mate rename; the earlier two login loopbacks remain green. The source tests use Rust
+Unicode escapes so PowerShell's pipeline encoding cannot change the multibyte goldens.

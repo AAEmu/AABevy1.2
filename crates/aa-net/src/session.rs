@@ -1051,7 +1051,7 @@ impl Session {
             Command::Mate(command) => {
                 if let Err(message) = command.validate() {
                     self.emit(Event::Mate(crate::mate::MateEvent::RequestRejected { command, message: message.into() }));
-                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::Mate(command)).await {
+                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::Mate(command.clone())).await {
                     self.emit(Event::Mate(crate::mate::MateEvent::Requested(command)));
                 }
             }
@@ -2071,6 +2071,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mate_rename_sends_exact_native_name_and_waits_for_received_name_change() {
+        use crate::mate::{MateCommand, MateEvent};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.game = Some(connection.unwrap());
+        let command = MateCommand::Rename { tl_id: 0x102, name: "A\u{e9}".into() };
+        session.command(Command::Mate(command.clone())).await;
+        assert!(matches!(events.try_recv(), Ok(Event::Mate(MateEvent::Requested(actual))) if actual == command));
+        assert!(events.try_recv().is_err(), "local send cannot invent a received name change");
+        let mut length = [0; 2];
+        peer.read_exact(&mut length).await.unwrap();
+        let mut received = vec![0; u16::from_le_bytes(length) as usize];
+        peer.read_exact(&mut received).await.unwrap();
+        assert_eq!(received, [0xdd, 1, 0, 0, 0xa6, 0, 2, 1, 3, 0, 65, 0xc3, 0xa9]);
+        session.game_msg(Ok(game::ServerMsg::UnitNameChanged { obj_id: 51, name: "Received".into() })).await;
+        assert!(matches!(events.try_recv(), Ok(Event::UnitNameChanged { obj_id: 51, name }) if name == "Received"));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn craft_unlock_and_repeated_setting_actions_reach_app_in_received_order() {
         use crate::craft::CraftItemUnlock;
         let (evt, mut events) = unbounded_channel();
@@ -2751,7 +2776,7 @@ mod tests {
             point: 1,
             reason: 4,
         };
-        session.command(Command::Mate(mount)).await;
+        session.command(Command::Mate(mount.clone())).await;
         assert!(
             events.try_recv().is_err(),
             "no connection means no local send notification"
@@ -2766,16 +2791,16 @@ mod tests {
                 target_obj_id: 0x1000000,
             },
         ] {
-            session.command(Command::Mate(command)).await;
+            session.command(Command::Mate(command.clone())).await;
             assert!(
                 matches!(events.try_recv(), Ok(Event::Mate(MateEvent::RequestRejected { command: rejected, .. })) if rejected == command)
             );
         }
         session.phase = Phase::CharacterSelect;
-        session.command(Command::Mate(mount)).await;
+        session.command(Command::Mate(mount.clone())).await;
         assert!(events.try_recv().is_err());
         session.phase = Phase::InWorld;
-        session.command(Command::Mate(mount)).await;
+        session.command(Command::Mate(mount.clone())).await;
         assert!(
             matches!(events.try_recv(), Ok(Event::Mate(MateEvent::Requested(command))) if command == mount)
         );
