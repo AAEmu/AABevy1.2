@@ -684,6 +684,10 @@ fn facing_game(v: Vec2) -> Vec2 {
 #[derive(Component)]
 pub struct Asleep(Animator);
 
+impl Asleep {
+    pub(super) fn animator(&self) -> &Animator { &self.0 }
+}
+
 /// Hides the units outside the view or far away and stops animating the ones nobody looks at.
 /// Skinned meshes are never frustum culled by Bevy (their bounds are unknown), so without this a
 /// town of 130 NPCs is drawn in full, behind the camera too.
