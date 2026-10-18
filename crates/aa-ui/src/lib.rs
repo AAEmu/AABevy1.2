@@ -27,6 +27,7 @@
 //! ```
 
 pub mod content;
+pub mod cursor;
 pub mod dump;
 pub mod input;
 pub mod item_link;
@@ -63,6 +64,7 @@ impl UiRuntime {
     /// A fresh Lua state with the toolkit for a screen of `w` x `h` physical pixels.
     pub fn new(locale: &str, w: f32, h: f32) -> anyhow::Result<UiRuntime> {
         let lua = aa_lua::new_lua().map_err(|e| anyhow::anyhow!("{e}"))?;
+        cursor::init(&lua);
         let ui_scale = default_ui_scale(w, h);
         let state = lua::Ui {
             tree: tree::Tree::new(w / ui_scale, h / ui_scale),
@@ -508,12 +510,13 @@ pub struct UiFrame;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config.clone().unwrap_or_default())
+            .init_resource::<cursor::CursorSource>()
             .init_resource::<UiRenderState>()
             .init_resource::<UiStats>()
             .init_resource::<UiVirtualPointer>()
             .add_message::<bevy::window::Ime>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame), ui_ime_window.in_set(UiFrame)).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame), cursor::sync.in_set(UiFrame), ui_ime_window.in_set(UiFrame)).chain());
     }
 }
 
