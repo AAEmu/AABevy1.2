@@ -1863,16 +1863,18 @@ atmosphere edits. Node **300B7330** puts these draws in transparency list 7 at f
 water halves. The supported Bevy path sorts after sky/decal overlays and before
 ordinary transparency, with a separate raster depth state. Native water-half
 partitioning, overlapping-volume priority and per-translucent-object fog tracing
-remain open. Global-fog-colour slots, nonzero HDRDynamic and FlowGraph density fades
-are explicitly unsupported. Native view-distance/cvar fading is also not reproduced;
+remain open. Nonzero HDRDynamic and FlowGraph density fades are explicitly
+unsupported; global-colour slots use the separate native sample described below.
+Native view-distance/cvar fading is also not reproduced;
 frustum and placement-cell lifetime bound this slice. Existing global post fog and
 its calibration remain unchanged.
 
 The existing bounded cell worker parses the slots; arrival creates at most **32 total**
 volume entities, meshes and materials across loaded cells. Oversized sets decline
 whole remaining slots and report `ObjectStats::{fog_volumes,fog_unsupported,
-fog_over_budget}`. No texture loads, new workers, per-frame material uploads or
-per-frame volume allocations are added. Unload explicitly removes every owned
+fog_over_budget}`. No texture loads, new workers or per-frame volume allocations
+are added. Local-colour materials stay static; global-colour uniform updates are
+bounded by the same 32 slots. Unload explicitly removes every owned
 entity/mesh/material; no global cache owns them. No aa-client hook is required.
 
 A bounded eight-cell main-world survey found three authored active supported slots:
@@ -1914,6 +1916,99 @@ material all absent by 23 s, with zero fog/object/pending-model counts; unloaded
 frames log 166-187 FPS. All runs exit and close their windows without GPU errors.
 The chimney world run retains the existing warning that `fleettest.dds` is not a
 cube map; the water calibration and fallback are unchanged.
+
+#### Native global fog colour
+
+`bUseGlobalFogColor=1`, with `fHDRDynamic=0`, now uses the actual native global
+fog input instead of the entity's ignored local `color_Color`. CFogVolume
+**300B5070** calls engine vslot +452, **30121B50**, which returns the three
+floats stored unchanged by vslot +448, **301235E0**. TimeOfDay UpdateEngine
+**300A5DD0** first blends raw layer values through the existing **300A5010**
+contract. Its instructions **300A5F5D-300A5F67** pass slot 0's sampled HDR
+power and engine HDR base to `powf`; **300A6192-300A619E** multiply raw slot 16
+(`Fog color multiplier`) by that HDR scale; **300A73C3-300A73EB** multiply raw
+slot 15 (`Fog color`) RGB by this product. The native HDR base getter
+**30121B70** reads the constructor's value 2. Thus the HDR-renderer input is
+`rawFogRGB * (rawMultiplier * 2^rawHDRPower)`, with no additional IEC or 2.2
+conversion. Legacy XML migration still affects only the previously proved six
+variable sets; fog RGB is unchanged and legacy HDR power retains its native default.
+
+`EnvSample::native_fog` keeps this input separate from the calibrated `fog`/
+`fog_srgb` fields. It is derived after raw zone blending, so neither colour
+conversion nor multiplied sample interpolation can alter the native order.
+No sky/post shader, radiance gain or calibration was changed. Global volume
+materials reuse the existing world radiance/view-exposure adapter. Their
+`GlobalFogColor` marker retains authored density: absent environment input draws
+zero opacity, valid input restores density and RGB, and time/zone changes update
+the same material only when its uniform changes. This bounded 32-volume update
+does not allocate assets or override visibility; local-colour materials are untouched.
+
+The original cell **(12,10)** contains active ellipsoid `FogVolume_3`, GUID
+`403db27ffb2191af`, size **200x300x30**, density **.07**, HDRDynamic **0**,
+height falloff **1**, with global colour enabled. Its world centre is Cry
+`(12587.38184,10548.99866,117.66377)`; authored SoftEdges 20 clamps to 1.
+A further bounded 20-cell survey also found an ordinary local-colour box in
+(21,9); it found no authored nonzero-HDRDynamic variant, which stays declined.
+Proof exports are ignored `lights/fogvolume-global-colour.txt` and
+`lights/fog-global-hdr-asm.txt`. The existing global post fog remains independent.
+
+Water-half ordering is still explicitly open. Native **301121C0** classifies
+normal-pass fog by `(cameraZ-oceanZ)*(.5-passId)*(centreZ-oceanZ)>0`;
+**3012B2E0**, called with a null point, returns the global ocean plane or
+-1000000, not a local pond's height. The current after-water path covers the
+above-ocean camera/volume case used here. Bevy's current transmissive pass copies
+scene colour before its sorted range, so merely moving the draw into that range
+would not include fog in water refraction; a dedicated before-water draw/copy
+boundary is needed. No local-water-height substitute or arbitrary extra copies
+were introduced. HDRDynamic nonzero, FlowGraph fades, view-distance fading,
+overlap priority and per-translucent-object fog tracing retain the limits above.
+
+Global-colour QA passes **192 world tests**, nine existing ignored, all examples
+check and the built `fog_volume` fixture. The added real-zone controls execute
+original x86 spline functions in bounded Unicorn for zones 149/179 at spline
+t=0/.5, then check native f32 multiplication order; the isolated regression uses
+identity dawn 6 so those endpoints are not confused with the main-world clock
+warp: raw clock midnight reads about 3.04 spline hours, not the t=0 endpoint.
+Production hour sampling is unchanged. Separate regressions prove raw weighted
+RGB/multiplier/HDR blending, legacy/missing defaults, absent-input restoration,
+local-material isolation, retained visibility and the mixed local/global 32-slot
+cap with complete entity/mesh/material release.
+
+`fog_volume --case 13..17 --shot ...` adds actual GPU controls for direct raw
+day/night RGB, raw zone blending, absent input and restoration after absence.
+All five pass independent source-input/numerical-density pixel expectations
+within one display byte; the existing box and foreground-glass controls also
+pass unchanged. These seven new-run controls log **242-366 FPS** on the shared
+machine. Inspected captures are `global_control_13.png` and the source-cell
+day/night on/off pairs under `shots/aa-world/fog_volume/`.
+
+The original graveyard view uses `--world --global`, Cry camera
+`(12527.382,10508.999,120.5)` toward `(12587.382,10548.999,121.5)`;
+its sector is zone **149**. `--hour 0`,
+`--zone 179` and `--off` provide night, explicit other-zone and no-volume
+controls on the same authored placement. Inspected `global_{day,night,zone}
+{,_off}.png` show the expected low blue day fog and dark night fog. The day
+ground patch (1000,880)-(1400,1000) averages display RGB (113,153,174)
+with the volume versus (52,52,38) off; no density, colour or lighting was
+tuned. Other clocks/foliage can move between these separate captures. No matching
+native graveyard capture is available in `reference/`, so this is source/numeric
+and renderer-control validation, not a native screenshot fit.
+
+`--transition-check` changes day to night at 8 s, forces zone 179 at 12 s,
+removes environment input at 16 s and restores normal zone selection at 20 s.
+Each settled phase asserts exact sampled RGB/density on the same single material;
+absence is zero RGBA and restoration recovers authored .07 density. The
+18-second `global_absence.png` confirms the missing-input case visually.
+At 24 s the actual focus leaves the cell; by 31 s its entity, mesh and material
+are all absent, with zero fog/object/pending counts. `global_transition.png`
+captures that empty state. All runs exit cleanly, without GPU errors or warnings.
+
+The last five two-second logs give day **128-159 FPS**, off **113-140**;
+night **143-159**, off **134-152**; forced-zone **117-181**, off **76-134**.
+The unload run varies roughly **131-295 FPS** after leaving. Other agents' QA
+shares the GPU, so these timings are recorded workload observations rather than
+a controlled performance comparison. All own windows are closed; the inherited
+five sky/post/water/fly calibration files retain their exact original hashes.
 
 Water: the type 11 volumes of a cell become flat meshes at the surface height (`water.rs`: quad strips reordered into rings, ear clipping
 for lakes), one mesh per `WaterStyle` (material path + the volume's own fog colour / density), spawned with the cell's other data

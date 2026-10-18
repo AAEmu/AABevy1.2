@@ -1,5 +1,5 @@
 //! Static authored FogVolume slots. Native CFogVolumeRenderNode and fogvolume.cfx.
-//! Local RGB / HDRDynamic=0 only; no global-colour or FlowGraph density adapter.
+//! Authored local/global RGB, HDRDynamic=0; no FlowGraph density adapter.
 use std::collections::{HashMap, HashSet};
 
 use crate::coords::{CRY_TO_BEVY, cell_origin, cry_to_bevy};
@@ -41,7 +41,7 @@ pub struct FogVolume {
 }
 impl FogVolume {
     pub fn supported(&self) -> bool {
-        !self.global_color && self.hdr_dynamic == 0.0 && self.color.min_element() >= 0.0
+        self.hdr_dynamic == 0.0 && (self.global_color || self.color.min_element() >= 0.0)
     }
     pub fn params(&self, cell: (i32, i32), radiance: f32) -> FogParams {
         let origin = cell_origin(cell.0, cell.1);
@@ -52,7 +52,9 @@ impl FogVolume {
         FogParams {
             local_from_world: from_local.inverse(),
             center: cry_to_bevy(center).extend(0.0),
-            color: (self.color * radiance).extend(self.density),
+            // A global volume must wait for the native environment input; its
+            // authored local colour is ignored by CFogVolume::GetFogColour.
+            color: if self.global_color { Vec4::ZERO } else { (self.color * radiance).extend(self.density) },
             base: cry_to_bevy(center + self.direction * self.shift).extend(self.soft_edges),
             gradient: cry_to_bevy(self.direction * self.falloff)
                 .extend(self.box_shape as u8 as f32),
@@ -296,7 +298,8 @@ impl Plugin for FogVolumePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "fog.wesl");
         bevy::shader::load_shader_library!(app, "fog_math.wesl");
-        app.add_plugins(MaterialPlugin::<FogMaterial>::default());
+        app.add_plugins(MaterialPlugin::<FogMaterial>::default())
+            .add_systems(Update, refresh_global_color.after(crate::sky::update_environment));
     }
 }
 #[derive(SystemParam)]
@@ -309,6 +312,31 @@ pub struct FogAssets<'w> {
 pub struct FogVolumePart {
     pub cell: (i32, i32),
     pub guid: u64,
+}
+
+/// Retains authored density while a global-colour volume waits for environment data.
+/// Materials are unique to their volume; streaming owns at most [`MAX_VOLUMES`].
+#[derive(Component, Clone, Copy, Debug)]
+pub struct GlobalFogColor {
+    pub density: f32,
+}
+
+fn refresh_global_color(
+    env: Option<Res<crate::sky::Environment>>,
+    tuning: Option<Res<crate::sky::AtmosphereTuning>>,
+    volumes: Query<(&GlobalFogColor, &MeshMaterial3d<FogMaterial>)>,
+    mut materials: ResMut<Assets<FogMaterial>>,
+) {
+    let color = env.as_ref().and_then(|e| e.sample.as_ref()).zip(tuning.as_ref())
+        .map(|(sample, tuning)| sample.native_fog * tuning.radiance);
+    for (global, handle) in volumes.iter().take(MAX_VOLUMES) {
+        let target = color.map_or(Vec4::ZERO, |c| c.extend(global.density));
+        if let Some(mut material) = materials.get_mut(&handle.0) {
+            if material.params.color != target {
+                material.params.color = target;
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -389,7 +417,7 @@ pub(crate) fn spawn_cell(
         let material = materials.add(FogMaterial {
             params: volume.params(cell, radiance),
         });
-        let entity = commands
+        let mut entity = commands
             .spawn((
                 Name::new(format!("FogVolume {}", volume.name)),
                 Mesh3d(mesh.clone()),
@@ -400,9 +428,11 @@ pub(crate) fn spawn_cell(
                     cell,
                     guid: volume.guid,
                 },
-            ))
-            .id();
-        result.entities.push(entity);
+            ));
+        if volume.global_color {
+            entity.insert(GlobalFogColor { density: volume.density });
+        }
+        result.entities.push(entity.id());
         result.assets.push((mesh, material));
     }
     result
@@ -431,7 +461,7 @@ mod tests {
         assert_eq!(v[0].density, 0.0);
         assert_eq!(v[0].soft_edges, 1.0);
         assert!(v[0].direction.distance(Vec3::X) < 1e-6);
-        assert!(!v[1].active && !v[1].supported() && !v[2].supported());
+        assert!(!v[1].active && v[1].supported() && !v[2].supported());
         let p = v[0].params((21, 8), 1.0);
         let center = cry_to_bevy(cell_origin(21, 8) + Vec3::new(12.0, 26.0, 42.0));
         assert!(
@@ -501,7 +531,10 @@ mod tests {
         let mut commands = CommandQueue::default();
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<FogMaterial>::default();
-        let volumes = vec![fixture(0); 40];
+        let mut volumes = vec![fixture(0); 40];
+        for volume in volumes.iter_mut().step_by(2) {
+            volume.global_color = true;
+        }
         let first = spawn_cell(
             &mut Commands::new(&mut commands, &world),
             &mut meshes,
@@ -524,6 +557,7 @@ mod tests {
         assert_eq!(first.over_budget + second.over_budget, 48);
         commands.apply(&mut world);
         assert_eq!(world.query::<&FogVolumePart>().iter(&world).count(), 32);
+        assert_eq!(world.query::<&GlobalFogColor>().iter(&world).count(), 16);
         first.release(
             &mut Commands::new(&mut commands, &world),
             &mut meshes,
@@ -536,7 +570,53 @@ mod tests {
         );
         commands.apply(&mut world);
         assert_eq!(world.query::<&FogVolumePart>().iter(&world).count(), 0);
+        assert_eq!(world.query::<&GlobalFogColor>().iter(&world).count(), 0);
         assert_eq!((meshes.len(), materials.len()), (0, 0));
+    }
+    #[test]
+    fn global_input_absence_restore_recolor_preserves_density_local_color_and_assets() {
+        let mut app = App::new();
+        app.init_resource::<Assets<FogMaterial>>()
+            .insert_resource(crate::sky::AtmosphereTuning { radiance: 2.0, ..default() })
+            .add_systems(Update, refresh_global_color);
+        let mut volume = fixture(1);
+        let local = app.world_mut().resource_mut::<Assets<FogMaterial>>()
+            .add(FogMaterial { params: volume.params((0, 0), 2.0) });
+        let local_color = volume.params((0, 0), 2.0).color;
+        volume.global_color = true;
+        let global = app.world_mut().resource_mut::<Assets<FogMaterial>>()
+            .add(FogMaterial { params: volume.params((0, 0), 2.0) });
+        app.world_mut().spawn(MeshMaterial3d(local.clone()));
+        let entity = app.world_mut().spawn((MeshMaterial3d(global.clone()),
+            GlobalFogColor { density: volume.density }, Visibility::Hidden)).id();
+        app.update();
+        let read = |app: &App| app.world().resource::<Assets<FogMaterial>>().get(&global).unwrap().params.color;
+        assert_eq!(read(&app), Vec4::ZERO);
+        let mut sample = crate::env::TimeOfDay::default().sample(10.0, crate::env::Lighting::default());
+        sample.native_fog = Vec3::new(0.1, 0.3, 0.5);
+        app.insert_resource(crate::sky::Environment {
+            sample: Some(sample.clone()), zone: Some(179), hour: 10.0, ocean_fog: Vec3::ZERO,
+        });
+        app.update();
+        assert_eq!(read(&app), Vec4::new(0.2, 0.6, 1.0, 0.2));
+        sample.native_fog = Vec3::new(0.2, 0.1, 0.0);
+        {
+            let mut env = app.world_mut().resource_mut::<crate::sky::Environment>();
+            env.zone = Some(180);
+            env.sample = Some(sample);
+        }
+        app.update();
+        assert_eq!(read(&app), Vec4::new(0.4, 0.2, 0.0, 0.2));
+        let sample = app.world_mut().resource_mut::<crate::sky::Environment>().sample.take();
+        app.update();
+        assert_eq!(read(&app), Vec4::ZERO);
+        app.world_mut().resource_mut::<crate::sky::Environment>().sample = sample;
+        app.update();
+        assert_eq!(read(&app), Vec4::new(0.4, 0.2, 0.0, 0.2));
+        let materials = app.world().resource::<Assets<FogMaterial>>();
+        assert_eq!(materials.len(), 2);
+        assert_eq!(materials.get(&local).unwrap().params.color, local_color);
+        assert_eq!(*app.world().get::<Visibility>(entity).unwrap(), Visibility::Hidden);
     }
     #[test]
     fn original_cave_shapes_and_nonlinear_soft_edge_clamp_are_authored() {
@@ -564,5 +644,14 @@ mod tests {
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].soft_edges, 1.);
         assert_eq!(b[0].density, 0.0001);
+        let c = parse(&read("012_010"));
+        assert_eq!(c.len(), 1);
+        let v = &c[0];
+        assert_eq!(v.guid, 0x403db27ffb2191af);
+        assert!(v.global_color && v.supported() && v.active && !v.hidden && !v.box_shape);
+        assert_eq!(v.size, Vec3::new(200., 300., 30.));
+        assert_eq!(v.density, 0.07);
+        assert_eq!(v.soft_edges, 1.);
+        assert_eq!(v.params((12, 10), 540.).color, Vec4::ZERO);
     }
 }

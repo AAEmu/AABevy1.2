@@ -1,5 +1,6 @@
-//! --case 0..12: real depth/material GPU controls. --world [--ellipsoid] [--off] [--unload-check].
-use aa_world::fog::{self, FogMaterial, FogVolume, FogVolumePart, FogVolumePlugin};
+//! --case 0..17: depth/material/global-colour GPU controls.
+//! --world [--global|--ellipsoid] [--hour H] [--zone Z] [--off] [--unload-check|--transition-check].
+use aa_world::fog::{self, FogMaterial, FogVolume, FogVolumePart, FogVolumePlugin, GlobalFogColor};
 use bevy::{
     asset::AssetId,
     camera::Exposure,
@@ -25,6 +26,10 @@ fn case() -> usize {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)
 }
+fn scalar_arg<T: std::str::FromStr>(name: &str) -> Option<T> {
+    let args: Vec<_> = std::env::args().collect();
+    args.iter().position(|v| v == name).and_then(|i| args.get(i + 1))?.parse().ok()
+}
 fn vector_arg(name: &str) -> Option<Vec3> {
     let args: Vec<_> = std::env::args().collect();
     let text = args
@@ -43,7 +48,10 @@ struct Control {
     wall_z: f32,
     no_depth: bool,
     pane: bool,
+    color: Vec3,
 }
+#[derive(Resource)]
+struct RestoreGlobal(aa_world::env::EnvSample);
 #[derive(Resource, Default)]
 struct WorldCheck {
     moved: bool,
@@ -52,6 +60,8 @@ struct WorldCheck {
     parts: HashSet<Entity>,
     meshes: HashSet<AssetId<Mesh>>,
     materials: HashSet<AssetId<FogMaterial>>,
+    phase: u8,
+    validated: u8,
 }
 fn main() {
     let mut app = App::new();
@@ -69,7 +79,8 @@ fn main() {
         config.water_distance = 200.;
         app.add_plugins(aa_world::AaWorldPlugin { config })
             .insert_resource(aa_world::WorldClock {
-                hour: 10.,
+                hour: scalar_arg("--hour").unwrap_or(10.),
+                zone: scalar_arg("--zone"),
                 ..default()
             })
             .init_resource::<WorldCheck>()
@@ -79,6 +90,7 @@ fn main() {
         app.add_plugins(FogVolumePlugin)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, numeric)
+            .add_systems(Update, restore_global)
             .add_observer(pixels);
     }
     app.run();
@@ -90,7 +102,7 @@ fn numeric(
     mut stdm: ResMut<Assets<StandardMaterial>>,
 ) {
     let id = case();
-    assert!(id <= 12);
+    assert!(id <= 17);
     let shape = if [4, 5, 6, 10].contains(&id) { 0 } else { 1 };
     let xml = format!(
         r#"<Mission><Objects><Entity EntityClass="FogVolume" Pos="0,8,0"><Properties VolumeType="{shape}" GlobalDensity="0.2" color_Color="0.7,0.4,0.2" FallOffScale="0"><Size x="4" y="4" z="4"/></Properties></Entity></Objects></Mission>"#
@@ -120,13 +132,50 @@ fn numeric(
         _ => {}
     }
     let exposure = Exposure { ev100: 0. };
+    let mut color = FOG;
+    if id >= 13 {
+        v.global_color = true;
+        let tod = |color: &str, multiplier: f32, hdr: f32| {
+            aa_world::env::TimeOfDay::parse(&format!(r#"<TimeOfDay sRGB="1">
+              <Variable Name="Fog color"><Spline Keys="0:({color}):0,1:({color}):0,"/></Variable>
+              <Variable Name="Fog color multiplier"><Spline Keys="0:{multiplier}:0,1:{multiplier}:0,"/></Variable>
+              <Variable Name="HDR dynamic power factor"><Spline Keys="0:{hdr}:0,1:{hdr}:0,"/></Variable>
+              </TimeOfDay>"#)).unwrap()
+        };
+        let day = tod("0.07:0.12:0.2", 1.2, 0.5);
+        let night = tod("0.02:0.04:0.08", 0.5, -1.0);
+        let lighting = aa_world::env::Lighting::default();
+        let sample = match id {
+            14 => night.sample(0., lighting),
+            15 => aa_world::env::TimeOfDay::sample_blended(&[(&day, 1.), (&night, 3.)], 10., lighting),
+            _ => day.sample(10., lighting),
+        };
+        // Independent numeric expectation from the raw source inputs, with no
+        // calls to the sampled/material colour implementation under test.
+        let (raw, mult, hdr) = match id {
+            14 => (Vec3::new(0.02, 0.04, 0.08), 0.5_f64, -1.0_f64),
+            15 => (Vec3::new(0.0325, 0.06, 0.11), 0.675, -0.625),
+            _ => (Vec3::new(0.07, 0.12, 0.2), 1.2, 0.5),
+        };
+        color = raw * (mult * 2_f64.powf(hdr)) as f32;
+        if id == 16 { color = BACK; }
+        commands.insert_resource(aa_world::sky::Environment {
+            sample: (id != 16 && id != 17).then_some(sample.clone()),
+            zone: Some(179), hour: 10., ocean_fog: Vec3::ZERO,
+        });
+        commands.insert_resource(aa_world::sky::AtmosphereTuning {
+            radiance: exposure.exposure().recip(), ..default()
+        });
+        if id == 17 { commands.insert_resource(RestoreGlobal(sample)); }
+    }
     // Exact native RGB controls use a unit scene conversion, independent of the world adapter.
     let params = v.params((0, 0), exposure.exposure().recip());
-    commands.spawn((
+    let mut fog_entity = commands.spawn((
         Mesh3d(meshes.add(fog::mesh(&v))),
         MeshMaterial3d(materials.add(FogMaterial { params })),
         Transform::default(),
     ));
+    if v.global_color { fog_entity.insert(GlobalFogColor { density: v.density }); }
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(100., 100.))),
         MeshMaterial3d(stdm.add(StandardMaterial {
@@ -172,8 +221,16 @@ fn numeric(
         wall_z,
         no_depth: id == 11,
         pane: id == 12,
+        color,
     });
     commands.spawn((Text::new(format!("Native FogVolume GPU control {id}: real opaque depth, analytic bounds/height integral\n0 box /1 depth middle /2 opaque in front /3 inside box /4 ellipsoid /5 inside ellipsoid\n6 ray miss /7-8 height gradients /9 rotated nonuniform /10 soft edge /11 no depth /12 alpha pane\nCentre pixel checked against independent numerical density integration.")),TextFont{font_size:FontSize::Px(18.),..default()},Node{position_type:PositionType::Absolute,left:px(15.),top:px(12.),..default()}));
+}
+fn restore_global(time: Res<Time>, restore: Option<Res<RestoreGlobal>>, env: Option<ResMut<aa_world::sky::Environment>>) {
+    if time.elapsed_secs() > 1.0 {
+        if let (Some(restore), Some(mut env)) = (restore, env) {
+            if env.sample.is_none() { env.sample = Some(restore.0.clone()); }
+        }
+    }
 }
 fn numerical(c: &Control, ray: Vec3) -> f32 {
     if c.no_depth {
@@ -222,7 +279,7 @@ fn pixels(shot: On<ScreenshotCaptured>, c: Res<Control>) {
     let scale = (FOV.to_radians() * 0.5).tan();
     let ray = Vec3::new(ndc.x * w as f32 / h as f32 * scale, ndc.y * scale, -1.).normalize();
     let alpha = numerical(&c, ray);
-    let mut color = BACK.lerp(FOG, alpha);
+    let mut color = BACK.lerp(c.color, alpha);
     if c.pane {
         color = color.lerp(Vec3::new(0.8, 0.1, 0.1), 0.5);
     }
@@ -246,12 +303,16 @@ fn pixels(shot: On<ScreenshotCaptured>, c: Res<Control>) {
     );
 }
 fn world_setup(mut commands: Commands) {
-    let target = if flag("--ellipsoid") {
+    let target = if flag("--global") {
+        Vec3::new(12587.382, 10548.999, 119.5)
+    } else if flag("--ellipsoid") {
         Vec3::new(21731.574, 8731.525, 507.83643)
     } else {
         Vec3::new(22064.125, 8376.249, 447.38528)
     };
-    let offset = if flag("--inside") {
+    let offset = if flag("--global") {
+        Vec3::new(-60., -40., 1.)
+    } else if flag("--inside") {
         Vec3::new(0., -1., -5.)
     } else {
         Vec3::new(40., -60., 8.)
@@ -289,6 +350,10 @@ fn world_check(
     mut camera: Query<&mut Transform, With<Camera3d>>,
     meshes: Res<Assets<Mesh>>,
     materials: Res<Assets<FogMaterial>>,
+    env: Res<aa_world::sky::Environment>,
+    tuning: Res<aa_world::sky::AtmosphereTuning>,
+    mut clock: ResMut<aa_world::WorldClock>,
+    mut config: ResMut<aa_world::WorldConfig>,
 ) {
     for (e, p, m, a) in &parts {
         info!("Original FogVolume cell{:?} guid{:016X}", p.cell, p.guid);
@@ -300,6 +365,29 @@ fn world_check(
         }
     }
     let now = time.elapsed_secs();
+    if flag("--transition-check") {
+        let phase = if now > 20. { 4 } else if now > 16. { 3 } else if now > 12. { 2 } else if now > 8. { 1 } else { 0 };
+        if phase != check.phase {
+            check.phase = phase;
+            clock.hour = if phase == 1 { 0. } else { 10. };
+            clock.zone = (phase == 2).then_some(179);
+            config.environment = phase != 3;
+            info!("Global fog transition phase{phase}: hour{} zone{:?} environment{}", clock.hour, clock.zone, config.environment);
+        }
+        let settled = match phase { 1 => now > 9., 2 => now > 13., 3 => now > 17., 4 => now > 21., _ => false };
+        if settled && check.validated < phase {
+            assert!(!check.materials.is_empty());
+            let expected = env.sample.as_ref().map(|s| (s.native_fog * tuning.radiance).extend(0.07)).unwrap_or(Vec4::ZERO);
+            assert_eq!(env.sample.is_none(), phase == 3);
+            for handle in &check.materials {
+                let actual = materials.get(*handle).unwrap().params.color;
+                assert!((actual - expected).abs().max_element() < 1e-5, "phase{phase} actual{actual:?} expected{expected:?}");
+            }
+            assert_eq!(check.materials.len(), 1);
+            check.validated = phase;
+            info!("Native global fog phase{phase} PASSED: raw native colour{expected:?}, same material retained");
+        }
+    }
     if now - check.last > 2. {
         check.last = now;
         info!(
@@ -311,15 +399,18 @@ fn world_check(
             objects.stats.models_pending,
             objects.stats.models_failed
         );
+        if flag("--global") { info!("Global fog env zone{:?} hour{} raw{:?}", env.zone, env.hour, env.sample.as_ref().map(|s| s.native_fog)); }
     }
-    if flag("--unload-check") && now > 16. && !check.moved {
+    let unload_at = if flag("--transition-check") { 24. } else { 16. };
+    if (flag("--unload-check") || flag("--transition-check")) && now > unload_at && !check.moved {
         assert!(!check.parts.is_empty());
+        if flag("--transition-check") { assert_eq!(check.validated, 4); }
         check.moved = true;
         for mut c in &mut camera {
             c.translation = Vec3::splat(-100_000.);
         }
     }
-    if check.moved && now > 23. && !check.done {
+    if check.moved && now > unload_at + 7. && !check.done {
         assert!(check.parts.iter().all(|e| all.get(*e).is_err()));
         assert!(check.meshes.iter().all(|id| !meshes.contains(*id)));
         assert!(check.materials.iter().all(|id| !materials.contains(*id)));

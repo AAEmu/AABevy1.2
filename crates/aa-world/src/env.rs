@@ -298,6 +298,9 @@ pub struct EnvSample {
     pub sky: Vec3,
     pub ambient_ground: Vec3,
     pub fog: Vec3,
+    /// Native SetFogColor RGB: raw sampled colour * (multiplier * 2^HDR power).
+    /// Kept separate from the calibrated, IEC-decoded `fog` surface/post sample.
+    pub native_fog: Vec3,
     pub fog_density: f32,
     pub ocean_fog: Vec3,
     /// Raw sRGB colours (before multipliers), for sky gradients.
@@ -430,7 +433,7 @@ impl EnvSample {
             };
         }
         mix!(
-            sun, sky, ambient_ground, fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
+            sun, sky, ambient_ground, fog, native_fog, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
             color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
             char_back, char_back_shadow, ocean_under
@@ -483,6 +486,9 @@ impl TimeOfDay {
         let (sky_srgb, sky) = col("Sky color", "Sky color multiplier");
         let (_, ambient_ground) = col("Ambient ground color", "Ambient ground color multiplier");
         let (fog_srgb, fog) = col("Fog color", "Fog color multiplier");
+        // 300A5DD0 computes this product after raw layer blending, then 301235E0
+        // stores all three floats unchanged. HDR renderer base (30121B70) is 2.
+        let native_fog = fog_srgb * (scalar("Fog color multiplier") * scalar("HDR dynamic power factor").exp2());
         let (_, ocean_fog) = col("Ocean fog color", "Ocean fog color multiplier");
         let (nh, horizon) = col("Night sky: Horizon color", "Night sky: Horizon color multiplier");
         let (nz, zenith) = col("Night sky: Zenith color", "Night sky: Zenith color multiplier");
@@ -510,6 +516,7 @@ impl TimeOfDay {
             sky,
             ambient_ground,
             fog,
+            native_fog,
             fog_density: scalar("Volumetric fog: Global density"),
             ocean_fog,
             sky_srgb,
@@ -864,6 +871,60 @@ mod tests {
         let single = TimeOfDay::sample_blended(&[(&a, 0.2)], 3.8, lighting);
         assert_eq!(single.sun, a.sample(3.8, lighting).sun);
         assert_eq!(single.moons[0].color, a.sample(3.8, lighting).moons[0].color);
+    }
+
+    #[test]
+    fn native_global_fog_raw_rgb_multiplier_hdr_and_raw_zone_blend() {
+        let tod = |color: &str, multiplier: f32, hdr: f32| TimeOfDay::parse(&format!(
+            r#"<TimeOfDay sRGB="1">
+            <Variable Name="Fog color"><Spline Keys="0:({color}):0,1:({color}):0,"/></Variable>
+            <Variable Name="Fog color multiplier"><Spline Keys="0:{multiplier}:0,1:{multiplier}:0,"/></Variable>
+            <Variable Name="HDR dynamic power factor"><Spline Keys="0:{hdr}:0,1:{hdr}:0,"/></Variable>
+            </TimeOfDay>"#)).unwrap();
+        let a = tod("0.1:0.3:0.5", 2.0, 1.0);
+        let b = tod("0.5:0.7:0.9", 6.0, 3.0);
+        let lighting = Lighting::default();
+        let single = a.sample(10.0, lighting);
+        assert!((single.native_fog - Vec3::new(0.4, 1.2, 2.0)).length() < 1e-6);
+        // The existing calibrated fog is deliberately a separate adapter.
+        assert!((single.fog - srgb_to_linear(Vec3::new(0.1, 0.3, 0.5)) * 2.0).length() < 1e-6);
+        let mixed = TimeOfDay::sample_blended(&[(&a, 1.0), (&b, 3.0)], 10.0, lighting);
+        let raw = Vec3::new(0.4, 0.6, 0.8);
+        assert!((mixed.native_fog - raw * (5.0 * 2.5_f32.exp2())).length() < 5e-6);
+        let late = a.sample(10.0, lighting).lerp(&b.sample(10.0, lighting), 0.75);
+        assert!((mixed.native_fog - late.native_fog).length() > 10.0);
+        // Old XML ignores its serialized HDR power; Fog colour is not one of
+        // the six legacy key sets migrated with exponent 2.2.
+        let legacy = tod("0.1:0.3:0.5", 2.0, 1.0);
+        let xml = r#"<TimeOfDay><Variable Name="Fog color"><Spline Keys="0:(0.1:0.3:0.5):0,1:(0.1:0.3:0.5):0,"/></Variable>
+            <Variable Name="Fog color multiplier"><Spline Keys="0:2:0,1:2:0,"/></Variable>
+            <Variable Name="HDR dynamic power factor"><Spline Keys="0:3:0,1:3:0,"/></Variable></TimeOfDay>"#;
+        let old = TimeOfDay::parse(xml).unwrap().sample(10.0, lighting);
+        assert!((old.native_fog - legacy.sample(10.0, lighting).native_fog * 0.5).length() < 1e-6);
+        let defaults = TimeOfDay::default();
+        let sample = defaults.sample(10.0, lighting);
+        let t = spline_hour(10.0, lighting.dawn_hour) / 24.0;
+        assert_eq!(sample.native_fog, defaults.color("Fog color", t)
+            * (defaults.scalar("Fog color multiplier", t) * defaults.scalar("HDR dynamic power factor", t).exp2()));
+    }
+
+    #[test]
+    fn real_global_fog_zones_match_native_curve_numeric_controls() {
+        if !crate::pak_available() { return }
+        // Raw curves executed by original 300AC0A0/300AF640 and
+        // 300ABDD0/300AF720 in bounded Unicorn, then native f32 product order.
+        for (zone, expected) in [
+            (149, [[0.0018018803, 0.004504689, 0.009910349], [0.20698118, 0.6002463, 0.9893724]]),
+            (179, [[0.0088735, 0.026620477, 0.057677742], [0.3472341, 0.49274158, 0.7539938]]),
+        ] {
+            let xml = aa_pak::Pak::global().read_string(&format!("worlds/main_world/zone/{zone}/time_of_day.xml")).unwrap();
+            let tod = TimeOfDay::parse(&xml).unwrap();
+            for (hour, rgb) in [0., 12.].into_iter().zip(expected) {
+                // Isolate native spline t=0/.5 from the separate main-world hour warp.
+                let native = tod.sample(hour, Lighting { dawn_hour: 6.0, ..Lighting::default() }).native_fog;
+                assert!((native - Vec3::from(rgb)).abs().max_element() < 3e-7, "zone{zone} hour{hour}: {native:?}");
+            }
+        }
     }
 
     #[test]
