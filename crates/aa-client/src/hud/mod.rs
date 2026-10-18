@@ -69,6 +69,7 @@ mod pets;
 mod plates;
 mod pvp;
 mod radar;
+mod ranking;
 mod repair;
 mod quests;
 mod ring;
@@ -83,6 +84,11 @@ mod tips;
 mod trade;
 mod trial;
 mod usable;
+
+#[allow(dead_code)]
+pub(crate) fn ranking_fixture() {
+    ranking::fixture::run();
+}
 
 /// Run the isolated original-script combat example without a network connection.
 #[allow(dead_code)]
@@ -408,6 +414,7 @@ impl Plugin for HudPlugin {
         chat::config::plugin(app);
         crime::plugin(app);
         trial::plugin(app);
+        ranking::plugin(app);
         mail::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
