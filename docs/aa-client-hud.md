@@ -1827,3 +1827,54 @@ captured replies/ignore behavior and stale selected characters. Inspected aa-dev
 original offline color and3/4 count at337.5-378.5 FPS, and the original invitation
 at306.6-371.2 FPS. Both processes self-close without runtime errors. These are
 controlled original-script checks; paired live family settlement is unverified.
+
+### Received stop-duration cooldowns in the original HUD (2026-10-18)
+
+Action sweeps, the original equipped-item constant buttons and click preflight now
+read aa-net's mutable native cooldown rows. These include original SCCooldowns
+snapshots and admitted CastingStopped/PlotStopped durations; the separate raw
+snapshot history remains unchanged. Selection retains every actual descriptor tag
+in SQL order, then the raw skill ID, strict unsigned greater-than and each winner's
+own total (including zero). Global timing still uses the prior observed-cast/DB
+estimate; this does not claim native default/custom GCD or Fired producers.
+
+The actual skill ID to primary cooldown tag catalog is bound once in First, before
+network PreUpdate, from GameData's existing skills query. A known zero routes to
+the direct skill timer; missing catalog rows remain unknown. aa-net shares this
+static map through Arc across clones and lifecycle resets, so the HUD's per-frame
+Skills copy does not clone the whole descriptor table.
+
+An admitted stop requires the uniquely tracked local actor timeline, a known
+descriptor routing row, a nonzero received duration and the actual received local
+GM mode1 byte equal to zero. It inserts before removal of the existing cast-bar
+record. The first matching timer extends only when the new duration is greater
+than its current integer-millisecond remainder; expired compaction preserves
+survivor order and the native150-row capacity. Such a stop also invalidates only
+that skill's older app DB estimate, even if an existing longer native timer wins.
+Consequently the old estimate cannot mask the received duration or reappear after
+expiry. A later actual Started can establish the existing fallback again. Unknown,
+ambiguous, nonlocal, zero-duration and GM-blocked stops do not apply this policy.
+
+Native ordinary TL records actually outlive stop, with reference/frame cleanup;
+plot active-caster lifetime differs. The current actor-keyed cast model cannot
+represent all duplicate/repeated timeline cases, so it deliberately refuses that
+ambiguity. Full native tracking, Fired duration modifiers and attribute74 GCD
+remain open. Source contracts and actual-code oracles are recorded in aa-net/UI
+docs and `data/extract/aa-net/native-cooldown-timeline-design-20261018.md`.
+
+Validation: six focused client checks pass, including real catalog installation
+through Bevy First, actual received stop folding, fallback expiry/new-start
+behavior and the original item button's7000ms sweep (2.37s). Full client208 passed/
+36 ignored in33.21s. Separate network checks cover unchanged longer timer rows,
+unrelated estimates, admission failures and static Arc sharing through resets.
+
+The inspected `equipment_cooldown --stopped` aa-dev capture in
+`shots/hud/sol61-native-stop/original-stopped.png` uses a received12000ms stop after
+the actual reset/start sequence, with the original item icons/countdowns intact;
+245.1-277.2 FPS, zero runtime errors and self-closed. The refreshed main build's
+world-selection capture in the same folder reaches the live Lane-bevy list with
+zero script errors at387.8-463.0 FPS. It was compared with
+`reference/world_select/real.png`; UI/art placement remains aligned. This login
+check used a separate QA account and does not claim a live in-game stop receipt.
+The tested executable `target/debug/aa-client-20261018-hud.exe` has SHA256
+`5EC6517593D6FBFAEBAF9ACEA8D8842C313920899E4A895561E4E9F104B55003`.

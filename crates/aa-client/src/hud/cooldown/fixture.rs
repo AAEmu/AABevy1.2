@@ -1,7 +1,6 @@
 //! Actual original equipped-item buttons, bound to two real use-skill items and received timers.
 use super::*;
 use aa_net::model::{EquipDetail, Item, ItemDetail, slot};
-use aa_net::state::ReceivedCooldown;
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -27,15 +26,17 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
             equipment[index] = Some(super::super::panels::item_slot(data.game.get(), template_id, 1, item.grade).with_instance(&item));
         }
         data.panels.equipment = equipment;
-        data.cooldowns.obj_id = 100;
-        let now = Instant::now();
-        for (id, remaining_ms, total_ms) in [(655, 18_000, 30_000), (1004, 12_000, 300_000)] {
-            data.cooldowns.received_tag_cooldowns.push(ReceivedCooldown {
-                cooldown: aa_net::Cooldown { id, remaining_ms, total_ms },
-                received_at: now,
-                reset: false,
-            });
-        }
+        data.cooldowns
+            .apply(&aa_net::Event::PlayerSpawn(Box::new(super::super::expansion::fixture::spawn())));
+        let catalog = data.game.get().unwrap().skills.iter().map(|(&id, info)| (id, info.tag)).collect();
+        data.cooldowns.set_cooldown_catalog(catalog);
+        data.cooldowns.apply(&aa_net::Event::Cooldowns(aa_net::skill::SkillCooldowns {
+            skills: vec![],
+            tags: [(655, 18_000, 30_000), (1004, 12_000, 300_000)]
+                .into_iter()
+                .map(|(id, remaining_ms, total_ms)| aa_net::Cooldown { id, remaining_ms, total_ms })
+                .collect(),
+        }));
         let hud: Table = rt.lua.globals().get("HUD")?;
         super::super::panels::push(&rt.lua, &hud, &data.panels, None)?;
     }
@@ -58,8 +59,32 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
+    if std::env::args().any(|arg| arg == "--stopped") {
+        let mut data = bridge.borrow_mut();
+        data.cooldowns.apply(&aa_net::Event::SkillCooldownReset {
+            obj_id: 100,
+            skill_id: 13419,
+            tag_id: 655,
+            gcd: false,
+        });
+        data.cooldowns.apply(&aa_net::Event::SkillStarted(aa_net::skill::SkillStarted {
+            skill_id: 13419,
+            tl: 8,
+            caster: aa_net::buff::BuffCaster {
+                obj_id: 100,
+                ..Default::default()
+            },
+            target: aa_net::skill::SkillTarget::unit(100),
+            cast_ms: 100,
+            base_cast_ms: 100,
+            synergy: 0,
+            result: 0,
+            result_value: 0,
+        }));
+        data.cooldowns.apply(&aa_net::Event::CastingStopped { tl: 8, duration_ms: 12000 });
+    }
     if std::env::args().any(|arg| arg == "--ready") {
-        for entry in &mut bridge.borrow_mut().cooldowns.received_tag_cooldowns {
+        for entry in &mut bridge.borrow_mut().cooldowns.native_tag_cooldowns {
             entry.reset = true;
         }
     }
