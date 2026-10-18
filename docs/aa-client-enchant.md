@@ -393,3 +393,50 @@ pixel equivalence, a live item transaction or isolated performance measurements.
 The worker's light-style production is committed as2ddb7ee. At16:52:00 local,
 the idle target/debug/aa-client-play.exe alias was refreshed from this inspected
 copy and its SHA256 rechecked equal to B4D86DF8...909B8D7 above.
+
+## Shared native provider and request retries
+
+Current source replaces the local record implementation with aa-net's shared
+NativeItemRecords/NativeItemRowOutput types (45d9d0c), removing760 duplicated
+implementation/test lines. The nine provider regressions now run in aa-net
+alongside whole-event/lifecycle and transport-loopback checks. The HUD keeps
+observe/apply_row/apply_detail/finish at its existing synchronous boundaries;
+Session uses the same implementation's whole-event fold without Lua, pending
+callbacks or controller notifications.
+
+Session now compares captures against those native records instead of the
+legacy Inventory plus a separate known-slot set. A supported Count row that
+ignores packet ID can therefore permit a newly captured retry while the old
+capture is rejected, even when the legacy reducer stayed unchanged. A qualified
+SC093 refresh behaves the same way. Unsupported rows still retire only affected
+certainty; global loss stays unknown until a fresh selected boundary. The raw AA
+setting, selected owner, active-world/received-actor and complete-item checks
+remain explicit. No receipt or retry changes items optimistically.
+
+The migrated client has23 focused enchant checks passing in6.72s; the reduced
+count reflects the nine provider tests moving to aa-net, not removed coverage.
+Network's separate source fixes also cover non-equipment Security11 unpack
+without a nonexistent descriptor lookup (fb3ebea) and actual SC095 ID-only
+equipment updates (a3de47e). The latter changes only IDs of already-known
+records for the current actor, preserving every other field, unknowns and sticky
+loss. Its227-byte BC3+28u64 native codec/copy-loop controls and full606 network
+tests pass; the lane's missing producer remains explicit.
+
+The combined shared-provider client passes319 tests, with38 existing optional
+probes ignored (64.38s). Main+enchant build passes in1m59s. Frozen copies are
+target/debug/aa-client-20261018-shared-records.exe (SHA256
+2A4985D44319E05373C3C0A167C1ADB7D45CCCD5CB631490F7C83A0710CF9DE8)
+and aa-enchant-shared-records-20261018.exe (SHA256
+0779B3C17DE40508DC3DE815FEA10C98B3FB20D82214623386CB76F45F9C6620).
+This cut includes UI56037ed's healthy/low-health effect restart correction;
+the later generic effect paint-clock, HDR light and static recharge-catalog
+work are outside it. Dependency artifact timestamps were checked against the
+first generic-clock source write to establish that boundary.
+
+Both1920x1080 shots/hud/shared-records/ captures are inspected, self-close and
+have no WARN/ERROR/panic: grade-working349.5-349.7 FPS and live world-select
+272.4-410.8 FPS. The original-script grade controls retain their selected data
+and visibly dim while working; Lane-bevy reports Up. These are fixture/live
+world-list smoke checks, not a live item transaction or native pixel pairing.
+The playable alias still points to the preceding B4D controller cut until the
+next accepted integration refresh.
