@@ -32,6 +32,7 @@ pub mod terrain;
 pub mod terrain_layers;
 pub mod terrain_query;
 pub mod vegetation;
+pub mod vegetation_color;
 pub mod water;
 pub mod water_material;
 pub mod water_query;

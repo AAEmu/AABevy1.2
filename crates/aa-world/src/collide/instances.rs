@@ -83,7 +83,7 @@ impl Item {
 
     /// The renderer's transform ([`Vegetation::mat4`]) with the cell origin in the translation.
     fn matrix(&self) -> Mat4 {
-        Vegetation { pos: self.pos, scale: self.scale, group: 0, angle_x: self.angles[0], angle_y: self.angles[1], bright: 0, angle_z: self.angles[2], flags: 0, max_view_dist: 0.0 }.mat4()
+        Vegetation { pos: self.pos, scale: self.scale, group: 0, angle_x: self.angles[0], angle_y: self.angles[1], bright: 0, color_variation: [127; 3], angle_z: self.angles[2], flags: 0, max_view_dist: 0.0 }.mat4()
     }
 }
 
@@ -348,7 +348,7 @@ mod tests {
     }
 
     fn veg(x: f32, y: f32, z: f32, scale: f32) -> Item {
-        let v = Vegetation { pos: Vec3::new(x, y, z), scale, group: 1, angle_x: 0, angle_y: 0, bright: 0, angle_z: 0, flags: 0, max_view_dist: 0.0 };
+        let v = Vegetation { pos: Vec3::new(x, y, z), scale, group: 1, angle_x: 0, angle_y: 0, bright: 0, color_variation: [127; 3], angle_z: 0, flags: 0, max_view_dist: 0.0 };
         Item::new(0, &v, Vec3::new(1024.0, 0.0, 0.0), scale > 1.5)
     }
 
