@@ -192,6 +192,7 @@ fn original_repair_buttons_physical_slots_costs_and_received_wear() -> Result<()
         slot: 7,
         item_id: item.id,
         detail_payload: None,
+        raw_detail_block: None,
         detail: ItemDetail::Equip(aa_net::model::EquipDetail { durability, ..default() }),
     };
     let ack = Event::ItemsChanged(aa_net::items::ItemTasks {

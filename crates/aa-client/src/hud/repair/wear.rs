@@ -150,6 +150,7 @@ mod tests {
                 ..Default::default()
             }),
             detail_payload: None,
+            raw_detail_block: None,
         };
         assert_eq!(
             wear.batch(
