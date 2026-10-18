@@ -577,6 +577,7 @@ pub(crate) mod tests {
             buffs: Vec::new(),
             anim_action: 0,
             house_posture: None,
+            state_attachments: None,
             attached_to: None,
             max_hp: 10,
             max_mp: 0,

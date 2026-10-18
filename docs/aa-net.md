@@ -3708,3 +3708,50 @@ Validation: `cargo check -p aa-net --features bevy`, full289 library tests and d
 pass. Three new tests cover native field goldens, raw count clipping at0/10 with exact
 following DD04 boundaries, every truncation, FULL32-bit canceled doodad IDs and repeated
 ordered receive forwarding without casting or inventing a workbench.
+
+### Complete lane slave/transfer/shipyard unit tails (2026-10-18)
+
+`Unit::read` now consumes complete active-lane SCUnitState packets for Slave2,
+Transfer4 and Shipyard6. Previously Slave returned immediately after its first attachment
+byte, and Transfer/Shipyard skipped their equipment/model-parameter/tail bytes entirely;
+a following DD04 opcode could therefore be read from the unit body. Transfer and Shipyard
+now retain exactly seven bare body-part template IDs in slots19..25, then read model
+parameters. Slave retains its full28-slot equipment format. All three consume the exact
+lane posture/weapon/zero learned counts/rotation/race/PISC/flags/buff suffix, rejecting
+truncation, unknown postures and impossible nonzero lane learned counts instead of
+reporting partial success. Character/NPC/mate tail compatibility is not broadened here.
+
+`Unit.state_attachments: Option<UnitStateAttachments>` retains received snapshot identity
+separately from `attached_to` and actual UnitAttached/Detached notifications. It is Some
+for the strict lane kinds2/3/4/6, including System/unbound snapshots. Fields are raw
+first_point, optional first_obj_id and optional bonding_obj_id. The exact active-lane
+rules from `world/unit_state.rs::write_net_unit` are:
+
+| Kind | First attachment | Second attachment |
+| --- | --- | --- |
+| Slave2 | signed i8 point; BC owner object only if point>-1 | BC bond when present, else byteff |
+| Housing3 / Shipyard6 | System byteff | BC bond when present, else byteff |
+| Transfer4 | u8 point; BC bonding object unless point==ff | BC bond when present, else byteff |
+
+Lane model comments identify Slave owner_obj_id as the unit to which the slave is attached;
+the snapshot preserves that role but does not issue a synthetic rider event or guess a
+passenger list. Existing real attachments remain authoritative for the live rider-seat
+view. Root adds state_attachments:None to its two explicit Unit fixture literals.
+
+A newly verified native boundary is retained explicitly: NetUnit calls397c03b0 at397c9698
+for its first attachment and3983bf10 at397c96a7 for its second, then397bda20 posture.
+Native first point!=ff always reads a BC via391b8780; it does not use the lane's signed
+Slave point>-1 condition. Native second non-ff form is point byte +BC via397b25d0 +kind
+byte +i32 space +i32 spot (13 bytes), whereas the lane writes plain optionalBC for these
+noncharacter bonds. These are concrete transport differences; the active lane parser does
+not guess a native profile or call this raw lane DTO a complete native attachment object.
+
+Three new regressions independently construct exact source field fixtures across every
+first-attachment branch and absent/present second bonds. They preserve seven body parts,
+distinct owner/bond IDs, signed edge bytes and complete HP/faction/rotation state, reject
+every truncation and malformed tails, and decode Slave→Transfer→Shipyard→Snow in one
+DD04 batch without desynchronization or fabricated UnitAttached state.
+
+Validation: strict object-tail `cargo check -p aa-net --features bevy` and full292
+library tests pass; diff check is clean. No live summon, vehicle, attachment or server
+transaction was issued during this protocol-only work.

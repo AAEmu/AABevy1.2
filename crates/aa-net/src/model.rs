@@ -810,8 +810,20 @@ pub struct Unit {
     pub anim_action: u32,
     /// Received house posture; absent until a full unit tail or house posture report supplies it.
     pub house_posture: Option<crate::unit_msg::HousePosture>,
+    /// Raw lane attachment fields in the unit-state snapshot, distinct from UnitAttached notifications.
+    pub state_attachments: Option<UnitStateAttachments>,
     /// What the unit sits on (a mount, a vehicle, a ship) and where, set while `UnitAttached` is in force.
     pub attached_to: Option<Attachment>,
+}
+
+/// Non-character lane unit-state attachment fields. These do not imply a local rider/seat event.
+/// Native first/second attachment serializers differ; no native layout inference is performed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UnitStateAttachments {
+    pub first_point: u8,
+    /// Slave owner object or transfer bonding object, only when the first point encodes one.
+    pub first_obj_id: Option<u32>,
+    pub bonding_obj_id: Option<u32>,
 }
 
 /// A rider's seat: the object it is attached to and the attach point (`1` driver, `2` and up passengers).
@@ -908,14 +920,13 @@ impl Unit {
         let scale = r.f32()?;
         let level = r.u8()?;
         let model_id = r.u32()?;
-        // Transfers and shipyards only carry the body part slots: they have no usable equipment.
-        let (equipment, model_params, tail_ok) = match kind_byte {
-            4 | 6 => (Equipment::default(), ModelParams::default(), false),
-            _ => {
-                let eq = Equipment::read(r, format)?;
-                (eq, ModelParams::read(r)?, true)
-            }
-        };
+        // Transfers and shipyards carry exactly the seven bare body-part template IDs.
+        let equipment = if matches!(kind_byte, 4 | 6) {
+            let mut equipment = Equipment::default();
+            for index in 19..=25 { equipment.slots[index] = Item::template_only(r.u32()?); }
+            equipment
+        } else { Equipment::read(r, format)? };
+        let model_params = ModelParams::read(r)?;
         let mut unit = Self {
             obj_id,
             name,
@@ -946,19 +957,15 @@ impl Unit {
             buffs: Vec::new(),
             anim_action: 0,
             house_posture: None,
+            state_attachments: None,
             attached_to: None,
         };
-        let mut tail_read = false;
-        if tail_ok {
-            // Housing has a proven complete lane tail. Reject truncation rather than
-            // leaving its unread bytes where the next DD04 opcode is expected.
-            tail_read = if kind_byte == 3 {
-                unit.read_tail(r, kind_byte)?;
-                true
-            } else {
-                unit.read_tail(r, kind_byte).is_ok()
-            };
-        }
+        // The lane's slave/house/transfer/shipyard tails have exact boundaries.
+        // Reject truncation instead of treating their suffix as the next DD04 opcode.
+        let tail_read = if matches!(kind_byte, 2 | 3 | 4 | 6) {
+            unit.read_tail(r, kind_byte)?;
+            true
+        } else { unit.read_tail(r, kind_byte).is_ok() };
         (unit.max_hp, unit.max_mp) = (unit.hp, unit.mp);
         // a character or monster announced with no health is a corpse (a failed tail leaves the health at 0 as well)
         unit.dead = tail_read && unit.hp <= 0 && (unit.is_npc() || unit.is_character());
@@ -971,19 +978,22 @@ impl Unit {
         self.hp = r.i32()? / 100;
         self.mp = r.i32()? / 100;
         let attach1 = r.u8()?;
-        // Slaves and transfers add an attach target to the first attach point; only characters,
-        // NPCs and mates have the plain form decoded here.
-        if kind_byte == 3 && attach1 != 255 {
-            return Err(WireError::Invalid(format!("housing first attach point {attach1}")));
-        }
-        if !matches!(kind_byte, 0 | 1 | 3 | 5) || (attach1 != 255 && kind_byte != 0) {
-            return Ok(());
-        }
-        // Second attach point: -1, or (characters) a 13 byte bond, or (NPCs) a bc.
+        let strict = matches!(kind_byte, 2 | 3 | 4 | 6);
+        let first_obj_id = match kind_byte {
+            2 if (attach1 as i8) > -1 => Some(r.bc()?),
+            4 if attach1 != 255 => Some(r.bc()?),
+            3 | 6 if attach1 != 255 => return Err(WireError::Invalid(format!("unit kind {kind_byte} first attach point {attach1}"))),
+            0 | 2 | 3 | 4 | 6 => None,
+            1 | 5 if attach1 == 255 => None,
+            _ => return Ok(()),
+        };
+        // Second attachment: -1, a character's longer bond, or a noncharacter BC.
         let bond = r.u8()?;
-        if bond != 0xFF {
-            r.skip(if kind_byte == 0 { 12 } else { 2 })?;
-        }
+        let bonding_obj_id = if bond != 0xff {
+            if kind_byte == 0 { r.skip(12)?; None }
+            else { Some(u32::from(bond) | (u32::from(r.u16()?) << 8)) }
+        } else { None };
+        if strict { self.state_attachments = Some(UnitStateAttachments { first_point: attach1, first_obj_id, bonding_obj_id }); }
         let posture = r.u8()?;
         let has_loot_left = r.bool()?;
         match posture {
@@ -995,7 +1005,7 @@ impl Unit {
             }
             7 => r.skip(14)?,
             8 => r.skip(8)?,
-            other if kind_byte == 3 => return Err(WireError::Invalid(format!("housing model posture {other}"))),
+            other if strict => return Err(WireError::Invalid(format!("unit kind {kind_byte} model posture {other}"))),
             _ => return Ok(()),
         }
         r.skip(1)?; // active weapon
@@ -1008,10 +1018,10 @@ impl Unit {
             for _ in 0..passives {
                 self.passive_buffs.push(r.u32()?);
             }
-        } else if kind_byte == 3 {
+        } else if strict {
             let skills = r.u8()?;
             let buffs = r.i32()?;
-            if skills != 0 || buffs != 0 { return Err(WireError::Invalid(format!("housing learned counts {skills}/{buffs}"))); }
+            if skills != 0 || buffs != 0 { return Err(WireError::Invalid(format!("unit kind {kind_byte} learned counts {skills}/{buffs}"))); }
         } else {
             r.skip(1 + 4)?; // learned skill and buff counts (always 0)
         }

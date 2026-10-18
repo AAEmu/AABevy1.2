@@ -74,7 +74,7 @@ pub use loot_roll::{LootRollCommand, LootRollEvent, LootRollFailure, LootRollKey
 pub use mail::{CachedMailBody, MailAttachment, MailBody, MailCommand, MailEvent, MailFailure, MailHeader, MailItemLocation, MailSlot, Mailbox, SendMail, UnreadMail};
 pub use mate::{DynamicUnitState, MateCommand, MateEvent, MateSpawn, Mates, OwnedMate, SlaveState};
 pub use mate_equipment::{MateEquipmentChange, MateEquipmentEntry, MateItemLocation};
-pub use model::{Character, CreateCharacter, Doodad, Unit};
+pub use model::{Character, CreateCharacter, Doodad, Unit, UnitStateAttachments};
 pub use session::{Client, ClientOptions, Command, Event, MoveCommand, MoveState, Phase, PlayerSpawn};
 pub use state::WorldState;
 pub use skill::{Cooldown, SkillCooldowns, COOLDOWN_LIMIT};
@@ -88,3 +88,6 @@ pub use ui_data::{UiData, UiDataCommand, UiDataEvent, UiDataResponse};
 
 #[cfg(feature = "bevy")]
 pub use plugin::{NetCommand, NetEvent, NetPlugin};
+
+#[cfg(test)]
+mod unit_state_tests;
