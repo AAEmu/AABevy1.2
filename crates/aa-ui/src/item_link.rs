@@ -1,5 +1,9 @@
 //! Native 1.2 item-link transport (394df700 encode, 394df7f0 decode, 394e4ef0 format).
-//! This transports a caller-supplied native item record; it does not invent instance fields.
+//! Native item field layout comes from the network serializer 3961f500 and detail 3961edf0.
+//! Applications supply real instance fields; opaque details remain opaque.
+
+mod record;
+pub use record::{EquipDetail, ItemDetail, ItemRecord, pack, unpack};
 
 pub const NATIVE_ITEM_BYTES: usize = 192;
 pub const ITEM_LINK_CHARS: usize = 256;
