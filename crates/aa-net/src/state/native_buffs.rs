@@ -70,6 +70,8 @@ impl NativeBuffs {
                         old.buff.elapsed_ms.min(buff.elapsed_ms)
                     };
                     old.buff.tick_ms = buff.tick_ms;
+                    // This receipt does not carry a new authoritative tick index.
+                    old.buff.raw_tick_index = buff.raw_tick_index;
                     match rule.stack_rule_id {
                         2 => old.buff.charged = buff.charged,
                         3 => old.buff.charged = old.buff.charged.wrapping_add(buff.charged),
@@ -180,6 +182,19 @@ mod tests {
             assert_eq!(b.charged, charge);
             assert_eq!(b.duration_ms, if rule == 5 { 2000 } else { 1000 });
         }
+    }
+    #[test]
+    fn snapshot_tick_index_survives_seed_and_created_invalidates_it() {
+        let mut v = view(4, false);
+        let event = created(1, 10, 1);
+        let Event::BuffCreated { buff, .. } = &event else { unreachable!() };
+        let mut snapshot = buff.clone();
+        snapshot.raw_tick_index = Some(-7);
+        snapshot.kind = BuffKind::Good;
+        v.seed(9, &[snapshot]);
+        assert_eq!(v.of(9).unwrap()[0].buff.raw_tick_index, Some(-7));
+        v.apply(&event);
+        assert_eq!(v.of(9).unwrap()[0].buff.raw_tick_index, None);
     }
     #[test]
     fn missing_history_or_catalog_stays_unknown_and_snapshot_recovers() {

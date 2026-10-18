@@ -67,6 +67,8 @@ pub struct Buff {
     /// Time already elapsed in ms when the packet was written (0 for a new buff).
     pub elapsed_ms: u32,
     pub tick_ms: u32,
+    /// Exact signed NetBuff tickIndex; Created has no corresponding wire field.
+    pub raw_tick_index: Option<i32>,
     /// Genuine snapshot stack count; Created uses the lane charge convenience value.
     /// For original-client modifiers use the catalog-aware `state::NativeBuffs` view.
     pub stacks: i32,
@@ -86,7 +88,7 @@ impl Buff {
         let duration_ms = r.i32()?;
         let elapsed_ms = r.u32()?;
         let tick_ms = r.u32()?;
-        r.skip(4)?; // tick index
+        let raw_tick_index = Some(r.i32()?);
         let stacks = r.i32()?;
         let charged = r.i32()?;
         r.skip(4)?; // cooldown skill
@@ -101,6 +103,7 @@ impl Buff {
             duration_ms,
             elapsed_ms,
             tick_ms,
+            raw_tick_index,
             stacks,
             charged,
             kind,
@@ -144,6 +147,7 @@ impl Buff {
                 duration_ms: (duration * 10) as i32,
                 elapsed_ms: (elapsed * 10) as u32,
                 tick_ms: (tick * 10) as u32,
+                raw_tick_index: None,
                 stacks: charge.max(1) as i32,
                 charged: charge as i32,
                 kind: BuffKind::Unknown,
@@ -177,6 +181,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn snapshot_tick_index_preserves_signed_bits_and_alignment() {
+        for index in [i32::MIN, -1, 0, 123, i32::MAX] {
+            let mut w = Writer::new();
+            net_buff(&mut w, 2, 77);
+            let mut bytes = w.finish();
+            let offset = bytes.len() - 16;
+            bytes[offset..offset + 4].copy_from_slice(&index.to_le_bytes());
+            bytes.push(0xa5);
+            let mut r = Reader::new(&bytes);
+            assert_eq!(Buff::read_net(&mut r, BuffKind::Good).unwrap().raw_tick_index, Some(index));
+            assert_eq!(r.u8().unwrap(), 0xa5);
+            for n in 0..bytes.len() - 1 {
+                assert!(Buff::read_net(&mut Reader::new(&bytes[..n]), BuffKind::Good).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn net_buff_lists() {
         let mut w = Writer::new();
         w.u8(2);
@@ -195,6 +217,7 @@ pub(crate) mod tests {
         assert_eq!(buffs[0].caster, BuffCaster { kind: 0, obj_id: 0x0102 });
         assert_eq!((buffs[0].caster_char_id, buffs[0].caster_level, buffs[0].ability_level), (77, 5, 3));
         assert_eq!((buffs[0].duration_ms, buffs[0].elapsed_ms, buffs[0].tick_ms), (30_000, 5_000, 1_000));
+        assert_eq!(buffs[0].raw_tick_index, Some(0));
         assert_eq!(buffs[0].stacks, 2);
         assert_eq!(buffs[2].kind, BuffKind::Hidden);
         assert_eq!(buffs[0].remaining_ms(1_000), Some(24_000));
@@ -216,6 +239,7 @@ pub(crate) mod tests {
         assert_eq!(owner, 0x0A0B0C);
         assert_eq!((b.index, b.buff_id, b.duration_ms, b.stacks), (2, 8_000_011, 30_000, 1));
         assert_eq!(b.kind, BuffKind::Unknown);
+        assert_eq!(b.raw_tick_index, None);
     }
 
     #[test]
