@@ -534,6 +534,24 @@ mod tests {
         (0..n).map(|i| core.tick(if i == 0 { Frame::new(1.0, 1.0) } else { Frame::ZERO }).left).collect()
     }
 
+    /// `cargo test -p aa-audio reverb::tests::cost -- --ignored --nocapture`: the CPU time of the reverb per second of audio.
+    #[test]
+    #[ignore]
+    fn cost() {
+        let mut core = ReverbCore::new(48000);
+        core.set_target(params(7.0, 0.33));
+        core.snap();
+        let mut block = vec![Frame::new(0.1, -0.1); 1024];
+        let blocks = 48000 / 1024 * 20;
+        let started = std::time::Instant::now();
+        for _ in 0..blocks {
+            core.process(&mut block, 1.0 / 48000.0);
+        }
+        let seconds = f64::from(blocks) * 1024.0 / 48000.0;
+        let took = started.elapsed().as_secs_f64();
+        println!("reverb: {:.1} ms per second of audio = {:.2} % of one core ({seconds:.0} s rendered in {:.0} ms)", took / seconds * 1000.0, took / seconds * 100.0, took * 1000.0);
+    }
+
     #[test]
     fn presets_are_read() {
         let p = Presets::parse(XML);
