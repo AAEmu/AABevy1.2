@@ -61,7 +61,7 @@ def plans(which):
     out = []
     for f in sorted((WORK / "plans").glob("*.json")):
         p = json.loads(f.read_text(encoding="utf-8"))
-        if p["ability"] in which or (not which and p["ability"] != 11):  # the motion reel (11) only when asked for
+        if p["ability"] in which or (not which and p["ability"] < 11):  # the motion and ground reels (11 and up) only when asked for
             p["file"] = f.stem
             out.append(p)
     return out
@@ -74,13 +74,16 @@ def record(tag, exe, plan, fps, size, extra_args):
     shutil.rmtree(d, ignore_errors=True)
     d.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(exe), "--enter-world", "--user", ACCOUNT, "--character", CHARACTER, "--hour", "12", "--size", size,
-           *([] if plan.get("hud") else ["--no-hud"]), "--mute", *CAM, *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
+           *([] if plan.get("hud") else ["--no-hud"]), "--mute", *plan.get("cam", CAM), *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
            "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *plan.get("args", []), *extra_args]
     env = dict(os.environ)
     env.update(plan["env"])
     # REEL_TARGET (e.g. `model=1290`: any training doll) replaces the stage's doll when it is gone (another session killed it)
     env["AA_COMBAT_FAKE_TARGET"] = os.environ.get("REEL_TARGET") or str(json.loads((WORK / "stage.json").read_text())["dummy_obj"])
-    env["AA_COMBAT_CAM_REL"] = "-90"
+    if plan.get("cam_rel", "-90") is None:  # a fixed camera orbit (--cam-yaw / --cam-pitch) instead of one relative to the facing
+        env.pop("AA_COMBAT_CAM_REL", None)
+    else:
+        env["AA_COMBAT_CAM_REL"] = plan.get("cam_rel", "-90")
     env["AA_COMBAT_LOG"] = "1"
     wait_ram()
     print(f"[{tag}] {plan['name']}: {len(plan['captions'])} skills, {plan['record_secs']} s of video", flush=True)
@@ -227,10 +230,13 @@ def cmd_record(tag, args):
 
 def cmd_compare(args):
     which = [int(a) for a in args if a.isdigit()]
+    after, into = opt(args, "--after") or "after", opt(args, "--out") or "compare"
     outs = []
     for plan in plans(which):
-        a, b = SHOTS / "baseline" / f"{plan['file']}.mp4", SHOTS / "after" / f"{plan['file']}.mp4"
-        out = SHOTS / "compare" / f"{plan['file']}_before_after.mp4"
+        a, b = SHOTS / "baseline" / f"{plan['file']}.mp4", SHOTS / after / f"{plan['file']}.mp4"
+        if not a.exists():  # the ground reels have no baseline (the baseline client has no ground targeting)
+            continue
+        out = SHOTS / into / f"{plan['file']}_before_after.mp4"
         out.parent.mkdir(parents=True, exist_ok=True)
         lab = lambda s, x: f"drawtext=fontfile={FONT.name}:text='{s}':x={x}:y=12:fontsize=26:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=8"
         subprocess.run([str(FFMPEG), "-y", "-hide_banner", "-loglevel", "error", "-i", str(a), "-i", str(b), "-filter_complex",
@@ -239,7 +245,7 @@ def cmd_compare(args):
         outs.append(out)
         print(f"  -> {out}")
     if len(outs) == len(plans([])):
-        concat(outs, SHOTS / "compare" / "all_skills_before_after.mp4")
+        concat(outs, SHOTS / into / "all_skills_before_after.mp4")
 
 
 SPAWN_AT = (15540.0, 15330.0)  # the caster is parked here facing east (-90 degrees): the doll appears 3 m ahead on the open dirt path
