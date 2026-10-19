@@ -22,6 +22,14 @@ pub struct Knock {
     pub angle: f32,
 }
 
+/// A blink of the caster (the server answers it with `SCBlinkUnit`): `Blink` goes `value1` metres forward, `TeleportToUnit` to behind the
+/// target.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Blink {
+    Forward(f32),
+    Behind,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
     Controller(Controller),
@@ -43,6 +51,8 @@ pub struct SkillMoves {
     pub controller: Option<Controller>,
     /// Knockbacks that apply to each unit the skill hurts.
     pub knocks: Vec<Knock>,
+    /// The blink of the caster, if the skill has one.
+    pub blink: Option<Blink>,
 }
 
 #[derive(bevy::prelude::Resource)]
@@ -55,8 +65,10 @@ struct Inner {
     skills: HashMap<u32, Arc<SkillMoves>>,
 }
 
-/// `special_effects.special_effect_type_id` of `KnockBack`.
+/// `special_effects.special_effect_type_id` of `KnockBack`, `Blink` and `TeleportToUnit`.
 const KNOCK_BACK: i64 = 13;
+const BLINK: i64 = 11;
+const TELEPORT_TO_UNIT: i64 = 47;
 
 fn as_id(v: Value) -> Option<u32> {
     match v {
@@ -123,6 +135,18 @@ impl Inner {
         (kind == KNOCK_BACK).then(|| Knock { distance: if v1 > 0 { v1 as f32 * 0.001 } else { 3.0 }, angle: v2 as f32 })
     }
 
+    fn blink_of(&self, special_id: u32) -> Option<Blink> {
+        let (kind, v1): (i64, i64) = self
+            .conn
+            .query_row("SELECT special_effect_type_id, value1 FROM special_effects WHERE id = ?1", params![special_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .ok()?;
+        match kind {
+            BLINK => Some(Blink::Forward(v1 as f32)),
+            TELEPORT_TO_UNIT => Some(Blink::Behind),
+            _ => None,
+        }
+    }
+
     fn step(&mut self, event_id: u32) -> Arc<Vec<StepMove>> {
         if let Some(s) = self.steps.get(&event_id) {
             return s.clone();
@@ -163,8 +187,9 @@ impl Inner {
             )
             .and_then(|mut q| q.query_map(params![id], |r| r.get(0))?.collect())
             .unwrap_or_default();
+        let blink = effects.iter().find_map(|&e| self.blink_of(e));
         let knocks = effects.into_iter().filter_map(|e| self.knock_of(e)).collect();
-        let skill = Arc::new(SkillMoves { controller, knocks });
+        let skill = Arc::new(SkillMoves { controller, knocks, blink });
         self.skills.insert(id, skill.clone());
         skill
     }
@@ -208,5 +233,8 @@ mod tests {
         // Focal Concussion (11353) pushes 0.4 m
         let knocks = &book.skill(11353).knocks;
         assert!(knocks.iter().any(|k| (k.distance - 0.4).abs() < 1e-4), "{knocks:?}");
+        // Teleportation blinks 15 m forward, Shadow Step to behind its target
+        assert_eq!(book.skill(10152).blink, Some(Blink::Forward(15.0)));
+        assert_eq!(book.skill(12075).blink, Some(Blink::Behind));
     }
 }

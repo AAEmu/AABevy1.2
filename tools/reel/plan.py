@@ -242,6 +242,8 @@ def make_plan(c, ability, nm):
 # (skill, ability) of the motion reel; the two ground skills come first (the caster has not moved yet), with the reticle shown first
 MOTION_SKILLS = [(10664, 7), (13281, 6), (11918, 1), (12039, 1), (10648, 8), (12075, 8), (10152, 4), (12049, 8)]
 GROUND_SKILLS = {10664, 13281}
+DROP_BACK = 12049
+DROP_BACK_SPOT = "15530:15322:0"  # x:y:yaw of an open dirt patch (a back step of 10 m stays on open ground)
 RETICLE_LEAD = 2.8       # seconds of aiming before a ground skill is cast
 AIM_PIXEL = (140, 545)  # where the doll stands on the 1280x720 screen (camera on the caster's right): the reticle is aimed at it
 
@@ -260,6 +262,9 @@ def make_motion_plan(c, nm):
             args += ["--ground-press", str(sid), f"{t:.2f}", "--aim", str(AIM_PIXEL[0]), str(AIM_PIXEL[1]), f"{t + 0.4:.2f}"]
             args += (["--click", f"{t + RETICLE_LEAD - 0.2:.2f}"] if sid == 10664 else ["--ground-cancel", f"{t + RETICLE_LEAD - 0.2:.2f}"])
             start = t + RETICLE_LEAD
+        if sid == DROP_BACK:
+            # the stage's own 10 m back is a thicket (the camera ends in the leaves): this one is cast from an open spot
+            steps.append(f"{start - 0.2:.3f}:tp:{DROP_BACK_SPOT}")
         ev, length = skill_events(c, ability, row, 100 + i * 10, start)
         steps += ev
         length += start - t
