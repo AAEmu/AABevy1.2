@@ -687,7 +687,9 @@ impl EmitterState {
         if self.tail_steps == 0 {
             self.tail_steps = (def.tail_steps as usize).clamp(2, MAX_TAIL_STEPS);
             // seconds of past path: as long as the particle lives at most; a sample per frame at the finest
-            let span = if p.life.is_finite() { def.tail_length.base.min(p.life) } else { def.tail_length.base };
+            // an endless particle (a weapon trail with no `ParticleLifeTime` asks for 100 or 200 s of tail) shows the last second at most:
+            // spread over the 64 steps it would be a sample every few seconds, a beam across the map
+            let span = if p.life.is_finite() { def.tail_length.base.min(p.life) } else { def.tail_length.base.min(1.0) };
             self.tail_dt = (span / self.tail_steps as f32).max(1.0 / 90.0);
         }
         p.slot = match self.trail_free.pop() {
