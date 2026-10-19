@@ -186,7 +186,7 @@ fn progress(
     warm: Res<super::warm::Warm>,
     player: Res<Player>,
     mut tp: ResMut<Teleport>,
-    mut curtain: ResMut<Curtain>,
+    curtain: Option<ResMut<Curtain>>,
     mut commands: Commands,
 ) {
     let dt = time.delta_secs();
@@ -232,10 +232,14 @@ fn progress(
     if load.done < HOLD {
         return;
     }
-    if !load.hud {
+    // no curtain without the login stage (`--enter-world`)
+    let (true, Some(mut curtain)) = (load.hud, curtain) else {
+        if let Some(rt) = rt.as_deref().filter(|_| load.hud) {
+            rt.fire_event("LEFT_LOADING", ());
+        }
         load.left = true;
         return;
-    }
+    };
     // the loading screen at 100 stays on the window while the HUD stage comes back underneath
     if curtain.phase == curtain::Phase::Off {
         curtain::lower(&mut commands, &mut curtain);
