@@ -19,7 +19,7 @@ commands.spawn((aa_fx::Effect::new("X2_EFFECTS.fire_smoke.torchlight_b"), Transf
   for this effect (collisions, see below).
 * `FxSettings` (resource): `max_particles` (20000, the hard global budget), `max_distance` (160 m activation radius cap),
   `gain` (colour multiplier; a world with pre-exposed HDR colours sets `radiance * exposure`, aa-world does), `light`
-  (0.8, how much of `DiffuseLighting` shows), `emissive`, `size_scale`, `sprite_half` (1: a sprite's `Size` is a radius), `alpha_scale`, `quality` (0..3, `ConfigMin/Max`),
+  (0.8, how much of `DiffuseLighting` shows), `emissive`, `hdr_base` (2: `EmissiveHDRDynamic` and `LightHDRDynamic` are powers of it), `max_lights` (8) and `light_lux` (1700), `size_scale`, `sprite_half` (1: a sprite's `Size` is a radius), `alpha_scale`, `quality` (0..3, `ConfigMin/Max`),
   `count_over_life`, `soft_distance` (0.6 m, needs `DepthPrepass` on the camera, otherwise particles are not softened),
   `activations_per_frame`, `wind`, `sun` (world direction to the sun, shades opaque mesh particles), `refraction` (distort the
   scene behind refraction materials, default on, `AA_FX_NO_REFRACTION=1` switches it off), `ground` (`Some(Ground(Arc<dyn Fn(Vec3)
@@ -81,7 +81,7 @@ and the round 3 features below: `Geometry` (mesh particles) with `NoOffset`/`NoM
 (orbiting), `Tail*`, refraction materials, `AttachType`/`AttachForm`, ground collisions (`PhysicsType`, `CollideTerrain`,
 `Bounciness`, `DynamicFriction`).
 
-Not supported (ignored): lights (`LightSource*`, `LightHDR*`), sounds, decals (`Decal*`), collisions with objects and entities
+Not supported (ignored): sounds, `DecalMode` / `DecalSortPriority` (decals are draped on the ground, see round 7), collisions with objects and entities
 (`CollideStaticObjects`, `CollideDynamicObjects`; only the ground is hit), `MaxCollisionEvents` (a particle reports its first
 ground hit only), `GeometryInPieces`, `ForceGeneration`, `ERotateMode`/local rotation modes and `VirtualAge`,
 `BindEmitterToCamera`/`SpaceLoop`, `ViewDistRatio`, `CameraMinDistance` (the data has values like 270 that would hide the
@@ -269,13 +269,67 @@ sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the
   materials keep the old emitted colour.
 * **Material before Texture** when both are set. **AnimBlend** (`TextureTiling` field 7): two quads weighted by the fraction of the
   frame. **Colour gamma**: `pow(colour, 2.2)` before the texture (`FxSettings::colour_gamma`, `AA_FX_GAMMA=1` is the old look; the
-  Step 3 mist fits below were made with 1, so the stage's `FxSettings` should set 1.0 or the mist be fitted again).
+  first Step 3 mist fits were made with 1; round 7 fitted the mist again at 2.2).
 * **Endless tails** show one second of path at most.
 * Tools: `effects --list <file> --cols n --times a,b,c --out <prefix>` (contact sheets), `--real <dist>` (the camera of the real client
   captures, 1.68 m above the floor, vertical fov 42.75 degrees), `--stagger`; scratch scripts and the decompile under
   `data/extract/aa-fx/r6/` (git-ignored: `real/cmp.py <effect> <tag>` spawns the effect in the real client and renders both).
-* Open: `white0001_hit` rings are 3D in the real client, camera facing here; `firewall_launch` is half as tall as the real one;
-  lights, decal projection, `EmissiveHDRDynamic`.
+* Open: `white0001_hit` rings are 3D in the real client, camera facing here (round 7 below).
+
+## Round 7: lights, decals, HDR, children that ride, mist, brightness
+
+* **Particle lights** (`LightSourceIntensity`, `LightSourceRadius`, `LightHDRDynamic`; 2307 emitters carry them, typically intensity 1,
+  radius 2-5 m, HDR 1). The engine (`CParticleContainer::RenderLights`, `sub_3009A9A0`) makes one dynamic light of every particle:
+  colour = the particle's colour times its age curve (not gamma raised, not lit), times `intensity * rand * ageCurve`, times
+  `pow(hdr multiplier, hdr * rand * ageCurve)`; radius = `LightSourceRadius * rand * ageCurve` in metres (the entity scale does not
+  scale it); the light is skipped when `intensity * radius` is below 0.001 and by the camera frustum / distance tests. aa-fx collects
+  those samples per effect in the simulation step, `update_lights` picks the brightest and nearest `FxSettings::max_lights` (score
+  `luminance * r^2 / (d^2 + 1 + r^2 / 4)`) of all active effects and puts pooled Bevy `PointLight`s (no shadows, `range` = radius) on
+  them: `FxLight` entities, spawned once, hidden when unused, copying the effect's `RenderLayers`. Lumens are chosen so that an
+  intensity 1 light gives `light_lux` lux at half its radius (pi times the world's radiance for a pre-exposed world; 1700 is
+  pi * 540, aa-world's value). **Cost**: 0.01 ms of main thread time for 100 candidates and 8 lights (100 torches, release build),
+  nothing measurable in frame time up to 32 lights on this machine (the example's 70-90 fps wandered with the load of other
+  sessions); clustered forward shading costs per light, 8 is the default cap. `AA_FX_LIGHTS=0` switches them off. Stats:
+  `FxStats::lights`, `light_candidates`, `light_ms`. Test: `torchlight_a`, `candle_a`, `e0004` in `effects --max-lights 0|8`
+  (`shots/aa-fx/r7/lights_*.png`).
+* **Decals** (`Facing = Decal` 661 emitters, `Terrain` 13). The engine projects them on what is below; the Free / Bottom / Water cards
+  stay flat. aa-fx drapes them: when `FxSettings::ground` knows the height under the card, the card is cut into cells of about
+  1.5 m (at most 12 x 12) whose corners lie 4 cm above the ground (`sim.rs`, `decal.rs`); without it a flat card as before.
+  `DecalAlphaMultiply` multiplies the opacity of the decal emitter (0 or absent: 1). `aa_fx::decal::drape_quad(centre, right, up,
+  ground, lift, cells)` is the same cut for any card of your own and returns positions / uvs / indices: the ground target reticle
+  (`materials/Decals/target/target_correct` is a decal in the client; `ingame/ground_target.rs` drapes its own mesh the same way) can
+  call it. `effects --bumps <m>` draws a rolling ground that the effects know; Freezing Earth (`ice_piece_launch`) and Crippling
+  Mire follow it (`shots/aa-fx/r7/decal_*.png`). Not done: projection onto objects (only the ground function is asked), `DecalMode`
+  (all are draped), the sort priority.
+* **EmissiveHDRDynamic** (1602 emitters, values 0.1-4, mostly 1-2): the engine's mesh path multiplies the colour by
+  `DiffuseLighting term + EmissiveLighting * pow(S, EmissiveHDRDynamic)` when the renderer draws in HDR (`sub_3009C0B0`), `S` being
+  the 3D engine's HDR multiplier (its value is not in the code: `FxSettings::hdr_base`, 2). aa-fx applies the factor to the emissive
+  term of sprites too (the writers show no other place for it). `AA_FX_HDR=1` switches it off.
+* **Children that ride on a parent particle.** A `SpawnIndirection = ParentStart` child with an `EmitterLifeTime` is attached to its
+  parent particle while its life lasts (`CParticleContainer::UpdateChildEmitters`): `Count` over the life, emitted wherever the parent
+  is. `firewall_launch`: the parent particle starts 3 m up and falls at 15 m/s, the fire puffs are emitted for 0.2 s along that path,
+  a 3 m column; aa-fx emitted them all at the birth point (a ball, half as tall). Fixed (`Follower` in `sim.rs`); the column is now as
+  tall as the real one (`shots/aa-fx/r7/fw_cmp.png`, top ours, bottom real; the real one is wider and brighter).
+* **Colour keys with two components** (418 keys): the missing blue is 0, not the default 1 (`(0.282,0.09)` is dark red,
+  `(0.035,0.027)` black; with 1 the end of the fire columns was violet and the black smoke blue). Base colours keep the default
+  (`(0.14,0.4)` is ice blue).
+* **`white0001_hit` rings: not solved.** The three lace rings are `hit_exp_ssd`, `Material hit_pattern` (`shield_ring_a.dds`, a soft ring,
+  `AlphaTest 0.366`, noise normal map `PerturbationScale 8.8`: the lace is that alpha test against the noise, which aa-fx does not draw, it
+  shows the soft ring) with no `Facing`, so Camera. The decompiled spawn (line 65700 of `data/extract/aa-fx/r6/ida/cry3dengine.c`) puts
+  Camera and Decal emitters that have a texture or material and no geometry on a simple path (one roll angle, `InitAngles.z +
+  RandomAngles.z`), and the writer builds the 3D matrix only when the derived facing byte is not 0. The `EParticleFacing` enum is Camera,
+  Free, Velocity, Horizontal, Water, Terrain, Bottom, Decal, Camera_Geometry. I found no path that orients this emitter in 3D. A real client
+  experiment (dir x / y / z variants) was lost to a bad camera position after login; the real rings are one flat and two vertical thin rings,
+  which fits particles whose normals follow the emission cone (`EmitAngle 90`) like `Facing = Velocity`, but nothing in the engine code says
+  so. Left as it is: 3 particles per hit.
+* **Brightness against the real client.** The 15 captures of round 1 (`data/extract/aa-fx/bright2.py`: excess over the empty scene, top 2 %
+  of the effect pixels, ours / real): the effects that are clearly visible in both (`fw`, `gr`, `hp`, `ip`, `js`) come out at 0.5-1.3 on the
+  peak, medians 1.1, 1.0, 1.1 (r, g, b) with the HDR factor and the gamma in; `gl` (the rock) and `rv` (the red armour) are 2.5 times too
+  bright and the rest cannot be measured (a persistent ice effect of my own test hides the real scene in half of the captures, and shape
+  differences dominate). No global change is justified: `gain`, `light` and `emissive` stay.
+* **Step 3 mist re-fit** (colour gamma 2.2, FocusAngle, tile aspect, radius sized sprites): table in the mist section. Display scaling:
+  Windows was set to 125 % between two of the fits; aa-dev windows then came out 1536 x 864 for `--size 1920x1080` and every region of the
+  fit moved: pass `--size 2400x1350` to get 1920 x 1080 shots (the fit script does).
 
 ## Free sprite velocity alignment
 
@@ -366,21 +420,19 @@ shots, against a run without the mist, `AA_CREATE_NO_FX=1`):
   makes. Unexplained: the same effect, `flow_fog_01` at scale 0.4, is a clear veil in the Hariharan and Ferre captures and a thin
   one in Nuian.
 
-Final values (`mist()` in `scenery.rs`, flowing mist opacity x, count x, light RGB gain; the haze `fog_01` only takes the light):
+Final values (`mist()` in `scenery.rs`, flowing mist opacity x, count x, light RGB gain; the haze `fog_01` only takes the light). Round 7,
+colour gamma 2.2 (`pow(colour, 2.2)` darkens the sprites, so the light gains came down by 1.3 to 2.3 times from the round 4 table):
 
 | race | alpha | count | light (r, g, b) | peak colour ours / capture | band excess ours / capture |
 |---|---|---|---|---|---|
-| Nuian | 1.0 | 1 | 2.6, 2.7, 1.55 | 1.00, 1.02, 1.07 | n/a (see below) |
-| Elf | 1.0 | 0.5 | 5.5, 5.4, 2.7 | 0.91, 0.91, 1.02 | n/a (see below) |
-| Hariharan | 3.0 | 3 | 3.35, 3.0, 1.95 | 1.02, 1.04, 1.04 | 0.86, 0.85, 0.91 (ours 48, 51, 50 against 56, 60, 55) |
-| Ferre | 1.0 | 0.6 | 7.9, 6.8, 4.6 | 0.94, 0.95, 0.91 | 1.52, 1.32, 1.02 (ours 38, 37, 52 against 25, 28, 51) |
+| Nuian | 1.0 | 1 | 1.85, 1.8, 1.3 | 1.00, 1.02, 1.01 | n/a (see below) |
+| Elf | 1.0 | 0.5 | 2.75, 2.75, 1.95 | 1.04, 1.02, 1.03 | n/a (see below) |
+| Hariharan | 3.0 | 3 | 2.0, 1.98, 1.77 | 0.97, 1.00, 1.00 | 54, 57, 59 against 55, 60, 51 |
+| Ferre | 1.0 | 0.6 | 5.8, 3.4, 2.6 | 1.06, 1.14, 0.98 (two runs) | 53, 53, 59 against 11, 19, 51 (the capture's control is not clear) |
 
-(Round 4, with `Size` as a radius; the round 2 and 3 values, sprites as full width, were Nuian 1.0 / 1 / 3.0, 3.15, 1.9, Elf 3.0 / 1
-/ 6.0, 6.0, 3.4, Hariharan 3.0 / 3 / 4.0, 3.6, 2.35, Ferre 1.3 / 1 / 7.6, 6.6, 4.1. A sprite twice as wide covers four times the
-area: the light comes down 13-20 % (Nuian, Hariharan), the Elf opacity and count down to 1 / 0.5, the Ferre ones to 1 / 0.6.
-The peak pick has a noise of about 4 % between runs: a second Elf / Ferre set with other count and light products came out
-the same within that. The grass under the Elf band still gets +18..+22 of mist where the capture has +5..+9: the Elf haze
-and the flowing mist cannot be told apart by one gain, and lowering it takes the peak with it; kept.)
+(The peak pick has a noise of 4 to 8 % between runs; the Ferre green does not go down with its gain, the pick takes the least saturated
+tiles. Round 4 values with gamma 1: Nuian 1.0 / 1 / 2.6, 2.7, 1.55, Elf 1.0 / 0.5 / 5.5, 5.4, 2.7, Hariharan 3.0 / 3 / 3.35, 3.0, 1.95,
+Ferre 1.0 / 0.6 / 7.9, 6.8, 4.6.)
 
 Peak colour: the mean of the 12 brightest, least saturated, least varying 24 x 14 px tiles of the mist band (the same pick on
 both images). Band excess: the mist's added light in the band (ours: with minus without the mist; the capture: the band minus
