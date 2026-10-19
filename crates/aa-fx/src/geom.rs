@@ -136,6 +136,8 @@ pub struct GeomMtl {
     pub emissive: f32,
     pub opacity: f32,
     pub uv: UvMod,
+    /// A lit surface (`Illum` shader): its diffuse colour is a reflectance, lit by the sun and sky, not an emitted colour.
+    pub lit: bool,
 }
 
 impl Default for GeomMtl {
@@ -150,6 +152,7 @@ impl Default for GeomMtl {
             emissive: 0.0,
             opacity: 1.0,
             uv: UvMod::default(),
+            lit: false,
         }
     }
 }
@@ -298,6 +301,7 @@ impl Geom {
             out.opacity = m.opacity.clamp(0.0, 1.0);
             out.cutoff = m.alpha_test.clamp(0.0, 1.0);
             let additive = m.flags & flags::ADDITIVE != 0;
+            out.lit = !additive && m.shader.eq_ignore_ascii_case("Illum");
             out.blend = if additive {
                 Blend::Additive
             } else if out.opacity < 1.0 || !out.opacity_map.is_empty() || m.shader.eq_ignore_ascii_case("Glass") {
