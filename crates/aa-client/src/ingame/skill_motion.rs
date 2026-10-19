@@ -44,7 +44,7 @@ use super::anim::{Locomotion, Motion, bind_action_clip};
 use super::combat::{Acting, Dead};
 use super::player::{LocalPlayer, Mover, floor_at, placement};
 use super::units::RemoteUnit;
-use book::{Book, Effect, Knock};
+use book::{Blink, Book, Effect, Knock};
 use path::{Arc as Flight, Controller};
 
 /// The capsule that collides with walls on the way (the player's, `player.rs`) and the step it climbs.
@@ -62,6 +62,8 @@ const KNOCK_WINDOW: f64 = 1.5;
 /// The camera pivot catches up with the player at this rate (1/s), and may trail by at most this much (m).
 const LAG_RATE: f32 = 7.0;
 const LAG_MAX: f32 = 7.0;
+/// How far behind its target Shadow Step puts the caster (m): what the lane server answers (`SCBlinkUnit`) for a straw doll.
+const BEHIND: f32 = 1.3;
 
 fn log() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -310,9 +312,14 @@ fn start_moves(
             Event::SkillFired(f) => {
                 let (target, target_pos) = skill_target(&f.target);
                 start.tracker.casts.insert(f.tl, CastInfo { caster: f.caster.obj_id, target, target_pos });
+                let moves = start.book.skill(f.skill_id);
                 // a skill without a plot that has a controller (Drop Back)
-                if let Some(c) = start.book.skill(f.skill_id).controller {
+                if let Some(c) = moves.controller {
                     start.controller(&c, f.caster.obj_id, (target != f.caster.obj_id && target != 0).then_some(target), target_pos, true);
+                }
+                // made-up events have no `SCBlinkUnit`: the blink the server would answer with
+                if let (true, Some(blink)) = (simulate_remote(), moves.blink) {
+                    start.sim_blink(blink, f.caster.obj_id, target, target_pos);
                 }
             }
             Event::PlotEvent(p) => start.plot(&p),
@@ -390,6 +397,31 @@ impl Starter<'_, '_, '_, '_, '_> {
         self.commands.entity(entity).insert(SkillMove::new(flight, Kind::Blink, false));
         if log() {
             info!("skill motion: blink of the player to ({:.1}, {:.1}, {:.1})", to.x, to.y, to.z);
+        }
+    }
+
+    /// The `SCBlinkUnit` a server would send for the blink of a skill the (made-up) events cast: the local player goes there through a
+    /// very short dash, so walls and the floor stop it as the server's terrain query does.
+    fn sim_blink(&mut self, blink: Blink, caster: u32, target: u32, target_pos: Option<Vec3>) {
+        let Some(who) = self.roster.who(caster).filter(|w| w.local) else { return };
+        let to = match blink {
+            Blink::Forward(metres) => {
+                let f = path::forward(who.yaw);
+                who.pos + Vec3::new(f.x * metres, f.y * metres, 0.0)
+            }
+            Blink::Behind => {
+                let Some(t) = (target != caster).then(|| self.roster.point(target).or(target_pos)).flatten() else { return };
+                let away = Vec2::new(t.x - who.pos.x, t.y - who.pos.y).normalize_or_zero();
+                t + Vec3::new(away.x * BEHIND, away.y * BEHIND, 0.0)
+            }
+        };
+        let d = Vec2::new(to.x - who.pos.x, to.y - who.pos.y);
+        let dist = d.length();
+        const SECS: f32 = 0.05;
+        let flight = Flight { from: who.pos, to, dir: d.normalize_or_zero(), dist, hs: dist / SECS, vs: 0.0, az: 0.0, eta: SECS };
+        self.commands.entity(who.entity).insert(SkillMove::new(flight, Kind::Blink, false));
+        if log() {
+            info!("skill motion: blink of the player {dist:.1} m (made-up events)");
         }
     }
 

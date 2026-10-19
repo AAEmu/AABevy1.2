@@ -60,13 +60,20 @@ SCENES = {
     "shadowstep": dict(
         title="Shadow Step (Shadowplay)", dist=7, cam=8, main=SWORD, off=SWORD,
         fake="15.5:fire:200:12075:0:0;15.55:hit:200:12075:150;15.8:end:200",
-        motion="15.52:behind:1300",
         captions=[("behind the doll", 15.4, 18.5)], secs=5.0),
     "teleport": dict(
         title="Teleportation (Auramancy)", dist=18, cam=12, main="6102", off="0",
         fake="15.5:fire@self:140:10152:0:0;15.8:end@self:140",
-        motion="15.52:blink:15000",
         captions=[("15 m forward", 15.4, 18.5)], secs=5.0),
+    # the skill reel's stage (tools/reel/plan.py: 15539,15330 facing east, camera 5 m) and its fake events: the client makes the SCBlinkUnit
+    "reel_teleport": dict(
+        title="Teleportation (Auramancy)", dist=0, cam=5, main="6102", off="0", pos="15539.0,15330.0", yaw="-90",
+        fake="15.5:fire@self:160:10152:0:0;15.65:end@self:160",
+        captions=[("15 m forward", 15.4, 18.5)], secs=5.0),
+    "reel_dropback": dict(
+        title="Drop Back (Shadowplay)", dist=0, cam=5, main=SWORD, off=SWORD, pos="15530.0,15322.0", yaw="0",  # the stage's own 10 m back is a thicket
+        fake="15.5:fire@self:170:12049:0:0;15.65:end@self:170",
+        captions=[("a back step of 10 m", 15.4, 18.5)], secs=5.0),
     # the same skills cast for real: the lane server answers the UseSkill with the plot steps / SCBlinkUnit (`{doll}` is the doll's
     # object id; `skilltest --user bevymotion --skills ...` teaches the skills first)
     "charge_live": dict(
@@ -140,7 +147,8 @@ def plan_of(name, s):
     env["AA_SKILL_MOTION_LOG"] = "1"
     plan = dict(name=s["title"], file=name, env=env, record_from=start - 1.0, record_secs=s["secs"] + 1.0,
                 captions=[dict(skill=0, name=c[0], start=c[1], end=c[2]) for c in s["captions"]])
-    pos = f"{x},{y - s['dist']}"
+    pos = s.get("pos") or f"{x},{y - s['dist']}"
+    plan["yaw"] = s.get("yaw", "0")
     return plan, pos
 
 
@@ -187,7 +195,7 @@ def record(names, exe, fresh=True):
         s = SCENES[name]
         plan, pos = plan_of(name, s)
         rr.CAM[:] = ["--cam-dist", str(s["cam"]), "--cam-fov", "60"]
-        rr.stage_args = lambda pos=pos: ["--pos", pos, "--yaw", "0"]
+        rr.stage_args = lambda pos=pos, yaw=plan["yaw"]: ["--pos", pos, "--yaw", yaw]
         import threading
         stop = threading.Event()
         watchdog(WORK / "logs" / "motion" / f"{name}.log", stop, name)

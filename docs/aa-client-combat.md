@@ -671,6 +671,14 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
 * **Blinks**: `SCBlinkUnit` for the local player puts it at the point at once (a `SkillMove` of length 0); the camera pivot trails and catches
   up. Another unit's blink resets its movement track, so it is not glided across the gap. `AA_MOTION_FAKE="T:blink:MM"` (forward) and
   `"T:behind:MM"` (behind `AA_COMBAT_FAKE_TARGET`) make the packet up.
+* **Made-up events have no `SCBlinkUnit`** (the skill reel's `fire@self` of Teleportation, `fire` of Shadow Step): with `AA_COMBAT_FAKE` set,
+  `SkillFired` of a skill with a `Blink` (type 11, `value1` metres forward) or `TeleportToUnit` (type 47, behind the target, 1.3 m) special
+  effect makes the blink itself (`Starter::sim_blink`): a 50 ms dash that `WorldCollision::slide` and the floor stop as the server's terrain query
+  would. With the real server nothing is made up. Teleportation in the reel therefore moves 15 m and the camera slides over.
+* **Vegetation and Drop Back.** `WorldCollision` has the vegetation that is physical in the client (`vegetation.dat` instances whose model has a
+  physics proxy: tree trunks, boulders, some plants; 85 % of the instances, `CVegetation::Physicalize`), and a back step stops at those like a
+  walking player. Bushes without a proxy are walked through by the real client as well, so a Drop Back that ends in a thicket is correct and
+  the camera may then show leaves; the skill reel casts it from an open patch instead (`tools/reel/plan.py` `DROP_BACK_SPOT`).
 * **Other units**: players and NPCs that run a controller arrive as movement reports and are played by `remote::Track` (smooth already); the
   module simulates their controllers only when `AA_COMBAT_FAKE` or `AA_SKILL_MOTION_SIM=1` is set (nothing else moves them then). An NPC that is
   knocked back has one report at the end: the move waits for it (`RemoteUnit::latest`, at most 0.5 s, else the predicted end point), plays the
