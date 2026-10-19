@@ -123,7 +123,8 @@ impl PlayerStats {
                     max_mp: c.mp,
                     exp: i64::from(cs.experience),
                     recoverable_exp: cs.recoverable_exp,
-                    labor: i32::from(c.labor_power),
+                    // Native header hydration MOVZXs the raw 16-bit wire value.
+                    labor: i32::from(c.labor_power as u16),
                     labor_updated: c.labor_power_modified,
                     money: c.money,
                     bank_money: c.money2,
@@ -166,7 +167,8 @@ impl PlayerStats {
                 }
             }
             Event::LaborChanged { amount, .. } => {
-                self.labor = (self.labor + amount).max(0);
+                // SC045 ->3930b4d0 adds the raw signed delta to header+5fc.
+                self.labor = self.labor.wrapping_add(*amount);
                 self.labor_updated = unix_now();
                 if self.labor_log.len() >= LABOR_LOG_LIMIT {
                     self.labor_log.remove(0);
@@ -418,4 +420,45 @@ mod tests {
         assert!(b.apply(&Event::UnitsRemoved(vec![5])));
         assert!(b.of(5).is_empty());
     }
+
+    #[test]
+    fn labor_matches_executed_native_signed_add_without_clamping() {
+        // Original3930b4d0; native-labor-delta-oracle.json. No regeneration estimate.
+        for (initial, amount, expected) in [
+            (50, -60, -10),
+            (i32::MAX, 1, i32::MIN),
+            (i32::MIN, -1, i32::MAX),
+            (-10, 20, 10),
+            (0, 0, 0),
+            (-1, 1, 0),
+            (i32::MAX, i32::MAX, -2),
+        ] {
+            let mut stats = PlayerStats { labor: initial, ..PlayerStats::default() };
+            assert!(stats.apply(&Event::LaborChanged { amount, action: 0, point: 0, step: 0 }));
+            assert_eq!(stats.labor, expected);
+            // This existing bounded history describes app receipt observations,
+            // including zero, rather than claiming native zero-delta callbacks.
+            assert_eq!(stats.labor_log, [(amount, expected)]);
+            assert_eq!(stats.labor_seq, 1);
+        }
+        let mut stats = PlayerStats { labor: 50, ..PlayerStats::default() };
+        for amount in [-60, 20] {
+            stats.apply(&Event::LaborChanged { amount, action: 0, point: 0, step: 0 });
+        }
+        assert_eq!(stats.labor, 10);
+        assert_eq!(stats.labor_log, [(-60, -10), (20, 10)]);
+    }
+
+    #[test]
+    fn labor_header_matches_executed_native_unsigned_projection() {
+        //391b9884 passes raw header+10 to39089d50; MOVZX stores raw+5fc.
+        for (wire, expected) in [(0i16, 0), (50, 50), (32767, 32767), (i16::MIN, 32768), (-1, 65535)] {
+            let Event::CharacterSelected(mut selected) = selected() else { unreachable!() };
+            selected.character.labor_power = wire;
+            let mut stats = PlayerStats::default();
+            stats.apply(&Event::CharacterSelected(selected));
+            assert_eq!(stats.labor, expected);
+        }
+    }
+
 }
