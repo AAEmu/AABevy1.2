@@ -224,7 +224,8 @@ its `item_assets` row (`ItemVisual`: `detail`, `heel`, `more_asset_id`). `PartAs
   `detail`, highest first (`cut_key`: gloves `|= chest & 0x1C7E`, arms `|= chest & 0x1FF0`, boots
   `|= legs & 0x1F8E`; no chest `0x4402`, no legs `0x4800`). Each part is cut by the hulls of the parts
   of its group sorted before it, then adds its own. Groups: head (helmet, costume) and body (the rest).
-  Face and hair are cut by the head group, the nude body by the body group, nothing else. Starter
+  Face, hair, glasses and beard (aa-client adds the last two as parts named by their slot) are cut
+  by the head group, the nude body by the body group, the tail not at all. Starter
   set on nu_m: gloves (0x5580) > jacket (0x5500) > boots (0x5030) > trousers (0x5020); 378 of the
   trousers' 888 triangles go (the shin inside the boot shaft), the jacket's cuffs inside the gloves,
   70 triangles. Trousers with `0x1040` sort before the boots and cut them (trousers over boots).

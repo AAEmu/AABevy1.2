@@ -690,7 +690,7 @@ fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutLis
     let mut order: Vec<(usize, u32)> = parts
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.kind == PartKind::Costume)
+        .filter(|(_, p)| p.kind == PartKind::Costume && body_part_slot(p).is_none())
         .map(|(i, p)| (i, cut_key(p, chest, legs)))
         .collect();
     // stable: equal keys keep the drawing order
@@ -720,14 +720,23 @@ fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutLis
         }
     }
     for (i, part) in parts.iter().enumerate() {
-        // (glasses and beard, once drawn, belong to the head group too; the tail to none)
-        out[i] = match part.kind {
-            PartKind::Costume => continue,
-            PartKind::Body => body.list(),
-            PartKind::Face | PartKind::Hair => head.list(),
+        out[i] = match (part.kind, body_part_slot(part)) {
+            (PartKind::Body, _) => body.list(),
+            (PartKind::Face | PartKind::Hair, _) | (_, Some("glasses" | "beard")) => head.list(),
+            (_, Some(_)) => None,
+            (PartKind::Costume, None) => continue,
         };
     }
     out
+}
+
+/// The body-part slots a client may add as costume-kind parts without an equipment slot
+/// (`aa-client` draws the ferre tail and the beard that way): `tail`, `glasses` or `beard`.
+fn body_part_slot(part: &PartAsset) -> Option<&'static str> {
+    if part.equip_slot.is_some() {
+        return None;
+    }
+    ["tail", "glasses", "beard"].into_iter().find(|s| part.slot == *s)
 }
 
 /// The per-character textures of the customisable face.
