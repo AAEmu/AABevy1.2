@@ -752,6 +752,31 @@ impl Stage<'_, '_> {
         }
     }
 
+    /// The hit reaction clip of a unit struck from `from`: `base` (`all_re_combat_hit` / `all_re_combat_critical`) in the variant the
+    /// unit's rig has: the `twohand_` clips of a unit with a two handed weapon and, for a blow from the side, `_l` / `_r`. The `_l`
+    /// clips throw the head to the unit's left (`hit_reaction_directions`), so they answer a blow from its right and the `_r` ones a
+    /// blow from its left. A blow from the front or the back plays the plain clip (the real client has `additive_*_f` / `_b` clips
+    /// for those; they are layers and not played here).
+    fn hit_reaction(&self, unit: Entity, from: Option<Vec3>, base: &'static str) -> String {
+        let two = self.wield(unit).two_handed;
+        let critical = base.ends_with("critical");
+        let side = from.zip(self.xforms.get(unit).ok()).and_then(|(from, g)| {
+            let local = g.affine().inverse().transform_point3(from);
+            let flat = Vec2::new(local.x, local.z);
+            // more than 40 degrees off the front / back axis
+            (flat.length() > 0.2 && flat.x.abs() > flat.length() * 0.64).then_some(if flat.x > 0.0 { "_l" } else { "_r" })
+        });
+        let prefixed = |name: &str| if two { name.replacen("all_", "twohand_", 1) } else { name.to_string() };
+        let mut candidates = Vec::new();
+        if let Some(side) = side.filter(|_| !critical) {
+            candidates.push(prefixed(&format!("{base}{side}")));
+            candidates.push(format!("{base}{side}"));
+        }
+        candidates.push(prefixed(base));
+        candidates.push(base.to_string());
+        candidates.into_iter().find(|n| self.clip(unit, n).is_some()).unwrap_or_else(|| base.to_string())
+    }
+
     /// The model's clip `name` bound to the unit's animator and its length.
     fn clip(&self, unit: Entity, name: &str) -> Option<(aa_anim::BoundClip, Arc<aa_anim::Cal>)> {
         let (animator, loco, ..) = self.actors.get(unit).ok()?;
@@ -781,6 +806,9 @@ impl Stage<'_, '_> {
             let (_, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
             // a hit reaction never interrupts an action or a run
             if dead || loco.is_none() || (kind == Act::Hurt && (acting.is_some() || motion.is_some_and(|m| m.speed > 0.3))) {
+                if verbose() {
+                    info!("combat: {unit:?} does not play {name}: dead {dead}, locomotion {}, acting {}", loco.is_some(), acting.is_some());
+                }
                 return None;
             }
             let moving = kind != Act::Hurt && !full_body_only() && motion.is_some_and(|m| m.speed > 0.3);
@@ -1384,6 +1412,20 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                     let flight = (f64::from(f.delay_ms.max(0)) / 1000.0 - release).max(0.06);
                     combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: f.tl, caster, target, target_pos, duration: if projectile.is_beam() && f.channeling_ms > 0 { f.channeling_ms as f32 / 1000.0 } else { flight as f32 }, speed: 0.0, hold: f.channeling_ms > 0 });
                 }
+                // the doodad the channel spawns (Protective Wings: doodad 879 at the caster's feet) has clouts with a projectile: an effect
+                // area on the ground under the caster that stands as long as the channel does
+                if verbose() && !visual.clout_projectiles.is_empty() {
+                    info!("combat: skill {} channels a doodad with {} clout projectile(s)", f.skill_id, visual.clout_projectiles.len());
+                }
+                for projectile in &visual.clout_projectiles {
+                    let secs = if f.channeling_ms > 0 { f.channeling_ms as f32 / 1000.0 } else { 2.0 };
+                    if let Some(e) = launch(st, projectile, caster, Some(caster), None, secs, 0.0)
+                        && f.channeling_ms > 0
+                        && let Some(cast) = combat.casts.get_mut(&f.tl)
+                    {
+                        cast.held.push((e, ev::END));
+                    }
+                }
             }
         }
         Event::PlotEvent(p) => {
@@ -1745,8 +1787,9 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
                         st.spawn_item(item, on, toward, false);
                     }
                 }
-                if let Some(clip) = hurt {
-                    st.play(target, clip, Act::Hurt, false, 0.0, now);
+                if let Some(base) = hurt {
+                    let clip = st.hit_reaction(target, toward, base);
+                    st.play(target, &clip, Act::Hurt, false, 0.0, now);
                 }
                 // the camera of the player kicks when its blow lands, or when it is the one that was hit by a heavy one
                 for item in shakes.iter().filter(|i| i.start == ev::HIT) {
@@ -1820,7 +1863,8 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         None => None,
     }
     .or(target_pos.map(|p| p + Vec3::Y));
-    let to = to?;
+    // an effect area stands on the ground at the target unit or point, whatever bone it has
+    let to = to.or(projectile.is_zone().then_some(from))?;
     // `proj_physic_id` 3 is an effect area (all 257 of them: Meteor Strike's stardust, Sunder Earth's rocks, the magic circles): the
     // effect stands on the ground at the target and does its own falling, spreading and fading
     let (from, to) = if projectile.is_zone() {
@@ -2289,5 +2333,28 @@ mod tests {
         let turn = CancelRules { on_turn: true, ..none };
         assert_eq!(cancel_of(turn, Phase::Cast), Some(Cancel { on_move: true, on_turn: true }));
         assert_eq!(cancel_of(turn, Phase::Channel), None);
+    }
+
+    /// Which way the head moves in the player's hit reactions (`--ignored --nocapture`): the sign tells which side `_l` / `_r` are for.
+    #[test]
+    #[ignore]
+    fn hit_reaction_directions() {
+        use aa_anim::pose::SampleOptions;
+        let Ok(rig) = aa_anim::pose::shared_rig("objects/characters/nuian/male/nude/nu_m_base.chr") else { return };
+        let cal = aa_anim::Cal::shared("objects/characters/nuian/male/nude/nu_m_base.cal").unwrap();
+        let clips = ClipLibrary::default();
+        let head = rig.skeleton.bones.iter().position(|b| b.name == "Bip01 Head").unwrap();
+        let rest = rig.bind.clone().model_space(&rig)[head].1;
+        for name in ["all_re_combat_hit", "all_re_combat_hit_l", "all_re_combat_hit_r", "twohand_re_combat_hit_l", "twohand_re_combat_hit_r", "all_re_combat_critical", "all_re_relaxed_hit"] {
+            let Some(clip) = bind_action_clip(&rig, &cal, &clips, name) else { println!("{name}: missing"); continue };
+            let mut worst = Vec3::ZERO;
+            for i in 0..=20 {
+                let mut pose = rig.bind.clone();
+                pose.sample(&rig, &clip.clip, &clip.binding, clip.clip.duration * i as f32 / 20.0, SampleOptions { lock_root_motion: true, ..clip.options });
+                let d = pose.model_space(&rig)[head].1 - rest;
+                if d.length() > worst.length() { worst = d; }
+            }
+            println!("{name:26} {:.2} s head moves x {:+.2} y {:+.2} z {:+.2} (cry: x right, y forward)", clip.clip.duration, worst.x, worst.y, worst.z);
+        }
     }
 }
