@@ -2,6 +2,8 @@
 //! `cargo run -p aa-client --example trade_hud -- --shot shots/hud/trade.png --shot-after 5`
 #![allow(dead_code)]
 
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]
