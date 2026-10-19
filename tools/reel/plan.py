@@ -278,16 +278,52 @@ def make_motion_plan(c, nm):
                 record_from=RECORD_FROM, record_secs=round(t - RECORD_FROM + 1.0, 2), end=t)
 
 
+# the ground-target reels: the real cast through the ground reticle (`--ground-press`, `--aim-world`, `--click`), the server's own
+# answer drives the effects (no fake events but the `tp` that opens the record gate). The camera is behind the caster so the reticle
+# in front of it is in view. id -> (skill, ability, metres from the caster along its facing or None = on the doll, camera args)
+GROUND_REELS = {12: (13281, 6, 11.5), 13: (10664, 7, None)}
+# the camera looks along the caster's facing from above and behind (found by trying: yaw 0, pitch -35), so the ring ahead is in the middle
+GROUND_CAM = ["--cam-dist", "8", "--cam-fov", "65", "--cam-yaw", "0", "--cam-pitch", "-35"]
+
+
+def make_ground_plan(c, nm, rid):
+    import math
+    sid, ability, metres = GROUND_REELS[rid]
+    st = json.loads((WORK / "stage.json").read_text())
+    x, y = (float(v) for v in st["pos"].split(","))
+    yaw = math.radians(st["yaw"])
+    if metres is None:
+        ax, ay = st["dummy"][0], st["dummy"][1]
+    else:
+        ax, ay = x - math.sin(yaw) * metres, y + math.cos(yaw) * metres
+    cast, chan, delay = c.execute("select casting_time, channeling_time, effect_delay from skills where id=?", (sid,)).fetchone()
+    t = FIRST_SKILL
+    aim_for = 3.4  # the ring is drawn from about a second after the press
+    end = t + 0.4 + aim_for + (cast or 0) / 1000.0 + (delay or 0) / 1000.0 + min((chan or 0) / 1000.0, CHANNEL_CAP) + 4.0
+    args = ["--ground-press", str(sid), f"{t:.2f}", "--aim-world", f"{ax:.2f}", f"{ay:.2f}", f"{t + 0.4:.2f}", "--click", f"{t + 0.4 + aim_for:.2f}"]
+    env = {f"AA_DEV_{k}": str(v) for k, v in WEAPONS[ability].items()}
+    env["AA_COMBAT_FAKE"] = f"{FIRST_SKILL - 1:.3f}:tp:{int(round(x))}:{int(round(y))}:{(st['yaw'] + 360) % 360}"
+    env["AA_CAMERA_NO_CLIP"] = "1"
+    where = f"{metres:g} m ahead" if metres else "on the doll"
+    caption = dict(skill=sid, name=f"{nm.get(sid, str(sid))} ({where})", start=t, end=end)
+    return dict(ability=rid, name="Ground", weapon=WEAPON_NAME[ability], env=env, captions=[caption], args=args, cam=GROUND_CAM, cam_rel=None,
+                hud=False, record_from=RECORD_FOR_GROUND, record_secs=round(end - RECORD_FOR_GROUND + 1.0, 2), end=end)
+
+
+RECORD_FOR_GROUND = RECORD_FROM
+
+
 def main():
-    want = [int(a) for a in sys.argv[1:]] or list(ABILITIES) + [MOTION]
+    want = [int(a) for a in sys.argv[1:]] or list(ABILITIES) + [MOTION] + list(GROUND_REELS)
     c = connect()
     nm = names(c)
     out = WORK / "plans"
     out.mkdir(exist_ok=True)
     for a in want:
-        plan = make_motion_plan(c, nm) if a == MOTION else make_plan(c, a, nm)
-        (out / f"{a:02d}_{(ABILITIES.get(a) or 'motion').lower()}.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
-        print(f"{a:2d} {(ABILITIES.get(a) or 'Motion'):11s} {len(plan['captions']):2d} skills, {plan['record_secs']:6.1f} s, weapon {plan['weapon']}")
+        plan = make_motion_plan(c, nm) if a == MOTION else make_ground_plan(c, nm, a) if a in GROUND_REELS else make_plan(c, a, nm)
+        label = ABILITIES.get(a) or ("motion" if a == MOTION else f"ground_{nm[GROUND_REELS[a][0]].lower().replace(' ', '_')}")
+        (out / f"{a:02d}_{label.lower()}.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
+        print(f"{a:2d} {(ABILITIES.get(a) or plan['name']):11s} {len(plan['captions']):2d} skills, {plan['record_secs']:6.1f} s, weapon {plan['weapon']}")
 
 
 if __name__ == "__main__":

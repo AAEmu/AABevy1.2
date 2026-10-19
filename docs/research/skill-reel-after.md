@@ -1,4 +1,62 @@
-# Skill reel: after
+# Skill reel: after (final round, HEAD bab4c1a) and round 1 (c19c00f)
+
+## Final round: `after2` at bab4c1a
+
+The same 110 skills, the motion reel and two new ground-target reels, recorded with `target/agents/reel/after2/aa-client.exe`
+(HEAD `bab4c1a`: af75c03 staff stance and hang, effect areas on the ground, Meteor Strike at the target; bab4c1a aa-fx round 10,
+beams stretch hand to target). The exe copy is deleted again after the recording.
+
+* Videos (git-ignored): `shots/reel/after2/NN_<ability>.mp4` + `_sheet.png`, `shots/reel/after2/all_skills.mp4`,
+  `shots/reel/after2/11_motion.mp4`; ground reels `shots/reel/after2/12_ground_missile_rain.mp4`, `13_ground_meteor_strike.mp4`;
+  side by side with the baseline: `shots/reel/compare2/NN_<ability>_before_after.mp4`, `11_motion_before_after.mp4`,
+  `all_skills_before_after.mp4` (the ground reels have no baseline: the baseline client has no ground targeting).
+  The round 1 videos (`after/`, `compare/`) and the first-stage baseline were deleted to save disk.
+* Capture: 30 fps fixed timestep, 23 to 37 rendered frames/s (14 to 20 for the ground reels, which render the world from above);
+  25 to 45 s wall per reel plus about 15 s startup; all ten reels, the motion reel and the ground reels took about 17 minutes.
+  `aa-dev: fps=30.0` in every log, no watchdog stall.
+* `run_reel.py setup` ran before each batch (the training doll is killed by other sessions); the stage is the same as the baseline.
+* Ground reels (`plan.py` ids 12 and 13): the real flow, no fake skill events: `--ground-press SKILL`, `--aim-world X Y`
+  (the cursor held on a world point), `--click`, so the server answers and the world-space reticle is drawn. Missile Rain is aimed
+  11.5 m ahead (its minimum is 10 m), Meteor Strike on the doll 4 m ahead. The camera is a fixed orbit (yaw 0, pitch -35, 8 m) from above
+  and behind: a camera relative to the facing at 5 m has the ring behind it or inside the grass.
+
+### What changed since round 1 (visible in the sheets)
+
+* The ground reticle is drawn (green ring on the ground, follows the aimed point). Meteor Strike now lands on the aimed spot
+  (crater, flames, ash), not on the caster.
+* Staff casts: the arms no longer stretch out sideways with the staff across both hands; the staff hangs on the back like the bow
+  (Witchcraft, Auramancy, Occultism, Sorcery, Vitalism casts look like casts).
+* Beams run hand to target: Absorb Lifeforce (green beam to the doll), Crippling Mire (orange streak to the doll), Chain
+  Lightning (white arcs to the doll), Mana Stars (orange glow at the doll). Summon Wraith's red smoke is a cloud around the
+  caster, not 50 m away.
+* Shadow Step and Teleportation blink in the tree reels too (the caster ends up elsewhere, the camera follows); Drop Back in the
+  motion reel is cast from an open patch and no longer ends in the bushes.
+
+### Still looks wrong (final round)
+
+* No visible effect (pose or cast clip only): Battlerage Bondbreaker, Frenzy, Precision Strike; Witchcraft Bubble Trap, Insidious
+  Whisper, Purge, Banshee Wail, Dahuta's Breath, Play Dead (no lie-down); Defense Shield Slam, Bull Rush (no dash), Redoubt,
+  Invincibility; Auramancy Vicious Implosion, Meditate (no seated pose), Leech, Protective Wings (no wings, a glow at the hand);
+  Occultism Mana Force, Telekinesis (no beam to the doll), Stillness, Summon Crows; Archery Endless Arrows (no arrows), Snare, Float,
+  Boneyard; Sorcery Freezing Arrow (no projectile), Magic Circle, Flame Barrier, Insulating Lens (tiny); Shadowplay Stealth,
+  Freerunner, Wallop; Songcraft most songs and performances (Quickstep, Ode to Recovery, Bulwark Ballad, Bloody Chantey, Alarm Call,
+  Startling Strain and Rhythmic Renewal only a spark), the lute is still a paddle shape; Vitalism Infuse, Aranzeb's Boon, Twilight.
+* Checked after bab4c1a: Arc Lightning is only a faint ring at the caster's feet (no arc to the doll); Lasso shows a green glow at the
+  hand but no rope; Telekinesis and Mana Force show nothing; Crippling Mire still has the black ring around the caster besides the
+  streak to the doll; Absorb Lifeforce and Chain Lightning are right.
+* Oversized or odd geometry: Whirlwind Slash (very long thin blade streak), Sunder Earth (large rock and dust mass at the caster's feet),
+  Ollo's Hammer (a big blue burst and cyan blocks over the doll), Hell Spear (a large red and white lattice covering the stage),
+  Freezing Earth (a wide water-like disc around the caster), Skewer (a large white mist cloud), Retribution (flame sheet
+  around the caster).
+* Wrong place: Searing Rain, Frigid Tracks (orange flames, wrong colour for frost) and the fake Meteor Strike of the tree reel are
+  drawn at the caster (the tree reels use fake events without a ground position; the ground reel shows the real thing); Mocking Howl and
+  Imprison are drawn around the caster.
+* Ground reels: Missile Rain shows the ring, the cast pose and a faint blue spark, but no arrow rain at the ring, and the log says
+  `abillity_skill_table_m.wild.long_distance_shot_launch not found in library`; the effect is missing in the data library. In the
+  motion reel (the old fake aim at 3 m) Missile Rain is still a very large red ribbon lattice near the caster.
+* The caster's hit reaction cannot be judged (the doll plays no hit clip).
+
+## Round 1: HEAD c19c00f (videos deleted)
 
 The same reel as `skill-reel-baseline.md` (110 skills of the ten ability trees on a training doll, plus the extra motion reel),
 recorded with the client built from HEAD `c19c00f` (aa-dev recorder deadlock fix) after the skill-fix rounds: 1a7b508, aa-fx rounds
