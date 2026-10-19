@@ -52,6 +52,8 @@ pub enum Grip {
     /// A shield: on the arm while a one handed weapon is out, out of sight otherwise (the real client shows none on a character at
     /// peace, nor with a bow or an instrument in the hands).
     Shield,
+    /// A backpack or a glider on the back: always there, never in a hand.
+    Pack,
 }
 
 /// The class of weapon a character holds: which of a skill's one handed, two handed and dual wield clips it plays, and which
@@ -173,18 +175,19 @@ pub fn weapon_for_clip(name: &str) -> Option<Out> {
 
 /// Where a holdable hangs while it is not in the hand (bones of the base skeleton: `item_bow_l`
 /// slings a bow diagonally across the back, `item_side_l / r` at the left and right hip, `item_arm_l` on the left
-/// forearm, `item_back_c` the back: the two handed weapons; a staff hangs like the bow, diagonally from the left shoulder: the
+/// forearm, `item_back_r` the back, over the right shoulder: the two handed weapons (`item_back_c` is the backpack's); a staff hangs like the bow, diagonally from the left shoulder: the
 /// real client's capture).
 fn sheath_bone(code: &str, slot: usize, two_handed: bool) -> &'static str {
     match (code, slot) {
         ("bow", _) => "item_bow_l",
         ("shield", _) => "item_arm_l",
-        _ if two_handed => "item_back_c",
+        // x2game's sheath codes: `item_back_c` is the backpack / glider bone, the two handed weapons use `item_back_r` (code 103)
+        _ if two_handed => "item_back_r",
         // the real client hangs the main sword on the left hip (`onehand_ac_holster_side_l` puts it there) and an off hand weapon
         // on the right one (`onehand_ac_holster_side_r`)
         (_, slot::OFFHAND) => "item_side_r",
         (_, slot::MAINHAND) => "item_side_l",
-        _ => "item_back_c",
+        _ => "item_back_r",
     }
 }
 
@@ -200,13 +203,24 @@ fn dev_item(slot: usize) -> Option<u32> {
     std::env::var(name).ok()?.parse().ok()
 }
 
-/// The weapons, shield and instrument in an equipment list.
+/// The rotation of `item_assets.attachment_offset_rot_*` (degrees about x, y, z). x2game builds it as CryEngine's
+/// `Quat::SetRotationXYZ(Ang3)` does (`3935A800`, `3935EA10`, `docs/research/re-equipment.md`): X first, then Y, then Z, which is
+/// `Rz * Ry * Rx` (glam's `XYZ` is the reverse).
+fn attachment_rotation(degrees: [f32; 3]) -> Quat {
+    let [rx, ry, rz] = degrees.map(f32::to_radians);
+    // `AA_DEV_EULER_XYZ=1`: the old order (glam `XYZ`, Rx * Ry * Rz), to compare the two
+    if std::env::var_os("AA_DEV_EULER_XYZ").is_some() {
+        return Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
+    }
+    Quat::from_euler(EulerRot::ZYX, rz, ry, rx)
+}
+
+/// The weapons, shield and instrument in an equipment list, and the backpack.
 pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
     let mut out = Vec::new();
     for s in [slot::MAINHAND, slot::OFFHAND, slot::RANGED, slot::MUSICAL] {
         let template = dev_item(s).or_else(|| equipment.get(s).map(|i| i.template_id));
         let Some(w) = template.filter(|t| *t != 0).and_then(|t| db.weapon(t)) else { continue };
-        let [rx, ry, rz] = w.rotation.map(f32::to_radians);
         let instrument = match w.code.as_str() {
             "string_instrument" => Some(0),
             "percussion_instrument" => Some(1),
@@ -214,6 +228,13 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             _ => None,
         };
         let offhand = s == slot::OFFHAND && w.code != "shield";
+        // x2game mirrors the off hand item across the attachment's X plane (`3935EA10`: `pos_x`, `rot_y` and `rot_z` change sign)
+        let (mut offset, mut rotation) = (w.offset, w.rotation);
+        if s == slot::OFFHAND && w.mirror {
+            offset[0] = -offset[0];
+            rotation[1] = -rotation[1];
+            rotation[2] = -rotation[2];
+        }
         let (grip, hand_bone) = match (w.code.as_str(), s) {
             // the lute is carried by the left hand bone: the lute clips animate `item_hand_l` (not `item_lute_r`, which they leave at
             // its rest place on the back), and the attachment offset (a few centimetres) is relative to it; the pipes hang on the
@@ -228,8 +249,8 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
         out.push(CarriedItem {
             bone: if w.staff { "item_staff_l" } else { sheath_bone(&w.code, s, w.two_handed) },
             transform: Transform {
-                translation: Vec3::from(w.offset),
-                rotation: Quat::from_euler(EulerRot::XYZ, rx, ry, rz),
+                translation: Vec3::from(offset),
+                rotation: attachment_rotation(rotation),
                 scale: Vec3::splat(if w.worn_scale > 0.0 { w.worn_scale } else { 1.0 }),
             },
             grip,
@@ -251,6 +272,22 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             side_bone: w.staff.then_some("item_side_l"),
         });
     }
+    // the backpack or glider on the back (`item_back_c`, the bone the real client hangs it on)
+    if let Some(w) = equipment.get(slot::BACKPACK).map(|i| i.template_id).filter(|t| *t != 0).and_then(|t| db.backpack(t)) {
+        out.push(CarriedItem {
+            path: w.path,
+            bone: "item_back_c",
+            transform: Transform { translation: Vec3::from(w.offset), rotation: attachment_rotation(w.rotation), scale: Vec3::ONE },
+            grip: Grip::Pack,
+            two_handed: false,
+            staff: false,
+            offhand: false,
+            hand_bone: None,
+            hand_transform: Transform::IDENTITY,
+            hide_sheathed: false,
+            side_bone: None,
+        });
+    }
     // a two handed weapon takes the bow's place on the back
     if out.iter().any(|i| i.grip == Grip::Blade && i.two_handed) {
         for i in out.iter_mut().filter(|i| i.grip == Grip::Bow) {
@@ -269,6 +306,38 @@ pub fn select_weapons(mut items: Vec<CarriedItem>) -> Vec<CarriedItem> {
     items
 }
 
+/// The model files a weapon is drawn with, each with the material that replaces its own. Most weapons are one `.cgf`; some are
+/// `.cdf` files (29 items): a `.chr` carrier (`real_torch.chr`, drawn with the `NoDraw` torch material, so it shows nothing) with the
+/// blade as a `CA_BONE` object attachment (`sword`, `item`, `weapon`) that has the enchant material, or the mesh itself
+/// (`shield_gorgon_002.cdf`: a `.chr` with another material). The effect attachments (the enchant glow) are not drawn.
+pub fn model_files(path: &str) -> Vec<(String, Option<String>)> {
+    if !path.ends_with(".cdf") {
+        return vec![(path.to_string(), None)];
+    }
+    let pak = aa_pak::Pak::global();
+    let Ok(cdf) = aa_anim::Cdf::load(path) else {
+        // a path the pak does not have (`sword_2h_46_8.cdf`): the model of the same name
+        let cgf = format!("{}.cgf", path.trim_end_matches(".cdf"));
+        return if pak.exists(&cgf) { vec![(cgf, None)] } else { Vec::new() };
+    };
+    let mut out = Vec::new();
+    if !cdf.model.ends_with("/real_torch.chr") && pak.exists(&cdf.model) {
+        out.push((cdf.model.clone(), cdf.material.as_deref().map(mtl)));
+    }
+    for attachment in &cdf.attachments {
+        // the torch's light and fire are entity bindings (`x2_light.torch.torch01`), not files
+        if let Some((path, material)) = super::attachments::model(attachment).filter(|(p, _)| pak.exists(p)) {
+            out.push((path, material.as_deref().map(mtl)));
+        }
+    }
+    out
+}
+
+/// A cdf names its materials without the `.mtl` (`..._enchant`).
+fn mtl(material: &str) -> String {
+    if material.ends_with(".mtl") { material.to_string() } else { format!("{material}.mtl") }
+}
+
 /// Spawns the carried models under their bones once the character's skeleton exists.
 pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Query<(Entity, &Animator, &Carried)>) {
     for (entity, animator, carried) in &characters {
@@ -278,8 +347,18 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
             let Some(bone) = bone_of(item.bone) else { continue };
             // Full shading bakes the Illum specular map into metal / roughness: wood stays wood, blades shine
             let options = ModelOptions { cry_space: true, shading: Shading::Full, ..default() };
-            let Ok(loaded) = cry.load_model(&item.path, &options) else { continue };
-            let model = spawn_loaded(&mut commands, &item.path, &loaded, &options);
+            let mut parts = Vec::new();
+            for (path, material) in model_files(&item.path) {
+                let options = ModelOptions { material, ..options.clone() };
+                let Ok(loaded) = cry.load_model(&path, &options) else { continue };
+                parts.push(spawn_loaded(&mut commands, &path, &loaded, &options));
+            }
+            // a `.cdf` weapon can be a carrier plus a blade: one entity holds the pieces
+            let model = match parts[..] {
+                [] => continue,
+                [one] => one,
+                _ => commands.spawn((Name::new("weapon"), Transform::default(), Visibility::default())).add_children(&parts).id(),
+            };
             commands.entity(model).insert((item.transform, ChildOf(bone)));
             // an instrument is only there while it is played, a shield while the sword is out
             if matches!(item.grip, Grip::Instrument(_) | Grip::Shield) || item.hide_sheathed {
@@ -442,5 +521,43 @@ mod tests {
         // item 6102 is the first two handed staff: two handed for the sheath, the one handed stance for the clips
         assert!(db.weapon(6102).is_some_and(|w| w.two_handed && w.staff));
         assert!(db.weapon(5660).is_some_and(|w| w.two_handed && !w.staff));
+    }
+
+    #[test]
+    fn two_handed_weapons_hang_on_the_right_back_bone() {
+        assert_eq!(sheath_bone("2h_slashing_sod", slot::MAINHAND, true), "item_back_r");
+        assert_eq!(sheath_bone("bow", slot::RANGED, false), "item_bow_l");
+        assert_eq!(sheath_bone("normal_slashing_sod", slot::MAINHAND, false), "item_side_l");
+    }
+
+    #[test]
+    fn the_attachment_rotation_applies_x_first() {
+        // Rz * Ry * Rx: a point on +Y turned 90 degrees about X goes to +Z, then 90 degrees about Z leaves it there
+        let q = attachment_rotation([90.0, 0.0, 90.0]);
+        assert!((q * Vec3::Y - Vec3::Z).length() < 1e-5);
+        // the other order would put it on +X
+        let xyz = Quat::from_euler(EulerRot::XYZ, 90f32.to_radians(), 0.0, 90f32.to_radians());
+        assert!((xyz * Vec3::Y - Vec3::Z).length() > 0.5);
+    }
+
+    #[test]
+    fn cdf_weapons_resolve_to_their_blade_model() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let files = model_files("objects/item/blade_1h/blade_1h_46_5/blade_1h_46_5_e.cdf");
+        assert_eq!(files.len(), 1, "the torch carrier is not drawn: {files:?}");
+        assert!(files[0].0.ends_with("blade_1h_46_5.cgf") && files[0].1.as_deref().is_some_and(|m| m.ends_with("_enchant.mtl")));
+        assert_eq!(model_files("objects/item/shield/shield_monster/shield_gorgon_002/shield_gorgon_002.cdf")[0].0, "objects/item/shield/shield_monster/shield_gorgon_001/shield_gorgon_001.chr");
+        assert_eq!(model_files("objects/item/sword_2h/sword_2h_01_1/sword_2h_01_1.cgf").len(), 1);
+    }
+
+    #[test]
+    fn backpacks_come_from_item_backpacks() {
+        let Some(db) = Db::open() else { return };
+        assert!(db.backpack(17683).is_some_and(|b| b.path.ends_with("ndeco_backpack_a.cgf")));
+        // a glider wears its folded model
+        assert!(db.backpack(14677).is_some_and(|b| b.path.ends_with("glider_b_back.cgf")));
+        assert!(db.backpack(5660).is_none());
     }
 }

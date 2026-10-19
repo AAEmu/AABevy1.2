@@ -24,6 +24,7 @@ struct Lookups {
     doodad_models: HashMap<u32, Option<String>>,
     npc_scale: HashMap<u32, f32>,
     weapons: HashMap<u32, Option<Weapon>>,
+    backpacks: HashMap<u32, Option<Weapon>>,
     anim_actions: HashMap<u32, Option<String>>,
     mount_poses: HashMap<u32, u32>,
 }
@@ -46,6 +47,8 @@ pub struct Weapon {
     /// A staff (`holdables.pose_id` 4): held two handed but fights and casts in the one handed stance (the `staff_` clips are
     /// the one handed ones).
     pub staff: bool,
+    /// `item_assets.allow_mirror`: the off hand copy is mirrored (x2game flips `pos_x`, `rot_y` and `rot_z`).
+    pub mirror: bool,
 }
 
 /// Columns the in-game lookups filter or join on. The server's database has no indexes beyond the
@@ -138,6 +141,7 @@ impl Db {
                 doodad_models: HashMap::new(),
                 npc_scale: HashMap::new(),
                 weapons: HashMap::new(),
+                backpacks: HashMap::new(),
                 anim_actions: HashMap::new(),
                 mount_poses: HashMap::new(),
             })),
@@ -225,7 +229,7 @@ impl Db {
         let weapon = l
             .conn
             .query_row(
-                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale, w.drawn_scale, h.slot_type_id, h.pose_id                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
+                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale, w.drawn_scale, h.slot_type_id, h.pose_id, ia.allow_mirror                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
                 params![item_id],
                 |r| {
                     let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
@@ -238,12 +242,47 @@ impl Db {
                         drawn_scale: f(9)?,
                         two_handed: r.get::<_, Option<i64>>(10)?.unwrap_or(0) == 16,
                         staff: r.get::<_, Option<i64>>(11)?.unwrap_or(0) == 4,
+                        mirror: matches!(r.get::<_, Option<String>>(12)?.as_deref(), Some("t" | "T" | "1")),
                     })
                 },
             )
             .ok();
         l.weapons.insert(item_id, weapon.clone());
         weapon
+    }
+
+    /// The model a backpack / glider item template wears on the back (`item_backpacks`): its stowed look when it has one
+    /// (`asset2_id`: a glider's folded `_back.cgf`), else `asset_id`. [`Weapon::code`] is `backpack`. A glider without a stowed look
+    /// (`glider_bx.chr`, 5 items) is only its flying model, a 6 m canopy: nothing is drawn for it.
+    pub fn backpack(&self, item_id: u32) -> Option<Weapon> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(w) = l.backpacks.get(&item_id) {
+            return w.clone();
+        }
+        let backpack = l
+            .conn
+            .query_row(
+                "SELECT ia.path, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z, ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z
+                 FROM item_backpacks b JOIN item_assets ia ON ia.id = CASE WHEN b.asset2_id > 0 THEN b.asset2_id ELSE b.asset_id END WHERE b.item_id = ?1 AND NOT (b.backpack_type_id = 2 AND b.asset2_id = 0)",
+                params![item_id],
+                |r| {
+                    let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
+                    Ok(Weapon {
+                        path: norm(&r.get::<_, String>(0)?),
+                        code: "backpack".into(),
+                        offset: [f(1)?, f(2)?, f(3)?],
+                        rotation: [f(4)?, f(5)?, f(6)?],
+                        worn_scale: 1.0,
+                        drawn_scale: 1.0,
+                        two_handed: false,
+                        staff: false,
+                        mirror: false,
+                    })
+                },
+            )
+            .ok();
+        l.backpacks.insert(item_id, backpack.clone());
+        backpack
     }
 
     /// The `.cgf` a doodad template is drawn with (`doodad_almighties.model` is `cgf://game/<path>`).
