@@ -25,8 +25,11 @@ pub fn c2b(v: Vec3) -> Vec3 {
 /// before it multiplies the texture: colours are authored in gamma space and the blend happens in linear space, so a tint of
 /// (1, 0.5, 0.2) is really (1, 0.22, 0.03).
 #[inline]
-pub fn engine_gamma(c: Vec3) -> Vec3 {
-    Vec3::new(c.x.max(0.0).powf(2.2), c.y.max(0.0).powf(2.2), c.z.max(0.0).powf(2.2))
+pub fn engine_gamma(c: Vec3, g: f32) -> Vec3 {
+    if g == 1.0 {
+        return c;
+    }
+    Vec3::new(c.x.max(0.0).powf(g), c.y.max(0.0).powf(g), c.z.max(0.0).powf(g))
 }
 
 /// Irradiance of the sun (on a surface facing it) and of the sky on a lit mesh particle (`Illum` material), in the units of
@@ -93,6 +96,8 @@ pub struct StepCtx<'a> {
     pub size_scale: f32,
     /// Half the width of a sprite per unit of `Size`.
     pub sprite_half: f32,
+    /// See `FxSettings::colour_gamma`.
+    pub colour_gamma: f32,
     /// A continuous emitter with a finite life spreads `Count` over that life (see `EmitterState::emit`).
     pub count_over_life: bool,
     /// Colour of the light on the effect.
@@ -809,7 +814,7 @@ impl EmitterState {
                 let t = orbit_speed * p.age + p.seed;
                 center += (Vec3::X * t.cos() + Vec3::Z * t.sin()) * orbit;
             }
-            let colour = engine_gamma(p.color * luts.color.at(a) * ctx.tint) * lit;
+            let colour = engine_gamma(p.color * luts.color.at(a) * ctx.tint, ctx.colour_gamma) * lit;
 
             // frame in the texture atlas
             if p.slot != u32::MAX {
@@ -1012,7 +1017,7 @@ impl EmitterState {
             let center = inv.transform_point3(frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis));
             let lin = inv3 * rot * Mat3::from_diagonal(scale);
             let shift = center - lin * pivot;
-            let c = if m.lit { engine_gamma(p.color * luts.color.at(a) * ctx.tint) * m.tint } else { engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint) * lit };
+            let c = if m.lit { engine_gamma(p.color * luts.color.at(a) * ctx.tint, ctx.colour_gamma) * m.tint } else { engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint, ctx.colour_gamma) * lit };
 
             self.pos.extend(t.pos.iter().map(|v| (lin * *v + shift).to_array()));
             if static_uv {
@@ -1303,6 +1308,7 @@ mod tests {
             lod: 1.0,
             size_scale: 1.0,
             sprite_half: 1.0,
+            colour_gamma: 2.2,
             count_over_life: true,
             tint: Vec3::ONE,
             sun: Vec3::Y,
