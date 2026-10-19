@@ -583,6 +583,7 @@ pub fn talk_input(
     target: Res<Target>,
     facts: Facts,
     mut script: ResMut<ScriptedTalk>,
+    mut script_pick: ResMut<crate::script::ScriptPick>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
 ) {
@@ -638,7 +639,9 @@ pub fn talk_input(
     }
     let typing = focus.0 || rt.keyboard_captured();
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
+    // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let picked = right_click_pick(&pointer, &units, own, &mut pressed_at);
+    let picked = script_pick.take_right().or(picked);
 
     let mut d = bridge.0.borrow_mut();
     if d.dialog.directing {
@@ -677,6 +680,7 @@ pub fn talk_input(
         return;
     }
     let what = begin_talk(&mut d, &player_facts, npc, target.obj_id, &mut net);
+    script_pick.talked(npc.0, what);
     drop(d);
     if let Some(what) = what {
         rt.fire_event("NPC_INTERACTION_START", ("quest", what, npc.0.to_string()));

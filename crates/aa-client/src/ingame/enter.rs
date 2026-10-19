@@ -60,7 +60,7 @@ pub struct AutoEnter {
 impl AutoEnter {
     pub fn from_args() -> Option<AutoEnter> {
         let args: Vec<String> = std::env::args().collect();
-        if !args.iter().any(|a| a == "--enter-world") {
+        if !args.iter().any(|a| a == "--enter-world" || a == "--script") {
             return None;
         }
         Some(AutoEnter { credentials: Credentials::from_args(), character: flag(&args, "--character") })
