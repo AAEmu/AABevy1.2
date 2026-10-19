@@ -14,9 +14,41 @@ x2game). Code: `crates/aa-client/src/ingame/weapons.rs`, `data.rs` (`Db::weapon`
 | mirror | `item_assets.allow_mirror` (14 assets, 1H swords / maces / axes): the off hand copy flips `pos_x`, `rot_y`, `rot_z` (x2game `3935EA10`, slot 16) |
 | 10 slots never drawn | Backpack (wire slot 26): `Db::backpack` reads `item_backpacks` (`asset_id`, or `asset2_id` = the stowed look of a glider, `glider_b_back.cgf`) with the `item_assets` offset; hung on `item_back_c` as `Grip::Pack`, never in a hand. The 5 gliders with no stowed look (`glider_bx.chr`, only the 6 m flying canopy) draw nothing. Tail (ferre `fe_m_tail01`, `fe_f_tail`) and beard (`fe_m_beard01`): `appearance::resolve` adds them as extra skin parts (`item_body_parts`, model must match); without the tail slot a ferre body has a hole at the tail root. Glasses: no row in `item_body_parts` / `item_armors` has a glasses visual, nothing to draw |
 
-Not changed: backpacks are drawn also under a costume (x2game has `ShowBackPackWithCosplay`; its default was not read);
-the fishing rods (27308..: 3.2 m props, `staff` pose) still hang as a staff; the sweep's `floating` for 1H spears on `item_side_l`
-(the authored offset) is unchanged.
+Backpack under a costume: the options script `x2ui/option/interface_option.lua` has `ShowMyCosplay` default 1 and
+`ShowMyBackPackWithCosplay` default **0** (`X2Player:ShowCosplay` / `ShowBackPackWithCosplay`), so `weapons::carried` hides the
+backpack while a costume (wire slot 27) is worn.
+
+**Fishing rods** (27308..27312, 27367..27370, 29702, 30584; holdable 17 = `2h_blunt_staff`, pose 4, `worn_scale` 0.8, offset
+(0, -0.77, 0.05)). Nothing is missing in the data: the grip (cork handle, reel) is the model origin, the rod is 3.1 m and points
+along +Y. The hold is the animation: the fishing clips `fist_fishing_idle`, `fist_fishing_action_r/l` and
+`fist_pos_stn_fishing_idle_rand_*` (and `animations/item/interaction/fishpole_a/*` for the rod itself) key both hands onto the rod
+(`h_rod_fishing_left.png`: the right hand holds the handle, the left the reel, the rod points forward and up; `AA_EQUIP_CLIP=
+fist_fishing_idle AA_EQUIP_DRAW=1` of the example). In the frozen idle the rod hangs from the hand at the side, which is what the
+sweep calls `weapon_off_body` / `bad_size` (bbox centre 1.1 m from the hand of a 3 m rod): expected, not a placement bug. The client
+has no fishing flow, so no code plays the clips; sheathed a rod hangs like a staff (`item_staff_l`).
+
+**1H spears on `item_side_l`** (5729, 21488, 21792): single axis rotation (0, 0, 0.5), so the rotation order changes nothing. The
+13 to 15 cm was a bind-pose artefact of the sweep: the relaxed idle clip moves the item bones (`item_side_l` from (0.027, -0.001,
+0.186) to (0.149, 0.156, 0.185) in the pelvis frame, `item_back_r` 12 cm, the staff and bow bones 2 cm) and the sweep placed the
+weapons in the bind pose. In the idle pose the shaft touches the hip (`i_spear_left.png`); no offset is missing. The sweep now
+places weapons in the idle pose.
+
+Not changed: the `.cdf` effect attachments (enchant glow) are not drawn; the sweep's `no_material` for the four 41_* `.cdf` items
+(27334, 27338, 27340, 27344) is a sweep artefact (their `Material` is in the cdf, which `model_files` passes on).
+
+## Equip sweep, weapon slots, before and after
+
+`cargo run -p aa-anim --example equip_sweep --release -- --analyze --slot <slot>` for the nine weapon slots, all 8 models
+(findings in `data/extract/aa-anim/equip_sweep*/`, git-ignored). The sweep's weapon rules now mirror `weapons.rs` (`item_back_r`,
+ZYX, `.cdf` blade resolution) and place the weapons in the idle pose against the idle body. Findings (item x model):
+
+| category | before (bind pose, old rules) | after, new rules, bind pose | after, new rules, idle pose |
+|---|---|---|---|
+| `sheath_horizontal` | 3557 (449 items) | 6 (1) | 22 (3 shields, `item_arm_l`) |
+| `floating` | 553 (99) | 171 (25) | 169 (58, thin swords 13 to 15 cm, NPC props) |
+| `weapon_cdf` | 200 (21) | 8 (1: `real_torch.cdf`, the torch has no mesh) | 8 (1) |
+| `weapon_off_body` | 199 (20) | 151 (21) | 113 (20: fishing rods in the hand, the NPC telescope) |
+| `bad_size` | 631 (49) | 239 (32) | 173 (18: rods, NPC 3.5 m props) |
 
 ## Rotation order: evidence
 
@@ -37,7 +69,8 @@ AA_EQUIP="race=nu,g=m,main=5660,label=2H sword;race=fe,g=m,tail=562,beard=564" A
 
 Figures are separated by `;`, each a `key=value` list: `race` (nu el ha fe), `g` (m f), `main off ranged music back cloak tail
 beard glasses chest legs feet hands head cosplay` = item template id, `label`. `AA_EQUIP_VIEW` is `back` / `left` / `right` /
-`front`, `AA_EQUIP_DRAW=1` puts the weapons in the hands. The figures are built with `appearance::describe` / `resolve` and
+`front`, `AA_EQUIP_DRAW=1` puts the weapons in the hands, `AA_EQUIP_CLIP=<cal clip>` / `AA_EQUIP_TIME=<s>` play and hold a clip
+(`fist_fishing_idle`). The figures are built with `appearance::describe` / `resolve` and
 `weapons::carried` / `attach_carried`, as the game does, and frozen in the relaxed idle (frame 0.7 s).
 
 Frames in `shots/aa-client/weapons-fix/` (git-ignored): `a_back` 2H sword / staff / mace / spear / axes from behind; `b_left`,

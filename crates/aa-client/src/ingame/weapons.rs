@@ -272,8 +272,10 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             side_bone: w.staff.then_some("item_side_l"),
         });
     }
-    // the backpack or glider on the back (`item_back_c`, the bone the real client hangs it on)
-    if let Some(w) = equipment.get(slot::BACKPACK).map(|i| i.template_id).filter(|t| *t != 0).and_then(|t| db.backpack(t)) {
+    // the backpack or glider on the back (`item_back_c`, the bone the real client hangs it on); the options `ShowCosplay` (default 1) and
+    // `ShowBackPackWithCosplay` (default 0, `x2ui/option/interface_option.lua`) hide it while a costume is worn
+    let costume = equipment.get(slot::COSPLAY).is_some_and(|i| i.template_id != 0);
+    if let Some(w) = equipment.get(slot::BACKPACK).filter(|_| !costume).map(|i| i.template_id).filter(|t| *t != 0).and_then(|t| db.backpack(t)) {
         out.push(CarriedItem {
             path: w.path,
             bone: "item_back_c",
