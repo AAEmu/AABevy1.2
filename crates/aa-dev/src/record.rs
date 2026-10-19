@@ -18,8 +18,8 @@
 //! The log line `aa-dev: record start at gate+X.XXX s` says exactly which game second (counted from the start, or from the gate)
 //! the first captured frame belongs to; a frame `k` (1-based) is at `X + k / fps`.
 //!
-//! PNGs are encoded on their own threads (fast compression, RGB); at most [`MAX_PENDING`] are in flight, the app waits for the
-//! writers beyond that. The capture is the window: keep it 1280x720 for videos (`--size 1280x720`, about 1 MB per frame).
+//! PNGs are encoded on their own threads (fast compression, RGB); at most [`MAX_WRITING`] encoders run, the app waits for the
+//! writers beyond that, and past [`MAX_IN_FLIGHT`] undelivered screenshots it renders frames with the clock frozen. The capture is the window: keep it 1280x720 for videos (`--size 1280x720`, about 1 MB per frame).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +32,12 @@ use bevy::time::TimeUpdateStrategy;
 
 use super::DevArgs;
 
-const MAX_PENDING: usize = 10;
+/// PNG encoders running at once (they are threads of their own, so waiting for them is safe).
+const MAX_WRITING: usize = 10;
+/// Screenshots requested but not handed back by the GPU yet. They only complete while the app keeps rendering frames (the render
+/// thread polls the readback, a main-world system delivers it), so the app must never block on them: past this many it lets frames
+/// pass with the clock frozen instead.
+const MAX_IN_FLIGHT: usize = 4;
 
 /// With `--record-gate` the recording clock (`--record-from`) starts when this opens.
 #[derive(Resource, Default)]
@@ -52,15 +57,17 @@ pub struct Recorder {
     /// Frames requested so far (0 until the recording starts).
     frames: u32,
     started: bool,
-    /// PNGs requested but not written yet.
-    pending: Arc<AtomicUsize>,
+    /// Screenshots requested and not delivered yet.
+    in_flight: Arc<AtomicUsize>,
+    /// PNG encoder threads running.
+    writing: Arc<AtomicUsize>,
     origin: f64,
 }
 
 impl Recorder {
     /// PNGs are still being written.
     pub fn busy(&self) -> bool {
-        self.pending.load(Ordering::Relaxed) > 0
+        self.in_flight.load(Ordering::Relaxed) + self.writing.load(Ordering::Relaxed) > 0
     }
 }
 
@@ -112,22 +119,32 @@ fn capture(
         return;
     }
     // writers behind: wait for them (the clock only moves when frames do, so nothing is lost)
-    while rec.pending.load(Ordering::Relaxed) >= MAX_PENDING {
+    while rec.writing.load(Ordering::Relaxed) >= MAX_WRITING {
         std::thread::sleep(Duration::from_millis(4));
     }
+    // the GPU behind: let frames pass with the clock frozen until it has handed screenshots back (blocking here would stop the
+    // very frames that deliver them: a deadlock)
+    if rec.in_flight.load(Ordering::Relaxed) >= MAX_IN_FLIGHT {
+        *strategy = TimeUpdateStrategy::ManualDuration(Duration::ZERO);
+        return;
+    }
+    *strategy = TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / fps as f64));
     rec.frames += 1;
     let path = PathBuf::from(dir).join(format!("f_{:06}.png", rec.frames));
-    let pending = rec.pending.clone();
-    pending.fetch_add(1, Ordering::Relaxed);
+    let in_flight = rec.in_flight.clone();
+    let writing = rec.writing.clone();
+    in_flight.fetch_add(1, Ordering::Relaxed);
     commands.spawn(Screenshot::primary_window()).observe(move |captured: On<ScreenshotCaptured>| {
         let image = captured.image.clone();
         let path = path.clone();
-        let pending = pending.clone();
+        writing.fetch_add(1, Ordering::Relaxed);
+        in_flight.fetch_sub(1, Ordering::Relaxed);
+        let writing = writing.clone();
         std::thread::spawn(move || {
             if let Err(e) = write_png(image, &path) {
                 error!("aa-dev: record {}: {e}", path.display());
             }
-            pending.fetch_sub(1, Ordering::Relaxed);
+            writing.fetch_sub(1, Ordering::Relaxed);
         });
     });
 }
