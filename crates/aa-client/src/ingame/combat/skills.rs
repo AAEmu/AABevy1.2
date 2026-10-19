@@ -283,6 +283,9 @@ pub struct PlotVisual {
     pub projectile: Option<Projectile>,
     /// `special_effects.value3` of the step's projectile effect: its speed (m/s; 0 = the default flight time).
     pub projectile_speed: f32,
+    /// `special_effects.value2` of the step's projectile effect (`ProjectileAnim`): how long a beam lives, in ms (Lasso 700, Crippling
+    /// Mire 4500, Absorb Lifeforce 6500; 0 for Arc Lightning and Mana Force, whose effects play out by themselves).
+    pub projectile_ms: u32,
 }
 
 impl PlotVisual {
@@ -321,11 +324,11 @@ pub struct BuffLook {
     pub bad: bool,
     /// `ragdoll`: the unit falls over (the client has no ragdoll: it plays the death clip and gets up again).
     pub ragdoll: bool,
+    /// `knock_down` (163 buffs, none with a clip): the unit is thrown on its back (or its front) and gets up when the buff goes.
+    pub knock_down: bool,
 }
 
 impl BuffLook {
-    /// `knock_down` (163 buffs, none with a clip): the unit is thrown on its back (or its front) and gets up when the buff goes.
-    pub knock_down: bool,
     /// The buff changes nothing the client draws.
     pub fn is_empty(&self) -> bool {
         self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.knock_down && !self.ragdoll
@@ -691,6 +694,7 @@ impl Inner {
                         int(r, 4)? != 0,
                         std::array::from_fn::<u32, 3, _>(|i| int(r, 6 + i).unwrap_or(0) as u32),
                         int(r, 5)? != 0,
+                        int(r, 9)? != 0,
                     ))
                 },
             )
@@ -705,11 +709,11 @@ impl Inner {
                 instrument_start: instruments.map(|i| self.anim(i)),
                 framehold,
                 ragdoll,
+                knock_down,
             })
             .filter(|l| !l.is_empty())
             .map(Arc::new);
         self.buffs.insert(id, look.clone());
-                knock_down,
         look
     }
 
@@ -776,18 +780,18 @@ impl Inner {
             return p.clone();
         }
         // special effects of the event: 34 Anim (anim id), 35 / 36 FxGroup(Anim) (group id), 37 / 38 Projectile(Anim)
-        let effects: Vec<(i64, u32, f32)> = self
+        let effects: Vec<(i64, u32, f32, u32)> = self
             .conn
             .prepare(
-                "SELECT s.special_effect_type_id, s.value1, s.value3 FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
+                "SELECT s.special_effect_type_id, s.value1, s.value3, s.value2 FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
                  WHERE e.event_id = ?1 AND e.actual_type = 'SpecialEffect' AND s.special_effect_type_id IN (34, 35, 36, 37, 38) ORDER BY e.position, e.id",
             )
-            .and_then(|mut q| q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32, int(r, 2)? as f32))).map(|rows| rows.flatten().collect()))
+            .and_then(|mut q| q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32, int(r, 2)? as f32, int(r, 3)?.max(0) as u32))).map(|rows| rows.flatten().collect()))
             .unwrap_or_default();
         let mut visual = PlotVisual::default();
         let mut fx: Vec<FxItem> = Vec::new();
         let mut shakes: Vec<ShakeItem> = Vec::new();
-        for (kind, value, speed) in effects {
+        for (kind, value, speed, ms) in effects {
             match kind {
                 34 => visual.anims.extend(self.anim(value)),
                 35 | 36 => {
@@ -801,6 +805,7 @@ impl Inner {
                     if first && let Some(p) = &visual.projectile {
                         visual.extras = visual.extras.plus(p.extras);
                         visual.projectile_speed = speed;
+                        visual.projectile_ms = ms;
                     }
                 }
             }
@@ -1014,6 +1019,19 @@ mod tests {
         let crow = items.iter().find(|i| i.chr).expect("the crow model");
         assert_eq!((crow.effect.as_str(), crow.start, crow.end, crow.bone), ("game/objects/effects/crow/crow.chr", ev::START, ev::END, 2));
         assert!(items.iter().any(|i| !i.chr && !i.effect.is_empty()), "the particle effect stays");
+    }
+
+    /// A beam lives as long as the `ProjectileAnim` of its plot step says (ms): Absorb Lifeforce 6.5 s, Crippling Mire 4.5 s, Lasso 0.7 s;
+    /// Arc Lightning's and Mana Force's say 0 (their effects play out).
+    #[test]
+    fn a_beam_lives_as_long_as_its_step_says() {
+        let Some(book) = book() else { return };
+        let ms = |event: u32| book.plot_event(event).map(|p| (p.projectile.as_ref().is_some_and(|p| p.is_beam()), p.projectile_ms));
+        assert_eq!(ms(2499), Some((true, 6500)));
+        assert_eq!(ms(2479), Some((true, 4500)));
+        assert_eq!(ms(2657), Some((true, 700)));
+        assert_eq!(ms(2325), Some((true, 0)));
+        assert_eq!(ms(5088), Some((true, 0)));
     }
 
     /// Only Crippling Mire's ring is a flat burst; the other `_form_end` effects and the rest of its group are not.
