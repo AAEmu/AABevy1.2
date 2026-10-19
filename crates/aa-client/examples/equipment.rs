@@ -7,6 +7,8 @@
 //! is `back` (default), `left`, `right` or `front`, `AA_EQUIP_FOV` the vertical field of view in degrees,
 //! `AA_EQUIP_DRAW=1` puts the weapons in the hands, `AA_EQUIP_CLIP=<clip of the .cal>` / `AA_EQUIP_TIME=<s>` play and hold a clip.
 #![allow(dead_code)]
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]

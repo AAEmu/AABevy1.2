@@ -1,5 +1,7 @@
 //! Original ranking tabs, received snapshots and reward controls over explicit receipt fixtures.
 #![allow(dead_code)]
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]

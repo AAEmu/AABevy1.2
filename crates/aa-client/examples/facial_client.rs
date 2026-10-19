@@ -1,5 +1,7 @@
 //! Client stage/local-player spawn paths at two authored body-clock samples, without a connection.
 #![allow(dead_code)]
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]
