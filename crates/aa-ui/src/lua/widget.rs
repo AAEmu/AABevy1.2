@@ -5,7 +5,7 @@ use mlua::{Lua, MultiValue, Table, Value};
 
 use super::{Args, Fade, method, new_object_table, none, reg, ret, ui, value_id};
 use crate::tree::{
-    Align, Anchor, ButtonState, DrawKind, DrawLayer, Id, Kind, Layer, Point, ROOT, TextBlock,
+    Align, Anchor, ButtonState, DrawKind, DrawLayer, Id, Kind, Layer, ListKey, Point, ROOT, TextBlock,
     WidgetType,
 };
 
@@ -2269,6 +2269,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     l.rows.push(rid);
                     l.sub_items.push(sub_ids);
                     l.has_data.push(false);
+                    l.keys.push(None);
                 }
                 items.raw_set(items.raw_len() + 1, row)?;
             }
@@ -2276,8 +2277,10 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    m.raw_set(
-        "DeleteAllRows",
+    // The client's name is `DeleteRows`; `DeleteAllRows` stays for the toolkit's own callers.
+    for name in ["DeleteAllRows", "DeleteRows"] {
+        m.raw_set(
+        name,
         method(lua, |lua, id, _| {
             let mut g = ui(lua);
             let u = &mut *g;
@@ -2297,32 +2300,42 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             l.rows.clear();
             l.sub_items.clear();
             l.has_data.clear();
+            l.keys.clear();
+            l.selected = -1;
             l.layout_extent = None;
+            let img = l.selected_image;
+            if let Some(img) = img {
+                place_on_row(u, img, None);
+            }
             drop(g);
             let this = super::object_table(lua, id)?.unwrap();
             this.raw_set("items", lua.create_table()?)?;
             none()
         })?,
     )?;
+    }
     m.raw_set(
         "InsertData",
         method(lua, |lua, id, a| {
-            // (row, col, text), 1-based: the row now holds data (its sub-items show); the text goes
-            // into the sub-item (LCCIT_STRING columns).
-            let (row, col) = (a.f(1) as usize, a.f(2) as usize);
+            // (key, col, text), col 1-based. The key is an id the script chose (a portal id, a mail
+            // id), not a row number: a new key takes the lowest free row, a known key updates its
+            // row. The row now holds data (its sub-items show) and the text goes into the sub-item
+            // (LCCIT_STRING columns). Scripts that pass 1..n in order land on row n as before.
+            let Some(key) = list_key(&a.v(1)) else {
+                return none();
+            };
+            let col = a.f(2) as usize;
             let text = a.s(3).unwrap_or_default();
-            set_row_data(lua, id, row.wrapping_sub(1), true);
+            let Some(row) = key_row(lua, id, &key, true) else {
+                return none();
+            };
+            set_row_data(lua, id, row, true);
             let mut u = ui(lua);
             let sub = u
                 .tree
                 .widget(id)
                 .and_then(|w| w.list.as_ref())
-                .and_then(|l| {
-                    l.sub_items
-                        .get(row.wrapping_sub(1))?
-                        .get(col.wrapping_sub(1))
-                        .copied()
-                });
+                .and_then(|l| l.sub_items.get(row)?.get(col.wrapping_sub(1)).copied());
             if let Some(s) = sub
                 && let Some(t) = u.tree.get_mut(s).text_mut()
             {
@@ -2333,6 +2346,18 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     m.raw_set(
         "DeleteData",
+        method(lua, |lua, id, a| {
+            // By key; the row becomes free again.
+            if let Some(key) = list_key(&a.v(1))
+                && let Some(row) = key_row(lua, id, &key, false)
+            {
+                set_row_data(lua, id, row, false);
+            }
+            none()
+        })?,
+    )?;
+    m.raw_set(
+        "DeleteDataByIndex",
         method(lua, |lua, id, a| {
             set_row_data(lua, id, (a.f(1) as usize).wrapping_sub(1), false);
             none()
@@ -2360,6 +2385,22 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             // 0-based index, -1 clears.
             let idx = a.f(1) as i32;
             set_selected(lua, id, idx, a.b(2, true), false);
+            none()
+        })?,
+    )?;
+    m.raw_set(
+        "ClearSelection",
+        method(lua, |lua, id, _| {
+            // Drops the selection; the scripts' handlers start with `if selIdx == 0 then return`,
+            // so the client reports the change as `OnSelChanged(0)`.
+            let had = ui(lua)
+                .tree
+                .widget(id)
+                .and_then(|w| w.list.as_ref())
+                .is_some_and(|l| l.selected >= 0);
+            if had {
+                set_selected(lua, id, -1, true, false);
+            }
             none()
         })?,
     )?;
@@ -2410,6 +2451,32 @@ fn list_image(lua: &Lua, id: Id, a: &Args, selected: bool) -> mlua::Result<Table
     Ok(t)
 }
 
+/// A script value as a row key (numbers and strings; anything else is not a key).
+fn list_key(v: &Value) -> Option<ListKey> {
+    match v {
+        Value::Integer(n) => Some(ListKey::Num(*n as f64)),
+        Value::Number(n) => Some(ListKey::Num(*n)),
+        Value::String(s) => Some(ListKey::Str(s.to_string_lossy())),
+        _ => None,
+    }
+}
+
+/// The row (0-based) that owns `key`. With `claim`, an unknown key takes the lowest free row
+/// (`None` when every row is taken).
+fn key_row(lua: &Lua, id: Id, key: &ListKey, claim: bool) -> Option<usize> {
+    let mut g = ui(lua);
+    let l = g.tree.widget_mut(id)?.list.as_mut()?;
+    if let Some(i) = l.keys.iter().position(|k| k.as_ref() == Some(key)) {
+        return Some(i);
+    }
+    if !claim {
+        return None;
+    }
+    let i = l.keys.iter().position(Option::is_none)?;
+    l.keys[i] = Some(key.clone());
+    Some(i)
+}
+
 /// Mark row `row` (0-based) as holding data or not; shows / hides its sub-items.
 fn set_row_data(lua: &Lua, id: Id, row: usize, on: bool) {
     let mut g = ui(lua);
@@ -2421,6 +2488,9 @@ fn set_row_data(lua: &Lua, id: Id, row: usize, on: bool) {
         return;
     };
     *flag = on;
+    if !on && let Some(k) = l.keys.get_mut(row) {
+        *k = None;
+    }
     let subs = l.sub_items[row].clone();
     for s in subs {
         u.tree.get_mut(s).shown = on;
