@@ -68,7 +68,7 @@ pub struct Extras {
     pub shake: u16,
     /// `FxMaterial`: a material flash on the unit.
     pub material: u16,
-    /// `FxChr`, `FxRope`, `FxCamFov`, `FxMotionBlur`, ...
+    /// `FxRope`, `FxCamFov`, `FxMotionBlur`, ... (`FxChr` is played: [`FxItem::chr`])
     pub other: u16,
 }
 
@@ -115,8 +115,11 @@ pub struct ShakeItem {
 /// One particle effect of an effect group, or one sound of it (`effect` is empty then and `sound` the whole item).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FxItem {
-    /// `library.group.name` for aa-fx (`X2_EFFECTS.p_effect.p0000`); empty for a sound item.
+    /// `library.group.name` for aa-fx (`X2_EFFECTS.p_effect.p0000`); the `.chr` path of a character effect ([`FxItem::chr`]); empty for a
+    /// sound item.
     pub effect: String,
+    /// `FxChr`: `effect` is a skinned model that plays its own start / loop / end clips (Summon Crows' crows, the pet net).
+    pub chr: bool,
     /// A sound item (`FxSound`, `FxVoice`), or the sound a particle effect carries in its database row (`fx_particles.sound_id`).
     pub sound: Option<Sfx>,
     /// [`ev`] it starts at and ends at (an effect that has played out by itself needs no end).
@@ -551,7 +554,7 @@ impl Inner {
         rows.into_iter().map(|(level, group, projectile)| (level, Look { fx: self.group(group), shakes: self.shakes_of(group), projectile: self.projectile(projectile) })).collect()
     }
 
-    /// The particle effects and sounds of an effect group (camera shakes, materials and models are left out).
+    /// The particle effects, character effects and sounds of an effect group (camera shakes and materials are left out).
     fn group(&mut self, id: u32) -> Arc<Vec<FxItem>> {
         if id == 0 {
             return Arc::default();
@@ -568,7 +571,7 @@ impl Inner {
                  LEFT JOIN fx_particles p ON p.id = i.fx_detail_id AND i.fx_detail_type = 'FxParticle' \
                  LEFT JOIN sounds s ON s.id = p.sound_id \
                  LEFT JOIN fx_voices v ON v.id = i.fx_detail_id AND i.fx_detail_type = 'FxVoice' \
-                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type IN ('FxParticle', 'FxSound', 'FxVoice') ORDER BY g.rowid",
+                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type IN ('FxParticle', 'FxSound', 'FxVoice', 'FxChr') ORDER BY g.rowid",
             )
             .and_then(|mut q| {
                 q.query_map(params![id], |r| {
@@ -586,6 +589,7 @@ impl Inner {
                         _ => (asset, path),
                     };
                     Ok(FxItem {
+                        chr: kind == "FxChr",
                         effect,
                         sound,
                         start: int(r, 1)? as u8,
@@ -632,6 +636,7 @@ impl Inner {
                 "FxSound" => extras.sound += 1,
                 "FxVoice" => extras.voice += 1,
                 "FxShakeCamera" => extras.shake += 1,
+                "FxChr" => {}
                 "FxMaterial" => extras.material += 1,
                 _ => extras.other += 1,
             }
@@ -988,6 +993,16 @@ mod tests {
         let other = book.skill(16064).unwrap();
         assert_eq!(other.instrument_start_clip(Some(0)), None);
         assert_eq!(other.instrument_fire_clip(Some(0)), None);
+    }
+
+    /// Summon Crows' group holds a character effect: the crow model, on the caster's bone 2, from the start to the end.
+    #[test]
+    fn a_character_effect_is_an_item() {
+        let Some(book) = book() else { return };
+        let items = book.fx_group(401);
+        let crow = items.iter().find(|i| i.chr).expect("the crow model");
+        assert_eq!((crow.effect.as_str(), crow.start, crow.end, crow.bone), ("game/objects/effects/crow/crow.chr", ev::START, ev::END, 2));
+        assert!(items.iter().any(|i| !i.chr && !i.effect.is_empty()), "the particle effect stays");
     }
 
     /// A skill whose effects grow with its level has a group per level range: the caster's level picks one.

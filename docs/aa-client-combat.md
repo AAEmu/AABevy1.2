@@ -508,6 +508,38 @@ projectile physics handled 1 of 4 kinds / 4 of 4.
   missing controllers (Precision Strike 703, Mana Force 732, Tiger Strike 2275, Triple Slash 604, Pin Down 2338) have no client data.
 * `ingame/stealth.rs`: buffs with `stealth` make the local player a translucent pink-red ghost and hide stealthed remote units.
 
+## Beams and character effects (round 6)
+
+**Beams** (`proj_physic_id` 2: Arc Lightning 66, Lasso 86, Telekinesis 71, Mana Force 118, Crippling Mire 38, Absorb Lifeforce 81) were
+checked one by one, with fake events (`AA_COMBAT_FAKE`) and with real server casts (see below). All of them spawn their anchor and stretch it
+from the launch bone to the target (`projectile N links ...` in the log); the code is right. What the reel saw as "nothing" is the data:
+
+| Beam | Effect | What it looks like |
+|---|---|---|
+| Arc Lightning | `lightning_magic_launch` | a bright white arc for 0.2 s of a 0.5 s link; a shot has to fall in that window |
+| Lasso | `full_launch` (+ `full_form` on the hand) | a thin dark chain from hand to target, from the launch on (about 1 s after the key) |
+| Telekinesis | `spell_move_launch` | black smoke streaks, held for the 12 s channel, flickering as the 0.2 s effect restarts |
+| Mana Force | `vital_absorb_launch` | a few small pink streaks for 0.5 s: faint by data |
+| Crippling Mire | `psychokinesis_launch` | a wide orange streak, held for the channel (right) |
+| Absorb Lifeforce | `life_absorb_launch` | a green beam, held (right) |
+
+The black ring of Crippling Mire is `psychokinesis_launch_form_end` (`AA_COMBAT_NOFX=launch_form_end` removes it, `launch_form2` does not): the fx
+item holds it from THROW to END on the hand, looping. In the `effects` example the same effect draws nothing (needs a look from aa-fx).
+
+Held beams (`SkillFired.channeling_ms > 0`, plot steps with a channel) live in `cast.held` and end with the skill. A beam of a skill
+without channel lives `max(delay, 0.35) + 0.15` s.
+
+**Character effects** (`FxChr`, 12 items: Summon Crows' crows, the pet net, Golem's hand, the whip, the glider): `FxItem::chr`, spawned as
+`aa_fx::ChrEffect` instead of `Effect` in `spawn_effect` / `ground_effect`, on the bone like a particle item, `life` = the held limit
+(12 s) or 6 s (then the end clip plays). Summon Crows (13340): two crows circle in front of the caster with a black portal.
+
+**Dev**: `AA_COMBAT_NOFX=a,b` mutes the effects whose name contains a part (to find which effect makes a look); the fake op
+`T:use:SKILL[:TARGET]` asks the real server for a skill (target 0 or none: `AA_COMBAT_FAKE_TARGET`). A real server cast of the occultism,
+sorcery and battlerage skills needs (character 73 `Bevycombat` of the lane DB, `mysql -P3317 -uroot lane_bevy_game`): `characters`
+level / abilities set, `skills` rows (id, 1, 'Skill', owner) and `abilities.exp` (the plots check the ability level: Arc Lightning's
+plot ends at once below level 15). The server also needs range (20 m), the facing within 90 degrees of the target (the client turns and asks again)
+and a live target (a dead one answers code 4).
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,

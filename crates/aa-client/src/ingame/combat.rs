@@ -37,7 +37,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aa_anim::{Animator, ClipLibrary};
-use aa_fx::{Effect, FxSettings, Ground};
+use aa_fx::{ChrEffect, Effect, FxSettings, Ground};
 use aa_net::buff::BuffCaster;
 use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, hit_type, target_kind};
 use aa_net::state::{Skills, Units};
@@ -281,6 +281,14 @@ fn verbose() -> bool {
     *V.get_or_init(|| std::env::var_os("AA_COMBAT_LOG").is_some())
 }
 
+/// `AA_COMBAT_NOFX=a,b`: effects whose name contains one of the parts are not played (to find which effect makes a look).
+fn muted(effect: &str) -> bool {
+    static M: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::env::var("AA_COMBAT_NOFX").map(|v| v.split(',').filter(|p| !p.is_empty()).map(str::to_owned).collect()).unwrap_or_default())
+        .iter()
+        .any(|p| effect.contains(p.as_str()))
+}
+
 /// `AA_COMBAT_FULLBODY=1`: units on the move play their action clips on the whole body, as before the upper body layer
 /// (to compare shots).
 fn full_body_only() -> bool {
@@ -307,7 +315,7 @@ fn slowmo() -> Option<f32> {
 /// * `T:buff:INDEX:BUFF_ID[:MS]`, `T:unbuff:INDEX`: a buff arrives on / leaves the target (its aura, pose and freeze: `combat/buffs.rs`)
 /// * `T:use:SKILL[:TARGET]`: the player asks the server for a skill (a `UseSkill` command, as the action bar sends it)
 ///
-/// The target is the player itself, or the unit `AA_COMBAT_FAKE_TARGET` names (an object id, `model=ID` or a part of the unit's name:
+/// The target is the player itself, or the unit `AA_COMBAT_FAKE_TARGET` names (an object id, `model=ID`, `npc=TEMPLATE` (the nearest) or a part of the unit's name:
 /// `model=1290` is the training dummy; the events wait up to 20 s for it to be in view). The first step opens `aa_dev::RecordGate` (`--record-gate`).
 #[derive(Resource)]
 struct Fake {
@@ -412,21 +420,31 @@ fn fake_events(
         None => me.obj_id,
         Some(t) => {
             let wanted = t.to_lowercase();
-            let found = units
-                .by_id
-                .values()
-                .find(|u| {
-                    u.obj_id != me.obj_id
-                        && (u.obj_id.to_string() == wanted
-                            || wanted.strip_prefix("model=").is_some_and(|m| m == u.model_id.to_string())
-                            || u.name.to_lowercase().contains(&wanted))
-                })
-                .map(|u| u.obj_id);
+            // `npc=TEMPLATE` / `model=ID`: the nearest live unit of that npc template or model (the rats of the pond are npc 10004)
+            let here = movers.single().map(|m| m.pos).unwrap_or_default();
+            let nearest = |keep: &dyn Fn(&aa_net::model::Unit) -> bool| {
+                units
+                    .by_id
+                    .values()
+                    .filter(|u| !u.dead && u.obj_id != me.obj_id && keep(u))
+                    .min_by(|a, b| {
+                        let d = |u: &aa_net::model::Unit| Vec3::new(u.pos.x, u.pos.y, u.pos.z).distance(here);
+                        d(a).total_cmp(&d(b))
+                    })
+                    .map(|u| u.obj_id)
+            };
+            let found = if let Some(template) = wanted.strip_prefix("npc=").and_then(|n| n.parse::<u32>().ok()) {
+                nearest(&|u| matches!(u.kind, aa_net::model::UnitKind::Npc { template_id, .. } if template_id == template))
+            } else if let Some(model) = wanted.strip_prefix("model=").and_then(|n| n.parse::<u32>().ok()) {
+                nearest(&|u| u.model_id == model)
+            } else {
+                units.by_id.values().find(|u| u.obj_id != me.obj_id && (u.obj_id.to_string() == wanted || u.name.to_lowercase().contains(&wanted))).map(|u| u.obj_id)
+            };
             match found {
                 Some(id) => id,
                 None if now - started < 20.0 => return,
                 None => {
-                    warn_once!("combat: AA_COMBAT_FAKE_TARGET {t} not in view: the player is the target");
+                    warn_once!("combat: AA_COMBAT_FAKE_TARGET {t} not in view: the player is the target (units: {:?})", units.by_id.values().filter(|u| u.faction_id == 101).take(12).map(|u| (u.obj_id, u.model_id, u.kind.clone(), u.faction_id)).collect::<Vec<_>>());
                     me.obj_id
                 }
             }
@@ -447,8 +465,8 @@ fn fake_events(
                 mover.velocity = Vec3::ZERO;
             }
         } else if op == "use" {
-            // the player asks for a skill without the action bar (which refuses a press while a cast runs)
-            commands.write(NetCommand(Command::UseSkill { skill_id: args.first().copied().unwrap_or(0), target_obj_id: args.get(1).copied().unwrap_or(0) }));
+            // the player asks for a skill without the action bar (which refuses a press while a cast runs); target 0: the fake target
+            commands.write(NetCommand(Command::UseSkill { skill_id: args.first().copied().unwrap_or(0), target_obj_id: args.get(1).copied().filter(|&t| t != 0).unwrap_or(other) }));
         } else if let Some(event) = Fake::event(op, &args, me.obj_id, if aim == 1 { me.obj_id } else { other }, ground) {
             // the buff list is the net state's: events written here do not reach it
             if let (Some(buffs), Event::BuffCreated { .. } | Event::BuffRemoved { .. }) = (buffs.as_mut(), &event) {
@@ -774,6 +792,9 @@ impl Stage<'_, '_> {
         if item.effect.is_empty() {
             return self.sound_item(item, on);
         }
+        if muted(&item.effect) {
+            return None;
+        }
         if verbose() {
             info!("combat: effect {} (start {}, end {}) on {on:?} bone {}{}", item.effect, item.start, item.end, item.bone, if hold { " held" } else { "" });
         }
@@ -905,10 +926,18 @@ impl Stage<'_, '_> {
             }
         }
         let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+        // a character effect (the crows of Summon Crows) plays its start and loop clips, and its end clip when the time is up
+        let fx_ttl = if item.chr { ttl + 2.0 } else { ttl };
+        let chr = item.chr.then(|| ChrEffect { scale: item.scale, life: Some(ttl), ..ChrEffect::new(item.effect.clone()) });
         if fixed_rotation {
             // a hit effect turned towards the attacker keeps that orientation: it only follows the bone's position (`follow_fx`)
             let follow = bone.map(|b| (on, b, offset));
-            return Some(self.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Fx { follow, fixed_rotation, ttl })).id());
+            let mut e = self.commands.spawn((Name::new(format!("fx {}", item.effect)), transform, Fx { follow, fixed_rotation, ttl: fx_ttl }));
+            match chr {
+                Some(chr) => e.insert(chr),
+                None => e.insert(effect),
+            };
+            return Some(e.id());
         }
         // the effect is a child of its bone (of the unit, for an effect on the origin), so that its tails and `InheritVelocity` see
         // the motion of the bone; the local pose gives it the world pose it would have had: the unit's orientation and scale
@@ -924,7 +953,12 @@ impl Stage<'_, '_> {
             // a blade trail has the bone's orientation (the weapon's +Y is the blade, which aa-fx takes as the ribbon's width axis)
             local.rotation = Quat::IDENTITY;
         }
-        Some(self.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, local, ChildOf(parent), Fx { follow: None, fixed_rotation: false, ttl })).id())
+        let mut e = self.commands.spawn((Name::new(format!("fx {}", item.effect)), local, ChildOf(parent), Fx { follow: None, fixed_rotation: false, ttl: fx_ttl }));
+        match chr {
+            Some(chr) => e.insert(chr),
+            None => e.insert(effect),
+        };
+        Some(e.id())
     }
 }
 
@@ -1026,6 +1060,10 @@ fn start_shakes(st: &Stage, combat: &mut Combat, shakes: &[ShakeItem], moments: 
 fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name: &str, kind: Act, hold: f64, now: f64) -> Option<f32> {
     let looping = kind == Act::Cast || st.book.clip_loops(name);
     let played = st.play(caster, name, kind, looping, hold, now);
+    if played.is_some() && name.starts_with("all_") {
+        // a spell puts the staff back on the back (the real client, after a weapon skill had sent it to the hip)
+        st.commands.entity(caster).try_insert(StaffSide(false));
+    }
     if played.is_some()
         && let Some(cast) = combat.casts.get_mut(&tl)
     {
@@ -1047,10 +1085,6 @@ fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: 
     }
 }
 
-    if played.is_some() && name.starts_with("all_") {
-        // a spell puts the staff back on the back (the real client, after a weapon skill had sent it to the hip)
-        st.commands.entity(caster).try_insert(StaffSide(false));
-    }
 /// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
 /// locomotion.
 fn end_loop(st: &mut Stage, combat: &mut Combat, tl: u16) {
@@ -1760,6 +1794,9 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
             }
             continue;
         }
+        if muted(&item.effect) {
+            continue;
+        }
         st.effect_sounds(item, caster, anchor, from);
         let effect = Effect { scale: item.scale, prime: false, looping: true, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
         // the effect flies with the anchor: its forward (-Z) is the flight direction, the mesh emitters (the arrow) draw their model
@@ -1787,7 +1824,14 @@ fn ground_effect(commands: &mut Commands, item: &FxItem, at: Vec3, toward: Optio
     if verbose() {
         info!("combat: {} on the ground at {:.1} {:.1} {:.1}", item.effect, at.x, at.y, at.z);
     }
-    commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Visibility::default(), Fx { follow: None, fixed_rotation: true, ttl: if hold { 12.0 } else { 6.0 } })).id()
+    let ttl = if hold { 12.0 } else { 6.0 };
+    let mut e = commands.spawn((Name::new(format!("fx {}", item.effect)), transform, Visibility::default(), Fx { follow: None, fixed_rotation: true, ttl: if item.chr { ttl + 2.0 } else { ttl } }));
+    if item.chr {
+        e.insert(ChrEffect { scale: item.scale, life: Some(ttl), ..ChrEffect::new(item.effect.clone()) });
+    } else {
+        e.insert(effect);
+    }
+    e.id()
 }
 
 /// A link between the caster's launch bone and the target (`proj_physic_id` 2).
