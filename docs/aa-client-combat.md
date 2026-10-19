@@ -277,6 +277,12 @@ slot 22 and Angry Rats / Solzreed Foxes around the spawn). Dev tools (all enviro
   lens (the game's is 42.75; the real captures used `cl_fov 75` = 71.25). `AA_FX_SCALE=2`: scales every skill effect.
 * `AA_AUDIO_LOG=1`: logs every sound the combat code starts and the per class counts (see Sounds).
 * `AA_COMBAT_NO_CANCEL=1`: moving, jumping and turning cancel no cast of the player (no `CSStopCasting`), to look at casts while it runs.
+* `AA_COMBAT_FAKE` also takes `buff:INDEX:BUFF_ID:DURATION_MS` and `unbuff:INDEX` (a `BuffCreated` / `BuffRemoved` on the other unit, else the
+  player). `AA_COMBAT_SWEEP=ID,ID,...` (skill ids, `b<buff id>` for a buff) walks the player through every skill / buff in turn on a
+  running client (events from the data, a target within 20 m or a spot 6 m ahead, frames at the moments that matter, files in
+  `AA_COMBAT_SWEEP_DIR`, then exits); `tools/skill_sheets.py DIR OUT` builds one contact sheet per skill from them. `AA_COMBAT_PRELOAD=ID,ID`
+  adds skills to the preload (see below), `AA_COMBAT_NO_PRELOAD=1` turns it off, `AA_COMBAT_HITCH_MS=N` moves the log threshold of
+  `hitch: a frame took N ms` (verbose log, default 40).
 * `AA_COMBAT_FAKE="T:op:args;..."`: server events for the local player, `T` seconds after the first frame (the test character has
   no channeled or two handed skills, and the lane does not interrupt a cast when the player walks): `start:TL:SKILL:CAST_MS`,
   `fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `plot:TL:EVENT:SKILL[:CASTING_MS]`, `hit:TL:SKILL:DAMAGE`, `end:TL`, `stop:TL`,
@@ -458,9 +464,53 @@ the client runs; "shown" = the shown tree skills):
 **What is left**: what changes the look is decals (31 skills: ground rings) and `GeometryInPieces` (2), the rest is lights (a budget
 `PointLight` per effect), `EmissiveHDRDynamic` and `ForceGeneration`. `FxMaterial` flashes (24 skills) are not played.
 
+## Skill audit round (animations, buffs, projectiles; `docs/research/skill-audit-anim.md`)
+
+What this round added, all in `ingame/combat.rs` and `ingame/combat/`:
+
+* **Buffs on units** (`combat/buffs.rs`). `aa_net::state::Buffs` says what a unit carries (the unit packet at first sight,
+  `SCBuffCreated` / `SCBuffRemoved` later); `reconcile_buffs` shows it every frame, so a buff that was there when the unit came into
+  view looks like one applied in front of the player. From `buffs`: the group's items that end at END live as long as the buff
+  (`Fx` without a timer, released when it goes), the other ones play once, items that start at END play when it ends; `anim_start_id`
+  is the pose (`anims.loop` clips loop for the buff's lifetime, others play once and hold their last frame; the `_start` clip falls
+  into the loop: `all_re_combat_stun_start` -> `all_re_combat_stun`), a song buff plays the cast pose of the instrument held,
+  `anim_end_id` plays when it goes (stop markers only release the unit), `framehold` freezes the animation (ice, stone) and `ragdoll`
+  lies the unit in `dead_01` / `dead_02` (Play Dead). Skills carry their buff through `skill_effects` -> `BuffEffect`, and through
+  `skills.channeling_buff_id` / `toggle_buff_id` (Invincibility's aura). 274 distinct buffs belong to player skills, 226 show
+  something (220 an effect group, 53 a pose, 5 a freeze, 1 a fall); units beyond 60 m show none.
+* **Anim-event effects**: the `effect` / `@effect` events of a clip start their effect on its bone at its time (`/flowers`: the
+  flowers at `item_hand_l` 0.29 s into `fist_em_celebrate`; `/sad`: the tears). 114 such events exist in the nuian male database
+  (dances, mining, rowing, swimming, the NPC archers).
+* **Blade trails** end at the swing's throw moment and stay where they were (`Later::Detach`), they follow the bone before.
+* **Stop markers**: a skill whose fire clip is `all_ac_stop` (Use Well) releases the unit instead of logging a missing clip.
+* **Preload** (`combat/preload.rs`): the skills of the action bar (plus the basics: hit reactions, death, holster, stances) have their
+  clips decoded and bound to the player's rig (2 ms per frame at most, none on a slow frame) and their effects started invisible one
+  per frame, so that the first use finds everything loaded. On this machine no skill produced a frame over 35 ms on first use either
+  way (7 spell skills, 4 runs); the effects' libraries load asynchronously, so what the preload buys is that the first effect is not
+  late, not a measured hitch.
+* **Projectiles** by `projectiles.proj_physic_id`: 0 / 1 fly (homing on the target's hit bone, as before; the hit and end items of the
+  group now play where the projectile lands: `fireball_hit`), 2 is a **beam** (Arc Lightning, Absorb Lifeforce, Telekinesis, Lasso,
+  Mana Force, Crippling Mire: the effect's mesh is one unit long and is stretched from the launch bone to the target's hit bone
+  every frame; held until the channel ends), 3 **falls** from 30 m above the target position (Meteor Strike, Gods' Whip). A plot step's
+  projectile flies at the speed of its special effect (`value3`, m/s: Missile Rain 25) instead of a fixed 0.25 s.
+* **Effects at the target's position**: an item for the target of a skill that was aimed at a point (`fx_location_id` 2, no unit)
+  starts on the ground there, yaw only (the emitters rise along world up).
+
+Counts of the 231 player skills before and after: clips missing 0 / 0 (the clip side was complete), stop markers 22 / 22 (they are
+not clips), effects missing 2 / 2 (typos in the data), skills whose buff shows 0 / 110 of 128 that bring one, anim-event effects 0 / 114,
+projectile physics handled 1 of 4 kinds / 4 of 4.
+
 ## Not done
 
-* Channel poses of the skills that have none in the skill data (Play Dead, `/bow`, `/kneel`: 3 of the 12 channeling skills).
+* Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,
+  `fist_ac_beggar_01`), which the server must send; Protective Wings, Summon Wraith and Meditate have no pose or object in the
+  data at all (the wings and the wraith would be doodads / npcs).
+* Beams are stretched along the effect's forward axis, which is right for the meshes of the lightning and rope effects; an effect of
+  the same group with sprite emitters stretches with it (sprites are not affected: aa-fx draws them camera facing).
+* Races other than Nuian male were checked by data only (all 202 clips bind on all 8 models, 0 missing); no character of another
+  race could be created in this session's walkthrough, so nothing was rendered for them.
+* Staff and wand casts hold the staff across the hands in the `all_` cast clips: that is what the clip does, there is no real 1.2
+  capture of a spell to compare with.
 * Cancelling a cast by jumping off a mount; moving, jumping, turning, another skill and the water cancel here. The rules come from
   the live game's behaviour and the skills' `channeling_cancelable` / `stop_casting_by_turn`, with no 1.2 client capture or
   disassembly to check them against.
@@ -477,6 +527,10 @@ the client runs; "shown" = the shown tree skills):
 
 ## Needed from other crates
 
+* aa-fx: beam effects (`proj_physic_id` 2) get the whole transform of their anchor: the combat code scales the anchor's local Z by the distance
+  and expects mesh emitters (`beam_test.cgf`, `lightning.cgf`: one unit long along cry +Y = Bevy -Z, radius 0.85) to follow that
+  non-uniform scale; sprite emitters should ignore it. Tails of projectile effects at flight speed are very long (Missile Rain's arrow:
+  a streak across the screen at 24 m/s); `skill-audit-fx.md` has the details.
 * aa-fx: the sprite sizes look half of what the real client draws (the Return orb: `Size 0.2` is 0.39 m across in the real capture,
   0.19 m in aa-fx; `AA_FX_SCALE=2` matches it), so check the `Size` convention against a second effect; a continuous emitter's first
   particle comes one pulse period after the start and after its assets loaded, so an arrow in a short flight is faint on its first
@@ -499,3 +553,43 @@ alone do not prove that a timeline key is absent: native local callers can creat
 and ending a retained node does not immediately erase its tree entry. Full native Fired
 and attribute74/GCD producers remain open; no timer success is inferred from these
 parser changes. aa-net.md records source/oracle coverage and retained-node limits.
+
+## Ground targeting (`ingame/ground_target.rs`)
+
+Skills aimed at a spot of the ground. What 1.2 says about them (all read from the game database and the client's own strings, the
+exe could not be decompiled here):
+
+| `skills.target_type_id` / `target_selection_id` | skills | client behaviour |
+|---|---|---|
+| 6 Pos, 11 BallisticPos, 15 ArtilleryPos, 13 RelativePos / selection 2 or 4 | player: Meteor Strike 10664 (r 5, range 0..25, cast 5 s), Missile Rain 13281 (r 7, range 10..50, cast 2 s), and the 3.0-era Fiend's Knell 23588, Gods' Whip 23593, Behind Enemy Lines 23587; items and gimmicks: Throw Firebomb, Dig, Plant Seed, Throw Hook ... (about 270 rows) | **ground reticle**, left click casts at the spot |
+| 6 Pos / selection 1 (source) | detonations, Stomp, Nuclear Bomb ... (28 rows) | **self position**: the area is centred on the caster, cast at once with the caster's own spot, no reticle |
+| 0 self (+ area radius, `target_angle`) | Freezing Earth 10151 (r 8) | not ground targeted in 1.2: plain self cast, the area is round the caster. The **front cone** is `skills.target_angle` (180 for Meteor Strike): the server fails the cast with `skill_outof_angle` unless the spot lies in front of the caster, so the caster is turned first |
+| 4 hostile | Crippling Mire 10201, Earthen Grip 14376 | unit targeted in 1.2 (they only became ground skills later): plain `UseSkill` on the target |
+| 12 SummonPos, 14 SourcePos, 7 Line | mount/pet summons, Throw Dagger, Spray | plain cast; the server's `initial_target` takes the caster for these |
+
+Healing circles do not exist as ground skills in the 1.2 data (no player skill with a ground type heals).
+
+* **Slot use**: `hud/panels.rs` `use_slot` / `use_item` / `use_bag_slot` send a `SkillPressed` message instead of `UseSkill` / `UseItem`;
+  `ground_target::route` sends the plain command for everything but the types above (same frame, nothing changes for them).
+* **Reticle** (`reticle`): the decal ring texture `textures/decal/target/target_correct_df.dds` (the texture of both
+  `materials/decals/target/target_correct.mtl`, green (0.18, 1, 0.44), and `target_null.mtl`, red (0.74, 0.03, 0.01)), its outer ring
+  as wide as `2 * target_area_radius` (`target_decal_radius` where set). Green while the spot is inside `min_range..=max_range`
+  (3D distance from the feet less 0.5 m body, as the server's `distance_to(.., include_z)`), red outside. Drawn like the target ring
+  (`hud/ring.rs`): a 24 x 24 grid of ground points (each on `WorldCollision::ground_below`, so it follows terrain, bridges and
+  floors; the terrain height when no brush is under it), projected onto the plate camera, over the world. The cursor spot is
+  `WorldCollision::raycast` on the camera ray (objects included); `TerrainQuery` marching when no brush is loaded.
+* **Confirm / cancel** (`aim_input`, `PreUpdate`): left click (not a drag, not on the HUD) casts; a click out of range (more than 1 m
+  over the red edge) is not sent and the aim stays; right click and `Escape` cancel; pressing the same skill again casts at the cursor.
+  The click and `Escape` are swallowed so they do not also select the unit under the cursor / drop the target.
+* **Cast**: a standing `Move` packet with the new facing (the caster turns to the spot) and then `CSStartSkill` with the position
+  target (`Command::UseSkillAt`, or `Command::UseItemAt` for an item's skill: kind 1, i64 x / i64 y in 1/4096 m << 32, f32 z, f32 rot 0,
+  two object ids 0; the unit test `position_target_decodes_as_the_server_reads_it` reads the bytes the way the server's
+  `SkillCastTarget::read` does).
+* **Smart ground targeting**: the option `OPTION_ITEM_SMART_GROUND_TARGETING` ("Skill Deployment Location": activates skills at the
+  location of the mouse cursor when their shortcut key is pressed; the Korean tooltip adds that a skill used with the mouse click on
+  the slot still has to be placed). With it on, a hotkey (the cursor is not over the HUD) casts at the cursor's spot at once; with no
+  ground under the cursor the current target's position is used. The slot click always aims.
+* Dev flags (seconds from entering the game): `--ground-press SKILL T`, `--aim X Y T` (logical window pixels), `--click T`,
+  `--ground-cancel T`, `--ground-smart 0|1`, `--bar-skill SLOT SKILL` (puts a skill on the action bar for `--hud-key slotN`).
+* Not found in the client: any other option for casting at the current target's spot (that is only the smart-targeting fallback above),
+  the `pointer_a` / `pointer_b` effect models (`objects/effects/pointer_*.cga`) the exe loads next to the decals are not drawn.
