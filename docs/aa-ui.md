@@ -156,7 +156,7 @@ cargo build lock. `cmp_tree.py` drops the runtime ids that tables are keyed by f
 | `texture.rs` | texture path resolution (locale copies), sizes, `.g` texture info (`GetTextureData`) |
 | `render.rs` | tree to quads, batching, atlas upload, state backgrounds, caret, diagram polygons |
 | `input.rs` | hit testing, mouse handlers, native button / check button / list / tab / focus behaviour |
-| `prof.rs` | opt-in frame profiler (`AA_UI_PROFILE=1`: ms per part of the UI frame, what changed the content, the costly per-frame handlers; `=2`: per native method, and which ones wrote) |
+| `prof.rs` | opt-in frame profiler (`AA_UI_PROFILE=1`: ms per part of the UI frame, every object that changed per frame (`dirty objects`), the `touch` / `repaint` sites, batch uploads, glyph atlas uploads, frames over 35 ms, the costly per-frame handlers; `=2`: per native method, and which ones wrote; `=3`: also logs what differs in each changed object) |
 | `dump.rs` | tree dump in the reference format (paths from `_G` and from upvalues, walked in Lua 10 steps deep like `reference/tools/lib.lua`) |
 
 ### Objects
@@ -218,6 +218,21 @@ about 0.45 ms of it the unit frame scripts' own `OnUpdate`. `AA_UI_PROFILE=1` pr
 the split every 3 s. Glyphs live in one 2048x2048 atlas (which also holds the
 white texel for solid quads). Textures are the pak's DDS files, decoded by Bevy (DXT1, DXT5,
 A8R8G8B8 so far).
+
+A rebuild re-collects all quads but uploads only the batches whose quads changed:
+`sync_batches` keeps the batch entities and meshes of the last upload (`UiRenderState::batches`)
+and matches the new batch list by position. An unchanged batch (same texture, same quad hash)
+is left alone; a changed one gets its mesh replaced under the same handle, and its material
+swapped if its texture changed; only a longer list spawns entities. Right after entering the
+world the HUD really does change every frame for about 4 s (the zone-name banner
+`subZoneMsgWindow` fades in and out, and an expiring buff icon blinks through `SetAlpha`), so it
+rebuilds 50 to 60 times a second. Before, every rebuild despawned and respawned all ~100 batch
+entities with new meshes (about 5,000 new meshes a second); now 4 or 5 batches per frame are
+uploaded and no mesh is created (dev build, lane server, `AA_UI_PROFILE=1`, 3 interleaved runs
+each: `+mesh` in the first 6 s in game 22,500 to 24,300 before, 1 to 4 after; `sync_meshes`
+0.33 -> 0.23 ms per rebuild frame). The 45 to 60 ms frames about once a second in that window
+come from `--enter-shots` (each screenshot is one), not from the HUD: without it neither build
+has a frame over 35 ms in the first 15 s.
 
 Blending happens in gamma space (`UiConfig::gamma_blending`, `CompositingSpace::Srgb` on the
 UI camera) like the client's Direct3D renderer: with linear blending the semi-transparent

@@ -99,9 +99,22 @@ pub fn change(key: impl FnOnce() -> String) {
     ACC.with(|a| *a.borrow_mut().changes.entry(k).or_default() += 1);
 }
 
+/// `AA_UI_PROFILE=3`: also log what changed in each changed object.
+pub fn detail() -> bool {
+    level() >= 3
+}
+
 /// Whether profiling is on.
 pub fn enabled() -> bool {
     on()
+}
+
+/// Count `n` events at once.
+pub fn add_count(name: &'static str, n: u64) {
+    if !on() || n == 0 {
+        return;
+    }
+    ACC.with(|a| *a.borrow_mut().counters.entry(name).or_default() += n);
 }
 
 /// Count an event (`rebuild`, ...).
@@ -211,7 +224,7 @@ pub fn frame_end() {
             ch.sort_by(|x, y| y.1.cmp(x.1));
             let list: Vec<String> = ch
                 .iter()
-                .take(12)
+                .take(24)
                 .map(|(k, c)| format!("{k} {:.2}/f", **c as f64 / n))
                 .collect();
             bevy::log::info!("aa-ui content changes: {}", list.join(", "));

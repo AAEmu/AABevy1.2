@@ -757,7 +757,12 @@ impl Tree {
     }
 
     /// Visual-only change (a drawable animation sample): repaint without invalidating anchors.
+    #[track_caller]
     pub fn repaint(&mut self) {
+        if !self.dirty && crate::prof::enabled() {
+            let at = std::panic::Location::caller();
+            crate::prof::change(|| format!("repaint {}:{}", at.file(), at.line()));
+        }
         self.dirty = true;
     }
 
@@ -765,10 +770,14 @@ impl Tree {
     /// [`Tree::settle`] can tell a real change from a write of the same values (the HUD scripts
     /// re-anchor, re-texture and re-show their widgets every frame).
     fn snapshot(&mut self, id: Id) {
-        if self.dirty {
+        // Profiling keeps comparing after the first change, to list every changed object.
+        if self.dirty && !crate::prof::enabled() {
             return;
         }
         if self.snaps.len() >= MAX_SNAPSHOTS {
+            if !self.dirty {
+                crate::prof::change(|| "more than MAX_SNAPSHOTS objects written".into());
+            }
             self.dirty = true;
             self.snaps.clear();
             return;
@@ -797,10 +806,43 @@ impl Tree {
     /// Fix the comparison point (a pass that read the layout, `OnBoundChanged`): a change so
     /// far still counts at the next settle, later writes compare against the state from now.
     pub fn checkpoint(&mut self) {
+        if crate::prof::enabled() {
+            self.note_changes();
+        }
         if !self.dirty && self.changed() {
             self.dirty = true;
         }
         self.snaps.clear();
+    }
+
+    /// Profiling: count every object whose state differs from its snapshot (`dirty objects`)
+    /// and note each one by class, name and parent.
+    fn note_changes(&self) {
+        for (id, old) in &self.snaps {
+            if self.objects.get(*id as usize) == Some(old) {
+                continue;
+            }
+            crate::prof::count("dirty objects");
+            let class = old
+                .widget()
+                .map_or(old.drawable().map_or("", |d| d.class), |w| w.class.as_str());
+            let owner = old
+                .parent
+                .map(|p| self.objects[p as usize].name.clone())
+                .unwrap_or_default();
+            crate::prof::change(|| format!("object {class} {:?} (parent {owner})", old.name));
+            if crate::prof::detail() {
+                // `AA_UI_PROFILE=3`: what differs (the first differing span of the debug text).
+                let (a, b) = (format!("{old:?}"), format!("{:?}", self.objects[*id as usize]));
+                let mut i = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+                while !a.is_char_boundary(i) {
+                    i -= 1;
+                }
+                let lo = a[..i].rfind(',').map_or(0, |j| j + 1);
+                let span = |t: &str| t.get(lo..(i + 40).min(t.len())).unwrap_or("").to_string();
+                bevy::log::info!("aa-ui change {class} {:?}: {} -> {}", old.name, span(&a), span(&b));
+            }
+        }
     }
 
     /// The content version: advances when something changed since the last call (an object's
@@ -808,27 +850,11 @@ impl Tree {
     /// rebuilds the meshes when it moves; `generation` (every mutable access) only guards the
     /// layout cache.
     pub fn settle(&mut self) -> u64 {
-        if !self.dirty {
-            let objects = &self.objects;
-            let changed = self
-                .snaps
-                .iter()
-                .find(|(id, old)| objects.get(**id as usize) != Some(*old));
-            if let Some((id, old)) = changed {
-                self.dirty = true;
-                if crate::prof::enabled() {
-                    let class = old
-                        .widget()
-                        .map_or(old.drawable().map_or("", |d| d.class), |w| w.class.as_str());
-                    let owner = old
-                        .parent
-                        .map(|p| self.objects[p as usize].name.clone())
-                        .unwrap_or_default();
-                    crate::prof::change(|| {
-                        format!("object {class} {:?} (parent {owner}) #{id}", old.name)
-                    });
-                }
-            }
+        if crate::prof::enabled() {
+            self.note_changes();
+        }
+        if !self.dirty && self.changed() {
+            self.dirty = true;
         }
         if self.dirty {
             self.content += 1;
