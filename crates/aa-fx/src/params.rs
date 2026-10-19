@@ -203,6 +203,8 @@ pub enum Facing {
     Camera,
     /// A card in 3D space turned by the particle's angles.
     Free,
+    /// `Velocity`: a card in 3D space whose normal follows the direction of travel (the rings of a thrown spear).
+    Velocity,
     /// Flat on the ground (`Bottom`, `Water`, `Decal`, `Horizontal`, `Terrain`). `Bottom` is the ring, ripple, glow and fire of
     /// the ground: the click marker of the interface (`ui.click_0000`) stacks a `Decal` ring and a `Bottom` ring of the same
     /// texture, the ground fires and the bases of the area skills (`Size 10`) are `Bottom` too (it was a standing billboard
@@ -522,12 +524,10 @@ impl EmitterDef {
                 "Facing" => {
                     d.facing = match v {
                         "Free" => Facing::Free,
+                        "Velocity" => Facing::Velocity,
                         "Bottom" | "Water" | "Decal" | "Horizontal" | "Terrain" => Facing::Flat,
                         _ => Facing::Camera,
                     };
-                    if v == "Velocity" {
-                        d.orient_to_velocity = true;
-                    }
                 }
                 "OrientToVelocity" => d.orient_to_velocity |= truth(v),
                 "Size" => d.size = Var::parse(v, 1.0),
