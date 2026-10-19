@@ -8,7 +8,7 @@
 //! * `skills.skill_controller_id` is the controller of a skill without a plot (Drop Back); a plot skill moves by its steps.
 //! * `skill_effects` of type `SpecialEffect` 13: the knockbacks of a plain skill, applied when its damage lands.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OpenFlags, params, types::Value};
@@ -63,17 +63,14 @@ struct Inner {
     controllers: HashMap<u32, Option<Controller>>,
     steps: HashMap<u32, Arc<Vec<StepMove>>>,
     skills: HashMap<u32, Arc<SkillMoves>>,
+    /// `buffs` that stun, put to sleep or root (loaded on first use): a unit under one only starts Leap controllers.
+    rooting: Option<HashSet<u32>>,
 }
 
 /// `special_effects.special_effect_type_id` of `KnockBack`, `Blink` and `TeleportToUnit`.
 const KNOCK_BACK: i64 = 13;
 const BLINK: i64 = 11;
 const TELEPORT_TO_UNIT: i64 = 47;
-
-/// Bull Rush: the plot step that starts its dash, the controller id its row names, and the Charge controller its values come from.
-const BULL_RUSH_STEP: u32 = 2225;
-const BULL_RUSH_CONTROLLER: u32 = 4433;
-const CHARGE_CONTROLLER: u32 = 6779;
 
 fn as_id(v: Value) -> Option<u32> {
     match v {
@@ -86,7 +83,7 @@ impl Book {
     pub fn open() -> Option<Book> {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI).ok()?;
-        Some(Book(Mutex::new(Inner { conn, controllers: HashMap::new(), steps: HashMap::new(), skills: HashMap::new() })))
+        Some(Book(Mutex::new(Inner { conn, controllers: HashMap::new(), steps: HashMap::new(), skills: HashMap::new(), rooting: None })))
     }
 
     fn inner(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -100,6 +97,28 @@ impl Book {
 
     pub fn skill(&self, id: u32) -> Arc<SkillMoves> {
         self.inner().skill(id)
+    }
+
+    /// The controller a buff starts on its owner when it arrives (`buffs.skill_controller_id`: Mana Force's four variants push their
+    /// target), if the row exists (a missing row is no controller, `docs/research/re-skills.md` section 1.1).
+    pub fn buff_controller(&self, id: u32) -> Option<Controller> {
+        let mut inner = self.inner();
+        let controller: i64 = inner.conn.query_row("SELECT skill_controller_id FROM buffs WHERE id = ?1", params![id], |r| r.get::<_, Option<i64>>(0).map(|v| v.unwrap_or(0))).ok()?;
+        (controller > 0).then(|| inner.controller(controller as u32)).flatten().filter(|c| matches!(c.kind, 2 | 4))
+    }
+
+    /// Whether buff `id` stuns, puts to sleep or roots its owner (`Unit +0x3A70..72`: movement speed is 0, and a controller other than a
+    /// Leap does not start).
+    pub fn is_rooting(&self, id: u32) -> bool {
+        let mut inner = self.inner();
+        let Inner { conn, rooting, .. } = &mut *inner;
+        rooting
+            .get_or_insert_with(|| {
+                conn.prepare("SELECT id FROM buffs WHERE stun = 't' OR sleep = 't' OR root = 't'")
+                    .and_then(|mut q| q.query_map([], |r| r.get::<_, i64>(0).map(|id| id as u32))?.collect())
+                    .unwrap_or_default()
+            })
+            .contains(&id)
     }
 }
 
@@ -172,27 +191,9 @@ impl Inner {
                 moves.push(StepMove { source: source as u8, target: target as u8, effect });
             }
         }
-        // controllers the database lacks (550 skills point at 173 ids that have no row; the client's own table is encrypted)
-        if let Some(m) = self.missing_controller(event_id) {
-            moves.push(m);
-        }
         let moves = Arc::new(moves);
         self.steps.insert(event_id, moves.clone());
         moves
-    }
-
-    /// Bull Rush (10501) names controller 4433, which has no row (Shackle shares it). The skill rushes at its target: its first step
-    /// (event 2225, after the cast) runs the dash of Charge (controller 6779: 400 ms, 10 m/s, 0.8 m short, forward only) on the caster,
-    /// keeping the skill's own clip. The other player skills with a missing controller (Precision Strike 703, Triple Slash 604, Pin
-    /// Down 2338: strikes) do not move their caster: the real client, with the target 3 m away, keeps Precision Strike and Triple Slash
-    /// where they stand (unit positions polled over the cast, see docs/research/skill-audit-anim.md round 4), so they need no fallback.
-    fn missing_controller(&mut self, event_id: u32) -> Option<StepMove> {
-        if event_id != BULL_RUSH_STEP {
-            return None;
-        }
-        let mut c = self.controller(CHARGE_CONTROLLER)?;
-        (c.id, c.start_anim) = (BULL_RUSH_CONTROLLER, 0);
-        Some(StepMove { source: 1, target: 4, effect: Effect::Controller(c) })
     }
 
     fn skill(&mut self, id: u32) -> Arc<SkillMoves> {
@@ -240,13 +241,14 @@ mod tests {
     }
 
     #[test]
-    fn bull_rush_dashes_like_a_charge() {
+    fn a_missing_controller_row_is_no_controller() {
         let Some(book) = book() else { return };
-        let step = book.step(2225);
-        let m = step.iter().find(|m| matches!(m.effect, Effect::Controller(_))).expect("bull rush dash");
-        assert_eq!((m.source, m.target), (1, 4));
-        let Effect::Controller(c) = m.effect else { panic!() };
-        assert_eq!((c.id, c.kind, c.v[1], c.v[2], c.v[3], c.start_anim), (4433, 2, 10, 400, -800, 0));
+        // Bull Rush (10501) names controller 4433, which has no row, and the real client then moves nobody: the shove is the target's
+        // knockdown pose (`docs/research/re-skills.md` section 1.4). Precision Strike (controller 703) and Triple Slash (604) the same.
+        assert!(book.step(2225).iter().all(|m| !matches!(m.effect, Effect::Controller(_))));
+        for skill in [10501, 12026, 18132] {
+            assert!(book.skill(skill).controller.is_none(), "{skill}");
+        }
     }
 
     #[test]

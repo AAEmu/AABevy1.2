@@ -6,7 +6,7 @@
 //!   to it (a negative offset stops short of it; with the unit itself as the target it is `offset` metres along its facing), and
 //!   when the controller has a launch angle the height follows a parabola that starts that much above the line and lands on the
 //!   end point. Charge is angle 0 (a straight dash), Drop Back and Overwhelm are arcs.
-//! * [`dash`]: kind 4, a straight run `offset` metres towards (or away from) the target.
+//! * [`dash`]: kind 4, 1.2 style: forward at run speed for `value1` ms (no distance or target in the data).
 //! * [`knock`]: a push (`KnockBack` special effect, `value1` mm and `value2` degrees): a parabola away from the source that lands
 //!   `distance` metres on.
 
@@ -14,6 +14,8 @@ use bevy::math::{Vec2, Vec3};
 
 /// Gravity of the actor model (`physics_living_gravity`).
 pub const GRAVITY: f32 = 25.0;
+/// The speed a dash holds the unit at (m/s): full run speed, `anim::RUN_SPEED`.
+pub const DASH_SPEED: f32 = 5.4;
 /// The fastest a controller moves a unit (m/s).
 const MAX_SPEED: f32 = 50.0;
 /// Seconds a controller without a duration takes (the server's fallback).
@@ -149,16 +151,17 @@ pub fn leap(c: &Controller, owner: Vec3, end: Vec3, anim_speed: f32) -> Option<A
     Some(Arc { from: owner, to: end, dir: d, dist, hs, vs, az, eta })
 }
 
-/// A dash controller (kind 4): `offset` metres towards the target (away from it for `Backward`), over the controller's duration.
-pub fn dash(c: &Controller, owner: Vec3, yaw: f32, target: Option<Vec3>) -> Option<Arc> {
-    let offset = c.v[3] as f32 * 0.001;
-    let toward = match target {
-        Some(t) if flat(owner, t) > 0.01 => Vec2::new(t.x - owner.x, t.y - owner.y).normalize(),
-        _ => forward(yaw),
-    };
-    let toward = if c.direction() == Direction::Backward { -toward } else { toward };
-    let end = Vec3::new(owner.x + toward.x * offset, owner.y + toward.y * offset, owner.z);
-    leap(&Controller { v: { let mut v = c.v; v[0] = 0; v[1] = 0; v }, ..*c }, owner, end, 1.0)
+/// A dash controller (kind 4), as the 1.2 client has it (`docs/research/re-skills.md` section 1.3): the unit holds forward at full run
+/// speed in its facing direction for `value1` ms and its input is locked meanwhile. There is no distance, speed or direction in
+/// the data (a later version's `value3` / `value4` / `value7` layout is not 1.2), and the target does not steer it.
+pub fn dash(c: &Controller, owner: Vec3, yaw: f32) -> Option<Arc> {
+    let eta = c.v[0] as f32 * 0.001;
+    if eta <= 0.0 {
+        return None;
+    }
+    let dir = forward(yaw);
+    let dist = DASH_SPEED * eta;
+    Some(Arc { from: owner, to: Vec3::new(owner.x + dir.x * dist, owner.y + dir.y * dist, owner.z), dir, dist, hs: DASH_SPEED, vs: 0.0, az: 0.0, eta })
 }
 
 /// A push of `distance` metres along `dir` that launches at `angle_deg` (a flat push, angle 0, still hops a little). The flight
@@ -283,16 +286,13 @@ mod tests {
     }
 
     #[test]
-    fn a_dash_goes_straight_and_backwards_when_told() {
+    fn a_dash_runs_forward_for_value1_milliseconds() {
         let mut v = [0; 13];
-        v[2] = 500;
-        v[3] = 4000;
+        v[0] = 500;
         let c = Controller { id: 1, kind: 4, v, start_anim: 0 };
-        let a = dash(&c, Vec3::ZERO, 0.0, Some(Vec3::new(0.0, 10.0, 0.0))).unwrap();
-        assert!((a.to - Vec3::new(0.0, 4.0, 0.0)).length() < 1e-4 && (a.eta - 0.5).abs() < 1e-4, "{a:?}");
-        let mut back = c;
-        back.v[6] = 2;
-        let a = dash(&back, Vec3::ZERO, 0.0, Some(Vec3::new(0.0, 10.0, 0.0))).unwrap();
-        assert!((a.to - Vec3::new(0.0, -4.0, 0.0)).length() < 1e-4);
+        // facing north (yaw 0): half a second at the run speed, whatever the other values say
+        let a = dash(&c, Vec3::ZERO, 0.0).unwrap();
+        assert!((a.to - Vec3::new(0.0, DASH_SPEED * 0.5, 0.0)).length() < 1e-4 && (a.eta - 0.5).abs() < 1e-4, "{a:?}");
+        assert!(dash(&Controller { v: [0; 13], ..c }, Vec3::ZERO, 0.0).is_none());
     }
 }

@@ -324,9 +324,11 @@ pub struct BuffLook {
 }
 
 impl BuffLook {
+    /// `knock_down` (163 buffs, none with a clip): the unit is thrown on its back (or its front) and gets up when the buff goes.
+    pub knock_down: bool,
     /// The buff changes nothing the client draws.
     pub fn is_empty(&self) -> bool {
-        self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.ragdoll
+        self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.knock_down && !self.ragdoll
     }
 }
 
@@ -678,7 +680,7 @@ impl Inner {
         let row = self
             .conn
             .query_row(
-                "SELECT fx_group_id, anim_start_id, anim_end_id, framehold = 't', ragdoll = 't', kind_id = 2,                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id                  FROM buffs WHERE id = ?1",
+                "SELECT fx_group_id, anim_start_id, anim_end_id, framehold = 't', ragdoll = 't', kind_id = 2,                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, knock_down = 't'                  FROM buffs WHERE id = ?1",
                 params![id],
                 |r| {
                     Ok((
@@ -694,7 +696,7 @@ impl Inner {
             )
             .ok();
         let look = row
-            .map(|(group, start, end, framehold, ragdoll, instruments, bad)| BuffLook {
+            .map(|(group, start, end, framehold, ragdoll, instruments, bad, knock_down)| BuffLook {
                 bad,
                 fx: self.group(group),
                 // the stop markers only end the pose: they are not clips
@@ -707,6 +709,7 @@ impl Inner {
             .filter(|l| !l.is_empty())
             .map(Arc::new);
         self.buffs.insert(id, look.clone());
+                knock_down,
         look
     }
 
