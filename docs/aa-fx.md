@@ -578,3 +578,22 @@ order) show every beam spanning the whole 4 m. The launch effects are 0.05 to 0.
   faint dark ellipse on the ground (`form_end_real.png`, 1st frame), with a horizontal direction nothing visible. So the combat side hangs the
   effect on the hand bone with an axis that stands the ring up; which axis the real client uses for this fx item (`offset_axis_id`) is for the
   combat agent to settle against a real cast. Nothing in aa-fx to fix.
+
+## Round 13: loop flag, loop budget, Render-attached emitters on the unit
+
+* **Loop flag.** The real client restarts an effect from the root's `Continuous` byte (params byte +1), not from what the caller says. New
+  `EffectDef::loops()` (= root `bContinuous`); `Effect.looping` is now ignored (kept so callers compile). `Effect.force_loop` is a dev override
+  (the example's `--loop`). Test `the_loop_flag_is_the_roots_continuous`.
+* **Loop budget.** `FxParticle::UpdateLoopParticles` keeps emitters only for the 50 closest looping fx-item effects. `Effect.item = true` marks
+  an effect as an fx item; `classify` ranks the looping ones by camera distance and deactivates the rest (`FxSettings::loop_budget`, default 50).
+  Test `only_the_closest_looping_effects_keep_their_emitters`. Combat must set `item = true` on the effects it spawns for fx items.
+* **Arc Lightning's missing orb.** The blue swirl disc at chest height is `lightning_magic_throw` (a `flare_11` sprite of Size 1.2 plus lightning
+  bolts whose emitters are `AttachType="Render"`, i.e. they emit from the unit's render mesh). aa-fx had no unit, so those bolts sat on a capsule
+  at the origin (above the hand). New `Effect.body: Option<Entity>` (the caster; attached emitters then use a human capsule standing on that
+  entity's transform) and `Effect.no_body` (no unit: the origin, like `Particle.SpawnEffect`); example flag `--no-body`. With `--no-body` the
+  example reproduces the real structure (orb with bolts around it), about 2.5 to 3 times dimmer than the real client, which blooms it.
+  **Combat side:** set `Effect.body = Some(caster)` for fx items and `item = true`.
+* **Absorb Lifeforce.** Unstretched, the beam (`beam_test5`) has the width of the real strands; peak pixel colours measured against the real
+  client are the same (real 166/198/164, ours 189/207/192, both pale green-teal), so no colour change was made. Under the (1, L, 1) stretch the
+  beam is a thin pale strand in the example. In-game verification was inconclusive (the beam was not in the reel frames either before or after
+  this round).

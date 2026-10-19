@@ -575,3 +575,11 @@ fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), gl
 |---|---|---|
 | Bubble Trap | `illusion.buble_dot`, `water_buble_dot.mtl` | the opaque sphere was a `Liquid` material read as opaque; now its dual material (translucent foam) draws, like the real client's water dome |
 | Crippling Mire | `death.psychokinesis_launch_form_end` | black by data (`Color 0`, sparse crack texture); the game shows it upright on the hand, the real client flat on the ground; orientation is the combat side's |
+
+## Round 13
+
+| skill | effect | verdict |
+|---|---|---|
+| Arc Lightning | `lightning_magic_throw` / `form` | orb = flare_11 (1.2 m) + `AttachType=Render` bolts; they need `Effect.body` (the caster) to leave the capsule at the origin; no emitter was missing |
+| Absorb Lifeforce | `beam_test5` | width and peak colour match the real strands unstretched; left as is |
+| all looping effects | | loop from the root `Continuous` flag; fx-item effects limited to the 50 closest (`FxSettings::loop_budget`) |
