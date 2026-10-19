@@ -2121,3 +2121,27 @@ received skill result/identity, f45717b native English edit behavior and the
 333b414 global FogVolume implementation. The playable `aa-client-play.exe` alias
 is refreshed to the same hash after confirming it has no active user process.
 GUI QA processes are all closed.
+
+## Duels (2026-10-20)
+
+`hud/duel.rs` + `duel.lua` over `aa_net::Duels`. The original has no script for the challenge dialog:
+native raises `DLG_TASK_CHALLENGE_DUEL` (9) and the `duel_result` message box with the texts of
+`locale_helper` (`locale.duel.challenge`, `ask_duel_msg`, `locale.messageBox.duel_result`). So:
+
+* `SCDuelChallenged` opens the default OK/Cancel dialog (`locale.duel.ask_duel_msg(challenger)`); OK
+  sends `CSStartDuel` 0, Cancel `CSStartDuel` 507. The name is the visible unit with that character id,
+  else the streamed character name, else the id.
+* `SCDuelStarted` fires `STARTED_DUEL` (the target frame refreshes its faction) and prints the
+  `DUEL_TEXT` "start" text; `SCDuelEnded` fires `ENDED_DUEL` and shows the result notice
+  (`result_winner` / `loser` / `draw` / `runaway`).
+* `X2Unit:CanChallengeTargetToDuel()` / `ChallengeTargetToDuel()` (the target popup's "Challenge to
+  Duel", `popup_menu_proc`): a living player other than oneself, no duel running, no open challenge.
+* Name plates and the target frame follow the temporary faction through `relation(own, faction)`; nothing
+  duel specific.
+
+A challenge that arrives before the HUD is built is prompted once it is. Live (our server lane, headless bot as
+opponent): the bot's challenge opens "Request Duel", Confirm accepts, the opponent's plate and target frame turn
+hostile for the duel and green again after, the loss shows "Duel lost."; the target popup's "Request Duel"
+challenges the bot and the duel starts.
+
+Not done: the "ignore duel invitation" option (auto refusal), a countdown display (see aa-net.md).
