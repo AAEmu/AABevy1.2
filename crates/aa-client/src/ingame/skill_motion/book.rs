@@ -104,7 +104,7 @@ impl Book {
     pub fn buff_controller(&self, id: u32) -> Option<Controller> {
         let mut inner = self.inner();
         let controller: i64 = inner.conn.query_row("SELECT skill_controller_id FROM buffs WHERE id = ?1", params![id], |r| r.get::<_, Option<i64>>(0).map(|v| v.unwrap_or(0))).ok()?;
-        (controller > 0).then(|| inner.controller(controller as u32)).flatten().filter(|c| matches!(c.kind, 2 | 4))
+        (controller > 0).then(|| inner.controller(controller as u32)).flatten().filter(|c| matches!(c.kind, 1 | 2 | 4))
     }
 
     /// Whether buff `id` stuns, puts to sleep or roots its owner (`Unit +0x3A70..72`: movement speed is 0, and a controller other than a
@@ -249,6 +249,18 @@ mod tests {
         for skill in [10501, 12026, 18132] {
             assert!(book.skill(skill).controller.is_none(), "{skill}");
         }
+    }
+
+    #[test]
+    fn float_lifts_its_caster_by_a_floating_controller_of_its_buff() {
+        let Some(book) = book() else { return };
+        // Float 10694: the toggle buff 181 carries controller 5836 (kind 1): 6000 mm up at 18000 mm/s
+        let c = book.buff_controller(181).expect("float controller");
+        assert_eq!((c.id, c.kind, c.v[0], c.v[1]), (5836, 1, 6000, 18000));
+        // Bubble Trap's buffs lift their victims the same way
+        assert_eq!(book.buff_controller(96).map(|c| c.kind), Some(1));
+        // Mana Force's variant with a missing controller row moves nobody
+        assert!(book.buff_controller(4814).is_none());
     }
 
     #[test]
