@@ -247,6 +247,36 @@ have their content in the upper half of the sprite and fit that, while `ef_glowl
 and the beam textures `glow_big_velocity2/3` would fit the opposite. A client capture of a velocity beam (Thwart) would decide
 (`data/extract/aa-fx/r5/velside.py` lists the textures).
 
+## Round 6: skill audit
+
+Every effect of the shown player skills rendered alone and the suspicious ones compared with the real 1.2 client (Lua
+`Particle.SpawnEffect` through the client driver). The full table, the open problems and what the spawn side owes the effects are
+in `docs/research/skill-audit-fx.md`. The engine was read in the decompile of `cry3dengine.dll` (IDA, emit function `sub_30059310`,
+sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the facts below are from there unless marked "real".
+
+* **FocusAngle** tilts the emitter axis (+Y) about X toward +Z, then `FocusAzimuth` (default 0, `base + rand * var * 360`)
+  spins the tilt about the axis. The old code used a random azimuth: `FocusAngle="90"` (4427 emitters) flew sideways. Real:
+  `el_wind0004_hit` rises like ours now. The emitter's orientation in the real client comes from the spawn direction (`dir` is cry +Y).
+* **Tile aspect.** Width over height of one tile (`ComputeAspect`): if >= 1 the height is divided by it, otherwise the width is
+  multiplied by it; the longer side keeps the authored `Size`. (Was: height times h/w, clamped to 4.) Real: `hitup`.
+* **Camera facing sprites** are a 2x2 matrix over the camera right / up: roll, `OrientToVelocity` turn (the roll is added to the
+  alignment), stretch grows each row along the screen velocity by `velocity * stretch * (row . dir) / |row|` and moves the centre by
+  `StretchOffsetRatio * stretch * velocity` (world velocity). A sprite with no screen velocity is a plain billboard.
+* **Facing = Velocity** is a 3D card: the engine rotates the card's +Y (normal) the shortest way onto the direction of travel
+  (`Particle::dir`: the emit direction until the particle moves faster than 1 mm/s, then its velocity).
+* **Lit meshes.** `Illum` material: colour = texture * Diffuse * (`LIT_SUN` * N.L + `LIT_SKY`), 12 and 2.9 (the engine's 7.6 and 1.8
+  noon values times about 1.6 of exposure, fitted on the rock of `fight.ground_launch_standalone` against the real client). Other mesh
+  materials keep the old emitted colour.
+* **Material before Texture** when both are set. **AnimBlend** (`TextureTiling` field 7): two quads weighted by the fraction of the
+  frame. **Colour gamma**: `pow(colour, 2.2)` before the texture (`FxSettings::colour_gamma`, `AA_FX_GAMMA=1` is the old look; the
+  Step 3 mist fits below were made with 1, so the stage's `FxSettings` should set 1.0 or the mist be fitted again).
+* **Endless tails** show one second of path at most.
+* Tools: `effects --list <file> --cols n --times a,b,c --out <prefix>` (contact sheets), `--real <dist>` (the camera of the real client
+  captures, 1.68 m above the floor, vertical fov 42.75 degrees), `--stagger`; scratch scripts and the decompile under
+  `data/extract/aa-fx/r6/` (git-ignored: `real/cmp.py <effect> <tag>` spawns the effect in the real client and renders both).
+* Open: `white0001_hit` rings are 3D in the real client, camera facing here; `firewall_launch` is half as tall as the real one;
+  lights, decal projection, `EmissiveHDRDynamic`.
+
 ## Free sprite velocity alignment
 
 `Facing = Free` now honors `OrientToVelocity` for sprites without a tail. The emitter's texture X axis aligns to the world-space
