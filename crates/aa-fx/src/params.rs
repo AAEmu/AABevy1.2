@@ -255,11 +255,13 @@ pub struct Tiling {
     /// Frames per second, 0 = spread over the particle's life.
     pub fps: f32,
     pub cycle: bool,
+    /// `AnimBlend`: the frame fades into the next one (the engine's pixel shader lerps the two frames).
+    pub blend: bool,
 }
 
 impl Default for Tiling {
     fn default() -> Self {
-        Tiling { x: 1, y: 1, first: 0, variants: 1, frames: 1, fps: 0.0, cycle: false }
+        Tiling { x: 1, y: 1, first: 0, variants: 1, frames: 1, fps: 0.0, cycle: false, blend: false }
     }
 }
 
@@ -501,8 +503,9 @@ impl EmitterDef {
                         variants: n(3, 1).max(1),
                         frames: n(4, 1).max(1),
                         fps: p.get(5).and_then(|s| num(s)).unwrap_or(0.0),
-                        // field 6 is `AnimCycle`, 7 is `AnimBlend` (true on 3877 emitters: frame blending, not looping; 36 loop)
+                        // field 6 is `AnimCycle`, 7 is `AnimBlend` (true on 3877 emitters: frames fade into each other, see `Tiling::blend`; 36 loop)
                         cycle: p.get(6).is_some_and(|s| truth(s.trim())),
+                        blend: p.get(7).is_some_and(|s| truth(s.trim())),
                     };
                 }
                 "BlendType" => {
