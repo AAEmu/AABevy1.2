@@ -32,6 +32,7 @@ use crate::water::WaterStyle;
 use crate::water_material::{SEA, WaterMaterial, WaterStyles};
 use crate::water_query::{WaterKind, WaterQuery};
 use crate::stream::{WorldConfig, WorldFocus, WorldInfo};
+use crate::terrain_query::TerrainQuery;
 use crate::world::World;
 
 /// The time of day. `hour` in `0..24`.
@@ -107,6 +108,9 @@ pub struct AtmosphereTuning {
     /// Ambient light: how much the ground colour gives way to the sky colour with the camera's height (1 = as the zone's data
     /// says: `Ambient min height` to `Ambient max height`, 0 = never).
     pub ambient_height: f32,
+    /// Ambient light: 1 measures that height above the terrain under the camera (the ground bounce of the ambient light dies out with
+    /// the distance to the ground), 0 above sea level.
+    pub ambient_rel: f32,
     /// Ambient light: how much of the sky dome's colour (horizon / zenith, blue grey) replaces `Sky color` (green yellow in the data).
     pub ambient_dome: f32,
     /// Water volumes: multiplier of the volume's fog colour (the engine's fog colour is constant and unlit).
@@ -125,6 +129,9 @@ pub struct AtmosphereTuning {
     pub water_env: f32,
     /// Water volumes: screen space reflections of the scene on top of the cube map (the engine has none): on (1) or off (0).
     pub water_ssr: f32,
+    /// Water volumes: mip level the environment cube map is sampled at (0 = the sharp base level, as the engine's `texCUBE` of a
+    /// map without a mip filter; the seams between the faces show as the steps of the real pond's reflection).
+    pub water_lod: f32,
     /// Sea: screen space reflections on (1) or off (0).
     pub ssr: f32,
     /// Water: refraction offset (fraction of the screen per unit of bump).
@@ -187,6 +194,7 @@ impl Default for AtmosphereTuning {
             ambient_dome: 1.0,
             ambient_spec: 0.2,
             ambient_height: 1.0,
+            ambient_rel: 1.0,
             water_body: 7.0,
             water_lit: 0.35,
             water_absorb: std::f32::consts::LN_2,
@@ -195,6 +203,7 @@ impl Default for AtmosphereTuning {
             water_foam: 0.7,
             water_env: 0.08,
             water_ssr: 0.0,
+            water_lod: 0.0,
             ssr: 1.0,
             refraction: 0.012,
             water_rough: 0.06,
@@ -247,6 +256,7 @@ impl AtmosphereTuning {
                 "ambient_dome" => t.ambient_dome = v,
                 "ambient_spec" => t.ambient_spec = v,
                 "ambient_height" => t.ambient_height = v,
+                "ambient_rel" => t.ambient_rel = v,
                 "water_body" => t.water_body = v,
                 "water_lit" => t.water_lit = v,
                 "water_absorb" => t.water_absorb = v,
@@ -255,6 +265,7 @@ impl AtmosphereTuning {
                 "water_foam" => t.water_foam = v,
                 "water_env" => t.water_env = v,
                 "water_ssr" => t.water_ssr = v,
+                "water_lod" => t.water_lod = v,
                 "ssr" => t.ssr = v,
                 "refraction" => t.refraction = v,
                 "water_rough" => t.water_rough = v,
@@ -653,6 +664,7 @@ fn update_ambient(
     mut last: Local<[f32; 9]>,
     mut lit: Local<Option<Entity>>,
     mut cubes: Local<Option<AmbientCubes>>,
+    terrain: Option<Res<TerrainQuery>>,
     focus: Query<Entity, With<WorldFocus>>,
     cameras: Query<(Entity, &GlobalTransform), With<Camera3d>>,
 ) {
@@ -671,7 +683,11 @@ fn update_ambient(
     let ground = desaturate(ground_dir, tuning.ambient_sat) * luminance(cur.ambient_ground) * scale;
     // the ground colour fades into the sky colour with the height above the ground (`Ambient min / max height`: in the
     // court yard of the palace, 240 m up, it is the sky colour already)
-    let height = bevy_to_cry(camera_tf.translation()).z;
+    let at = bevy_to_cry(camera_tf.translation());
+    let mut height = at.z;
+    if tuning.ambient_rel > 0.5 {
+        height -= terrain.and_then(|t| t.height_at(at.x, at.y)).unwrap_or(0.0).min(height);
+    }
     let span = (cur.ambient_heights.y - cur.ambient_heights.x).max(1e-3);
     let up = ((height - cur.ambient_heights.x) / span).clamp(0.0, 1.0);
     let bottom = lerp3(ground, top, up * tuning.ambient_height);

@@ -4,3 +4,5 @@
 /shots/
 *.log
 /tools/*.exe
+
+__pycache__/

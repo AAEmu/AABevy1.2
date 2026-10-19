@@ -497,7 +497,7 @@ pub fn update_water(
             sky_h,
             sky_z,
             misc: Vec4::new(ssr, tuning.refraction, tuning.water_rough, amount),
-            foam: Vec4::new(base.foam_reach, base.speed, 0.0, 0.0),
+            foam: Vec4::new(base.foam_reach, base.speed, tuning.water_lod, 0.0),
             foam_col: foam.extend(0.0),
             env_lit: foam_light.extend(cube),
             motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0),
