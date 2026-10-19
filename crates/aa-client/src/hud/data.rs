@@ -242,6 +242,8 @@ pub struct GameData {
     pub book: super::skillbook::Book,
     pub stores: super::store::Tables,
     pub mail: super::mail::Tables,
+    /// What each doodad phase can be used for, doodad names (`doodad.rs`).
+    pub(super) doodad: super::doodad::Tables,
     pub expansions: Vec<aa_net::bank::ExpansionRule>,
     pub(super) repair: super::repair::Tables,
     pub(super) crafting: super::crafting::Tables,
@@ -590,6 +592,7 @@ impl GameData {
         data.book = super::skillbook::Book::load(&conn)?;
         data.stores = super::store::Tables::load(&conn)?;
         data.mail = super::mail::Tables::load(&conn)?;
+        data.doodad = super::doodad::Tables::load(&conn)?;
         data.expansions = super::expansion::load(&conn)?;
         data.repair = super::repair::Tables::load(&conn)?;
         data.crafting = super::crafting::Tables::load(&conn)?;

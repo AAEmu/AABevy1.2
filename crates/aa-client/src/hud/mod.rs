@@ -70,6 +70,7 @@ mod panels;
 mod party;
 mod period;
 mod portal;
+mod doodad;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
 mod pets;
 mod plates;
@@ -448,6 +449,7 @@ impl Plugin for HudPlugin {
         trade::plugin(app);
         store::plugin(app);
         portal::plugin(app);
+        doodad::plugin(app);
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
