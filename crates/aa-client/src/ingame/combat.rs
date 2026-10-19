@@ -916,6 +916,10 @@ impl Stage<'_, '_> {
         let offset = cry_to_bevy(item.offset);
         let mut transform = Transform { translation: anchor + rotation * offset * scale.y, rotation, scale: Vec3::splat(scale.y) };
         let mut fixed_rotation = false;
+        if item.flat() {
+            // the ring lies flat: the emitters' axis (the effect's forward, -Z) points up
+            transform.rotation *= Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        }
         if item.axis == 4
             && let Some(from) = toward
         {
@@ -1627,7 +1631,7 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
     for Timer { what, .. } in due {
         match what {
             Later::Fx { item, tl, on, toward, once, detach } => {
-                let hold = item.start < ev::LAUNCH && item.end > item.start && !once;
+                let hold = item.start < ev::LAUNCH && item.end > item.start && !once && !item.flat();
                 let spawned = st.spawn_item(&item, on, toward, hold);
                 if let (Some(e), Some(after)) = (spawned, detach) {
                     combat.after(now + after, Later::Detach(e));
@@ -1643,7 +1647,7 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
                 st.spawn_clip_effect(unit, &effect);
             }
             Later::GroundFx { item, tl, at, toward } => {
-                let hold = item.start < ev::LAUNCH && item.end > item.start;
+                let hold = item.start < ev::LAUNCH && item.end > item.start && !item.flat();
                 if let Some(e) = st.spawn_ground_item(&item, at, toward, hold)
                     && item.end > item.start
                     && let Some(cast) = combat.casts.get_mut(&tl)
