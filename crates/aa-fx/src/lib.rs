@@ -68,6 +68,10 @@ pub struct FxSettings {
     /// 0.5 would read it as the full width (what this crate did before round 4). Meshes are not affected (`Size` scales the model).
     /// `AA_FX_SPRITE=0.5` goes back.
     pub sprite_half: f32,
+    /// The power the engine raises a particle's authored colour to (2.2 in `particles.cfi`: `OUT.Color.xyz = pow(OUT.Color.xyz, 2.2)`).
+    /// 1 leaves the colours as authored (what rounds 1 to 5 drew, and what the mist fits of the stage were made with).
+    /// `AA_FX_GAMMA=1` goes back.
+    pub colour_gamma: f32,
     /// Multiplier on every particle's opacity (1 = as authored).
     pub alpha_scale: f32,
     /// A continuous emitter with a finite `EmitterLifeTime` emits `Count` over that life (otherwise `Count` per particle life).
@@ -112,6 +116,7 @@ impl Default for FxSettings {
             emissive: 1.0,
             size_scale: 1.0,
             sprite_half: std::env::var("AA_FX_SPRITE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
+            colour_gamma: std::env::var("AA_FX_GAMMA").ok().and_then(|v| v.parse().ok()).unwrap_or(2.2),
             alpha_scale: 1.0,
             count_over_life: std::env::var_os("AA_FX_COUNT_OLD").is_none(),
             quality: 2,
@@ -699,6 +704,7 @@ fn simulate(
             lod: 1.0 - 0.6 * far,
             size_scale: settings.size_scale,
             sprite_half: settings.sprite_half,
+            colour_gamma: settings.colour_gamma,
             count_over_life: settings.count_over_life,
             tint: effect.tint,
             sun: settings.sun,
