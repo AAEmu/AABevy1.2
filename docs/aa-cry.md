@@ -287,7 +287,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 | `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`; its `reflectance` is scaled by `ReflectAmount`, `reflect_scale`: 0.25 on props gives 0.43, costumes 10-15 keep 1: the Hariharan detect machine, Specular 3.4, mirrored the whole sky at a grazing view and was pale grey where the captures have dark rust); with `Shading::Full` and a `Specular` map, four images are baked from the map (`g = luma(map) * min(Specular * modifier, METAL_GAIN_MAX 5)`: saint armour is 7.4 x 4.9 on a map that never exceeds 0.19, it was a matte grey at the old limit of 1.5; the albedo of the metal texels is multiplied by up to `METAL_ALBEDO_GAIN` 8, metal reflects in the colour of its albedo and the diffuse maps are dark): metallic / roughness (`metal = smoothstep(0.2, 0.75, g) * f(ReflectAmount)`; matte roughness from `Shininess`, glossy dielectric texels down to `SHARP_ROUGHNESS` 0.42 = sharper leather highlights, metal 0.6 x matte) and Bevy's `specular_texture` (alpha = `sqrt(SPEC_STRENGTH * g)`, the highlight strength of the dielectric part, `reflectance` 2.0) and `specular_tint_texture` (the map's colour, `SPEC_TINT_AMOUNT` 0.3 of it, only for warm maps: gold, bronze, leather; the greenish maps of plate armour stay white because the plates are silver in the captures) |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5); `GenMask` bit 0x2000 (`%BLEND_WITH_TERRAIN_COLOR`, set exactly on the 276 materials with a `blendWithTerrainAmount`, default 0.5) moves the colour map towards the ground hue at the same brightness (`bake_terrain_blend`, `TERRAIN_BLEND_HUE`): the marigolds of the login fields are yellow in the captures, orange in the map |
 | `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `hair_colour(HairColor) * 2 * Diffuse` (hue as written, brightness `^HAIR_GAMMA` 1.5), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`). This `StandardMaterial` keeps only a faint broad sheen (roughness 0.65); with `Shading::Full` the material is tagged and swapped for the hair shader, see "Hair" below |
-| `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
+| `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`). With `Shading::Full` the `StandardMaterial` is only the base of `skin::SkinMaterial` (below): no GGX, no environment specular |
 | `Eye` | roughness 0.12, reflectance 0.2; static `IrisColor` multiplies Diffuse under the sRGB-decoded Specular red mask when both IRIS/GLOSS_MAP flags are enabled (see below); aa-anim can replace the final face texture |
 | `Metal` | metallic 0.6 |
 | `Glass`, `Liquid`, `Ice` | blend, alpha min(opacity, 0.6), roughness 0.1 |
@@ -612,6 +612,57 @@ without the hair tag is left alone by `HairPlugin`. (`aa-client` `ingame/stealth
 Shots: `shots/aa-cry/hair/compare_<target>.png` (real client | before | after),
 `cargo run -p aa-anim --example compare -- --target step2_elf_female --shot shots/aa-cry/hair/after_step2_elf_female.png`.
 `Illum` hair (some ferre styles, astra, dwarf, warborn) keeps the `Illum` path: matte in the captures and here.
+
+## Skin (`shade::skin`, `skin.wesl`)
+
+The client's `HumanSkin` shader (`shaders/hwscripts/cryfx/humanskin.cfx` with `fraglib.cfi` / `shadelib.cfi`, extracted to
+`data/extract/aa-cry/skin/`) ported as `SkinMaterial = ExtendedMaterial<StandardMaterial, SkinExt>` (bindless, index
+table 50..55: data, gloss map + sampler, SSS map + sampler). Why the old skin looked oily: Bevy's normalised GGX lobe
+(reflectance 0.4 at roughness 0.5 on faces, aa-anim's 0.7 at roughness 0.3 on bodies) spread a sheen over the whole
+face, and Bevy's environment specular mirrored the bright sky at every grazing angle (in the world on top of the
+x3 world gain). The engine has neither:
+
+* **Specular** per light: plain, unnormalised Blinn-Phong `pow(N.H, Shininess * gloss.a)` times the light colour and
+  its shadow, no Fresnel, no `N.L` (here faded out behind the surface). The Specular ("gloss") map masks it:
+  `x gloss.r x lerp(Specular, 1, gloss.b)` with `GLOSS_MAP_IGNORE_SPECULAR_COLOR` (0x2000000000, bodies),
+  `x gloss.r x Specular` with `SPLIT_GLOSS_MAP` (0x8, where `gloss.g` also triples the exponent) or `FUZZYNESS`,
+  else `x gloss.rgb x Specular`; without `GLOSS_MAP` (0x2) the diffuse map's alpha is the gloss. `Shininess` 25
+  (bodies) to 65 (nuian face), the maps about 0.25: a small highlight on nose and forehead. Only the shadow casting
+  light (the sun) makes it: the login stage's fill and rim lights stand for the engine's sky light.
+  An environment reflection (`pow(env, 3) x light x gloss.g`, the "lip" gloss) exists only with `ENVIRONMENT_MAP`
+  (0x100); it is not ported (the nuian faces and bodies do not have the bit, some elf and hariharan faces do).
+* **Diffuse** per light (the sun): `SkinfNdotL2`, `T = smoothstep(-DiffusionAmount * dark, 1, N.L)` (unclamped `N.L`;
+  `dark = lerp(sss.r, sss.rgb, SSSMapSat)` from the `SubSurface` map, read linear),
+  `lerp(dark, lerp(MSkinColor * (SubsurfaceStrenght + 1), BSkinColor, N.L^2), T) * T`, `^1.5 * 1.5`, `x 0.8` towards a
+  light behind the camera, times `luma(light) * 0.9 + light * 0.1`; shadows take `reShadow * 0.8 + 0.2` with
+  `reShadow = saturate(shadow * max(N.L * 0.7 + 0.3, L.V) * 0.7 + shadow * 0.3)`, and add the colourless shadow rim
+  `(1 - |N.V|) * (1 - reShadow) * RimPow * (N.up * 0.5 + 0.5) * (1 - N.up)`. The base colour stays the calibrated
+  colour of fully lit skin (`skin_base_color`, aa-anim's `skin_colors` row and `skin_tune`), so the fall-off is used
+  relative to full light (`SkinfNdotL2(N.L)^1.5 / BSkinColor^1.5` with the material's own colours): 1 in the sun, a
+  soft wrap with the sub-surface colour into the terminator.
+* **Ambient**: Bevy's PBR lighting on a white albedo with every specular term off (ambient, environment diffuse,
+  SSAO, the stage's fill lights) minus its Lambert part of the sun, plus `0.3 x reColorInShadow` (a skin coloured
+  fill, `lerp(dark * 0.7, lerp(M, (B + M) * 0.6, N.V^1.3), N.V)`) in engine units.
+* **Back lights** (`X2BackLight`): plain `N.L` on `texture x Diffuse` (as `CharMaterial`) and a Phong highlight
+  `pow(R.L, Shininess)` x the specular multiplier, masked like the sun's.
+* **World**: while `CharBackLight` is active the material carries `WORLD_DIFFUSE_GAIN` (3) on everything but the back
+  lights, like `backlight::world_look` does for costumes; skins are not swapped to `CharMaterial` any more (their
+  tag is `2e6 + index`, outside the back light and hair tags).
+* **Calibration** (`TUNE` in `skin.rs`, `AA_SKIN_TUNE="spec=..,diffuse=..,ambient=..,fill=..,sss_srgb=0|1"` for
+  experiments): `Specular x 0.35` (at 1 the stage's key light, 3x the engine's units, made a broad bluish sheen on
+  the forehead that the captures do not have), ambient x 0.5 (the engine multiplies it by `texture x Diffuse`, the
+  base colour carries the lit skin colour). aa-anim's `skin_tune` table was refitted for the new lighting (the old
+  rows cut blue, against Bevy's sky-blue environment specular): `data/extract/aa-cry/scripts/skintune.py`, the
+  `step1_*` faces, mean linear colour within 1 % of the captures.
+
+Wiring like hair: `convert_material` (`Shading::Full`) calls `skin::prepare` (parameters, gloss and SSS maps into a
+registry, the index into `lightmap_exposure`), `SkinPlugin` (added by `CryPlugin` with `PbrPlugin`) swaps tagged
+`StandardMaterial`s for `SkinMaterial`s. To draw skin differently (stealth) swap `MeshMaterial3d<SkinMaterial>` like
+`HairMaterial` (`aa-client` `ingame/stealth.rs` does).
+
+Shots (kept): `shots/aa-cry/skin/compare_<target>.png` (before | after | real, the eight `step2_*` and `step1_nuian_female`),
+`compare_step2_sheet_{a,b}.png`, `compare_ingame.png` / `compare_ingame_close.png` (refhair / Hairrefb at noon and in the
+morning against `reference/hair/ingame_*`).
 
 ## Characters under the world's light
 

@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use aa_cry::shade::backlight::CharMaterial;
 use aa_cry::shade::hair::{HairFringe, HairMaterial};
+use aa_cry::shade::skin::SkinMaterial;
 use aa_net::state::{Buffs, Player, Units};
 use bevy::asset::embedded_asset;
 use bevy::pbr::{Material, MaterialPlugin};
@@ -127,6 +128,7 @@ enum Swapped {
     Standard(Handle<StandardMaterial>),
     Char(Handle<CharMaterial>),
     Hair(Handle<HairMaterial>),
+    Skin(Handle<SkinMaterial>),
 }
 
 /// On a mesh of a hidden unit: its visibility before.
@@ -174,7 +176,7 @@ fn reconcile(
     net_units: Option<Res<Units>>,
     units: Query<(Entity, Option<&RemoteUnit>, Option<&LocalPlayer>, Option<&Stealthed>, &GlobalTransform)>,
     children: Query<&Children>,
-    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&MeshMaterial3d<HairMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
+    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&MeshMaterial3d<HairMaterial>>, Option<&MeshMaterial3d<SkinMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
     fringes: Query<&HairFringe>,
 ) {
     let Some(buffs) = buffs else { return };
@@ -206,7 +208,7 @@ fn reconcile(
         // the blended strand ends of the hair (`HairFringe`, the whole hair mesh again): hidden while the hair is a ghost
         let fringe_meshes: Vec<Entity> = children.iter_descendants(unit).filter_map(|m| fringes.get(m).ok().map(|f| f.0)).collect();
         for mesh in children.iter_descendants(unit) {
-            let Ok((standard, char, hair, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
+            let Ok((standard, char, hair, skin, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
             let fringe = fringe_meshes.contains(&mesh);
             let mut e = commands.entity(mesh);
             match (look == Some(Look::Ghost) && !fringe, swapped) {
@@ -218,6 +220,8 @@ fn reconcile(
                         e.remove::<MeshMaterial3d<CharMaterial>>().insert((Swapped::Char(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
                     } else if let Some(m) = hair {
                         e.remove::<MeshMaterial3d<HairMaterial>>().insert((Swapped::Hair(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
+                    } else if let Some(m) = skin {
+                        e.remove::<MeshMaterial3d<SkinMaterial>>().insert((Swapped::Skin(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
                     }
                 }
                 (false, Some(saved)) => {
@@ -226,6 +230,7 @@ fn reconcile(
                         Swapped::Standard(h) => e.insert(MeshMaterial3d(h.clone())),
                         Swapped::Char(h) => e.insert(MeshMaterial3d(h.clone())),
                         Swapped::Hair(h) => e.insert(MeshMaterial3d(h.clone())),
+                        Swapped::Skin(h) => e.insert(MeshMaterial3d(h.clone())),
                     }
                     .remove::<Swapped>();
                 }

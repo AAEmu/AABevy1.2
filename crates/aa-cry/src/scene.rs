@@ -56,6 +56,9 @@ impl Plugin for CryPlugin {
         if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::hair::HairPlugin>() {
             app.add_plugins(crate::shade::hair::HairPlugin);
         }
+        if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::skin::SkinPlugin>() {
+            app.add_plugins(crate::shade::skin::SkinPlugin);
+        }
     }
 }
 
