@@ -52,7 +52,9 @@ RECORD_FROM = 14.0   # fake seconds before the first frame (the world is still s
 FIRST_SKILL = 15.5   # fake time of the first skill
 MIN_SLOT = 2.5       # seconds per skill, at least
 TAIL = 1.0           # after the cast, the channel and the flight
-CHANNEL_CAP = 4.0    # long channels (Play Dead 60 s) end after this
+CHANNEL_CAP = 8.0    # long channels (Play Dead 60 s, Twilight 60 s) end after this: the channel buff shows for as long
+BUFF_SHOW = 3.5      # seconds a (non channel) buff stays on its bearer in the reel, at most; a shorter buff goes when it ends
+SHOT_RANGE = 10.0    # metres a projectile skill is timed for when the doll is nearer: the real shots of a bow or a staff fly 8 to 17 m
 CLIP_SYNC = 0.45     # seconds an `add_anim_cs_time` edge adds
 COMBO = {13282}      # skills whose three stages are three casts (plot conditions of kind 17)
 STAGE_GAP = 1.3      # between the casts of a combo skill
@@ -97,6 +99,7 @@ class Plot:
             effects = c.execute("select actual_type, actual_id from plot_effects where event_id=?", (eid,)).fetchall()
             visual = False
             damage = False
+            buffs = []
             for kind, actual in effects:
                 if kind == "SpecialEffect":
                     t = c.execute("select special_effect_type_id from special_effects where id=?", (actual,)).fetchone()
@@ -104,12 +107,16 @@ class Plot:
                         visual = True
                 elif kind == "DamageEffect":
                     damage = True
+            for buff_id, target in c.execute(
+                    "select be.buff_id, pe.target_id from plot_effects pe join buff_effects be on be.id=pe.actual_id "
+                    "where pe.event_id=? and pe.actual_type='BuffEffect' order by pe.position", (eid,)):
+                buffs.append((buff_id, target == 1))  # plot target 1 is the caster, the others are what the step hit
             conds = [r[0] for r in c.execute(
                 "select condition_id from plot_event_conditions where event_id=? order by position", (eid,))]
             nexts = c.execute(
                 "select next_event_id, casting, delay, channeling, fail, add_anim_cs_time from plot_next_events where event_id=? order by position",
                 (eid,)).fetchall()
-            self.events[eid] = dict(pos=pos, visual=visual, damage=damage, conds=conds, nexts=nexts)
+            self.events[eid] = dict(pos=pos, visual=visual, damage=damage, buffs=buffs, conds=conds, nexts=nexts)
         self.start = min(self.events, key=lambda e: self.events[e]["pos"]) if self.events else None
         self.cond_cache = {}
 
@@ -148,13 +155,79 @@ class Plot:
                         casting = max(casting, delay)
                     # `add_anim_cs_time`: the delay comes on top of the clip's own sync moment (about 0.45 s into a swing)
                     go(nxt, t + delay / 1000.0 + (CLIP_SYNC if plus_clip == "t" else 0.0))
-            if ok and (e["visual"] or e["damage"]):
+            if ok and (e["visual"] or e["damage"] or e["buffs"]):
                 out.append((t, eid, casting, e["damage"]))
                 last[0] = max(last[0], t)
 
         go(self.start, 0.0)
         out.sort(key=lambda x: (x[0], self.events[x[1]]["pos"]))
         return out, last[0]
+
+
+# ---- buffs and flights ---------------------------------------------------------------------------------------------
+
+_look = {}
+_index = [5000]
+
+
+def buff_look(c, buff_id):
+    """(shows something, duration in seconds or 0) of a buff: an aura (effect group), a start pose, a freeze or a ragdoll."""
+    r = _look.get(buff_id)
+    if r is None:
+        b = c.execute("select duration, fx_group_id, anim_start_id, framehold, ragdoll, idle_anim from buffs where id=?", (buff_id,)).fetchone()
+        r = _look[buff_id] = (False, 0.0) if b is None else (bool(b[1] or b[2] or b[3] == "t" or b[4] == "t" or b[5]), (b[0] or 0) / 1000.0)
+    return r
+
+
+def skill_buffs(c, sid, aimed_at_caster, hostile):
+    """[(buff, on the caster, channel buff)] a skill's cast applies, the way the server's SCBuffCreated would carry them.
+
+    `skill_effects` -> BuffEffect rows of the lowest level they apply at (rows that need a buff tag on someone are left out), and the
+    channeling / toggle buff of the skill. A buff lands on the target of the skill (the doll); on the caster when the skill aims at the caster,
+    or when the row is for friends only and the skill is a hostile one (a buff of the source)."""
+    rows = c.execute(
+        "select se.start_level, se.end_level, se.friendly, se.non_friendly, be.buff_id from skill_effects se "
+        "join effects e on e.id=se.effect_id and e.actual_type='BuffEffect' join buff_effects be on be.id=e.actual_id "
+        "where se.skill_id=? and se.target_buff_tag_id is null and se.source_buff_tag_id is null order by se.id", (sid,)).fetchall()
+    out, seen = [], set()
+    if rows:
+        # the level of the first row that shows something (a song's visible buffs start at its own level, 10 or 18, not at 1)
+        level = min([r[0] for r in rows if buff_look(c, r[4])[0]] or [r[0] for r in rows])
+        for start, end, friendly, non_friendly, buff in rows:
+            if not start <= level <= end or buff in seen:
+                continue
+            seen.add(buff)
+            out.append((buff, aimed_at_caster or (hostile and friendly == "t" and non_friendly == "f"), False))
+    for col in ("channeling_buff_id", "toggle_buff_id"):
+        r = c.execute(f"select {col} from skills where id=?", (sid,)).fetchone()
+        if r and r[0] and r[0] not in seen:
+            seen.add(r[0])
+            out.append((r[0], True, col == "channeling_buff_id"))
+    return out
+
+
+def stage_distance():
+    """Metres from the caster to the doll (stage.json), 4 when there is no stage yet."""
+    try:
+        import math
+        st = json.loads((WORK / "stage.json").read_text())
+        x, y = (float(v) for v in st["pos"].split(","))
+        return math.hypot(st["dummy"][0] - x, st["dummy"][1] - y)
+    except (OSError, KeyError, ValueError):
+        return 4.0
+
+
+def buff_steps(c, at, buff, caster, channel):
+    """The `buff` / `unbuff` steps of one buff that arrives at `at`; (steps, time it is gone), or ([], at) when it shows nothing."""
+    visual, duration = buff_look(c, buff)
+    if not visual:
+        return [], at
+    show = CHANNEL_CAP if channel else BUFF_SHOW
+    if duration:
+        show = min(show, max(duration, 0.8))
+    _index[0] += 1
+    suffix = "@self" if caster else ""
+    return [f"{at:.3f}:buff{suffix}:{_index[0]}:{buff}:0", f"{at + show:.3f}:unbuff{suffix}:{_index[0]}"], at + show
 
 
 # ---- one skill ---------------------------------------------------------------------------------------------------
@@ -165,13 +238,21 @@ def skill_events(c, ability, row, tl, t0):
     cast = cast or 0
     chan = chan or 0
     delay = delay or 0
-    me = "@ground" if ttype == 6 else "@self" if target_self(ability, ttype) else ""
+    me = "@ground" if ttype == 6 else "@self" if target_self(ability, ttype) and relation != 4 else ""
     steps = []
     # does it hurt someone (the dummy takes the hit effects even when the skill is centred on the caster)?
     hit = relation == 4 or ttype in (4, 6) or (ttype == 5 and ability != 10)
 
     def add(t, op, *args):
         steps.append(f"{t:.3f}:{op}{'' if op == 'hit' else me}:" + ":".join(str(a) for a in args))
+
+    gone = [t0]  # when the last buff is off again: the slot has to last that long
+
+    def buffs_at(at, wanted):
+        for buff, caster, channel in wanted:
+            ev, off = buff_steps(c, at, buff, caster, channel)
+            steps.extend(ev)
+            gone[0] = max(gone[0], off)
 
     if plot:
         p = Plot(c, plot)
@@ -187,6 +268,7 @@ def skill_events(c, ability, row, tl, t0):
                 at = t + dt
                 if eid is not None and p.events[eid]["visual"]:
                     add(at, "plot", tlx, eid, sid, *([casting] if casting else []))
+                buffs_at(at + 0.05, [(b, caster, False) for b, caster in p.events[eid]["buffs"]])
                 if damage and hit and hits < 3 and round(at, 1) not in hit_times:
                     add(at + 0.05, "hit", tlx, sid, 120 + stage)
                     hit_times.add(round(at, 1))
@@ -194,7 +276,10 @@ def skill_events(c, ability, row, tl, t0):
             add(t + span + 0.4, "plotend", tlx)
             end = max(end, t + span + 0.4)
             t += max(span, 0.0) + STAGE_GAP
-        length = max(MIN_SLOT, end - t0 + TAIL)
+        # the skill's own buff rows and its channel / toggle buff, when the steps of the plot do not name them
+        named = {x[0] for ev in p.events.values() for x in ev["buffs"]}
+        buffs_at(t0 + 0.1, [b for b in skill_buffs(c, sid, me == "@self", hit) if b[2] or b[0] not in named])
+        length = max(MIN_SLOT, max(end + TAIL, gone[0] + 0.3) - t0)
         return steps, length
 
     t = t0
@@ -202,12 +287,18 @@ def skill_events(c, ability, row, tl, t0):
     if cast:
         add(t, "start", tl, sid, cast)
         t += cast / 1000.0
-    add(t, "fire", tl, sid, delay if delay else (500 if proj else 0), chan)
+    # the time the effects take to land, as the server computes it: the launch moment of the clip plus the flight (distance / speed)
+    speed = (c.execute("select effect_speed from skills where id=?", (sid,)).fetchone() or (0,))[0] or 0
+    metres = max(stage_distance(), SHOT_RANGE) if proj else stage_distance()
+    flight = int(round(metres / speed * 1000)) if speed and (proj or hit) else (500 - delay if proj and delay < 500 else 0)
+    land = delay + flight
+    add(t, "fire", tl, sid, land, chan)
     if hit:
-        add(t + 0.05, "hit", tl, sid, 150)
-    end_at = t + max(delay, 0) / 1000.0 + ch + 0.1
+        add(t + (land / 1000.0 if proj else 0.0) + 0.05, "hit", tl, sid, 150)
+    buffs_at(t + land / 1000.0 + 0.05, skill_buffs(c, sid, me == "@self", hit))
+    end_at = t + land / 1000.0 + ch + 0.1
     add(end_at, "end", tl)
-    length = max(MIN_SLOT, end_at - t0 + TAIL)
+    length = max(MIN_SLOT, max(end_at + TAIL, gone[0] + 0.3) - t0)
     return steps, length
 
 
