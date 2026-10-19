@@ -597,3 +597,18 @@ order) show every beam spanning the whole 4 m. The launch effects are 0.05 to 0.
   client are the same (real 166/198/164, ours 189/207/192, both pale green-teal), so no colour change was made. Under the (1, L, 1) stretch the
   beam is a thin pale strand in the example. In-game verification was inconclusive (the beam was not in the reel frames either before or after
   this round).
+
+### Round 13 follow-up: the beams that flickered (frames longer than the particle life)
+
+The combat agent saw the Absorb Lifeforce beam flicker after round 13 (visible at 2.0 s and 6.2 s, not at 3.5 s and 5.0 s) while the real client holds it for
+the whole 6.5 s. It was none of the four suspects: the root of `death.life_absorb_launch` is `Continuous` (so are `psychokinesis_launch`, `spell_move_launch`'s
+mesh emitter, `vital_absorb_launch`, `full_launch`; only `lightning_magic_launch` is not, and that one is meant to play out in 0.2 to 0.5 s), `loops()`
+is true and the effect never even finishes. The cause is in the simulation: the beam is one mesh particle with `ParticleLifeTime 0.05` (Telekinesis' 0.1), and
+`emit` placed each birth `age0` into the step but `update` then aged it by the whole step again, so with a frame longer than the life (the reel runs 10 frames a
+second, a slow client 20 to 30) every particle was dead before it was ever drawn; only a frame with a short step happened to show one (a temporary
+log: the beam emitter had 0 alive in every sampled frame, 1 after the fix). Fix in `sim.rs`: (1) a particle born in a step is not aged again in that step
+(`EmitterState.fresh`); (2) the births of a continuous emitter get their real age (`dt - time of the j-th birth`, from the spawn accumulator) instead of a random
+one, and a birth already older than the life at the end of the step is skipped, so one particle of life 0.05 s is alive in every frame at 10, 30 and 60 frames
+a second, exactly one on average (test `a_particle_shorter_than_the_frame_is_still_drawn_every_frame`). Checked in game (`AA_COMBAT_FAKE`, 10 fps reel):
+Absorb Lifeforce (12 consecutive frames, all with the beam), Telekinesis (dark beam in every frame from 4.5 s to 12 s), Crippling Mire (the beam in every
+sampled frame of the 4.5 s); buff auras (Bubble Trap, `life_absorb_form`, `spell_move_form`, `lightning_magic_form` in the example) unchanged.

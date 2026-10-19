@@ -583,3 +583,4 @@ fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), gl
 | Arc Lightning | `lightning_magic_throw` / `form` | orb = flare_11 (1.2 m) + `AttachType=Render` bolts; they need `Effect.body` (the caster) to leave the capsule at the origin; no emitter was missing |
 | Absorb Lifeforce | `beam_test5` | width and peak colour match the real strands unstretched; left as is |
 | all looping effects | | loop from the root `Continuous` flag; fx-item effects limited to the 50 closest (`FxSettings::loop_budget`) |
+| Absorb Lifeforce, Telekinesis, Crippling Mire beams | `life_absorb_launch`, `spell_move_launch`, `psychokinesis_launch` | the roots are Continuous; the beam mesh lives 0.05 to 0.1 s, shorter than a frame at 10 to 20 fps, and was aged again in its birth step: invisible in most frames. Fixed in the simulation (steady at 10, 30, 60 fps) |
