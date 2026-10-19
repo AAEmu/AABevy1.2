@@ -61,8 +61,13 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
     bake_terrain_blend(prep, m, &mut out);
     if prep.shading == Shading::Full {
         // characters get the `Char BackLight` term when `backlight::CharLightPlugin` is on
-        out.lightmap_exposure =
-            if shader_is_skin(m) { backlight::skin_tag(luma(m.diffuse)) } else { backlight::TAG };
+        out.lightmap_exposure = if shader_is_skin(m) {
+            backlight::skin_tag(luma(m.diffuse))
+        } else if matches!(m.shader.to_ascii_lowercase().as_str(), "hair" | "eye") {
+            backlight::NEUTRAL_TAG
+        } else {
+            backlight::TAG
+        };
         bake_specular(prep, m, &mut out);
         // hair gets the strand shading of `hair::HairMaterial` (tagged here, swapped by `hair::HairPlugin`)
         hair::prepare(prep, m, &mut out);
@@ -269,6 +274,7 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
     let costume = (param_f32(m, "ReflectAmount").unwrap_or(1.0) / COSTUME_REFLECT_AMOUNT).clamp(0.0, 1.0);
     let mix = |prop: f32, costume_value: f32| prop + (costume_value - prop) * costume;
     let boost = mix(1.0, COSTUME_GLOSS_BOOST);
+    let metal_boost = mix(1.0, COSTUME_METAL_BOOST);
     let sharp = mix(SHARP_ROUGHNESS, COSTUME_SHARP_ROUGHNESS);
     let (ramp_lo, ramp_hi) = (mix(0.1, 0.05), mix(0.5, 0.3));
     let tint_amount = mix(SPEC_TINT_AMOUNT, COSTUME_TINT_AMOUNT);
@@ -279,12 +285,14 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
         let c = out.base_color.to_linear();
         out.base_color = Color::linear_rgba(c.red * diffuse_k, c.green * diffuse_k, c.blue * diffuse_k, c.alpha);
     }
-    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}:{boost:.2}:{sharp:.2}:{ramp_lo:.2}:{ramp_hi:.2}:{tint_amount:.2}");
+    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}:{boost:.2}:{metal_boost:.2}:{sharp:.2}:{ramp_lo:.2}:{ramp_hi:.2}:{tint_amount:.2}");
     // per texel: g = how glossy the map is, metal = how much of it reflects like a metal
     let texel = move |p: &[u8]| {
         let s = Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0;
         let g = (luma(s) * gain * boost).clamp(0.0, 1.2);
-        let metal = smoothstep(0.2, 0.75, g) * reflect;
+        // what turns into a metal is the unboosted-ish map: leather and cloth stay dielectrics (a boosted dim map
+        // would make them mirrors of the sky in the world's light)
+        let metal = smoothstep(0.2, 0.75, (luma(s) * gain * metal_boost).clamp(0.0, 1.2)) * reflect;
         // glossier texels have sharper highlights (leather streaks, polished trims)
         let rough_dielectric = matte + (matte.min(sharp) - matte) * smoothstep(ramp_lo, ramp_hi, g);
         let rough = rough_dielectric + (shiny - rough_dielectric) * metal;
@@ -400,6 +408,9 @@ const SHARP_ROUGHNESS: f32 = 0.42;
 const COSTUME_REFLECT_AMOUNT: f32 = 8.0;
 /// Factor on the glossiness of costume specular maps.
 const COSTUME_GLOSS_BOOST: f32 = 8.0;
+/// Factor on the glossiness that decides which texels are metal (plate armour, trims), less than the boost on the
+/// highlights: leather and cloth are lacquered dielectrics, not metals.
+const COSTUME_METAL_BOOST: f32 = 2.0;
 /// Roughness of the sharpest costume highlights (leather streaks).
 const COSTUME_SHARP_ROUGHNESS: f32 = 0.3;
 /// Factor on the diffuse colour of costume materials.

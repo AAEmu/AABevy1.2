@@ -31,6 +31,18 @@ use bevy::shader::ShaderRef;
 /// only read when a mesh has a lightmap, which nothing here has, and its default is exactly 1.
 pub const TAG: f32 = 1.0 + 1.0 / 4096.0;
 
+/// The tag of hair and eye materials: back lights, but none of the world look (see [`world_look`]).
+pub const NEUTRAL_TAG: f32 = 1.0 + 2.0 / 4096.0;
+
+/// What a tag says about a material.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    Costume,
+    /// A skin whose `Diffuse` has this luma.
+    Skin(f32),
+    Neutral,
+}
+
 /// The tag of a skin material, whose `Diffuse` has the luma `diffuse`: `2 + diffuse`. The skin's base colour carries the
 /// lit skin colour (`BSkinColor^1.5 * 1.5` x a gain, see `skin_base_color`) that the engine puts into the sun and
 /// ambient light instead, while the back lights reach the skin as plain `colour * N.L * texture * Diffuse`; the term
@@ -39,12 +51,13 @@ pub fn skin_tag(diffuse: f32) -> f32 {
     2.0 + diffuse.clamp(0.0, 0.99)
 }
 
-/// `Some(None)` for a character material, `Some(Some(diffuse))` for a skin, `None` for anything else.
-fn decode_tag(exposure: f32) -> Option<Option<f32>> {
+fn decode_tag(exposure: f32) -> Option<Kind> {
     if exposure == TAG {
-        Some(None)
+        Some(Kind::Costume)
+    } else if exposure == NEUTRAL_TAG {
+        Some(Kind::Neutral)
     } else if (2.0..3.0).contains(&exposure) {
-        Some(Some(exposure - 2.0))
+        Some(Kind::Skin(exposure - 2.0))
     } else {
         None
     }
@@ -188,11 +201,16 @@ fn swap_materials(
         let id = handle.id();
         let shared = mirrors.0.get(&id).and_then(|m| extended.get_strong_handle(*m));
         let mirror = shared.unwrap_or_else(|| {
-            let albedo = skin.map_or(Vec4::ONE, |d| {
-                let c = base.base_color.to_linear();
-                (Vec3::splat(d) / Vec3::new(c.red, c.green, c.blue).max(Vec3::splat(1e-4))).extend(1.0)
-            });
-            let strong = extended.add(CharMaterial { base: base.clone(), extension: CharBackExt { params: light.params(), albedo } });
+            let mut world = base.clone();
+            world_look(&mut world, skin);
+            // the back lights keep their own calibration: the albedo they use is the stage one
+            let stage = base.base_color.to_linear();
+            let now = world.base_color.to_linear();
+            let albedo = match skin {
+                Kind::Skin(d) => (Vec3::splat(d) / Vec3::new(now.red, now.green, now.blue).max(Vec3::splat(1e-4))).extend(1.0),
+                _ => (Vec3::new(stage.red, stage.green, stage.blue) / Vec3::new(now.red, now.green, now.blue).max(Vec3::splat(1e-4))).extend(1.0),
+            };
+            let strong = extended.add(CharMaterial { base: world, extension: CharBackExt { params: light.params(), albedo } });
             mirrors.0.insert(id, strong.id());
             strong
         });
@@ -206,6 +224,26 @@ fn swap_materials(
         for (e, m) in &fresh {
             swap(e, &m.0);
         }
+    }
+}
+
+/// How the world's light (nominal engine units) differs from the login stage's (three times that, `LOGIN_EXPOSURE`):
+/// the skin and costume colours were calibrated on the stage, so under the world's sun they are gain times too dark
+/// (grey-brown faces, dim costumes), and the sky the environment light shows is a bright mirror for the reflections the
+/// stage's `beach_blur2` only tints. Applied to the copy the swap makes, so the login stages (no swap) are unchanged.
+const WORLD_DIFFUSE_GAIN: f32 = 3.0;
+/// Factor on the specular reflectance of costumes in the world (the sky is bright, the stage's environment is not).
+const WORLD_REFLECTANCE: f32 = 0.3;
+
+fn world_look(m: &mut StandardMaterial, kind: Kind) {
+    if kind == Kind::Neutral {
+        return;
+    }
+    let k = WORLD_DIFFUSE_GAIN;
+    let c = m.base_color.to_linear();
+    m.base_color = Color::linear_rgba(c.red * k, c.green * k, c.blue * k, c.alpha);
+    if matches!(kind, Kind::Costume) {
+        m.reflectance *= WORLD_REFLECTANCE;
     }
 }
 
@@ -274,9 +312,10 @@ mod tests {
 
     #[test]
     fn tags_round_trip_and_the_default_is_not_a_tag() {
-        assert_eq!(decode_tag(TAG), Some(None));
+        assert_eq!(decode_tag(TAG), Some(Kind::Costume));
+        assert_eq!(decode_tag(NEUTRAL_TAG), Some(Kind::Neutral));
         assert_eq!(decode_tag(1.0), None);
-        assert_eq!(decode_tag(skin_tag(0.086)), Some(Some(skin_tag(0.086) - 2.0)));
+        assert_eq!(decode_tag(skin_tag(0.086)), Some(Kind::Skin(skin_tag(0.086) - 2.0)));
         assert!((skin_tag(0.086) - 2.086).abs() < 1e-6);
     }
 

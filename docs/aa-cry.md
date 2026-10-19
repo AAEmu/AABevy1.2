@@ -613,6 +613,18 @@ Shots: `shots/aa-cry/hair/compare_<target>.png` (real client | before | after),
 `cargo run -p aa-anim --example compare -- --target step2_elf_female --shot shots/aa-cry/hair/after_step2_elf_female.png`.
 `Illum` hair (some ferre styles, astra, dwarf, warborn) keeps the `Illum` path: matte in the captures and here.
 
+## Characters under the world's light
+
+Skin and costume colours are calibrated on the login stage, whose lights are `LOGIN_EXPOSURE` (3) times the engine's nominal
+units; the world's are nominal, so in game faces were grey-brown and costumes dim, and the gloss (a boosted dim map, i.e.
+dielectrics promoted to metals) mirrored the bright sky: a grey-purple sheen on leather. `shade::backlight::world_look`
+fixes the copy of the material that `swap_materials` makes (only where the plugin is active, i.e. in the world; the login
+stages never swap): the colour of skin and costumes (not hair and eyes, `NEUTRAL_TAG`) times `WORLD_DIFFUSE_GAIN` 3, the
+reflectance of costumes times 0.3; the back light keeps its calibration (its albedo factor divides the gain out).
+In `bake_specular` the metal mask uses `COSTUME_METAL_BOOST` 2 instead of the highlight boost 8, so leather and cloth stay
+dielectrics. Checked against `reference/hair/ingame_{noon_sun,morning_backlit,shade}_front.png`: pale pink face, matte tan
+jacket; the palace shade (`reference/ingame/royal_palace`) is unchanged within the back light's calibration.
+
 ## Character back lights (`shade::backlight`)
 
 The time of day has a `Char BackLight` group: `InShadowIntensity` (0.5) and, per light `i` = 1, 2, `"i Color"`,
