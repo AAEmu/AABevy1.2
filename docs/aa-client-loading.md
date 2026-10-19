@@ -72,11 +72,16 @@ all of it from the HUD:
 
 Frame rate in the spawn scenes: 70 to 80 fps on the loading screen once the world is in and in game (dev build).
 
+After a create the list comes back with the new character selected (`Bridge::prefer`, the script's `GetLastPlayedCharacterIndex`;
+the list is built from the refreshed one that has it), so Start enters it. Before, the server's list has no play time for a
+new character, the script took slot 1 and Start entered the first character (seen with `Bevyloadc`: `Bevyloadb` entered).
+
 ## Open
 
 * The pipelines are what the loading screen waits for (60 to 120 of them compile behind it at 5 to 10 per second). The
-  character list's prewarm (`ingame::prewarm`) builds the world around the first character with a position, not the one
-  selected: a new character in another zone gets the shared pipelines from it but not its zone's.
+  character list's prewarm (`ingame::prewarm`) follows the selected character (`login::character_select::Selected`, set by
+  `ShowSelectedCharacter`): a running one moves the world over when the selection goes more than 400 m away, a settled one
+  runs again (about 2 s, the pipelines are compiled already), clicking through characters of one place builds nothing.
 * For about 10 s after entering, the HUD changes every frame (aa-ui rebuilds its batches about 70 times a second, about 100
   new meshes a frame) and the game has a 45 to 60 ms frame every one to three seconds; the UI frame itself stays under 5 ms,
   so the spikes are likely the render side of the mesh churn (aa-ui). With `--no-hud` there are none.

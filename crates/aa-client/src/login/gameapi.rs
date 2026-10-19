@@ -53,6 +53,10 @@ pub struct Bridge {
     /// Name of the connected world.
     pub world_name: String,
     pub requests: Vec<Request>,
+    /// The character the list selects when it is built: the one just created (the client's "last played"
+    /// before it ever played; the server's list has no play time for it). Cleared by Start.
+    pub prefer: Option<u32>,
+    prefer_since: Option<std::time::Instant>,
     names: Names,
 }
 
@@ -75,6 +79,27 @@ impl Bridge {
     /// The world the character list belongs to.
     pub fn set_world(&mut self, id: u8) {
         self.world_name = self.worlds.world(id).map(|w| w.name.clone()).unwrap_or_default();
+    }
+
+    /// The character just created: the list selects it.
+    pub fn set_prefer(&mut self, id: u32) {
+        self.prefer = Some(id);
+        self.prefer_since = Some(std::time::Instant::now());
+    }
+
+    /// The created character is not in the list yet (the refresh is on its way): the list is not built from a stale one.
+    pub fn waiting_for_created(&self) -> bool {
+        let missing = self.prefer.is_some_and(|id| !self.characters.iter().any(|c| c.id == id));
+        missing && self.prefer_since.is_some_and(|t| t.elapsed().as_secs_f32() < 4.0)
+    }
+
+    /// Index (0-based) of the character the list selects first.
+    pub fn initial_selection(&self) -> Option<usize> {
+        let created = self.prefer.and_then(|id| self.characters.iter().position(|c| c.id == id));
+        created.or_else(|| {
+            let played = self.characters.iter().enumerate().filter(|(_, c)| c.leave_time > 0);
+            played.max_by_key(|(_, c)| c.leave_time).map(|(i, _)| i)
+        })
     }
 
     pub fn take_requests(&mut self) -> Vec<Request> {
@@ -322,16 +347,10 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
         })?,
     )?;
 
-    // Index (1-based) of the character that played last, nil when none ever did.
+    // Index (1-based) of the character the list selects first: the one just created, else the one that played
+    // last; nil when there is none (the scripts take the first then).
     let s = shared.clone();
-    net.set(
-        "last_played",
-        lua.create_function(move |_, ()| {
-            let b = s.borrow();
-            let last = b.characters.iter().enumerate().filter(|(_, c)| c.leave_time > 0).max_by_key(|(_, c)| c.leave_time);
-            Ok(last.map(|(i, _)| i as i64 + 1))
-        })?,
-    )?;
+    net.set("last_played", lua.create_function(move |_, ()| Ok(s.borrow().initial_selection().map(|i| i as i64 + 1)))?)?;
 
     let s = shared.clone();
     net.set("world_name", lua.create_function(move |_, ()| Ok(s.borrow().world_name.clone()))?)?;
