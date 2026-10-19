@@ -1,0 +1,191 @@
+[
+ {
+  "file": "elf_female_black_style17.png",
+  "hair_style_index": 17,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "elf_female"
+ },
+ {
+  "file": "elf_female_blond_style20.png",
+  "hair_style_index": 20,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "elf_female"
+ },
+ {
+  "file": "elf_female_red_style11.png",
+  "hair_style_index": 11,
+  "hair_color_index": 25,
+  "color_name": "red",
+  "race_gender": "elf_female"
+ },
+ {
+  "file": "elf_male_black_style14.png",
+  "hair_style_index": 14,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "elf_male"
+ },
+ {
+  "file": "elf_male_silver_style10.png",
+  "hair_style_index": 10,
+  "hair_color_index": 4,
+  "color_name": "silver",
+  "race_gender": "elf_male"
+ },
+ {
+  "file": "elf_male_blond_style03.png",
+  "hair_style_index": 3,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "elf_male"
+ },
+ {
+  "file": "elf_male_red_style08.png",
+  "hair_style_index": 8,
+  "hair_color_index": 25,
+  "color_name": "red",
+  "race_gender": "elf_male"
+ },
+ {
+  "file": "firran_female_black_style04.png",
+  "hair_style_index": 4,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "firran_female"
+ },
+ {
+  "file": "firran_female_blond_style06.png",
+  "hair_style_index": 6,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "firran_female"
+ },
+ {
+  "file": "firran_female_red_style14.png",
+  "hair_style_index": 14,
+  "hair_color_index": 25,
+  "color_name": "red",
+  "race_gender": "firran_female"
+ },
+ {
+  "file": "firran_male_black_style02.png",
+  "hair_style_index": 2,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "firran_male"
+ },
+ {
+  "file": "firran_male_silver_style05.png",
+  "hair_style_index": 5,
+  "hair_color_index": 4,
+  "color_name": "silver",
+  "race_gender": "firran_male"
+ },
+ {
+  "file": "firran_male_brown_style06.png",
+  "hair_style_index": 6,
+  "hair_color_index": 22,
+  "color_name": "brown",
+  "race_gender": "firran_male"
+ },
+ {
+  "file": "harani_female_black_style09.png",
+  "hair_style_index": 9,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "harani_female"
+ },
+ {
+  "file": "harani_female_brown_style20.png",
+  "hair_style_index": 20,
+  "hair_color_index": 22,
+  "color_name": "brown",
+  "race_gender": "harani_female"
+ },
+ {
+  "file": "harani_female_red_style14.png",
+  "hair_style_index": 14,
+  "hair_color_index": 25,
+  "color_name": "red",
+  "race_gender": "harani_female"
+ },
+ {
+  "file": "harani_male_black_style18.png",
+  "hair_style_index": 18,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "harani_male"
+ },
+ {
+  "file": "harani_male_blond_style17.png",
+  "hair_style_index": 17,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "harani_male"
+ },
+ {
+  "file": "harani_male_silver_style09.png",
+  "hair_style_index": 9,
+  "hair_color_index": 4,
+  "color_name": "silver",
+  "race_gender": "harani_male"
+ },
+ {
+  "file": "nuian_female_black_style10.png",
+  "hair_style_index": 10,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "nuian_female"
+ },
+ {
+  "file": "nuian_female_blond_style20.png",
+  "hair_style_index": 20,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "nuian_female"
+ },
+ {
+  "file": "nuian_female_brown_style17.png",
+  "hair_style_index": 17,
+  "hair_color_index": 22,
+  "color_name": "brown",
+  "race_gender": "nuian_female"
+ },
+ {
+  "file": "nuian_female_silver_style19.png",
+  "hair_style_index": 19,
+  "hair_color_index": 4,
+  "color_name": "silver",
+  "race_gender": "nuian_female"
+ },
+ {
+  "file": "nuian_male_black_style09.png",
+  "hair_style_index": 9,
+  "hair_color_index": 47,
+  "color_name": "black",
+  "race_gender": "nuian_male"
+ },
+ {
+  "file": "nuian_male_blond_style07.png",
+  "hair_style_index": 7,
+  "hair_color_index": 7,
+  "color_name": "blond",
+  "race_gender": "nuian_male"
+ },
+ {
+  "file": "nuian_male_silver_style20.png",
+  "hair_style_index": 20,
+  "hair_color_index": 4,
+  "color_name": "silver",
+  "race_gender": "nuian_male"
+ },
+ {
+  "file": "nuian_male_red_style08.png",
+  "hair_style_index": 8,
+  "hair_color_index": 25,
+  "color_name": "red",
+  "race_gender": "nuian_male"
+ }
+]
