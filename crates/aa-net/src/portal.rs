@@ -8,8 +8,10 @@
 //! * `SCCharacterReturnDistricts` (0x05c): `i32` count, entries, `u32` the return point the character is
 //!   bound to (`X2Warp:GetBoundPortalId`). Always the whole district list.
 //! * `SCPortalInfoSaved` (0x05d): one entry, a private location renamed.
-//! * `SCPortalDeleted` (0x05e): `u8` portal type, `i32` id (the lane never sends it: deletions are local).
-//! * `SCUnitPortalUsed` (0x060): `bc` the unit that went through a portal.
+//! * `SCPortalDeleted` (0x05e): `u8` portal type, `i32` id, the answer to `CSDeletePortal`. The book already dropped the
+//!   entry when the request went out (a server that never answers still works), so the answer changes nothing then.
+//! * `SCUnitPortalUsed` (0x060): `bc` the unit that went through a portal, sent to the players around a gate
+//!   (`OnUnitPortalUsed` plays an effect on that unit, see `docs/aa-client-portals.md`).
 //! * `SCNaviTeleport` (0x15c): a long position (`i64` x, `i64` y, `f32` z).
 //!
 //! An entry: `u32` id, string name, `u32` zone key, `f32` x and y relative to the zone's origin cell
@@ -285,10 +287,11 @@ impl Portals {
                         }
                         Some(PortalChange::Renamed)
                     }
-                    PortalEvent::Deleted { portal_type, portal_id } => {
-                        self.remove(*portal_type, *portal_id as u32);
-                        Some(PortalChange::Deleted)
-                    }
+                    // idempotent: the request already dropped the entry (`Event::PortalDeleteSent`), so the server's answer
+                    // changes (and refreshes the window) only when the entry was still there
+                    PortalEvent::Deleted { portal_type, portal_id } => u32::try_from(*portal_id)
+                        .is_ok_and(|id| self.remove(*portal_type, id))
+                        .then_some(PortalChange::Deleted),
                     PortalEvent::UnitPortalUsed { .. } | PortalEvent::NaviTeleport { .. } => None,
                 };
                 if let Some(change) = change {
@@ -296,7 +299,7 @@ impl Portals {
                     self.last = Some(change);
                 }
             }
-            // the lane answers a deletion with nothing: the book drops the entry once the request is out
+            // the entry leaves the book once the request is out (the answer, `SCPortalDeleted`, is idempotent)
             Event::PortalDeleteSent { portal_type, portal_id } if self.remove(*portal_type, *portal_id) => {
                 self.revision = self.revision.wrapping_add(1);
                 self.last = Some(PortalChange::Deleted);
@@ -381,6 +384,13 @@ mod tests {
             w.raw(&[0x0c, 0x0b, 0x0a]);
         });
         assert_eq!(ServerMsg::decode(&raw).unwrap(), ServerMsg::Portal(PortalEvent::UnitPortalUsed { unit_id: 0x0a0b0c }));
+        // both are fixed size: a short body is an error, not a half-read event
+        for n in 0..5 {
+            assert!(PortalEvent::read(SC_PORTAL_DELETED, &mut Reader::new(&[1, 0x34, 0x12, 0, 0][..n])).is_err(), "{n}");
+        }
+        for n in 0..3 {
+            assert!(PortalEvent::read(SC_UNIT_PORTAL_USED, &mut Reader::new(&[0x0c, 0x0b, 0x0a][..n])).is_err(), "{n}");
+        }
         let raw = body(SC_NAVI_TELEPORT, |w| {
             w.long_position(Pos::new(1000.5, 2000.0, 50.0));
         });
@@ -483,6 +493,16 @@ mod tests {
         assert!(!book.apply(&Event::PortalDeleteSent { portal_type: portal_type::PRIVATE, portal_id: 1 }));
         assert!(book.apply(&Event::Portal(PortalEvent::Deleted { portal_type: portal_type::DISTRICT, portal_id: 240 })));
         assert!(book.districts.is_empty());
+        // the server's answer to a deletion already done locally changes nothing and raises no event
+        let rev = book.revision;
+        assert!(!book.apply(&Event::Portal(PortalEvent::Deleted { portal_type: portal_type::PRIVATE, portal_id: 1 })));
+        assert!(!book.apply(&Event::Portal(PortalEvent::Deleted { portal_type: portal_type::DISTRICT, portal_id: 240 })));
+        assert!(!book.apply(&Event::Portal(PortalEvent::Deleted { portal_type: portal_type::PRIVATE, portal_id: -5 })));
+        assert_eq!(book.revision, rev);
+        // an entry the server deletes that is still there (another session, an old client) goes
+        assert!(book.apply(&Event::Portal(PortalEvent::Deleted { portal_type: portal_type::PRIVATE, portal_id: 2 })));
+        assert_eq!(book.private.iter().map(|p| p.id).collect::<Vec<_>>(), [3]);
+        assert_eq!((book.last, book.revision), (Some(PortalChange::Deleted), rev + 1));
         let rev = book.revision;
         assert!(!book.apply(&Event::Portal(PortalEvent::UnitPortalUsed { unit_id: 5 })));
         assert_eq!(book.revision, rev);
