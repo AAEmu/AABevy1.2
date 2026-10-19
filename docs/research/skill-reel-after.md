@@ -1,5 +1,27 @@
 # Skill reel: after (final round, HEAD bab4c1a) and round 1 (c19c00f)
 
+## Reel harness v2 (after 4c8bb5c; used by the next re-record)
+
+`tools/reel/plan.py` now sends what the server would, so auras, poses, freezes and stuns show (the triage in `skill-novisible.md` found
+about 24 of 27 "we fail to show it" rows were the reel):
+
+* **Buffs**: `T:buff[@self]:INDEX:BUFF:0` / `T:unbuff[@self]:INDEX` steps (the existing fake ops, same event as the audit sweep's
+  `BuffCreated`), from the DB: the `skill_effects` BuffEffect rows at the lowest level that shows something (rows that need a buff tag on
+  someone are left out), the skill's channeling / toggle buff, and for plot skills the BuffEffect rows of each plot step (plot target 1 =
+  caster). A buff lands on the doll, on the caster for a self skill, or on the caster when its row is for friends only and the skill is
+  hostile. Only buffs with an aura, start pose, framehold or ragdoll are sent. A buff stays on for its duration, at most 3.5 s (a
+  channel buff up to `CHANNEL_CAP`), and the skill's slot lasts that long.
+* **Flights**: `fire` delay = `effect_delay` + distance / `effect_speed` (the server's landing time; the client plays the projectile for
+  `delay - effect_delay`), and the hit lands when the shot lands. The doll stands 4 m away, so a projectile skill is timed for 10 m
+  (`SHOT_RANGE`, real shots fly 8 to 17 m); speedless projectiles take 500 ms. Plot steps' projectiles fly by their own data speed over the
+  real 4 m (Endless Arrows: about 0.1 s) and cannot be lengthened from the reel.
+* **Channels**: `CHANNEL_CAP` 4 s -> 8 s (Meditate 9, Invincibility 12, Telekinesis 12, Play Dead and Twilight 60 are cut at 8).
+* A hostile skill whose target type is "any" (Snare) now aims at the doll, not the caster (`relation == 4` is not a self skill).
+* Reel lengths grow by about 25 percent (35 to 66 s per tree); the ground reels have no buffs (real server flow).
+
+Test captures at HEAD with the working tree of that moment: Play Dead lies down (a body at the caster's feet; the standing model stays, a
+client matter), Bubble Trap flies about 1 s and the bubble and splash show at the doll, Meditate's pink aura shows over the 8 s channel.
+
 ## Final round: `after2` at bab4c1a
 
 The same 110 skills, the motion reel and two new ground-target reels, recorded with `target/agents/reel/after2/aa-client.exe`
