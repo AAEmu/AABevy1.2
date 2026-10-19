@@ -820,29 +820,72 @@ impl Inner {
     }
 }
 
-/// The bone names (of the player and creature rigs, tried in order) of an `fx_items.bone_id`. The ids 6 / 7 (feet), 8 / 9 (the
-/// hands: the weapon bones) and 19 (`Bip01 Hit`, where a blow lands) are certain from the anim events of the clips; 1 to 5 are
-/// the body, head and pelvis by their effects. 0 is the model's origin (the feet).
+/// The joint names (tried in order, case-insensitively, as the client does) of an `fx_items.bone_id` and of a projectile's
+/// `dest_bone_id`: the table of x2game `393E7C40` (`docs/research/re-skills.md` 4.4). Unknown ids and 0 are `bip01`, which every clip
+/// moves to the ground under the unit; 14 to 18 are an empty name (the client takes `bip01 spine` for it); 19 is `Bip01 Hit`, the point a
+/// blow lands on (the client picks the hit joint closest to the attacker; a rig without one gets its spine). A rig without the joint
+/// has the model's origin (the caller's fallback).
 pub fn bone_names(id: u8) -> &'static [&'static str] {
     match id {
-        1 => &["Bip01 Spine1", "Bip01 Spine"],
-        2 => &["Bip01 Head", "Bip01 Spine2"],
-        3 => &["Bip01 Spine2", "Bip01 Spine1"],
-        4 => &["Bip01 Pelvis", "Bip01 Spine"],
-        5 => &["item_hand_r", "Bip01 R Hand"],
-        6 => &["Bip01 L Foot"],
-        7 => &["Bip01 R Foot"],
-        8 => &["item_hand_l", "Bip01 L Hand", "Bip01 L Forearm"],
-        9 => &["item_hand_r", "Bip01 R Hand", "Bip01 R Forearm"],
-        19 => &["Bip01 Hit", "Bip01 Spine1", "Bip01 Spine"],
-        24 => &["Bip01 Spine1"],
-        _ => &[],
+        1 | 14..=18 => &["bip01 spine"],
+        2 => &["bip01 head"],
+        3 => &["bip01 neck"],
+        4 => &["bip01 L Hand"],
+        5 => &["bip01 R Hand"],
+        6 => &["bip01 L Foot"],
+        7 => &["bip01 R Foot"],
+        8 => &["item_hand_l"],
+        9 => &["item_hand_r"],
+        10 => &["effect_1"],
+        11 => &["bone_center"],
+        12 => &["bone_string"],
+        13 => &["bone_string_b8"],
+        19 => &["Bip01 Hit", "bip01 spine1", "bip01 spine"],
+        20 => &["attach_form"],
+        21 => &["attach_launch"],
+        22 => &["bip01 spine1"],
+        23 => &["bip01 spine2"],
+        24 => &["bip01 spine3"],
+        _ => &["bip01"],
+    }
+}
+
+/// The joint names of a projectile's `src_bone_id` (x2game `393E7D50`): the same as [`bone_names`], except that 14 to 18 and the unknown
+/// ids are `bip01`, 25 to 28 are the `effect1` / `effect2` joints of the main / off hand weapon (the rigs have none: the caller falls
+/// back to the hand that holds it) and 29 / 30 the sword hangers `item_side_l` / `item_side_r`.
+///
+/// `bip01` (0, the source of 23 of 30 beams and of nearly every flying shot) is the chest here, not the joint: a real capture of
+/// Arc Lightning, Absorb Lifeforce and Flamebolt shows the beam's launch disc and the fireball leaving the caster at waist to
+/// shoulder height (about 1.2 m), while every clip puts `Bip01` on the ground (`docs/research/re-skills.md` 4.4). The hit joint
+/// stands for it (it follows the pose like the real one: the disc sits ahead of the torso in a lunge).
+pub fn src_bone_names(id: u8) -> &'static [&'static str] {
+    match id {
+        1..=13 | 19..=24 => bone_names(id),
+        25 | 27 => &["effect1"],
+        26 | 28 => &["effect2"],
+        29 => &["item_side_l"],
+        30 => &["item_side_r"],
+        _ => &["Bip01 Hit", "bip01 spine1", "bip01 spine", "bip01"],
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bone table of x2game (`393E7C40` / `393E7D50`): the ids, the defaults and the source-only ids.
+    #[test]
+    fn the_bone_tables_follow_x2game() {
+        let names = |id: u8| bone_names(id)[0];
+        assert_eq!((names(0), names(200)), ("bip01", "bip01"));
+        assert_eq!((names(1), names(3), names(4), names(5)), ("bip01 spine", "bip01 neck", "bip01 L Hand", "bip01 R Hand"));
+        assert_eq!((names(8), names(9), names(10), names(13)), ("item_hand_l", "item_hand_r", "effect_1", "bone_string_b8"));
+        assert_eq!((names(16), names(19), names(22), names(24)), ("bip01 spine", "Bip01 Hit", "bip01 spine1", "bip01 spine3"));
+        // the source table adds the weapon and hanger joints and sends the unknown ids to the chest
+        let src = |id: u8| src_bone_names(id)[0];
+        assert_eq!((src(25), src(28), src(29), src(9)), ("effect1", "effect2", "item_side_l", "item_hand_r"));
+        assert_eq!((src(0), src(15)), ("Bip01 Hit", "Bip01 Hit"));
+    }
 
     fn book() -> Option<SkillBook> {
         std::path::Path::new(aa_anim::db::DEFAULT_DB).exists().then(|| SkillBook::open().expect("database"))

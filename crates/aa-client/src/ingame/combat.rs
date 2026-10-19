@@ -55,7 +55,7 @@ use super::sounds::{AnimSound, Audio, Class, LayerSounds};
 use super::weapons::{Drawn, Out, StaffSide, Wield, holster_clip, hold_weapons, weapon_for_clip};
 use crate::Screen;
 pub(super) use skills::Sfx;
-use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
+use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev, src_bone_names};
 
 /// What a unit is busy with, so locomotion does not take its clip away.
 #[derive(Component, Clone, Copy, Debug)]
@@ -719,23 +719,24 @@ impl Stage<'_, '_> {
 
     /// The bone entity of an effect bone id (`None` for the origin and for rigs without such a bone).
     fn bone(&self, unit: Entity, id: u8) -> Option<Entity> {
-        self.bone_by(unit, bone_names(id))
-    }
-
-    /// The first of `names` the unit's rig has, as the entity of that bone.
-    fn bone_by(&self, unit: Entity, names: &[&str]) -> Option<Entity> {
         let (animator, ..) = self.actors.get(unit).ok()?;
-        names.iter().find_map(|name| {
-            let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *name)?;
-            animator.bones.get(i).copied()
-        })
+        find_bone(animator, bone_names(id))
     }
 
-    /// World position of an effect bone of a unit: the bone, else the unit's origin raised to `fallback_height`.
+    /// World position of an effect bone of a unit: the bone, else the unit's origin (id 0) or the origin raised to `fallback_height`.
     fn bone_point(&self, unit: Entity, id: u8, fallback_height: f32) -> Option<Vec3> {
         match self.bone(unit, id).and_then(|b| self.xforms.get(b).ok()) {
             Some(g) => Some(g.translation()),
-            None => self.xforms.get(unit).ok().map(|g| g.translation() + Vec3::Y * fallback_height * g.scale().y),
+            None => self.xforms.get(unit).ok().map(|g| g.translation() + if id == 0 { Vec3::ZERO } else { Vec3::Y * fallback_height * g.scale().y }),
+        }
+    }
+
+    /// World position of a projectile's source bone (`src_bone_id`, the table of `src_bone_names`) on its caster.
+    fn source_point(&self, unit: Entity, id: u8) -> Option<Vec3> {
+        let found = self.actors.get(unit).ok().and_then(|(animator, ..)| source_bone(animator, id));
+        match found.and_then(|b| self.xforms.get(b).ok()) {
+            Some(g) => Some(g.translation()),
+            None => self.xforms.get(unit).ok().map(|g| g.translation() + if (25..=30).contains(&id) { Vec3::Y * g.scale().y } else { Vec3::ZERO }),
         }
     }
 
@@ -1797,14 +1798,10 @@ fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLigh
 #[allow(clippy::too_many_arguments)]
 fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32) -> Option<Entity> {
     let beam = projectile.is_beam();
-    // the launch bone: the projectile's own, else the first effect item's (the left hand of a bow, the right hand of a spell). A beam
-    // sits on its own source bone alone: id 0 is `Bip01` (the client's table, `docs/research/re-skills.md` 4.2), not the items' bone
-    let src_bone = if projectile.src_bone != 0 || beam { projectile.src_bone } else { projectile.items.first().map_or(9, |i| i.bone) };
-    let from = if beam && src_bone == 0 {
-        st.bone_by(caster, BEAM_ROOT).and_then(|b| st.xforms.get(b).ok()).map(|g| g.translation()).or_else(|| st.bone_point(caster, 0, 1.0))?
-    } else {
-        st.bone_point(caster, src_bone, 1.0)?
-    };
+    // the launch bone is the projectile's own source bone, items of bone 0, 8 and 9 included (`src_bone_names`: id 0 is the chest,
+    // 25 the left hand of a bow); there is no fallback to the first item's bone
+    let src_bone = projectile.src_bone;
+    let from = st.source_point(caster, src_bone)?;
     let dest_bone = if projectile.dest_bone != 0 { projectile.dest_bone } else { 19 };
     let to = match target {
         Some(t) => st.bone_point(t, dest_bone, 1.0),
@@ -1843,6 +1840,12 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         st.commands.entity(anchor).insert(Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05), arrival: Arc::new(arrival) });
     }
     for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
+        // the client moves the items of bone 0, 8 and 9 (the origin and the hands: the launch flash) onto the projectile's source
+        // bone, the anchor here; an item of another bone stays on its own bone of the caster (`docs/research/re-skills.md` 4.4)
+        if !matches!(item.bone, 0 | 8 | 9) {
+            st.spawn_item(item, caster, None, false);
+            continue;
+        }
         // the sounds of the projectile fly with it
         if item.effect.is_empty() {
             if let Some(sfx) = &item.sound {
@@ -1904,16 +1907,25 @@ struct Beam {
     to_pos: Vec3,
 }
 
-/// The world position of an effect bone of a unit.
-/// The rig bone of a beam's source id 0 (`bip01`).
-const BEAM_ROOT: &[&str] = &["Bip01"];
-
-fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit: Entity, id: u8, beam_source: bool) -> Option<Vec3> {
-    let animator = actors.get(unit).ok()?;
-    (if beam_source && id == 0 { BEAM_ROOT } else { bone_names(id) }).iter().find_map(|n| {
-        let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *n)?;
-        xforms.get(*animator.bones.get(i)?).ok().map(|g| g.translation())
+/// The first of `names` the rig has, as the entity of that bone (names match case-insensitively, as the client's do).
+fn find_bone(animator: &Animator, names: &[&str]) -> Option<Entity> {
+    names.iter().find_map(|name| {
+        let i = animator.rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case(name))?;
+        animator.bones.get(i).copied()
     })
+}
+
+/// The bone of a projectile's source id: the table of `src_bone_names`; the weapon joints `effect1` / `effect2` (25 to 28) are not in
+/// the rigs, the hand that holds the weapon (a bow is in the left one) stands for them.
+fn source_bone(animator: &Animator, id: u8) -> Option<Entity> {
+    find_bone(animator, src_bone_names(id)).or_else(|| (25..=28).contains(&id).then(|| find_bone(animator, bone_names(8))).flatten())
+}
+
+/// The world position of an effect bone of a unit (a projectile's source bone when `source`).
+fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit: Entity, id: u8, source: bool) -> Option<Vec3> {
+    let animator = actors.get(unit).ok()?;
+    let bone = if source { source_bone(animator, id) } else { find_bone(animator, bone_names(id)) }?;
+    xforms.get(bone).ok().map(|g| g.translation())
 }
 
 /// Stretches the links between their two ends: the anchor sits on the launch bone, faces the target's bone and is as long as the
@@ -1960,11 +1972,7 @@ fn fly_projectiles(
         f.elapsed += dt;
         // homing: the target's hit bone as it moves
         if let Some((unit, bone_id)) = f.to_unit
-            && let Ok(animator) = actors.get(unit)
-            && let Some(point) = bone_names(bone_id).iter().find_map(|n| {
-                let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *n)?;
-                xforms.get(*animator.bones.get(i)?).ok().map(|g| g.translation())
-            })
+            && let Some(point) = bone_world(&xforms, &actors, unit, bone_id, false)
         {
             f.to_pos = point;
         }
