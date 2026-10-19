@@ -21,6 +21,7 @@ use bevy::prelude::*;
 
 use crate::caf::Clip;
 use crate::pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
+use crate::rope::RopeSim;
 
 /// One clip being played.
 #[derive(Clone, Debug)]
@@ -300,7 +301,10 @@ pub struct AnimPlugin;
 
 impl Plugin for AnimPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ClipLibrary>().add_systems(PostUpdate, animate.before(TransformSystems::Propagate));
+        use crate::rope::{RopeSettings, attach_ropes, track_ropes};
+        app.init_resource::<ClipLibrary>()
+            .init_resource::<RopeSettings>()
+            .add_systems(PostUpdate, (attach_ropes, track_ropes, animate).chain().before(TransformSystems::Propagate));
     }
 }
 
@@ -312,11 +316,11 @@ pub fn take_stats() -> (u32, u64) {
     (UPDATED.swap(0, Ordering::Relaxed), NANOS.swap(0, Ordering::Relaxed))
 }
 
-pub(crate) fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut transforms: Query<&mut Transform>) {
+pub(crate) fn animate(time: Res<Time>, mut animators: Query<(&mut Animator, Option<&mut RopeSim>)>, mut transforms: Query<&mut Transform>) {
     let started = Instant::now();
     let dt = time.delta_secs();
     // sample the poses of the characters that are due (in parallel: a crowd is hundreds of bones each)
-    animators.par_iter_mut().batching_strategy(BatchingStrategy::fixed(8)).for_each(|mut a| {
+    animators.par_iter_mut().batching_strategy(BatchingStrategy::fixed(8)).for_each(|(mut a, rope)| {
         if a.current.is_none() {
             return;
         }
@@ -326,10 +330,15 @@ pub(crate) fn animate(time: Res<Time>, mut animators: Query<&mut Animator>, mut 
         }
         let step = std::mem::take(&mut a.accum);
         a.update(step);
+        // rope bones (robes, cloaks, skirts) follow the sampled pose with their own motion
+        if let Some(mut rope) = rope {
+            let a = &mut *a;
+            rope.apply(&a.rig, &mut a.pose, step);
+        }
         a.fresh = true;
     });
     let mut updated = 0;
-    for mut a in &mut animators {
+    for (mut a, _) in &mut animators {
         if !a.fresh {
             continue;
         }
