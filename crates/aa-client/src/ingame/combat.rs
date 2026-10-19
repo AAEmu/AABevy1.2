@@ -52,7 +52,7 @@ use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::RemoteUnit;
 use super::camera::CameraShake;
 use super::sounds::{AnimSound, Audio, Class, LayerSounds};
-use super::weapons::{Drawn, Out, Wield, holster_clip, hold_weapons, weapon_for_clip};
+use super::weapons::{Drawn, Out, StaffSide, Wield, holster_clip, hold_weapons, weapon_for_clip};
 use crate::Screen;
 pub(super) use skills::Sfx;
 use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev};
@@ -1047,6 +1047,10 @@ fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: 
     }
 }
 
+    if played.is_some() && name.starts_with("all_") {
+        // a spell puts the staff back on the back (the real client, after a weapon skill had sent it to the hip)
+        st.commands.entity(caster).try_insert(StaffSide(false));
+    }
 /// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
 /// locomotion.
 fn end_loop(st: &mut Stage, combat: &mut Combat, tl: u16) {

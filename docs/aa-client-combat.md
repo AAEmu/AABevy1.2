@@ -500,6 +500,14 @@ Counts of the 231 player skills before and after: clips missing 0 / 0 (the clip 
 not clips), effects missing 2 / 2 (typos in the data), skills whose buff shows 0 / 110 of 128 that bring one, anim-event effects 0 / 114,
 projectile physics handled 1 of 4 kinds / 4 of 4.
 
+## Round 3 notes (`docs/research/skill-audit-anim.md`)
+
+* The lute attaches to `item_hand_l` (the bone the music clip animates). The staff hangs on `item_side_l` after a weapon skill
+  (`StaffSide`, set when it leaves the hand, cleared by the next `all_` clip), else on the back.
+* Bull Rush (controller 4433, not in `skill_controllers`) dashes like Charge through a fallback in `skill_motion/book.rs`; the other
+  missing controllers (Precision Strike 703, Mana Force 732, Tiger Strike 2275, Triple Slash 604, Pin Down 2338) have no client data.
+* `ingame/stealth.rs`: buffs with `stealth` make the local player a translucent pink-red ghost and hide stealthed remote units.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,

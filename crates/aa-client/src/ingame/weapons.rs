@@ -35,6 +35,8 @@ pub struct CarriedItem {
     /// Out of sight while it is not in the hand: a bow whose place on the back a two handed weapon takes (`holdables.sheathe_priority`
     /// 9 against the bow's 4).
     pub hide_sheathed: bool,
+    /// Where it hangs after it was in the hand (a staff the real client put away after a weapon skill: the left hip, `item_side_l`).
+    pub side_bone: Option<&'static str>,
 }
 
 /// How a weapon is held, which decides when it comes out.
@@ -93,7 +95,16 @@ pub struct HeldWeapon {
     pub hand_transform: Transform,
     pub in_hand: bool,
     pub hide_sheathed: bool,
+    /// The bone it hangs on at the side (see [`StaffSide`]).
+    pub side: Option<Entity>,
+    /// Hanging at the side now.
+    pub on_side: bool,
 }
+
+/// A character's staff hangs on its left hip (after a weapon skill put it away) instead of the back (at spawn, and after a spell).
+/// The bow is on the back whenever the staff is not.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StaffSide(pub bool);
 
 /// What the character has out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +215,10 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
         };
         let offhand = s == slot::OFFHAND && w.code != "shield";
         let (grip, hand_bone) = match (w.code.as_str(), s) {
+            // the lute is carried by the left hand bone: the lute clips animate `item_hand_l` (not `item_lute_r`, which they leave at
+            // its rest place on the back), and the attachment offset (a few centimetres) is relative to it; the pipes hang on the
+            // right hand bone
+            _ if instrument == Some(0) => (Grip::Instrument(0), Some("item_hand_l")),
             _ if instrument.is_some() => (Grip::Instrument(instrument.unwrap_or(0)), Some("item_hand_r")),
             ("bow", _) => (Grip::Bow, Some("item_hand_l")),
             ("shield", _) => (Grip::Shield, None),
@@ -211,7 +226,7 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             _ => (Grip::Blade, Some("item_hand_r")),
         };
         out.push(CarriedItem {
-            bone: if w.staff { "item_bow_l" } else { sheath_bone(&w.code, s, w.two_handed) },
+            bone: if w.staff { "item_staff_l" } else { sheath_bone(&w.code, s, w.two_handed) },
             transform: Transform {
                 translation: Vec3::from(w.offset),
                 rotation: Quat::from_euler(EulerRot::XYZ, rx, ry, rz),
@@ -233,6 +248,7 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             },
             path: w.path,
             hide_sheathed: false,
+            side_bone: w.staff.then_some("item_side_l"),
         });
     }
     // a two handed weapon takes the bow's place on the back
@@ -280,6 +296,8 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                     hand_transform: item.transform,
                     in_hand: false,
                     hide_sheathed: false,
+                    side: None,
+                    on_side: false,
                 });
             } else if let Some(hand) = item.hand_bone.and_then(bone_of) {
                 commands.entity(model).insert(HeldWeapon {
@@ -292,6 +310,8 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                     hand_transform: item.hand_transform,
                     in_hand: false,
                     hide_sheathed: item.hide_sheathed,
+                    side: item.side_bone.and_then(bone_of),
+                    on_side: false,
                 });
             }
         }
@@ -301,7 +321,14 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
 }
 
 /// Moves the weapons between the sheath and the hand as their owners start and stop fighting.
-pub fn hold_weapons(time: Res<Time>, mut commands: Commands, entities: &Entities, owners: Query<&Drawn>, mut weapons: Query<(Entity, &mut HeldWeapon)>) {
+pub fn hold_weapons(
+    time: Res<Time>,
+    mut commands: Commands,
+    entities: &Entities,
+    owners: Query<&Drawn>,
+    sides: Query<&StaffSide>,
+    mut weapons: Query<(Entity, &mut HeldWeapon)>,
+) {
     let now = time.elapsed_secs_f64();
     for (entity, mut weapon) in &mut weapons {
         // a weapon whose owner went in the frame it was attached lost its bone: it goes too
@@ -316,17 +343,32 @@ pub fn hold_weapons(time: Res<Time>, mut commands: Commands, entities: &Entities
             (Grip::Blade, Some(Out::Blade { dual })) => dual || !weapon.offhand,
             _ => false,
         };
-        if want == weapon.in_hand {
+        let on_side = sides.get(weapon.owner).is_ok_and(|s| s.0);
+        // a staff that was in the hand and is put away goes to the hip
+        if weapon.side.is_some() && weapon.in_hand && !want {
+            commands.entity(weapon.owner).try_insert(StaffSide(true));
+        }
+        // the bow shares the back with a staff: out of sight while the staff is there
+        let hidden_bow = weapon.hide_sheathed && !on_side;
+        let place = if want { None } else { weapon.side.filter(|_| on_side) };
+        if want == weapon.in_hand && weapon.on_side == place.is_some() {
+            if weapon.hide_sheathed && !want {
+                commands.entity(entity).try_insert(if hidden_bow { Visibility::Hidden } else { Visibility::Inherited });
+            }
             continue;
         }
         weapon.in_hand = want;
-        let (bone, transform) = match (want, weapon.hand) {
-            (true, Some(hand)) => (hand, weapon.hand_transform),
+        weapon.on_side = place.is_some();
+        let (bone, transform) = match (want, weapon.hand, place) {
+            (true, Some(hand), _) => (hand, weapon.hand_transform),
+            (false, _, Some(side)) => (side, weapon.sheath_transform),
             _ => (weapon.sheath, weapon.sheath_transform),
         };
         commands.entity(entity).try_insert((transform, ChildOf(bone)));
-        if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) || weapon.hide_sheathed {
+        if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) {
             commands.entity(entity).try_insert(if want { Visibility::Inherited } else { Visibility::Hidden });
+        } else if weapon.hide_sheathed {
+            commands.entity(entity).try_insert(if want || !hidden_bow { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
 }
@@ -336,7 +378,7 @@ mod tests {
     use super::*;
 
     fn item(grip: Grip, two_handed: bool, offhand: bool) -> CarriedItem {
-        CarriedItem { path: String::new(), bone: "", transform: Transform::IDENTITY, grip, two_handed, staff: false, offhand, hand_bone: None, hand_transform: Transform::IDENTITY, hide_sheathed: false }
+        CarriedItem { path: String::new(), bone: "", transform: Transform::IDENTITY, grip, two_handed, staff: false, offhand, hand_bone: None, hand_transform: Transform::IDENTITY, hide_sheathed: false, side_bone: None }
     }
 
     #[test]
