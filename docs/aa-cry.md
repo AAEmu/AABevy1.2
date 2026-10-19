@@ -87,8 +87,11 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
   name) and the ambient light on the camera; `aa_cry::stage::login_color_grading()` is the
   matching `ColorGrading` component. Lights are in engine light units (`LIGHT_UNIT_LUX`,
   `LOGIN_EXPOSURE`); `environment_light(cry, cubemap, intensity)` and
-  `material_environment(&Material)` are the generic helpers. Directions are in the stage frame
-  (+Z towards the camera, +Y up, +X to the viewer's right).
+  `material_environment(&Material)` are the generic helpers. Directions are in the figure's frame:
+  its front is **-Z**, +Z points away from the camera, +X is the viewer's left (the callers pass
+  `from_rotation_arc(NEG_Z, to_camera)`). The first calibration read +Z as "to the camera", which put the
+  key light behind the figure and the rim in front; fixed (`login()` now has the key at `(0.45, 0.6, -0.65)`).
+  `StageShadows` sets the key's cascades (2, 1 - 30 m, first bound 10 m instead of Bevy's 4 out to 150 m).
 * **Facing.** CryEngine characters face **+Y** (their left is -X); `CRY_TO_BEVY` leaves them
   facing Bevy **-Z**, so rotate the root by PI about Y to face a camera on +Z.
 * `LoadedModel { model, skeleton, inverse_bindposes, material_path, parts: Vec<(node, Vec<Part>)> }`
@@ -545,6 +548,22 @@ ignored. Five focused tests cover flags/defaults, modified/animated mapping reje
 filtering, resolution/mip selection, every Diffuse alpha mip, cache/palette separation, real
 512/256 assets, and unchanged/base-replaced/explicit-emissive hook behaviour. The fixture builds
 and its inspected window closes after capture.
+
+## Costume gloss and stage lighting
+
+* `bake_specular` (Illum, `Shading::Full`) treats a material as costume by `ReflectAmount` (7 - 15 on costumes, 0.25 on props;
+  factor `ReflectAmount / 8`, clamped): `COSTUME_GLOSS_BOOST` 8 on the glossiness of the specular map, sharpest roughness 0.3,
+  warm highlight tint 0.1, `COSTUME_DIFFUSE` 0.85 on the diffuse. Only `Illum` is touched: hair, skin and eyes are not.
+  The real costume leather is lacquer-glossy (the shader multiplies a dim map by `ReflectAmount`); the trims shine white-silver.
+* Measured on the step 2 captures (geometric mean real / ours of the figure's luma): mean 1.06 -> 1.00, q90 1.36 -> 1.35,
+  q99 1.36 -> 1.21 (frame fix and gloss together); real still has darker darks (q25 0.25).
+* Shadows: casters and receivers are the default for every character / creature mesh (nothing sets `NotShadowReceiver`); in
+  game `ingame/units.rs` drops the caster flag beyond a radius. The key's shadow is small on the stage because the fill and
+  environment light the shaded side. SSAO changes almost nothing (it only dims ambient light).
+* Step 1 "much darker in the real capture": the figure's mean luma matches (real / ours 0.9 - 1.1 for most races); the real
+  has deeper midtones and brighter highlights (gloss, shadow), and the costume leather is darker than ours while the face
+  matches. Not an exposure difference. A light-basis fit (`--key-from`, NNLS over 24 directions) puts most of the light near
+  the camera direction at 15 - 45 degrees elevation.
 
 ## Character back lights (`shade::backlight`)
 

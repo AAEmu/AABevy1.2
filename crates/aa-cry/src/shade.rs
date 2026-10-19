@@ -307,14 +307,31 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
     let reflect = 0.35 + 0.65 * (param_f32(m, "ReflectAmount").unwrap_or(1.0) / 2.0).clamp(0.0, 1.0);
     let matte = shininess_to_roughness(m.shininess);
     let shiny = (matte * 0.6).clamp(0.3, 0.55);
-    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}:{SPEC_STRENGTH}:{SPEC_TINT_AMOUNT}");
+    // Costumes (`ReflectAmount` 7 - 15, props 0.25) are far glossier in the captures than their
+    // maps alone give: the shader multiplies the dim specular map (purple on leather, 0.05 luma) by
+    // the reflect amount. A material counts as costume by `ReflectAmount` (0 props .. 1 costumes),
+    // and the costume side of every constant below is blended in by that factor.
+    let costume = (param_f32(m, "ReflectAmount").unwrap_or(1.0) / COSTUME_REFLECT_AMOUNT).clamp(0.0, 1.0);
+    let mix = |prop: f32, costume_value: f32| prop + (costume_value - prop) * costume;
+    let boost = mix(1.0, COSTUME_GLOSS_BOOST);
+    let sharp = mix(SHARP_ROUGHNESS, COSTUME_SHARP_ROUGHNESS);
+    let (ramp_lo, ramp_hi) = (mix(0.1, 0.05), mix(0.5, 0.3));
+    let tint_amount = mix(SPEC_TINT_AMOUNT, COSTUME_TINT_AMOUNT);
+    // The costume lighting: the gloss gives the highlights, the diffuse base is darker (the captures'
+    // costumes have deeper midtones than a Lambert surface under the stage rig).
+    let diffuse_k = mix(1.0, COSTUME_DIFFUSE);
+    if diffuse_k != 1.0 {
+        let c = out.base_color.to_linear();
+        out.base_color = Color::linear_rgba(c.red * diffuse_k, c.green * diffuse_k, c.blue * diffuse_k, c.alpha);
+    }
+    let key = format!("gloss:{spec}:{gain:.3}:{matte:.3}:{reflect:.3}:{boost:.2}:{sharp:.2}:{ramp_lo:.2}:{ramp_hi:.2}:{tint_amount:.2}");
     // per texel: g = how glossy the map is, metal = how much of it reflects like a metal
     let texel = move |p: &[u8]| {
         let s = Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0;
-        let g = (luma(s) * gain).clamp(0.0, 1.2);
+        let g = (luma(s) * gain * boost).clamp(0.0, 1.2);
         let metal = smoothstep(0.2, 0.75, g) * reflect;
         // glossier texels have sharper highlights (leather streaks, polished trims)
-        let rough_dielectric = matte + (matte.min(SHARP_ROUGHNESS) - matte) * smoothstep(0.1, 0.5, g);
+        let rough_dielectric = matte + (matte.min(sharp) - matte) * smoothstep(ramp_lo, ramp_hi, g);
         let rough = rough_dielectric + (shiny - rough_dielectric) * metal;
         (s, g, metal, rough)
     };
@@ -393,7 +410,7 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
                     // silver in the captures
                     let norm = s / s.max_element().max(1e-3);
                     let warm = smoothstep(0.0, 0.2, norm.x - norm.y);
-                    let hue = Vec3::ONE.lerp(norm, SPEC_TINT_AMOUNT * warm);
+                    let hue = Vec3::ONE.lerp(norm, tint_amount * warm);
                     let strength = (SPEC_STRENGTH * g).sqrt().clamp(0.0, 1.0);
                     data.extend_from_slice(&[
                         (hue.x * 255.0).round() as u8,
@@ -424,6 +441,16 @@ const METAL_GAIN_MAX: f32 = 5.0;
 const METAL_ALBEDO_GAIN: f32 = 8.0;
 /// Roughness of the sharpest dielectric highlights (glossy map texels).
 const SHARP_ROUGHNESS: f32 = 0.42;
+/// `ReflectAmount` from which a material counts fully as a costume (see [`bake_specular`]).
+const COSTUME_REFLECT_AMOUNT: f32 = 8.0;
+/// Factor on the glossiness of costume specular maps.
+const COSTUME_GLOSS_BOOST: f32 = 8.0;
+/// Roughness of the sharpest costume highlights (leather streaks).
+const COSTUME_SHARP_ROUGHNESS: f32 = 0.3;
+/// Factor on the diffuse colour of costume materials.
+const COSTUME_DIFFUSE: f32 = 0.85;
+/// Warm tint of costume highlights: the trims of the captures shine white-silver.
+const COSTUME_TINT_AMOUNT: f32 = 0.1;
 /// Dielectric specular strength per unit of map glossiness: `F0 = 0.16 * strength * tint^2`
 /// (strength 1 at glossiness 1 = the full 16% a dielectric can show).
 const SPEC_STRENGTH: f32 = 1.0;

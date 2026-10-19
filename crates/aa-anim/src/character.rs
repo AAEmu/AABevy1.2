@@ -801,14 +801,14 @@ const BODY_SKIN_REFLECTANCE: f32 = 0.7;
 pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     // BEGIN SKIN TUNE
     let t = match (race, gender) {
-        (Race::Nuian, Gender::Male) => [0.932, 1.199, 0.794],
-        (Race::Nuian, Gender::Female) => [1.445, 1.817, 1.870],
-        (Race::Elf, Gender::Male) => [0.966, 1.069, 0.953],
-        (Race::Elf, Gender::Female) => [1.577, 1.486, 1.599],
-        (Race::Hariharan, Gender::Male) => [0.765, 0.670, 0.663],
-        (Race::Hariharan, Gender::Female) => [0.677, 0.616, 0.597],
-        (Race::Ferre, Gender::Male) => [0.300, 0.330, 0.300],
-        (Race::Ferre, Gender::Female) => [0.765, 0.669, 0.570],
+        (Race::Nuian, Gender::Male) => [0.642, 0.741, 0.415],
+        (Race::Nuian, Gender::Female) => [1.074, 1.250, 1.207],
+        (Race::Elf, Gender::Male) => [0.679, 0.679, 0.541],
+        (Race::Elf, Gender::Female) => [1.272, 1.083, 1.078],
+        (Race::Hariharan, Gender::Male) => [0.508, 0.404, 0.367],
+        (Race::Hariharan, Gender::Female) => [0.428, 0.319, 0.268],
+        (Race::Ferre, Gender::Male) => [0.222, 0.244, 0.222],
+        (Race::Ferre, Gender::Female) => [0.557, 0.523, 0.444],
     };
     // END SKIN TUNE
     Vec3::from(t)
@@ -826,7 +826,7 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
 ///   `(0.37, 0.26, 0.26)`, so the face tune (1.6) pushed the red of the costume's chest cutout
 ///   (`el_f_login001`, a `HumanSkin` sub-mesh with the nude texture) into the tone curve's shoulder:
 ///   a flat salmon patch `(243, 161, 148)` where the capture shows pale pink `(221, 165, 163)`. The
-///   row is the face / body texture ratio `(0.50, 0.63, 0.83)` times about 1.3, fitted to the mean
+///   row is the face / body texture ratio `(0.50, 0.63, 0.83)`, refitted (`(0.43, 0.54, 0.69)`) after the stage-frame fix, to the mean
 ///   of the two cutout lobes of `step2_elf_female` (`compare`, same pixels).
 ///
 /// The other bodies are not tinted: their textures are brighter than the faces' too, but the faces
@@ -835,7 +835,7 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
 pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
     match (race, gender) {
         (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),
-        (Race::Elf, Gender::Female) => Vec3::new(0.65, 0.78, 0.90),
+        (Race::Elf, Gender::Female) => Vec3::new(0.43, 0.54, 0.69),
         _ => Vec3::ONE,
     }
 }
