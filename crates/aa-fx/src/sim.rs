@@ -176,7 +176,7 @@ pub struct EmitterState {
     pub parent: Option<usize>,
     /// Index into the material table of the plugin.
     pub material: u32,
-    /// Height / width of one texture tile.
+    /// Width / height of one texture tile (the engine shrinks the shorter side of the quad by it).
     pub aspect: f32,
     /// The mesh entity (or `Entity::PLACEHOLDER` for an emitter that only triggers others).
     pub mesh: bevy::prelude::Entity,
@@ -777,7 +777,8 @@ impl EmitterState {
         let n_tiles = (tiling.x * tiling.y).max(1);
         let du = 1.0 / tiling.x as f32;
         let dv = 1.0 / tiling.y as f32;
-        let aspect = self.aspect;
+        // the engine keeps the longer side of the texture tile at the authored size and shrinks the other
+        let (kx, ky) = if self.aspect >= 1.0 { (1.0, 1.0 / self.aspect) } else { (self.aspect, 1.0) };
         let lit = self.lit;
         let facing = def.facing;
         let orient = def.orient_to_velocity;
@@ -798,8 +799,8 @@ impl EmitterState {
             if alpha < 0.003 || sz < 1e-5 {
                 continue;
             }
-            let hx = ctx.sprite_half * sz * p.sx * luts.size_x.at(a);
-            let mut hy = ctx.sprite_half * sz * p.sy * luts.size_y.at(a) * aspect;
+            let hx = ctx.sprite_half * sz * p.sx * luts.size_x.at(a) * kx;
+            let mut hy = ctx.sprite_half * sz * p.sy * luts.size_y.at(a) * ky;
             let mut center = frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis);
             if orbit > 0.0 {
                 let t = orbit_speed * p.age + p.seed;

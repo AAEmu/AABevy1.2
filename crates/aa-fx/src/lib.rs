@@ -722,8 +722,9 @@ fn simulate(
                     SlotState::Loading => ready = false,
                     SlotState::Failed => e.draws = false,
                     SlotState::Ready if e.geom.is_none() => {
+                        // the engine's `aspect`: width over height of one tile (`ResourceParticleParams::ComputeAspect`)
                         let t = e.def.tiling;
-                        e.aspect = (slot.size.y as f32 * t.x as f32 / (slot.size.x as f32 * t.y as f32)).clamp(0.25, 4.0);
+                        e.aspect = (slot.size.x as f32 * t.y as f32 / (slot.size.y as f32 * t.x as f32)).max(1e-3);
                     }
                     SlotState::Ready => {}
                 }
