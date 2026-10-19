@@ -19,6 +19,7 @@
 //! * `--loop`                     start every effect again when it has finished (skill effects are one shots)
 //! * `--stagger <s>`             with `--grid n`: copy `i` of the effect starts `i * s` seconds after the first (a film strip of one
 //!   effect in a single shot; add `--loop` and `--no-prime`)
+//! * `--beam <m>`               stretches the effect entity to this length on its Z, like the combat code's beam anchor
 //! * `--sweep <m>`               moves every effect on a circle of this radius, 8 rad/s, at 1.2 m (a sword swing: trails and tails)
 //! * `--swing <s>`              a sword slash: the effect starts at 3 s, and the entity swings like a hand with a blade (the effect's
 //!   forward -Z is the blade) through 170 degrees in the plane facing the camera, in `<s>` seconds (0.3 is a fast cut)
@@ -354,7 +355,7 @@ fn setup(
     let stagger = num("--stagger", 0.0);
     for (i, (name, pos)) in positions.into_iter().enumerate() {
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
-        let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
+        let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians())).with_scale(Vec3::new(1.0, 1.0, num("--beam", 1.0)));
         if spawn.sheet.is_some() {
             // loaded behind the camera first, the real one starts with every other at SHEET_START
             commands.spawn((Effect { looping: false, prime: false, ..effect.clone() }, Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));

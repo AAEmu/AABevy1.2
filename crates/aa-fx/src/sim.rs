@@ -87,8 +87,12 @@ pub struct StepCtx<'a> {
     pub global: Affine3A,
     /// Rotation of the effect, scale removed.
     pub rot: Mat3,
-    /// Uniform scale of the effect (entity scale times `Effect::scale`).
+    /// Uniform scale of the effect (entity scale times `Effect::scale`); for a stretched anchor the middle axis scale.
     pub scale: f32,
+    /// How much longer than `scale` the entity is along each of its own axes (1 for a uniform scale). A beam anchor
+    /// (`proj_physic_id` 2) is stretched on its Z by the length of the link: offsets and velocities of the particles and the
+    /// mesh particles follow, the sprites' sizes do not.
+    pub axis: Vec3,
     pub speed_scale: f32,
     pub count_scale: f32,
     /// 1 = full emission, less thins far effects.
@@ -120,6 +124,14 @@ struct Frame {
     origin: Vec3,
     rot: Mat3,
     bound: bool,
+}
+
+impl StepCtx<'_> {
+    /// A vector of the effect's local frame, stretched along the entity's axes (`axis`).
+    #[inline]
+    fn stretch(&self, v: Vec3) -> Vec3 {
+        if self.axis == Vec3::ONE { v } else { self.rot * (self.axis * (self.rot.transpose() * v)) }
+    }
 }
 
 impl Frame {
@@ -558,7 +570,7 @@ impl EmitterState {
             local += c2b(p) * scale;
             surface_normal = Some(n);
         }
-        let world_pos = at.unwrap_or(frame.origin) + ctx.rot * local;
+        let world_pos = at.unwrap_or(frame.origin) + ctx.stretch(ctx.rot * local);
         let pos = frame.point_from_world(world_pos);
 
         // direction: focus axis, tilted by the focus angle, then the emit cone
@@ -594,7 +606,7 @@ impl EmitterState {
             dir = ctx.rot * c2b(n);
         }
         let speed = def.speed.spawn(r.next(), strength) * ctx.speed_scale * scale;
-        let mut vel = frame.dir_from_world(dir * speed);
+        let mut vel = frame.dir_from_world(ctx.stretch(dir * speed));
         let mut inh = Vec3::ZERO;
         if def.inherit_velocity != 0.0 && !def.bind_to_emitter {
             inh = frame.dir_from_world(ctx.emitter_vel * def.inherit_velocity);
@@ -1163,7 +1175,7 @@ impl EmitterState {
                 // the mesh's forward axis (CryEngine +Y) along the velocity
                 Mat3::from_quat(Quat::from_rotation_arc(Vec3::NEG_Z, vel / speed)) * turn
             } else {
-                ctx.rot * turn
+                ctx.rot * Mat3::from_diagonal(ctx.axis) * turn
             };
             let center = inv.transform_point3(frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis));
             let lin = inv3 * rot * Mat3::from_diagonal(scale);
@@ -1479,6 +1491,7 @@ mod tests {
             global: Affine3A::IDENTITY,
             rot: Mat3::IDENTITY,
             scale: 1.0,
+            axis: Vec3::ONE,
             speed_scale: 1.0,
             count_scale: 1.0,
             lod: 1.0,
@@ -1846,6 +1859,29 @@ mod tests {
         let p = s.emitters[0].particles[0];
         assert!((p.vel.x - 14.0).abs() < 1e-3, "{:?}", p.vel);
         assert!((p.vel - p.inh).length() < 1e-3, "{:?} {:?}", p.vel, p.inh);
+    }
+
+    /// A beam anchor (`proj_physic_id` 2) is stretched on its Z by the length of the link: the particles' offsets and velocities
+    /// follow along the entity's axes, the sizes do not (the engine's beam projectiles, `combat::update_beams`).
+    #[test]
+    fn a_stretched_anchor_stretches_offsets_and_velocities_but_not_sizes() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Size="0.5" Speed="2" PositionOffset="0,1,0""#);
+        let mut c = ctx(&budget);
+        c.axis = Vec3::new(1.0, 1.0, 4.0);
+        s.step(&c);
+        let p = s.emitters[0].particles[0];
+        // cry +Y is Bevy -Z: one metre of offset and 2 m/s become four and eight
+        assert!((p.pos.z + 4.0).abs() < 0.2 && p.pos.x.abs() < 1e-3, "{:?}", p.pos);
+        assert!((p.vel.z + 8.0).abs() < 1e-3 && p.vel.x.abs() < 1e-3, "{:?}", p.vel);
+        assert!((p.size - 0.5).abs() < 1e-6, "{}", p.size);
+        // a rotated anchor stretches along its own Z
+        let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        c.rot = Mat3::from_quat(rotation);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Speed="2""#);
+        s.step(&c);
+        let v = s.emitters[0].particles[0].vel;
+        assert!((v - rotation * Vec3::new(0.0, 0.0, -8.0)).length() < 1e-3, "{v:?}");
     }
 
     /// `Facing = Velocity` turns the card's normal (cry +Y) onto the direction of travel: a ring thrown along +X seen from
