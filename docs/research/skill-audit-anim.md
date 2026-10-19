@@ -304,8 +304,8 @@ The 60 hidden sub skills of the trees (call skills, weapon variants) use the cli
 * **Stealth (`ingame/stealth.rs`):** the real client draws the player's own character as a translucent red-pink hologram (blue spark
   flicker and a smoke puff when it starts; `shots/skill-audit/anim/real_stealth_*.png` at the time) and other stealthed units not at
   all. The 71 `buffs.stealth` ids come from the DB; the local player's meshes swap to one shared alpha-blended material that flickers
-  and are restored when the buff goes; meshes of stealthed remote units are hidden. Not done: the start spark / smoke, the hair
-  (its own material type stays opaque), and allies (no faction data, so a stealthed ally vanishes too).
+  and are restored when the buff goes; meshes of stealthed remote units are hidden. Not done in round 3 (round 4 below
+  adds allies and the crackle): the hair (its own material type stays opaque).
 
 ## Round 4 (buff poses, controllers, stealth allies)
 

@@ -185,7 +185,7 @@ impl Inner {
     /// (event 2225, after the cast) runs the dash of Charge (controller 6779: 400 ms, 10 m/s, 0.8 m short, forward only) on the caster,
     /// keeping the skill's own clip. The other player skills with a missing controller (Precision Strike 703, Triple Slash 604, Pin
     /// Down 2338: strikes) do not move their caster: the real client, with the target 3 m away, keeps Precision Strike and Triple Slash
-    /// where they stand ( over the cast,  round 4), so they need no fallback.
+    /// where they stand (unit positions polled over the cast, see docs/research/skill-audit-anim.md round 4), so they need no fallback.
     fn missing_controller(&mut self, event_id: u32) -> Option<StepMove> {
         if event_id != BULL_RUSH_STEP {
             return None;
