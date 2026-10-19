@@ -332,6 +332,16 @@ impl Geom {
             } else {
                 Blend::Opaque
             };
+            if dual.is_none() && out.texture.is_empty() && m.shader.eq_ignore_ascii_case("Liquid") {
+                // a Liquid surface with no dual material and no texture (the centre of `world_crack`, the portal gates): clear water, which the engine draws as
+                // the scene seen through it, tinted by `LiquidColor`. Opaque white was wrong; the real gate shows the scene darker and green
+                let c: Vec<f32> = m.public_param("LiquidColor").map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
+                out.tint = if c.len() == 3 { Vec3::new(c[0], c[1], c[2]) } else { Vec3::new(0.5, 0.6, 0.6) };
+                out.blend = Blend::Multiplicative;
+                out.lit = false;
+                out.opacity = 1.0;
+                out.emissive = 0.0;
+            }
             if !out.opacity_map.is_empty() {
                 // `opacityChannelMask="0,0,0,1"` names the channel; a grey map has the same value in all of them
                 out.opacity_mask = match m.public_param("opacityChannelMask") {
@@ -432,6 +442,18 @@ mod tests {
         assert_eq!(g.mtl.blend, Blend::Alpha);
         assert!(g.mtl.opacity < 0.5, "{:?}", g.mtl);
         assert!(g.mtl.texture.contains("water_fall_foamy"), "{:?}", g.mtl);
+    }
+
+    #[test]
+    fn the_liquid_centre_of_the_portal_gate_is_tinted_water_not_a_white_slab() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        // `world_crack_center.mtl`: a Liquid with no textures and no dual material, LiquidColor 0.45 0.62 0.54 (it was drawn opaque white)
+        let key = GeomKey { path: "game/objects/effects/world_crack_center.cgf".into(), material: "game/objects/effects/world_crack_center.mtl".into(), texture: String::new(), blend: None };
+        let g = Geom::load(&key).expect("crack centre");
+        assert_eq!(g.mtl.blend, Blend::Multiplicative, "{:?}", g.mtl);
+        assert!((g.mtl.tint.y - 0.62).abs() < 0.01 && g.mtl.tint.x < 0.5, "{:?}", g.mtl);
     }
 
     #[test]
