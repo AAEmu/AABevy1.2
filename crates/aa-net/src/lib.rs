@@ -54,6 +54,8 @@ pub mod model;
 pub mod net;
 pub mod opcodes;
 pub mod party;
+pub mod portal;
+pub use portal::{PortalChange, PortalCommand, PortalEntry, PortalEvent, Portals};
 pub mod proxy;
 pub mod quest;
 pub mod repair;

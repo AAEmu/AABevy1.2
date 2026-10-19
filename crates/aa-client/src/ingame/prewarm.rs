@@ -12,6 +12,12 @@
 //! The world is the real one, not a mock scene, because the pipeline of a material depends on its flags, on the mesh's
 //! vertex layout and on the passes it is drawn in (prepass, shadow cascades), and the data decides which combinations exist.
 //!
+//! The world follows the selection of the list ([`Selected`]: the character just created, or the one the player clicked). When the
+//! selection moves to another place (more than [`RETARGET`] away from where the world was built) and stays there for
+//! [`CHOOSE`] seconds, a running prewarm moves the world, the camera and its character over; one that has settled runs again
+//! (the pipelines are compiled by then: it only streams the new place in, about a second). Clicking back and forth between
+//! characters of the same place does nothing.
+//!
 //! `--no-prewarm` (or `AA_PREWARM=0`) turns it off.
 
 use std::sync::Mutex;
@@ -36,6 +42,7 @@ use super::player::{height_or, placement};
 use super::prepare::prepare_listed;
 use crate::Screen;
 use crate::login::WorldAnchor;
+use crate::login::character_select::Selected;
 
 /// Seconds the character list must have been up before the prewarm starts (its own build, the stage character).
 const SETTLE: f32 = 1.0;
@@ -45,6 +52,10 @@ const STEADY: f32 = 0.6;
 const TIMEOUT: f32 = 20.0;
 /// The way the camera looks (towards the pond at the Nuian spawn; anywhere else it is just a view).
 const YAW_DEG: f32 = 158.74;
+/// The world is rebuilt (or moved) for a selected character farther than this (m) from the place it was built for.
+const RETARGET: f32 = 400.0;
+/// Seconds a selection must stay before the world follows it (clicking through the list builds nothing).
+const CHOOSE: f32 = 0.5;
 /// Size of the image the camera renders into.
 const TARGET: (u32, u32) = (96, 54);
 
@@ -54,7 +65,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(Screen::CharacterSelect), abort)
         .add_systems(OnEnter(Screen::WorldSelect), park)
         .add_systems(OnEnter(Screen::CharacterCreate), park)
-        .add_systems(Update, (start, watch).chain().run_if(super::list_is_up))
+        .add_systems(Update, (retarget, start, watch).chain().run_if(super::list_is_up))
         .add_systems(Update, tail.run_if(in_state(Screen::CharacterSelect)));
 }
 
@@ -99,6 +110,8 @@ pub struct Prewarm {
     phase: Phase,
     /// Seconds the character list has been up.
     list_secs: f32,
+    /// Where (x, y) the world was last built for, the next retarget compares against it.
+    built_for: Option<Vec2>,
     /// Seconds left to watch the frames after the world was dropped, and the worst of them.
     tail: f32,
     tail_worst: f32,
@@ -108,10 +121,65 @@ fn disabled(dev: &DevOptions) -> bool {
     dev.no_prewarm || std::env::var("AA_PREWARM").is_ok_and(|v| v == "0")
 }
 
-/// A character of the list to stand in for the player: the first one with a position.
-fn pick(characters: &Characters) -> Option<(&aa_net::model::Character, Vec3)> {
-    let c = characters.list.iter().find(|c| c.pos.x != 0.0 || c.pos.y != 0.0)?;
+/// The character of the list to stand in for the player: the selected one, else the first one with a position.
+fn pick<'a>(characters: &'a Characters, selected: &Selected) -> Option<(&'a aa_net::model::Character, Vec3)> {
+    let placed = |c: &&aa_net::model::Character| c.pos.x != 0.0 || c.pos.y != 0.0;
+    let chosen = selected.0.and_then(|id| characters.by_id(id)).filter(placed);
+    let c = chosen.or_else(|| characters.list.iter().find(placed))?;
     Some((c, Vec3::new(c.pos.x, c.pos.y, c.pos.z)))
+}
+
+/// The selection moved to another place: move the running prewarm there, or let a settled one run again.
+fn retarget(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    characters: Res<Characters>,
+    selected: Res<Selected>,
+    mut prewarm: ResMut<Prewarm>,
+    terrain: Res<TerrainQuery>,
+    mut anchor: Query<&mut Transform, With<WorldAnchor>>,
+    mut cameras: Query<&mut Transform, (With<PrewarmCamera>, Without<WorldAnchor>)>,
+    mut stable: Local<(Option<u32>, f32)>,
+) {
+    let Some((c, pos)) = pick(&characters, &selected) else { return };
+    // the same choice for CHOOSE seconds
+    if stable.0 != Some(c.id) {
+        *stable = (Some(c.id), 0.0);
+    }
+    stable.1 += time.delta_secs();
+    let here = pos.truncate();
+    let Some(built) = prewarm.built_for else { return };
+    if stable.1 < CHOOSE || built.distance(here) < RETARGET {
+        return;
+    }
+    match &mut prewarm.phase {
+        Phase::Waiting => {}
+        Phase::Done => {
+            info!("prewarm: {} is selected, {:.0} m from where the world was built: again", c.name, built.distance(here));
+            prewarm.phase = Phase::Waiting;
+            prewarm.built_for = None;
+        }
+        Phase::Running(run) => {
+            let ground = height_or(&terrain, pos.x, pos.y, pos.z);
+            let pos = Vec3::new(pos.x, pos.y, ground);
+            info!("prewarm: {} is selected, moving the world to ({:.0}, {:.0})", c.name, pos.x, pos.y);
+            run.pos = pos;
+            run.since = 0.0;
+            run.steady = 0.0;
+            terrain.prefetch(pos.x, pos.y, 500.0);
+            let orbit = OrbitCamera { yaw: YAW_DEG.to_radians(), ..default() };
+            if let Ok(mut t) = anchor.single_mut() {
+                t.translation = cry_to_bevy(pos);
+            }
+            if let Ok(mut t) = cameras.get_mut(run.camera) {
+                *t = camera_transform(&orbit, pos);
+            }
+            if let Some(e) = run.character {
+                commands.entity(e).insert(placement(pos, YAW_DEG.to_radians(), 1.0));
+            }
+            prewarm.built_for = Some(pos.truncate());
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -122,6 +190,7 @@ fn start(
     db: Option<Res<Db>>,
     mut prewarm: ResMut<Prewarm>,
     characters: Res<Characters>,
+    selected: Res<Selected>,
     mut cfg: ResMut<WorldConfig>,
     terrain: Res<TerrainQuery>,
     status: Res<PipelineStatus>,
@@ -133,11 +202,12 @@ fn start(
     if !matches!(prewarm.phase, Phase::Waiting) || prewarm.list_secs < SETTLE || disabled(&dev) {
         return;
     }
-    let (Some(db), Some((character, pos))) = (db, pick(&characters)) else { return };
+    let (Some(db), Some((character, pos))) = (db, pick(&characters, &selected)) else { return };
     let Ok(mut anchor) = anchor.single_mut() else { return };
     let ground = height_or(&terrain, pos.x, pos.y, pos.z);
     let pos = Vec3::new(pos.x, pos.y, ground);
     let facing = YAW_DEG.to_radians();
+    prewarm.built_for = Some(pos.truncate());
     info!("prewarm: building the world around {} at ({:.0}, {:.0}) behind the character list", character.name, pos.x, pos.y);
 
     // the real streaming, at a small footprint and a light touch on the main thread

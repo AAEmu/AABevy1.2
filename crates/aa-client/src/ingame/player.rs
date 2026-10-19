@@ -613,7 +613,8 @@ pub fn follow_server(
 ) {
     for NetEvent(event) in events.read() {
         let (pos, yaw, own) = match event {
-            Event::Teleported { pos } => (pos, None, None),
+            // `SCTeleportUnit` carries the facing at the destination (`z2`, radians)
+            Event::Teleported { pos, yaw, .. } => (pos, Some(*yaw), None),
             Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id)),
             _ => continue,
         };
