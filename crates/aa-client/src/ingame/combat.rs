@@ -719,8 +719,13 @@ impl Stage<'_, '_> {
 
     /// The bone entity of an effect bone id (`None` for the origin and for rigs without such a bone).
     fn bone(&self, unit: Entity, id: u8) -> Option<Entity> {
+        self.bone_by(unit, bone_names(id))
+    }
+
+    /// The first of `names` the unit's rig has, as the entity of that bone.
+    fn bone_by(&self, unit: Entity, names: &[&str]) -> Option<Entity> {
         let (animator, ..) = self.actors.get(unit).ok()?;
-        bone_names(id).iter().find_map(|name| {
+        names.iter().find_map(|name| {
             let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *name)?;
             animator.bones.get(i).copied()
         })
@@ -960,7 +965,7 @@ impl Stage<'_, '_> {
                 fixed_rotation = true;
             }
         }
-        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: false, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
         // a character effect (the crows of Summon Crows) plays its start and loop clips, and its end clip when the time is up
         let fx_ttl = if item.chr { ttl + 2.0 } else { ttl };
         let chr = item.chr.then(|| ChrEffect { scale: item.scale, life: Some(ttl), ..ChrEffect::new(item.effect.clone()) });
@@ -1364,7 +1369,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 if let Some(projectile) = &look.projectile {
                     start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
                     let flight = (f64::from(f.delay_ms.max(0)) / 1000.0 - release).max(0.06);
-                    combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: f.tl, caster, target, target_pos, duration: flight as f32, speed: 0.0, hold: f.channeling_ms > 0 });
+                    combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: f.tl, caster, target, target_pos, duration: if projectile.is_beam() && f.channeling_ms > 0 { f.channeling_ms as f32 / 1000.0 } else { flight as f32 }, speed: 0.0, hold: f.channeling_ms > 0 });
                 }
             }
         }
@@ -1430,7 +1435,13 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             start_shakes(&st, combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
             if let Some(projectile) = &step.projectile {
                 start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
-                combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: p.tl, caster, target, target_pos, duration: 0.25, speed: step.projectile_speed, hold: visual.as_ref().is_some_and(|v| v.channel_ms > 0 || v.channeling_anim.is_some()) });
+                // a beam lives as long as the step's `ProjectileAnim` says (the channel); a flight takes the time its speed needs
+                let (duration, hold) = if projectile.is_beam() {
+                    (step.projectile_ms as f32 / 1000.0, step.projectile_ms > 0)
+                } else {
+                    (0.25, visual.as_ref().is_some_and(|v| v.channel_ms > 0 || v.channeling_anim.is_some()))
+                };
+                combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: p.tl, caster, target, target_pos, duration, speed: step.projectile_speed, hold });
             }
         }
         Event::UnitDamaged(d) => {
@@ -1700,7 +1711,7 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
             }
             Later::Launch { projectile, tl, caster, target, target_pos, duration, speed, hold } => {
                 // a link that lasts as long as the channel ends with it
-                if let Some(e) = launch(&mut st, &projectile, caster, target, target_pos, duration, speed, hold)
+                if let Some(e) = launch(&mut st, &projectile, caster, target, target_pos, duration, speed)
                     && hold
                     && projectile.is_beam()
                     && let Some(cast) = combat.casts.get_mut(&tl)
@@ -1784,10 +1795,16 @@ fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLigh
 
 /// Sends a projectile from the caster's launch bone to the target's hit point.
 #[allow(clippy::too_many_arguments)]
-fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32, hold: bool) -> Option<Entity> {
-    // the launch bone: the projectile's own, else the first effect item's (the left hand of a bow, the right hand of a spell)
-    let src_bone = if projectile.src_bone != 0 { projectile.src_bone } else { projectile.items.first().map_or(9, |i| i.bone) };
-    let from = st.bone_point(caster, src_bone, 1.0)?;
+fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32) -> Option<Entity> {
+    let beam = projectile.is_beam();
+    // the launch bone: the projectile's own, else the first effect item's (the left hand of a bow, the right hand of a spell). A beam
+    // sits on its own source bone alone: id 0 is `Bip01` (the client's table, `docs/research/re-skills.md` 4.2), not the items' bone
+    let src_bone = if projectile.src_bone != 0 || beam { projectile.src_bone } else { projectile.items.first().map_or(9, |i| i.bone) };
+    let from = if beam && src_bone == 0 {
+        st.bone_by(caster, BEAM_ROOT).and_then(|b| st.xforms.get(b).ok()).map(|g| g.translation()).or_else(|| st.bone_point(caster, 0, 1.0))?
+    } else {
+        st.bone_point(caster, src_bone, 1.0)?
+    };
     let dest_bone = if projectile.dest_bone != 0 { projectile.dest_bone } else { 19 };
     let to = match target {
         Some(t) => st.bone_point(t, dest_bone, 1.0),
@@ -1807,7 +1824,6 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         (from, to)
     };
     let rotation = Transform::from_translation(from).looking_at(to, Vec3::Y).rotation;
-    let beam = projectile.is_beam();
     // a plot step's projectile has its speed (m/s) in the data, the flight takes as long as the distance needs
     let duration = if speed > 0.0 && !beam { (from.distance(to) / speed).clamp(0.08, 4.0) } else { duration };
     let anchor = st
@@ -1816,7 +1832,7 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
             Name::new(format!("projectile {}", projectile.id)),
             Transform { translation: from, rotation, scale: Vec3::ONE },
             Visibility::default(),
-            Fx { follow: None, fixed_rotation: true, ttl: if !beam { duration + 3.0 } else if hold { 60.0 } else { duration.max(0.35) + 0.15 } },
+            Fx { follow: None, fixed_rotation: true, ttl: duration + if beam { 0.6 } else { 3.0 } },
         ))
         .id();
     if beam {
@@ -1840,12 +1856,15 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
             continue;
         }
         st.effect_sounds(item, caster, anchor, from);
-        let effect = Effect { scale: item.scale, prime: false, looping: true, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
+        // the client never starts a finished effect again: only the effect's own continuous emitters last (a beam keeps moving them).
+        // A flying shot still restarts: aa-fx has no loop flag of the effect's own, and an arrow body (a short mesh emitter) would
+        // be gone before it lands
+        let effect = Effect { scale: item.scale, prime: false, looping: !beam, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
         // the effect flies with the anchor: its forward (-Z) is the flight direction, the mesh emitters (the arrow) draw their model
         st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
     }
     if verbose() {
-        info!("combat: projectile {} {} {:.2} s over {:.1} m", projectile.id, if beam { "links" } else if projectile.is_zone() { "stands" } else { "flies" }, duration, from.distance(to));
+        info!("combat: projectile {} {} {:.2} s over {:.1} m (from {:.2} m above the caster)", projectile.id, if beam { "links" } else if projectile.is_zone() { "stands" } else { "flies" }, duration, from.distance(to), from.y - st.xforms.get(caster).map_or(0.0, |g| g.translation().y));
     }
     Some(anchor)
 }
@@ -1862,7 +1881,7 @@ fn ground_effect(commands: &mut Commands, item: &FxItem, at: Vec3, toward: Optio
         }
     }
     let transform = Transform { translation: at + rotation * cry_to_bevy(item.offset), rotation, scale: Vec3::ONE };
-    let effect = Effect { scale: item.scale, prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+    let effect = Effect { scale: item.scale, prime: false, looping: false, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
     if verbose() {
         info!("combat: {} on the ground at {:.1} {:.1} {:.1}", item.effect, at.x, at.y, at.z);
     }
@@ -1886,9 +1905,12 @@ struct Beam {
 }
 
 /// The world position of an effect bone of a unit.
-fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit: Entity, id: u8) -> Option<Vec3> {
+/// The rig bone of a beam's source id 0 (`bip01`).
+const BEAM_ROOT: &[&str] = &["Bip01"];
+
+fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit: Entity, id: u8, beam_source: bool) -> Option<Vec3> {
     let animator = actors.get(unit).ok()?;
-    bone_names(id).iter().find_map(|n| {
+    (if beam_source && id == 0 { BEAM_ROOT } else { bone_names(id) }).iter().find_map(|n| {
         let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *n)?;
         xforms.get(*animator.bones.get(i)?).ok().map(|g| g.translation())
     })
@@ -1898,9 +1920,9 @@ fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit:
 /// distance (the effect's mesh is one unit long along its forward axis).
 fn update_beams(mut beams: Query<(&mut Transform, &mut Beam)>, xforms: Query<&GlobalTransform>, actors: Query<&Animator>) {
     for (mut transform, mut beam) in &mut beams {
-        let Some(from) = bone_world(&xforms, &actors, beam.caster, beam.src_bone).or_else(|| xforms.get(beam.caster).ok().map(|g| g.translation() + Vec3::Y)) else { continue };
+        let Some(from) = bone_world(&xforms, &actors, beam.caster, beam.src_bone, true).or_else(|| xforms.get(beam.caster).ok().map(|g| g.translation() + Vec3::Y)) else { continue };
         if let Some((unit, bone)) = beam.target
-            && let Some(point) = bone_world(&xforms, &actors, unit, bone).or_else(|| xforms.get(unit).ok().map(|g| g.translation() + Vec3::Y))
+            && let Some(point) = bone_world(&xforms, &actors, unit, bone, false).or_else(|| xforms.get(unit).ok().map(|g| g.translation() + Vec3::Y))
         {
             beam.to_pos = point;
         }
