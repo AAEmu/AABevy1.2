@@ -48,6 +48,7 @@ pub mod create;
 pub mod create;
 pub mod gameapi;
 pub mod host;
+pub mod curtain;
 pub mod loading;
 pub mod login_screen;
 pub(crate) mod name_policy;

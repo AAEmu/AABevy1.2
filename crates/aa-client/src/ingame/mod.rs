@@ -19,8 +19,10 @@
 //! character and `camera::spawn_camera` the world camera, which renders into an image of the window's size
 //! (`camera::BehindLoading`); the units near the spawn are prepared by `units`, and `login::loading` waits until the
 //! terrain, the objects, the units and the GPU pipelines (`aa_world::pipelines::PipelineStatus`) have settled. The first-use
-//! work of the renderer thus happens behind the loading UI. `Screen::InGame` then only turns the input on and
-//! `camera::show_world` puts the camera on the window once the UI cameras agree with it (HDR, MSAA).
+//! work of the renderer thus happens behind the loading UI. `Screen::InGame` then turns the input on and
+//! `camera::show_world` puts the camera on the window once the UI cameras agree with it (HDR, MSAA), all of it under the
+//! loading screen's curtain (`login::curtain`: a capture of the loading screen at 100 % held over the window until the HUD,
+//! the name plates and the quest marks are in). [`trace`] (`AA_ENTER_TRACE=1`) measures what still comes up after.
 //! `--enter-world` has no loading screen: the camera goes straight to the window.
 //!
 //! Leaving (`OnExit(Screen::InGame)`, [`leave_game`]) removes the player, the units, the doodads and the camera, forgets
@@ -49,6 +51,7 @@ mod skill_motion;
 mod sounds;
 mod stealth;
 mod swim;
+mod trace;
 pub(crate) mod units;
 pub(crate) mod warm;
 pub(crate) mod weapons;
@@ -117,6 +120,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(units::plugin)
             .add_plugins(attachments::plugin)
             .add_plugins(bench::plugin)
+            .add_plugins(trace::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnExit(Screen::InGame), leave_game)
