@@ -296,6 +296,11 @@ pub struct ObjectStats {
     /// Active visible slots declined by the static local-colour/HDR0 path.
     pub fog_unsupported: usize,
     pub fog_over_budget: usize,
+    /// Terrain cells in reach whose placement files have not arrived yet (+1 while the vegetation groups load).
+    pub cells_pending: usize,
+    /// Sectors in range not completely drawn yet, and the instances waiting for their model.
+    pub sectors_incomplete: usize,
+    pub instances_waiting: usize,
 }
 
 impl ObjectState {
@@ -617,6 +622,18 @@ pub fn stream_objects(
     state.stats.voxel_layers_unsupported = state.voxels.values().map(|v| v.layers_unsupported).sum();
     state.stats.voxel_triangles = state.voxels.values().map(|v| v.triangles).sum();
     state.stats.voxels_unsupported = state.voxels.values().map(|v| v.unsupported).sum();
+    // placement files still to come for the cells in reach (and the vegetation groups), for a loading screen
+    state.stats.cells_pending = loaded
+        .iter()
+        .filter(|c| !state.cells.contains_key(c))
+        .filter(|c| {
+            let o = cell_origin(c.0, c.1);
+            let dx = (o.x - p.x).max(0.0).max(p.x - (o.x + CELL_SIZE));
+            let dy = (o.y - p.y).max(0.0).max(p.y - (o.y + CELL_SIZE));
+            (dx * dx + dy * dy).sqrt() <= load_reach + 200.0
+        })
+        .count()
+        + usize::from(state.groups.is_none());
     let Some(groups) = state.groups.clone() else { return };
 
     // models prepared by the workers: insert them (a few per frame)
@@ -874,6 +891,15 @@ pub fn stream_objects(
         }
     }
     let waiting: usize = state.sectors.values().map(|s| s.waiting.len()).sum();
+    // sectors in range that are not drawn completely yet (not started, spawning, waiting for models, a new LOD being built)
+    state.stats.sectors_incomplete = keep
+        .iter()
+        .filter(|k| {
+            let len = state.cells.get(&(k.0, k.1)).map_or(0, |data| bin_of(data, k.3, k.2 as usize).len());
+            !state.sectors.get(*k).is_some_and(|s| s.complete(len) && !s.hidden)
+        })
+        .count();
+    state.stats.instances_waiting = waiting;
     // models on their way; a `Wanted` one that no sector waits for any more (its sector went out of range) is not pending, and
     // the instances that do wait for one are `waiting`
     let pending = state.models.states.iter().filter(|m| matches!(m, ModelState::Loading)).count() + state.model_queue.len();

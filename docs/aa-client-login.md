@@ -26,6 +26,8 @@ Bevy UI on its own camera and does not use the Lua UI. Code: `crates/aa-client/s
 * Remembered: `%APPDATA%\AABevy\login.toml` (else `login.toml` next to the exe; `AA_LOGIN_CONFIG=PATH` overrides):
   `user` and `server`, saved after a successful login. Prefilled server: `127.0.0.1:27237`.
   `--login-type` runs never write it.
+* The loading screen after Start (what it waits for, the curtain that holds it over the game screen until the HUD,
+  the name plates and the quest marks are in, and the measurements) is in [aa-client-loading.md](aa-client-loading.md).
 
 ## Input widget
 

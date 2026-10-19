@@ -234,14 +234,14 @@ pub use input::HudPointerOverUi;
 
 /// `--no-hud`: do not build the HUD (frame rate comparisons, screenshots of the bare world).
 #[derive(Resource)]
-struct HudOptions {
-    enabled: bool,
+pub(crate) struct HudOptions {
+    pub(crate) enabled: bool,
 }
 
 /// Whether the HUD stage is up (the runtime currently is the in-game UI).
 #[derive(Resource, Default)]
-struct HudBuilt {
-    up: bool,
+pub(crate) struct HudBuilt {
+    pub(crate) up: bool,
     /// Built this frame: what aa-net reported until now has been replayed into the scripts.
     fresh: bool,
 }

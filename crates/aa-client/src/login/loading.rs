@@ -5,33 +5,39 @@
 //! `STILL_LOADING(percent)` and `LEFT_LOADING`. The percentage is real:
 //!
 //! * 0..25: the server's enter-game sequence (select, state, spawn) until `PlayerSpawn`;
-//! * 25..65: terrain cells within [`NEAR`] metres of the spawn built by aa-world's streamer (the
+//! * 25..60: terrain cells within [`NEAR`] metres of the spawn built by aa-world's streamer (the
 //!   world is pointed at the spawn through the [`WorldAnchor`]);
-//! * 65..100: the world has settled: the objects and vegetation around it have stopped appearing, the player and the
-//!   units near it are built, and the GPU pipelines are compiled.
+//! * 60..95: the rest of the world: the GPU pipelines compiled, the object sectors in draw distance complete, the units
+//!   near the spawn built (each counts the share done of the most that was outstanding at once);
+//! * 95..100: everything has been complete for [`SETTLE`] seconds: all terrain within the load radius, the placement
+//!   files and every object, tree and grass sector within its draw distance (no model or instance waiting, no level of
+//!   detail being rebuilt), the units, the pipelines, and no image added and no terrain patch rebuilt meanwhile.
 //!
 //! The world is not only streamed behind this screen but drawn: as soon as the spawn is known the player and the world
 //! camera are built (`ingame::player::spawn_player`, `ingame::camera::spawn_camera`; the camera renders into an image),
 //! so the first-use work of the renderer (pipeline compilation, model and texture uploads, the first skinned meshes)
-//! happens here instead of in the first frames of the game. Then the screen switches to `Screen::InGame`, where the
-//! camera is put on the window. `--hold-loading PCT` pins the gauge at PCT and stays (for screenshots against
-//! `reference/loading`).
+//! happens here instead of in the first frames of the game. At 100 the screen is captured and stays on the window as the
+//! [`curtain`](super::curtain) while `Screen::InGame` brings up the HUD, the name plates and the quest marks underneath;
+//! it is lifted when those are complete too. `--hold-loading PCT` pins the gauge at PCT and stays (for screenshots against
+//! `reference/loading`). `docs/aa-client-loading.md` has the measurements.
 
 use aa_net::state::Player;
 use aa_ui::{Stage, UiRuntime};
 use aa_world::coords::cell_origin;
 use aa_world::objects::ObjectState;
 use aa_world::pipelines::PipelineStatus;
-use aa_world::stream::Streamer;
+use aa_world::stream::{Streamer, TerrainPatch};
 use aa_world::{CELL_SIZE, TerrainQuery, cry_to_bevy};
 use bevy::prelude::*;
 
+use super::curtain::{self, Curtain};
 use super::{LoginArgs, LoginBridge, WorldAnchor, gameapi, host, ui_is};
 use crate::Screen;
 
 /// Terrain within this many metres of the spawn must be built before the game starts.
 const NEAR: f32 = 500.0;
-/// Seconds without anything new (objects, units, pipelines) after which the world counts as settled.
+/// Seconds everything must have been complete, with nothing new (objects, units, pipelines, images), before the world counts
+/// as settled.
 const SETTLE: f32 = 0.4;
 /// Seconds the gauge stays at 100 before the game starts.
 const HOLD: f32 = 0.25;
@@ -44,7 +50,8 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<Loading>()
         .add_systems(OnEnter(Screen::Loading), (reset, boost_streaming))
         .add_systems(OnExit(Screen::Loading), normal_streaming)
-        .add_systems(Update, progress.run_if(ui_is(Screen::Loading)));
+        .add_systems(Update, progress.run_if(ui_is(Screen::Loading)))
+        .add_plugins(curtain::plugin);
 }
 
 /// Build the loading UI (a fresh Lua state, like the client's third state).
@@ -77,9 +84,11 @@ struct Loading {
     /// Pipelines requested when the screen came up (what the character list's prewarm got done).
     pipelines_at_start: Option<usize>,
     stable: f32,
-    /// Seconds into the loading screen when each part was last seen unfinished: terrain, camera frames, models, units,
-    /// pipelines (for the log: what the loading screen waited for).
-    busy_until: [f32; 5],
+    /// The most pipelines waiting, object sectors incomplete and units outstanding seen at once (the 60..95 part of the gauge).
+    peak: [usize; 3],
+    /// Seconds into the loading screen when each part was last seen unfinished (for the log: what the loading screen waited
+    /// for), see [`PARTS`].
+    busy_until: [f32; 8],
     /// Seconds the gauge has been at 100.
     done: f32,
     /// Terrain cells loaded / needed around the spawn (for the log).
@@ -121,7 +130,10 @@ fn near_cells(terrain: &TerrainQuery, x: f32, y: f32) -> Vec<(i32, i32)> {
     cells
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The parts [`Loading::busy_until`] follows.
+const PARTS: [&str; 8] = ["near terrain", "far terrain", "camera frames", "placement", "objects", "units", "pipelines", "images / lod"];
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn progress(
     rt: NonSend<UiRuntime>,
     time: Res<Time>,
@@ -136,8 +148,15 @@ fn progress(
     mut anchor: Query<&mut Transform, With<WorldAnchor>>,
     mut loading: ResMut<Loading>,
     mut next: ResMut<NextState<Screen>>,
+    (mut commands, mut curtain, lod_swaps, mut image_events): (
+        Commands,
+        ResMut<Curtain>,
+        Query<(), (With<TerrainPatch>, Changed<Mesh3d>)>,
+        MessageReader<AssetEvent<Image>>,
+    ),
 ) {
     let dt = time.delta_secs();
+    let images_added = image_events.read().any(|e| matches!(e, AssetEvent::Added { .. }));
     loading.t += dt;
     loading.pipelines_at_start.get_or_insert(pipelines.total());
     if let Some(hold) = args.hold_loading {
@@ -171,37 +190,72 @@ fn progress(
             loading.cells = (loaded, needed.len());
             let terrain_done = needed.is_empty() || loaded == needed.len();
             let terrain_part = if needed.is_empty() { 1.0 } else { loaded as f32 / needed.len() as f32 };
-            let (entities, models) = objects.as_ref().map_or((0, 0), |o| (o.stats.entities, o.stats.models_pending));
+            let stats = objects.as_ref().map(|o| o.stats.clone()).unwrap_or_default();
+            let (entities, models) = (stats.entities, stats.models_pending);
             let (waiting, total) = (pipelines.waiting(), pipelines.total());
             let drawn = warm.player && warm.camera_frames >= WARM_FRAMES;
+            let far_terrain = streamer.as_ref().is_some_and(|s| s.is_loading());
+            let placement = objects.is_none() || stats.cells_pending > 0;
+            let incomplete = stats.sectors_incomplete + stats.instances_waiting + models;
+            let churn = images_added || !lod_swaps.is_empty();
             let t = loading.t;
             if (t * 4.0).floor() != ((t - dt) * 4.0).floor() {
-                debug!("loading: t {:.2} workers pending {} models {} units outstanding {} waiting pipelines {} entities {} cells {}/{}", t, aa_cry::workers::Workers::global().pending(), models, warm.outstanding, waiting, entities, loaded, needed.len());
+                debug!(
+                    "loading: t {:.2} workers pending {} models {} sectors incomplete {} instances waiting {} placement {} units outstanding {} waiting pipelines {} entities {} cells {}/{} far {}",
+                    t,
+                    aa_cry::workers::Workers::global().pending(),
+                    models,
+                    stats.sectors_incomplete,
+                    stats.instances_waiting,
+                    stats.cells_pending,
+                    warm.outstanding,
+                    waiting,
+                    entities,
+                    loaded,
+                    needed.len(),
+                    far_terrain
+                );
             }
-            for (i, busy) in [!terrain_done, !drawn, models > 0, warm.outstanding > 0, waiting > 0].into_iter().enumerate() {
+            let parts = [!terrain_done, far_terrain, !drawn, placement, incomplete > 0, warm.outstanding > 0, waiting > 0, churn];
+            for (i, busy) in parts.into_iter().enumerate() {
                 if busy {
                     loading.busy_until[i] = t;
                 }
             }
             let changed = entities != loading.entities || warm.announced != loading.announced || total != loading.pipelines;
             (loading.entities, loading.announced, loading.pipelines) = (entities, warm.announced, total);
-            if changed || !terrain_done || !drawn || models > 0 || warm.outstanding > 0 || waiting > 0 {
+            let all_done = !parts.iter().any(|b| *b);
+            if changed || !all_done {
                 loading.stable = 0.0;
             } else {
                 loading.stable += dt;
             }
+            // the rest of the world: the share done of the most that was outstanding at once (no placement yet: none done)
+            let now = [waiting, incomplete, warm.outstanding];
+            let mut share = 0.0;
+            for (i, n) in now.into_iter().enumerate() {
+                loading.peak[i] = loading.peak[i].max(n);
+                let done = if i == 1 && placement { 0.0 } else if loading.peak[i] == 0 { 1.0 } else { 1.0 - n as f32 / loading.peak[i] as f32 };
+                share += done / 3.0;
+            }
             let timed_out = since > TIMEOUT;
-            if timed_out {
+            if timed_out && loading.shown < 100.0 {
                 warn!(
-                    "loading: the world around the spawn is not ready after {TIMEOUT} s ({loaded}/{} cells, {models} models, {} units outstanding, {waiting} pipelines), entering anyway",
+                    "loading: the world around the spawn is not ready after {TIMEOUT} s ({loaded}/{} cells, far terrain loading {far_terrain}, {} placement files, {} sectors incomplete, {models} models, {} units outstanding, {waiting} pipelines), entering anyway",
                     needed.len(),
+                    stats.cells_pending,
+                    stats.sectors_incomplete,
                     warm.outstanding
                 );
             }
             if timed_out || loading.stable >= SETTLE {
                 100.0
+            } else if !terrain_done {
+                25.0 + 35.0 * terrain_part
+            } else if all_done {
+                95.0 + 5.0 * (loading.stable / SETTLE).min(0.9)
             } else {
-                25.0 + 40.0 * terrain_part + if terrain_done { 35.0 * (loading.stable / SETTLE).min(1.0) * 0.95 } else { 0.0 }
+                60.0 + 35.0 * share.min(0.99)
             }
         }
     };
@@ -212,24 +266,31 @@ fn progress(
     }
     if loading.shown >= 100.0 {
         loading.done += dt;
-        if loading.done > HOLD {
-            rt.fire_event("LEFT_LOADING", ());
-            info!(
-                "loading: done after {:.1} s ({}/{} terrain cells within {NEAR} m, {} objects, {} units, {} pipelines of which {} compiled here), entering the game",
-                loading.t,
-                loading.cells.0,
-                loading.cells.1,
-                loading.entities,
-                loading.announced,
-                loading.pipelines,
-                loading.pipelines.saturating_sub(loading.pipelines_at_start.unwrap_or(0))
-            );
-            let b = loading.busy_until;
-            info!(
-                "loading: waited for (s): terrain {:.1}, camera frames {:.1}, models {:.1}, units {:.1}, pipelines {:.1}; the objects and the rest settled after {:.1}",
-                b[0], b[1], b[2], b[3], b[4], loading.t - HOLD - SETTLE
-            );
-            next.set(Screen::InGame);
+        if loading.done <= HOLD {
+            return;
         }
+        // the loading screen at 100 stays on the window over the game screen until that is complete too
+        if curtain.phase == curtain::Phase::Off {
+            curtain::lower(&mut commands, &mut curtain);
+            return;
+        }
+        curtain::tick(&mut curtain, dt);
+        if !curtain.ready() {
+            return;
+        }
+        rt.fire_event("LEFT_LOADING", ());
+        info!(
+            "loading: done after {:.1} s ({}/{} terrain cells within {NEAR} m, {} objects, {} units, {} pipelines of which {} compiled here), entering the game",
+            loading.t,
+            loading.cells.0,
+            loading.cells.1,
+            loading.entities,
+            loading.announced,
+            loading.pipelines,
+            loading.pipelines.saturating_sub(loading.pipelines_at_start.unwrap_or(0))
+        );
+        let waited: Vec<String> = PARTS.iter().zip(loading.busy_until).map(|(name, t)| format!("{name} {t:.1}")).collect();
+        info!("loading: waited for (s): {}", waited.join(", "));
+        next.set(Screen::InGame);
     }
 }
