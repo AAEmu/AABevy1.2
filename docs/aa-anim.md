@@ -203,9 +203,14 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
 
 Face texture details (`face.rs`): decals are small BC3 images whose alpha is the shape, drawn at
 `(defaultX, defaultY)` (+ move offsets for the scar) on the 512x512 face texture. Eyebrow and deco
-decals carry a constant grey; their colour is `eyebrow_color` / `deco_color` (`0xAABBGGRR`).
-Drawing order: tattoo, makeup, scar, eyebrow, deco. Lips: green channel of `<pfx>_face_mask_new.dds`
-tinted by `lip_color`.
+decals carry a constant 0.5 grey and modulate the skin, `skin * colour * 2 * grey` with
+`eyebrow_color` / `deco_color` (`0xAABBGGRR`): the brows darken the strands painted into the face
+texture, and the nuian male deco (`nu_m_decal_deco002`, the stubble on chin, jaw and upper lip) shows.
+A blend towards the flat colour turned blond characters' brows ginger and washed the stubble out.
+Other decals blend their own colours. Drawing order: tattoo, makeup, scar, eyebrow, deco. Lips:
+green channel of `<pfx>_face_mask_new.dds` tinted by `lip_color`. Iris: `left_pupil_color`
+multiplies the grey of the iris disc in linear light (`eye.cfx`: `diffuse *= lerp(1, IrisColor,
+gloss.r)`; the female elf's `face01` atlas has a teal painted iris, taken as its grey).
 
 ## Equipment assembly (costumes, Cut order, underwear, heels)
 

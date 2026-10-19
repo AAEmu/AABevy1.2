@@ -288,7 +288,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5); `GenMask` bit 0x2000 (`%BLEND_WITH_TERRAIN_COLOR`, set exactly on the 276 materials with a `blendWithTerrainAmount`, default 0.5) moves the colour map towards the ground hue at the same brightness (`bake_terrain_blend`, `TERRAIN_BLEND_HUE`): the marigolds of the login fields are yellow in the captures, orange in the map |
 | `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `hair_colour(HairColor) * 2 * Diffuse` (hue as written, brightness `^HAIR_GAMMA` 1.5), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`). This `StandardMaterial` keeps only a faint broad sheen (roughness 0.65); with `Shading::Full` the material is tagged and swapped for the hair shader, see "Hair" below |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`). With `Shading::Full` the `StandardMaterial` is only the base of `skin::SkinMaterial` (below): no GGX, no environment specular |
-| `Eye` | roughness 0.12, reflectance 0.2; static `IrisColor` multiplies Diffuse under the sRGB-decoded Specular red mask when both IRIS/GLOSS_MAP flags are enabled (see below); aa-anim can replace the final face texture |
+| `Eye` | roughness 0.45, reflectance 0.08 (`eye.cfx` has no GGX or Fresnel: a small Phong glint inside the iris, an environment term of about 0.04; 0.12 / 0.2 put a wet sheen over the whole eyeball); static `IrisColor` multiplies Diffuse under the sRGB-decoded Specular red mask when both IRIS/GLOSS_MAP flags are enabled (see below); aa-anim can replace the final face texture |
 | `Metal` | metallic 0.6 |
 | `Glass`, `Liquid`, `Ice` | blend, alpha min(opacity, 0.6), roughness 0.1 |
 | `Water*`, `Ocean*` | blend, dark blue-green, roughness 0.05 |
@@ -586,6 +586,10 @@ The client's `Hair` shader (`shaders/hwscripts/cryfx/hair.cfx` in the pak, see `
   the back rim `(1 - N.V)^3 * RimMultiplier * (1 - L.V)`. Light colours: Bevy lux / pi = the engine's units.
 * **Back lights.** The two `Char BackLight`s (`CharBackLight`, when the resource exists) go through the same per
   light terms, in the character's space; hair is not swapped to `CharMaterial`.
+* **World.** While the back lights are on (in the world) hair gets `WORLD_DIFFUSE_GAIN` (3, `mode.z`) on everything
+  but the back lights, like skin and costumes: its colours are calibrated under the login stage's lights (three
+  times the engine's units), and without the gain blond came out a dark khaki where `reference/hair/ingame_*` is a
+  pale bright blond.
 * **Colour parameters** go through `hair_colour` (hue as written, brightness `^1.5`): plain `^1.5` per channel made
   blond a saturated gold, plain values made dark hair olive grey; the captures have ash blond and near black.
 * **Calibration** `DIFFUSE_GAIN` 0.55, `SPEC_GAIN` 1.3: fitted to the lit top of the hair in the `step2_*` captures
@@ -641,8 +645,15 @@ x3 world gain). The engine has neither:
   relative to full light (`SkinfNdotL2(N.L)^1.5 / BSkinColor^1.5` with the material's own colours): 1 in the sun, a
   soft wrap with the sub-surface colour into the terminator.
 * **Ambient**: Bevy's PBR lighting on a white albedo with every specular term off (ambient, environment diffuse,
-  SSAO, the stage's fill lights) minus its Lambert part of the sun, plus `0.3 x reColorInShadow` (a skin coloured
-  fill, `lerp(dark * 0.7, lerp(M, (B + M) * 0.6, N.V^1.3), N.V)`) in engine units.
+  SSAO, the stage's fill lights) minus its Lambert part of the sun, times the hemisphere factor `N.up * 0.25 + 0.75`
+  (`bHemisphereLighting`: half the ambient under the chin, nose and lips), plus `0.3 x reColorInShadow` (a skin
+  coloured fill, `lerp(dark * 0.7, lerp(M, (B + M) * 0.6, N.V^1.3), N.V)`) in engine units. The shader sets
+  `bDontUseAmbientOcc` (no AO from a map or the diffuse alpha); SSAO is Bevy's (on in the world, `post.rs`).
+* **Detail**: the face normal map is applied at full strength (CryEngine's `GetNormalMap` has no Y flip, the mesh
+  binormals are kept, see the CGF section; checked with `AA_SKIN_TUNE=debug=1|2|3`: shading normal, mesh normal,
+  flipped Y). `HumanSkin` has no tiling detail map; its only extra layer is `WRINKLE_BLENDING` (animated wrinkle
+  normals from per-vertex weights), not ported. Stubble, brows and makeup are decals of the composed face texture
+  (aa-anim `face.rs`).
 * **Back lights** (`X2BackLight`): plain `N.L` on `texture x Diffuse` (as `CharMaterial`) and a Phong highlight
   `pow(R.L, Shininess)` x the specular multiplier, masked like the sun's.
 * **World**: while `CharBackLight` is active the material carries `WORLD_DIFFUSE_GAIN` (3) on everything but the back
@@ -659,6 +670,10 @@ Wiring like hair: `convert_material` (`Shading::Full`) calls `skin::prepare` (pa
 registry, the index into `lightmap_exposure`), `SkinPlugin` (added by `CryPlugin` with `PbrPlugin`) swaps tagged
 `StandardMaterial`s for `SkinMaterial`s. To draw skin differently (stealth) swap `MeshMaterial3d<SkinMaterial>` like
 `HairMaterial` (`aa-client` `ingame/stealth.rs` does).
+
+Second round (`shots/aa-cry/skin2/`, before | after | real, kept): hemisphere ambient, multiplied brow and stubble
+decals, linear iris tint, matte eyeball, hair world gain, skin tunes refitted again. The login stage's grading
+(`login_color_grading`, post-saturation 1.6) is what keeps irises bluer than the captures.
 
 Shots (kept): `shots/aa-cry/skin/compare_<target>.png` (before | after | real, the eight `step2_*` and `step1_nuian_female`),
 `compare_step2_sheet_{a,b}.png`, `compare_ingame.png` / `compare_ingame_close.png` (refhair / Hairrefb at noon and in the

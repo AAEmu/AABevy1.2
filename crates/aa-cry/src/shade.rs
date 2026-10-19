@@ -590,8 +590,11 @@ pub fn to_standard_material(
             out.diffuse_transmission = 0.1;
         }
         "eye" => {
-            out.perceptual_roughness = 0.12;
-            out.reflectance = 0.2;
+            // `eye.cfx` has no GGX and no Fresnel: a small Phong glint inside the iris (`gloss.r`), none on the
+            // sclera, and an environment term of about 0.04 (`ReflectionAmount` 0.05); a glossy eyeball
+            // (roughness 0.12, reflectance 0.2) put a wet sheen and the sky over the whole eye
+            out.perceptual_roughness = 0.45;
+            out.reflectance = 0.08;
         }
         "glass" | "liquid" | "ice" => {
             out.alpha_mode = AlphaMode::Blend;

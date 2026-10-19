@@ -1044,14 +1044,14 @@ const BODY_SKIN_REFLECTANCE: f32 = 0.7;
 pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     // BEGIN SKIN TUNE
     let t = match (race, gender) {
-        (Race::Nuian, Gender::Male) => [0.725, 1.072, 1.053],
-        (Race::Nuian, Gender::Female) => [0.829, 1.200, 1.204],
-        (Race::Elf, Gender::Male) => [0.699, 0.874, 0.752],
-        (Race::Elf, Gender::Female) => [1.136, 1.142, 1.241],
-        (Race::Hariharan, Gender::Male) => [0.696, 0.710, 0.609],
-        (Race::Hariharan, Gender::Female) => [0.414, 0.394, 0.365],
+        (Race::Nuian, Gender::Male) => [0.775, 1.155, 1.156],
+        (Race::Nuian, Gender::Female) => [0.853, 1.246, 1.260],
+        (Race::Elf, Gender::Male) => [0.731, 0.932, 0.812],
+        (Race::Elf, Gender::Female) => [1.177, 1.189, 1.308],
+        (Race::Hariharan, Gender::Male) => [0.731, 0.753, 0.651],
+        (Race::Hariharan, Gender::Female) => [0.432, 0.417, 0.395],
         (Race::Ferre, Gender::Male) => [0.222, 0.244, 0.222],
-        (Race::Ferre, Gender::Female) => [0.423, 0.420, 0.337],
+        (Race::Ferre, Gender::Female) => [0.441, 0.451, 0.380],
     };
     // END SKIN TUNE
     Vec3::from(t)
