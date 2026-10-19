@@ -117,16 +117,8 @@ chain. Main thread 2 ms. 70-80 fps here with the GPU shared with a real ArcheAge
 * `hud::plates::update_plates` wrote every plate root's translation every frame; now only when it moved.
 * `ingame::bench`: asset change counters and aa-fx counters in the `BENCH` lines.
 
-The aa-client systems are 0.4 ms of the frame, so the last two are small (within the noise of this machine). Results,
-alternating rounds with the CPU at 95-100 % (`head` = HEAD 246d14e, `fix2` = the fixes above, `fix2-normal` = the same with
-`AA_PRIORITY=normal`), avg fps of 15 s per round:
+The aa-client systems are 0.4 ms of the frame, so the last two are small (within the noise of this machine).
 
-RESULTS_TABLE
-
-## Fixed in aa-fx (small)
-
-AA_FX_SECTION
-
-## For other crates, ranked
-
-OTHER_CRATES
+The alternating-round results table, the aa-fx section and the ranked list for other crates were never written: the
+session that measured them ended first. The later aa-fx fix (77d3f01, invisible emitters skip their mesh rewrites) has
+not been re-measured either.
