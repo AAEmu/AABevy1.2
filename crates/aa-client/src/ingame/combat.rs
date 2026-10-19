@@ -289,7 +289,8 @@ fn slowmo() -> Option<f32> {
 /// * `T:start:TL:SKILL:CAST_MS`, `T:fire:TL:SKILL:DELAY_MS:CHANNEL_MS[:FIRE_ANIM]`, `T:plot:TL:EVENT:SKILL[:CASTING_MS]`
 /// * `T:hit:TL:SKILL:DAMAGE` (a blow of the player lands on the player), `T:end:TL`, `T:stop:TL` (casting stopped),
 ///   `T:plotend:TL`, `T:plotstop:TL` (channeling stopped)
-/// * an op may end in `@self` (`T:fire@self:...`): that event aims at the player even when `AA_COMBAT_FAKE_TARGET` names a unit
+/// * an op may end in `@self` (`T:fire@self:...`): that event aims at the player even when `AA_COMBAT_FAKE_TARGET` names a unit;
+///   `@ground`: it aims at the spot where that unit stands (a ground skill: Meteor Strike, Missile Rain)
 /// * `T:buff:INDEX:BUFF_ID[:MS]`, `T:unbuff:INDEX`: a buff arrives on / leaves the target (its aura, pose and freeze: `combat/buffs.rs`)
 /// * `T:use:SKILL[:TARGET]`: the player asks the server for a skill (a `UseSkill` command, as the action bar sends it)
 ///
@@ -297,8 +298,8 @@ fn slowmo() -> Option<f32> {
 /// `model=1290` is the training dummy; the events wait up to 20 s for it to be in view). The first step opens `aa_dev::RecordGate` (`--record-gate`).
 #[derive(Resource)]
 struct Fake {
-    /// (time, arguments, op, aimed at the player itself)
-    steps: Vec<(f64, Vec<u32>, &'static str, bool)>,
+    /// (time, arguments, op, aim: 0 the target unit, 1 the player itself, 2 the ground under the target unit)
+    steps: Vec<(f64, Vec<u32>, &'static str, u8)>,
     started: Option<f64>,
     /// `AA_COMBAT_FAKE_TARGET`.
     target: Option<String>,
@@ -307,14 +308,15 @@ struct Fake {
 impl Fake {
     fn from_env() -> Option<Fake> {
         let text = std::env::var("AA_COMBAT_FAKE").ok()?;
-        let mut steps: Vec<(f64, Vec<u32>, &'static str, bool)> = Vec::new();
+        let mut steps: Vec<(f64, Vec<u32>, &'static str, u8)> = Vec::new();
         for step in text.split(';').filter(|s| !s.trim().is_empty()) {
             let mut parts = step.split(':');
             let at: f64 = parts.next()?.trim().parse().ok()?;
             let raw = parts.next()?.trim();
-            let (raw, own) = match raw.strip_suffix("@self") {
-                Some(op) => (op, true),
-                None => (raw, false),
+            let (raw, own) = match (raw.strip_suffix("@self"), raw.strip_suffix("@ground")) {
+                (Some(op), _) => (op, 1),
+                (_, Some(op)) => (op, 2),
+                _ => (raw, 0),
             };
             let op = match raw {
                 "start" => "start",
@@ -339,17 +341,20 @@ impl Fake {
         Some(Fake { steps, started: None, target: std::env::var("AA_COMBAT_FAKE_TARGET").ok().filter(|t| !t.is_empty()) })
     }
 
-    fn event(op: &str, a: &[u32], me: u32, other: u32) -> Option<Event> {
+    fn event(op: &str, a: &[u32], me: u32, other: u32, ground: Option<Pos>) -> Option<Event> {
         let arg = |i: usize| a.get(i).copied().unwrap_or(0);
         let caster = BuffCaster { kind: 0, obj_id: me };
-        let target = SkillTarget { kind: 0, obj_id: other, pos: None };
+        let target = match ground {
+            Some(pos) => SkillTarget { kind: aa_net::skill::target_kind::POSITION, obj_id: 0, pos: Some(pos) },
+            None => SkillTarget { kind: 0, obj_id: other, pos: None },
+        };
         let raw_caster = aa_net::SkillCasterData::Unit(me);
         let raw_target = aa_net::SkillTargetData::Unit(other);
         let tl = arg(0) as u16;
         Some(match op {
             "start" => Event::SkillStarted(SkillStarted { skill_id: arg(1), tl, caster, target, cast_ms: arg(2), base_cast_ms: arg(2), synergy: 0, result: 0, result_value: 0, raw_result: Default::default(), raw_caster, raw_target }),
             "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4), raw_final_flag: 0, result: Default::default(), raw_caster, raw_target }),
-            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: other, caster_pos: None, target_pos: None, casting_ms: arg(3) }),
+            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: if ground.is_some() { 0 } else { other }, caster_pos: None, target_pos: ground, casting_ms: arg(3) }),
             "hit" => Event::UnitDamaged(UnitDamage {
                 action: CastAction { kind: 0, skill_id: arg(1), tl, buff_id: 0 },
                 caster,
@@ -413,11 +418,12 @@ fn fake_events(
         }
     };
     while fake.steps.last().is_some_and(|s| now - started >= s.0) {
-        let (_, args, op, own) = fake.steps.pop().unwrap();
+        let (_, args, op, aim) = fake.steps.pop().unwrap();
+        let ground = (aim == 2).then(|| units.by_id.get(&other).map(|u| u.pos)).flatten();
         if op == "use" {
             // the player asks for a skill without the action bar (which refuses a press while a cast runs)
             commands.write(NetCommand(Command::UseSkill { skill_id: args.first().copied().unwrap_or(0), target_obj_id: args.get(1).copied().unwrap_or(0) }));
-        } else if let Some(event) = Fake::event(op, &args, me.obj_id, if own { me.obj_id } else { other }) {
+        } else if let Some(event) = Fake::event(op, &args, me.obj_id, if aim == 1 { me.obj_id } else { other }, ground) {
             // the buff list is the net state's: events written here do not reach it
             if let (Some(buffs), Event::BuffCreated { .. } | Event::BuffRemoved { .. }) = (buffs.as_mut(), &event) {
                 buffs.apply(&event);
@@ -515,6 +521,9 @@ pub fn plugin(app: &mut App) {
     }
     if let Some(degrees) = std::env::var("AA_COMBAT_CAM_REL").ok().and_then(|v| v.parse::<f32>().ok()) {
         app.insert_resource(super::camera::CamRel(degrees));
+    }
+    if let Some(sweep) = sweep::Sweep::from_env() {
+        app.insert_resource(sweep).add_systems(Update, sweep::run_sweep.before(handle_events).run_if(resource_exists::<SkillBook>));
     }
     if let Some(fake) = Fake::from_env() {
         app.insert_resource(fake).add_systems(Update, fake_events.before(handle_events));

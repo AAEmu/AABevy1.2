@@ -163,7 +163,7 @@ def skill_events(c, ability, row, tl, t0):
     cast = cast or 0
     chan = chan or 0
     delay = delay or 0
-    me = "@self" if target_self(ability, ttype) else ""
+    me = "@ground" if ttype == 6 else "@self" if target_self(ability, ttype) else ""
     steps = []
     # does it hurt someone (the dummy takes the hit effects even when the skill is centred on the caster)?
     hit = relation == 4 or ttype in (4, 6) or (ttype == 5 and ability != 10)
