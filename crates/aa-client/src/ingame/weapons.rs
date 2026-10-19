@@ -25,11 +25,16 @@ pub struct CarriedItem {
     pub grip: Grip,
     /// Held with both hands.
     pub two_handed: bool,
+    /// A staff: held with both hands but in the one handed stance.
+    pub staff: bool,
     /// The off hand weapon of a dual wielder (left hand).
     pub offhand: bool,
     /// The bone of the hand that holds it and its pose there (`None`: never leaves the body, a shield).
     pub hand_bone: Option<&'static str>,
     pub hand_transform: Transform,
+    /// Out of sight while it is not in the hand: a bow whose place on the back a two handed weapon takes (`holdables.sheathe_priority`
+    /// 9 against the bow's 4).
+    pub hide_sheathed: bool,
 }
 
 /// How a weapon is held, which decides when it comes out.
@@ -52,6 +57,9 @@ pub enum Grip {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Wield {
     pub two_handed: bool,
+    /// The two handed weapon is a staff (a spell caster's): the one handed clips with a `staff_` name, `two_handed` stays set for
+    /// the sheath only.
+    pub staff: bool,
     pub dual: bool,
     pub instrument: Option<usize>,
     /// The character carries a sword, axe, staff ... (the basic attack has no clip of its own: the server picks the weapon's).
@@ -61,7 +69,8 @@ pub struct Wield {
 impl Wield {
     pub fn of(items: &[CarriedItem]) -> Wield {
         Wield {
-            two_handed: items.iter().any(|i| i.grip == Grip::Blade && i.two_handed),
+            two_handed: items.iter().any(|i| i.grip == Grip::Blade && i.two_handed && !i.staff),
+            staff: items.iter().any(|i| i.grip == Grip::Blade && i.staff),
             dual: items.iter().any(|i| i.grip == Grip::Blade && i.offhand),
             melee: items.iter().any(|i| i.grip == Grip::Blade),
             instrument: items.iter().find_map(|i| match i.grip {
@@ -83,6 +92,7 @@ pub struct HeldWeapon {
     pub sheath_transform: Transform,
     pub hand_transform: Transform,
     pub in_hand: bool,
+    pub hide_sheathed: bool,
 }
 
 /// What the character has out.
@@ -128,6 +138,7 @@ fn stay(out: Out) -> f64 {
 /// clip's `aw_none` moment.
 pub fn holster_clip(out: Out, wield: Wield) -> Option<&'static str> {
     match out {
+        Out::Blade { .. } if wield.staff => Some("staff_ac_holster_staff_l"),
         Out::Blade { .. } if wield.two_handed => Some("twohand_ac_holster_back_r"),
         Out::Blade { .. } => Some("onehand_ac_holster_side_l"),
         Out::Bow | Out::Instrument => None,
@@ -151,7 +162,8 @@ pub fn weapon_for_clip(name: &str) -> Option<Out> {
 
 /// Where a holdable hangs while it is not in the hand (bones of the base skeleton: `item_bow_l`
 /// slings a bow diagonally across the back, `item_side_l / r` at the left and right hip, `item_arm_l` on the left
-/// forearm, `item_back_c` the back: the two handed weapons).
+/// forearm, `item_back_c` the back: the two handed weapons; a staff hangs like the bow, diagonally from the left shoulder: the
+/// real client's capture).
 fn sheath_bone(code: &str, slot: usize, two_handed: bool) -> &'static str {
     match (code, slot) {
         ("bow", _) => "item_bow_l",
@@ -199,7 +211,7 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             _ => (Grip::Blade, Some("item_hand_r")),
         };
         out.push(CarriedItem {
-            bone: sheath_bone(&w.code, s, w.two_handed),
+            bone: if w.staff { "item_bow_l" } else { sheath_bone(&w.code, s, w.two_handed) },
             transform: Transform {
                 translation: Vec3::from(w.offset),
                 rotation: Quat::from_euler(EulerRot::XYZ, rx, ry, rz),
@@ -207,6 +219,7 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
             },
             grip,
             two_handed: w.two_handed,
+            staff: w.staff,
             offhand,
             hand_bone,
             hand_transform: {
@@ -219,7 +232,14 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
                 t
             },
             path: w.path,
+            hide_sheathed: false,
         });
+    }
+    // a two handed weapon takes the bow's place on the back
+    if out.iter().any(|i| i.grip == Grip::Blade && i.two_handed) {
+        for i in out.iter_mut().filter(|i| i.grip == Grip::Bow) {
+            i.hide_sheathed = true;
+        }
     }
     out
 }
@@ -246,7 +266,7 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
             let model = spawn_loaded(&mut commands, &item.path, &loaded, &options);
             commands.entity(model).insert((item.transform, ChildOf(bone)));
             // an instrument is only there while it is played, a shield while the sword is out
-            if matches!(item.grip, Grip::Instrument(_) | Grip::Shield) {
+            if matches!(item.grip, Grip::Instrument(_) | Grip::Shield) || item.hide_sheathed {
                 commands.entity(model).insert(Visibility::Hidden);
             }
             if item.grip == Grip::Shield {
@@ -259,6 +279,7 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                     sheath_transform: item.transform,
                     hand_transform: item.transform,
                     in_hand: false,
+                    hide_sheathed: false,
                 });
             } else if let Some(hand) = item.hand_bone.and_then(bone_of) {
                 commands.entity(model).insert(HeldWeapon {
@@ -270,6 +291,7 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                     sheath_transform: item.transform,
                     hand_transform: item.hand_transform,
                     in_hand: false,
+                    hide_sheathed: item.hide_sheathed,
                 });
             }
         }
@@ -303,7 +325,7 @@ pub fn hold_weapons(time: Res<Time>, mut commands: Commands, entities: &Entities
             _ => (weapon.sheath, weapon.sheath_transform),
         };
         commands.entity(entity).try_insert((transform, ChildOf(bone)));
-        if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) {
+        if matches!(weapon.grip, Grip::Instrument(_) | Grip::Shield) || weapon.hide_sheathed {
             commands.entity(entity).try_insert(if want { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
@@ -314,7 +336,7 @@ mod tests {
     use super::*;
 
     fn item(grip: Grip, two_handed: bool, offhand: bool) -> CarriedItem {
-        CarriedItem { path: String::new(), bone: "", transform: Transform::IDENTITY, grip, two_handed, offhand, hand_bone: None, hand_transform: Transform::IDENTITY }
+        CarriedItem { path: String::new(), bone: "", transform: Transform::IDENTITY, grip, two_handed, staff: false, offhand, hand_bone: None, hand_transform: Transform::IDENTITY, hide_sheathed: false }
     }
 
     #[test]
@@ -326,6 +348,10 @@ mod tests {
         assert_eq!(Wield::of(&[item(Grip::Blade, true, false)]), Wield { two_handed: true, melee: true, ..Default::default() });
         assert_eq!(Wield::of(&[item(Grip::Blade, false, false), item(Grip::Blade, false, true)]), Wield { dual: true, melee: true, ..Default::default() });
         assert_eq!(Wield::of(&[item(Grip::Instrument(2), false, false)]).instrument, Some(2));
+        let staff = CarriedItem { staff: true, ..item(Grip::Blade, true, false) };
+        let wield = Wield::of(&[staff]);
+        assert!(wield.staff && wield.melee && !wield.two_handed, "a staff is held with both hands but fights in the one handed stance");
+        assert_eq!(holster_clip(Out::Blade { dual: false }, wield), Some("staff_ac_holster_staff_l"));
     }
 
     #[test]
@@ -371,5 +397,8 @@ mod tests {
         assert!(db.weapon(5660).is_some_and(|w| w.two_handed));
         assert!(db.weapon(5569).is_some_and(|w| !w.two_handed));
         assert!(db.weapon(6177).is_some_and(|w| w.code == "string_instrument"));
+        // item 6102 is the first two handed staff: two handed for the sheath, the one handed stance for the clips
+        assert!(db.weapon(6102).is_some_and(|w| w.two_handed && w.staff));
+        assert!(db.weapon(5660).is_some_and(|w| w.two_handed && !w.staff));
     }
 }

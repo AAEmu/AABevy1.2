@@ -99,7 +99,7 @@ pub struct ClipSet {
     run_clip_speed: f32,
     walk_clip_speed: f32,
     /// The combat stances, bound when a unit first fights in one.
-    stances: Arc<[OnceLock<Arc<StanceClips>>; 4]>,
+    stances: Arc<[OnceLock<Arc<StanceClips>>; 5]>,
 }
 
 /// The stance a unit fights in, from the weapon it holds: its idle and run clips are `<prefix>_ba_combat_idle` and
@@ -109,6 +109,8 @@ pub enum Stance {
     /// One handed (and dual wield) weapons.
     Onehand,
     Twohand,
+    /// The two handed staff: its `staff_` clips are the one handed ones.
+    Staff,
     /// Instruments.
     Music,
     /// The bow and everything without a stance of its own (the `fist_` clips are the one handed ones).
@@ -116,12 +118,13 @@ pub enum Stance {
 }
 
 impl Stance {
-    const ALL: [Stance; 4] = [Stance::Onehand, Stance::Twohand, Stance::Music, Stance::Fist];
+    const ALL: [Stance; 5] = [Stance::Onehand, Stance::Twohand, Stance::Staff, Stance::Music, Stance::Fist];
 
     fn prefix(self) -> &'static str {
         match self {
             Stance::Onehand => "onehand",
             Stance::Twohand => "twohand",
+            Stance::Staff => "staff",
             Stance::Music => "music",
             Stance::Fist => "fist",
         }
@@ -130,6 +133,7 @@ impl Stance {
     /// The stance of a unit with `out` in its hand.
     pub fn of(out: Out, wield: Wield) -> Stance {
         match out {
+            Out::Blade { .. } if wield.staff => Stance::Staff,
             Out::Blade { .. } if wield.two_handed => Stance::Twohand,
             Out::Blade { .. } => Stance::Onehand,
             Out::Instrument => Stance::Music,
@@ -150,8 +154,9 @@ impl StanceClips {
     fn load(rig: &Rig, cal: &Cal, clips: &ClipLibrary, stance: Stance) -> StanceClips {
         let prefix = stance.prefix();
         let bind = |name: String, fallback: String| bind_clip(rig, cal, clips, &name).or_else(|| bind_clip(rig, cal, clips, &fallback));
-        let idle = bind(format!("{prefix}_ba_combat_idle"), "fist_ba_combat_idle".to_string());
-        let run: [Option<BoundClip>; 8] = std::array::from_fn(|i| bind(format!("{prefix}_mo_combat_run_{}", DIRS[i]), format!("fist_mo_combat_run_{}", DIRS[i])));
+        let base = if stance == Stance::Staff { "onehand" } else { "fist" };
+        let idle = bind(format!("{prefix}_ba_combat_idle"), format!("{base}_ba_combat_idle"));
+        let run: [Option<BoundClip>; 8] = std::array::from_fn(|i| bind(format!("{prefix}_mo_combat_run_{}", DIRS[i]), format!("{base}_mo_combat_run_{}", DIRS[i])));
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         StanceClips { idle, run, run_clip_speed }
     }
@@ -344,6 +349,7 @@ mod tests {
         assert_eq!(Stance::of(Out::Instrument, none), Stance::Music);
         assert_eq!(Stance::of(Out::Bow, none), Stance::Fist);
         // every stance has a slot
-        assert_eq!(Stance::ALL.len(), 4);
+        assert_eq!(Stance::ALL.len(), 5);
+        assert_eq!(Stance::of(Out::Blade { dual: false }, Wield { two_handed: true, staff: true, ..none }), Stance::Staff);
     }
 }

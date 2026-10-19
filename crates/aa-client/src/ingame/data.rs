@@ -43,6 +43,9 @@ pub struct Weapon {
     pub drawn_scale: f32,
     /// Held with both hands (`holdables.slot_type_id` 16: the two handed swords, axes, hammers, spears and staves).
     pub two_handed: bool,
+    /// A staff (`holdables.pose_id` 4): held two handed but fights and casts in the one handed stance (the `staff_` clips are
+    /// the one handed ones).
+    pub staff: bool,
 }
 
 /// Columns the in-game lookups filter or join on. The server's database has no indexes beyond the
@@ -222,7 +225,7 @@ impl Db {
         let weapon = l
             .conn
             .query_row(
-                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale, w.drawn_scale, h.slot_type_id                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
+                "SELECT ia.path, h.code, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z,                  ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z, w.worn_scale, w.drawn_scale, h.slot_type_id, h.pose_id                  FROM item_weapons w JOIN item_assets ia ON ia.id = w.asset_id JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1",
                 params![item_id],
                 |r| {
                     let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
@@ -234,6 +237,7 @@ impl Db {
                         worn_scale: f(8)?,
                         drawn_scale: f(9)?,
                         two_handed: r.get::<_, Option<i64>>(10)?.unwrap_or(0) == 16,
+                        staff: r.get::<_, Option<i64>>(11)?.unwrap_or(0) == 4,
                     })
                 },
             )

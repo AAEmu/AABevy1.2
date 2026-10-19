@@ -132,7 +132,7 @@ pub(super) fn run_preload(
             preload.clip(name);
         }
         // the combat stances of the weapons the character carries (idle and the eight way run)
-        let stances: Vec<Stance> = [wield.melee.then(|| if wield.two_handed { Stance::Twohand } else { Stance::Onehand }), Some(Stance::Fist), wield.instrument.map(|_| Stance::Music)].into_iter().flatten().collect();
+        let stances: Vec<Stance> = [wield.melee.then(|| if wield.staff { Stance::Staff } else if wield.two_handed { Stance::Twohand } else { Stance::Onehand }), Some(Stance::Fist), wield.instrument.map(|_| Stance::Music)].into_iter().flatten().collect();
         for stance in stances {
             let _ = loco.clips.stance(&animator.rig, &library, stance);
         }

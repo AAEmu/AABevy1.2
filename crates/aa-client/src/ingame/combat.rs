@@ -774,6 +774,9 @@ impl Stage<'_, '_> {
         if item.effect.is_empty() {
             return self.sound_item(item, on);
         }
+        if verbose() {
+            info!("combat: effect {} (start {}, end {}) on {on:?} bone {}{}", item.effect, item.start, item.end, item.bone, if hold { " held" } else { "" });
+        }
         let effect = self.spawn_effect(item, on, toward, hold, if hold { 12.0 } else { 6.0 })?;
         // the effect entity has no place in the world yet: its sounds start where its bone is
         let bone = self.bone(on, item.bone).unwrap_or(on);
@@ -1712,12 +1715,16 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
     }
     .or(target_pos.map(|p| p + Vec3::Y));
     let to = to?;
-    // a projectile of the sky comes down on the position (Meteor Strike), slanted from the side of the caster
-    let from = if projectile.falls() {
-        let side = Vec3::new(from.x - to.x, 0.0, from.z - to.z).normalize_or_zero();
-        to + Vec3::Y * FALL_HEIGHT + side * (FALL_HEIGHT * 0.4)
+    // `proj_physic_id` 3 is an effect area (all 257 of them: Meteor Strike's stardust, Sunder Earth's rocks, the magic circles): the
+    // effect stands on the ground at the target and does its own falling, spreading and fading
+    let (from, to) = if projectile.is_zone() {
+        let ground = match target.and_then(|t| st.xforms.get(t).ok()) {
+            Some(g) => g.translation(),
+            None => target_pos.unwrap_or(to - Vec3::Y),
+        };
+        (ground, ground)
     } else {
-        from
+        (from, to)
     };
     let rotation = Transform::from_translation(from).looking_at(to, Vec3::Y).rotation;
     let beam = projectile.is_beam();
@@ -1755,7 +1762,7 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
     }
     if verbose() {
-        info!("combat: projectile {} {} {:.2} s over {:.1} m", projectile.id, if beam { "links" } else if projectile.falls() { "falls" } else { "flies" }, duration, from.distance(to));
+        info!("combat: projectile {} {} {:.2} s over {:.1} m", projectile.id, if beam { "links" } else if projectile.is_zone() { "stands" } else { "flies" }, duration, from.distance(to));
     }
     Some(anchor)
 }
@@ -1778,9 +1785,6 @@ fn ground_effect(commands: &mut Commands, item: &FxItem, at: Vec3, toward: Optio
     }
     commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Visibility::default(), Fx { follow: None, fixed_rotation: true, ttl: if hold { 12.0 } else { 6.0 } })).id()
 }
-
-/// How high (m) a projectile of the sky starts above its target.
-const FALL_HEIGHT: f32 = 30.0;
 
 /// A link between the caster's launch bone and the target (`proj_physic_id` 2).
 #[derive(Component)]

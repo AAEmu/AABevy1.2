@@ -491,7 +491,7 @@ What this round added, all in `ingame/combat.rs` and `ingame/combat/`:
 * **Projectiles** by `projectiles.proj_physic_id`: 0 / 1 fly (homing on the target's hit bone, as before; the hit and end items of the
   group now play where the projectile lands: `fireball_hit`), 2 is a **beam** (Arc Lightning, Absorb Lifeforce, Telekinesis, Lasso,
   Mana Force, Crippling Mire: the effect's mesh is one unit long and is stretched from the launch bone to the target's hit bone
-  every frame; held until the channel ends), 3 **falls** from 30 m above the target position (Meteor Strike, Gods' Whip). A plot step's
+  every frame; held until the channel ends), 3 is an **effect area**: all 257 are named "effect area" (Meteor Strike's stardust, Sunder Earth's rocks, the magic circles), the effect stands on the ground at the target and falls, spreads and fades by itself (`Projectile::is_zone`; round 1 dropped them from 30 m, wrongly). A plot step's
   projectile flies at the speed of its special effect (`value3`, m/s: Missile Rain 25) instead of a fixed 0.25 s.
 * **Effects at the target's position**: an item for the target of a skill that was aimed at a point (`fx_location_id` 2, no unit)
   starts on the ground there, yaw only (the emitters rise along world up).
@@ -509,8 +509,15 @@ projectile physics handled 1 of 4 kinds / 4 of 4.
   the same group with sprite emitters stretches with it (sprites are not affected: aa-fx draws them camera facing).
 * Races other than Nuian male were checked by data only (all 202 clips bind on all 8 models, 0 missing); no character of another
   race could be created in this session's walkthrough, so nothing was rendered for them.
-* Staff and wand casts hold the staff across the hands in the `all_` cast clips: that is what the clip does, there is no real 1.2
-  capture of a spell to compare with.
+* **Staves** (round 2; checked against the real 1.2 client with a Civilian Magic Staff, `shots/skill-audit/anim/real_fb_sheet.png`,
+  `real_idle2_crop.png`, `real_st_sheet.png`): a staff (`holdables.pose_id` 4, code `2h_blunt_staff`; `Weapon::staff`) is held with two
+  hands for the sheath but fights in the one handed stance: `Wield::staff` (not `two_handed`), `Stance::Staff` (`staff_` clips, which
+  the `.cal` aliases to the `onehand_` ones), the holster `staff_ac_holster_staff_l`. The `all_` spell clips never draw it: the real staff
+  stays on the back during a Flamebolt (the outstretched arms in the real capture are the clip's own). It hangs on `item_bow_l` like
+  the bow (diagonal from the left shoulder, head above the shoulder), not on `item_back_c` (that was horizontal across the upper back), and
+  the bow it shares the back with is hidden while the staff is stowed (`CarriedItem::hide_sheathed`: `sheathe_priority` 9 against 4).
+  Not done: after a weapon skill in the real client the staff goes to the left hip (horizontal) and the bow shows on the back; ours
+  returns it to the back.
 * Cancelling a cast by jumping off a mount; moving, jumping, turning, another skill and the water cancel here. The rules come from
   the live game's behaviour and the skills' `channeling_cancelable` / `stop_casting_by_turn`, with no 1.2 client capture or
   disassembly to check them against.
