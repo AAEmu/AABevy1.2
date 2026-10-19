@@ -694,6 +694,42 @@ Second round (`shots/aa-cry/skin2/`, before | after | real, kept): hemisphere am
 decals, linear iris tint, matte eyeball, hair world gain, skin tunes refitted again. The login stage's grading
 (`login_color_grading`, post-saturation 1.6) is what keeps irises bluer than the captures.
 
+Face contrast (open; measured, nothing changed). The stage refit left faces flatter than the captures. The measurement
+uses a hand-placed face box per `step2_*` target, intersected with the skin pixels of both images. The luma is linear
+and blurred. The coefficient of variation (cv) is 0.48 for us and 0.63 for the captures. The p10 / p90 ratio is
+0.26 against 0.15.
+* **humanskin.cfx, reread.** The shadow side is lit by three things only:
+  * the wrap `SkinfNdotL2`: `smoothstep(-DiffusionAmount * dark, 1, N.L)`, coloured from the SSS map, then `^1.5 * 1.5`;
+  * the rim term;
+  * the constant `reColorInShadow * 0.3`, added to `cDiffuseAcc` in `frag_custom_begin`.
+
+  The shader also sets `bHemisphereLighting` (ambient times `N.z * 0.25 + 0.75`) and `bDontUseAmbientOcc`.
+  `fraglib.cfi` adds two more terms: D3D9 SSDO scales `fNdotL` by the bent-normal occlusion, and D3D10 NVSSAO scales
+  `fOcclShadow`. For actors, `X2CustomBalancePreEnd` rescales the lights above the ambient and fill by
+  `Char Light Multiplier`, but that is 1 in `game/studio_tod.xml`, so it is not the cause.
+* **The gap is mostly on the lit side, not in the shadows.** These are face-luma quantiles over the median for
+  elf male, nuian male / female and hariharan male:
+  * captures: p10 0.23 - 0.36, p75 1.6 - 1.9, p90 2.1 - 2.5;
+  * ours: p10 0.35 - 0.40, p75 1.2 - 1.6, p90 1.4 - 2.0.
+
+  With the skin fill off (`AA_SKIN_TUNE=fill=0`), the dark tail already matches (p10 / p90 0.13 against 0.13), but
+  cv only reaches 0.58 against 0.69. With the key alone (fill, rim, environment, ambient and skin fill all 0), cv is
+  0.58 - 0.61.
+* **The tonemapper accounts for part of it.** `--tonemap none` alone raises cv from 0.48 to 0.56 and lifts p90 to
+  1.7 - 2.1. TonyMcMapface's highlight shoulder squeezes the lit cheek, which the captures (CryEngine's HDR curve)
+  keep at about 2.3 x the median.
+* **`fill=0.5`** (the shadow fill halved) gives cv 0.51 and p5 / p50 0.30 against the captures' 0.24, with the mean
+  5 % darker. It was not adopted: the gain is small and it is not checked in game.
+* **Next steps:**
+  * a stage tonemapper with a softer shoulder (aa-client / stage);
+  * a broad lit-side term: the captures' cheek and nose-bridge sheen is part of the highlight, and the spec tune
+    0.35 removes it. That has to be weighed against the shine complaint.
+  * then refit the fill (about 0.5) and the skin tunes.
+* **Iris.** The stage-only eye desaturation against the 1.6 grading is not done.
+
+Shots: `shots/aa-cry/skin3/luma_{nuian_male,nuian_female,elf_male}.png`. Each panel shows HEAD | `fill=0.5` |
+`--tonemap none` | real, colour on top and median-normalised luma (0 - 3x) below.
+
 Shots (kept): `shots/aa-cry/skin/compare_<target>.png` (before | after | real, the eight `step2_*` and `step1_nuian_female`),
 `compare_step2_sheet_{a,b}.png`, `compare_ingame.png` / `compare_ingame_close.png` (refhair / Hairrefb at noon and in the
 morning against `reference/hair/ingame_*`).
