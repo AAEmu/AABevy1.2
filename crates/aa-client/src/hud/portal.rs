@@ -9,18 +9,21 @@
 //! * `X2Warp:SavePortal(name)` / `RenamePortal(id, name)`: skills 11215 / 16841 with a `SavePortalInfo` object.
 //! * `X2Warp:OpenPortal(type, id, name)`: the Teleport Book's skill 11216 with a `PortalInfo` object, cast by the book
 //!   (the one used to open the window, else the first in the bag), the gate [`GATE_AHEAD`] metres in front of the player.
-//! * `X2Warp:DeletePortal(type, id)`: `CSDeletePortal`; the lane answers nothing, the entry leaves the book at once.
+//! * `X2Warp:DeletePortal(type, id)`: `CSDeletePortal`; the entry leaves the book at once (the server's `SCPortalDeleted` is
+//!   idempotent, see `aa_net::portal`).
 //! * Events: `TOGGLE_PORTAL_DIALOG(addPortal)` when the Teleport Book is used (with Shift held: the Record dialog on
 //!   top, see `docs/aa-client-portals.md`), `SAVE_PORTAL` / `RENAME_PORTAL` / `DELETE_PORTAL` after the book changed.
 //!
-//! Also here: the visited sub zones (`CSNotifySubZone`, which fills the Default Site tab) and going through a portal
-//! gate (a right click or F on the gate NPC: `CSUsePortal` with the interface option "use only my portal").
+//! Also here: the visited sub zones (`CSNotifySubZone`, which fills the Default Site tab), going through a portal
+//! gate (a right click or F on the gate NPC: `CSUsePortal` with the interface option "use only my portal") and the effect
+//! of `SCUnitPortalUsed` ([`unit_used`]).
 
 use super::api::{HudBridge, HudData, Shared};
 use aa_net::portal::portal_type;
 use aa_net::wire::Pos;
 use aa_net::{Command, NetCommand, PortalChange, PortalCommand, Portals};
 use aa_ui::UiRuntime;
+use aa_net::{Event, NetEvent, PortalEvent};
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 use std::collections::HashMap;
@@ -38,6 +41,86 @@ const TELEPORT_BOOK: u32 = 4045;
 pub(crate) const GATE_TEMPLATES: [u32; 2] = [3891, 6949];
 /// Metres in front of the player the gate opens at (the server accepts up to `open_portal_effects.distance` 3 m).
 const GATE_AHEAD: f32 = 2.5;
+
+/// The fx item `OnUnitPortalUsed` plays (x2game `FUN_393558e0`; read from a live 1.2 client, it is a constant of the client's
+/// `.data`): `fx_items` 57 ("Curse of Doll_hit", the particle `ability_skill_table.blackmagic.black0011_hit`).
+const USE_FX_ITEM: u32 = 57;
+/// Seconds it lives (the client sets the effect's end time to now + 5.0 s).
+const USE_FX_SECS: f32 = 5.0;
+
+/// The fx item played on a unit that used a portal: dev override `AA_PORTAL_USE_FX=<fx_items id>` (e.g. 388, the casting
+/// effect `portal_caster_target`, to see the pipeline draw something).
+#[derive(Clone, Debug, PartialEq)]
+struct UseFx {
+    effect: String,
+    /// `fx_items.offset_*` (cry axes).
+    offset: Vec3,
+}
+
+fn use_fx() -> Option<&'static UseFx> {
+    static FX: OnceLock<Option<UseFx>> = OnceLock::new();
+    FX.get_or_init(|| {
+        let id = std::env::var("AA_PORTAL_USE_FX").ok().and_then(|v| v.parse().ok()).unwrap_or(USE_FX_ITEM);
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let read = || -> rusqlite::Result<Option<UseFx>> {
+            let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let mut q = conn.prepare("SELECT asset_name, offset_x, offset_y, offset_z FROM fx_items WHERE id = ?1 AND fx_detail_type = 'FxParticle'")?;
+            let mut rows = q.query_map([id], |r| Ok(UseFx { effect: r.get(0)?, offset: Vec3::new(r.get(1)?, r.get(2)?, r.get(3)?) }))?;
+            rows.next().transpose()
+        };
+        read().unwrap_or_else(|e| {
+            warn!("portal: fx item {id}: {e}");
+            None
+        })
+    })
+    .as_ref()
+}
+
+/// The effect of a unit that went through a portal, until its time is up.
+#[derive(Component)]
+struct UseEffect(Timer);
+
+/// `SCUnitPortalUsed` (`OnUnitPortalUsed`): the client looks the unit up (the lane sends the gate NPC) and plays fx item
+/// [`USE_FX_ITEM`] at its position for [`USE_FX_SECS`] seconds. In the 1.2 data that particle has no emitters (and no sound), so nothing shows by default.
+fn unit_used(
+    mut events: MessageReader<NetEvent>,
+    mut commands: Commands,
+    views: Res<crate::ingame::units::Views>,
+    remote: Query<&GlobalTransform, With<crate::ingame::units::RemoteUnit>>,
+    local: Query<(&crate::ingame::player::LocalPlayer, &GlobalTransform)>,
+    units: Res<aa_net::state::Units>,
+) {
+    for NetEvent(e) in events.read() {
+        let Event::Portal(PortalEvent::UnitPortalUsed { unit_id }) = e else { continue };
+        let at = views
+            .unit_entity(*unit_id)
+            .and_then(|en| remote.get(en).ok())
+            .map(|g| g.translation())
+            .or_else(|| local.iter().find(|(l, _)| l.obj_id == *unit_id).map(|(_, g)| g.translation()))
+            .or_else(|| units.get(*unit_id).map(|u| aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z))));
+        let Some(at) = at else {
+            debug!("portal: unit {unit_id} used a portal, not known");
+            continue;
+        };
+        let Some(fx) = use_fx() else { continue };
+        info!("portal: unit {unit_id} used a portal: {} at {:.1} {:.1} {:.1}", fx.effect, at.x, at.y, at.z);
+        commands.spawn((
+            Name::new(format!("portal use {unit_id}")),
+            Transform::from_translation(at + aa_world::cry_to_bevy(fx.offset)),
+            Visibility::default(),
+            aa_fx::Effect { prime: false, item: true, ..aa_fx::Effect::new(fx.effect.clone()) },
+            UseEffect(Timer::from_seconds(USE_FX_SECS, TimerMode::Once)),
+        ));
+    }
+}
+
+fn expire_use_effects(mut commands: Commands, time: Res<Time>, mut fx: Query<(Entity, &mut UseEffect)>) {
+    for (e, mut t) in &mut fx {
+        if t.0.tick(time.delta()).is_finished() {
+            commands.entity(e).despawn();
+        }
+    }
+}
 
 /// The Teleport Book (or another item with its skill) was used: the HUD opens the book instead of casting
 /// (`ingame::ground_target::route` sends this). `record`: with the Record dialog on top.
@@ -422,10 +505,38 @@ fn scripted_lua(mut script: ResMut<ScriptedLua>, time: Res<Time>, rt: Option<Non
     }
 }
 
+/// `--portal-used T` (repeatable): T seconds after the player is in the world, fake a `SCUnitPortalUsed` for the player's unit
+/// (what a bystander at a gate gets), to see the use effect (`AA_PORTAL_USE_FX=388` draws a visible one).
+fn scripted_used(
+    mut times: Local<Option<Vec<f32>>>,
+    mut since: Local<f32>,
+    time: Res<Time>,
+    player: Query<&crate::ingame::player::LocalPlayer>,
+    mut out: MessageWriter<NetEvent>,
+) {
+    let times = times.get_or_insert_with(|| {
+        let args: Vec<String> = std::env::args().collect();
+        let mut t: Vec<f32> = args.windows(2).filter(|w| w[0] == "--portal-used").filter_map(|w| w[1].parse().ok()).collect();
+        t.sort_by(|a, b| b.total_cmp(a));
+        t
+    });
+    let Ok(me) = player.single() else { return };
+    if times.is_empty() {
+        return;
+    }
+    *since += time.delta_secs();
+    while times.last().is_some_and(|t| *t <= *since) {
+        times.pop();
+        info!("portal: --portal-used: unit {}", me.obj_id);
+        out.write(NetEvent(Event::Portal(PortalEvent::UnitPortalUsed { unit_id: me.obj_id })));
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(ScriptedLua::from_args())
         .add_systems(Update, scripted_lua.after(super::sync_hud).run_if(in_state(crate::Screen::InGame)))
         .add_message::<PortalBookUsed>()
+        .add_systems(Update, (scripted_used, unit_used, expire_use_effects).chain().run_if(in_state(crate::Screen::InGame)))
         .add_systems(Update, (reset, track).chain().before(aa_ui::UiInput).before(super::sync_hud).before(super::build_hud))
         .add_systems(
             Update,
@@ -477,6 +588,38 @@ mod tests {
         assert_eq!(d.portal.requests[2], Req::Delete { portal_type: 2, portal_id: 7 });
         // facing north (yaw 0): the gate is 2.5 m north of the player
         assert!(matches!(d.portal.requests[3], Req::Open { portal_type: 1, portal_id: 240, pos } if (pos.y - GATE_AHEAD).abs() < 1e-4 && pos.x.abs() < 1e-4));
+    }
+
+    /// The unit that used a portal gets the client's fx item for 5 s (needs the game database).
+    #[test]
+    fn a_unit_that_used_a_portal_gets_the_use_effect_for_five_seconds() {
+        let Some(fx) = use_fx() else { return };
+        assert_eq!(fx.effect, "ability_skill_table.blackmagic.black0011_hit");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NetEvent>()
+            .init_resource::<crate::ingame::units::Views>()
+            .init_resource::<aa_net::state::Units>()
+            .add_systems(Update, (unit_used, expire_use_effects).chain());
+        let player = app
+            .world_mut()
+            .spawn((crate::ingame::player::LocalPlayer { obj_id: 77 }, GlobalTransform::from(Transform::from_xyz(10.0, 20.0, 30.0))))
+            .id();
+        app.world_mut().write_message(NetEvent(Event::Portal(PortalEvent::UnitPortalUsed { unit_id: 5 })));
+        app.update();
+        assert_eq!(app.world_mut().query::<&UseEffect>().iter(app.world()).count(), 0, "an unknown unit gets nothing");
+        app.world_mut().write_message(NetEvent(Event::Portal(PortalEvent::UnitPortalUsed { unit_id: 77 })));
+        app.update();
+        let mut q = app.world_mut().query::<(&Transform, &aa_fx::Effect, &UseEffect)>();
+        let (t, e, _) = q.single(app.world()).unwrap();
+        assert!((t.translation - Vec3::new(10.0, 20.0, 30.0)).length() < 0.5, "{:?}", t.translation);
+        assert_eq!(e.name, fx.effect);
+        for mut t in app.world_mut().query::<&mut UseEffect>().iter_mut(app.world_mut()) {
+            t.0.tick(std::time::Duration::from_secs_f32(5.1));
+        }
+        app.world_mut().despawn(player);
+        app.update();
+        assert_eq!(app.world_mut().query::<&UseEffect>().iter(app.world()).count(), 0, "gone after its five seconds");
     }
 
     #[test]
