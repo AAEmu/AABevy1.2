@@ -7,13 +7,14 @@
 //!     [--crowd N]      N characters (the cloak) on a grid, for the frame-time cost
 //!     [--no-rope]      the same without rope simulation (bind-relative rope bones)
 //!     [--cam x,y,z --look x,y,z]   camera override
+//!     [--follow x,y,z]   the camera keeps this offset from the (first) character and looks at its head (hair close-ups)
 //!     [--record dir --record-fps 15 --record-from 6 --record-secs 2]   frame sequence (aa-dev)
 //! ```
 //!
-//! Every character runs 3 s around a circle (turning all the time), stands 1.5 s, and starts again. The console logs
+//! Every character runs 3 s around a 3.5 m circle (turning all the time, about 7 m/s² sideways), stands 1.5 s, and starts again. The console logs
 //! `rope: <n> updates, <µs> per frame` every 2 s next to aa-dev's fps.
 
-use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, Costume, GameDb, Gender, NoRope, Race, RopeSettings, SampleOptions, spawn_character};
+use aa_anim::{AnimPlugin, Animator, CharacterDesc, ClipLibrary, Costume, GameDb, Gender, NoRope, Race, RopeSettings, RopeSim, SampleOptions, spawn_character};
 use aa_cry::scene::{CryAssets, CryPlugin};
 use bevy::prelude::*;
 
@@ -28,7 +29,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.07, 0.075, 0.09)))
         .insert_resource(GlobalAmbientLight { color: Color::srgb(0.75, 0.8, 0.9), brightness: 700.0, ..default() })
         .add_systems(Startup, setup)
-        .add_systems(Update, (run, log_stats));
+        .add_systems(Update, (run, follow.after(run), log_stats));
     if has("--no-rope") {
         app.insert_resource(RopeSettings { enabled: false, ..default() });
     }
@@ -116,13 +117,13 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         }
         (Vec3::new(0.0, 9.0, 12.0), Vec3::new(0.0, 0.5, -(side as f32) * 1.6))
     } else if let Some(o) = only {
-        spawn(&mut commands, &mut cry, &LOOKS[o.min(2)], Vec3::ZERO, 2.0, 0.0);
-        (Vec3::new(0.0, 2.2, 7.5), Vec3::new(0.0, 0.9, 0.0))
+        spawn(&mut commands, &mut cry, &LOOKS[o.min(2)], Vec3::ZERO, 3.5, 0.0);
+        (Vec3::new(0.0, 2.6, 10.5), Vec3::new(0.0, 0.9, 0.0))
     } else {
         for (i, look) in LOOKS.iter().enumerate() {
-            spawn(&mut commands, &mut cry, look, Vec3::new((i as f32 - 1.0) * 5.0, 0.0, 0.0), 1.8, i as f32 * 0.8);
+            spawn(&mut commands, &mut cry, look, Vec3::new((i as f32 - 1.0) * 8.0, 0.0, 0.0), 3.5, i as f32 * 0.8);
         }
-        (Vec3::new(0.0, 3.0, 12.0), Vec3::new(0.0, 0.9, 0.0))
+        (Vec3::new(0.0, 7.0, 24.0), Vec3::new(0.0, 0.5, 0.0))
     };
 
     let floor = cry.meshes.add(Cylinder::new(40.0, 0.04));
@@ -141,6 +142,14 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         Projection::Perspective(PerspectiveProjection { fov: 35f32.to_radians(), ..default() }),
         Transform::from_translation(vec3("--cam", cam)).looking_at(vec3("--look", look_at), Vec3::Y),
     ));
+}
+
+/// `--follow x,y,z`: the camera rides along at a fixed world offset, looking at the head.
+fn follow(runners: Query<&Transform, (With<Runner>, Without<Camera3d>)>, mut cameras: Query<&mut Transform, With<Camera3d>>) {
+    let Some(offset) = arg("--follow").map(|_| vec3("--follow", Vec3::ZERO)) else { return };
+    let (Some(r), Ok(mut cam)) = (runners.iter().next(), cameras.single_mut()) else { return };
+    let head = r.translation + Vec3::Y * 1.45;
+    *cam = Transform::from_translation(head + offset).looking_at(head, Vec3::Y);
 }
 
 /// Moves the runners around their circles and switches between the run and the idle clip.
@@ -169,14 +178,25 @@ fn run(time: Res<Time>, clips: Res<ClipLibrary>, mut runners: Query<(&mut Runner
     }
 }
 
-fn log_stats(time: Res<Time>, mut since: Local<f32>, mut frames: Local<u32>) {
+fn log_stats(time: Res<Time>, mut since: Local<f32>, mut frames: Local<u32>, mut listed: Local<bool>, ropes: Query<(&Name, &RopeSim)>) {
     *since += time.delta_secs();
     *frames += 1;
     if *since >= 2.0 {
         let (n, nanos) = aa_anim::rope::take_stats();
         let (_, anim) = aa_anim::animator::take_stats();
         let f = (*frames).max(1) as f32;
-        info!("rope: {n} updates, {:.1} us per frame (whole animation system {:.1} us)", nanos as f32 / 1000.0 / f, anim as f32 / 1000.0 / f);
+        let (active, all) = ropes.iter().fold((0, 0), |(a, t), (_, r)| (a + r.active_chains().count(), t + r.rig.chains.len()));
+        info!(
+            "rope: {n} updates, {:.1} us per frame (whole animation system {:.1} us), {active} of {all} chains skinned, {} mask updates",
+            nanos as f32 / 1000.0 / f,
+            anim as f32 / 1000.0 / f,
+            aa_anim::rope::take_mask_updates()
+        );
+        if !std::mem::replace(&mut *listed, true) {
+            for (name, r) in ropes.iter().take(4) {
+                info!("rope: {name}: {:?}", r.active_chains().map(|c| c.name.as_str()).collect::<Vec<_>>());
+            }
+        }
         *since = 0.0;
         *frames = 0;
     }
