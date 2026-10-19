@@ -473,12 +473,15 @@ impl EmitterState {
         let mut dir = axis;
         let fa = def.focus_angle.spawn(r.next(), strength).to_radians();
         if fa != 0.0 {
-            let az = if def.focus_azimuth.base != 0.0 || def.focus_azimuth.var > 0.0 {
-                def.focus_azimuth.spawn(r.next(), strength).to_radians()
+            // CryEngine tilts the focus axis (emitter +Y) about the emitter's X axis toward +Z (up for a standing emitter) and
+            // then spins that tilt about the axis by `FocusAzimuth` (default 0: it does not scatter by itself)
+            let az = def.focus_azimuth.base + def.focus_azimuth.var * r.signed() * 180.0;
+            let az = az.to_radians();
+            let side = if def.focus_gravity {
+                t * az.cos() + b * az.sin()
             } else {
-                r.next() * std::f32::consts::TAU
+                ctx.rot * c2b(Vec3::Z * az.cos() + Vec3::X * az.sin())
             };
-            let side = t * az.cos() + b * az.sin();
             dir = axis * fa.cos() + side * fa.sin();
         }
         let emit_max = def.emit_angle.base.to_radians();
