@@ -675,6 +675,10 @@ pub fn talk_input(
         None
     };
     let Some(npc) = npc else { return };
+    // a summoned portal gate is gone through, not talked to
+    if super::portal::use_gate(&mut d, npc.0, npc.1) {
+        return;
+    }
     let what = begin_talk(&mut d, &player_facts, npc, target.obj_id, &mut net);
     script_pick.talked(npc.0, what);
     drop(d);

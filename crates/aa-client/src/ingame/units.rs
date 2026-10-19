@@ -454,6 +454,15 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             let _t = aa_cry::prof::scope("unit.spawn_creature");
             creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
         }
+        UnitBuild::Effects(effects) => {
+            let root = commands.spawn((transform, Visibility::default())).id();
+            for e in effects {
+                // looping (the gate's effects are continuous), primed so the gate stands at once
+                let effect = aa_fx::Effect { scale: e.scale, speed_scale: e.speed_scale, count_scale: e.count_scale, prime: e.prime, no_body: true, ..aa_fx::Effect::new(e.effect.clone()) };
+                commands.spawn((effect, Transform { translation: cry_to_bevy(e.pos), rotation: cry_rot_to_bevy(e.rot), ..default() }, ChildOf(root)));
+            }
+            root
+        }
         UnitBuild::None(why) => return Err(why),
     };
     commands.entity(entity).insert((

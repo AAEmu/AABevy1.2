@@ -287,6 +287,8 @@ pub enum Command {
     Bounty { character_id:u32,command:crate::BountyCommand },
     QueryCharacterName { character_id:u32,requested_id:u32 },
     Ranking { character_id:u32,command:crate::RankingCommand },
+    /// The portal book and portals: record, rename, open, delete, enter, the visited sub zone ([`crate::portal`]).
+    Portal(crate::portal::PortalCommand),
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
@@ -562,6 +564,12 @@ pub enum Event {
     GameDecodeFailed { message:String },
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Portal(crate::portal::PortalEvent),
+    /// A portal request went out (the book drops a deleted entry on [`Event::PortalDeleteSent`]).
+    PortalRequested(crate::portal::PortalCommand),
+    /// `CSDeletePortal` was sent: the lane answers nothing, the entry is gone from the book.
+    PortalDeleteSent { portal_type: u8, portal_id: u32 },
+    PortalRequestRejected { command: crate::portal::PortalCommand, message: String },
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     RankingRequested { character_id:u32,command:crate::RankingCommand },
@@ -659,7 +667,7 @@ pub enum Event {
     /// Local validation failure, not a server crafting result.
     CraftRejected { craft_id: u32, doodad_obj_id: u32, count: i32, message: String },
     /// The server moved the local player (answered automatically).
-    Teleported { pos: Pos },
+    Teleported { pos: Pos, yaw: f32, reason: u8 },
     Chat(ChatMessage),
     ServerError { code: i16 },
     Kicked { reason: u8, message: String },
@@ -1136,6 +1144,19 @@ impl Session {
                 } else { Some("buff cancellation was not written to the game connection") };
                 if let Some(message) = message {
                     self.emit(Event::BuffRemovalRequestRejected { character_id, obj_id, buff_index, message:message.into() });
+                }
+            }
+            Command::Portal(command) => {
+                let invalid = if self.phase != Phase::InWorld { Some("not in the world") } else { command.validate().err() };
+                if let Some(message) = invalid {
+                    self.emit(Event::PortalRequestRejected { command, message: message.into() });
+                } else if self.send_game(game::ClientMsg::Portal { self_obj_id: self.self_obj, command: command.clone() }).await {
+                    if let crate::portal::PortalCommand::Delete { portal_type, portal_id } = command {
+                        self.emit(Event::PortalDeleteSent { portal_type, portal_id });
+                    }
+                    self.emit(Event::PortalRequested(command));
+                } else {
+                    self.emit(Event::PortalRequestRejected { command, message: "portal request was not sent".into() });
                 }
             }
             Command::Ranking{character_id,command}=>{
@@ -1772,6 +1793,7 @@ impl Session {
                 }
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
+            M::Portal(e) => self.emit(Event::Portal(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
@@ -1834,9 +1856,9 @@ impl Session {
             M::LunagemSocketingResult { raw_result, item_id, template_id, raw_install } => self.emit(Event::LunagemSocketingResult { raw_result, item_id, template_id, raw_install }),
             M::LunastoneSocketingResult { raw_result, item_id, template_id } => self.emit(Event::LunastoneSocketingResult { raw_result, item_id, template_id }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
-            M::Teleport { pos, .. } => {
+            M::Teleport { pos, yaw, reason, .. } => {
                 self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
-                self.emit(Event::Teleported { pos });
+                self.emit(Event::Teleported { pos, yaw, reason });
             }
             M::DoodadsCreated(v) => self.emit(Event::DoodadsSpawned(v)),
             M::DoodadsRemoved(v) => self.emit(Event::DoodadsRemoved(v)),

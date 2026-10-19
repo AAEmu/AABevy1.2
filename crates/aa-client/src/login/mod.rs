@@ -278,6 +278,8 @@ fn route_events(
                 info!("login: {} character(s) on {}", list.len(), bridge.0.borrow().world_name);
                 next.set(if list.is_empty() && !force_select { Screen::CharacterCreate } else { Screen::CharacterSelect });
             }
+            // the new character is the one the list selects when it comes back (see `Bridge::prefer`)
+            (Event::CharacterCreated(c), _) => bridge.0.borrow_mut().set_prefer(c.id),
             // back from character select (or create) to the server list
             (Event::WorldList(_), Screen::CharacterSelect | Screen::CharacterCreate) => next.set(Screen::WorldSelect),
             (Event::LoginFailed { message }, _) => {
@@ -343,6 +345,7 @@ fn handle_requests(
             Request::StartGame(index) => match character(index) {
                 Some(c) => {
                     info!("login: starting the game as {} (id {})", c.name, c.id);
+                    bridge.0.borrow_mut().prefer = None;
                     net.write(NetCommand(Command::EnterGame { character_id: c.id }));
                     next.set(Screen::Loading);
                 }

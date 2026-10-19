@@ -477,6 +477,8 @@ pub struct UiStats {
     pub quads: usize,
     pub draw_calls: usize,
     pub rebuilds: u64,
+    /// Batch meshes uploaded since start (a rebuild re-uploads only the batches that changed).
+    pub mesh_uploads: usize,
     /// A widget has keyboard capture/edit focus, or UI consumed a key this frame: the app should not treat keys as game
     /// bindings this frame.
     pub keyboard_focus: bool,
@@ -734,6 +736,9 @@ fn ui_frame(
     let Ok(window) = windows.single() else { return };
     let t0 = std::time::Instant::now();
     let p_frame = prof::scope("frame");
+    if prof::enabled() && time.delta_secs() > 0.035 {
+        info!("aa-ui: slow frame {:.0} ms", time.delta_secs() * 1000.0);
+    }
     let (pw, ph) = (
         window.resolution.physical_width() as f32,
         window.resolution.physical_height() as f32,
@@ -802,6 +807,9 @@ fn ui_frame(
     if content != state.generation || u.fonts.atlas_dirty || state.screen != (pw as u32, ph as u32)
     {
         prof::count("rebuild");
+        if content == state.generation {
+            prof::change(|| if u.fonts.atlas_dirty { "glyph atlas".into() } else { "window size".into() });
+        }
         let p_build = prof::scope("build_quads");
         let (quads, background_quads) = render::build_quads_split(u, pressed);
         drop(p_build);
@@ -830,6 +838,7 @@ fn ui_frame(
         stats.quads = state.quads;
         stats.draw_calls = state.draw_calls;
         stats.rebuilds += 1;
+        stats.mesh_uploads = state.uploads;
     }
     stats.keyboard_focus = u.keyboard.captured(&u.tree, u.focus);
     drop(g);

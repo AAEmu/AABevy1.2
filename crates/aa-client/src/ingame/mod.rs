@@ -51,6 +51,7 @@ mod skill_motion;
 mod sounds;
 mod stealth;
 mod swim;
+pub(crate) mod teleport;
 mod trace;
 pub(crate) mod units;
 pub(crate) mod warm;
@@ -121,6 +122,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(attachments::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
+            .add_plugins(teleport::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnExit(Screen::InGame), leave_game)
@@ -130,9 +132,9 @@ impl Plugin for InGamePlugin {
                 (
                     (player::spawn_player, camera::spawn_camera).chain(),
                     (
-                        camera::orbit_input.run_if(in_state(Screen::InGame)),
+                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         player::follow_server,
-                        player::control_player.run_if(in_state(Screen::InGame)),
+                        player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         camera::follow_player,
                     )
                         .chain()
