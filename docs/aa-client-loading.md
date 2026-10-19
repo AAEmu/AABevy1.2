@@ -82,6 +82,6 @@ new character, the script took slot 1 and Start entered the first character (see
   character list's prewarm (`ingame::prewarm`) follows the selected character (`login::character_select::Selected`, set by
   `ShowSelectedCharacter`): a running one moves the world over when the selection goes more than 400 m away, a settled one
   runs again (about 2 s, the pipelines are compiled already), clicking through characters of one place builds nothing.
-* For about 10 s after entering, the HUD changes every frame (aa-ui rebuilds its batches about 70 times a second, about 100
-  new meshes a frame) and the game has a 45 to 60 ms frame every one to three seconds; the UI frame itself stays under 5 ms,
-  so the spikes are likely the render side of the mesh churn (aa-ui). With `--no-hud` there are none.
+* For a few seconds after entering, the HUD really changes every frame (the zone banner fading, a blinking buff icon). Since
+  3fe5c03 aa-ui only re-uploads the batches that changed (about 4 a frame, no new meshes). The 45 to 60 ms frames once
+  blamed on it come from `--enter-shots` itself: each screenshot costs one 58 to 73 ms frame; without it no frame is over 35 ms.
