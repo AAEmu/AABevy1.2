@@ -55,7 +55,7 @@ pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        if args.iter().any(|a| a == "--enter-world") {
+        if args.iter().any(|a| a == "--enter-world" || a == "--script") {
             return false;
         }
         if args.iter().any(|a| a == "--login-screen" || a == "--login-type") {

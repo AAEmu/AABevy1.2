@@ -75,8 +75,11 @@ pub fn route_session(
                 let leaving = bridge.0.borrow().leaving;
                 match leaving {
                     // logged out on purpose
+                    // (a script run ends itself, after its summary)
                     Some(0) => {
-                        exit.write(AppExit::Success);
+                        if !aa_dev::SCRIPTED.load(std::sync::atomic::Ordering::Relaxed) {
+                            exit.write(AppExit::Success);
+                        }
                     }
                     Some(_) => {}
                     None => {
@@ -143,6 +146,19 @@ pub struct ScriptedSession {
 }
 
 impl ScriptedSession {
+    /// For the script runner (`script`): the action, click, right click or hover happens on the next frame.
+    pub fn open_now(&mut self, action: &str) {
+        self.opens.push((0.0, action.to_string()));
+    }
+
+    pub fn click_now(&mut self, at: Vec2, right: bool) {
+        if right { self.rclicks.push((0.0, at)) } else { self.clicks.push((0.0, at)) }
+    }
+
+    pub fn hover_now(&mut self, at: Vec2) {
+        self.hovers.push((0.0, at));
+    }
+
     pub fn from_args() -> ScriptedSession {
         let args: Vec<String> = std::env::args().collect();
         let num = |i: usize| args.get(i).and_then(|v| v.parse::<f32>().ok());
